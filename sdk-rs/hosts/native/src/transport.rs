@@ -50,6 +50,14 @@ pub trait Transport {
     ) -> HttpPrepareFuture {
         Box::pin(async { Err(HttpPrepareError::Unsupported) })
     }
+    fn prepare_http_classified(
+        &self,
+        request: HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+        _class: safe_cex_engine::request_budget::RequestClass,
+    ) -> HttpPrepareFuture {
+        self.prepare_http(request, intent)
+    }
     /// Open a socket; report it on `events` and return where to send text.
     /// Dropping the returned sender closes the socket.
     fn connect(
@@ -125,6 +133,13 @@ pub trait Transport {
 pub struct NetworkTransport {
     http: reqwest::Client,
     routing: Option<Arc<RoutingState>>,
+    io_guard: Option<IoGuard>,
+    venue: Option<Arc<str>>,
+}
+
+pub(crate) type IoGuard = Arc<dyn Fn() -> bool + Send + Sync>;
+fn io_allowed(guard: &Option<IoGuard>) -> bool {
+    guard.as_ref().is_none_or(|allowed| allowed())
 }
 
 impl NetworkTransport {
@@ -137,7 +152,21 @@ impl NetworkTransport {
                 .build()
                 .expect("an HTTP client with the default configuration"),
             routing: None,
+            io_guard: None,
+            venue: None,
         }
+    }
+
+    /// Attributes this transport's failure reports to `venue`.
+    pub fn with_venue(mut self, venue: &str) -> Self {
+        self.venue = Some(venue.into());
+        self
+    }
+
+    /// A host-owned, generation-bound authority checked at each final IO handoff.
+    pub fn with_io_guard(mut self, guard: Arc<dyn Fn() -> bool + Send + Sync>) -> Self {
+        self.io_guard = Some(guard);
+        self
     }
 
     /// Apply the account plan resolved once by TypeScript, outside the engine.
@@ -320,15 +349,32 @@ impl OpenFailures {
 
 static FAILURES: std::sync::Mutex<Option<OpenFailures>> = std::sync::Mutex::new(None);
 
-fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) {
-    if let Some(line) = note(
+/// Whether a line was due (and written).
+fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) -> bool {
+    let line = note(
         FAILURES
             .lock()
             .unwrap()
             .get_or_insert_with(OpenFailures::default),
-    ) {
+    );
+    if let Some(line) = &line {
         eprintln!("{line}");
     }
+    line.is_some()
+}
+
+/// A transport failure the journal just logged, for the host's error sink.
+fn report_failure(kind: crate::report::ErrorKind, target: &str, venue: Option<&str>) {
+    crate::report::report(&crate::report::ErrorReport {
+        kind,
+        label: None,
+        target: Some(target),
+        error_kind: None,
+        venue_code: None,
+        venue,
+        startup_unloaded: None,
+        startup_refused: None,
+    });
 }
 
 /// A URL's host alone: a relay URL's query names its upstream and may carry a token.
@@ -339,13 +385,28 @@ pub(crate) fn host_of(url: &str) -> String {
         .unwrap_or_else(|| "unparsable url".to_owned())
 }
 
-pub(crate) fn log_open_failure(url: &str, error: &str) {
-    log_failure(|failures| failures.note(url, error, std::time::Instant::now()));
+pub(crate) fn log_open_failure(url: &str, error: &str, venue: Option<&str>) {
+    if log_failure(|failures| failures.note(url, error, std::time::Instant::now())) {
+        report_failure(
+            crate::report::ErrorKind::SocketOpenFailed,
+            &host_of(url),
+            venue,
+        );
+    }
 }
 
 /// A venue request that failed in transport (a timeout, a refused connection), by route.
-pub(crate) fn log_request_failure(route: &str, error: &str, elapsed: Duration) {
-    log_failure(|failures| failures.note_request(route, error, elapsed, std::time::Instant::now()));
+pub(crate) fn log_request_failure(
+    route: &str,
+    error: &str,
+    elapsed: Duration,
+    venue: Option<&str>,
+) {
+    if log_failure(|failures| {
+        failures.note_request(route, error, elapsed, std::time::Instant::now())
+    }) {
+        report_failure(crate::report::ErrorKind::RequestFailed, route, venue);
+    }
 }
 
 const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
@@ -424,6 +485,8 @@ impl Transport for NetworkTransport {
     ) -> mpsc::UnboundedSender<String> {
         let (outgoing, mut pending) = mpsc::unbounded_channel::<String>();
         let routing = self.routing.clone();
+        let guard = self.io_guard.clone();
+        let venue = self.venue.clone();
         let headers = headers
             .into_iter()
             .map(|(name, value)| (name.to_owned(), value))
@@ -439,6 +502,10 @@ impl Transport for NetworkTransport {
         tokio::spawn(async move {
             let canceled = events.clone();
             let operation = async move {
+                if !io_allowed(&guard) {
+                    let _ = events.send(HostEvent::WsClosed(socket, 4100));
+                    return;
+                }
                 // Enqueued as ordinary ingress after connect returned; no open or close follows.
                 if selected.as_ref().is_some_and(|selected| selected.exhausted) {
                     let _ = events.send(HostEvent::WsRouteExhausted(socket));
@@ -473,17 +540,24 @@ impl Transport for NetworkTransport {
                         },
                         result = &mut opening => match result {
                             Ok(Ok(ws)) => break ws,
-                            Ok(Err(error)) => { log_open_failure(&target, &error); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
-                            Err(_) => { log_open_failure(&target, "timed out after 15s"); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                            Ok(Err(error)) => { log_open_failure(&target, &error, venue.as_deref()); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                            Err(_) => { log_open_failure(&target, "timed out after 15s", venue.as_deref()); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
                         },
                     }
                 };
                 if pending.is_closed() {
+                    if !io_allowed(&guard) {
+                        return;
+                    }
                     let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await;
                     return;
                 }
                 let _ = events.send(HostEvent::WsOpened(socket));
                 for message in queued {
+                    if !io_allowed(&guard) {
+                        let _ = events.send(HostEvent::WsClosed(socket, 4100));
+                        return;
+                    }
                     if !matches!(
                         tokio::time::timeout(
                             Duration::from_secs(5),
@@ -513,19 +587,25 @@ impl Transport for NetworkTransport {
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                                 let _ = events.send(HostEvent::WsMessage(socket, text));
                             }
-                            Some(Ok(Message::Ping(_))) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break (1006, "pong send failed".to_owned()); } }
+                            Some(Ok(Message::Ping(_))) => {
+                                if !io_allowed(&guard) { break (4100, "account IO authority expired".to_owned()); }
+                                if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break (1006, "pong send failed".to_owned()); }
+                            }
                             Some(Ok(Message::Close(frame))) => break frame.map_or((1005, String::new()), |frame| (u16::from(frame.code), frame.reason.to_string())),
                             Some(Ok(_)) => {}
                             Some(Err(error)) => break (1006, error.to_string()),
                             None => break (1006, "stream ended".to_owned()),
                         },
                         text = pending.recv() => match text {
-                            Some(text) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.send(Message::text(text))).await, Ok(Ok(()))) { break (1006, "send failed".to_owned()); } }
-                            None => { let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await; return; }
+                            Some(text) => {
+                                if !io_allowed(&guard) { break (4100, "account IO authority expired".to_owned()); }
+                                if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.send(Message::text(text))).await, Ok(Ok(()))) { break (1006, "send failed".to_owned()); }
+                            }
+                            None => { if io_allowed(&guard) { let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await; } return; }
                         },
                     }
                 };
-                log_failure(|failures| {
+                let _ = log_failure(|failures| {
                     failures.note_close(
                         &target,
                         code,
@@ -550,7 +630,16 @@ impl Transport for NetworkTransport {
         request: HttpRequest,
         intent: safe_cex_engine::request_context::RoutingIntent,
     ) -> HttpPrepareFuture {
-        http::prepare(self, request, Some(intent))
+        http::prepare(self, request, Some(intent), None)
+    }
+
+    fn prepare_http_classified(
+        &self,
+        request: HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+        class: safe_cex_engine::request_budget::RequestClass,
+    ) -> HttpPrepareFuture {
+        http::prepare(self, request, Some(intent), Some(class))
     }
 
     fn request(&self, request: HttpRequest, events: Events) {
@@ -558,7 +647,7 @@ impl Transport for NetworkTransport {
         // classification remains legacy until its venue declares context.
         let id = request.id;
         let packet = request.clone();
-        let preparation = http::prepare(self, request, None);
+        let preparation = http::prepare(self, request, None, None);
         tokio::spawn(async move {
             let result = tokio::select! {
                 biased;
@@ -581,6 +670,48 @@ impl Transport for NetworkTransport {
 mod security_tests {
     use super::*;
     use std::io::Write;
+
+    #[tokio::test]
+    async fn io_guard_drops_a_queued_socket_write_when_the_open_finishes_after_fencing() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/private", listener.local_addr().unwrap());
+        let (connected, waiting) = tokio::sync::oneshot::channel();
+        let (release, held) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            connected.send(()).unwrap();
+            held.await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            let message = tokio::time::timeout(Duration::from_secs(2), socket.next())
+                .await
+                .unwrap();
+            assert!(!matches!(message, Some(Ok(Message::Text(_)))));
+        });
+        let allowed = Arc::new(AtomicBool::new(true));
+        let gate = allowed.clone();
+        let transport =
+            NetworkTransport::new().with_io_guard(Arc::new(move || gate.load(Ordering::Acquire)));
+        let (events, mut replies) = mpsc::unbounded_channel();
+        let socket = transport.connect(SocketId(1), url, events);
+        socket.send("queued-order-sentinel".into()).unwrap();
+        waiting.await.unwrap();
+        allowed.store(false, Ordering::Release);
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if matches!(
+                    replies.recv().await,
+                    Some(HostEvent::WsClosed(SocketId(1), 4100))
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+    }
 
     #[test]
     fn a_failed_venue_socket_open_is_logged_by_host_at_most_once_a_minute() {
@@ -789,5 +920,83 @@ mod security_tests {
             assert!(decode_message(&compressed).is_err());
         }
         assert_eq!(decode_message(b"valid text").unwrap(), "valid text");
+    }
+
+    type Reported = (&'static str, String, Option<String>);
+    static REPORTED: std::sync::Mutex<Vec<Reported>> = std::sync::Mutex::new(Vec::new());
+
+    fn record(report: &crate::report::ErrorReport<'_>) {
+        REPORTED.lock().unwrap().push((
+            report.kind.as_str(),
+            report.target.unwrap_or_default().to_owned(),
+            report.venue.map(str::to_owned),
+        ));
+    }
+
+    /// The sink is process-wide, so one test owns it: direct logging, then a
+    /// real refused request through a venue-attributed transport. Its route
+    /// (`localhost`) is one no other test in this binary logs inside the window.
+    #[tokio::test]
+    async fn a_logged_failure_reaches_the_error_sink_once_per_window_with_its_venue() {
+        assert!(crate::report::set_error_sink(record));
+        let url = "wss://sink-test.example/tunnel?ts-relay=wss%3A%2F%2Fvenue&token=t";
+        log_open_failure(url, "refused", Some("bybitdemo"));
+        log_open_failure(url, "refused", Some("bybitdemo"));
+        log_request_failure(
+            "sink-test.example via HTTP tunnel",
+            "reset",
+            Duration::ZERO,
+            None,
+        );
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = closed.local_addr().unwrap();
+        drop(closed);
+        let (events, mut received) = mpsc::unbounded_channel();
+        NetworkTransport::new().with_venue("okx").request(
+            HttpRequest {
+                id: safe_cex_engine::RequestId(1),
+                method: safe_cex_engine::Method::Get,
+                route: None,
+                timeout_ms: Some(5_000),
+                url: format!("http://localhost:{}/v5/order?sign=s", address.port()),
+                headers: vec![],
+                signer_headers: vec![],
+                body: None,
+            },
+            events,
+        );
+        assert!(matches!(
+            received.recv().await,
+            Some(HostEvent::HttpFailed(..))
+        ));
+        let reported: Vec<_> = REPORTED
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, target, _)| {
+                target.starts_with("sink-test.example") || target.starts_with("localhost")
+            })
+            .cloned()
+            .collect();
+        assert_eq!(
+            reported,
+            [
+                (
+                    "transport.socket_open_failed",
+                    "sink-test.example".to_owned(),
+                    Some("bybitdemo".to_owned())
+                ),
+                (
+                    "transport.request_failed",
+                    "sink-test.example via HTTP tunnel".to_owned(),
+                    None
+                ),
+                (
+                    "transport.request_failed",
+                    "localhost direct".to_owned(),
+                    Some("okx".to_owned())
+                ),
+            ]
+        );
     }
 }

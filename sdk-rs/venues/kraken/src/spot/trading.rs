@@ -516,8 +516,8 @@ fn unproven(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
-/// A refused private write, classified by HTTP status and Kraken's documented
-/// error prefixes. 408/5xx and malformed answers do not prove a refusal.
+/// A failed private write, classified by HTTP status and Kraken's documented
+/// error prefixes. 408/429/5xx and malformed answers do not prove a refusal.
 pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueError {
     let error = VenueError::new(message);
     let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
@@ -525,7 +525,7 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         200..=299 => {}
         401 => return rejected(error, ErrorKind::AuthInvalid),
         403 => return rejected(error, ErrorKind::AuthPermission),
-        429 => return rejected(error, ErrorKind::RateLimited),
+        429 => return error.kind(ErrorKind::RateLimited).outcome(Outcome::Unknown),
         408 => return error.outcome(Outcome::Unknown),
         400..=499 => return rejected(error, ErrorKind::Rejected),
         _ => return error.outcome(Outcome::Unknown),

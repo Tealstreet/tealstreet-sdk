@@ -194,6 +194,8 @@ pub struct LotSizeFilter<'a> {
     pub min_order_qty: Opt<'a>,
     #[serde(borrow, default)]
     pub max_order_qty: Opt<'a>,
+    #[serde(borrow, default)]
+    pub max_mkt_order_qty: Opt<'a>,
 }
 
 #[derive(Deserialize)]

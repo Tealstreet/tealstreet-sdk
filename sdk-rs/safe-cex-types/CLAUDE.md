@@ -74,8 +74,8 @@ are the reason a field rename here is cheap and a shape change is not.
 Exchange metadata has a dedicated `Rust / native metadata` CI check: run
 `node --test safe-cex-types/tests/metadata-freshness.test.cjs` and
 `cargo test --locked -p safe-cex-types --test exchange_metadata` from `sdk-rs`.
-Regenerate its snapshot and typed records with
-`node safe-cex-types/scripts/generate-exchange-metadata.cjs`; readonly arrays
+Regenerate its snapshot and typed records with `corepack yarn rust:metadata`
+from the repo root (`rust:metadata:check` verifies; both need `rustfmt` on PATH); readonly arrays
 retain their element enums and nested property records stay typed objects.
 The explicit 48-name roster includes Binance Options and excludes the retired
 SalsaDEX/Tealstreet DEX brokers. Roster changes must update this independent
@@ -291,3 +291,7 @@ refusals are unchanged. JSON string parsing copies unescaped spans together;
 escape/control validation and duplicate-property order keep their existing rules.
 
 StoreData.socketHealth uses RetainedJsonInput so own undefined diagnostic fields survive typed notifications and native Store payloads. Ordinary JSON output omits those keys. StoreUpdate and the Store health getter/merge use the same carrier; a JSON map is an explicit ingress conversion.
+
+StoreData and WritableStoreData latency are required nullable numbers. Null means
+unmeasured, not zero; absent/non-numeric values still refuse. Native STATUS uses
+an explicit presence flag, with legacy positive samples retained.

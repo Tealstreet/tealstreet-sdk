@@ -63,7 +63,11 @@ per operation, preserves original request bodies, and streams HTTP results in
 16 KiB chunks. A HOW request uses a dedicated tunnel connection with raw response
 negotiation, supports TSB1 gzip and older text encodings, and honors automatic
 IP-whitelist authentication. Token acquisition, authentication and response
-handling share one 20-second deadline. Transport recovery never replays a sent
+handling share one original per-class deadline (60 s discovery, 30 s history,
+20 s order reads/writes and other reads), capped by any explicit remaining
+engine/venue budget. Startup discovery keeps its existing 90 s total; tunnel
+readiness has a 30 s cap inside the original deadline. Timeout errors name the
+class, budget and elapsed milliseconds. Transport recovery never replays a sent
 HTTP write.
 
 Private socket relays hide tunnel authentication and report open only after the
@@ -196,6 +200,12 @@ Orphan IDs remain reserved until the venue finishes: disconnect never cancels or
 replays a potentially submitted trading write. A permanently stuck venue job
 therefore continues to occupy a bounded slot. Exhausted internal IDs fail closed
 rather than wrapping. The server never retries client trading commands.
+
+`AccountHandle::begin_disposal` binds the first disposal cause before host-owned
+algo cleanup, without stopping the actor's I/O. `dispose`, normal termination
+and actor drop record an ordinary stop when no cause is bound. Cloned handles
+share that one-time record: late releases cannot relabel a stopped actor as a
+planned move. `disposal_cause` reads the original cause after cleanup as well.
 
 Diagnostic codes are stable; messages are display data. Engine and host-origin
 warnings use the same event envelope. Warn+ is written to stderr without a

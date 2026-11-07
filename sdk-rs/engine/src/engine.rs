@@ -105,6 +105,17 @@ impl RequestRoute {
     }
 }
 
+/// Admission hints only; never signing, delivery or reconciliation authority.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum HttpReadClass {
+    #[default]
+    Normal = 0,
+    Critical = 1,
+    Bulk = 2,
+    Reconciliation = 3,
+}
+
 #[derive(Clone, PartialEq)]
 pub struct HttpRequest {
     pub id: RequestId,
@@ -324,6 +335,9 @@ pub enum Notice {
     /// account the venue refuses); hosts fail `start` with it.
     StartupFailed {
         error: VenueError,
+        /// Only a refused bootstrap read can recover from later account reads.
+        #[cfg(not(target_arch = "wasm32"))]
+        read_refusal: bool,
     },
     /// Completes a command with a structured failure; hosts report it like a
     /// `CommandDone` error, plus the detail.
@@ -376,6 +390,8 @@ pub struct SocketSpec {
     pub url: String,
     /// Logical feed role lets hosts route identical venue URLs independently.
     pub channel: Option<SocketChannel>,
+    /// This physical socket also carries public topics; routing keeps its primary role.
+    pub public_topics: bool,
     pub context: Option<SocketContext>,
     pub headers: Vec<(&'static str, String)>,
     /// Binary protocols still receive text control responses through on_message.
@@ -392,6 +408,11 @@ impl SocketSpec {
 
     pub fn channel(mut self, channel: SocketChannel) -> Self {
         self.channel = Some(channel);
+        self
+    }
+
+    pub fn public_topics(mut self, enabled: bool) -> Self {
+        self.public_topics = enabled;
         self
     }
 
@@ -451,6 +472,7 @@ pub enum Action {
         /// Upgrade authentication; hosts must fail closed if headers are unsupported.
         headers: Vec<(&'static str, String)>,
         channel: Option<SocketChannel>,
+        public_topics: bool,
         context: Option<SocketContext>,
     },
     WsSend {
@@ -502,6 +524,7 @@ impl PartialEq for Action {
                     headers: d,
                     channel: e,
                     context: f,
+                    public_topics: m,
                 },
                 Self::WsConnect {
                     binary: g,
@@ -510,8 +533,9 @@ impl PartialEq for Action {
                     headers: j,
                     channel: k,
                     context: l,
+                    public_topics: n,
                 },
-            ) => (a, b, c, d, e, f) == (g, h, i, j, k, l),
+            ) => (a, b, c, d, e, f, m) == (g, h, i, j, k, l, n),
             (Self::WsSend { socket: a, text: b }, Self::WsSend { socket: c, text: d }) => {
                 (a, b) == (c, d)
             }
@@ -576,6 +600,11 @@ pub enum VenueAction {
     /// (`None`: the account) until a read sent after this ask lands
     /// (docs/plans/RUST_FRAME_FED_READ_COVER.md §5.2).
     RefreshOrders { symbols: Option<Vec<String>> },
+    /// Register native identities for the next source census; never cancels or seals a write.
+    #[cfg(feature = "command-bitget")]
+    RegisterCancelChecks {
+        orders: Vec<crate::model::CancelOrderRef>,
+    },
     /// Succeeds only once a positions read issued after this command has
     /// committed to the store; `Capabilities::fresh_positions` advertises it.
     ReadPositions,
@@ -601,8 +630,9 @@ pub enum VenueAction {
 /// The shared rejection for a venue action the venue does not implement.
 const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
 /// A repair on a feed that has carried no data this long reconnects it instead.
+/// Venue data-silence windows that a repair should agree with use this value.
 #[cfg(feature = "managed-sockets")]
-const REPAIR_SILENCE_MS: f64 = 30_000.0;
+pub const REPAIR_SILENCE_MS: f64 = 30_000.0;
 /// The same topic repaired again within this window reconnects its feed.
 #[cfg(feature = "managed-sockets")]
 const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;
@@ -796,7 +826,22 @@ impl Command {
             | Self::SetPositionMode { .. }
             | Self::SetStpMode { .. } => Intent::Setting,
             Self::Venue { .. } => Intent::Place,
-            _ => Intent::Read,
+            Self::FetchOptionChain { .. }
+            | Self::FetchOptionExpiries { .. }
+            | Self::FetchAccountGreeks { .. }
+            | Self::SetTickerSymbols { .. }
+            | Self::SubscribeOrderBook { .. }
+            | Self::UnsubscribeOrderBook { .. }
+            | Self::SubscribeCandles { .. }
+            | Self::UnsubscribeCandles { .. }
+            | Self::RepairSubscription(_)
+            | Self::FetchStpMode { .. }
+            | Self::FetchAccount { .. }
+            | Self::FetchOrderBook { .. }
+            | Self::FetchLeverage { .. }
+            | Self::FetchMaxLeverage { .. }
+            | Self::Query { .. }
+            | Self::FetchCandles { .. } => Intent::Read,
         }
     }
 
@@ -825,6 +870,31 @@ impl Command {
             | Self::Venue { command, .. } => Some(*command),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod command_intent_tests {
+    use super::Command;
+    use crate::classify::Intent;
+
+    #[test]
+    fn fetching_leverage_is_a_read() {
+        let command = Command::FetchLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+        };
+        assert_eq!(command.write_intent(), Intent::Read);
+    }
+
+    #[test]
+    fn changing_margin_type_is_a_setting_write() {
+        let command = Command::SetMarginType {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        };
+        assert_eq!(command.write_intent(), Intent::Setting);
     }
 }
 
@@ -1014,6 +1084,7 @@ struct ReadAuth {
 }
 
 struct PendingHttp<P> {
+    startup: crate::startup::Sections,
     value: P,
     auth: Option<ReadAuth>,
 }
@@ -1835,6 +1906,8 @@ impl OrdersRefresh {
 }
 
 struct IoCore {
+    startup_causes: crate::startup_causes::Causes,
+    startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
     address_setup: address_nonce_setup::AddressNonceSetup,
     nonce_unscheduled: bool,
@@ -1846,6 +1919,9 @@ struct IoCore {
     /// `V::http_mutation_barriers()`, copied by `Engine::new` for admission in `Cx`.
     #[cfg(feature = "http-mutation-barriers")]
     mutation_barriers_declared: bool,
+    /// `V::http_plans()`, copied by `Engine::new` for Preflight admission in `Cx`.
+    #[cfg(feature = "http-plans")]
+    http_plans_declared: bool,
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     #[cfg(feature = "http-plans")]
@@ -1857,8 +1933,6 @@ struct IoCore {
     http_write_reply: Option<(u16, String)>,
     #[cfg(feature = "repair-mutations")]
     repairs: repair_core::Repairs,
-    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-    http_status_exempt: Option<RequestId>,
     // Reconcile reads the engine owes the venue, one per uncertain seal: the
     // symbols (`None` = all) and the earliest time to ask.
     #[cfg(feature = "order-locks")]
@@ -1919,6 +1993,9 @@ struct IoCore {
     /// Data source: a frame-fed page's asks for fresh orders.
     #[cfg(feature = "order-locks")]
     orders_refresh: OrdersRefresh,
+    /// Frame-fed: a plain Unknown cancel owes a source read even without a fence.
+    #[cfg(feature = "order-locks")]
+    cancel_refresh: Option<(Option<Vec<String>>, f64)>,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -2113,6 +2190,7 @@ impl IoCore {
 
 struct Io<P> {
     core: IoCore,
+    startup_reads: fn(&P) -> crate::startup::Sections,
     /// Managed close, installed by `Engine::new` only for venues that declare
     /// managed sockets, so other venues never reference the managed retire path.
     #[cfg(feature = "managed-sockets")]
@@ -2139,16 +2217,18 @@ impl Default for IoCore {
             managed_sockets_declared: false,
             #[cfg(feature = "http-mutation-barriers")]
             mutation_barriers_declared: false,
+            #[cfg(feature = "http-plans")]
+            http_plans_declared: true,
             request_contexts: Default::default(),
             http_delivery: None,
             #[cfg(feature = "http-plans")]
             http_history_failure: None,
+            startup_causes: Default::default(),
+            startup_delivery: Default::default(),
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
             #[cfg(feature = "repair-mutations")]
             repairs: Default::default(),
-            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-            http_status_exempt: None,
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             #[cfg(feature = "order-locks")]
@@ -2193,6 +2273,8 @@ impl Default for IoCore {
             order_response_read: None,
             #[cfg(feature = "order-locks")]
             orders_refresh: OrdersRefresh::default(),
+            #[cfg(feature = "order-locks")]
+            cancel_refresh: None,
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -2293,14 +2375,20 @@ struct CoreIo<'a> {
 }
 
 /// The venue-independent view of `Cx<P>`; see `CoreIo`.
-struct CoreCx<'a> {
-    now: f64,
+pub(crate) struct CoreCx<'a> {
+    pub(crate) now: f64,
     #[cfg(feature = "metadata-freshness")]
     store: &'a mut Store,
     io: CoreIo<'a>,
 }
 
 impl<P> Io<P> {
+    fn startup_issued(&mut self, pending: &P) -> crate::startup::Sections {
+        let sections = (self.startup_reads)(pending);
+        self.core.startup_causes.started(sections);
+        sections
+    }
+
     #[inline]
     fn core_io(&mut self) -> CoreIo<'_> {
         CoreIo {
@@ -2312,7 +2400,7 @@ impl<P> Io<P> {
 
 impl<P> Cx<'_, P> {
     #[inline]
-    fn core(&mut self) -> CoreCx<'_> {
+    pub(crate) fn core(&mut self) -> CoreCx<'_> {
         CoreCx {
             now: self.now,
             #[cfg(feature = "metadata-freshness")]
@@ -2385,6 +2473,7 @@ impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
             core: IoCore::default(),
+            startup_reads: |_| crate::startup::Sections::NONE,
             #[cfg(feature = "managed-sockets")]
             managed_close: None,
             pending: Default::default(),
@@ -2452,14 +2541,7 @@ impl<P> Io<P> {
 
     /// Splits the poll registry from the timer state it writes to.
     fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
-        (
-            &mut self.core.polls,
-            TimerSink {
-                next_id: &mut self.core.next_id,
-                timers: &mut self.core.timers,
-                actions: &mut self.core.actions,
-            },
-        )
+        poll_timers(&mut self.core)
     }
 }
 
@@ -2656,10 +2738,7 @@ impl<P> Cx<'_, P> {
 
     /// `SocketId(0)` stands for a connect the engine suppressed.
     fn inert_socket(&self, socket: SocketId) -> bool {
-        socket.0 == 0
-            && (self.io.core.public_feed_policy != PublicFeedPolicy::Direct
-                || self.io.core.signing_latch.roles != 0
-                || self.io.core.frame_fed)
+        self.core_ref().inert_socket(socket)
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
@@ -2756,21 +2835,7 @@ impl<P> Cx<'_, P> {
     /// use this after revoking the epoch, before native invalidation; public
     /// close can then enter retirement without recursively invoking itself.
     fn close_socket_transport(&mut self, socket: SocketId) {
-        if self.inert_socket(socket) {
-            return;
-        }
-        self.io.opaque_entry_activity();
-        for timer in self.io.core.signing.close_socket(socket) {
-            if timer.0 != 0 {
-                self.io.core.actions.push(Action::ClearTimer { timer });
-            }
-        }
-        // The host drops engine-initiated closes without reporting them back.
-        // They are deliberate, so they never make the next connect a reconnect.
-        if self.io.core.sockets.closed(socket, false) {
-            self.io.core.health.count(log_code::WS_CLOSED);
-        }
-        self.io.core.actions.push(Action::WsClose { socket });
+        self.core().close_socket_transport(socket)
     }
 
     /// Issue a request; `pending` comes back with its response.
@@ -2782,6 +2847,7 @@ impl<P> Cx<'_, P> {
         body: Option<String>,
         pending: P,
     ) -> RequestId {
+        let startup = self.io.startup_issued(&pending);
         let id = RequestId(self.io.next());
         #[cfg(feature = "order-locks")]
         {
@@ -2801,6 +2867,7 @@ impl<P> Cx<'_, P> {
         self.io.pending.insert(
             id,
             PendingHttp {
+                startup,
                 value: pending,
                 auth: None,
             },
@@ -2954,12 +3021,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
-        self.io
-            .core
-            .entropy
-            .as_ref()
-            .ok_or("Engine entropy providers are required")?
-            .identity(bytes)
+        self.core_ref().fill_entropy(bytes)
     }
     pub fn fill_signing_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
         self.io
@@ -2974,22 +3036,7 @@ impl<P> Cx<'_, P> {
     /// clients do not retry in lockstep. Apply rate-limit minimums afterwards.
     /// Non-finite and non-positive delays pass through unchanged.
     pub fn jittered(&mut self, delay_ms: f64) -> f64 {
-        if !(delay_ms.is_finite() && delay_ms > 0.0) {
-            return delay_ms;
-        }
-        let mut bytes = [0; 8];
-        if self.fill_entropy(&mut bytes).is_err() {
-            return delay_ms;
-        }
-        crate::backoff::jitter(delay_ms, u64::from_le_bytes(bytes))
-    }
-
-    pub(crate) fn note_socket_backoff(&mut self, timer: TimerId) {
-        let core = &mut self.io.core;
-        let timers = &core.timers;
-        core.socket_backoffs
-            .retain(|waiting| timers.contains_key(waiting));
-        core.socket_backoffs.push(timer);
+        self.core().jittered(delay_ms)
     }
 
     /// The host rearms a timer id in place, so a due backoff fires as usual.
@@ -3004,13 +3051,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
-        let timer = TimerId(self.io.next());
-        self.io.core.timers.insert(timer, ());
-        self.io.core.actions.push(Action::SetTimer {
-            timer,
-            at_ms: self.now + delay_ms,
-        });
-        timer
+        self.core().set_timer(delay_ms)
     }
 
     /// Register one periodic-poll wakeup. The configured positive interval
@@ -3040,10 +3081,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn clear_timer(&mut self, timer: TimerId) {
-        let (polls, mut sink) = self.io.polls();
-        if !polls.clear(timer, &mut sink) {
-            sink.clear(timer);
-        }
+        self.core().clear_timer(timer)
     }
 
     pub fn book_changed(&mut self, symbol: &str) {
@@ -3161,6 +3199,76 @@ impl<P> Cx<'_, P> {
         self.core().command_error(command, message)
     }
 
+    /// A native startup failure with explicit section membership; no error text is retained.
+    pub fn startup_read_failure(&mut self, sections: crate::startup::Sections, error: &VenueError) {
+        if self.io.core.startup_delivery.sections == sections {
+            self.io.core.startup_causes.failed(
+                &mut self.io.core.startup_delivery,
+                error,
+                error.outcome == Some(crate::Outcome::NotSent),
+            );
+        } else {
+            self.io.core.startup_causes.failed(
+                &mut crate::startup_causes::Delivery::new(sections, None),
+                error,
+                error.outcome == Some(crate::Outcome::NotSent),
+            );
+        }
+    }
+
+    /// A declared startup read denied before an HTTP request could be issued.
+    pub fn startup_admission_refused(
+        &mut self,
+        sections: crate::startup::Sections,
+        error: &VenueError,
+    ) {
+        self.io.core.startup_causes.failed(
+            &mut crate::startup_causes::Delivery::new(sections, None),
+            error,
+            true,
+        );
+    }
+
+    fn with_startup_delivery<R>(
+        &mut self,
+        sections: crate::startup::Sections,
+        callback: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = std::mem::replace(
+            &mut self.io.core.startup_delivery,
+            crate::startup_causes::Delivery::new(sections, None),
+        );
+        let result = callback(self);
+        self.io.core.startup_delivery = previous;
+        result
+    }
+
+    /// Keep a child read's local failure handling and logging separate from its parent callback.
+    pub fn with_startup_request<R>(
+        &mut self,
+        pending: P,
+        callback: impl FnOnce(&mut Self, P) -> R,
+    ) -> R {
+        let sections = (self.io.startup_reads)(&pending);
+        self.with_startup_delivery(sections, |cx| callback(cx, pending))
+    }
+
+    /// Scope a pre-send failure, including its native cleanup and legacy failure notices.
+    pub fn with_startup_request_failure<R>(
+        &mut self,
+        pending: P,
+        error: VenueError,
+        callback: impl FnOnce(&mut Self, P, VenueError) -> R,
+    ) -> R {
+        self.with_startup_request(pending, |cx, pending| {
+            cx.io
+                .core
+                .startup_causes
+                .failed(&mut cx.io.core.startup_delivery, &error, true);
+            callback(cx, pending, error)
+        })
+    }
+
     /// A private read the venue refused over the key, before the account
     /// loaded: ends the start once with that reason instead of retrying unseen.
     /// True when it reported, so a venue's own log of the refusal can stand aside.
@@ -3179,7 +3287,7 @@ impl<P> Cx<'_, P> {
             return false;
         }
         self.notice_error(Level::Error, log_code::for_startup_error(error), error);
-        self.startup_failed(error.clone());
+        self.push_startup_failure(error.clone(), true);
         let now = self.now;
         let (polls, mut sink) = self.io.polls();
         polls.hold_off_refused(now, &mut sink);
@@ -3187,12 +3295,22 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
-        let error = error.into().with_ip_whitelist_hint();
+        self.push_startup_failure(error.into(), false);
+    }
+
+    fn push_startup_failure(&mut self, error: VenueError, read_refusal: bool) {
+        let error = error.with_ip_whitelist_hint();
         count_auth_failure(&mut self.io.core, Some(&error));
+        #[cfg(target_arch = "wasm32")]
+        let _ = read_refusal;
         self.io
             .core
             .actions
-            .push(Action::Notice(Notice::StartupFailed { error }));
+            .push(Action::Notice(Notice::StartupFailed {
+                error,
+                #[cfg(not(target_arch = "wasm32"))]
+                read_refusal,
+            }));
     }
 
     /// Legacy numeric finalization. Managed commands use `fail_context`.
@@ -3236,6 +3354,41 @@ impl<P> Cx<'_, P> {
         return self.io.core.reconcile_reask;
         #[cfg(not(feature = "order-locks"))]
         false
+    }
+
+    /// A source refresh ask is outstanding. Join an older census and owe one
+    /// successor rather than starting a competing read; its cover must still
+    /// come from a release after the ask. This grants no commit authority.
+    pub fn orders_refresh_pending(&self) -> bool {
+        #[cfg(feature = "order-locks")]
+        return self.io.core.orders_refresh.in_flight.is_some();
+        #[cfg(not(feature = "order-locks"))]
+        false
+    }
+
+    /// Forward bounded cancel targets before the ordinary source refresh ask.
+    /// This grants no read-cover, write or reconciliation authority.
+    #[cfg(feature = "command-bitget")]
+    pub fn source_cancel_checks(&mut self, orders: &[crate::model::CancelOrderRef]) {
+        if !self.frame_fed() || orders.is_empty() || orders.len() > 64 {
+            return;
+        }
+        if orders.iter().any(|o| {
+            o.id.is_empty() || o.id.len() > 128 || o.symbol.is_empty() || o.symbol.len() > 128
+        }) {
+            return;
+        }
+        if let Ok(targets) = serde_json::to_string(orders) {
+            self.io
+                .core
+                .actions
+                .push(Action::Notice(Notice::Event(LogEvent {
+                    level: Level::Info,
+                    code: "orders.cancel_check",
+                    message: "Register native targets before the source orders refresh".into(),
+                    fields: vec![("targets", Value::Str(targets))],
+                })));
+        }
     }
 
     /// The order-uncertainty epoch now. A read that spans several contexts (a
@@ -3457,6 +3610,7 @@ impl crate::engine::CoreCx<'_> {
             context,
             headers,
             binary,
+            public_topics,
         } = spec;
         if let Some(channel) = &channel {
             self.io
@@ -3469,6 +3623,7 @@ impl crate::engine::CoreCx<'_> {
         }
         self.io.core.actions.push(Action::WsConnect {
             binary,
+            public_topics,
             socket,
             url,
             headers,
@@ -3584,7 +3739,7 @@ impl crate::engine::CoreCx<'_> {
         let mut message = message.into();
         if level >= Level::Warn {
             let kind = fields.iter().find_map(|(name, value)| match (name, value) {
-                (&"kind", Value::Str(kind)) => auth_kind(kind),
+                (&"kind", value) => value.as_str().and_then(auth_kind),
                 _ => None,
             });
             if let Some((hinted, named)) = crate::error::ip_whitelist_text(&message, kind) {
@@ -3597,6 +3752,26 @@ impl crate::engine::CoreCx<'_> {
                     fields.push(("kind", ErrorKind::AuthPermission.as_str().into()));
                 }
             }
+        }
+        if matches!(
+            code,
+            log_code::REQUEST_FAILED | log_code::AUTH_REJECTED | log_code::STARTUP_DEGRADED
+        ) {
+            let mut error = VenueError::new("");
+            for (key, value) in &fields {
+                if let Some(value) = value.as_str() {
+                    if *key == "kind" {
+                        error.kind = crate::startup_causes::error_kind(value);
+                    }
+                    if *key == "venueCode" {
+                        error.venue_code = crate::startup_causes::venue_code(value);
+                    }
+                }
+            }
+            self.io
+                .core
+                .startup_causes
+                .failed(&mut self.io.core.startup_delivery, &error, false);
         }
         // A rejection often also arrives as an auth-kind failure or `deactivate`.
         if code == log_code::AUTH_REJECTED {
@@ -3713,6 +3888,9 @@ impl crate::engine::CoreCx<'_> {
         };
         // A credential-free route's auth-kind refusal is no credential evidence.
         let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
+        #[cfg(feature = "order-locks")]
+        let cancel = self.io.core.request_contexts.owner_intent(command)
+            == Some(crate::classify::Intent::Cancel);
         self.io.finish_command_wait(command);
         self.io.retire_http_command(command);
         if !self.io.core.request_contexts.finish(command) {
@@ -3760,6 +3938,21 @@ impl crate::engine::CoreCx<'_> {
                     _ => 0.,
                 };
                 let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
+                if self.io.core.frame_fed && unknown && cancel {
+                    let at = if self.now.is_finite() {
+                        self.now + delay
+                    } else {
+                        0.
+                    };
+                    let (symbols, due) = match self.io.core.cancel_refresh.take() {
+                        Some((pending, due)) => {
+                            (OrdersRefresh::merge(pending, scope.clone()), due.max(at))
+                        }
+                        None => (scope.clone(), at),
+                    };
+                    // A long rate-limit wait cannot accumulate unbounded symbol names.
+                    self.io.core.cancel_refresh = Some((symbols.filter(|s| s.len() <= 64), due));
+                }
                 self.io.queue_reconcile(scope, self.now + delay);
             }
             self.io.core.active_commands.remove(&command);
@@ -3883,12 +4076,6 @@ pub trait Venue {
     fn public_key_setup(&self) -> Option<(AddressSetupSlots, crate::signing::Algorithm)> {
         None
     }
-    /// A fully parsed native refusal may exempt this delivery from unproven
-    /// HTTP status handling. The default keeps the strict shared policy.
-    fn status_exempt_refusal(&self, _pending: &Self::Pending, _response: Response<'_>) -> bool {
-        false
-    }
-
     /// Read-only native evidence from an unproven managed mutation envelope.
     /// Exact SDK identity namespaces must be validated by the native codec.
     fn unproven_http_evidence(
@@ -3896,6 +4083,16 @@ pub trait Venue {
         _pending: &Self::Pending,
         _response: Response<'_>,
         _evidence: &mut crate::request_context::UnprovenEvidence,
+    ) {
+    }
+
+    /// Rate-limit bookkeeping for a validated delivery, before its Unknown seal.
+    /// No Cx: this cannot send, publish financial rows or complete a command.
+    fn observe_unproven_http_response(
+        &mut self,
+        _now: f64,
+        _pending: &Self::Pending,
+        _response: Response<'_>,
     ) {
     }
 
@@ -3959,6 +4156,10 @@ pub trait Venue {
         _owner: &crate::request_context::ConditionOwner,
         _error: VenueError,
     ) {
+    }
+
+    fn http_read_class(&self, _pending: &Self::Pending) -> HttpReadClass {
+        HttpReadClass::Normal
     }
 
     /// Bounded native correlation metadata only. No credential, outbound packet
@@ -4026,6 +4227,17 @@ pub trait Venue {
         false
     }
 
+    /// Whether this venue may open HTTP Preflights (and so Plans). Engine<V> reads
+    /// it statically: a venue declaring false compiles the per-event Plan sweeps
+    /// out and cannot open a Preflight. Plan adopters keep the default.
+    #[inline]
+    fn http_plans() -> bool
+    where
+        Self: Sized,
+    {
+        true
+    }
+
     /// The venue's one FIFO release domain, if any. Its group must be registered
     /// in `http_pacing`; the engine stamps it onto every member Context.
     #[cfg(feature = "release-domains")]
@@ -4054,6 +4266,18 @@ pub trait Venue {
         HttpRelease::Mutable(|_, _, _| Ok(crate::request_context::Admission::Unscheduled))
     }
 
+    /// Pure veto at a single request's final claim; reads current Store only.
+    /// No I/O, interior mutation or scheduling; Err must name a NotSent cause.
+    /// A refusal follows normal claim cleanup before any physical release.
+    fn http_release_veto(
+        &self,
+        _store: &Store,
+        _pending: &Self::Pending,
+        _release: &crate::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        Ok(())
+    }
+
     /// Explicit pure group admission; the default refuses group support.
     /// Implementations must not mutate state, schedule work or use interior
     /// mutability here. This first contract accepts only Unscheduled.
@@ -4076,7 +4300,9 @@ pub trait Venue {
         _reason: crate::request_context::Error,
         error: VenueError,
     ) {
-        self.on_sign_error(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_sign_error(cx, pending, error);
+        });
     }
 
     /// Reconcile writes whose outcome is unknown: issue a fresh order read for
@@ -4093,6 +4319,12 @@ pub trait Venue {
     /// Every complete orders read commits its covers through
     /// `Cx::commit_orders_read*`, so a data source answers `RefreshOrders` by
     /// reading through `reconcile_uncertain` (the page's bounded ask).
+    /// Read-only targets retained by a retired cancel owner, before its source ask.
+    #[cfg(feature = "command-bitget")]
+    fn take_source_cancel_checks(&mut self) -> Vec<crate::model::CancelOrderRef> {
+        vec![]
+    }
+
     fn refreshes_orders(&self) -> bool {
         false
     }
@@ -4257,7 +4489,9 @@ pub trait Venue {
         pending: Self::Pending,
         error: VenueError,
     ) {
-        self.on_sign_failed(cx, pending, &error.message);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_sign_failed(cx, pending, &error.message);
+        });
     }
     /// Delegated signing failed before an HTTP write could reach the venue.
     fn on_sign_failed(
@@ -4435,9 +4669,31 @@ pub trait Venue {
     ) {
         self.on_request_failed(cx, pending, &error.message);
     }
+    /// Exact native startup-set membership, sampled at issuance, never inferred
+    /// from a URL or a missing section. Commands and metadata return NONE.
+    fn startup_reads(_pending: &Self::Pending) -> crate::startup::Sections
+    where
+        Self: Sized,
+    {
+        crate::startup::Sections::NONE
+    }
+
     /// Optional public stage facts for the nonterminal startup watchdog.
     fn startup_diagnostics(&self, _store: &Store) -> Vec<(&'static str, Value)> {
         Vec::new()
+    }
+    /// Native recovery may retry bootstrap reads, never commands or timers.
+    /// Opt in only with a read-only implementation; false stops host rechecks.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn rechecks_startup_reads() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn recheck_startup_reads(&mut self, _cx: &mut Cx<'_, Self::Pending>) -> bool {
+        false
     }
     fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
@@ -4468,7 +4724,7 @@ const STARTUP_REPEAT_MS: f64 = 300_000.0;
 fn watch_startup<P>(
     cx: &mut Cx<'_, P>,
     account: bool,
-    started_at: f64,
+    started_at: Option<f64>,
     mut fields: Vec<(&'static str, Value)>,
 ) -> bool {
     let loaded = cx.store.loaded();
@@ -4492,12 +4748,14 @@ fn watch_startup<P>(
     } else {
         Level::Error
     };
-    let elapsed = cx.now - started_at;
-    // Invalid transport clocks cannot introduce nonfinite diagnostic fields.
-    if cx.now.is_finite() && elapsed.is_finite() {
-        fields.push(("elapsedMs", elapsed.max(0.0).into()));
-        fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
+    if let Some(started_at) = started_at {
+        let elapsed = cx.now - started_at;
+        if started_at.is_finite() && cx.now.is_finite() && elapsed.is_finite() && elapsed >= 0.0 {
+            fields.push(("elapsedMs", elapsed.into()));
+        }
     }
+    fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
+    cx.io.core.startup_causes.fields(&missing, &mut fields);
     cx.event(
         level,
         log_code::STARTUP_INCOMPLETE,
@@ -4518,7 +4776,7 @@ pub struct Engine<V: Venue> {
     started: bool,
     /// Checked on handled events, so it adds no timer of its own.
     startup_watch_at: Option<f64>,
-    startup_started_at: f64,
+    startup_started_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
     #[cfg(feature = "order-locks")]
@@ -4564,60 +4822,118 @@ struct BookBaseline {
     book: Book,
 }
 
+/// The venue's declarations `Engine::new` needs, read once so the rest of
+/// construction compiles once for every venue.
+struct CoreSpec<'a> {
+    quantity_units: crate::QuantityUnits,
+    http_pacing: &'a [crate::request_context::Pacing],
+    http_pacing_sets: &'a [crate::request_context::PacingSet],
+    nonce_unscheduled: bool,
+    #[cfg(feature = "order-locks")]
+    fence_uncertain_placements: bool,
+    #[cfg(feature = "release-domains")]
+    release_domain: Option<crate::request_context::ReleaseDomain>,
+    #[cfg(feature = "dispatch-nonce")]
+    dispatch_nonce: bool,
+    #[cfg(feature = "http-mutation-barriers")]
+    http_mutation_barriers: bool,
+    #[cfg(feature = "http-plans")]
+    http_plans: bool,
+    #[cfg(feature = "managed-sockets")]
+    managed_sockets: bool,
+    #[cfg(feature = "managed-sockets")]
+    socket_capabilities: crate::socket_lifecycle::SocketCapabilities,
+}
+
+/// The venue-independent half of `Engine::new`: validated pacing, store and I/O core.
+fn new_core(
+    entropy: Option<crate::entropy::Entropy>,
+    spec: CoreSpec<'_>,
+) -> Result<(Store, IoCore), VenueError> {
+    let entropy = entropy.ok_or_else(|| {
+        VenueError::new("Engine entropy providers are required").kind(ErrorKind::InvalidInput)
+    })?;
+    let mut store = Store::default();
+    store.set_quantity_units(spec.quantity_units);
+    let http_pacing =
+        crate::request_context::SendPacing::with_sets(spec.http_pacing, spec.http_pacing_sets)
+            .map_err(|_| {
+                VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput)
+            })?;
+    #[cfg(feature = "order-locks")]
+    let order_locks =
+        crate::order_locks::OrderLocks::fencing_placements(spec.fence_uncertain_placements);
+    #[cfg(feature = "release-domains")]
+    let release_domain = spec.release_domain;
+    #[cfg(feature = "release-domains")]
+    if let Some(domain) = release_domain {
+        release_domain::validate(domain, &http_pacing).map_err(|_| {
+            VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
+        })?;
+    }
+    #[cfg(feature = "release-domains")]
+    let (domain_queue, domain_held) = release_domain::reserve(release_domain.is_some())
+        .map_err(|_| VenueError::new("HTTP release domain capacity unavailable"))?;
+    let core = IoCore {
+        entropy: Some(entropy),
+        http_pacing,
+        #[cfg(feature = "release-domains")]
+        release_domain,
+        #[cfg(feature = "release-domains")]
+        domain_queue,
+        #[cfg(feature = "release-domains")]
+        domain_held,
+        nonce_unscheduled: spec.nonce_unscheduled,
+        #[cfg(feature = "dispatch-nonce")]
+        nonce_enabled: spec.dispatch_nonce,
+        #[cfg(feature = "http-mutation-barriers")]
+        mutation_barriers_declared: spec.http_mutation_barriers,
+        #[cfg(feature = "http-plans")]
+        http_plans_declared: spec.http_plans,
+        #[cfg(feature = "managed-sockets")]
+        managed_sockets_declared: spec.managed_sockets,
+        #[cfg(feature = "managed-sockets")]
+        socket_capabilities: spec.socket_capabilities,
+        #[cfg(feature = "order-locks")]
+        order_locks,
+        ..IoCore::default()
+    };
+    Ok((store, core))
+}
+
 impl<V: Venue> Engine<V> {
     pub fn new(venue: V, entropy: Option<crate::entropy::Entropy>) -> Result<Self, VenueError> {
-        let entropy = entropy.ok_or_else(|| {
-            VenueError::new("Engine entropy providers are required").kind(ErrorKind::InvalidInput)
-        })?;
-        let mut store = Store::default();
-        store.set_quantity_units(venue.capabilities().quantity_units);
-        let http_pacing = crate::request_context::SendPacing::with_sets(
-            venue.http_pacing(),
-            venue.http_pacing_sets(),
-        )
-        .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
         let http_release = V::http_release();
-        #[cfg(feature = "order-locks")]
-        let order_locks =
-            crate::order_locks::OrderLocks::fencing_placements(venue.fence_uncertain_placements());
-        #[cfg(feature = "release-domains")]
-        let release_domain = V::http_release_domain();
-        #[cfg(feature = "release-domains")]
-        if let Some(domain) = release_domain {
-            release_domain::validate(domain, &http_pacing).map_err(|_| {
-                VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
-            })?;
-        }
-        #[cfg(feature = "release-domains")]
-        let (domain_queue, domain_held) = release_domain::reserve(release_domain.is_some())
-            .map_err(|_| VenueError::new("HTTP release domain capacity unavailable"))?;
+        let (store, core) = new_core(
+            entropy,
+            CoreSpec {
+                quantity_units: venue.capabilities().quantity_units,
+                http_pacing: venue.http_pacing(),
+                http_pacing_sets: venue.http_pacing_sets(),
+                nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
+                #[cfg(feature = "order-locks")]
+                fence_uncertain_placements: venue.fence_uncertain_placements(),
+                #[cfg(feature = "release-domains")]
+                release_domain: V::http_release_domain(),
+                #[cfg(feature = "dispatch-nonce")]
+                dispatch_nonce: V::dispatch_nonce(),
+                #[cfg(feature = "http-mutation-barriers")]
+                http_mutation_barriers: V::http_mutation_barriers(),
+                #[cfg(feature = "http-plans")]
+                http_plans: V::http_plans(),
+                #[cfg(feature = "managed-sockets")]
+                managed_sockets: V::managed_sockets(),
+                #[cfg(feature = "managed-sockets")]
+                socket_capabilities: V::socket_capabilities(),
+            },
+        )?;
         Ok(Self {
             venue,
             http_release,
             store,
             io: Io {
-                core: IoCore {
-                    entropy: Some(entropy),
-                    http_pacing,
-                    #[cfg(feature = "release-domains")]
-                    release_domain,
-                    #[cfg(feature = "release-domains")]
-                    domain_queue,
-                    #[cfg(feature = "release-domains")]
-                    domain_held,
-                    nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
-                    #[cfg(feature = "dispatch-nonce")]
-                    nonce_enabled: V::dispatch_nonce(),
-                    #[cfg(feature = "http-mutation-barriers")]
-                    mutation_barriers_declared: V::http_mutation_barriers(),
-                    #[cfg(feature = "managed-sockets")]
-                    managed_sockets_declared: V::managed_sockets(),
-                    #[cfg(feature = "managed-sockets")]
-                    socket_capabilities: V::socket_capabilities(),
-                    #[cfg(feature = "order-locks")]
-                    order_locks,
-                    ..IoCore::default()
-                },
+                core,
+                startup_reads: V::startup_reads,
                 #[cfg(feature = "managed-sockets")]
                 managed_close: V::managed_sockets().then_some(
                     Cx::<V::Pending>::managed_close
@@ -4627,7 +4943,7 @@ impl<V: Venue> Engine<V> {
             },
             started: false,
             startup_watch_at: None,
-            startup_started_at: 0.0,
+            startup_started_at: None,
             ack_timer: None,
             #[cfg(feature = "order-locks")]
             reconcile_timer: None,
@@ -4767,6 +5083,14 @@ impl<V: Venue> Engine<V> {
         )
     }
 
+    /// Synchronize protocol UTC without moving scheduling time. Small host updates
+    /// preserve venue calibration; a >1 s host discontinuity invalidates its old
+    /// baseline (e.g. suspend). Host deadlines stay on `host_now`.
+    pub fn sync_host_time(&mut self, host_now: f64, utc_now: f64) -> bool {
+        self.assert_live();
+        self.io.core.protocol_clock.observe_host(host_now, utc_now)
+    }
+
     /// Host configuration is immutable once startup begins.
     pub fn set_entropy(&mut self, fill: crate::entropy::Fill) -> Result<(), VenueError> {
         if self.started {
@@ -4804,6 +5128,8 @@ impl<V: Venue> Engine<V> {
             return Err("public feed policy must be configured before startup");
         }
         self.io.core.public_feed_policy = policy;
+        self.store.export_ticker_observations =
+            policy == PublicFeedPolicy::Shared || !self.account_startup;
         Ok(())
     }
 
@@ -4991,43 +5317,15 @@ impl<V: Venue> Engine<V> {
         if !self.source_read_covers {
             return;
         }
-        let standing: Vec<(String, u64)> = self
-            .io
-            .core
-            .order_locks
-            .uncertain_epochs()
-            .map(|(symbol, epoch)| (symbol.to_owned(), epoch))
-            .collect();
-        self.orders_held
-            .retain(|named| standing.iter().any(|(symbol, _)| symbol == named));
-        if standing
-            .iter()
-            .all(|(symbol, _)| self.orders_held.contains(symbol))
-        {
-            return;
-        }
-        let marks = &self.fence_marks;
-        let Some(oldest) = standing
-            .iter()
-            .filter_map(|(_, epoch)| marks.iter().find(|(token, _)| token >= epoch))
-            .map(|(_, at)| *at)
-            .min_by(f64::total_cmp)
-        else {
+        let Some((named, lift_after_ms)) = orders_held_notice(
+            &self.io.core.order_locks,
+            &mut self.orders_held,
+            &self.fence_marks,
+            self.source_clock_offset.is_some(),
+            now,
+        ) else {
             return;
         };
-        let grace = if self.source_clock_offset.is_some() {
-            crate::frame_fed::FENCE_GRACE_MS
-        } else {
-            crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
-        };
-        let mut symbols: Vec<String> = standing.into_iter().map(|(symbol, _)| symbol).collect();
-        symbols.sort();
-        let named = if symbols.iter().any(String::is_empty) {
-            String::new()
-        } else {
-            symbols.join(",")
-        };
-        self.orders_held = symbols;
         Cx {
             now,
             store: &mut self.store,
@@ -5039,7 +5337,7 @@ impl<V: Venue> Engine<V> {
             "Holding an uncertain write until the data source reads its orders",
             vec![
                 ("symbols", Value::Str(named)),
-                ("liftAfterMs", Value::Num((oldest + grace - now).max(0.))),
+                ("liftAfterMs", Value::Num(lift_after_ms)),
             ],
         );
     }
@@ -5048,6 +5346,55 @@ impl<V: Venue> Engine<V> {
     /// for an account that can sign, matching the SDK's readiness rule.
     pub fn set_account_startup(&mut self, account: bool) {
         self.account_startup = account;
+        self.store.export_ticker_observations =
+            !account || self.public_feed_policy() == PublicFeedPolicy::Shared;
+    }
+
+    /// Whether startup expects the account sections (`set_account_startup`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn account_startup(&self) -> bool {
+        self.account_startup
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn private_startup_pending(&self) -> bool {
+        self.started
+            && self.account_startup
+            && !self.frame_fed()
+            && !self.private_startup_complete()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn private_startup_complete(&self) -> bool {
+        let loaded = self.store.loaded();
+        self.started
+            && self.account_startup
+            && !self.frame_fed()
+            && !self.failed()
+            && !self.io.core.signing.refused()
+            && loaded.markets
+            && loaded.balance
+            && loaded.orders
+            && loaded.positions
+    }
+
+    /// Trusted native-host ingress; no command receipt or mutation authority.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn recheck_startup_reads(&mut self, now: f64) -> bool {
+        self.assert_live();
+        if !V::rechecks_startup_reads() || !now.is_finite() || !self.private_startup_pending() {
+            return false;
+        }
+        self.begin_event_scope();
+        self.store.set_clock(now);
+        self.io.core.dispatch_now = now;
+        let supported = self.venue.recheck_startup_reads(&mut Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        });
+        self.finish_event_scope(now);
+        supported
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
@@ -5123,30 +5470,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn apply_shared_tickers(&mut self, now: f64) {
-        let mut missing = Vec::new();
-        for ticker in self.shared_tickers.values() {
-            if self.store.ticker(&ticker.symbol).is_none()
-                && let Some(market) = self.store.market(&ticker.symbol)
-            {
-                missing.push(crate::model::Ticker {
-                    id: market.id.clone(),
-                    symbol: market.symbol.clone(),
-                    ..Default::default()
-                });
-            }
-        }
-        if !missing.is_empty() {
-            let mut tickers = self.store.tickers().to_vec();
-            tickers.extend(missing);
-            self.store.set_tickers(tickers);
-        }
-        // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
-        for ticker in self.shared_tickers.values() {
-            if self.store.market(&ticker.symbol).is_some() {
-                self.store
-                    .update_ticker(&ticker.symbol, |target| ticker.apply(target));
-            }
-        }
+        copy_shared_tickers(&mut self.store, &self.shared_tickers);
         // A venue may have revalued its account using REST prices before restoration.
         let mut cx = Cx {
             now,
@@ -5276,7 +5600,7 @@ impl<V: Venue> Engine<V> {
         self.process_socket_work(now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
-        self.startup_started_at = now;
+        self.startup_started_at = now.is_finite().then_some(now);
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
         self.flush_http_owner_retirements();
@@ -5578,6 +5902,20 @@ impl<V: Venue> Engine<V> {
         if let Some(delivery) = delivery.as_ref() {
             self.io.core.request_contexts.enter_delivery(delivery);
         }
+        let sections = request
+            .and_then(|id| self.io.pending.get(&id))
+            .map_or(crate::startup::Sections::NONE, |p| p.startup);
+        let status = match &event {
+            Event::HttpResponse { response, .. } => Some(response.status),
+            Event::HttpStart { status, .. } => Some(*status),
+            _ => request
+                .and_then(|id| self.io.core.incoming.get(&id))
+                .map(|r| r.status),
+        };
+        let previous_startup = std::mem::replace(
+            &mut self.io.core.startup_delivery,
+            crate::startup_causes::Delivery::new(sections, status),
+        );
         let previous = std::mem::replace(&mut self.io.core.http_delivery, delivery.clone());
         #[cfg(feature = "managed-sockets")]
         let socket_message = self.io.core.socket_message.take();
@@ -5589,6 +5927,7 @@ impl<V: Venue> Engine<V> {
             _ => None,
         });
         self.handle_event_scoped(now, event, physical_timeout);
+        self.io.core.startup_delivery = previous_startup;
         #[cfg(feature = "repair-mutations")]
         self.end_repair_data(previous_data);
         #[cfg(feature = "http-plans")]
@@ -5860,6 +6199,11 @@ impl<V: Venue> Engine<V> {
                     cx.io.core.health.count(log_code::HTTP_FAILED);
                     let kind = cx.io.core.http_failure_kind;
                     let make_failure = || VenueError::new(error).kind(kind);
+                    cx.io.core.startup_causes.failed(
+                        &mut cx.io.core.startup_delivery,
+                        &make_failure(),
+                        false,
+                    );
                     #[cfg(feature = "http-plans")]
                     {
                         use request_context_registry::ReleasedReadFailure;
@@ -5919,7 +6263,10 @@ impl<V: Venue> Engine<V> {
                 }
                 .write_intent();
                 cx.io.core.request_contexts.dispatch = Some((command, intent));
+                cx.io.core.request_contexts.dispatch_class =
+                    crate::request_budget::RequestClass::venue_action(&action);
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.core.request_contexts.dispatch_class = Default::default();
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
@@ -6087,7 +6434,10 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.request_contexts.dispatch = command
                     .completion_id()
                     .map(|id| (id, command.write_intent()));
+                cx.io.core.request_contexts.dispatch_class =
+                    crate::request_budget::RequestClass::command(&command);
                 self.venue.on_command(&mut cx, command);
+                cx.io.core.request_contexts.dispatch_class = Default::default();
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
@@ -6146,6 +6496,15 @@ impl<V: Venue> Engine<V> {
                 }
             }
             if by_feed.is_empty() {
+                // A stream the venue itself withdrew (a refused subscribe) is its to retry.
+                let mut cx = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                };
+                if let Some(result) = self.venue.repair_subscription(&mut cx, topic) {
+                    return result;
+                }
                 return Err(format!("{} is not subscribed", skipped.join(", ")));
             }
             let mut cx = Cx {
@@ -6229,7 +6588,9 @@ impl<V: Venue> Engine<V> {
 
     fn finish_event_scope(&mut self, now: f64) {
         #[cfg(feature = "http-plans")]
-        self.io.core.request_contexts.end_preflight_admission();
+        if V::http_plans() {
+            self.io.core.request_contexts.end_preflight_admission();
+        }
         self.io.core.request_contexts.end_plan_admission();
         self.flush_bearer_fences(now);
         self.flush_http_owner_retirements();
@@ -6323,9 +6684,45 @@ impl<V: Venue> Engine<V> {
                 self.fence_marks.push((token, now));
             }
             self.announce_orders_held(now);
-            if let Some((timer, _)) = self.reconcile_timer.take() {
-                self.io.core.actions.push(Action::ClearTimer { timer });
-            }
+            let next = if self.venue.refreshes_orders() {
+                let due = self.io.core.cancel_refresh.as_ref().map(|(_, at)| *at);
+                if due.is_some_and(|at| at <= now || !now.is_finite()) {
+                    let (symbols, _) = self
+                        .io
+                        .core
+                        .cancel_refresh
+                        .take()
+                        .expect("due cancel refresh");
+                    #[cfg(feature = "command-bitget")]
+                    {
+                        let targets = self.venue.take_source_cancel_checks();
+                        let mut cx = Cx {
+                            now,
+                            store: &mut self.store,
+                            io: &mut self.io,
+                        };
+                        cx.source_cancel_checks(&targets);
+                    }
+                    let named = symbols.map(|s| s.join(",")).unwrap_or_default();
+                    // A control ask must survive the host's diagnostic log filter.
+                    self.io
+                        .core
+                        .actions
+                        .push(Action::Notice(Notice::Event(LogEvent {
+                            level: Level::Info,
+                            code: crate::log::code::ORDERS_REFRESH,
+                            message: "An unknown cancel requests a fresh source orders read".into(),
+                            fields: vec![("symbols", Value::Str(named))],
+                        })));
+                    None
+                } else {
+                    due
+                }
+            } else {
+                self.io.core.cancel_refresh = None;
+                None
+            };
+            self.arm_reconcile_timer(next);
             return;
         }
         // A refresh read that never landed frees its slot; its asks retry once.
@@ -6407,6 +6804,11 @@ impl<V: Venue> Engine<V> {
             .chain(self.io.core.fence_reread.map(|(at, _)| at))
             .chain(self.io.core.orders_refresh.deadline())
             .min_by(f64::total_cmp);
+        self.arm_reconcile_timer(next);
+    }
+
+    #[cfg(feature = "order-locks")]
+    fn arm_reconcile_timer(&mut self, next: Option<f64>) {
         if self.reconcile_timer.map(|(_, at)| at) == next {
             return;
         }
@@ -6486,6 +6888,21 @@ impl<V: Venue> Engine<V> {
             return;
         };
         self.count_http_status(incoming.status);
+        if incoming.status >= 400 {
+            let kind = match incoming.status {
+                401 => ErrorKind::AuthInvalid,
+                403 => ErrorKind::AuthPermission,
+                408 | 504 => ErrorKind::Timeout,
+                418 | 429 => ErrorKind::RateLimited,
+                _ => ErrorKind::VenueUnavailable,
+            };
+            self.io.core.startup_causes.failed(
+                &mut self.io.core.startup_delivery,
+                &VenueError::new("").kind(kind),
+                false,
+            );
+        }
+
         let mut cx = Cx {
             now,
             store: &mut self.store,
@@ -6496,6 +6913,11 @@ impl<V: Venue> Engine<V> {
         if let Some(splitter) = &incoming.splitter {
             let outside = splitter.outside();
             if !splitter.finished() {
+                cx.io.core.startup_causes.failed(
+                    &mut cx.io.core.startup_delivery,
+                    &VenueError::new("").kind(ErrorKind::Internal),
+                    false,
+                );
                 let body = splitter.envelope();
                 if serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok() {
                     let response = Response {
@@ -6544,6 +6966,11 @@ impl<V: Venue> Engine<V> {
                 Ok(body) => body,
                 Err(_) => {
                     let make_failure = || malformed_body("stream envelope is not UTF-8");
+                    cx.io.core.startup_causes.failed(
+                        &mut cx.io.core.startup_delivery,
+                        &make_failure(),
+                        false,
+                    );
                     cx.with_owned_read_failure(make_failure, |cx| {
                         self.venue.on_http_failed(cx, pending.value, make_failure());
                     });
@@ -6647,8 +7074,15 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.order_read_tokens.remove(&http.id);
                 cx.io.core.streams.remove(&http.id);
                 if let Some(pending) = cx.io.pending.remove(&http.id) {
-                    self.venue
-                        .on_sign_error(&mut cx, pending.value, error.venue_error());
+                    cx.with_startup_delivery(pending.startup, |cx| {
+                        let error = error.venue_error();
+                        cx.io.core.startup_causes.failed(
+                            &mut cx.io.core.startup_delivery,
+                            &error,
+                            true,
+                        );
+                        self.venue.on_sign_error(cx, pending.value, error);
+                    });
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
@@ -6777,6 +7211,11 @@ impl<V: Venue> Engine<V> {
     /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
+        // A venue without Preflights has no Plan state: the plan-less tail.
+        if !V::http_plans() {
+            self.flush_bearer_fences(now);
+            return;
+        }
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         self.flush_keyless_session_roots(now);
         if self.io.core.request_contexts.has_plans() {
@@ -6857,6 +7296,9 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "http-plans")]
     fn expire_plan_timer(&mut self, now: f64, event: &Event<'_>) -> bool {
+        if !V::http_plans() {
+            return false;
+        }
         let Event::TimerFired { timer } = event else {
             return false;
         };
@@ -6875,6 +7317,10 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "http-plans")]
     fn flush_http_owner_retirements(&mut self) {
+        if !V::http_plans() {
+            self.assert_live();
+            return;
+        }
         self.io.core.request_contexts.end_plan_admission();
         self.assert_live();
         if self.io.core.request_contexts.has_retirements() {
@@ -6950,6 +7396,7 @@ impl<V: Venue> Engine<V> {
     ) {
         self.assert_live();
         self.flush_http_owner_retirements();
+        self.apply_account_read_budgets(self.io.core.dispatch_now, emitted);
         for action in self.io.core.actions.split_off(emitted).into_iter().rev() {
             queued.push_front(action);
         }
@@ -6958,6 +7405,7 @@ impl<V: Venue> Engine<V> {
     #[inline(always)]
     fn dispatch_actions(&mut self, now: f64) {
         self.assert_live();
+        self.apply_account_read_budgets(now, 0);
         if self.io.core.actions.is_empty()
             && self.io.core.signing_admission.is_empty()
             && self.io.core.signing.is_empty()
@@ -7518,6 +7966,92 @@ impl<V: Venue> Engine<V> {
     }
 }
 
+impl CoreRef<'_> {
+    fn inert_socket(&self, socket: SocketId) -> bool {
+        socket.0 == 0
+            && (self.io.core.public_feed_policy != PublicFeedPolicy::Direct
+                || self.io.core.signing_latch.roles != 0
+                || self.io.core.frame_fed)
+    }
+}
+
+impl CoreCx<'_> {
+    pub(crate) fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.core_ref().fill_entropy(bytes)
+    }
+    pub(crate) fn jittered(&mut self, delay_ms: f64) -> f64 {
+        if !(delay_ms.is_finite() && delay_ms > 0.0) {
+            return delay_ms;
+        }
+        let mut bytes = [0; 8];
+        if self.fill_entropy(&mut bytes).is_err() {
+            return delay_ms;
+        }
+        crate::backoff::jitter(delay_ms, u64::from_le_bytes(bytes))
+    }
+    pub(crate) fn note_socket_backoff(&mut self, timer: TimerId) {
+        let core = &mut self.io.core;
+        let timers = &core.timers;
+        core.socket_backoffs
+            .retain(|waiting| timers.contains_key(waiting));
+        core.socket_backoffs.push(timer);
+    }
+    pub(crate) fn set_timer(&mut self, delay_ms: f64) -> TimerId {
+        let timer = TimerId(self.io.next());
+        self.io.core.timers.insert(timer, ());
+        self.io.core.actions.push(Action::SetTimer {
+            timer,
+            at_ms: self.now + delay_ms,
+        });
+        timer
+    }
+    pub(crate) fn clear_timer(&mut self, timer: TimerId) {
+        let (polls, mut sink) = poll_timers(self.io.core);
+        if !polls.clear(timer, &mut sink) {
+            sink.clear(timer);
+        }
+    }
+    pub(crate) fn close_socket_transport(&mut self, socket: SocketId) {
+        if self.core_ref().inert_socket(socket) {
+            return;
+        }
+        self.io.opaque_entry_activity();
+        for timer in self.io.core.signing.close_socket(socket) {
+            if timer.0 != 0 {
+                self.io.core.actions.push(Action::ClearTimer { timer });
+            }
+        }
+        // The host drops engine-initiated closes without reporting them back.
+        // They are deliberate, so they never make the next connect a reconnect.
+        if self.io.core.sockets.closed(socket, false) {
+            self.io.core.health.count(log_code::WS_CLOSED);
+        }
+        self.io.core.actions.push(Action::WsClose { socket });
+    }
+}
+
+fn poll_timers(core: &mut IoCore) -> (&mut Polls, TimerSink<'_>) {
+    (
+        &mut core.polls,
+        TimerSink {
+            next_id: &mut core.next_id,
+            timers: &mut core.timers,
+            actions: &mut core.actions,
+        },
+    )
+}
+
+impl CoreRef<'_> {
+    fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.io
+            .core
+            .entropy
+            .as_ref()
+            .ok_or("Engine entropy providers are required")?
+            .identity(bytes)
+    }
+}
+
 /// The longest a repeating retried-read failure goes without an Error. Below the
 /// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
 pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
@@ -7586,9 +8120,75 @@ impl SigningLatch {
         if startup {
             actions.push(Action::Notice(Notice::StartupFailed {
                 error: error.venue_error(),
+                #[cfg(not(target_arch = "wasm32"))]
+                read_refusal: false,
             }));
         }
     }
+}
+
+/// Shared provider quotes into the Store: a placeholder row for each missing
+/// ticker, then every quote. Venue-independent, so one copy serves every family.
+#[inline(never)]
+fn copy_shared_tickers(
+    store: &mut Store,
+    shared: &HashMap<String, crate::public_feed::PublicTicker>,
+) {
+    let mut added = false;
+    for ticker in shared.values() {
+        if store.ticker(&ticker.symbol).is_none() && store.ensure_ticker(&ticker.symbol).is_some() {
+            added = true;
+        }
+    }
+    if added {
+        store.set_loaded(|loaded| loaded.tickers = true);
+    }
+    // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
+    for ticker in shared.values() {
+        if store.market(&ticker.symbol).is_some() {
+            store.apply_shared_ticker(ticker);
+        }
+    }
+}
+
+/// The `orders.held` notice's symbols and `liftAfterMs`, or None when every
+/// standing fence is already named or none has a mark. Records what it names.
+#[cfg(feature = "order-locks")]
+#[inline(never)]
+fn orders_held_notice(
+    locks: &crate::order_locks::OrderLocks,
+    held: &mut Vec<String>,
+    marks: &[(u64, f64)],
+    synced: bool,
+    now: f64,
+) -> Option<(String, f64)> {
+    let standing: Vec<(String, u64)> = locks
+        .uncertain_epochs()
+        .map(|(symbol, epoch)| (symbol.to_owned(), epoch))
+        .collect();
+    held.retain(|named| standing.iter().any(|(symbol, _)| symbol == named));
+    if standing.iter().all(|(symbol, _)| held.contains(symbol)) {
+        return None;
+    }
+    let oldest = standing
+        .iter()
+        .filter_map(|(_, epoch)| marks.iter().find(|(token, _)| token >= epoch))
+        .map(|(_, at)| *at)
+        .min_by(f64::total_cmp)?;
+    let grace = if synced {
+        crate::frame_fed::FENCE_GRACE_MS
+    } else {
+        crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
+    };
+    let mut symbols: Vec<String> = standing.into_iter().map(|(symbol, _)| symbol).collect();
+    symbols.sort();
+    let named = if symbols.iter().any(String::is_empty) {
+        String::new()
+    } else {
+        symbols.join(",")
+    };
+    *held = symbols;
+    Some((named, (oldest + grace - now).max(0.)))
 }
 
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
@@ -7691,8 +8291,12 @@ fn push_event(
     }
     event.message = crate::log::cap(event.message);
     for (_, value) in &mut event.fields {
-        if let Value::Str(text) = value {
-            *text = crate::log::cap(std::mem::take(text));
+        match value {
+            Value::Str(text) => *text = crate::log::cap(std::mem::take(text)),
+            Value::StaticStr(text) if text.len() > crate::log::MAX_LOG_BYTES => {
+                *value = Value::Str(crate::log::cap((*text).to_owned()));
+            }
+            _ => {}
         }
     }
     actions.push(Action::Notice(Notice::Event(event)));
@@ -10619,6 +11223,73 @@ mod startup_watch_tests {
     }
 
     #[test]
+    fn startup_elapsed_is_absent_without_a_valid_start_mark() {
+        for start in [None, Some(f64::NAN), Some(f64::INFINITY), Some(2_000.0)] {
+            let mut engine = crate::test_support::seeded_engine(Idle);
+            engine.start(0.0);
+            engine.startup_started_at = start;
+            engine.startup_watch_at = Some(1_000.0);
+            engine.handle(1_000.0, Event::PollScaleChanged { scale: 1.0 });
+            let event = engine
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::Event(e)) if e.code == log_code::STARTUP_INCOMPLETE => {
+                        Some(e)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert!(!event.fields.iter().any(|(name, _)| *name == "elapsedMs"));
+            assert!(
+                event
+                    .fields
+                    .contains(&("deadlineMs", STARTUP_WATCH_MS.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn startup_watch_reports_only_missing_required_section_causes() {
+        let mut engine = crate::test_support::seeded_engine(Idle);
+        engine.set_account_startup(true);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.store_mut().set_balance(Default::default());
+        engine.handle(STARTUP_WATCH_MS, Event::PollScaleChanged { scale: 1.0 });
+        let event = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::Event(e)) if e.code == log_code::STARTUP_INCOMPLETE => {
+                    Some(e)
+                }
+                _ => None,
+            })
+            .unwrap();
+        for section in [
+            "startupTickersState",
+            "startupOrdersState",
+            "startupPositionsState",
+        ] {
+            assert!(
+                event.fields.contains(&(section, "neverStarted".into())),
+                "{section}: {:?}",
+                event.fields
+            );
+        }
+        assert!(
+            !event
+                .fields
+                .iter()
+                .any(|(key, _)| key.starts_with("startupMarkets")
+                    || key.starts_with("startupBalance"))
+        );
+        assert_eq!(
+            event.message,
+            "Startup incomplete: still waiting for tickers, orders, positions"
+        );
+    }
+
+    #[test]
     fn unloaded_startup_is_reported_until_every_section_loads() {
         let mut engine = crate::test_support::seeded_engine(Idle);
         engine.set_account_startup(true);
@@ -11250,6 +11921,10 @@ mod http_plan_boundary_tests;
 #[path = "http_plan_expiry.rs"]
 mod http_plan_expiry;
 
+#[cfg(test)]
+#[path = "cold_path_tests.rs"]
+mod cold_path_tests;
+
 #[cfg(all(test, feature = "order-locks"))]
 #[path = "read_cover_lift_tests.rs"]
 mod read_cover_lift_tests;
@@ -11261,3 +11936,7 @@ mod orders_refresh_tests;
 #[cfg(test)]
 #[path = "retried_read_diagnostic_tests.rs"]
 mod retried_read_diagnostic_tests;
+
+#[cfg(test)]
+#[path = "startup_cause_tests.rs"]
+mod startup_cause_tests;

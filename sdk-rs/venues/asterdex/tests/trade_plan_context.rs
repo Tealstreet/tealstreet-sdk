@@ -283,6 +283,47 @@ const SIGNATURE: &str = r#"{"code":-1022,"msg":"Signature for this request is no
 const TIMESTAMP: &str =
     r#"{"code":-1021,"msg":"Timestamp for this request was outside of the recvWindow."}"#;
 
+fn ambiguous_http_response_never_resends(body: &str) {
+    for status in [429, 408, 500, 503] {
+        for (command_of, method, path) in [
+            (place as fn() -> Command, Method::Post, "/order"),
+            (cancel as fn() -> Command, Method::Delete, "/order"),
+            (leverage as fn() -> Command, Method::Post, "/leverage"),
+        ] {
+            let mut e = engine();
+            let sent = command(&mut e, command_of());
+            managed(&sent, 1);
+            let first = write(&sent, method, path).clone();
+            // drain() answers any clock resync through the real engine, so a
+            // timestamp retry is counted at physical release, after resync.
+            let after = answer(&mut e, &first, status, body);
+            let extra_writes = after
+                .requests
+                .iter()
+                .filter(|request| request.method != Method::Get)
+                .count();
+            assert_eq!(
+                1 + extra_writes,
+                1,
+                "HTTP {status} {method:?} {path} {body}: one physical write; released {:?}",
+                after.released
+            );
+            let error = terminal(&after).expect("one terminal").unwrap_err();
+            assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+        }
+    }
+}
+
+#[test]
+fn ambiguous_http_timestamp_response_never_resends_a_released_write() {
+    ambiguous_http_response_never_resends(TIMESTAMP);
+}
+
+#[test]
+fn ambiguous_http_signature_response_never_resends_a_released_write() {
+    ambiguous_http_response_never_resends(SIGNATURE);
+}
+
 #[test]
 fn a_placement_is_one_managed_plan_leg_with_its_native_result() {
     let mut e = engine();
@@ -877,19 +918,20 @@ fn a_non_json_throttle_on_a_write_is_rate_limited() {
         let sent = command(&mut e, place());
         let order = write(&sent, Method::Post, "/order").clone();
         let failed = answer(&mut e, &order, status, "Too Many Requests");
-        assert!(failed.requests.is_empty());
+        assert!(
+            failed
+                .requests
+                .iter()
+                .all(|request| request.method == Method::Get)
+        );
         let error = terminal(&failed).expect("one terminal").unwrap_err();
         assert_eq!(
             error.kind,
             Some(ErrorKind::RateLimited),
             "{status}: {error:?}"
         );
-        // A documented throttle refused the write; it is not an unknown outcome.
-        assert_eq!(
-            error.outcome,
-            Some(Outcome::Rejected),
-            "{status}: {error:?}"
-        );
+        // A released throttle cannot prove that the write was not accepted.
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{status}: {error:?}");
     }
 }
 

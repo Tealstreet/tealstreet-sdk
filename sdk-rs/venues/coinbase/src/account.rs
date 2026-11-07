@@ -1028,7 +1028,11 @@ impl Coinbase {
                 .credentials
                 .as_ref()
                 .ok_or("Coinbase credentials missing".to_string())
-                .and_then(|c| c.jwt(cx.now, None, |bytes| cx.fill_signing_entropy(bytes)));
+                .and_then(|c| {
+                    c.jwt(cx.protocol_now(), None, |bytes| {
+                        cx.fill_signing_entropy(bytes)
+                    })
+                });
             match signed {
                 Ok(jwt) => cx.send(
                     socket,
@@ -2509,6 +2513,22 @@ impl Coinbase {
         }
     }
 }
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance => S::BALANCE,
+            Self::SpotBalance => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders(_) => S::ORDERS,
+            Self::Portfolios | Self::Probe { .. } => S::ACCOUNT,
+            Self::KeyPermissions { .. } => S::ACCOUNT,
+            Self::DetectCfm { .. } => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2573,4 +2593,16 @@ mod tests {
             assert!(proof.is_none());
         }
     }
+}
+
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    let read = Request::Probe {
+        portfolios: vec![],
+        index: 0,
+    };
+    assert_eq!(
+        read.startup_sections(),
+        safe_cex_engine::startup::Sections::ACCOUNT
+    );
 }

@@ -96,6 +96,9 @@ trait AnyEngine {
         &mut self,
         algorithms: Option<Vec<safe_cex_engine::signing::Algorithm>>,
     ) -> Result<(), safe_cex_engine::VenueError>;
+    fn sync_host_time(&mut self, _now: f64, _utc: f64) -> bool {
+        false
+    }
     fn prepare_dispatch(&mut self, now: f64);
     fn set_entropy(
         &mut self,
@@ -111,6 +114,10 @@ trait AnyEngine {
     #[cfg(feature = "sign-meta")]
     fn sign_meta(&self, _: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
         None
+    }
+    #[cfg(feature = "hyperliquid")]
+    fn http_read_class(&self, _: RequestId) -> safe_cex_engine::HttpReadClass {
+        safe_cex_engine::HttpReadClass::Normal
     }
     fn http_preparation_pending(&self, _: safe_cex_engine::request_context::Preparation) -> bool {
         false
@@ -245,6 +252,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.set_signer(None)?;
         self.set_host_algorithms(algorithms)
     }
+    fn sync_host_time(&mut self, now: f64, utc: f64) -> bool {
+        Engine::sync_host_time(self, now, utc)
+    }
     fn prepare_dispatch(&mut self, now: f64) {
         Engine::prepare_dispatch(self, now);
     }
@@ -265,6 +275,10 @@ impl<V: Venue> AnyEngine for Engine<V> {
     #[cfg(feature = "sign-meta")]
     fn sign_meta(&self, task: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
         Engine::sign_meta(self, task)
+    }
+    #[cfg(feature = "hyperliquid")]
+    fn http_read_class(&self, request: RequestId) -> safe_cex_engine::HttpReadClass {
+        Engine::http_read_class(self, request)
     }
     fn http_preparation_pending(
         &self,
@@ -423,6 +437,8 @@ enum ActionOut<'a> {
     WsConnect {
         #[serde(skip_serializing_if = "is_false")]
         binary: bool,
+        #[serde(rename = "publicTopics", skip_serializing_if = "is_false")]
+        public_topics: bool,
         socket: u64,
         url: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -501,7 +517,8 @@ impl serde::Serialize for Fields<'_> {
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for (key, value) in self.0 {
             match value {
-                Value::Str(text) => map.serialize_entry(key, text)?,
+                Value::Str(text) => map.serialize_entry(key, text.as_str())?,
+                Value::StaticStr(text) => map.serialize_entry(key, *text)?,
                 // JSON has no non-finite numbers.
                 Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
                 Value::Num(_) => map.serialize_entry(key, &())?,
@@ -536,6 +553,7 @@ fn encode(actions: &[Action]) -> String {
             #[cfg(not(feature = "address-nonce"))]
             Action::RetireAddressSetup { .. } => std::process::abort(),
             Action::WsConnect {
+                public_topics,
                 binary,
                 socket,
                 url,
@@ -543,6 +561,7 @@ fn encode(actions: &[Action]) -> String {
                 channel,
                 context,
             } => ActionOut::WsConnect {
+                public_topics: *public_topics,
                 binary: *binary,
                 socket: socket.0,
                 url,
@@ -592,7 +611,7 @@ fn encode(actions: &[Action]) -> String {
                 command: *command,
                 message,
             },
-            Action::Notice(Notice::StartupFailed { error }) => {
+            Action::Notice(Notice::StartupFailed { error, .. }) => {
                 ActionOut::StartupFailed { detail: error }
             }
             Action::Notice(Notice::Event(event)) => ActionOut::Event {
@@ -1038,6 +1057,10 @@ impl WasmEngine {
                         #[cfg(not(feature = "lighter"))]
                         api_key_index: None,
                         paradex_address: options.paradex_address.clone(),
+                        #[cfg(feature = "grvt")]
+                        grvt_trading_account_id: options.grvt_trading_account_id.clone(),
+                        #[cfg(not(feature = "grvt"))]
+                        grvt_trading_account_id: None,
                     };
                     (venue.to_owned(), identities, account)
                 })
@@ -1297,12 +1320,22 @@ impl WasmEngine {
         )
     }
 
+    /// Host UTC is protocol time only; every deadline keeps the stable host clock.
+    #[wasm_bindgen(js_name = syncHostTime)]
+    pub fn sync_host_time(&mut self, now: f64, utc: f64) -> bool {
+        self.inner.sync_host_time(now, utc)
+    }
+
     pub fn start(&mut self, now: f64) -> String {
         #[cfg(feature = "address-nonce")]
         if !self.inner.has_started()
             && let Err(error) = self.inner.initialize_address_setup(now, false)
         {
-            return encode(&[Action::Notice(Notice::StartupFailed { error })]);
+            return encode(&[Action::Notice(Notice::StartupFailed {
+                error,
+                #[cfg(not(target_arch = "wasm32"))]
+                read_refusal: false,
+            })]);
         }
         self.inner.start(now);
         self.flush()
@@ -1612,6 +1645,28 @@ fn is_false(value: &bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn socket_public_topics_are_optional_and_do_not_replace_the_primary_role() {
+        let mut action = safe_cex_engine::Action::WsConnect {
+            binary: false,
+            socket: safe_cex_engine::SocketId(1),
+            url: "wss://venue.test/ws".into(),
+            headers: vec![],
+            channel: Some(safe_cex_engine::SocketChannel::Private),
+            public_topics: false,
+            context: None,
+        };
+        let ordinary: serde_json::Value =
+            serde_json::from_str(&super::encode(&[action.clone()])).unwrap();
+        assert!(ordinary[0].get("publicTopics").is_none());
+        if let safe_cex_engine::Action::WsConnect { public_topics, .. } = &mut action {
+            *public_topics = true;
+        }
+        let shared: serde_json::Value = serde_json::from_str(&super::encode(&[action])).unwrap();
+        assert_eq!(shared[0]["channel"], "private");
+        assert_eq!(shared[0]["publicTopics"], true);
+    }
+
     #[cfg(feature = "asterdex")]
     #[test]
     fn hosted_signing_identity_exists_only_for_aster_v1_accounts() {
@@ -2362,7 +2417,7 @@ mod tests {
                     || any(&ORDERLY, venue)
                 {
                     LeverageQuery::OnRead
-                } else if any(&["mexc", "woo", "kraken"], venue) {
+                } else if any(&["mexc", "woo", "kraken", "hyperliquid"], venue) {
                     LeverageQuery::OnMetadata
                 } else {
                     LeverageQuery::Settings
@@ -2925,6 +2980,21 @@ mod tests {
         fn account_snapshot(&mut self, _now: f64) -> &[u8] {
             &[]
         }
+    }
+
+    #[test]
+    fn static_startup_fields_encode_identically_to_owned_strings() {
+        let borrowed = [
+            ("state", Value::StaticStr("neverStarted")),
+            ("kind", Value::StaticStr("timeout")),
+        ];
+        let owned = [
+            ("state", Value::from("neverStarted")),
+            ("kind", Value::from("timeout")),
+        ];
+        let expected = r#"{"state":"neverStarted","kind":"timeout"}"#;
+        assert_eq!(serde_json::to_string(&Fields(&borrowed)).unwrap(), expected);
+        assert_eq!(serde_json::to_string(&Fields(&owned)).unwrap(), expected);
     }
 
     #[test]

@@ -6,6 +6,7 @@ mod identity;
 mod leverage;
 mod paths;
 mod sign;
+mod telemetry;
 mod trading;
 mod venue_state;
 mod wire;
@@ -79,7 +80,7 @@ impl Pending {
 }
 
 pub enum Discovered {
-    Markets(Vec<Market>),
+    Markets(Vec<Market>, HashMap<String, (f64, f64)>),
     Tickers(Vec<Ticker>),
 }
 
@@ -134,6 +135,7 @@ pub struct BitgetFutures {
     discovery: PublicRetries,
     account: account::Account,
     trading: trading::Trading,
+    telemetry: telemetry::Telemetry,
     history: history::History,
     sockets: [Connection; 4],
     ticker_index: Vec<Option<u32>>,
@@ -144,6 +146,57 @@ pub struct BitgetFutures {
     refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
     /// When an unreadable public message was last logged; at most one per minute.
     public_parse_logged_at: Option<f64>,
+    order_caps: HashMap<String, OrderCaps>,
+}
+
+#[derive(Clone, Copy)]
+struct OrderCaps {
+    limit: f64,
+    market: f64,
+}
+
+impl OrderCaps {
+    fn from_wire(row: &Contract<'_>, inverse: bool) -> Self {
+        let limit = if inverse {
+            row.max_trade_num.0.filter(|n| *n > 0.0)
+        } else {
+            [
+                row.max_order_qty,
+                row.max_market_order_qty,
+                row.max_trade_num,
+            ]
+            .iter()
+            .find_map(|n| n.0.filter(|n| *n > 0.0))
+        }
+        .unwrap_or(f64::INFINITY);
+        Self {
+            limit,
+            market: if inverse {
+                limit
+            } else {
+                row.max_market_order_qty
+                    .0
+                    .filter(|n| *n > 0.0)
+                    .unwrap_or(limit)
+            },
+        }
+    }
+
+    fn shared(self) -> f64 {
+        self.limit.min(self.market)
+    }
+
+    fn for_order(self, shared: f64, market: bool) -> f64 {
+        // Expand only our own conservative publication for limits. A tighter
+        // store override or source frame remains a bound for either kind.
+        if market {
+            shared.min(self.shared())
+        } else if shared == self.shared() {
+            self.limit
+        } else {
+            shared
+        }
+    }
 }
 
 /// A refused subscription is sent again after 1 s, 2 s and 4 s, then left refused.
@@ -208,6 +261,7 @@ impl BitgetFutures {
             discovery: Default::default(),
             account: account::Account::new(),
             trading: trading::Trading::default(),
+            telemetry: telemetry::Telemetry::default(),
             history: history::History::default(),
             sockets: Default::default(),
             ticker_index: Vec::new(),
@@ -216,6 +270,7 @@ impl BitgetFutures {
             candles: HashMap::new(),
             refused_topics: HashMap::new(),
             public_parse_logged_at: None,
+            order_caps: HashMap::new(),
         }
     }
 
@@ -226,9 +281,25 @@ impl BitgetFutures {
             self.live_tickers.begin();
         }
         let scope = safe_cex_engine::request_context::Scope::Background;
-        let context = match cx.http_context(scope, read_policy(None)) {
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, scope, read_policy(None)) {
             Ok(context) => context,
-            Err(reason) => return self.public_failed(cx, tickers, reason.read_venue_error()),
+            Err(reason) => {
+                let error = reason.read_venue_error();
+                cx.startup_admission_refused(
+                    if tickers {
+                        safe_cex_engine::startup::Sections::TICKERS
+                    } else {
+                        safe_cex_engine::startup::Sections::MARKETS
+                    },
+                    &error,
+                );
+                return self.public_failed(cx, tickers, error);
+            }
         };
         let path = if tickers {
             paths::TICKERS
@@ -241,7 +312,7 @@ impl BitgetFutures {
             rows: if tickers {
                 Discovered::Tickers(vec![])
             } else {
-                Discovered::Markets(vec![])
+                Discovered::Markets(vec![], HashMap::new())
             },
         };
         match cx.request_managed_with_headers(
@@ -663,14 +734,7 @@ fn market(row: &Contract<'_>) -> Market {
         limits: Limits {
             amount: MinMax {
                 min: row.min_trade_num.get(),
-                max: [
-                    row.max_order_qty,
-                    row.max_market_order_qty,
-                    row.max_trade_num,
-                ]
-                .iter()
-                .find_map(|v| v.0.filter(|v| *v > 0.0))
-                .unwrap_or(f64::INFINITY),
+                max: OrderCaps::from_wire(row, false).shared(),
             },
             leverage: MinMax {
                 min: row.min_lever.0.filter(|n| *n != 0.0).unwrap_or(1.0),
@@ -763,6 +827,20 @@ impl Venue for BitgetFutures {
     ) {
         match action {
             safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            safe_cex_engine::VenueAction::RegisterCancelChecks { orders } => {
+                let root = match cx.admit_caller_read_root(None, None) {
+                    Ok(root) => root,
+                    Err(safe_cex_engine::request_context::CommandEntryError::Revoked) => {
+                        let _ = cx.reject_expired_command(
+                            safe_cex_engine::request_context::Operation::Read,
+                        );
+                        return;
+                    }
+                    Err(safe_cex_engine::request_context::CommandEntryError::Rejected(_)) => return,
+                };
+                self.register_cancel_checks(cx, &orders);
+                let _ = cx.done_context(&root, "null".into());
+            }
             action @ safe_cex_engine::VenueAction::CancelAccountOrders => {
                 self.trade_command(cx, safe_cex_engine::Command::Venue { command, action })
             }
@@ -775,7 +853,12 @@ impl Venue for BitgetFutures {
             self.account.uta,
             &self.account.plans,
             &self.account.trailing,
+            &self.account.execution_prices,
         ))
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account_mode_event(cx);
+        self.observe_framed_close_bookings(cx);
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
         let Some(state) = venue_state::decode(state) else {
@@ -786,6 +869,7 @@ impl Venue for BitgetFutures {
         self.account.uta = state.uta;
         self.account.plans = state.plans;
         self.account.trailing = state.trailing;
+        self.account.execution_prices = state.execution_prices;
         // Writes waiting on detection may now plan.
         self.wake_trading(cx);
     }
@@ -802,6 +886,9 @@ impl Venue for BitgetFutures {
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_orders(cx);
+    }
+    fn take_source_cancel_checks(&mut self) -> Vec<safe_cex_engine::model::CancelOrderRef> {
+        self.take_retired_cancel_targets()
     }
     fn refreshes_orders(&self) -> bool {
         true
@@ -848,6 +935,19 @@ impl Venue for BitgetFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Discovery {
+                rows: Discovered::Markets(..),
+                ..
+            } => S::MARKETS,
+            Pending::Discovery { .. } => S::TICKERS,
+            Pending::Account { request, .. } => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -928,6 +1028,7 @@ impl Venue for BitgetFutures {
         }
         if index == 3 {
             self.private_message(cx, text);
+            self.account_mode_event(cx);
         } else {
             self.public_message(cx, text);
         }
@@ -969,7 +1070,8 @@ impl Venue for BitgetFutures {
                     return;
                 }
                 match rows {
-                    Discovered::Markets(rows) => match serde_json::from_str::<Contract>(item) {
+                    Discovered::Markets(rows, caps) => match serde_json::from_str::<Contract>(item)
+                    {
                         Ok(row) if row.quote_coin == self.quote() => {
                             if row.symbol.is_empty()
                                 || row.base_coin.is_empty()
@@ -990,11 +1092,6 @@ impl Venue for BitgetFutures {
                                         mapped.limits.leverage.min = 1.0;
                                     }
                                     mapped.is_inverse = Some(true);
-                                    mapped.limits.amount.max = row
-                                        .max_trade_num
-                                        .0
-                                        .filter(|n| *n > 0.0)
-                                        .unwrap_or(f64::INFINITY);
                                     if row.max_lever.get() == 0.0 {
                                         mapped.limits.leverage.max = 20.0;
                                     }
@@ -1004,6 +1101,12 @@ impl Venue for BitgetFutures {
                                 {
                                     safe_cex_engine::startup::skipped_row(cx);
                                 } else {
+                                    let limits = OrderCaps::from_wire(&row, self.inverse());
+                                    mapped.limits.amount.max = limits.shared();
+                                    caps.insert(
+                                        mapped.symbol.clone(),
+                                        (limits.limit, limits.market),
+                                    );
                                     rows.push(mapped);
                                 }
                             }
@@ -1071,6 +1174,7 @@ impl Venue for BitgetFutures {
                 && cx.validate_background_read_http_delivery(&context).is_ok()
             {
                 self.account_response(cx, request, response);
+                self.account_mode_event(cx);
                 self.wake_trading(cx);
             }
             let _ = cx.finish_http_context(&context);
@@ -1104,7 +1208,7 @@ impl Venue for BitgetFutures {
             Pending::Discovery { context, rows } => {
                 let tickers = matches!(rows, Discovered::Tickers(_));
                 let empty = match &rows {
-                    Discovered::Markets(rows) => rows.is_empty(),
+                    Discovered::Markets(rows, _) => rows.is_empty(),
                     Discovered::Tickers(rows) => rows.is_empty(),
                 };
                 // A product with no contracts cannot appear by retrying.
@@ -1129,7 +1233,13 @@ impl Venue for BitgetFutures {
                     return self.public_failed(cx, tickers, error);
                 }
                 match rows {
-                    Discovered::Markets(rows) => cx.store.set_markets(rows),
+                    Discovered::Markets(rows, caps) => {
+                        self.order_caps = caps
+                            .into_iter()
+                            .map(|(symbol, (limit, market))| (symbol, OrderCaps { limit, market }))
+                            .collect();
+                        cx.store.set_markets(rows);
+                    }
                     Discovered::Tickers(mut rows) => {
                         self.live_tickers.finish(cx.store, &mut rows);
                         cx.store.set_tickers(rows);
@@ -1213,13 +1323,22 @@ impl Venue for BitgetFutures {
             );
         }
     }
+    fn on_signing_release(
+        &mut self,
+        target: safe_cex_engine::SigningTarget<'_, Pending>,
+        release: safe_cex_engine::SigningRelease,
+    ) {
+        if let safe_cex_engine::SigningTarget::Http { pending, .. } = target {
+            self.position_read_released(pending, release);
+        }
+    }
     fn on_sign_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
@@ -1238,7 +1357,7 @@ impl Venue for BitgetFutures {
                     self.wake_trading(cx);
                 }
             }
-        }
+        });
     }
 
     /// History keeps typed failure causes separate from native response retries;
@@ -1439,7 +1558,7 @@ impl Venue for BitgetFutures {
                     return;
                 };
                 let limit = limit.unwrap_or(500).clamp(1, 1000);
-                let mut end = to_ms.unwrap_or(cx.now);
+                let mut end = to_ms.unwrap_or(cx.protocol_now());
                 if let Some(start) = from_ms {
                     end = end.min(start + (value.ms() * f64::from(limit)).min(90.0 * 86_400_000.0));
                 }

@@ -10160,6 +10160,176 @@
           "evidence": "#2970; sdk-rs/harness/private-tape-coinbase.mjs spot breakdown USD row; sdk-rs/venues/coinbase/tests/account.rs and packages/safe-cex/src/__tests__/coinbase.rust.wasm.test.ts pin filtered cash totals and private readiness."
         }
       ]
+    },
+    {
+      "venue": "okx",
+      "tape": "sdk-rs/harness/tapes/okx-private.jsonl",
+      "tapeSha256": "74a118f8e887d45e9d4dc243cf48cbaf5b3a829fe553b4091073ca30bb7bed1c",
+      "diagnostics": [
+        {
+          "failures": [
+            "account orders[9].price: ts=200 rust=100",
+            "checkpoint 0 account.orders[6].price: ts=200 rust=100",
+            "checkpoint 1 account.orders[6].price: ts=200 rust=100",
+            "checkpoint 10 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 11 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 12 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 13 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 14 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 15 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 16 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 17 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 18 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 19 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 2 account.orders[6].price: ts=200 rust=100",
+            "checkpoint 20 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 21 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 22 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 3 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 4 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 5 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 6 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 7 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 8 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 9 account.orders[7].price: ts=200 rust=100"
+          ],
+          "category": "rust-better",
+          "rationale": "A trailing stop's row price is where Tealstreet draws and drags its line. OKX documents moveTriggerPx as the move_order_stop trigger price, so Rust shows it (100) once published; with activePx pending it sits a callback behind activePx, otherwise behind the current last (#3174). TS shows last + (min(entry, callbackSpread) - max(entry, callbackSpread)) for a sell with a position, where last is the algo row's placement-time fill price: 3000 + (100 - 2900) = 200, a level mixed with a distance.",
+          "evidence": "sdk-rs/harness/private-tape-okx.mjs trailing algo 204 (ETH sell, callbackSpread 100, moveTriggerPx 100, last 3000, no activePx) with the ETH position avgPx 2900; venues/okx/tests/trailing_display.rs."
+        }
+      ]
+    },
+    {
+      "venue": "okxdemo",
+      "tape": "sdk-rs/harness/tapes/okxdemo-private.jsonl",
+      "tapeSha256": "9185854cc09dbad9b9142b3e5b15812b66813e4e413caa84467bf864807149af",
+      "diagnostics": [
+        {
+          "failures": [
+            "account orders[9].price: ts=200 rust=100",
+            "checkpoint 0 account.orders[6].price: ts=200 rust=100",
+            "checkpoint 1 account.orders[6].price: ts=200 rust=100",
+            "checkpoint 10 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 11 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 12 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 13 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 14 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 15 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 16 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 17 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 18 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 19 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 2 account.orders[6].price: ts=200 rust=100",
+            "checkpoint 20 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 21 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 22 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 3 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 4 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 5 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 6 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 7 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 8 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 9 account.orders[7].price: ts=200 rust=100"
+          ],
+          "category": "rust-better",
+          "rationale": "A trailing stop's row price is where Tealstreet draws and drags its line. OKX documents moveTriggerPx as the move_order_stop trigger price, so Rust shows it (100) once published; with activePx pending it sits a callback behind activePx, otherwise behind the current last (#3174). TS shows last + (min(entry, callbackSpread) - max(entry, callbackSpread)) for a sell with a position, where last is the algo row's placement-time fill price: 3000 + (100 - 2900) = 200, a level mixed with a distance.",
+          "evidence": "sdk-rs/harness/private-tape-okx.mjs trailing algo 204 (ETH sell, callbackSpread 100, moveTriggerPx 100, last 3000, no activePx) with the ETH position avgPx 2900; venues/okx/tests/trailing_display.rs."
+        }
+      ]
+    },
+    {
+      "venue": "okxeu",
+      "tape": "sdk-rs/harness/tapes/okxeu-private.jsonl",
+      "tapeSha256": "16a59dcbb227ea25238e7708803b49c8b87e26ca6863d1de9a7a6dfce3851ea9",
+      "diagnostics": [
+        {
+          "failures": [
+            "account orders[12].price: ts=200 rust=100",
+            "checkpoint 0 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 1 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 10 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 11 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 12 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 13 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 14 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 15 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 16 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 17 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 18 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 19 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 2 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 20 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 21 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 22 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 23 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 24 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 25 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 26 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 27 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 28 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 29 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 3 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 30 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 31 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 4 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 5 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 6 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 7 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 8 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 9 account.orders[8].price: ts=200 rust=100"
+          ],
+          "category": "rust-better",
+          "rationale": "A trailing stop's row price is where Tealstreet draws and drags its line. OKX documents moveTriggerPx as the move_order_stop trigger price, so Rust shows it (100) once published; with activePx pending it sits a callback behind activePx, otherwise behind the current last (#3174). TS shows last + (min(entry, callbackSpread) - max(entry, callbackSpread)) for a sell with a position, where last is the algo row's placement-time fill price: 3000 + (100 - 2900) = 200, a level mixed with a distance.",
+          "evidence": "sdk-rs/harness/private-tape-okx.mjs trailing algo 204 (ETH sell, callbackSpread 100, moveTriggerPx 100, last 3000, no activePx) with the ETH position avgPx 2900; venues/okx/tests/trailing_display.rs."
+        }
+      ]
+    },
+    {
+      "venue": "okxeudemo",
+      "tape": "sdk-rs/harness/tapes/okxeudemo-private.jsonl",
+      "tapeSha256": "1e3d0e42eaf44165351a876997b0894d25655d2fa031aabd46c6e5a693a7eb78",
+      "diagnostics": [
+        {
+          "failures": [
+            "account orders[12].price: ts=200 rust=100",
+            "checkpoint 0 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 1 account.orders[7].price: ts=200 rust=100",
+            "checkpoint 10 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 11 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 12 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 13 account.orders[9].price: ts=200 rust=100",
+            "checkpoint 14 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 15 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 16 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 17 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 18 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 19 account.orders[10].price: ts=200 rust=100",
+            "checkpoint 2 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 20 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 21 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 22 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 23 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 24 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 25 account.orders[11].price: ts=200 rust=100",
+            "checkpoint 26 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 27 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 28 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 29 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 3 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 30 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 31 account.orders[12].price: ts=200 rust=100",
+            "checkpoint 4 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 5 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 6 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 7 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 8 account.orders[8].price: ts=200 rust=100",
+            "checkpoint 9 account.orders[8].price: ts=200 rust=100"
+          ],
+          "category": "rust-better",
+          "rationale": "A trailing stop's row price is where Tealstreet draws and drags its line. OKX documents moveTriggerPx as the move_order_stop trigger price, so Rust shows it (100) once published; with activePx pending it sits a callback behind activePx, otherwise behind the current last (#3174). TS shows last + (min(entry, callbackSpread) - max(entry, callbackSpread)) for a sell with a position, where last is the algo row's placement-time fill price: 3000 + (100 - 2900) = 200, a level mixed with a distance.",
+          "evidence": "sdk-rs/harness/private-tape-okx.mjs trailing algo 204 (ETH sell, callbackSpread 100, moveTriggerPx 100, last 3000, no activePx) with the ETH position avgPx 2900; venues/okx/tests/trailing_display.rs."
+        }
+      ]
     }
   ]
 }

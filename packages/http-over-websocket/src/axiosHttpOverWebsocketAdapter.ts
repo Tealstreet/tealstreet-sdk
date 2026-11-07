@@ -14,6 +14,8 @@ import type { ConnectionCloseDiagnostic, TimerLatenessBucket } from './connectio
 import { HOWWebSocket } from './HOWWebSocket';
 import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, LatencyEntry } from './types';
 
+import { budgetDiagnostic, requestBudgetMs, requestClass, type RequestClass } from './requestBudget';
+
 const MAX_LOG_STRING_LENGTH = 500;
 const MAX_LOG_ARRAY_LENGTH = 20;
 const MAX_LOG_OBJECT_KEYS = 50;
@@ -35,6 +37,9 @@ type TradeTunnelRouteContext = {
 };
 
 export class TradeTunnelTimeoutError extends Error {
+  readonly requestClass?: RequestClass;
+  readonly budgetMs?: number;
+  readonly elapsedMs?: number;
   readonly config: any;
   readonly method: string;
   readonly tradeTunnelRoute: TradeTunnelRouteContext;
@@ -43,6 +48,9 @@ export class TradeTunnelTimeoutError extends Error {
   constructor(
     message: string,
     context: {
+      requestClass?: RequestClass;
+      budgetMs?: number;
+      elapsedMs?: number;
       config: any;
       method: string;
       route: TradeTunnelRouteContext;
@@ -51,6 +59,9 @@ export class TradeTunnelTimeoutError extends Error {
   ) {
     super(stripDiagnosticUrlQueries(message));
     this.name = 'TradeTunnelTimeoutError';
+    this.requestClass = context.requestClass;
+    this.budgetMs = context.budgetMs;
+    this.elapsedMs = context.elapsedMs;
     this.config = context.config;
     this.method = context.method;
     this.tradeTunnelRoute = context.route;
@@ -80,7 +91,15 @@ export class TradeTunnelReadinessError extends TradeTunnelTimeoutError {
 
   constructor(
     message: string,
-    context: { config: any; method: string; route: TradeTunnelRouteContext; url: string },
+    context: {
+      config: any;
+      method: string;
+      route: TradeTunnelRouteContext;
+      url: string;
+      requestClass?: RequestClass;
+      budgetMs?: number;
+      elapsedMs?: number;
+    },
     readiness?: TradeTunnelReadiness,
   ) {
     const socket =
@@ -98,12 +117,12 @@ export class TradeTunnelReadinessError extends TradeTunnelTimeoutError {
   }
 }
 
-const proxyTokenMissingBeforeDeadline = (config: any) =>
+const proxyTokenMissingBeforeDeadline = (config: any, detail: string, facts: object) =>
   Object.assign(
     new Error(
-      `Tealstreet proxy authorization missing: no valid proxy token before the request deadline (${diagnosticUrl(config.url)})`,
+      `Tealstreet proxy authorization missing: no valid proxy token before the request deadline (${detail}; ${diagnosticUrl(config.url)})`,
     ),
-    { name: 'ProxyTokenUnavailableError', config },
+    { name: 'ProxyTokenUnavailableError', config, ...facts },
   );
 
 /** The most of a request's deadline spent waiting for the socket to open and authorize. */
@@ -413,6 +432,8 @@ export class TradeTunnelPreparationError extends Error {
 export type DisposableAxiosAdapter = AxiosAdapter & {
   connectionDiagnostic(): ConnectionCloseDiagnostic | undefined;
   hiddenTimerLateness(): TimerLatenessBucket;
+  /** The smoothed client-to-tunnel ping of the socket this adapter last used. */
+  tunnelLatency(): number | undefined;
   prepare(config: InternalAxiosRequestConfig): Promise<PreparedTunnelRequest>;
   /** Opaque TS/legacy requests only; never managed engine release proof. */
   prepareLegacy(config: InternalAxiosRequestConfig): Promise<PreparedTunnelRequest>;
@@ -496,8 +517,20 @@ const createAxiosHttpOverWebsocketAdapter = (
         websocketRequest = packet;
         bound = true;
       };
-      const timeoutMs = typeof config.timeout === 'number' && config.timeout > 0 ? config.timeout : 20_000;
-      const deadline = Date.now() + timeoutMs;
+      const startedAt = Date.now();
+      const kind: RequestClass = requestClass(
+        websocketRequest.method,
+        websocketRequest.url,
+        (config as InternalAxiosRequestConfig & { requestClass?: RequestClass }).requestClass,
+      );
+      const timeoutMs = requestBudgetMs(kind, config.timeout);
+      const deadline = startedAt + timeoutMs;
+      const timeoutFacts = () => ({
+        requestClass: kind,
+        budgetMs: timeoutMs,
+        elapsedMs: Math.max(0, Date.now() - startedAt),
+      });
+      const timeoutDetail = () => budgetDiagnostic(kind, timeoutMs, Date.now() - startedAt);
       // Socket open, clock sync and authorization are bounded on their own, so a slow
       // reconnect cannot spend the request's time; a long read (discovery) keeps the rest.
       const readinessDeadline = Math.min(deadline, Date.now() + READINESS_CAP_MS);
@@ -515,17 +548,21 @@ const createAxiosHttpOverWebsocketAdapter = (
       };
       const createReadinessError = (route: TradeTunnelRouteContext = baseRouteContext) =>
         new TradeTunnelReadinessError(
-          `HTTP tunnel was not ready within ${Math.round((readinessDeadline - (deadline - timeoutMs)) / 1000)} s: ${diagnosticUrl(websocketRequest.url)}`,
-          { config, method: websocketRequest.method, route, url: websocketRequest.url },
+          `HTTP tunnel was not ready within ${Math.round((readinessDeadline - (deadline - timeoutMs)) / 1000)} s (${timeoutDetail()}): ${diagnosticUrl(websocketRequest.url)}`,
+          { config, method: websocketRequest.method, route, url: websocketRequest.url, ...timeoutFacts() },
           readinessState(),
         );
       const createTimeoutError = (route: TradeTunnelRouteContext = baseRouteContext) =>
-        new TradeTunnelTimeoutError(`WSoverHTTP request timed out: ${diagnosticUrl(websocketRequest.url)}`, {
-          config,
-          method: websocketRequest.method,
-          route,
-          url: websocketRequest.url,
-        });
+        new TradeTunnelTimeoutError(
+          `WSoverHTTP request timed out (${timeoutDetail()}): ${diagnosticUrl(websocketRequest.url)}`,
+          {
+            ...timeoutFacts(),
+            config,
+            method: websocketRequest.method,
+            route,
+            url: websocketRequest.url,
+          },
+        );
       const remainingTime = () => {
         if (disposed) throw disposedError(config);
         if (canceled) throw canceledError();
@@ -633,7 +670,7 @@ const createAxiosHttpOverWebsocketAdapter = (
             return await pollValidToken();
           } catch (error) {
             if (error instanceof TradeTunnelTimeoutError && error.config === config)
-              throw proxyTokenMissingBeforeDeadline(config);
+              throw proxyTokenMissingBeforeDeadline(config, timeoutDetail(), timeoutFacts());
             throw error;
           }
         };
@@ -944,6 +981,7 @@ const createAxiosHttpOverWebsocketAdapter = (
   return Object.assign(adapter, {
     connectionDiagnostic: () => lastSocket?.diagnostics.lastClose,
     hiddenTimerLateness: () => lastSocket?.timerLateness.bucket ?? 'unknown',
+    tunnelLatency: () => lastSocket?.tunnelLatency,
     prepare: (config: InternalAxiosRequestConfig) => prepare(config),
     prepareLegacy: (config: InternalAxiosRequestConfig) => prepare(config, true),
     dispose: () => {

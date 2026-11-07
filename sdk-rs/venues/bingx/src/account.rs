@@ -93,7 +93,14 @@ pub enum Request {
 /// The one read-cover scope of BingX's account-wide open-orders read.
 const ORDERS_SCOPE: &str = "orders";
 
-type OrderMeta = (Order, String, String, bool, String);
+type OrderMeta = (
+    Order,
+    String,
+    String,
+    bool,
+    String,
+    Option<crate::trading::protection::Original>,
+);
 
 /// One background per-symbol settings refresh. Both legs share the issue-time
 /// stamp, so their merged row publishes once and never over a newer write.
@@ -135,12 +142,11 @@ pub struct Account {
     symbol_settings_sequence: u64,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
+    source_orders_owed: bool,
     positions_in_flight: Option<u64>,
     /// Numbers every positions read, so `readPositions` can name one it may trust.
     positions_read: u32,
     pub(crate) fresh_positions: FreshPositions,
-    /// The typed cause of the read failure being delivered, for its waiters.
-    pub(crate) read_error: Option<VenueError>,
     balance_in_flight: Option<u64>,
     mode_guard: StaleGuard,
     balance_guard: StaleGuard,
@@ -402,13 +408,8 @@ pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::Ve
         })
 }
 /// A typed cause for a failing read: a refused key, or a rate limit.
-pub(crate) fn read_refusal(response: &Response<'_>) -> Option<VenueError> {
-    key_refusal(response).or_else(|| {
-        (response.status == 429).then(|| {
-            VenueError::new(format!("BingX HTTP 429: {}", response.body))
-                .kind(ErrorKind::RateLimited)
-        })
-    })
+pub(crate) fn read_refusal(response: &Response<'_>, now: f64) -> Option<VenueError> {
+    key_refusal(response).or_else(|| crate::read_rate_limit(response, now))
 }
 impl Account {
     pub(crate) fn with_slots(slots: Slots<Identity>) -> Self {
@@ -539,7 +540,7 @@ impl Account {
                 pending => pending,
             };
             if let Pending::Account(request) = pending {
-                self.on_request_failed(cx, request, &error.message, credentials);
+                self.request_failed(cx, request, &error.message, Some(&error), credentials);
             }
         }
     }
@@ -710,7 +711,9 @@ impl Account {
         if self.orders_in_flight.is_some() {
             return;
         }
-        self.start_order_read(cx, credentials, None);
+        let primary = std::mem::take(&mut self.source_orders_owed)
+            .then_some(PrimaryReason::PostUnknownOrderRead);
+        self.start_order_read(cx, credentials, primary);
     }
     /// The snapshot that clears an uncertain-write fence is Primary-signed, so a
     /// read key can never be the read that proves the trading account's orders.
@@ -718,10 +721,15 @@ impl Account {
         if cx.frame_fed() {
             return;
         }
+        if cx.orders_refresh_pending() && self.orders_in_flight.is_some() {
+            self.source_orders_owed = true;
+            return;
+        }
         if cx.reconcile_reask() && self.orders_in_flight.is_some() {
             return;
         }
         self.bump_orders(cx.store);
+        self.source_orders_owed = false;
         self.start_order_read(cx, credentials, Some(PrimaryReason::PostUnknownOrderRead));
     }
     /// A fence needs a new owner even if an older snapshot is still pending.
@@ -1265,7 +1273,6 @@ impl Account {
         if let Some(error) = key_refusal(&response) {
             cx.startup_read_refused(&error);
         }
-        self.read_error = read_refusal(&response);
         if let Some(error) = response_error(response, is_key).map(|error| request.named(error)) {
             if matches!(request, Request::Keepalive { .. })
                 && (response.status == 404 || {
@@ -1283,7 +1290,8 @@ impl Account {
                 );
                 self.fresh_key(cx, credentials);
             } else {
-                self.on_request_failed(cx, request, &error, credentials);
+                let typed = read_refusal(&response, cx.protocol_now());
+                self.request_failed(cx, request, &error, typed.as_ref(), credentials);
             }
             return;
         }
@@ -1562,6 +1570,9 @@ impl Account {
                 }
             }
         }
+        if self.source_orders_owed && self.orders_in_flight.is_none() {
+            self.fetch_orders(cx, credentials);
+        }
     }
 
     pub fn on_sign_failed(
@@ -1580,7 +1591,7 @@ impl Account {
         if owns_read {
             // Native recovery owns retries and listen-key epoch checks. A provider
             // failure supplies no response and therefore no venue-auth evidence.
-            self.on_request_failed(cx, request, &error.message, credentials);
+            self.request_failed(cx, request, &error.message, Some(&error), credentials);
         }
     }
 
@@ -1589,6 +1600,17 @@ impl Account {
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: &str,
+        credentials: &Credentials,
+    ) {
+        self.request_failed(cx, request, error, None, credentials);
+    }
+
+    pub(crate) fn request_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+        typed: Option<&VenueError>,
         credentials: &Credentials,
     ) {
         if matches!(&request,Request::ListenKey{epoch}|Request::Keepalive{epoch} if *epoch!=self.epoch)
@@ -1601,11 +1623,15 @@ impl Account {
             _ => None,
         };
         if let Some((id, symbol, leverage)) = refresh {
-            cx.notice(
-                Level::Warn,
-                code::REQUEST_FAILED,
-                format!("BingX settings refresh for {symbol} failed: {error}"),
-            );
+            if let Some(error) = typed.filter(|error| error.kind == Some(ErrorKind::RateLimited)) {
+                cx.notice_error(Level::Warn, code::REQUEST_FAILED, error);
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    format!("BingX settings refresh for {symbol} failed: {error}"),
+                );
+            }
             self.settle_symbol_settings(cx, symbol, id, |read| {
                 if leverage {
                     read.leverage = Some(None);
@@ -1616,10 +1642,14 @@ impl Account {
             return;
         }
         // A failing private read surfaces as an Error at the retried-failure cadence.
-        cx.retried_failure(
-            "bingx.account:private",
-            format!("BingX private request failed: {error}"),
-        );
+        if let Some(error) = typed.filter(|error| error.kind == Some(ErrorKind::RateLimited)) {
+            cx.retried_failure_error("bingx.account:private", error);
+        } else {
+            cx.retried_failure(
+                "bingx.account:private",
+                format!("BingX private request failed: {error}"),
+            );
+        }
         match request {
             Request::ListenKey { .. } => {
                 self.invalidate_private(cx);
@@ -1636,9 +1666,8 @@ impl Account {
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { read, .. } => {
                 self.positions_in_flight = None;
-                let fresh = self
-                    .read_error
-                    .take()
+                let fresh = typed
+                    .cloned()
                     .unwrap_or_else(|| VenueError::new(format!("BingX positions: {error}")));
                 self.fresh_positions.failed(cx, 0, read, &fresh);
                 self.read_fresh_positions_again(cx, read, credentials);
@@ -2074,9 +2103,22 @@ impl Account {
 }
 
 fn observation(order: Order, native: &NativeOrder<'_>) -> OrderMeta {
+    let original = original_protection(native);
     (
         order,
-        native.kind.to_string(),
+        if (native.stop_guaranteed.is_some()
+            || native.price_protect.is_some()
+            || native.position_id.is_some())
+            && matches!(
+                native.kind.as_ref(),
+                "STOP_MARKET" | "TAKE_PROFIT_MARKET" | "TRIGGER_MARKET"
+            )
+            && original.is_none()
+        {
+            String::new()
+        } else {
+            native.kind.to_string()
+        },
         native.position_side.to_string(),
         native
             .take_profit
@@ -2087,7 +2129,105 @@ fn observation(order: Order, native: &NativeOrder<'_>) -> OrderMeta {
                 .as_ref()
                 .is_some_and(Protection::meaningful),
         native.status.as_deref().unwrap_or_default().to_owned(),
+        original,
     )
+}
+
+fn original_protection(native: &NativeOrder<'_>) -> Option<crate::trading::protection::Original> {
+    use crate::trading::protection::{NativeScalar, Original};
+    if !native.complete_metadata()
+        || native.filled != Some(0.0)
+        || native
+            .parent_order_id
+            .as_deref()
+            .is_some_and(|s| !s.is_empty())
+        || native.group_id.as_deref().is_some_and(|s| !s.is_empty())
+        || native
+            .take_profit
+            .as_ref()
+            .is_some_and(Protection::meaningful)
+        || native
+            .stop_loss
+            .as_ref()
+            .is_some_and(Protection::meaningful)
+        || !matches!(native.status.as_deref(), Some("NEW" | "PENDING"))
+        || !matches!(native.position_side.as_ref(), "BOTH" | "LONG" | "SHORT")
+        || !matches!(native.side.as_ref(), "BUY" | "SELL")
+    {
+        return None;
+    }
+    let quantity = native.quantity.filter(|q| q.is_finite() && *q > 0.0)?;
+    let stop = matches!(
+        native.kind.as_ref(),
+        "STOP_MARKET" | "TAKE_PROFIT_MARKET" | "TRIGGER_MARKET"
+    );
+    if !stop && !(native.kind == "LIMIT" && native.reduce_only) {
+        return None;
+    }
+    let (price, stop_price, working_type, time_in_force) = if stop {
+        if !native.stop_price.is_finite() || native.stop_price <= 0.0 {
+            return None;
+        }
+        (
+            None,
+            Some(native.stop_price),
+            Some(
+                native
+                    .working_type
+                    .as_deref()
+                    .filter(|s| matches!(*s, "MARK_PRICE" | "CONTRACT_PRICE"))?
+                    .to_owned(),
+            ),
+            None,
+        )
+    } else {
+        if !native.price.is_finite() || native.price <= 0.0 {
+            return None;
+        }
+        (
+            Some(native.price),
+            None,
+            None,
+            Some(
+                native
+                    .time_in_force
+                    .as_deref()
+                    .filter(|s| matches!(*s, "GTC" | "PostOnly" | "GTX"))?
+                    .to_owned(),
+            ),
+        )
+    };
+    let scalar = |raw: Option<&serde_json::value::RawValue>| -> Option<Option<NativeScalar>> {
+        raw.map(|r| serde_json::from_str(r.get())).transpose().ok()
+    };
+    let guaranteed = scalar(native.stop_guaranteed)?;
+    if guaranteed.as_ref().is_some_and(|v| {
+        matches!(v, NativeScalar::Boolean(true))
+            || matches!(v, NativeScalar::Text(s) if s == "true" || s == "cutfee")
+    }) && working_type.as_deref() != Some("CONTRACT_PRICE")
+    {
+        return None;
+    }
+    Some(Original {
+        symbol: native.symbol.to_string(),
+        native_kind: native.kind.to_string(),
+        side: native.side.to_string(),
+        position_side: native.position_side.to_string(),
+        quantity,
+        price,
+        stop_price,
+        working_type,
+        time_in_force,
+        close_position: native.close_position,
+        reduce_only: (native.position_side == "BOTH" && !native.close_position)
+            .then_some(native.reduce_only),
+        client_order_id: (!stop)
+            .then(|| native.client_order_id.as_deref().map(str::to_owned))
+            .flatten(),
+        stop_guaranteed: guaranteed,
+        price_protect: scalar(native.price_protect)?,
+        position_id: scalar(native.position_id)?,
+    })
 }
 
 pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Option<Order> {
@@ -2240,6 +2380,18 @@ pub(crate) fn metadata_error(
         error
     } else {
         error.outcome(safe_cex_engine::Outcome::NotSent)
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::OpenOrders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }
 
@@ -2728,5 +2880,33 @@ mod tests {
         assert!(!account.first_execution((RETAINED_EXECUTIONS + 99).to_string()));
         assert!(account.first_execution("0".into()));
         assert_eq!(account.seen_executions.len(), RETAINED_EXECUTIONS);
+    }
+}
+
+#[cfg(test)]
+mod protective_provenance_tests {
+    use super::*;
+    #[test]
+    fn only_complete_standalone_unfilled_native_rows_supply_restoration() {
+        let good = r#"{"orderId":"1","symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL","status":"NEW","origQty":"2","executedQty":"0","stopPrice":"90","positionSide":"BOTH","workingType":"MARK_PRICE","reduceOnly":true}"#;
+        let native: NativeOrder<'_> = serde_json::from_str(good).unwrap();
+        assert_eq!(original_protection(&native).unwrap().quantity, 2.0);
+        for bad in [
+            good.replace("STOP_MARKET", "TRAILING_STOP_MARKET"),
+            good.replace("\"NEW\"", "\"PARTIALLY_FILLED\""),
+            good.replace("\"executedQty\":\"0\"", "\"executedQty\":\"1\""),
+            good.replace("MARK_PRICE", "UNKNOWN"),
+            good.replace(
+                "\"reduceOnly\":true",
+                "\"parentOrderId\":\"parent\",\"reduceOnly\":true",
+            ),
+            good.replace(
+                "\"reduceOnly\":true",
+                "\"stopLoss\":{\"stopPrice\":90},\"reduceOnly\":true",
+            ),
+        ] {
+            let native: NativeOrder<'_> = serde_json::from_str(&bad).unwrap();
+            assert!(original_protection(&native).is_none(), "{bad}");
+        }
     }
 }

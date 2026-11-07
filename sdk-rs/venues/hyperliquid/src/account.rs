@@ -82,30 +82,57 @@ pub enum Request {
         symbol: String,
         revision: u64,
     },
-    Builder,
+    Builder {
+        startup: bool,
+    },
     Fees,
     AmendSource {
         id: String,
+        amend: crate::trading::AmendRead,
     },
     /// The frame-fed page never ran the startup role read; its amend reads need the account.
     AmendRole {
         id: String,
+        amend: crate::trading::AmendRead,
     },
 }
 impl Request {
+    /// Names the read in its `request.failed` notice, so a report shows which read failed.
+    pub(crate) fn read_kind(&self) -> &'static str {
+        match self {
+            Self::Role => "role",
+            Self::Mode => "mode",
+            Self::State { .. } => "state",
+            Self::Orders { .. } => "orders",
+            Self::Spot { .. } => "spot",
+            Self::Asset { .. } => "asset",
+            Self::Builder { .. } => "builder",
+            Self::Fees => "fees",
+            Self::AmendSource { .. } => "amendSource",
+            Self::AmendRole { .. } => "amendRole",
+        }
+    }
+    pub(crate) fn amend_read(&self) -> Option<(&str, crate::trading::AmendRead)> {
+        match self {
+            Self::AmendRole { id, amend } | Self::AmendSource { id, amend } => Some((id, *amend)),
+            _ => None,
+        }
+    }
     pub(crate) fn is_builder(&self) -> bool {
-        matches!(self, Self::Builder)
+        matches!(self, Self::Builder { .. })
     }
 }
 enum ReadContinuation {
     Account(Request),
     History(Box<crate::history::Request>),
+    Candles(Box<crate::ManagedCandleRead>),
 }
 impl ReadContinuation {
     fn pending(self) -> Pending {
         match self {
             Self::Account(r) => Pending::Account(r),
             Self::History(r) => Pending::History(r),
+            Self::Candles(r) => Pending::ManagedCandles(r),
         }
     }
 }
@@ -113,7 +140,9 @@ impl ReadContinuation {
 enum ReadPriority {
     Foreground,
     Core,
+    Financial,
     Background,
+    Bulk,
 }
 struct QueuedRead {
     body: String,
@@ -121,6 +150,39 @@ struct QueuedRead {
     streamed: bool,
     weight: u32,
     priority: ReadPriority,
+}
+impl QueuedRead {
+    fn occupies_account_slot(&self) -> bool {
+        matches!(&self.continuation, ReadContinuation::Account(_))
+            && (self.priority != ReadPriority::Foreground
+                || matches!(
+                    &self.continuation,
+                    ReadContinuation::Account(Request::Orders { .. })
+                ))
+    }
+    fn deadline(&self) -> Option<f64> {
+        match &self.continuation {
+            ReadContinuation::History(read) => Some(read.root().deadline()),
+            ReadContinuation::Candles(read) => Some(read.context.deadline()),
+            _ => None,
+        }
+    }
+    fn capacity(&self) -> u32 {
+        match self.priority {
+            ReadPriority::Foreground | ReadPriority::Core | ReadPriority::Financial => 1000,
+            _ => 800,
+        }
+    }
+    fn read_class(&self) -> safe_cex_engine::HttpReadClass {
+        match self.priority {
+            ReadPriority::Foreground => safe_cex_engine::HttpReadClass::Critical,
+            ReadPriority::Core | ReadPriority::Financial => {
+                safe_cex_engine::HttpReadClass::Reconciliation
+            }
+            ReadPriority::Bulk => safe_cex_engine::HttpReadClass::Bulk,
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
 }
 struct SettingBarrier {
     at: f64,
@@ -143,6 +205,10 @@ fn backoff_ms(tries: u32) -> f64 {
 #[derive(Default)]
 pub struct Account {
     pub started: bool,
+    /// The symbol a caller last read leverage for: the page's selection.
+    selected: Option<String>,
+    /// Symbols whose activeAssetData streams: the selection and open orders.
+    asset_scope: std::collections::BTreeSet<String>,
     mode: Mode,
     mode_resolved: bool,
     pub(crate) mode_refresh_due: bool,
@@ -156,7 +222,7 @@ pub struct Account {
     mode_attempts: u32,
     sync_timer: Option<TimerId>,
     last_order_refresh: f64,
-    read_timer: Option<TimerId>,
+    read_timer: Option<(TimerId, f64)>,
     read_window: f64,
     read_weight: u32,
     reads: VecDeque<QueuedRead>,
@@ -295,7 +361,7 @@ impl Hyperliquid {
                 .as_deref()
                 .filter(|identity| !identity.is_empty()))
     }
-    fn account_read(
+    pub(super) fn account_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         kind: &str,
@@ -332,13 +398,15 @@ impl Hyperliquid {
         // approval is read, once, before the first placement.
         if cx.frame_fed() {
             match &account_request {
-                Request::Builder | Request::AmendSource { .. } | Request::AmendRole { .. } => {}
+                Request::Builder { .. }
+                | Request::AmendSource { .. }
+                | Request::AmendRole { .. } => {}
                 _ => return,
             }
         }
         let weight = match &account_request {
-            Request::Role => 60,
-            Request::State { .. } | Request::Spot { .. } => 2,
+            Request::Role | Request::AmendRole { .. } => 60,
+            Request::State { .. } | Request::Spot { .. } | Request::AmendSource { .. } => 2,
             _ => 20,
         };
         let urgent = std::mem::take(&mut self.account.fence_read)
@@ -346,6 +414,10 @@ impl Hyperliquid {
                 &account_request,
                 Request::AmendSource { .. } | Request::AmendRole { .. } | Request::Asset { .. }
             );
+        let financial = matches!(
+            &account_request,
+            Request::State { .. } | Request::Orders { .. }
+        );
         let core = match &account_request {
             Request::Role | Request::Mode | Request::Spot { .. } => true,
             Request::State { dex, .. } | Request::Orders { dex, .. } => dex.is_empty(),
@@ -360,16 +432,14 @@ impl Hyperliquid {
                 ReadPriority::Foreground
             } else if core {
                 ReadPriority::Core
+            } else if financial {
+                ReadPriority::Financial
             } else {
                 ReadPriority::Background
             },
         };
-        // Foreground reconciliation never waits for a routine snapshot's network round trip.
-        if urgent {
-            self.account.reads.push_front(read);
-        } else {
-            self.account.reads.push_back(read);
-        }
+        // Rank selects the class; insertion order preserves FIFO within it.
+        self.account.reads.push_back(read);
         self.pump_reads(cx);
     }
     pub(crate) fn history_read(
@@ -385,15 +455,40 @@ impl Hyperliquid {
             continuation: ReadContinuation::History(Box::new(request)),
             streamed,
             weight,
-            priority: ReadPriority::Foreground,
+            priority: ReadPriority::Bulk,
         });
         self.pump_reads(cx);
     }
-    pub(crate) fn history_weight(&mut self, cx: &mut Cx<'_, Pending>, rows: u32, reserved: bool) {
-        if cx.now - self.account.read_window >= 60_000.0 {
-            self.account.read_window = cx.now;
-            self.account.read_weight = 0;
+    pub(crate) fn queue_candles(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        body: String,
+        read: Box<crate::ManagedCandleRead>,
+    ) {
+        self.account.reads.push_back(QueuedRead {
+            body,
+            continuation: ReadContinuation::Candles(read),
+            streamed: true,
+            weight: 104,
+            priority: ReadPriority::Bulk,
+        });
+        self.pump_reads(cx);
+    }
+    fn refill_read_weight(&mut self, now: f64) {
+        if now.is_finite() && now >= self.account.read_window {
+            let refill = ((now - self.account.read_window) / 60.)
+                .floor()
+                .min(f64::from(u32::MAX)) as u32;
+            self.account.read_weight = self.account.read_weight.saturating_sub(refill);
+            self.account.read_window = if self.account.read_weight == 0 {
+                now
+            } else {
+                self.account.read_window + f64::from(refill) * 60.
+            };
         }
+    }
+    pub(crate) fn history_weight(&mut self, cx: &mut Cx<'_, Pending>, rows: u32, reserved: bool) {
+        self.refill_read_weight(cx.now);
         if reserved {
             self.account.read_weight = self.account.read_weight.saturating_sub(100);
         }
@@ -401,9 +496,22 @@ impl Hyperliquid {
         self.pump_reads(cx);
     }
     fn pump_reads(&mut self, cx: &mut Cx<'_, Pending>) {
-        if cx.now - self.account.read_window >= 60_000.0 {
-            self.account.read_window = cx.now;
-            self.account.read_weight = 0;
+        self.refill_read_weight(cx.now);
+        while let Some(index) = self
+            .account
+            .reads
+            .iter()
+            .position(|read| read.deadline().is_some_and(|deadline| cx.now >= deadline))
+        {
+            let read = self.account.reads.remove(index).unwrap();
+            let error = safe_cex_engine::request_context::Error::TimedOut.read_venue_error();
+            match read.continuation {
+                ReadContinuation::History(history) => self.reject_history(cx, *history, error),
+                ReadContinuation::Candles(read) => {
+                    let _ = cx.fail_context(&read.context, error);
+                }
+                _ => unreachable!("only caller reads have queued deadlines"),
+            }
         }
         while let Some(index) = self
             .account
@@ -411,24 +519,54 @@ impl Hyperliquid {
             .iter()
             .enumerate()
             .filter(|(_, read)| {
-                self.account.background_reads < MAX_BACKGROUND_READS
-                    || read.priority == ReadPriority::Foreground
+                let ancillary = matches!(
+                    &read.continuation,
+                    ReadContinuation::Account(Request::Fees | Request::Builder { startup: true })
+                );
+                // Startup-only work follows the financial census before its 20 s
+                // deadline starts. A live placement may promote its queued builder read.
+                (!ancillary
+                    || (self.account.inflight.is_empty()
+                        && !self.account.mode_pending
+                        && !self.account.role_pending))
+                    && (self.account.background_reads < MAX_BACKGROUND_READS
+                        || !read.occupies_account_slot())
             })
             .min_by_key(|(_, read)| read.priority)
             .map(|(index, _)| index)
         {
             let read = &self.account.reads[index];
-            // Leave headroom for chart reads and trading in the shared IP budget.
-            if self.account.read_weight + read.weight > 1000 {
-                if self.account.read_timer.is_none() {
-                    self.account.read_timer = Some(
-                        cx.set_timer((60_000.0 - (cx.now - self.account.read_window)).max(1.0)),
-                    );
-                }
-                return;
+            if self.account.read_weight.saturating_add(read.weight) > read.capacity() {
+                break;
             }
             let read = self.account.reads.remove(index).unwrap();
             let read = match read {
+                QueuedRead {
+                    body,
+                    continuation: ReadContinuation::Candles(read),
+                    weight,
+                    ..
+                } => {
+                    let context = read.context.clone();
+                    match cx.request_managed_with_headers(
+                        context.clone(),
+                        None,
+                        Method::Post,
+                        format!("{}/info", self.rest()),
+                        &[("Content-Type", "application/json")],
+                        Some(body),
+                        Pending::ManagedCandles(read),
+                    ) {
+                        Ok(id) => {
+                            self.account.read_weight += weight;
+                            cx.stream_response(id, ArrayAt::Root);
+                        }
+                        Err((_, error)) => {
+                            let _ = cx.fail_context(&context, error.read_venue_error());
+                        }
+                    }
+                    continue;
+                }
                 QueuedRead {
                     body,
                     continuation: ReadContinuation::History(mut history),
@@ -477,15 +615,22 @@ impl Hyperliquid {
                 }
                 read => read,
             };
+            if let ReadContinuation::Account(request) = &read.continuation
+                && let Some((id, amend)) = request.amend_read()
+                && !self.amend_read_pending(cx, id, amend)
+            {
+                continue;
+            }
+            let background = read.occupies_account_slot();
+            let read_class = read.read_class();
             let QueuedRead {
                 body,
                 continuation,
                 streamed,
                 weight,
-                priority,
+                ..
             } = read;
             self.account.read_weight += weight;
-            let background = priority != ReadPriority::Foreground;
             if background {
                 self.account.background_reads += 1;
             }
@@ -496,7 +641,41 @@ impl Hyperliquid {
                 continuation.pending(),
                 streamed.then_some(ArrayAt::Root),
                 background,
+                read_class,
             );
+        }
+        if !self.account.reads.is_empty() {
+            let refill_at = self
+                .account
+                .reads
+                .iter()
+                .filter(|read| {
+                    self.account.read_weight.saturating_add(read.weight) > read.capacity()
+                })
+                .map(|read| {
+                    self.account.read_window
+                        + f64::from(
+                            self.account.read_weight.saturating_add(read.weight) - read.capacity(),
+                        ) * 60.
+                })
+                .fold(cx.now + 60_000., f64::min);
+            let at = self
+                .account
+                .reads
+                .iter()
+                .filter_map(QueuedRead::deadline)
+                .fold(refill_at, f64::min)
+                .max(cx.now + 1.);
+            if self
+                .account
+                .read_timer
+                .is_none_or(|(_, existing)| at < existing)
+            {
+                if let Some((timer, _)) = self.account.read_timer.take() {
+                    cx.clear_timer(timer);
+                }
+                self.account.read_timer = Some((cx.set_timer(at - cx.now), at));
+            }
         }
     }
     pub(crate) fn finish_background_read(&mut self, cx: &mut Cx<'_, Pending>, background: bool) {
@@ -512,6 +691,10 @@ impl Hyperliquid {
                 continuation: ReadContinuation::History(history),
                 ..
             } => history.root().owner() != owner,
+            QueuedRead {
+                continuation: ReadContinuation::Candles(read),
+                ..
+            } => read.context.owner() != owner,
             _ => true,
         });
     }
@@ -695,7 +878,7 @@ impl Hyperliquid {
         self.send_mode(cx);
         self.refresh_account(cx);
         self.account_read(cx, "userFees", None, Request::Fees, false);
-        self.check_builder(cx);
+        self.request_builder(cx, true);
         if !self.dex_names.is_empty() {
             self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
                 120_000.0,
@@ -707,6 +890,22 @@ impl Hyperliquid {
         }
     }
     pub(crate) fn check_builder(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = self.account.reads.iter_mut().find(|read| {
+            matches!(
+                &read.continuation,
+                ReadContinuation::Account(Request::Builder { startup: true })
+            )
+        }) {
+            if let ReadContinuation::Account(Request::Builder { startup }) = &mut read.continuation
+            {
+                *startup = false;
+            }
+            self.pump_reads(cx);
+            return;
+        }
+        self.request_builder(cx, false);
+    }
+    fn request_builder(&mut self, cx: &mut Cx<'_, Pending>, startup: bool) {
         let Some(user) = self.options.application_id.as_deref() else {
             self.account.builder_approved = Some(false);
             return;
@@ -727,10 +926,18 @@ impl Hyperliquid {
                 builder: &b.b,
             })
             .unwrap(),
-            Request::Builder,
+            Request::Builder { startup },
         );
     }
-    pub(crate) fn read_amend_source(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+    pub(crate) fn read_amend_source(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        amend: crate::trading::AmendRead,
+    ) {
+        if !self.amend_read_pending(cx, id, amend) {
+            return;
+        }
         #[derive(Serialize)]
         struct Read<'a> {
             r#type: &'static str,
@@ -738,12 +945,17 @@ impl Hyperliquid {
             oid: u64,
         }
         let Ok(oid) = id.parse::<u64>() else {
-            self.amend_source_read(cx, id, Err("the order ID is not numeric".to_owned()));
+            self.amend_source_read(cx, id, amend, Err("the order ID is not numeric".to_owned()));
             return;
         };
         let Some(user) = self.user() else {
             let Some(key) = self.options.key.as_deref() else {
-                self.amend_source_read(cx, id, Err("the account is not resolved".to_owned()));
+                self.amend_source_read(
+                    cx,
+                    id,
+                    amend,
+                    Err("the account is not resolved".to_owned()),
+                );
                 return;
             };
             #[derive(Serialize)]
@@ -757,7 +969,14 @@ impl Hyperliquid {
             })
             .unwrap();
             self.account.fence_read = true;
-            self.read_body(cx, body, Request::AmendRole { id: id.to_owned() });
+            self.read_body(
+                cx,
+                body,
+                Request::AmendRole {
+                    id: id.to_owned(),
+                    amend,
+                },
+            );
             self.account.fence_read = false;
             return;
         };
@@ -768,7 +987,14 @@ impl Hyperliquid {
         })
         .unwrap();
         self.account.fence_read = true;
-        self.read_body(cx, body, Request::AmendSource { id: id.to_owned() });
+        self.read_body(
+            cx,
+            body,
+            Request::AmendSource {
+                id: id.to_owned(),
+                amend,
+            },
+        );
         self.account.fence_read = false;
     }
     pub(crate) fn builder(&self) -> crate::Builder {
@@ -797,9 +1023,28 @@ impl Hyperliquid {
         let mut dexes = vec![String::new()];
         dexes.extend(self.dex_names.iter().cloned());
         for dex in dexes {
-            self.refresh_state(cx, &dex);
-            self.refresh_orders_scope(cx, &dex);
+            self.refresh_account_scope(cx, &dex);
         }
+    }
+    pub(crate) fn refresh_account_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
+        self.refresh_state(cx, dex);
+        self.refresh_orders_scope(cx, dex);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn recheck_account_startup(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        if self.options.public_data_only || !self.account.started || cx.frame_fed() {
+            return false;
+        }
+        if self.user().is_none() {
+            self.send_role(cx);
+        } else {
+            if !self.spot && !self.account.mode_resolved {
+                self.send_mode(cx);
+            }
+            self.refresh_account(cx);
+            self.refresh_spot_holdings(cx);
+        }
+        true
     }
     fn refresh_state(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
         if !self.account.inflight.insert(format!("state:{dex}")) {
@@ -1031,22 +1276,123 @@ impl Hyperliquid {
                 (self.account.mode == Mode::Portfolio).then_some(true),
             );
         }
+        // Only clearinghouseState is per dex: Hyperliquid ignores `dex` on fills, orders and
+        // events, refusing each copy as "Already subscribed".
         for dex in &self.dex_names {
-            for kind in [
-                "clearinghouseState",
-                "userFills",
-                "orderUpdates",
-                "userEvents",
-            ] {
-                send(kind, Some(dex), None, None);
-            }
+            send("clearinghouseState", Some(dex), None, None);
         }
+        // One activeAssetData per market filled the 1,000-per-IP cap with ~5 keyed
+        // accounts; held symbols take settings from clearinghouseState instead.
         for m in markets {
-            if !m.id.contains(':') && m.is_spot != Some(true) {
+            if !m.id.contains(':')
+                && m.is_spot != Some(true)
+                && self.account.asset_scope.contains(&m.symbol)
+            {
                 send("activeAssetData", None, Some(&m.id), None);
             }
         }
         interests
+    }
+
+    /// Re-subscribe settings when the selection or the set of symbols with open orders changes.
+    pub(crate) fn refresh_asset_scope(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot || self.options.public_data_only {
+            return;
+        }
+        let scope: std::collections::BTreeSet<String> = cx
+            .store
+            .orders()
+            .iter()
+            .map(|order| order.symbol.clone())
+            .chain(self.account.selected.clone())
+            .collect();
+        if scope != self.account.asset_scope {
+            self.account.asset_scope = scope;
+            self.propose_socket_interests(cx);
+        }
+    }
+
+    /// A caller read of `symbol`'s leverage, answered from a fresh activeAssetData read;
+    /// the symbol becomes the selection, whose settings then stream.
+    pub(crate) fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
+        let Ok(context) = cx.admit_http_command(safe_cex_engine::request_context::Policy {
+            operation: safe_cex_engine::request_context::Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: safe_cex_engine::request_context::RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let (Some(user), Some(coin)) = (self.user(), self.coin(cx, &symbol)) else {
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new(format!("Hyperliquid has no account leverage for {symbol}"))
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(safe_cex_engine::Outcome::NotSent),
+            );
+            return;
+        };
+        #[derive(Serialize)]
+        struct Read<'a> {
+            r#type: &'static str,
+            user: &'a str,
+            coin: &'a str,
+        }
+        let body = serde_json::to_string(&Read {
+            r#type: "activeAssetData",
+            user,
+            coin,
+        })
+        .unwrap();
+        if self.account.selected.as_deref() != Some(symbol.as_str()) {
+            self.account.selected = Some(symbol.clone());
+            self.refresh_asset_scope(cx);
+        }
+        let pending = Pending::Leverage(Box::new(crate::LeverageRead {
+            context: context.clone(),
+            symbol,
+        }));
+        if let Err((_pending, error)) = cx.request_managed_with_headers(
+            context.clone(),
+            None,
+            Method::Post,
+            format!("{}/info", self.rest()),
+            &[("Content-Type", "application/json")],
+            Some(body),
+            pending,
+        ) {
+            let _ = cx.fail_context(&context, error.venue_error());
+        }
+    }
+
+    /// The rails a leverage read reports: the venue's row, applied where settings may move.
+    pub(crate) fn leverage_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: crate::LeverageRead,
+        body: &str,
+    ) {
+        let row = serde_json::from_str::<ActiveAsset>(body)
+            .ok()
+            .filter(|row| self.symbol(&row.coin) == Some(read.symbol.as_str()));
+        let Some(row) = row else {
+            let _ = cx.fail_context(&read.context, "Malformed Hyperliquid active asset settings");
+            return;
+        };
+        let held = cx.store.positions().iter().any(|p| p.symbol == read.symbol);
+        if !held && !self.settings_uncertain(&read.symbol) {
+            self.apply_asset_setting(cx, &read.symbol, &row);
+        }
+        let isolated = row.leverage.kind != "cross";
+        let _ = cx.done_context(
+            &read.context,
+            format!(
+                "{{\"buyLeverage\":{0},\"sellLeverage\":{0},\"marginType\":\"{1}\",\"positionMode\":\"oneway\"}}",
+                row.leverage.value,
+                if isolated { "isolated" } else { "cross" }
+            ),
+        );
     }
     pub(crate) fn account_response(
         &mut self,
@@ -1101,7 +1447,7 @@ impl Hyperliquid {
                 self.account.mode = mode;
                 self.mode_ready(cx);
             }
-            Request::Builder => {
+            Request::Builder { .. } => {
                 self.account.builder_approved = serde_json::from_str::<Num>(raw)
                     .ok()
                     .map(|n| n.0 >= f64::from(self.builder().f));
@@ -1110,15 +1456,26 @@ impl Hyperliquid {
                     cx.hold_setting(crate::BUILDER_HOLD.clone());
                 }
             }
-            Request::AmendRole { id } => {
+            Request::AmendRole { id, amend } => {
+                if !self.amend_read_pending(cx, &id, amend) {
+                    return;
+                }
                 self.apply_role(raw);
                 if self.user().is_some() {
-                    self.read_amend_source(cx, &id);
+                    self.read_amend_source(cx, &id, amend);
                 } else {
-                    self.amend_source_read(cx, &id, Err("the account is not resolved".to_owned()));
+                    self.amend_source_read(
+                        cx,
+                        &id,
+                        amend,
+                        Err("the account is not resolved".to_owned()),
+                    );
                 }
             }
-            Request::AmendSource { id } => {
+            Request::AmendSource { id, amend } => {
+                if !self.amend_read_pending(cx, &id, amend) {
+                    return;
+                }
                 #[derive(serde::Deserialize)]
                 struct Lookup<'a> {
                     #[serde(borrow)]
@@ -1132,12 +1489,17 @@ impl Hyperliquid {
                     .and_then(|lookup| lookup.order)
                     .ok_or_else(|| "the order read was unreadable".to_owned());
                 match read {
-                    Ok(row) => self.amend_source_read(
-                        cx,
-                        &id,
-                        Ok((row.status.as_ref(), row.order.orig_sz, row.order.sz)),
-                    ),
-                    Err(error) => self.amend_source_read(cx, &id, Err(error)),
+                    Ok(row) => {
+                        let captured = self.capture_protective_source(cx, &id, &row.order);
+                        self.amend_source_read(
+                            cx,
+                            &id,
+                            amend,
+                            captured
+                                .map(|()| (row.status.as_ref(), row.order.orig_sz, row.order.sz)),
+                        );
+                    }
+                    Err(error) => self.amend_source_read(cx, &id, amend, Err(error)),
                 }
             }
             Request::Fees => {
@@ -1447,7 +1809,10 @@ impl Hyperliquid {
             Level::Warn,
             code::REQUEST_FAILED,
             error,
-            vec![("lastFailedPrivateReadKind", kind.as_str().into())],
+            vec![
+                ("lastFailedPrivateReadKind", kind.as_str().into()),
+                ("readKind", kind.as_str().into()),
+            ],
         );
     }
     fn bootstrap_read_needed(&self, kind: BootstrapRead) -> bool {
@@ -1493,6 +1858,8 @@ impl Hyperliquid {
             Request::Mode => Some(PrivateReadKind::Mode),
             _ => None,
         };
+        let read_kind = request.read_kind();
+        debug_assert!(kind.is_none_or(|kind| kind.as_str() == read_kind));
         match request {
             Request::Mode => self.mode_failed(cx),
             Request::Role => self.role_failed(cx, error),
@@ -1535,16 +1902,24 @@ impl Hyperliquid {
                     }
                 }
             }
-            Request::Builder => self.account.builder_approved = None,
-            Request::AmendSource { id } | Request::AmendRole { id } => {
-                self.amend_source_read(cx, &id, Err(error.to_owned()));
+            Request::Builder { .. } => self.account.builder_approved = None,
+            Request::AmendSource { id, amend } | Request::AmendRole { id, amend } => {
+                if !self.amend_read_current(&id, amend) {
+                    return;
+                }
+                self.amend_source_read(cx, &id, amend, Err(error.to_owned()));
             }
             Request::Fees => {}
         }
         if let Some(kind) = kind {
             self.private_read_failed(cx, kind, error);
         } else {
-            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+            cx.event(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                error,
+                vec![("readKind", read_kind.into())],
+            );
         }
     }
     /// `readPositions`: wait on each dex's next read. One already out may predate
@@ -1668,7 +2043,7 @@ impl Hyperliquid {
                 self.account.state_refresh_timer = Some(cx.set_timer(350.0));
             }
         }
-        if self.account.read_timer == Some(timer) {
+        if self.account.read_timer.is_some_and(|(id, _)| id == timer) {
             self.account.read_timer = None;
             self.pump_reads(cx);
         }
@@ -2095,11 +2470,17 @@ impl Hyperliquid {
             .positions()
             .iter()
             .map(|p| {
+                // The mid, as when `last` was always the mid; a trade print moves neither.
                 cx.store
                     .ticker(&p.symbol)
-                    .filter(|t| t.last > 0.0 && p.entry_price > 0.0)
-                    .map_or(p.unrealized_pnl, |t| {
-                        (t.last - p.entry_price)
+                    .and_then(|t| {
+                        [t.mid_price.unwrap_or(0.0), t.last]
+                            .into_iter()
+                            .find(|price| price.is_finite() && *price > 0.0)
+                    })
+                    .filter(|_| p.entry_price > 0.0)
+                    .map_or(p.unrealized_pnl, |price| {
+                        (price - p.entry_price)
                             * p.contracts
                             * if p.side == PositionSide::Long {
                                 1.0
@@ -2593,7 +2974,13 @@ impl Hyperliquid {
             }
             self.account.suppressed.insert(id.clone(), cx.now);
             cx.store.remove_orders(&[&id]);
-            if let Some(c) = row.cloid {
+            if let Some(c) = row.cloid
+                && self
+                    .account
+                    .records
+                    .get(c.as_ref())
+                    .is_none_or(|record| record.order.id.is_empty() || record.order.id == id)
+            {
                 self.account.records.remove(c.as_ref());
             }
             return;
@@ -2619,10 +3006,18 @@ impl Hyperliquid {
             .and_then(|c| self.account.records.get(c))
             .cloned();
         if let Some(record) = record {
-            order.kind = record.order.kind;
-            order.price = record.order.price;
+            let native_fields = row.order_type == "Limit"
+                || (row.trigger_px.is_some()
+                    && matches!(
+                        row.order_type.as_ref(),
+                        "Stop Market" | "Stop Limit" | "Take Profit Market" | "Take Profit Limit"
+                    ));
+            if !native_fields {
+                order.kind = record.order.kind;
+                order.price = record.order.price;
+            }
             order.reduce_only = record.order.reduce_only;
-            order.time_in_force = record.order.time_in_force;
+            order.time_in_force = order.time_in_force.or(record.order.time_in_force);
             self.account
                 .preplacements
                 .retain(|p| p.order.client_order_id != order.client_order_id);
@@ -3033,6 +3428,20 @@ fn every_dex_clean(names: &[String], clean: &HashMap<String, u64>) -> Option<u64
     names.iter().try_fold(*main, |oldest, name| {
         clean.get(name).map(|epoch| oldest.min(*epoch))
     })
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Role => S::ACCOUNT,
+            Self::Mode => S::ACCOUNT,
+            Self::State { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            Self::Spot { .. } => S::BALANCE,
+            _ => S::NONE,
+        }
+    }
 }
 
 #[cfg(test)]

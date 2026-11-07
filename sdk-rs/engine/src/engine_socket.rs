@@ -3,7 +3,8 @@ use super::*;
 use crate::socket_driver::{ControlWork, Driver, Effect};
 use crate::socket_lifecycle::{
     Admission, Control, ControlPolicy, EncodedBatch, Epoch, FeedId, FeedPolicy, Ingress, Interest,
-    LifecycleEvent, MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, SocketError,
+    LifecycleEvent, MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, Retirement,
+    SocketError,
 };
 const MAX_EFFECTS: usize = MAX_FEEDS * 16;
 const MAX_PROPOSALS: usize = MAX_FEEDS;
@@ -33,21 +34,8 @@ pub(super) struct Continuation<P> {
 }
 
 impl<P> Cx<'_, P> {
-    fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
-        let mut driver = self.take_socket_driver();
-        let result = f(&mut driver, self);
-        self.restore_socket_driver(driver);
-        result
-    }
-    // Shared out of line: every driver closure would otherwise inline the
-    // driver's default construction and drop.
-    #[inline(never)]
-    fn take_socket_driver(&mut self) -> Driver {
-        std::mem::take(&mut self.io.core.socket_driver)
-    }
-    #[inline(never)]
-    fn restore_socket_driver(&mut self, driver: Driver) {
-        self.io.core.socket_driver = driver;
+    fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut CoreCx<'_>) -> R) -> R {
+        self.core().with_socket_driver(f)
     }
     #[inline(never)]
     pub(super) fn socket_effects(&mut self, effects: Vec<Effect>) {
@@ -179,6 +167,11 @@ impl<P> Cx<'_, P> {
     }
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
         self.io.core.socket_driver.state.authenticated(feed)
+    }
+    /// Whether `key`'s subscribe frame was sent on the feed's current socket (and not
+    /// since unsubscribed): what was released, not what was encoded.
+    pub fn socket_released(&self, feed: FeedId, key: &str) -> bool {
+        self.io.core.socket_driver.state.released(feed, key)
     }
     /// Native one-shot frames ordered after current interests, retained with
     /// their epoch until final drain. They are never persistent interests.
@@ -456,6 +449,21 @@ impl crate::engine::CoreRef<'_> {
 }
 
 impl<V: Venue> Engine<V> {
+    /// Install before start; observes final managed subscription handoff and retirement.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_interest_observer(&mut self, observer: crate::socket_lifecycle::InterestObserver) {
+        assert!(
+            !self.has_started(),
+            "interest observer must precede engine start"
+        );
+        assert!(
+            self.io.core.socket_driver.state.observer.is_none(),
+            "interest observer already installed"
+        );
+        observer.observe(crate::socket_lifecycle::InterestObservation::Attached);
+        self.io.core.socket_driver.state.observer = Some(observer);
+    }
+
     pub(super) fn has_socket_work(&self) -> bool {
         if !V::managed_sockets() {
             return false;
@@ -484,7 +492,7 @@ impl<V: Venue> Engine<V> {
     fn socket_mutate<R>(
         &mut self,
         now: f64,
-        f: impl FnOnce(&mut Driver, &mut Cx<'_, V::Pending>) -> R,
+        f: impl FnOnce(&mut Driver, &mut CoreCx<'_>) -> R,
     ) -> R {
         self.assert_live();
         let mut cx = Cx {
@@ -598,24 +606,22 @@ impl<V: Venue> Engine<V> {
         loop {
             self.assert_live();
             if processed >= MAX_EFFECTS && !self.io.core.socket_failed {
-                self.io.core.socket_failed = true;
-                self.io
-                    .core
-                    .socket_effects
-                    .retain(|e| matches!(e, Effect::Retired { .. }));
-                self.io.socket_proposals.clear();
-                self.io.core.socket_proposal_bytes = 0;
-                let mut cx = Cx {
+                Cx {
                     now,
                     store: &mut self.store,
                     io: &mut self.io,
-                };
-                cx.notice(
-                    Level::Error,
-                    log_code::SUBSCRIPTION_REJECTED,
-                    "Managed socket effect processing capacity exhausted",
-                );
-                let stopped = self.socket_mutate(now, |d, cx| d.stop_all(cx));
+                }
+                .core()
+                .exhaust_socket_work_before_clear();
+                self.io.socket_proposals.clear();
+                Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                }
+                .core()
+                .exhaust_socket_work_after_clear();
+                let stopped = self.socket_mutate(now, |driver, cx| driver.stop_all(cx));
                 self.io.core.socket_effects.extend(stopped);
             }
             if let Some(effect) = self.io.core.socket_effects.pop_front() {
@@ -630,35 +636,13 @@ impl<V: Venue> Engine<V> {
                     if V::socket_capabilities().handoff {
                         self.cancel_socket_continuations(retirement.epoch);
                     }
-                    let pending = std::mem::take(&mut self.io.core.socket_after);
-                    for (epoch, text) in pending {
-                        if epoch == retirement.epoch {
-                            self.io
-                                .core
-                                .socket_driver
-                                .state
-                                .release_external(text.len());
-                        } else {
-                            self.io.core.socket_after.push_back((epoch, text));
-                        }
+                    Cx {
+                        now,
+                        store: &mut self.store,
+                        io: &mut self.io,
                     }
-                    {
-                        let mut cx = Cx {
-                            now,
-                            store: &mut self.store,
-                            io: &mut self.io,
-                        };
-                        if reason == RetireReason::Closed
-                            && cx.io.core.sockets.closed(retirement.epoch.socket(), true)
-                        {
-                            cx.io.core.health.count(log_code::WS_CLOSED);
-                        }
-                        // Nothing was dialled, so the transport close below must not count.
-                        if reason == RetireReason::RouteExhausted {
-                            cx.io.core.sockets.closed(retirement.epoch.socket(), true);
-                        }
-                        cx.close_socket_transport(retirement.epoch.socket());
-                    }
+                    .core()
+                    .retire_socket_transport(retirement, reason);
                     let result = self.socket_native(
                         now,
                         LifecycleEvent::Retired {
@@ -861,7 +845,9 @@ impl<V: Venue> Engine<V> {
                 };
                 let other = matches!(
                     control,
-                    Control::Other | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
+                    Control::Other
+                        | Control::Unwatched
+                        | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
                 );
                 #[cfg(feature = "socket-native-timing")]
                 let other = other || matches!(control, Control::Traffic);
@@ -1263,6 +1249,65 @@ impl<V: Venue> Engine<V> {
         }
         self.process_socket_work(now);
         true
+    }
+}
+
+impl CoreCx<'_> {
+    fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
+        let mut driver = self.take_socket_driver();
+        let result = f(&mut driver, self);
+        self.restore_socket_driver(driver);
+        result
+    }
+    #[inline(never)]
+    fn take_socket_driver(&mut self) -> Driver {
+        std::mem::take(&mut self.io.core.socket_driver)
+    }
+    #[inline(never)]
+    fn restore_socket_driver(&mut self, driver: Driver) {
+        self.io.core.socket_driver = driver;
+    }
+    // Typed proposal destruction remains between these two phases, before notice and stop.
+    #[inline(never)]
+    fn exhaust_socket_work_before_clear(&mut self) {
+        self.io.core.socket_failed = true;
+        self.io
+            .core
+            .socket_effects
+            .retain(|e| matches!(e, Effect::Retired { .. }));
+    }
+    #[inline(never)]
+    fn exhaust_socket_work_after_clear(&mut self) {
+        self.io.core.socket_proposal_bytes = 0;
+        self.notice(
+            Level::Error,
+            log_code::SUBSCRIPTION_REJECTED,
+            "Managed socket effect processing capacity exhausted",
+        );
+    }
+    #[inline(never)]
+    fn retire_socket_transport(&mut self, retirement: Retirement, reason: RetireReason) {
+        let pending = std::mem::take(&mut self.io.core.socket_after);
+        for (epoch, text) in pending {
+            if epoch == retirement.epoch {
+                self.io
+                    .core
+                    .socket_driver
+                    .state
+                    .release_external(text.len());
+            } else {
+                self.io.core.socket_after.push_back((epoch, text));
+            }
+        }
+        if reason == RetireReason::Closed
+            && self.io.core.sockets.closed(retirement.epoch.socket(), true)
+        {
+            self.io.core.health.count(log_code::WS_CLOSED);
+        }
+        if reason == RetireReason::RouteExhausted {
+            self.io.core.sockets.closed(retirement.epoch.socket(), true);
+        }
+        self.close_socket_transport(retirement.epoch.socket());
     }
 }
 
@@ -2494,11 +2539,14 @@ mod tests {
             }
             let actions = e.io.core.actions.len();
             let timers = e.io.core.timers.clone();
-            supervisor.authentication_progress(&mut Cx {
-                now,
-                store: &mut e.store,
-                io: &mut e.io,
-            });
+            supervisor.authentication_progress_core(
+                &mut Cx {
+                    now,
+                    store: &mut e.store,
+                    io: &mut e.io,
+                }
+                .core(),
+            );
             assert_eq!(e.io.core.actions.len(), actions);
             assert_eq!(e.io.core.timers, timers);
             assert_eq!(
@@ -2526,11 +2574,14 @@ mod tests {
         }
         let actions = e.io.core.actions.len();
         let timers = e.io.core.timers.clone();
-        supervisor.authentication_progress(&mut Cx {
-            now: f64::MAX / 2.,
-            store: &mut e.store,
-            io: &mut e.io,
-        });
+        supervisor.authentication_progress_core(
+            &mut Cx {
+                now: f64::MAX / 2.,
+                store: &mut e.store,
+                io: &mut e.io,
+            }
+            .core(),
+        );
         assert_eq!(e.io.core.actions.len(), actions);
         assert_eq!(e.io.core.timers, timers);
         assert_eq!(
@@ -2560,11 +2611,14 @@ mod tests {
         e.io.core.next_id =
             crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
         let trapped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            supervisor.authentication_progress(&mut Cx {
-                now: 14_000.,
-                store: &mut e.store,
-                io: &mut e.io,
-            });
+            supervisor.authentication_progress_core(
+                &mut Cx {
+                    now: 14_000.,
+                    store: &mut e.store,
+                    io: &mut e.io,
+                }
+                .core(),
+            );
         }));
         assert!(trapped.is_err());
         assert!(e.failed());

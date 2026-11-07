@@ -111,3 +111,36 @@ it('selects STP support from the record and retains the engine-reported version 
   await exchange.changeStpMode('EXPIRE_TAKER');
   expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'setStpMode', mode: 'EXPIRE_TAKER' });
 });
+
+
+it.each(['phemex', 'binance', 'binancepm'] as const)(
+  '%s exposes the native per-symbol order-history requirement to collectors',
+  (name) => {
+    const { exchange } = make(name, { orderHistoryNeedsSymbol: true });
+    expect(exchange.engineCapabilities?.orderHistoryNeedsSymbol).toBe(true);
+    expect(exchange.capabilities).toMatchObject({ orderHistoryNeedsSymbol: true });
+  },
+);
+
+it.each([true, false])('preserves the complete authoritative capability record with flags=%s', (enabled) => {
+  const { exchange } = make('phemex', {
+    orderHistoryNeedsSymbol: enabled,
+    freshPositions: enabled,
+    nukeAccountCancel: enabled,
+    symbolCancelMissesUnseen: enabled,
+    orderReadCovers: enabled,
+    finiteHistoryBounds: enabled,
+  });
+  for (const [key, value] of Object.entries(exchange.engineCapabilities!)) {
+    expect(exchange.capabilities, key).toHaveProperty(key, value);
+  }
+});
+
+it('keeps native policy unknown before a record arrives and retains the base method capabilities', () => {
+  const exchange = new RustEngineExchange('phemex', { key: 'fixture', secret: 'fixture' }, new DefaultStore());
+  running.push(exchange);
+  expect(exchange.engineCapabilities).toBeUndefined();
+  expect(exchange.capabilities).not.toHaveProperty('orderHistoryNeedsSymbol');
+  expect(exchange.capabilities).toHaveProperty('startup', true);
+  expect(exchange.capabilities).toMatchObject({ optionChain: false, optionExpiries: false, accountGreeks: false });
+});

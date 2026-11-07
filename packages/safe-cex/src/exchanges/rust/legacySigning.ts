@@ -63,6 +63,40 @@ export const signHostedHttp = async (
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
+  if (name === 'kucoin') {
+    const xhr = axios.create({ timeout: options.extra?.recvWindow ?? 10_000,
+      paramsSerializer: { serialize: (params) => qs.stringify(params) },
+      headers: { 'Content-Type': 'application/json', 'X-CHANNEL-API-CODE': '3zexp' } });
+    xhr.interceptors.request.use(async (config) => {
+      if (!primaryComplete || options.publicDataOnly === true) return config;
+      const { credential } = await host.hostedSigning({ kind: 'credential' });
+      if (!credential) throw new Error('Signing credential is unavailable');
+      const clock = host.hostedSigningClock();
+      const timestamp = String(clock.stampMs);
+      const query = config.params ? `?${qs.stringify(config.params, { encode: false })}` : '';
+      const body = typeof config.data === 'string' ? config.data : config.data ? JSON.stringify(config.data) : '';
+      const broker = options.extra?.kucoinBroker;
+      const partner = broker?.partner.trim();
+      const brokerName = broker?.brokerName.trim();
+      const brokerPrefix = partner && brokerName ? timestamp + partner : undefined;
+      const payload = JSON.stringify({ slot: 'primary',
+        payload: `${timestamp}${config.method?.toUpperCase() ?? 'GET'}${config.url ?? ''}${query}${body}`,
+        ...(brokerPrefix === undefined ? {} : { brokerPrefix }) });
+      const output = await host.hostedSigning({ kind: 'http', payload, ...clock });
+      const passphrase = output.headers?.find(([key]) => key === 'KC-API-PASSPHRASE')?.[1];
+      const brokerMac = output.headers?.find(([key]) => key === 'KC-API-PARTNER-SIGN')?.[1];
+      if (output.credential !== credential || !output.signature || !passphrase || (brokerPrefix && !brokerMac))
+        throw new Error('Signing identity changed');
+      const headers = new AxiosHeaders(config.headers);
+      for (const key of Object.keys(headers)) if (/^KC-(API-|BROKER-)/i.test(key)) headers.delete(key);
+      headers.set({ 'KC-API-KEY': credential, 'KC-API-SIGN': output.signature, 'KC-API-PASSPHRASE': passphrase,
+        'KC-API-TIMESTAMP': timestamp, 'KC-API-KEY-VERSION': '2',
+        ...(brokerPrefix ? { 'KC-API-PARTNER': partner, 'KC-API-PARTNER-SIGN': brokerMac,
+          'KC-BROKER-NAME': brokerName, 'KC-API-PARTNER-VERIFY': String(broker?.verify ?? true) } : {}) });
+      return { ...config, headers };
+    });
+    return signHttpCapture(xhr, request);
+  }
   // Other dispatch families have no request codec here.
   const aster = name === 'asterdex';
   const okx = OKX.has(name);
@@ -199,10 +233,11 @@ export const signHostedWsAuth = async (
   const { toSign, outputFormat } = request.wsAuth ?? {};
   if (!toSign || !outputFormat) return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
   if (outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address' || outputFormat === 'lighter-tx'
+    || outputFormat === 'grvt-order' || outputFormat === 'grvt-address'
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
   if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64'
-    && outputFormat !== 'bitunix-double-sha256')
+    && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'kucoin-batch')
     return { id: request.id, error: 'Unsupported WS auth output format' };
   const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
   if (!output.signature) throw new Error('Signing result is unavailable');

@@ -8,10 +8,15 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, and
+Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
+GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
+KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
-policy, with no separate beta override. Robinhood is admitted through the existing Lighter
-family and remote-signing policy; its preview/production visibility flags are unchanged.
+policy, with no separate beta override. Refused `remoteSigner` accounts are told to
+turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
+accounts receive neutral delegated-signing wording. Both use the venue display
+name and retain `unsupported` / `notSent` before I/O.
+Robinhood is admitted through the existing Lighter family and remote-signing policy; its preview/production visibility flags are unchanged.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
 
@@ -224,6 +229,11 @@ are reported through `console.error` with venue, event and original cause.
 Reporting emits no error/log event, so failures in those listeners cannot recurse.
 The inherited once/off/context and subscription-snapshot behavior stays intact.
 
+Rust `startup.incomplete` carries bounded per-section cause fields from the native
+engine. `BaseExchange.emitAndLogError` derives Sentry tags from those event fields
+for local and hosted accounts; it never guesses causes from browser read state.
+See `docs/plans/callers/startup-incomplete-causes.md` for the field contract.
+
 Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
 with the actual SDK venue plus method, redacted path template, phase and closed
 failure kind. Queries, origins and request material are never diagnostic fields;
@@ -265,6 +275,12 @@ field mismatch still fails. Testnet accounts ignore the venue-keyed source and r
 their own feed. Websocket gateways still reject.
 A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
+Shared ticker `observedAt` carries source engine receipt times for last/mark/index,
+including unchanged observations. SCXF's optional TICKER_OBSERVATIONS section and
+an opt-in shared-feed handshake preserve those times across frame/port/in-process
+hops; polling, snapshots and local REST restoration never date them as now.
+Older producers retain changed-value-only dating; older native consumers receive
+only the legacy JSON shape. Only genuinely observed fields gain freshness.
 Matching shared ticker seeds wake startup even when identical REST data means
 the native engine emits no changed frame.
 Book/candle listeners registered before startup retain current demand and replay
@@ -363,9 +379,17 @@ read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
 maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
 order-book queries and options. Clock selection is shared engine-host policy:
-the default SDK transport awaits the shared `virtualClock` startup and reads it
-dynamically for every venue. Explicit host/recording transports retain their own
-clock; native servers supply their OS clock and own its synchronization. There is no per-venue
+the default SDK transport awaits shared `virtualClock` startup, anchors an
+epoch-shaped scheduling clock to `performance.now()`, and never moves its live
+deadlines on subsequent synchronization. Browser workers wait up to 30 s for
+an initial host time push before anchoring. Later syncs update only the engine's
+protocol UTC fallback; small corrections preserve venue calibration, while a
+>1 s host-baseline discontinuity (including suspend) invalidates it. The default
+transport records wall-versus-monotonic divergence as pending UTC data only;
+EngineHost drains it outside HTTP handoffs before the next Rust call. Journal
+UTC bounds and scheduled-cancel validation still use synchronized wall time.
+Explicit host/recording transports retain their own clock; native servers supply
+their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue
 `hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
 `start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
@@ -420,8 +444,17 @@ write whose outcome is unknown fences its symbol. From a source advertising
 a symbol not yet named turns uncertain or a partial lift leaves some standing,
 and the page asks the source for `refreshAccountOrders(symbols)` once
 `liftAfterMs + 500 ms` has passed: one timer, the latest names, the earliest due
-time. The source's engine (`refreshOrders`) bounds the reads. A
-LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
+time. The source's engine (`refreshOrders`) bounds the reads. A plain Unknown
+cancel has no placement fence: for a source-refreshing venue,
+`orders.refresh { symbols }` asks the source once without disturbing that
+placement-hold timer. It preserves the cancel's Unknown error, never replays,
+and never infers a Canceled order from absence.
+Bitget also sends bounded `orders.cancel_check` targets before that same ask.
+The source registers them through read-only `registerCancelChecks`, then runs
+`refreshOrders` even if registration refuses. Only its clean post-registration
+native census can report present/absent before cached-algo retention; it never
+changes the writer's original Unknown command result.
+A LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
 snapshot}`, after the `forwardFrames` op, and keeps posting fill ops.
 
 The web builds a second `RustEngineExchange` on the main thread; the worker's
@@ -556,6 +589,17 @@ Actual empty reads and public-only sessions still return empty arrays. Journal
 and ingestion use the separate strict `fetchHistoricalPositions` path, so this
 change confers no ingestion completion or new history capability.
 
+## Native history row diagnostics
+
+Bitget and Kraken row refusals carry `causeCode: HISTORY_DECODE` and a closed
+`historyDecode: { schema, reason }` record through host and worker errors. The
+record contains no row values, identities or response text. Only Bitget and
+Kraken enable the non-default `history-row-diagnostics` engine feature; the JS
+validator remains available when native detail is absent. Bitget rejects a
+proven invalid row immediately instead of replaying the same page; transport
+and envelope failures retain their bounded retry policy. Native strict checks
+and Kraken's existing accepted-prefix incomplete policy remain unchanged.
+
 ## Rust incomplete history
 
 A successful partial Rust history read returns the available rows with a
@@ -584,7 +628,11 @@ wire protocol. See B11 in `docs/plans/RUST_CUTOVER_CALLERS.md`.
 
 Engine venues own their sockets and reconnect policy; the wasm host only
 observes them. `EngineHost.socketHealth()` keeps per-channel (public, business,
-private) open/first-frame/close state, at one property write per frame.
+private) open/first-frame/close state, at one property write per carried channel
+per frame. `SocketSpec::public_topics(true)` declares that a primary private
+socket also carries public topics; it preserves routing/authentication and counts
+the one physical socket in both health channels. Hyperliquid and TxFlow use it
+only when their public topics are direct; separate sockets remain independent.
 `RustEngineExchange` exposes one `RustSocketHandle` per channel through the
 `BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
 CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
@@ -597,6 +645,11 @@ again resets it. Private `privateLastMessage` retains the last received frame's
 page-clock timestamp while the socket is uninitialized or reconnecting; a feed
 that has never received a frame still has no timestamp. Health/initialization
 flags remain independent of this diagnostic age.
+
+`store.latency` is nullable: null means no measurement, including on reset.
+STATUS keeps its fixed layout and uses `LATENCY_MEASURED` to distinguish an
+actual zero sample; positive legacy samples remain readable. Frame-fed engines
+and worker stores preserve null. UI callers must hide unknown latency.
 
 ## Client order ID contract
 
@@ -1039,6 +1092,12 @@ loads the real registry and enforces the following minimum contracts:
   non-fallback `start` implementation;
 - TP/SL trigger defaults must belong to the unique advertised trigger set.
 
+Rust public capabilities also retain the loaded engine record, including
+`orderHistoryNeedsSymbol` and other authoritative policy flags. Those fields
+remain absent before engine/worker capability adoption; method-derived booleans
+retain their existing checks. Symbol-scoped collectors must read this record,
+not guess from a venue name or send a symbol-less query as an empty census.
+
 The fills-history runtime gate is deliberately not metadata. Ingestion checks
 `exchange.capabilities.fillHistory` and then applies
 `symbolScopedFills.ts` to decide whether the venue can be asked account-wide or
@@ -1178,6 +1237,21 @@ hosts consume these hints before network I/O. Public CORS routes come from the
 provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.
 
+Managed HTTP carries the engine's closed `requestClass` into HOW outside signed
+packet bytes. TS ignores non-write hints on non-GET methods; explicit remaining
+engine deadlines still govern managed posted reads. Catalogue discovery alone
+gets 60 s (90 s during startup): markets, instruments, contracts and symbol/asset/
+product catalogues, including closed catalogue RPC kinds. Live public depth,
+order books, tickers/market summaries, trades, candle polls and funding/mark-price
+reads get 20 s on every family; unknown public read kinds also stay short. Engine
+history queries (fills/order history/income) get 30 s, while candles and public
+trades use 20 s. Semantic classification happens once at the shared managed-HTTP
+boundary and uses the original Context issuance time, so neither re-prepare nor
+retry renews the deadline. Explicit nonstandard venue bounds and shorter Plan/
+caller caps remain authoritative. Both engine and transport diagnostics name
+class, budget and elapsed milliseconds; readiness stays inside the original
+bound, with no write replay.
+
 Managed engine HTTP uses `Transport.prepareHttp` to finish route/proxy-token
 and tunnel readiness before signing. `credentialIntent` (`public`, `primary`,
 `secondary`) selects the route independently of HTTP method or credential headers;
@@ -1228,6 +1302,15 @@ declares a separate `privateUta` channel, resolved as the optional
 `wsPrivateUta`. `createWebsocket` recognises a relay url (`isRelayUrl`) and hands `RelayWebSocket` to the reconnecting socket as its `WebSocket` option.
 
 **One set of hosts since AWS_EXIT step 4: the browser build's, which the hosted exchange server shares.** Master (the Rust bundle) sends every tunnel, relay, private-pool and per-venue socket to the Vultr host `fsjnpy143pbz-tyo` — Tokyo for every region, so `PRIVATE_PROXY_JP/ASIA/GRVT_TINY` and `TOKYO/SINGAPORE_HOW_EGRESS` are each one value, and okx/okxeu/bitget/blofin/coinbase private sockets are relay urls (`BROWSER_WS_HOSTS` in `routingTable.ts`). The public CORS proxy (`PUBLIC_CORS_PROXY`) is the same Vultr host's `/api/public_proxy`: the edge Worker serves it without a JWT, from the tunnel hosts' own IPs and never the whitelisted fleet, even when a caller attaches its proxy token (Binance public reads do), so public-data weight stays off the IPs users trade through (`infra/tofu/CLAUDE.md` → trade tunnel). **The rust lanes must not be released until `public_cors_enabled` is on and both tunnel hosts carry the public CORS container**, or every public read 403s. `services/exchange-server` pinned the old AWS hosts at boot (`pinTealstreetEgressHosts`); the pin was deleted on master 2026-10-29 (the running containers keep it until the cutover deploy, AWS_EXIT step 4) so a hosted account egresses exactly like a browser one, and `services/exchange-server/src/egress.test.ts` fails if the server sets a host of its own again. **Read hosts at call time** — `tunnelEgressUrl`, `getPrivateProxyHost`, `getPublicCorsProxy`, `getRoutingTable` — because tests substitute them (`setTunnelEgressUrls`, `setRoutingWsHosts`) after modules load. **`WS_RELAY_PRIVATE` is not a kill switch for the relay any more**: for a proxied okx, okxeu, bitget or blofin account the relay url IS the channel's `host`, which the flag never gated (it gates only the `relay` candidate a direct account may fall back to). Turning the flag off leaves those sockets on the relay; the rollback is redeploying the previous build (or moving the user back to legacy).
+
+**Fleet REST fallback allowlist.** `transport/tealstreet/proxyFleetAllowlist.ts` must
+match the active HTTPS ACLs in `terraform/private-exchange-proxy/haproxy-sg-running.cfg`.
+Its test also requires each advertised route to select an existing backend; commented ACLs
+are not routes. Remove retired DNS names from both files together, or
+`engine.ts` can select an HTTP fallback the fleet cannot serve. WEEX remains
+HTTP-only (no HOW); adding its fleet route does not enable the venue or change
+that transport policy. Lighter's `testnet-api.lighter.xyz` does not resolve and
+is intentionally absent; do not introduce another dead backend to cover it.
 
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned families (bitmex always, bybit when tunnelling) whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
@@ -1298,6 +1381,35 @@ routing is **byte-identical** to before. Precedence for the secondary read trans
 secondary client's `overrideProxyUrl`. `createExchangeFromAccount` sets
 `secondaryProxyUrl` to `PUBLIC_CORS_PROXY` — the same
 edge Worker `/api/public_proxy` host `getPublicCorsProxy()` returns (the tunnel hosts' own IPs, never the whitelisted fleet).
+
+**Nothing credentialed goes to the public proxy (`transport/publicProxyGuard.ts`).**
+Engine `prepare` refuses, before I/O, any request bound for `publicCorsProxy()`
+with primary/secondary intent, an `Authorization`/venue key header or a
+`signature`/`sign` query param (`SignedPublicProxyRefusal`, code
+`HTTP_PREPARATION_INVALID`). Secondary read keys are deprecated, so their default
+public-proxy reads fail closed, and the native plan omits a public-proxy
+`readHttp`. Lighter's `usesRestProxy` profiles (`payloadSignedViaPublicProxy`)
+keep payload-signed REST there. The native short-lived token
+(`deadline:account:key-index:hex(80-byte signature)`) may appear in `Authorization`
+or the `auth` query parameter only on that deployment's exact API origin and this
+explicit method/path allowlist:
+GET `/api/v1/trades`, `/api/v1/accountInactiveOrders`, `/api/v1/accountActiveOrders`,
+`/api/v1/positionFunding`, `/api/v1/accountLimits`; POST `/api/v1/changeAccountTier` (the existing user setting).
+Every other venue credential header and every `signature`/`sign` query parameter
+is refused, including on Lighter. Binding repeats the check on the signer's final
+URL, query tokens and venue headers before raw binding; refusal releases the
+preparation. Legacy binding checks the captured send URL and refuses any URL change.
+Proxy-owned authorization is separate from the venue's signed headers.
+
+**Secondary read keys are bypassed (`src/secondaryReadKeys.ts`,
+`SECONDARY_READ_KEYS_ENABLED = false`).** `withSecondaryReadKeyPolicy` drops the
+saved read key before Rust signer setup and in the engine transport/plan, so
+signed reads use the primary key and route, with no warning. The account's
+`secondaryProxyUrl` remains only as the egress for managed unsigned public GETs
+(TS `publicReadHttp` and the native plan's `publicReadHttp`, no `readHttp`),
+except direct-public venues; POSTs and header-inferred GETs keep the account route. Coinbase drops that egress as
+before. Every secondary path below, and the NX UI and flags, stays intact behind
+the switch; tests pinning today's behaviour mock it to `true`.
 
 The Rust `SecondaryKeyClients` exposes the same get-only split, keeping generic
 request calls on the primary. The raw secondary adapter is private, so its
@@ -1728,12 +1840,29 @@ Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
 Each Hyperliquid engine issues at most three routine account reads at once, with
 core Mode/State/Orders ahead of ancillary work. Queued intents acquire their
-managed deadline only when issued. Caller-owned reads and uncertain-write
-reconciliation bypass those slots while retaining the existing quota and root
-deadlines; only completion of an issued routine read releases its slot. Shared
+managed deadline only when issued. Foreground Orders, including refresh asks,
+Unknown reconciliation and owed successors, retain priority but consume the same
+slots; promoting a queued intent preserves its captured census epoch. Caller-owned
+history, positions and settings retain their independent admission and original
+quota/root deadlines. Only completion of a slotted read releases its slot. Shared
 dispatch waiters use FIFO leases so newer cheap reads cannot starve older Orders;
 100 ms renewal and 2 s expiry bound a dead worker's obstruction without charging
 its abandoned work.
+
+Explicit native prerequisites and fence reconciliation precede account financial
+reconciliation, then normal ancillary reads and bulk caller history/candles in both
+admission layers. Account State/Orders, reconnect snapshots and Role/Mode/Spot
+use the reconciliation class; its 1,000-weight ceiling shares the critical reserve,
+while explicit fence/amend reads retain first rank. The three-slot financial bound
+stays in place. Startup fees/builder are queued until financial reads settle; a live
+placement can release its queued builder check with its ordinary class and bound. The 1,000-weight
+bucket refills at 1,000/min; noncritical work can occupy 800, reserving 200 for
+critical reads. Native refill is continuous. Pending native metadata supplies the
+closed class through the Hyperliquid-only WASM `httpReadClass` export; a caller
+orderStatus lookup stays bulk. Classes never enter HTTP bytes or grant authority.
+Weight-blocked preparations keep their leased FIFO position through dispatch.
+Candles retain their original 20 s native bound, capped by a shorter caller wait;
+queued expiry cannot turn into a late send. See `docs/plans/callers/hl-critical-read-priority.md`.
 
 The worker's unchanged 120 s timeout preserves closed native startup fields and
 per-account `/info` route, 429, quota-wait, undispatched and in-flight counters.
@@ -1766,6 +1895,9 @@ Unavailable storage from startup preserves independent native discovery/backoff.
 After a successful coordination transaction, storage loss refuses preparation
 instead of bypassing an unknown lease. Waiter cancellation never deletes a peer's
 lease/cooldown; each engine still parses and publishes its own catalogue.
+The 30 s storage recovery pause starts only on an actual failed storage attempt.
+Retries refused during that pause cannot extend it; after expiry the coordinator
+reopens storage and rechecks the existing route-scoped lease before sending.
 Future-dated strict ownership stays blocking. A dispatched timeout publishes a
 cooldown before abort cleanup without delaying the caller; expired ownership
 retains its minimum failure window until that publication can settle. The original
@@ -1779,3 +1911,11 @@ plus maximum hidden timer lateness across engine/HOW callbacks. These are TS
 host observations, not native venue health or server-managed browser evidence.
 Snapshots retain object identity until a bucket changes; the existing health
 sync publishes them without a new polling loop. The wasm binary is unchanged.
+
+`updateSymbolMetadata` rechecks exact symbol membership after native market readiness
+before querying leverage. A foreign symbol or an engine retired during readiness
+starts no metadata command. UI callers also validate their account market binding.
+
+Bybit native receive-window corrections emit bybit.clock.corrected with numeric
+offsetMs only. Hosts without an explicit clock-advice listener keep the normal
+info log; CLI listeners replace it with one clock-sync warning per session.

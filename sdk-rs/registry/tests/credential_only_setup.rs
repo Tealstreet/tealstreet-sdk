@@ -33,7 +33,7 @@ impl safe_cex_venues::Visit for Accept {
 /// Omni, the eighth, is pinned after the socket sign-failure fix lane.
 #[test]
 fn k4_non_validating_crates_without_dispatch_signing_refuse_injected_identities() {
-    for venue in ["breakoutprop", "grvt", "orderly", "polymarket"] {
+    for venue in ["breakoutprop", "orderly", "polymarket"] {
         for primary in [
             r#"{"credential":"primary.credential","signing":""}"#,
             r#"{"credential":"","signing":"primary.signing"}"#,
@@ -52,6 +52,30 @@ fn k4_non_validating_crates_without_dispatch_signing_refuse_injected_identities(
                 "{venue}"
             );
         }
+    }
+}
+
+/// GRVT supports dispatch signing; opaque refs still need their owning provider.
+#[cfg(feature = "grvt")]
+#[test]
+fn k4_grvt_injected_refs_still_require_the_installed_provider_after_cutover() {
+    for primary in [
+        r#"{"credential":"primary.credential","signing":""}"#,
+        r#"{"credential":"","signing":"primary.signing"}"#,
+        r#"{"credential":"primary.credential","signing":"primary.signing"}"#,
+    ] {
+        let options: EngineOptions =
+            serde_json::from_str(&format!(r#"{{"signing":{{"primary":{primary}}}}}"#)).unwrap();
+        let error = safe_cex_venues::build(
+            "grvt",
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(17)),
+            Accept,
+        )
+        .expect_err("refs alone cannot install a signing provider");
+        assert_eq!(error.message, "GRVT requires its primary signing provider");
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, None);
     }
 }
 

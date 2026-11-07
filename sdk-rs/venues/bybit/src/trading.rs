@@ -6,6 +6,7 @@
 pub(crate) mod acknowledgement;
 pub(crate) mod codes;
 pub(crate) mod ordinary;
+mod partial;
 
 use crate::sign::Body;
 use crate::wire::*;
@@ -14,6 +15,7 @@ use safe_cex_engine::model::{
     Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, CommandId, Cx, Outcome, SocketId, VenueError, num};
 use std::collections::{HashMap, VecDeque};
 
@@ -76,7 +78,9 @@ enum Call {
     CancelPartialStop {
         id: String,
         batch: bool,
+        guard: Box<PartialStopGuard>,
     },
+    PartialProof(partial::Axis),
     CancelAll {
         ids: Vec<String>,
     },
@@ -90,6 +94,117 @@ enum Call {
     PositionMode {
         hedged: bool,
     },
+}
+
+#[derive(Clone)]
+struct PartialStopGuard {
+    original: Order,
+    category: String,
+    position_idx: i64,
+    symbol: String,
+    side: OrderSide,
+    kind: OrderType,
+    price: f64,
+    reference: StopTriggerType,
+}
+
+impl PartialStopGuard {
+    fn validate_original(
+        &self,
+        store: &safe_cex_engine::Store,
+        now: f64,
+    ) -> Result<(), VenueError> {
+        let reference = self.original.trigger_type.ok_or_else(|| {
+            safe_cex_engine::protective_amend::refused(Some(
+                "The original trigger source is unknown; your protection is unchanged".into(),
+            ))
+        })?;
+        let mut original = self.clone();
+        original.kind = original.original.kind;
+        original.price = original.original.price;
+        original.reference = reference;
+        original.validate(store, now)
+    }
+
+    fn validate_order(
+        &self,
+        store: &safe_cex_engine::Store,
+        canceled: bool,
+    ) -> Result<(), VenueError> {
+        let unchanged = match store.order(&self.original.id) {
+            Some(current) => {
+                let mut current = current.clone();
+                current.last_update = self.original.last_update;
+                if canceled && current.status == OrderStatus::Canceled {
+                    current.status = self.original.status;
+                }
+                current == self.original
+            }
+            None => canceled,
+        };
+        let protected_side = if self.side == OrderSide::Sell {
+            PositionSide::Long
+        } else {
+            PositionSide::Short
+        };
+        let protected = store.positions().iter().any(|position| {
+            position.symbol == self.symbol
+                && position.side == protected_side
+                && position.contracts.is_finite()
+                && position.contracts > 0.0
+        });
+        if !unchanged || self.original.filled != 0.0 || !protected {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "The original {} protection changed, filled, or no longer protects an open position; check Open Orders before editing it",
+                self.symbol
+            ))));
+        }
+        Ok(())
+    }
+
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::LastPrice => "last",
+            StopTriggerType::IndexPrice => "index",
+        };
+        let current = store
+            .reference_seen_at(&self.symbol, self.reference)
+            .filter(|seen| *seen <= now)
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    store,
+                    &self.symbol,
+                    self.reference,
+                    now,
+                )
+            });
+        let Some(current) = current else {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "A fresh {label} price is required before replacing this protection; your {} order is unchanged",
+                self.symbol
+            ))));
+        };
+        let fires = match (self.side, self.kind) {
+            (OrderSide::Sell, OrderType::StopLoss) | (OrderSide::Buy, OrderType::TakeProfit) => {
+                self.price >= current
+            }
+            _ => self.price <= current,
+        };
+        if fires {
+            let name = if self.kind == OrderType::TakeProfit {
+                "take profit"
+            } else {
+                "stop"
+            };
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "A {name} at {} would trigger at once against the {label} price {current}; your {} order is unchanged",
+                number(self.price),
+                self.symbol
+            ))));
+        }
+        Ok(())
+    }
 }
 
 struct Planned {
@@ -193,7 +308,7 @@ fn trigger_by(opts: &PlaceOrderOpts) -> Option<&'static str> {
     })
 }
 
-/// Stop-losses trigger on mark unless asked for last; take-profits the reverse.
+/// Stop-losses default to mark; take-profits default to last.
 fn sl_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
     match opts.sl_trigger_type {
         Some(StopTriggerType::LastPrice) => "LastPrice",
@@ -201,9 +316,22 @@ fn sl_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
     }
 }
 
+fn stop_loss_reference(trigger: Option<StopTriggerType>) -> &'static str {
+    match trigger {
+        Some(StopTriggerType::LastPrice) => "LastPrice",
+        Some(StopTriggerType::IndexPrice) => "IndexPrice",
+        _ => "MarkPrice",
+    }
+}
+
 fn tp_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
-    match opts.tp_trigger_type {
+    take_profit_reference(opts.tp_trigger_type)
+}
+
+fn take_profit_reference(trigger: Option<StopTriggerType>) -> &'static str {
+    match trigger {
         Some(StopTriggerType::MarkPrice) => "MarkPrice",
+        Some(StopTriggerType::IndexPrice) => "IndexPrice",
         _ => "LastPrice",
     }
 }
@@ -614,7 +742,7 @@ impl BybitLinear {
                     chunk.iter().map(|lot| lot.item.clone().finish()).collect();
                 let body = Body::new()
                     .str("category", category.as_str())
-                    .raw("request", &format!("[{}]", items.join(",")))
+                    .raw("request", &format!("[{}]", items.join_with(",")))
                     .finish();
                 let fallback = chunk
                     .iter()
@@ -748,7 +876,12 @@ impl BybitLinear {
         let tif = (limit_price.is_some() || execution.bbo_side.is_some())
             .then(|| tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel)));
 
-        let max = market.limits.amount.max;
+        let max = self
+            .order_caps
+            .get(&opts.symbol)
+            .map_or(market.limits.amount.max, |caps| {
+                caps.for_order(market.limits.amount.max, order_type == "Market")
+            });
         if !max.is_finite() || max <= 0.0 {
             return Err("Market has no valid maximum order quantity".into());
         }
@@ -1052,22 +1185,14 @@ impl BybitLinear {
                 "stopLoss",
                 "slTriggerBy",
                 "slSize",
-                if trigger == Some(StopTriggerType::LastPrice) {
-                    "LastPrice"
-                } else {
-                    "MarkPrice"
-                },
+                stop_loss_reference(trigger),
             )
         } else {
             (
                 "takeProfit",
                 "tpTriggerBy",
                 "tpSize",
-                if trigger == Some(StopTriggerType::MarkPrice) {
-                    "MarkPrice"
-                } else {
-                    "LastPrice"
-                },
+                take_profit_reference(trigger),
             )
         };
         let body = Body::new()
@@ -1118,14 +1243,16 @@ impl BybitLinear {
         }
         let mark = cx
             .store
-            .ticker(&order.symbol)
-            .map(|ticker| ticker.mark)
-            .filter(|mark| mark.is_finite() && *mark > 0.0);
-        let base = || {
-            Body::new()
-                .str("category", self.category_for(&order.symbol).as_str())
-                .str("symbol", &order.symbol)
-        };
+            .reference_seen_at(&order.symbol, StopTriggerType::MarkPrice)
+            .filter(|seen| *seen <= cx.now)
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    cx.store,
+                    &order.symbol,
+                    StopTriggerType::MarkPrice,
+                    cx.now,
+                )
+            });
         if let Some(mark) =
             mark.filter(|_| self.variant != crate::Variant::Inverse || price.is_some())
         {
@@ -1177,36 +1304,26 @@ impl BybitLinear {
             }
             let (body, reference) =
                 self.trading_stop_body(cx, order, kind, price, trigger, amount, limit);
-            // Judged against the price that fires the kind it became, on a fresh ticker.
-            let (label, by) = if reference == "LastPrice" {
-                ("last", StopTriggerType::LastPrice)
-            } else {
-                ("mark", StopTriggerType::MarkPrice)
+            let by = match reference {
+                "LastPrice" => StopTriggerType::LastPrice,
+                "IndexPrice" => StopTriggerType::IndexPrice,
+                _ => StopTriggerType::MarkPrice,
             };
-            if let Some(current) = safe_cex_engine::protective_amend::fresh_reference(
-                cx.store,
-                &order.symbol,
-                by,
-                cx.now,
-            ) {
-                let fires = match (order.side, kind) {
-                    (OrderSide::Sell, OrderType::StopLoss)
-                    | (OrderSide::Buy, OrderType::TakeProfit) => price >= current,
-                    _ => price <= current,
-                };
-                if fires {
-                    let name = if kind == OrderType::TakeProfit {
-                        "take profit"
-                    } else {
-                        "stop"
-                    };
-                    return Err(format!(
-                        "A {name} at {} would trigger at once against the {label} price {current}; your {} order is unchanged",
-                        number(price),
-                        order.symbol
-                    ));
-                }
-            }
+            let guard = PartialStopGuard {
+                original: order.clone(),
+                category: self.category_for(&order.symbol).as_str().into(),
+                position_idx: self.stop_position_idx(cx, &order.symbol, order.side),
+                symbol: order.symbol.clone(),
+                side: order.side,
+                kind,
+                price,
+                reference: by,
+            };
+            guard
+                .validate_order(cx.store, false)
+                .and_then(|()| guard.validate_original(cx.store, cx.now))
+                .and_then(|()| guard.validate(cx.store, cx.now))
+                .map_err(|error| error.message)?;
             // The stop as it stands, to put back exactly if its replacement is refused.
             let (restore, _) = self.trading_stop_body(
                 cx,
@@ -1214,7 +1331,7 @@ impl BybitLinear {
                 order.kind,
                 order.price,
                 order.trigger_type,
-                num::adjust(order.amount, market.precision.amount),
+                order.amount,
                 limit,
             );
             let mut job = self.plan_cancel(std::slice::from_ref(order));
@@ -1222,7 +1339,22 @@ impl BybitLinear {
                 planned.call = Call::CancelPartialStop {
                     id: order.id.clone(),
                     batch: self.paths.batch_orders,
+                    guard: Box::new(guard.clone()),
                 };
+            }
+            for axis in [
+                partial::Axis::Target,
+                partial::Axis::Live,
+                partial::Axis::History,
+            ] {
+                job.steps.push_back(Step {
+                    delay_ms: 0.0,
+                    requests: vec![partial::proof(
+                        self.category_for(&order.symbol).as_str(),
+                        order,
+                        axis,
+                    )],
+                });
             }
             job.steps.push_back(Step {
                 delay_ms: 0.0,
@@ -1242,29 +1374,11 @@ impl BybitLinear {
         if self.variant == crate::Variant::Inverse && price.is_none() {
             return Err("Bybit inverse stop and take-profit sizes cannot be edited".into());
         }
-        // Missing mark (or inverse amount-only): TS updates the original leg directly.
-        let level = if order.kind == OrderType::StopLoss {
-            "stopLoss"
-        } else {
-            "takeProfit"
-        };
-        let size = if order.kind == OrderType::StopLoss {
-            "slSize"
-        } else {
-            "tpSize"
-        };
-        let mut body = base().int(
-            "positionIdx",
-            self.position_idx(cx, &order.symbol, order.side, order.reduce_only),
-        );
-        if self.variant != crate::Variant::Inverse {
-            body = body.str("tpslMode", "Partial");
-        }
-        body = body.opt_str(level, price.map(number).as_deref());
-        if self.variant != crate::Variant::Inverse {
-            body = body.str(size, &number(amount.unwrap_or(order.amount)));
-        }
-        Ok(trading_stop_job(body.finish()))
+        // Partial trading-stop only adds protection; it cannot edit the existing leg.
+        Err(format!(
+            "A fresh mark price is required before replacing this protection; your {} order is unchanged",
+            order.symbol
+        ))
     }
 
     /// Partial position stops cancel/recreate; ordinary orders amend in place.
@@ -1315,7 +1429,26 @@ impl BybitLinear {
             } else {
                 "takeProfit"
             };
-            return amend(base().str("orderId", parent).str(field, &number(price)));
+            return amend(
+                base()
+                    .str("orderId", parent)
+                    .str(field, &number(price))
+                    .opt_str(
+                        "tpTriggerBy",
+                        (order.kind == OrderType::TakeProfit && !self.variant.is_spot())
+                            .then(|| take_profit_reference(order.trigger_type)),
+                    )
+                    .opt_str(
+                        "slTriggerBy",
+                        (order.kind == OrderType::StopLoss && !self.variant.is_spot()).then_some(
+                            match order.trigger_type {
+                                Some(StopTriggerType::LastPrice) => "LastPrice",
+                                Some(StopTriggerType::IndexPrice) => "IndexPrice",
+                                _ => "MarkPrice",
+                            },
+                        ),
+                    ),
+            );
         }
         if order.kind == OrderType::TrailingStopLoss {
             let target = price.ok_or("A trailing stop moves by price")?;
@@ -1354,11 +1487,15 @@ impl BybitLinear {
             } else {
                 ("takeProfit", "tpTriggerBy")
             };
-            let by_value = match order.trigger_type {
-                Some(StopTriggerType::MarkPrice) => Some("MarkPrice"),
-                Some(StopTriggerType::LastPrice) => Some("LastPrice"),
-                Some(StopTriggerType::IndexPrice) => Some("IndexPrice"),
-                None => None,
+            let by_value = if order.kind == OrderType::TakeProfit {
+                Some(take_profit_reference(order.trigger_type))
+            } else {
+                match order.trigger_type {
+                    Some(StopTriggerType::MarkPrice) => Some("MarkPrice"),
+                    Some(StopTriggerType::LastPrice) => Some("LastPrice"),
+                    Some(StopTriggerType::IndexPrice) => Some("IndexPrice"),
+                    None => None,
+                }
             };
             let body = Body::new()
                 .str("category", self.category_for(&order.symbol).as_str())
@@ -1490,7 +1627,7 @@ impl BybitLinear {
                     .collect();
                 let body = Body::new()
                     .str("category", category.as_str())
-                    .raw("request", &format!("[{}]", items.join(",")))
+                    .raw("request", &format!("[{}]", items.join_with(",")))
                     .finish();
                 job.steps.push_back(Step {
                     delay_ms: if index > 0 {

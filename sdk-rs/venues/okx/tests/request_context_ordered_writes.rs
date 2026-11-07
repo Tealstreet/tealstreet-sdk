@@ -712,9 +712,9 @@ fn a_managed_code_one_cancel_fails_the_plan_without_continuing() {
 }
 
 #[test]
-fn a_dependent_replacement_never_runs_after_its_cancel_is_refused() {
+fn a_native_stop_amend_refusal_never_prepares_a_replacement() {
     let mut engine = trading_engine();
-    // A standalone stop with no limit price amends as cancel-then-replace.
+    // Native amendment keeps the original stop; a refusal cannot initiate replacement.
     let mut stop = stored("stop");
     stop.kind = OrderType::StopLoss;
     engine.store_mut().upsert_order(stop);
@@ -728,11 +728,11 @@ fn a_dependent_replacement_never_runs_after_its_cancel_is_refused() {
         }),
     );
     let (first, managed) = release(&mut engine, 5.);
-    assert!(managed, "the prerequisite cancel is a managed Plan call");
+    assert!(managed, "the native amendment is a managed Plan call");
     let cancel = post(&first);
     assert!(
-        matches!(cancel, Action::Http(r) if r.url.contains("cancel")),
-        "the cancel goes first: {cancel:?}"
+        matches!(cancel, Action::Http(r) if r.url.ends_with("/amend-algos")),
+        "the native amend goes first: {cancel:?}"
     );
     reply(
         &mut engine,
@@ -744,7 +744,11 @@ fn a_dependent_replacement_never_runs_after_its_cancel_is_refused() {
     assert!(!replaced, "no replacement is prepared after the refusal");
     assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
     let errors = failed(&output, OWNER);
-    assert_eq!(errors.len(), 1, "the cancel's refusal ends the command");
+    assert_eq!(errors.len(), 1, "the amendment refusal ends the command");
+    assert_eq!(
+        engine.store().order("stop").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
 }
 
 #[test]
@@ -1423,4 +1427,38 @@ fn a_documented_refusal_is_rejected_not_unknown() {
             Action::Notice(Notice::CommandFailed { command: OWNER, error }) if error.outcome == Some(safe_cex_engine::Outcome::Rejected)
         )), "{code}");
     }
+}
+
+#[test]
+fn engine_ambiguity_429_signature_must_not_resend() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 429, SIGNATURE_REJECTED, 6.);
+    let output = prepared(&mut engine, 6.);
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "429 physically resent: {:?}",
+        output
+    );
+}
+#[test]
+fn engine_ambiguity_503_signature_working_control_never_resends() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 503, SIGNATURE_REJECTED, 6.);
+    let output = prepared(&mut engine, 6.);
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
+    );
+    assert!(
+        failures(&output)
+            .iter()
+            .all(|e| e.outcome == Some(safe_cex_engine::Outcome::Unknown))
+    );
 }

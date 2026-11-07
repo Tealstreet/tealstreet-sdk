@@ -15,6 +15,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::request_context::{Context, Operation, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
+use safe_cex_engine::text::JoinWith;
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
@@ -349,14 +350,14 @@ impl Polymarket {
                 .collect::<Vec<_>>(),
         )
         .expect("token list");
-        let context = match cx.http_context(Scope::Background, public_read::policy(Operation::Read))
-        {
-            Ok(context) => context,
-            Err(_) => {
-                self.midpoints_failed(cx, offset, false);
-                return;
-            }
-        };
+        let context =
+            match cx.http_live_context(Scope::Background, public_read::policy(Operation::Read)) {
+                Ok(context) => context,
+                Err(_) => {
+                    self.midpoints_failed(cx, offset, false);
+                    return;
+                }
+            };
         self.midpoint_inflight.insert(offset, context.clone());
         if cx
             .request_managed_with_headers(
@@ -761,7 +762,20 @@ fn valid_level(price: f64, size: f64) -> bool {
     (0.0..=1.0).contains(&price) && size >= 0.0
 }
 impl Venue for Polymarket {
+    fn http_plans() -> bool {
+        false
+    }
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Midpoints { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
@@ -896,7 +910,7 @@ impl Venue for Polymarket {
                         format!(
                             "Skipped {} malformed Polymarket market rows: {}",
                             skipped.len(),
-                            skipped.join(", ")
+                            skipped.join_with(", ")
                         ),
                     );
                     self.walk_skipped_slugs.extend(skipped);
@@ -1077,7 +1091,7 @@ impl Venue for Polymarket {
                     from_ms.is_none_or(|from| c.timestamp >= from)
                         && to_ms.is_none_or(|to| c.timestamp <= to)
                 });
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 rows.dedup_by(|later, earlier| {
                     if later.timestamp == earlier.timestamp {
                         *earlier = *later;
@@ -1253,7 +1267,9 @@ impl Venue for Polymarket {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        self.on_http_failed(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_http_failed(cx, pending, error);
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {

@@ -5,6 +5,7 @@ use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url;
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, model::*};
 use serde::{Deserialize, Serialize};
@@ -220,7 +221,7 @@ pub(super) fn form(params: &[(&str, String)]) -> String {
         .iter()
         .map(|(k, v)| format!("{}={}", url::encode(k), url::encode(v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 impl KrakenSpot {
     fn current_token(&self, cx: &Cx<'_, Pending>, kind: &Kind) -> bool {
@@ -248,7 +249,7 @@ impl KrakenSpot {
                 .filter(|k| !k.is_empty())
                 .ok_or("Kraken Spot credentials required")?;
             let signer = self.signer.as_mut().ok_or("Kraken Spot invalid secret")?;
-            let nonce = signer.nonce(cx.now)?;
+            let nonce = signer.nonce(cx.protocol_now())?;
             let mut params = request.params.clone();
             params.push(("nonce", nonce.clone()));
             let body = form(&params);
@@ -691,9 +692,13 @@ impl KrakenSpot {
         let text = match result(response) {
             Ok(t) => t,
             Err(e) => {
-                let signature_refused = response.status != 408
+                // An ambiguous write response cannot prove a signature refusal.
+                // Reads retain their bounded signature retry policy.
+                let is_trade = matches!(request.kind, Kind::Trade(_));
+                let definitive = response.status != 408
                     && response.status < 500
-                    && e.contains("EAPI:Invalid signature");
+                    && (response.status != 429 || !is_trade);
+                let signature_refused = definitive && e.contains("EAPI:Invalid signature");
                 if signature_refused && request.signature_retries < 1 {
                     let mut r = request;
                     r.signature_retries += 1;
@@ -702,11 +707,9 @@ impl KrakenSpot {
                 }
                 // A status alone is not permanent account evidence. Only the exhausted
                 // definitive signature refusal retains the existing terminal policy.
-                let credential_refused = response.status != 408
-                    && response.status < 500
+                let credential_refused = definitive
                     && (e.contains("EAPI:Invalid key")
-                        || (e.contains("EGeneral:Permission denied")
-                            && !matches!(request.kind, Kind::Trade(_)))
+                        || (e.contains("EGeneral:Permission denied") && !is_trade)
                         || (signature_refused && request.signature_retries == 1));
                 if credential_refused {
                     self.reject_auth(cx, &e);
@@ -952,7 +955,7 @@ impl KrakenSpot {
                 rejected.push(String::new());
                 return;
             }
-            let time = crate::history::timestamp(&e.timestamp).unwrap_or(cx.now);
+            let time = crate::history::timestamp(&e.timestamp).unwrap_or(cx.protocol_now());
             if times
                 .get(&*e.order_id)
                 .or_else(|| self.account.native_times.get(&*e.order_id))
@@ -1052,7 +1055,7 @@ impl KrakenSpot {
                         .and_then(|o| o.time_in_force)
                         .unwrap_or(TimeInForce::GoodTillCancel)
                 },
-                crate::history::timestamp(&e.timestamp).unwrap_or(cx.now),
+                crate::history::timestamp(&e.timestamp).unwrap_or(cx.protocol_now()),
             );
             // A failed delivery must not consume the display baseline or row fences.
             let delivery = if !snapshot && e.exec_type == "trade" {

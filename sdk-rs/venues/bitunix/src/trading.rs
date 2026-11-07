@@ -14,6 +14,7 @@ use safe_cex_engine::request_context::{
     PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
 };
 use safe_cex_engine::signing::Identity as SigningIdentity;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, Cx, ErrorKind, Method, Outcome, Response, VenueError, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1303,6 +1304,23 @@ impl BitunixFutures {
             None
         };
         let full = n.full_position || o.amount == 0.0;
+        // A LIMIT-executed TP/SL rests its limit at the old trigger: moving the trigger alone
+        // would leave a stop that fires and then rests unfilled.
+        if let Some(leg) = leg
+            && price.is_some_and(|price| price != o.price)
+            && (if leg == "tp" {
+                &n.tp_execution
+            } else {
+                &n.sl_execution
+            })
+            .eq_ignore_ascii_case("LIMIT")
+        {
+            return Err(format!(
+                "Your {} {} was not changed: its LIMIT execution would keep the old limit price; cancel it and place a new one",
+                o.symbol,
+                if leg == "tp" { "take profit" } else { "stop" }
+            ));
+        }
         if (attached || full) && amount.is_some() {
             return Err(
                 "Bitunix full-position or attached TP/SL quantity cannot be amended".into(),
@@ -2173,6 +2191,22 @@ impl BitunixFutures {
                 leg,
             } = &request.step.call
         {
+            // The re-place carries reduceOnly, and the private channel omits it: a flag the
+            // venue never reported nor this session set could reopen a closing order.
+            // Native modify_order carries no reduceOnly, so only this fallback is gated.
+            if !self
+                .account
+                .native
+                .get(parent)
+                .is_some_and(|meta| meta.reduce_reconciled)
+            {
+                let mut refusal = VenueError::new(format!(
+                    "Your TP/SL edit was not applied: Bitunix could not modify order {parent} in place, and re-placing it needs its reduce-only state, which is not reconciled yet; nothing was canceled"
+                ))
+                .outcome(Outcome::Rejected);
+                refusal.presents = true;
+                return self.end(cx, command, refusal);
+            }
             // Native fallback: cancel, prove the cancel final, then replace.
             let symbol = p.symbol.clone().unwrap_or_default();
             let ids: Vec<_> = cx
@@ -2385,7 +2419,7 @@ impl BitunixFutures {
         let message = if messages.is_empty() {
             "Bitunix batch response has incomplete order acknowledgements".to_owned()
         } else {
-            messages.join("; ")
+            messages.join_with("; ")
         };
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.job.ids.extend(ids.iter().cloned());
@@ -2533,7 +2567,7 @@ impl BitunixFutures {
         } else if message.is_empty() {
             "Malformed Bitunix cancellation acknowledgement".to_owned()
         } else {
-            message.join("; ")
+            message.join_with("; ")
         };
         match cx.http_write_batch(
             &request.context,
@@ -2636,8 +2670,9 @@ impl BitunixFutures {
                 .store
                 .market(&row.symbol)
                 .ok_or("Bitunix market missing")?;
+            // The parent filled before its cancel: its TP/SL went live with the old triggers.
             if status == "FILLED" {
-                return Ok(None);
+                return Err(filled_before_edit(&row.symbol, leg.is_some()));
             }
             if row.qty.0 <= 0.0
                 || row.trade_qty.0 < 0.0
@@ -2655,7 +2690,7 @@ impl BitunixFutures {
                 return Err("Bitunix canceled quantity is not reconciled".into());
             }
             if remaining == 0.0 {
-                return Ok(None);
+                return Err(filled_before_edit(&row.symbol, leg.is_some()));
             }
             let mut p = (**payload).clone();
             p.qty = Some(num::format(remaining));
@@ -2689,7 +2724,12 @@ impl BitunixFutures {
                 }
                 self.advance(cx, command);
             }
-            Err(message) => self.end(cx, command, VenueError::new(message)),
+            Err(message) => {
+                // A filled parent says why the edit was not applied, not the first leg's refusal.
+                let mut error = VenueError::new(message.clone());
+                error.presents = message.contains(FILLED_BEFORE_EDIT);
+                self.end(cx, command, error)
+            }
         }
     }
 }
@@ -2724,6 +2764,17 @@ fn affected_ids(cx: &Cx<'_, Pending>, n: &NativeOrder) -> Vec<String> {
         .filter(|o| o.id == n.raw_id || o.id.starts_with(&format!("{}__", n.raw_id)))
         .map(|o| o.id.clone())
         .collect()
+}
+const FILLED_BEFORE_EDIT: &str = "order filled before its";
+/// An amend fallback whose canceled parent had filled: the edit was never applied.
+fn filled_before_edit(symbol: &str, leg: bool) -> String {
+    if leg {
+        format!(
+            "Your {symbol} {FILLED_BEFORE_EDIT} TP/SL edit; its TP/SL keep the old triggers. Check them in Open Orders"
+        )
+    } else {
+        format!("Your {symbol} {FILLED_BEFORE_EDIT} edit; the edit was not applied")
+    }
 }
 fn append_protection(
     p: &mut Payload,

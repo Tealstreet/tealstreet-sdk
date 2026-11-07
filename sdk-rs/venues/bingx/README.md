@@ -28,6 +28,13 @@ fully preflighted before any order is sent. Caller IDs are honored verbatim on
 one ordinary order or rejected before writes. Leverage changes without a side
 update both hedge sides sequentially, matching the engine's symbol-level API.
 
+An ordinary cancel answered `109400` with exactly `order not exist`, or `109421`,
+uses the same satisfied-cancel path as `80016`: the command completes, but its
+symbols remain fenced until a fresh primary-key order snapshot reconciles them.
+Edits and protective cancels require their existing cancellation proof; a missing
+order reply never authorizes a replacement or put-back. Generic `109400`
+parameter and timestamp refusals keep their existing classifications.
+
 The gate declares TS fixes for zero decimal precision, descending asks,
 non-finite ticker placeholders, per-execution fills and terminal dedupe,
 `cp` close flags, required full-position stop quantity, fail-closed bracket
@@ -48,3 +55,12 @@ History read refusals retain a typed kind, the numeric venue code, and a closed
 `causeCode` (rate limit, key/permission, invalid parameters, venue failure, or
 decode). These diagnostics do not change one-resend or strict history recovery
 rules. Code meanings follow [BingX's error reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/error-codes.md).
+
+Protective edits retain native closing authority and use a final managed-Claim
+veto with a genuine <=5 s Mark/Last receipt. Proven standalone stop-market edits
+use native cancelReplace; explicit partial refusal permits one exact put-back.
+Ambiguous replies and guarded rate limits are Unknown, with no resend or restore.
+Frame-fed protective price edits refuse `reference stale` until the engine maps
+genuine source receipt clocks; frame arrival never refreshes a reference.
+See [protective edits](../../../../docs/plans/callers/bingx-protective-edits.md)
+for the native classes, proof requirements and frame-state version contract.

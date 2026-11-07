@@ -46,6 +46,7 @@ pub enum Pending {
     History(history::Request),
     Identity(CommandId),
     Trade(trading::Request),
+    Protective(Box<trading::managed::ManagedRequest>),
     Account(account::Request),
     Markets {
         context: Context,
@@ -55,6 +56,7 @@ pub enum Pending {
     Tickers {
         context: Context,
         rows: Vec<Ticker>,
+        references: Vec<(String, trading::protection::References)>,
         failed: bool,
     },
     Depth {
@@ -118,6 +120,7 @@ pub struct MexcFutures {
     books: HashMap<String, BookState>,
     volume_units: HashMap<String, f64>,
     ticker_symbols: Vec<String>,
+    references: HashMap<String, trading::protection::References>,
     ticker_subscriptions: BTreeSet<String>,
     candles: HashMap<(String, Interval), u32>,
     next_book_generation: u32,
@@ -168,6 +171,7 @@ impl MexcFutures {
             books: HashMap::new(),
             volume_units: HashMap::new(),
             ticker_symbols: vec![],
+            references: HashMap::new(),
             ticker_subscriptions: BTreeSet::new(),
             candles: HashMap::new(),
             next_book_generation: 0,
@@ -178,7 +182,7 @@ impl MexcFutures {
         }
     }
     fn get(&mut self, cx: &mut Cx<'_, Pending>, path: &str, symbol: String, generation: u32) {
-        let context = match cx.http_context(
+        let context = match cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -211,7 +215,13 @@ impl MexcFutures {
         }
     }
     fn stream(&mut self, cx: &mut Cx<'_, Pending>, path: &str, tickers: bool) {
-        let context = match cx.http_context(
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -236,6 +246,7 @@ impl MexcFutures {
             Pending::Tickers {
                 context: context.clone(),
                 rows: vec![],
+                references: vec![],
                 failed: false,
             }
         } else {
@@ -313,7 +324,7 @@ impl MexcFutures {
             }
         }
     }
-    fn mini_ticker(&self, cx: &mut Cx<'_, Pending>, item: &str) {
+    fn mini_ticker(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
         #[derive(serde::Deserialize)]
         struct Identity<'a> {
             #[serde(borrow)]
@@ -356,6 +367,10 @@ impl MexcFutures {
             );
             return;
         }
+        self.references
+            .entry(symbol.clone())
+            .or_default()
+            .observe(cx.now, [raw.last_price, raw.fair_price, raw.index_price]);
         cx.store.update_ticker(&symbol, |t| {
             // A zero price is an unavailable quote (seen in the public feed),
             // not a reason to discard valid mark/index/volume fields.
@@ -711,10 +726,19 @@ impl MexcFutures {
                 );
             }
             Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Protective(request) => {
+                self.protective_failed(cx, *request, VenueError::new(error))
+            }
             Pending::Trade(request) => {
                 let error = VenueError::new(error).kind(ErrorKind::Network);
                 // The amend read precedes the replacement, which was never sent.
-                let error = if matches!(request.call, trading::Call::AmendRead { .. }) {
+                let before_write = matches!(request.call, trading::Call::AmendRead { .. })
+                    || if let trading::Call::ProtectiveRead { after_cancel, .. } = &request.call {
+                        !*after_cancel
+                    } else {
+                        false
+                    };
+                let error = if before_write {
                     error.outcome(Outcome::NotSent)
                 } else {
                     error.outcome(Outcome::Unknown)
@@ -762,6 +786,22 @@ impl Venue for MexcFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Private { pending, .. } => Self::startup_reads(pending),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(account::Request::Mode) => S::ACCOUNT,
+            Pending::Account(account::Request::Snapshot(read)) => match read.scope {
+                account::Scope::Assets => S::BALANCE,
+                account::Scope::Positions => S::POSITIONS,
+                _ => S::ORDERS,
+            },
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
@@ -849,6 +889,14 @@ impl Venue for MexcFutures {
                     serde_json::from_str::<Tick<'_>>(data.get()),
                     cx.store.market(&symbol),
                 ) {
+                    self.references.entry(symbol.clone()).or_default().observe(
+                        cx.now,
+                        [
+                            Some(raw.last_price),
+                            Some(raw.fair_price),
+                            Some(raw.index_price),
+                        ],
+                    );
                     let ticker = Self::ticker(raw, market);
                     cx.store.update_ticker(&symbol, |t| *t = ticker);
                 }
@@ -884,6 +932,7 @@ impl Venue for MexcFutures {
         }
         self.public.socket = None;
         self.public.open = false;
+        self.references.clear();
         self.ticker_subscriptions.clear();
         self.public_supervisor.retry(cx);
         for state in self.books.values_mut() {
@@ -942,9 +991,21 @@ impl Venue for MexcFutures {
                     }
                 }
             },
-            Pending::Tickers { rows, .. } => match serde_json::from_str::<Tick<'_>>(item) {
+            Pending::Tickers {
+                rows, references, ..
+            } => match serde_json::from_str::<Tick<'_>>(item) {
                 Ok(raw) => {
                     if let Some(m) = cx.store.market_by_id(&raw.symbol) {
+                        let mut receipt = trading::protection::References::default();
+                        receipt.observe(
+                            cx.now,
+                            [
+                                Some(raw.last_price),
+                                Some(raw.fair_price),
+                                Some(raw.index_price),
+                            ],
+                        );
+                        references.push((m.symbol.clone(), receipt));
                         rows.push(Self::ticker(raw, m));
                     }
                 }
@@ -954,6 +1015,10 @@ impl Venue for MexcFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Protective(request) = pending {
+            self.protective_response(cx, *request, response);
+            return;
+        }
         if let Pending::Clock(request) = pending {
             self.clock_response(cx, *request, response);
             return;
@@ -1053,7 +1118,7 @@ impl Venue for MexcFutures {
                     self.refresh_stop_orders(cx);
                 }
             }
-            Pending::Trade(_) => unreachable!(),
+            Pending::Trade(_) | Pending::Protective(_) => unreachable!(),
             Pending::History(request) => self.query_response(cx, request, response),
             Pending::Markets {
                 rows, malformed, ..
@@ -1091,7 +1156,10 @@ impl Venue for MexcFutures {
                 start_account_and_tickers = true;
             }
             Pending::Tickers {
-                mut rows, failed, ..
+                mut rows,
+                references,
+                failed,
+                ..
             } => {
                 if failed || rows.is_empty() {
                     cx.notice(
@@ -1102,6 +1170,7 @@ impl Venue for MexcFutures {
                     self.discovery.failed(cx, true);
                     return;
                 }
+                self.references.extend(references);
                 rows.sort_by_key(|t| cx.store.market_index(&t.symbol));
                 self.discovery.succeeded(cx, &true);
                 cx.store.set_tickers(rows);
@@ -1256,29 +1325,86 @@ impl Venue for MexcFutures {
             ),
         );
     }
-    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        if let Pending::Clock(request) = pending {
-            self.clock_failed(cx, *request, error);
-            return;
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.settle_protective_retirement(cx);
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        if let Pending::Protective(request) = pending {
+            self.protective_release(store, request, release.time.raw_ms)
+        } else {
+            Ok(())
         }
-        if matches!(pending, Pending::Private { .. }) {
-            self.private_precommit_failed(
-                cx,
-                pending,
-                safe_cex_engine::request_context::Error::Invalid,
-                error,
-            );
-            return;
-        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
         match pending {
-            Pending::Candles { context, .. } => {
-                let _ = cx.fail_context(&context, error);
+            Pending::Protective(request) => {
+                safe_cex_engine::request_context::ReconciliationData::new(
+                    request.native.command.to_string(),
+                )
             }
-            Pending::BookQuery { context, .. } => {
-                let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
-            }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
         }
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.protective_preflight_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.protective_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.protective_retired(owner)
+    }
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if let Pending::Protective(request) = pending {
+                self.protective_failed(cx, *request, error);
+                return;
+            }
+            if let Pending::Clock(request) = pending {
+                self.clock_failed(cx, *request, error);
+                return;
+            }
+            if matches!(pending, Pending::Private { .. }) {
+                self.private_precommit_failed(
+                    cx,
+                    pending,
+                    safe_cex_engine::request_context::Error::Invalid,
+                    error,
+                );
+                return;
+            }
+            match pending {
+                Pending::Candles { context, .. } => {
+                    let _ = cx.fail_context(&context, error);
+                }
+                Pending::BookQuery { context, .. } => {
+                    let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
+                }
+                pending => self.on_request_failed(cx, pending, &error.message),
+            }
+        });
     }
     fn on_http_preparation_failed(
         &mut self,
@@ -1287,13 +1413,19 @@ impl Venue for MexcFutures {
         reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        if matches!(pending, Pending::Private { .. }) {
-            self.private_precommit_failed(cx, pending, reason, error);
-        } else {
-            self.on_sign_error(cx, pending, error);
-        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if matches!(pending, Pending::Private { .. }) {
+                self.private_precommit_failed(cx, pending, reason, error);
+            } else {
+                self.on_sign_error(cx, pending, error);
+            }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Pending::Protective(request) = pending {
+            self.protective_failed(cx, *request, error);
+            return;
+        }
         if let Pending::Clock(request) = pending {
             self.clock_failed(cx, *request, error);
             return;

@@ -25,6 +25,7 @@ export const SECTION = {
   CAPABILITIES: 19,
   UNDERLYING_TOKENS: 20,
   ACCOUNT_READ: 21,
+  TICKER_OBSERVATIONS: 24,
 };
 
 export const NONE = 0xffffffff;
@@ -42,6 +43,10 @@ export const MARKET_COLUMNS = [
   'precisionAmount', 'precisionPrice', 'minAmount', 'maxAmount', 'minLeverage',
   'maxLeverage', 'minPrice', 'contractSize', 'takerFee', 'makerFee',
 ];
+// ORDERS' per-row trigger word (crate::model::order_trigger_word): bits 0-7 take-profit
+// trigger, 8-15 stop-loss trigger, 16 the Rust-only native_algo routing flag. Each field
+// is masked, so a bit this decoder does not know is ignored.
+export const ORDER_TRIGGER_WORD = { TP_SHIFT: 0, SL_SHIFT: 8, TRIGGER_MASK: 0xff, NATIVE_ALGO: 1 << 16 };
 export const MARKET_FLAG = { ACTIVE: 1, INVERSE: 2, SPOT: 4, PERPETUAL: 8, EXPIRING: 16, READ_ONLY: 32 };
 // Bits 8..12 of a market's flags: how its order and position quantities are expressed.
 export const QUANTITY_UNITS = ['base', 'nativePlacement', 'inverseNative', 'contractCount', 'inverseContractSized'];
@@ -72,7 +77,7 @@ const CAPABILITY_ENUMS = [
   ['fillHistoryTime', ['asProvided', 'secondsOrMilliseconds', 'nonnegativeSecondsOrMilliseconds']],
 ];
 export const LOADED_FLAG = { BALANCE: 1, ORDERS: 2, MARKETS: 4, TICKERS: 8, POSITIONS: 16 };
-export const STATUS_FLAG = { HEDGED: 1 };
+export const STATUS_FLAG = { HEDGED: 1, LATENCY_MEASURED: 2 };
 
 export const ORDER_COLUMNS = ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
 export const ORDER_STATUS = ['open', 'closed', 'canceled', 'creating', 'updating', 'canceling'];
@@ -403,6 +408,21 @@ export class Frame {
     return values;
   }
 
+  /** Source receipt times, independent of price changes: [row, last, mark, index]. */
+  tickerObservations() {
+    const section = this.first(SECTION.TICKER_OBSERVATIONS);
+    if (!section) return undefined;
+    if (section.length % 32) throw new Error('invalid ticker observation length');
+    const values = new Float64Array(this.buffer, section.offset, section.length / 8);
+    for (let i = 0; i < values.length; i += 4) {
+      if (!Number.isInteger(values[i]) || values[i] < 0) throw new Error('invalid ticker observation row');
+      for (let j = 1; j < 4; j++) {
+        if (values[i + j] !== -Infinity && (!Number.isFinite(values[i + j]) || values[i + j] < 0)) throw new Error('invalid ticker observation time');
+      }
+    }
+    return values;
+  }
+
   /** Full books: `bids`/`asks` are rows of `[price, amount, total]`. */
   books() {
     return this.bookSections(SECTION.BOOK, 3);
@@ -467,8 +487,10 @@ export class Frame {
       ...(revised && {
         remainingNotional: new Float64Array(buffer, native + count * 16, count),
         conditionalOrderPrice: new Float64Array(buffer, native + count * 24, count),
-        tpTriggerType: (i) => TRIGGER_TYPE[brackets[i] & 0xff],
-        slTriggerType: (i) => TRIGGER_TYPE[(brackets[i] >>> 8) & 0xff],
+        tpTriggerType: (i) =>
+          TRIGGER_TYPE[(brackets[i] >>> ORDER_TRIGGER_WORD.TP_SHIFT) & ORDER_TRIGGER_WORD.TRIGGER_MASK],
+        slTriggerType: (i) =>
+          TRIGGER_TYPE[(brackets[i] >>> ORDER_TRIGGER_WORD.SL_SHIFT) & ORDER_TRIGGER_WORD.TRIGGER_MASK],
         symbol: (i) => requiredString(frame, symbols[i]),
       }),
       ...(count && native + count * 8 <= section.offset + section.length
@@ -565,7 +587,10 @@ export class Frame {
     requireEnd(section, section.offset + 16);
     const [loaded, flags] = new Uint32Array(this.buffer, section.offset, 2);
     const latency = new Float64Array(this.buffer, section.offset + 8, 1)[0];
-    return { loaded, hedged: (flags & STATUS_FLAG.HEDGED) !== 0, latency };
+    return {
+      loaded, hedged: (flags & STATUS_FLAG.HEDGED) !== 0,
+      latency: (flags & STATUS_FLAG.LATENCY_MEASURED) !== 0 || latency > 0 ? latency : null,
+    };
   }
 
   /** Per-market account settings, replacing any earlier table. */

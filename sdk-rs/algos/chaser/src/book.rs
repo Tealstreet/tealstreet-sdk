@@ -150,6 +150,22 @@ fn fills_read_retryable(error: &VenueError) -> bool {
     )
 }
 
+/// A placement refusal a re-priced retry only repeats, as (stop reason, message text):
+/// a refused key, or an order no price fixes (a reduce-only size above the position,
+/// an unaffordable or malformed order, an unsupported type).
+fn settled_refusal(error: &VenueError) -> Option<(&'static str, &'static str)> {
+    match error.kind? {
+        ErrorKind::AuthInvalid | ErrorKind::AuthPermission => Some((
+            "The venue refused this account's key",
+            "the venue refused this account's key",
+        )),
+        ErrorKind::InvalidInput | ErrorKind::InsufficientBalance | ErrorKind::Unsupported => {
+            Some(("The venue refused the order", "the venue refused the order"))
+        }
+        _ => None,
+    }
+}
+
 fn cancel_retryable(error: &VenueError) -> bool {
     matches!(
         error.kind,
@@ -1208,19 +1224,15 @@ impl ChaserBook {
             };
             if let Err(error) = &placed {
                 last_refusal = Some(error.message.clone());
-                // A refused key stays refused: another try only repeats the request.
-                if ids.is_empty()
+                if let Some((reason, refused)) = settled_refusal(error)
+                    && ids.is_empty()
                     && !lost
-                    && matches!(
-                        error.kind,
-                        Some(ErrorKind::AuthInvalid | ErrorKind::AuthPermission)
-                    )
                 {
                     self.error(&format!(
-                        "Chaser for {} stopped: the venue refused this account's key: {}",
+                        "Chaser for {} stopped: {refused}: {}",
                         chase.options.symbol, error.message
                     ));
-                    chase.mark_complete("The venue refused this account's key");
+                    chase.mark_complete(reason);
                     self.check_and_mark_if_complete(chase);
                     return Vec::new();
                 }

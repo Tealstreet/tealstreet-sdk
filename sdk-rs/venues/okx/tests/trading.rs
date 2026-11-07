@@ -20,6 +20,60 @@ fn place(
 }
 
 #[test]
+fn ambiguous_http_signature_response_never_resends_a_released_create() {
+    use safe_cex_engine::{Method, Outcome, Response};
+
+    for status in [429, 408, 500, 503] {
+        let mut e = trading_engine();
+        let out = place(
+            &mut e,
+            vec![order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#,
+            )],
+        );
+        let writes: Vec<_> = out
+            .iter()
+            .filter_map(|action| match action {
+                Action::Http(request) if request.method != Method::Get => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(writes.len(), 1, "one physically released create");
+        e.handle(
+            6.0,
+            Event::HttpResponse {
+                request: writes[0].id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#,
+                },
+            },
+        );
+        let mut after = prepared(&mut e, 6.0);
+        after.extend(fire_armed(&mut e, &after.clone(), 30_000.0));
+        assert!(
+            !after.iter().any(
+                |action| matches!(action, Action::Http(request) if request.method != Method::Get)
+            ),
+            "HTTP {status} must not resend the create: {after:?}"
+        );
+        let terminal = terminals(&after, 1);
+        assert_eq!(terminal.len(), 1, "HTTP {status}: one terminal");
+        assert_eq!(
+            terminal[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        assert!(
+            after.iter().any(
+                |action| matches!(action, Action::Http(request) if request.method == Method::Get)
+            ),
+            "HTTP {status}: reconcile by reading back"
+        );
+    }
+}
+
+#[test]
 fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
     let mut e = trading_engine();
     let a = place(
@@ -666,7 +720,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
 }
 
 #[test]
-fn replacement_never_runs_after_cancellation_rejection() {
+fn protective_amend_51400_is_refused_without_any_replacement() {
     use safe_cex_engine::model::*;
     let mut e = trading_engine();
     e.store_mut()
@@ -681,7 +735,7 @@ fn replacement_never_runs_after_cancellation_rejection() {
         }),
     );
     let out = prepared(&mut e, 5.0);
-    assert!(matches!(http(&out), Action::Http(r) if r.url.ends_with("/cancel-algos")));
+    assert!(matches!(http(&out), Action::Http(r) if r.url.ends_with("/amend-algos")));
     reply(
         &mut e,
         http(&out),
@@ -697,38 +751,32 @@ fn replacement_never_runs_after_cancellation_rejection() {
     assert_eq!(e.store().order("91_sl").unwrap().status, OrderStatus::Open);
 }
 
-/// The cancel landed and the replacement was refused: the stop is gone.
+/// Native amendment rejection leaves the old protection standing.
 #[test]
-fn a_stop_whose_replacement_is_refused_is_gone_and_says_so() {
+fn refused_native_stop_amend_preserves_the_old_stop() {
     use safe_cex_engine::model::*;
     let mut e = trading_engine();
     e.store_mut()
         .upsert_order(stored("91_sl", OrderType::StopLoss));
     e.handle(
-        5.0,
+        5.,
         Event::Command(Command::AmendOrder {
             command: 2,
             id: "91_sl".into(),
-            price: Some(37000.0),
+            price: Some(37000.),
             amount: None,
         }),
     );
-    let out = prepared(&mut e, 5.0);
+    let out = prepared(&mut e, 5.);
+    let request = http(&out);
+    assert!(matches!(request, Action::Http(r) if r.url.ends_with("/amend-algos")));
     reply(
         &mut e,
-        http(&out),
-        &envelope(r#"{"algoId":"91","sCode":"0","sMsg":""}"#),
-        6.0,
+        request,
+        r#"{"code":"1","msg":"","data":[{"algoId":"91","sCode":"51277","sMsg":"TP trigger price cannot be lower than the last price"}]}"#,
+        6.,
     );
-    let out = prepared(&mut e, 6.0);
-    assert!(matches!(http(&out), Action::Http(r) if r.url.ends_with("/order-algo")));
-    reply(
-        &mut e,
-        http(&out),
-        r#"{"code":"1","msg":"","data":[{"algoId":"","sCode":"51277","sMsg":"TP trigger price cannot be lower than the last price"}]}"#,
-        7.0,
-    );
-    let out = prepared(&mut e, 7.0);
+    let out = prepared(&mut e, 6.);
     let error = out
         .iter()
         .find_map(|a| match a {
@@ -736,11 +784,14 @@ fn a_stop_whose_replacement_is_refused_is_gone_and_says_so() {
             _ => None,
         })
         .expect("a failure");
-    assert!(error.message.contains("has no stop"), "{}", error.message);
-    assert_eq!(
-        e.store().order("91_sl").unwrap().status,
-        OrderStatus::Canceled
+    assert_eq!(error.venue_code.as_deref(), Some("51277"));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert!(!error.message.contains("has no stop"));
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
+    assert_eq!(e.store().order("91_sl").unwrap().status, OrderStatus::Open);
 }
 
 #[test]
@@ -904,7 +955,7 @@ fn explicit_zero_sl_and_tp_still_close_the_whole_position() {
 }
 
 #[test]
-fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_cancel() {
+fn standalone_protective_limit_amend_is_native_and_preserves_original_on_refusal() {
     use safe_cex_engine::model::*;
     for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
         let mut e = trading_engine();
@@ -934,8 +985,21 @@ fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_canc
             }),
         );
         let out = prepared(&mut e, 5.0);
-        assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("execution price"))));
+        let request = http(&out);
+        assert!(matches!(request, Action::Http(r) if r.url.ends_with("/amend-algos")));
+        assert!(body(request).contains("35900"));
+        assert!(body(request).contains("\"cxlOnFail\":false"));
+        reply(
+            &mut e,
+            request,
+            r#"{"code":"1","data":[{"algoId":"91","sCode":"51000","sMsg":"refused"}]}"#,
+            6.,
+        );
+        let out = prepared(&mut e, 6.);
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
         assert_eq!(e.store().order(id), Some(&original));
     }
 }
@@ -1812,7 +1876,7 @@ fn trading_failures_are_classified_without_changing_their_text() {
         (
             r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
             Some(ErrorKind::RateLimited),
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some("50011"),
         ),
         (

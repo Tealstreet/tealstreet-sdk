@@ -7,12 +7,12 @@ import { gunzipSync } from 'node:zlib';
 import { buildBinanceOptionsTape } from '../../../../../sdk-rs/harness/private-tape-binanceoptions.mjs';
 import { buildBitgetUtaTape } from '../../../../../sdk-rs/harness/private-tape-bitget-uta.mjs';
 import { buildBitgetInverseTape } from '../../../../../sdk-rs/harness/private-tape-bitgetinverse.mjs';
-import { coinbasePrivateTape } from '../../../../../sdk-rs/harness/private-tape-coinbase.mjs';
 import { canonicalUrl, Tape } from '../../../../../sdk-rs/harness/tape.mjs';
 import { venueOf } from '../../../../../sdk-rs/harness/venues.mjs';
 import { HYROTRADER_SIMULATOR_URL, HYROTRADER_SIMULATOR_WS_URL } from '../../exchanges/bybit/bybit.types';
 import { directTransport } from '../../transport/direct';
 import { prepareRecordedHttp } from '../support/managedHttp';
+import { coinbaseDrbPublicRecords, coinbaseDrbPublicResponse } from '../support/coinbaseDrb';
 
 type RecordRow = {
   type: string;
@@ -91,11 +91,8 @@ export const realVenue = (name: ExchangeName) => {
     records = buildBinanceOptionsTape({ isPublic: true }) as RecordRow[];
     source = 'private-tape-binanceoptions.mjs public records';
   } else if (name === 'coinbase') {
-    // Main Coinbase keyless mode is legacy INTX. The captured public tape is
-    // spot-only, so use the documented INTX instruments input, with no keys.
-    // This proves compatibility, not availability of the retired live route.
-    records = coinbasePrivateTape({ profile: 'intx' }).records as RecordRow[];
-    source = 'private-tape-coinbase.mjs legacy INTX public records';
+    records = coinbaseDrbPublicRecords;
+    source = 'venues/coinbase/tests/fixtures/drb-public.jsonl (live public gateway capture)';
   } else {
     const file = new URL(`../../../../../sdk-rs/harness/fixtures/${fixture}-public.jsonl.gz`, import.meta.url);
     records = gunzipSync(readFileSync(file))
@@ -113,12 +110,6 @@ export const realVenue = (name: ExchangeName) => {
       record.type === 'http'
         ? record.url!.includes('/mix/market/')
         : record.type === 'ws' && record.url!.endsWith('/ws/public'),
-    );
-  if (name === 'coinbase')
-    records = records.filter((record) =>
-      record.type === 'http'
-        ? record.url!.includes('api.international.coinbase.com')
-        : record.type === 'ws' && record.url === 'wss://advanced-trade-ws.coinbase.com',
     );
 
   const venue = venueOf(name === 'binancepm' ? 'binance' : name);
@@ -336,6 +327,7 @@ export const realVenue = (name: ExchangeName) => {
     async request({ method, url, body, headers, signal }) {
       signal?.throwIfAborted();
       requests.push(`${method} ${url}`);
+      if (name === 'coinbase') return coinbaseDrbPublicResponse({ method, url, body, headers });
       // Polling records become available with real elapsed input time. Start
       // after WASM initialization, at the first actual request, and leave the
       // native engine's timers and store publication untouched.

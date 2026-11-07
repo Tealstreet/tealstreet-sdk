@@ -27,7 +27,7 @@
     "80d6da32d1ff894feb349435b11b1d16783adf7f241e52f37faea1214194f2e0": 1
   },
   "venues/coinbase/src/public.rs": {
-    "632efff5a9082aa22bf2a2a91f0104a93fc1a42f9ccc388478b028220bc3ee02": 1
+    "1048fbdc0a05786a43250a11e1958597faebcdd23e6a645fab2a6ae668888169": 1
   },
   "venues/cryptocom/src/account.rs": {
     "fa5d212e681c96ea593cc1d269023ae773a6ae98e350a9c791a8c518bfb8682c": 1
@@ -51,13 +51,6 @@
   },
   "venues/kucoin/src/spot/mod.rs": {
     "28a064fa5dcf2d763ad4d0384ff20ec72c72c2117c5ee7c55907f7da532066ed": 1
-  },
-  "venues/lighter/src/account.rs": {
-    "be4ae7498ff0397e2fc47240cbd41040182c112562364fc9d7044e907169e600": 1
-  },
-  "venues/lighter/src/lib.rs": {
-    "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2,
-    "ea3cd61f2f9f9bb9f955dbc0c94f97694342d0cb658213c05a034f8572a31ab2": 1
   },
   "venues/mexc/src/account.rs": {
     "a11771673f092a01c7fac3d204d1c1f3dd8424214a324efce5390248d48ecfbe": 1

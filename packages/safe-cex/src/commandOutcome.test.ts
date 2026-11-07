@@ -264,3 +264,13 @@ it('keeps a closed native history cause separately from the venue code through w
   expect(serializeCommandError({ message: 'bad cause', causeCode: 'https://signed?secret' }))
     .not.toHaveProperty('causeCode');
 });
+
+it('keeps closed history row evidence through worker serialization without extra properties', () => {
+  const error = Object.assign(new Error('invalid row'), {
+    kind: 'internal', causeCode: 'HISTORY_DECODE',
+    historyDecode: { schema: 'bitgetClassicOrders', reason: 'quantity', raw: 'must not cross' },
+  });
+  const serialized = serializeCommandError(error);
+  expect(serialized).toHaveProperty('historyDecode', { schema: 'bitgetClassicOrders', reason: 'quantity' });
+  expect(deserializeCommandError(structuredClone(serialized))).toHaveProperty('historyDecode', { schema: 'bitgetClassicOrders', reason: 'quantity' });
+});

@@ -773,3 +773,21 @@ fn malformed_batch_rows_do_not_erase_other_correlated_identity_evidence() {
     );
     assert!(engine.store().orders().is_empty());
 }
+
+#[test]
+fn engine_ambiguity_429_auth_body_cannot_change_unknown() {
+    let mut e = engine();
+    place(&mut e, 1);
+    let request = packet(&collect(&mut e, START));
+    let actions = respond(
+        &mut e,
+        &request,
+        START + 1.,
+        429,
+        r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#,
+    );
+    assert!(writes(&actions).is_empty());
+    let errors = failures(&actions);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
+}

@@ -250,6 +250,38 @@ pub fn apply(
             section::MARKETS => {}
             section::TICKERS => tickers(store, &mut *state, frame, section)?,
             section::TICKER_DELTAS => ticker_deltas(store, state, frame, section)?,
+            section::TICKER_OBSERVATIONS => {
+                if section.revision != 0 || !section.payload.len().is_multiple_of(32) {
+                    return Err(IngestError("invalid ticker observation section"));
+                }
+                // Validate the whole observation batch before changing any reference.
+                for apply in [false, true] {
+                    let mut cursor = Cursor::new(section.payload);
+                    while cursor.at < section.payload.len() {
+                        let row = cursor.f64()?;
+                        let times = [cursor.f64()?, cursor.f64()?, cursor.f64()?];
+                        if row.fract() != 0.
+                            || !(0.0..state.source_tickers.len() as f64).contains(&row)
+                            || times
+                                .iter()
+                                .any(|v| !(v.is_finite() && *v >= 0. || *v == f64::NEG_INFINITY))
+                        {
+                            return Err(IngestError("invalid ticker observation"));
+                        }
+                        if store
+                            .tickers()
+                            .get(row as usize)
+                            .map(|ticker| &ticker.symbol)
+                            != state.source_tickers.get(row as usize)
+                        {
+                            return Err(IngestError("ticker observation identity mismatch"));
+                        }
+                        if apply {
+                            store.import_observation_times(row as u32, times);
+                        }
+                    }
+                }
+            }
             section::ORDERS => {
                 orders(store, state, frame, section)?;
                 applied.orders = true;
@@ -622,6 +654,7 @@ fn orders(
             column.push(c.f64()?);
         }
     }
+    use crate::model::order_trigger_word as word;
     let mut extra_triggers = Vec::with_capacity(count);
     for _ in 0..count {
         extra_triggers.push(c.u32()?);
@@ -638,13 +671,14 @@ fn orders(
         let extra = OrderExtra {
             take_profit_known: false,
             stop_loss_known: false,
-            tp_trigger_type: optional(&TRIGGER, tp_sl & 0xff)?,
-            sl_trigger_type: optional(&TRIGGER, (tp_sl >> 8) & 0xff)?,
+            tp_trigger_type: optional(&TRIGGER, (tp_sl >> word::TP_SHIFT) & word::TRIGGER_MASK)?,
+            sl_trigger_type: optional(&TRIGGER, (tp_sl >> word::SL_SHIFT) & word::TRIGGER_MASK)?,
             remaining_native: present(column(7)),
             filled_in_placement_units: present(column(8)),
             remaining_notional: present(column(9)),
             conditional_order_price: present(column(10)),
             reject_reason: optional(&REJECT, flags >> 4)?,
+            native_algo: tp_sl & word::NATIVE_ALGO != 0,
         };
         orders.push(Order {
             id: strings.required(id)?.to_owned(),
@@ -888,7 +922,9 @@ fn status(
         bits.positions = has(loaded_flag::POSITIONS);
     });
     store.set_hedged(flags & status_flag::HEDGED != 0);
-    store.set_latency(latency);
+    store.set_latency_sample(
+        (flags & status_flag::LATENCY_MEASURED != 0 || latency > 0.0).then_some(latency),
+    );
     Ok(())
 }
 
@@ -1532,6 +1568,66 @@ pub(crate) mod tests {
         assert_eq!(store.positions(), source.positions());
     }
 
+    /// ORDERS' trigger word: bit 16 carries `native_algo` both ways, a word without it
+    /// is exactly the pre-flag encoding, and a decoder that masks bits 0-15 (every older
+    /// build, Rust or JS) reads the same triggers whether or not it is set.
+    #[test]
+    fn the_native_algo_bit_round_trips_and_older_decoders_mask_it_away() {
+        use crate::model::order_trigger_word::{self as word, encode};
+        use crate::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, StopTriggerType};
+        let extra = |native_algo| OrderExtra {
+            tp_trigger_type: Some(StopTriggerType::LastPrice),
+            sl_trigger_type: Some(StopTriggerType::IndexPrice),
+            native_algo,
+            ..OrderExtra::default()
+        };
+        let plain = encode(&extra(false));
+        let flagged = encode(&extra(true));
+        // The pre-flag formula: each trigger + 1, sl shifted by 8; nothing above bit 15.
+        let tp = StopTriggerType::LastPrice as u32 + 1;
+        let sl = StopTriggerType::IndexPrice as u32 + 1;
+        assert_eq!(plain, tp | (sl << 8));
+        assert_eq!(flagged, plain | (1 << 16));
+        // An older decoder's masks.
+        for w in [plain, flagged] {
+            assert_eq!((w & 0xff, (w >> 8) & 0xff), (tp, sl));
+        }
+        // This decoder on an older producer's word: no flag.
+        assert_eq!(plain & word::NATIVE_ALGO, 0);
+        let order = |id: &str, native_algo| Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSD_PERP".into(),
+            kind: OrderType::StopLoss,
+            side: OrderSide::Sell,
+            price: 90.0,
+            amount: 7.0,
+            filled: 0.0,
+            remaining: 7.0,
+            reduce_only: true,
+            close: Some(false),
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 1.0,
+            trigger_type: Some(StopTriggerType::MarkPrice),
+            take_profit: None,
+            stop_loss: None,
+            extra: Some(OrderExtra {
+                remaining_native: Some(7.0),
+                ..extra(native_algo)
+            }),
+        };
+        let mut source = Store::default();
+        source.set_orders(vec![order("algo", true), order("legacy", false)]);
+        let (store, applied) = round_trip(&source);
+        assert!(applied.orders);
+        assert_eq!(store.orders(), source.orders());
+        let flag = |id: &str| store.order(id).unwrap().extra.as_ref().unwrap().native_algo;
+        assert!(flag("algo"));
+        assert!(!flag("legacy"));
+    }
+
     #[test]
     fn deltas_follow_the_source_row_even_when_a_symbol_repeats() {
         let mut source = Store::default();
@@ -1549,6 +1645,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn latency_presence_survives_frame_fed_ingest() {
+        let mut source = Store::default();
+        let mut target = Store::default();
+        let mut state = IngestState::default();
+        target.set_latency(9.0);
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        source.write(&source.account_snapshot(), &mut writer);
+        let frame = writer.finish();
+        apply(&mut target, &mut state, &parse(&frame).unwrap(), true).unwrap();
+        assert_eq!(target.latency(), None);
+        source.set_latency(0.0);
+        ingest(&mut source, &mut state, &mut target, false);
+        assert_eq!(target.latency(), Some(0.0));
+        source.set_latency(25.0);
+        ingest(&mut source, &mut state, &mut target, false);
+        assert_eq!(target.latency(), Some(25.0));
+        source.set_latency_sample(None);
+        ingest(&mut source, &mut state, &mut target, false);
+        assert_eq!(target.latency(), None);
+    }
+
+    #[test]
     fn status_carries_account_loaded_bits_hedged_and_latency_but_not_markets() {
         let mut source = Store::default();
         source.set_hedged(true);
@@ -1561,7 +1679,7 @@ pub(crate) mod tests {
         let mut store = Store::default();
         ingest(&mut source, &mut IngestState::default(), &mut store, true);
         assert!(store.hedged());
-        assert_eq!(store.latency(), 42.5);
+        assert_eq!(store.latency(), Some(42.5));
         let loaded = store.loaded();
         assert!(loaded.balance && loaded.positions);
         assert!(!loaded.orders && !loaded.tickers && !loaded.markets);

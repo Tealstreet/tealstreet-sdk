@@ -35,12 +35,9 @@ fn order_path(variant: Variant) -> &'static str {
 fn order_reads(variant: Variant) -> &'static [&'static str] {
     match variant {
         Variant::UsdM => &["/fapi/v1/openOrders", "/fapi/v1/openAlgoOrders"],
-        Variant::PortfolioMargin => &[
-            "/papi/v1/um/openOrders",
-            "/papi/v1/um/conditional/openOrders",
-        ],
+        Variant::PortfolioMargin => &["/papi/v1/um/openOrders", "/papi/v1/um/algo/openAlgoOrders"],
         Variant::Spot => &["/api/v3/openOrders"],
-        Variant::CoinM => &["/dapi/v1/openOrders"],
+        Variant::CoinM => &["/dapi/v1/openOrders", "/dapi/v1/openAlgoOrders"],
         Variant::Options => &["/eapi/v1/openOrders"],
     }
 }
@@ -137,7 +134,9 @@ fn coin_or_spot_ready(variant: Variant) -> Harness {
             r#"{"assets":[]}"#
         },
     );
-    h.respond(&format!("{prefix}/openOrders"), 200, "[]");
+    for path in order_reads(variant) {
+        h.respond(path, 200, "[]");
+    }
     let socket = h
         .socket(if spot { "ws-api/v3" } else { "/ws/coin-key" })
         .unwrap();

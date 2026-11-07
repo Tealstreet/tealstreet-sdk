@@ -176,19 +176,21 @@ fn reconnect_resubscribes_live_topics_and_ignores_retired_socket() {
 }
 
 #[test]
-fn open_socket_pings_every_fifteen_seconds_and_silence_retires_it_at_forty_five() {
+// The 45 s idle bound still stands, but streaming public topics that carry no data retire the
+// socket first, at 30 s.
+fn open_socket_pings_every_fifteen_seconds_and_silence_retires_it_at_thirty() {
     let mut h = Harness::public(PublicFeedPolicy::Direct);
     h.open();
     let socket = h.socket();
     let opened = h.now;
-    h.advance(opened + 44_999.0);
-    assert_eq!(h.pings(socket), 2);
+    h.advance(opened + 29_999.0);
+    assert_eq!(h.pings(socket), 1);
     assert!(!h.closed.contains(&socket));
-    h.advance(opened + 45_000.0);
+    h.advance(opened + 30_000.0);
     assert!(h.closed.contains(&socket));
     let until = h.now + 1_000.0;
     h.advance(until);
-    assert_ne!(h.socket(), socket, "idle timeout reconnects");
+    assert_ne!(h.socket(), socket, "data silence reconnects");
 }
 
 #[test]

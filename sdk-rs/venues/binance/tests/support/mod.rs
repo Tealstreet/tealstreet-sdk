@@ -291,7 +291,7 @@ impl Harness {
                     self.done.push((command, Err(error.legacy_text())));
                     self.failures.push((command, error));
                 }
-                Action::Notice(Notice::StartupFailed { error }) => {
+                Action::Notice(Notice::StartupFailed { error, .. }) => {
                     assert!(
                         self.expect_startup_failure,
                         "unexpected Binance startup failure: {error}"
@@ -431,6 +431,23 @@ impl Harness {
 
     pub fn best_bid(&self) -> Option<f64> {
         self.engine.book("BTCUSDT").and_then(|book| book.best_bid())
+    }
+
+    /// Answer the targeted PM algo query, separately from the DELETE acknowledgement.
+    pub fn pm_cancel_proof(&mut self, native: u64, client: &str, symbol: &str) {
+        let query = self.take("/papi/v1/um/algo/algoOrder");
+        assert_eq!(query.method, safe_cex_engine::Method::Get);
+        assert!(query.url.contains(&format!("algoId={native}")));
+        self.reply(
+            query.id,
+            200,
+            "",
+            &serde_json::json!({
+                "algoId": native, "clientAlgoId": client, "symbol": symbol,
+                "algoStatus": "CANCELED", "actualOrderId": "", "actualPrice": "0", "triggerTime": 0,
+            })
+            .to_string(),
+        );
     }
 
     /// Move the clock forward, firing every timer that comes due.

@@ -13,6 +13,9 @@ import { createEngineObject } from '@tealstreet/safe-cex-wasm/workers';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
+
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { accountToExchangeOptions } from '../createExchangeFromAccount';
 import { exchangeMetadata } from '../exchangeMetadata';
@@ -24,6 +27,7 @@ import { createAPI as createKucoinAPI } from '../__tests__/reference/kucoin/kuco
 import { createKucoinSpotAPI } from '../__tests__/reference/kucoin/kucoinspot.api';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
+import { SignedPublicProxyRefusal } from './publicProxyGuard';
 import { setDefaultTransport } from './registry';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
@@ -572,7 +576,10 @@ describe('engine HTTP routing at the raw transport boundary', () => {
             const raw = makeRaw();
             const input = {
               ...request(`https://${exchange}.example/engine-routing`),
-              headers: { 'X-MBX-APIKEY': 'key' },
+              // Lighter authorizes in the payload: a key header to its public proxy is refused.
+              headers: (exchange === 'lighter' || exchange === 'lighter-robinhood'
+                ? {}
+                : { 'X-MBX-APIKEY': 'key' }) as Record<string, string>,
             };
             mocks.adapter.mockClear();
             mocks.createAdapter.mockClear();
@@ -1313,8 +1320,9 @@ describe('Aster secondary signer HTTP routing', () => {
     headers: { 'x-mbx-apikey': 'read-wallet' },
   });
 
+  // Secondary read keys are deprecated; their public-proxy read fails closed (publicProxyGuard).
   it.each(['GET', 'get'])(
-    'routes signed %s to the secondary CORS egress and every write to primary',
+    'refuses signed %s on the secondary CORS egress and routes every write to primary',
     async (method) => {
       const opts = options({
         tealstreetProxy: true,
@@ -1324,9 +1332,8 @@ describe('Aster secondary signer HTTP routing', () => {
       });
       const raw = makeRaw();
       const routed = createEngineTransport('asterdex', opts, raw);
-      await routed.request(privateRequest(method));
-      expect(raw.request.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${privateRequest(method).url}`);
-      expect(raw.request.mock.lastCall![0].headers['x-mbx-apikey']).toBe('read-wallet');
+      await expect(routed.request(privateRequest(method))).rejects.toThrow(SignedPublicProxyRefusal);
+      expect(raw.request).not.toHaveBeenCalled();
       for (const write of ['POST', 'PUT', 'DELETE']) {
         await routed.request(privateRequest(write));
         expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${privateRequest(write).url}`);
@@ -1337,7 +1344,7 @@ describe('Aster secondary signer HTTP routing', () => {
     },
   );
 
-  it('retains the primary HOW path and puts secondary CORS inside only its read RPC', async () => {
+  it('retains the primary HOW path and refuses the secondary read RPC to public CORS', async () => {
     const opts = options({
       tealstreetTunnel: true,
       secondary_key: 'read-wallet',
@@ -1345,15 +1352,14 @@ describe('Aster secondary signer HTTP routing', () => {
     });
     const raw = makeRaw();
     const routed = createEngineTransport('asterdex', opts, raw);
-    await routed.request(privateRequest('GET'));
-    expect(mocks.adapter.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${privateRequest('GET').url}`);
+    await expect(routed.request(privateRequest('GET'))).rejects.toThrow(SignedPublicProxyRefusal);
+    expect(mocks.adapter).not.toHaveBeenCalled();
     await routed.request(privateRequest('POST'));
     expect(mocks.adapter.mock.lastCall![0].url).toBe(privateRequest('POST').url);
     expect(raw.request).not.toHaveBeenCalled();
     const plan = resolveEngineRoutingPlan('asterdex', opts, baseURL);
     expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false });
-    expect(plan.readHttp).toMatchObject({ mode: 'how', prefix: PUBLIC_CORS_PROXY, authorize: false });
-    expect(plan.readHttp?.tunnelUrl).toBe(plan.http.tunnelUrl);
+    expect(plan).not.toHaveProperty('readHttp');
     expect(JSON.stringify(plan)).not.toMatch(/read-wallet|read-private-key|venue-key|venue-secret|proxy-jwt/);
     routed.dispose!();
   });

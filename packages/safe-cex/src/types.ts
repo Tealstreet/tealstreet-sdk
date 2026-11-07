@@ -129,6 +129,8 @@ export type ExchangeOptions = {
     readonly address: string;
     readonly feeTenthsBps: number;
   };
+  /** Extra fast HL perp depth topic per book. Default off; budget all sockets against the per-IP cap. */
+  readonly hyperliquidFastBook?: boolean;
   readonly testnet?: boolean;
   /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
   readonly enableSpotMarkets?: boolean;
@@ -543,7 +545,11 @@ export type Market = {
   readonly makerFee?: number;
 };
 
+/** Source engine receipt times for last, mark and index; null is unobserved. */
+export type TickerObservedAt = [number | null, number | null, number | null];
+
 export type Ticker = {
+  readonly observedAt?: TickerObservedAt;
   readonly id: string;
   readonly symbol: string;
   readonly bid: number;
@@ -1128,7 +1134,7 @@ export type DisplayedMargin = {
 };
 
 export type StoreData = {
-  readonly latency: number;
+  readonly latency: number | null;
   readonly balance: Balance;
   readonly markets: Market[];
   readonly tickers: Ticker[];
@@ -1232,7 +1238,7 @@ export type Writable<T> =
             : T; // is primitive or literal value
 
 export type WritableStoreData = {
-  latency: number;
+  latency: number | null;
   balance: Writable<Balance>;
   markets: Array<Writable<Market>>;
   tickers: Array<Writable<Ticker>>;
@@ -1333,8 +1339,11 @@ export interface RemoteSignerRequest {
       | 'kraken-challenge'
       | 'apexomni-base64'
       | 'bitunix-double-sha256'
+      | 'kucoin-batch'
       // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
       // the digest from; `hyperliquid-address` binds the agent address.
+      | 'grvt-order'
+      | 'grvt-address'
       | 'hyperliquid-l1'
       | 'hyperliquid-address'
       // Lighter: `toSign` is a transaction or auth statement the device re-derives

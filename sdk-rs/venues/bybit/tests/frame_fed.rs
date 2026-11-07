@@ -43,6 +43,34 @@ fn a_frame_fed_engine_loads_public_metadata_once_and_opens_no_socket() {
 }
 
 #[test]
+fn frame_fed_market_close_splits_with_the_public_market_quantity_cap() {
+    let mut h = frame_fed();
+    load(&mut h);
+    let mut order = support::order();
+    order.kind = safe_cex_engine::model::OrderType::Market;
+    order.amount = 1100.0;
+    order.reduce_only = Some(true);
+    h.command(Command::PlaceOrders {
+        command: 10,
+        orders: vec![order],
+    });
+    h.respond(
+        "/v5/position/list",
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+    );
+    let request = h.take("/v5/order/create-batch");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let children = body["request"].as_array().unwrap();
+    let quantities: Vec<f64> = children
+        .iter()
+        .map(|child| child["qty"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(quantities, vec![500.0, 500.0, 100.0]);
+    assert!(children.iter().all(|child| child["reduceOnly"] == true));
+}
+
+#[test]
 fn writes_before_markets_and_non_writes_are_refused_without_a_request() {
     let mut h = frame_fed();
     h.command(Command::PlaceOrders {
@@ -163,6 +191,81 @@ fn an_ingested_order_cancels_in_exactly_one_request() {
         body.contains("server-order") && body.contains("BTCUSDT"),
         "{body}"
     );
+}
+
+fn source_refreshes(h: &Harness) -> Vec<&safe_cex_engine::LogEvent> {
+    h.notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event) if event.code == "orders.refresh" => Some(event),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_unknown_plain_cancel_asks_its_source_once_without_a_placement_fence() {
+    for level in [safe_cex_engine::Level::Info, safe_cex_engine::Level::Error] {
+        let mut h = frame_fed();
+        load(&mut h);
+        h.engine.set_log_level(level);
+        h.engine.apply_frame(h.now, &source_frame(), true).unwrap();
+        h.collect();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["server-order".into()],
+        });
+        let request = h.take("/v5/order/cancel");
+        h.event(safe_cex_engine::Event::HttpFailed {
+            request: request.id,
+            error: "cancel response lost",
+        });
+        assert_eq!(h.unknown, [1]);
+        assert_eq!(
+            source_refreshes(&h).len(),
+            1,
+            "no placement fence is needed"
+        );
+        assert!(source_refreshes(&h)[0].fields.iter().any(|(key, value)| {
+            // Bybit holds no mutation lock scope: conservatively ask for the account.
+            *key == "symbols" && matches!(value, safe_cex_engine::Value::Str(s) if s.is_empty())
+        }));
+        assert_eq!(
+            h.engine.store().order("server-order").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+        h.advance(120_000.);
+        assert_eq!(source_refreshes(&h).len(), 1, "no automatic ask loop");
+        assert!(h.requests.is_empty(), "no cancel replay or page-side read");
+        h.command(Command::PlaceOrders {
+            command: 2,
+            orders: vec![support::order()],
+        });
+        assert!(
+            h.has_request("/v5/order/create"),
+            "plain cancel creates no placement fence"
+        );
+    }
+}
+
+#[test]
+fn a_confirmed_or_rejected_cancel_does_not_request_an_unknown_cancel_refresh() {
+    for body in [
+        r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+        r#"{"retCode":10001,"retMsg":"invalid argument","result":{}}"#,
+    ] {
+        let mut h = frame_fed();
+        load(&mut h);
+        h.engine.apply_frame(h.now, &source_frame(), true).unwrap();
+        h.collect();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["server-order".into()],
+        });
+        h.respond("/v5/order/cancel", 200, body);
+        assert!(h.unknown.is_empty(), "{body}: {:?}", h.outcomes);
+        assert!(source_refreshes(&h).is_empty(), "{body}");
+    }
 }
 
 #[test]

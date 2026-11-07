@@ -9,7 +9,7 @@ spot = []
 private-adoption-originals = []
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["order-locks"] }
+safe-cex-engine = { workspace = true, features = ["order-locks", "serial-plans"] }
 safe-cex-crypto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -18,4 +18,5 @@ serde_json.workspace = true
 workspace = true
 
 [dev-dependencies]
+safe-cex-venues = { path = "../../registry", default-features = false, features = ["kucoin"] }
 safe-cex-engine = { workspace = true, features = ["test-support"] }

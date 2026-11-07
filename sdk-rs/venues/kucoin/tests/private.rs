@@ -73,6 +73,7 @@ impl Harness {
             .find_map(|a| match a {
                 Action::WsConnect {
                     binary,
+                    public_topics,
                     socket,
                     url,
                     headers,
@@ -80,6 +81,10 @@ impl Harness {
                     context,
                 } if url.contains("/private?") => {
                     assert!(!binary, "KuCoin sockets use the text protocol");
+                    assert!(
+                        !public_topics,
+                        "KuCoin private feeds do not carry public topics"
+                    );
                     assert!(
                         headers.is_empty(),
                         "KuCoin authenticates with a bullet token"
@@ -592,12 +597,28 @@ fn full_position_stop_keeps_close_flag_after_documented_partial_event() {
         h.engine.store().order("full-stop").unwrap().close,
         Some(true)
     );
+    h.reply("/bullet-public", r#"{"code":"200000","data":{"token":"public-token","instanceServers":[{"endpoint":"wss://example.test/public","pingInterval":18000,"pingTimeout":10000}]}}"#);
+    let socket = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/public?") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.event(Event::WsOpened { socket });
+    h.event(Event::WsMessage {
+        socket,
+        text: r#"{"type":"welcome"}"#,
+    });
+    h.event(Event::WsMessage { socket, text: r#"{"type":"message","topic":"/contract/instrument:XBTUSDTM","data":{"markPrice":100}}"# });
     h.event(Event::Command(Command::AmendOrder {
         command: 1,
         id: "full-stop".into(),
         price: Some(81.0),
         amount: None,
     }));
+    h.pace();
     h.reply(
         "/orders/full-stop",
         r#"{"code":"200000","data":{"cancelledOrderIds":["full-stop"]}}"#,
@@ -1632,4 +1653,46 @@ fn local_signing_refusal_reports_a_sign_error_and_sends_no_private_read() {
     assert!(!h.actions.iter().any(
         |action| matches!(action, Action::Http(request) if request.url.contains("account-overview"))
     ));
+}
+
+#[test]
+fn native_stop_limit_rows_keep_limit_price_across_sparse_stop_events() {
+    let mut h = Harness::new();
+    h.ready();
+    let row = r#"{"orderId":"stop-limit","symbol":"XBTUSDTM","type":"open","orderType":"limit","status":"open","side":"sell","stop":"down","stopPrice":"80","price":"79","stopPriceType":"MP","size":10,"filledSize":0,"reduceOnly":true,"closeOrder":false,"postOnly":false,"timeInForce":"GTC"}"#;
+    h.ws("/contractMarket/advancedOrders", row);
+    let original = h.engine.store().order("stop-limit").unwrap();
+    assert_eq!(original.kind, OrderType::StopLoss);
+    assert_eq!(original.price, 80.0);
+    assert_eq!(
+        original.extra.as_ref().unwrap().conditional_order_price,
+        Some(79.0)
+    );
+    h.ws("/contractMarket/advancedOrders", r#"{"orderId":"stop-limit","symbol":"XBTUSDTM","type":"open","orderType":"stop","side":"sell","stop":"down","stopPrice":"80","stopPriceType":"MP","size":10,"ts":1610000000500000000}"#);
+    let sparse = h.engine.store().order("stop-limit").unwrap();
+    assert_eq!(
+        sparse.extra.as_ref().unwrap().conditional_order_price,
+        Some(79.0)
+    );
+    assert_eq!(sparse.close, Some(false));
+}
+
+#[test]
+fn native_stop_limit_rest_rows_keep_a_separate_limit_price() {
+    let mut h = Harness::new();
+    h.ready();
+    h.poll();
+    h.reply("/stopOrders?", &Harness::page(r#"{"id":"rest-limit","symbol":"XBTUSDTM","type":"limit","status":"open","side":"sell","stop":"down","stopPrice":"80","price":"79","stopPriceType":"MP","size":10,"filledSize":0,"reduceOnly":true,"closeOrder":false,"postOnly":false,"timeInForce":"GTC"}"#, 1));
+    h.reply("/orders?", EMPTY);
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    let order = h.engine.store().order("rest-limit").unwrap();
+    assert_eq!(order.kind, OrderType::StopLoss);
+    assert_eq!(order.price, 80.0);
+    assert_eq!(
+        order.extra.as_ref().unwrap().conditional_order_price,
+        Some(79.0)
+    );
 }

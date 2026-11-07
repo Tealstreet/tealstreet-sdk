@@ -23,7 +23,10 @@ fn option_seed_envelope_limit_preserves_reset_headers_and_retries_after_reset() 
         .position(|r| r.url.contains("tickers") && r.url.contains("baseCoin=BTC"))
         .unwrap();
     let request = h.requests.remove(index);
-    let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 60_000.0);
+    let headers = format!(
+        "X-Bapi-Limit-Reset-Timestamp: {}",
+        h.engine.signing_clock(h.now).0 + 60_000.0
+    );
     h.event(Event::HttpResponse {
         request: request.id,
         response: safe_cex_engine::Response {
@@ -420,7 +423,14 @@ fn account_wide_histories_visit_enabled_categories_and_symbol_queries_route_dire
         },
     });
     for category in ["linear", "inverse", "option"] {
+        h.advance(250.0);
         respond(&mut h, "order/history", category, None, EMPTY);
+        for status in ["Cancelled", "Rejected", "Deactivated"] {
+            let request = h.take(&format!("orderStatus={status}"));
+            assert!(request.url.contains(&format!("category={category}")));
+            assert!(!request.url.contains("cursor="));
+            h.reply(request.id, 200, EMPTY);
+        }
     }
     assert_eq!(h.result(91).unwrap().as_ref().unwrap(), "[]");
     h.command(Command::Query {

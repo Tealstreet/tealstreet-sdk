@@ -118,6 +118,50 @@ fn caller_id_on_later_batch_item_rejects_before_any_read_or_write() {
     );
 }
 
+#[test]
+fn native_stop_limit_edit_never_converts_to_a_market_stop() {
+    for kind in [3, 5] {
+        let (mut e, socket) = ready_unattributed();
+        message(
+            &mut e,
+            socket,
+            NOW + 1.0,
+            &json!({
+                "channel":"account_all_orders", "type":"update/account_all_orders", "orders":[{
+                    "order_index":"42", "market_id":1, "status":"open", "type":kind,
+                    "is_ask":true, "reduce_only":true, "initial_base_amount":"2",
+                    "filled_base_amount":"0", "remaining_base_amount":"2",
+                    "trigger_price":"80", "price":"79", "time_in_force":1
+                }]
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            e.store()
+                .order("42")
+                .unwrap()
+                .extra
+                .as_ref()
+                .unwrap()
+                .conditional_order_price,
+            Some(79.0)
+        );
+        e.handle(
+            NOW + 1.0,
+            Event::Command(Command::AmendOrder {
+                command: 8,
+                id: "42".into(),
+                price: Some(81.0),
+                amount: None,
+            }),
+        );
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 1.0);
+        assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error, ..}) if error.outcome == Some(Outcome::NotSent))), "{out:?}");
+        assert!(e.store().order("42").is_some());
+    }
+}
+
 fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
     let (mut e, _) = ready_unattributed();
     let before = e.snapshot_frame(NOW).to_vec();
@@ -456,7 +500,7 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
 }
 
 #[test]
-fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+fn a_stop_without_native_provenance_is_refused_before_cancel() {
     let (mut e, _) = ready_unattributed();
     e.store_mut().update_order("42", |o| {
         o.kind = OrderType::StopLoss;
@@ -472,22 +516,10 @@ fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
             amount: None,
         }),
     );
-    let nonce = http(&mut e, "nextNonce");
-    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let cancel = http(&mut e, "sendTx");
-    ack(&mut e, &cancel);
-    let t = timer(&mut e);
-    e.handle(NOW + 100.0, Event::TimerFired { timer: t });
-    let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
-    reply_at(
-        &mut e,
-        NOW + 100.0,
-        &replacement,
-        200,
-        r#"{"code":21702,"message":"replacement refused"}"#,
-    );
-    let error = failure(&mut e);
-    assert!(error.contains("long position has no stop"), "{error}");
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error,..}) if error.outcome == Some(Outcome::NotSent) && error.message.contains("original unavailable"))));
+    assert!(e.store().order("42").is_some());
 }
 
 #[test]
@@ -689,7 +721,10 @@ fn account_snapshot_started_during_settings_write_cannot_undo_acknowledgement() 
             MarginType::Isolated,
         ),
     ] {
-        let (mut e, socket) = ready_unattributed();
+        // The private socket's first open is the resync this race needs.
+        let mut opts = options();
+        opts.testnet = true;
+        let (mut e, socket) = ready_unopened_meta(opts, META);
         e.handle(NOW, Event::Command(command));
         let nonce = http(&mut e, "nextNonce");
         reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
@@ -794,15 +829,15 @@ fn signed_perp_market_indexes_above_legacy_sentinel_are_supported() {
 }
 
 #[test]
-fn amend_infers_protection_from_requested_price() {
-    for (side, old_price, new_price, conditional) in [
-        (OrderSide::Sell, 110.0, 95.0, true),
-        (OrderSide::Buy, 90.0, 105.0, true),
-        (OrderSide::Sell, 95.0, 110.0, false),
-        (OrderSide::Buy, 105.0, 90.0, false),
-        (OrderSide::Buy, 90.0, 100.0, true),
+fn closing_limit_edit_preserves_native_limit_type() {
+    for (side, old_price, new_price) in [
+        (OrderSide::Sell, 110.0, 95.0),
+        (OrderSide::Buy, 90.0, 105.0),
+        (OrderSide::Sell, 95.0, 110.0),
+        (OrderSide::Buy, 105.0, 90.0),
+        (OrderSide::Buy, 90.0, 100.0),
     ] {
-        let (mut e, _) = ready_unattributed();
+        let (mut e, socket) = ready_unattributed();
         e.store_mut().update_order("42", |o| {
             o.side = side;
             o.price = old_price;
@@ -815,6 +850,17 @@ fn amend_infers_protection_from_requested_price() {
                 PositionSide::Long
             };
         });
+        let source = json!({"order_index":"42","client_order_index":"123","market_id":1,"status":"open","type":0,"time_in_force":1,
+            "is_ask":side==OrderSide::Sell,"reduce_only":true,"initial_base_amount":"2","filled_base_amount":"0","remaining_base_amount":"2",
+            "price":old_price.to_string(),"trigger_price":"0","order_expiry":NOW as u64+1_000_000,"trigger_status":"na",
+            "parent_order_index":0,"parent_order_id":"0","to_trigger_order_id_0":"0","to_trigger_order_id_1":"0","to_cancel_order_id_0":"0","order_flags":0});
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &json!({"channel":"account_all_orders","orders":[source.clone()]}).to_string(),
+        );
+        assert_eq!(e.store().order("42").unwrap().kind, OrderType::Limit);
         e.handle(
             NOW,
             Event::Command(Command::AmendOrder {
@@ -830,21 +876,20 @@ fn amend_infers_protection_from_requested_price() {
         ack(&mut e, &cancel);
         let t = timer(&mut e);
         e.handle(NOW + 100.0, Event::TimerFired { timer: t });
-        let replacement = http(&mut e, "sendTx");
+        let proof = http_at(&mut e, NOW + 100.0, "accountOrders");
+        let mut canceled = source;
+        canceled["status"] = json!("canceled");
+        reply_at(
+            &mut e,
+            NOW + 100.0,
+            &proof,
+            200,
+            &json!({"code":200,"orders":[canceled]}).to_string(),
+        );
+        let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
         let tx = wire(&replacement);
-        assert_eq!(
-            tx["Type"],
-            if conditional { 2 } else { 0 },
-            "{side:?}: {old_price} -> {new_price}"
-        );
-        assert_eq!(
-            tx["TriggerPrice"],
-            if conditional {
-                (new_price * 100.0) as u64
-            } else {
-                0
-            }
-        );
+        assert_eq!(tx["Type"], 0, "{side:?}: {old_price} -> {new_price}");
+        assert_eq!(tx["TriggerPrice"], 0);
     }
 }
 
@@ -1051,7 +1096,7 @@ fn explicit_invalid_margin_rejection_refreshes_account_without_resubmitting() {
     assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:7,error}) if error.venue_code.as_deref()==Some("21613")&&error.outcome==Some(Outcome::Rejected))));
 }
 #[test]
-fn proven_rate_limit_refusals_keep_rejected_and_never_replay() {
+fn released_http_throttles_are_unknown_and_never_replay() {
     use safe_cex_engine::ErrorKind;
     for status in [405, 429] {
         let (mut e, _) = ready_unattributed();
@@ -1065,11 +1110,29 @@ fn proven_rate_limit_refusals_keep_rejected_and_never_replay() {
         let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
             .into_iter()
             .collect::<Vec<_>>();
-        assert_eq!(out.iter().filter(|a| matches!(a,
-            Action::Notice(Notice::CommandFailed { command: 7, error })
-                if error.kind == Some(ErrorKind::Rejected) && error.outcome == Some(Outcome::Rejected)
-                    && error.venue_code.as_deref() == Some("23000") && error.message.contains("native throttle")
-        )).count(), 1, "definitive native refusal never resends: {out:?}");
+        let errors: Vec<_> = out
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{out:?}");
+        let error = errors[0];
+        if status == 429 {
+            assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_eq!(
+                error.message,
+                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+            );
+            assert_eq!(error.venue_code, None);
+        } else {
+            assert_eq!(error.kind, Some(ErrorKind::Rejected));
+            assert_eq!(error.outcome, Some(Outcome::Rejected));
+            assert!(error.message.contains("native throttle"));
+            assert_eq!(error.venue_code.as_deref(), Some("23000"));
+        }
         assert!(!out.iter().any(
             |a| matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))
         ));
@@ -1224,7 +1287,14 @@ fn rate_limit_without_rejection_proof_keeps_unknown_outcome() {
         let submit = begin(&mut e, vec![limit()]);
         reply(&mut e, &submit, status, body);
         let [error] = typed_failures(&mut e).try_into().unwrap();
-        assert_eq!(error.kind, Some(ErrorKind::Internal));
+        assert_eq!(
+            error.kind,
+            Some(if status == 429 {
+                ErrorKind::RateLimited
+            } else {
+                ErrorKind::Internal
+            })
+        );
         assert_eq!(error.outcome, Some(Outcome::Unknown));
     }
     let (mut e, _) = ready_unattributed();

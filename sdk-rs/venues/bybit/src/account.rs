@@ -15,6 +15,7 @@ use safe_cex_engine::model::{
     TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, ErrorKind, Fill, Response, SocketId, Store, TimerId, VenueError, num};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -542,6 +543,21 @@ pub fn order_side(text: Option<&str>) -> Option<OrderSide> {
     }
 }
 
+fn note_unknown_order_trigger(cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) {
+    if [
+        (&row.trigger_by, &row.trigger_price),
+        (&row.tp_trigger_by, &row.take_profit),
+        (&row.sl_trigger_by, &row.stop_loss),
+    ]
+    .iter()
+    .any(|(reference, level)| {
+        float_of(level) > 0.0
+            && present(reference).is_some_and(|name| trigger(Some(name)).is_none())
+    }) {
+        cx.notice(Level::Warn, "order.trigger_unknown", "Bybit order has an unrecognized trigger reference; a TP write will use LastPrice when no reference is known");
+    }
+}
+
 fn trigger(text: Option<&str>) -> Option<StopTriggerType> {
     match text? {
         "MarkPrice" => Some(StopTriggerType::MarkPrice),
@@ -812,7 +828,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
                     amount
                 },
                 client_order_id: None,
-                trigger_type: trigger(present(by)).or(parent.trigger_type),
+                trigger_type: trigger(present(by)),
                 extra: inverse.then(|| OrderExtra {
                     remaining_native: Some(remaining),
                     remaining_notional: Some(remaining),
@@ -1189,6 +1205,22 @@ impl BybitLinear {
             cx.clear_timer(timer);
         }
         self.account.partial_stop_refresh = Some(cx.set_timer(250.0));
+    }
+
+    /// A fresh order read after the venue changed orders no row of ours names.
+    pub(crate) fn refresh_order_source(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.variant.is_hyro() {
+            if self.account.authed && self.account.handshake.is_none() {
+                if self.account.snapshot.is_some() {
+                    self.account.revision = self.account.revision.wrapping_add(1);
+                } else {
+                    self.start_hyro_snapshot(cx);
+                }
+            }
+        } else {
+            self.account.orders_follow_up |= self.account.orders.is_some();
+            self.fetch_orders(cx);
+        }
     }
 
     pub(crate) fn note_order_terminal(&mut self, ids: &[String]) {
@@ -1752,9 +1784,14 @@ impl BybitLinear {
         }
     }
 
-    /// Reconcile an uncertain write with a fresh order read: an older read
-    /// still out predates the write, so it is abandoned rather than joined.
+    /// A source refresh joins an older census and owes one fresh successor;
+    /// its epoch/cover still proves only its own cut. Native uncertain writes
+    /// without a source ask keep abandoning their older read.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.orders_refresh_pending() && self.account.orders.is_some() {
+            self.account.orders_follow_up = true;
+            return;
+        }
         if let Some(old) = self.account.orders.take() {
             Self::finish_read_root(cx, old.root, &old.legs);
         }
@@ -1992,7 +2029,7 @@ impl BybitLinear {
                 });
                 error.message = format!(
                     "Bybit private startup timed out waiting for {}. Last failure: {}",
-                    missing.join(", "),
+                    missing.join_with(", "),
                     error.message
                 );
                 cx.startup_failed(error.kind(ErrorKind::Timeout));
@@ -2005,18 +2042,7 @@ impl BybitLinear {
         }
         if self.account.partial_stop_refresh == Some(timer) {
             self.account.partial_stop_refresh = None;
-            if self.variant.is_hyro() {
-                if self.account.authed && self.account.handshake.is_none() {
-                    if self.account.snapshot.is_some() {
-                        self.account.revision = self.account.revision.wrapping_add(1);
-                    } else {
-                        self.start_hyro_snapshot(cx);
-                    }
-                }
-            } else {
-                self.account.orders_follow_up |= self.account.orders.is_some();
-                self.fetch_orders(cx);
-            }
+            self.refresh_order_source(cx);
             return;
         }
         if self.account.handshake_timer == Some(timer) {
@@ -2425,6 +2451,7 @@ impl BybitLinear {
         mut mapped: Mapped,
     ) {
         let status = row.order_status.as_ref();
+        note_unknown_order_trigger(cx, row);
         self.note_unpriced_tpsl(&mapped);
         if self.stale_terminal_snapshot(&mapped) {
             return;
@@ -2701,6 +2728,7 @@ impl BybitLinear {
                         self.reject_order_item(cx, rejected, item);
                     }
                 } else if let Some(mapped) = mapped {
+                    note_unknown_order_trigger(cx, &row);
                     self.note_unpriced_tpsl(&mapped);
                     rows.push(mapped);
                 }
@@ -3660,6 +3688,19 @@ fn hyro_failure(ready: bool, transient: bool, local: bool, streak: u8) -> HyroFa
         HyroFailure::Retry { counts: !local }
     } else {
         HyroFailure::Reconnect
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Wallet { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::AccountInfo => S::ACCOUNT,
+            _ => S::NONE,
+        }
     }
 }
 

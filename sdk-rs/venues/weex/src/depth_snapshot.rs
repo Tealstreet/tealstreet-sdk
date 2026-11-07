@@ -22,7 +22,7 @@ impl WeexFutures {
         self.next_generation += 1;
         state.generation = self.next_generation;
         let generation = state.generation;
-        let context = match cx.http_context_with_egress(
+        let context = match cx.http_live_context_with_egress(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -127,7 +127,7 @@ impl WeexFutures {
         if response.status == 429 {
             self.paused_until = self
                 .paused_until
-                .max(cx.now + rate::delay(response, cx.now));
+                .max(cx.now + rate::delay(response, cx.protocol_now()));
         }
         if response.status >= 400 {
             self.depth_failed(

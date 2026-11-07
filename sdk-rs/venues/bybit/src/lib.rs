@@ -288,6 +288,44 @@ struct ProductState {
     account: account::AccountState,
 }
 
+#[derive(Clone, Copy)]
+struct OrderCaps {
+    limit: f64,
+    market: f64,
+}
+
+impl OrderCaps {
+    fn from_wire(row: &Instrument<'_>) -> Option<Self> {
+        let lot = row.lot_size_filter.as_ref()?;
+        let limit = float_of(&lot.max_order_qty);
+        let market = present(&lot.max_mkt_order_qty)
+            .map(float)
+            .filter(|cap| cap.is_finite() && *cap > 0.0)
+            .unwrap_or(limit);
+        Some(Self { limit, market })
+    }
+
+    fn shared(self) -> f64 {
+        if self.market.is_finite() && self.market > 0.0 {
+            self.limit.min(self.market)
+        } else {
+            0.0
+        }
+    }
+
+    fn for_order(self, shared: f64, market: bool) -> f64 {
+        // Expand only our own conservative publication for limits. A tighter
+        // store override or source frame remains a bound for either kind.
+        if market {
+            shared.min(self.shared())
+        } else if shared == self.shared() {
+            self.limit
+        } else {
+            shared
+        }
+    }
+}
+
 pub struct BybitLinear {
     /// A Bybit Brazil (`BRA_BTL`) account: REST writes publish their own order
     /// rows, as on Demo, until its proxied private WS is venue-validated.
@@ -307,6 +345,7 @@ pub struct BybitLinear {
     published_seeds: usize,
     classification: HashMap<String, InstrumentClassification>,
     derivatives: HashMap<String, DerivativeProduct>,
+    order_caps: HashMap<String, OrderCaps>,
     wallet: Option<account::Wallet>,
     orders_loaded: HashSet<Category>,
     positions_loaded: HashSet<Category>,
@@ -568,6 +607,7 @@ impl BybitLinear {
             published_seeds: 0,
             classification: HashMap::new(),
             derivatives: HashMap::new(),
+            order_caps: HashMap::new(),
             wallet: None,
             orders_loaded: HashSet::new(),
             positions_loaded: HashSet::new(),
@@ -786,16 +826,43 @@ impl BybitLinear {
         if self.config_error.is_some() {
             return self.on_public_response(cx, then, Err("Bybit options are invalid"));
         }
-        let Some(policy) = self.read_policy(rest.signed, policy::read_policy().timeout_ms) else {
+        let timeout_ms = match &then {
+            Then::Hyro(read) => {
+                let remaining = (read.deadline - cx.now).floor() as u32;
+                if remaining == 0 {
+                    return self.on_public_response(
+                        cx,
+                        then,
+                        Err("Hyro reconciliation deadline expired"),
+                    );
+                }
+                remaining.min(policy::read_policy().timeout_ms)
+            }
+            _ => policy::read_policy().timeout_ms,
+        };
+        let Some(policy) = self.read_policy(rest.signed, timeout_ms) else {
+            cx.startup_admission_refused(
+                then.startup_sections(),
+                &VenueError::new("").kind(ErrorKind::AuthInvalid),
+            );
             return self.on_public_response(
                 cx,
                 then,
                 Err("Bybit has no API key for a signed read"),
             );
         };
-        let context = match cx.http_context(Scope::Background, policy) {
+        let issue = if matches!(
+            &then,
+            Then::Tickers(_) | Then::OptionSeed { .. } | Then::Candles(_)
+        ) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, policy) {
             Ok(context) => context,
             Err(error) => {
+                cx.startup_admission_refused(then.startup_sections(), &error.read_venue_error());
                 self.note_local_read_refusal();
                 return self.on_public_response(cx, then, Err(&error.venue_error().message));
             }
@@ -859,9 +926,20 @@ impl BybitLinear {
         root: &safe_cex_engine::request_context::Context,
         signed: bool,
     ) -> Result<safe_cex_engine::request_context::Context, VenueError> {
-        let policy = self.read_policy(signed, PAGE_WINDOW_MS).ok_or_else(|| {
+        self.page_leg_paced(cx, root, signed, None)
+    }
+
+    fn page_leg_paced(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        root: &safe_cex_engine::request_context::Context,
+        signed: bool,
+        pacing: Option<safe_cex_engine::request_context::Pacing>,
+    ) -> Result<safe_cex_engine::request_context::Context, VenueError> {
+        let mut policy = self.read_policy(signed, PAGE_WINDOW_MS).ok_or_else(|| {
             VenueError::new("Bybit signed read has no credential").kind(ErrorKind::AuthInvalid)
         })?;
+        policy.pacing = pacing;
         cx.http_leg_context(root, policy)
             .map_err(|error| error.venue_error())
     }
@@ -1017,6 +1095,7 @@ impl BybitLinear {
             native.as_ref(),
             message.clone(),
         );
+        cx.startup_read_failure(current.then.startup_sections(), &failure.error);
         if failure.retry != Some(ReadRetry::NativeResend) {
             return false;
         }
@@ -1025,12 +1104,26 @@ impl BybitLinear {
         };
         // Bybit names its own clock in the raw refusal, before any sanitizing.
         if let Some(server) = trading::ordinary::server_time(response.body) {
-            cx.observe_protocol_time(server);
+            Self::observe_clock(cx, server);
         }
         let mut taken = pending.take().expect("checked above");
         taken.rest.resent = true;
         self.queue_read(cx, retry, taken.rest, taken.then);
         true
+    }
+
+    /// Only protocol time changes; hosts receive numeric evidence for clock-sync advice.
+    pub(crate) fn observe_clock(cx: &mut Cx<'_, Pending>, server: f64) {
+        let changed = (server - cx.protocol_now()).abs() >= CLOCK_DRIFT_MS;
+        let offset = server - cx.now;
+        if cx.observe_protocol_time(server) && changed && offset.abs() >= CLOCK_DRIFT_MS {
+            cx.event(
+                Level::Info,
+                "bybit.clock.corrected",
+                "Bybit protocol clock corrected",
+                vec![("offsetMs", offset.into())],
+            );
+        }
     }
 
     /// Calibrate from an answer's own `time` only past network delay, so
@@ -2206,6 +2299,12 @@ impl BybitLinear {
         then: Then,
         response: Result<Response<'_>, &str>,
     ) {
+        if let Ok(response) = &response
+            && then.startup_sections() != safe_cex_engine::startup::Sections::NONE
+            && let Some(error) = read_refusal(response, "")
+        {
+            cx.startup_read_failure(then.startup_sections(), &error);
+        }
         let failure = match &response {
             Ok(response) => venue_error(response).map(|(_, message)| message),
             Err(error) => Some((*error).to_owned()),
@@ -2216,7 +2315,7 @@ impl BybitLinear {
                 Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
             )
         {
-            let pause = venue_rate_limit_pause_ms(response, cx.now);
+            let pause = venue_rate_limit_pause_ms(response, cx.protocol_now());
             // One window per streak: a repeat refusal while it runs does not extend it.
             if pause > 0.0 && cx.now >= self.discovery_paused_until {
                 self.discovery_paused_until = cx.now + pause;
@@ -2509,7 +2608,7 @@ fn market_from_wire(m: &Instrument<'_>, variant: Variant, category: Category) ->
                         .reduce(f64::min)
                         .unwrap_or(f64::NAN)
                     } else {
-                        float_of(&l.max_order_qty)
+                        OrderCaps::from_wire(m).map_or(f64::NAN, OrderCaps::shared)
                     }
                 }),
             },
@@ -2623,6 +2722,17 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        &[history::ORDER_HISTORY_PACING]
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.partial_stop_release_veto(store, pending, release)
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -2765,6 +2875,9 @@ impl Venue for BybitLinear {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        pending.then.startup_sections()
+    }
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -3246,6 +3359,11 @@ impl Venue for BybitLinear {
                 {
                     self.classification
                         .insert(row.symbol.to_string(), classification_from_wire(&row));
+                    if !self.variant.is_spot()
+                        && let Some(caps) = OrderCaps::from_wire(&row)
+                    {
+                        self.order_caps.insert(row.symbol.to_string(), caps);
+                    }
                     if let Some(product) = derivative_from_wire(&row, self.category) {
                         self.derivatives.insert(row.symbol.to_string(), product);
                     }
@@ -3256,51 +3374,53 @@ impl Venue for BybitLinear {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        if let Then::AuthClock = pending.then {
-            return self.settle_auth_clock(cx);
-        }
-        // The engine seals an ordinary preflight or plan unless an
-        // independent-order leg retires alone.
-        if let Then::Ordinary(request) = pending.then {
-            self.on_ordinary_leg_failed(cx, request, error);
-            return;
-        }
-        if let Then::Candles(read) = pending.then {
-            Self::candles_failed(cx, read, error);
-            return;
-        }
-        // A managed identity read (first or retried leg) keeps the engine's type.
-        if let Then::Identity(context) = pending.then {
-            self.identity_response(cx, context, Err(error));
-            return;
-        }
-        if let Then::Leverage(read) = pending.then {
-            self.leverage_response(cx, read, Err(error));
-            return;
-        }
-        // A page or its re-read keeps the signer's typed error.
-        if let Then::History(request) = pending.then {
-            self.on_history_failed(cx, request, error);
-            return;
-        }
-        if let Then::Closed(request) = pending.then {
-            self.on_closed_failed(cx, *request, error);
-            return;
-        }
-        if pending.rest.resent {
-            // This refusal concerns only the retry. The earlier dispatched
-            // attempt keeps the existing conservative failure/recovery path.
-            self.on_request_failed(cx, pending, "Bybit retry signing failed before dispatch");
-            return;
-        }
-        self.select_category(pending.category);
-        match pending.then {
-            Then::Hyro(read) => self.on_hyro_response(cx, read, Err(&error.message)),
-            Then::Identity(context) => self.identity_response(cx, context, Err(error)),
-            Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
-            Then::Options(request) => self.on_options_response(cx, request, Err(error)),
-            then => self.on_public_response(cx, then, Err(&error.message)),
-        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if let Then::AuthClock = pending.then {
+                return self.settle_auth_clock(cx);
+            }
+            // The engine seals an ordinary preflight or plan unless an
+            // independent-order leg retires alone.
+            if let Then::Ordinary(request) = pending.then {
+                self.on_ordinary_leg_failed(cx, request, error);
+                return;
+            }
+            if let Then::Candles(read) = pending.then {
+                Self::candles_failed(cx, read, error);
+                return;
+            }
+            // A managed identity read (first or retried leg) keeps the engine's type.
+            if let Then::Identity(context) = pending.then {
+                self.identity_response(cx, context, Err(error));
+                return;
+            }
+            if let Then::Leverage(read) = pending.then {
+                self.leverage_response(cx, read, Err(error));
+                return;
+            }
+            // A page or its re-read keeps the signer's typed error.
+            if let Then::History(request) = pending.then {
+                self.on_history_failed(cx, request, error);
+                return;
+            }
+            if let Then::Closed(request) = pending.then {
+                self.on_closed_failed(cx, *request, error);
+                return;
+            }
+            if pending.rest.resent {
+                // This refusal concerns only the retry. The earlier dispatched
+                // attempt keeps the existing conservative failure/recovery path.
+                self.on_request_failed(cx, pending, "Bybit retry signing failed before dispatch");
+                return;
+            }
+            self.select_category(pending.category);
+            match pending.then {
+                Then::Hyro(read) => self.on_hyro_response(cx, read, Err(&error.message)),
+                Then::Identity(context) => self.identity_response(cx, context, Err(error)),
+                Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
+                Then::Options(request) => self.on_options_response(cx, request, Err(error)),
+                then => self.on_public_response(cx, then, Err(&error.message)),
+            }
+        });
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -3505,6 +3625,18 @@ impl Venue for BybitLinear {
     }
 }
 
+impl Then {
+    fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Then::Markets { .. } | Then::Fees(_) => S::MARKETS,
+            Then::Tickers(_) | Then::OptionSeed { .. } => S::TICKERS,
+            Then::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod public_decoder_tests {
     use super::*;
@@ -3684,3 +3816,7 @@ mod candle_start_tests {
         assert_eq!(candle_start(Interval::S15, t), 1_792_499_685.0);
     }
 }
+
+#[cfg(test)]
+#[path = "startup_cause_tests.rs"]
+mod startup_cause_tests;

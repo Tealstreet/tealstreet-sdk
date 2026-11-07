@@ -9,6 +9,57 @@ use safe_cex_venue_bingx::Bingx;
 use support::Options;
 const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
+#[test]
+fn a_rate_limited_positions_command_keeps_its_kind_delay_and_snapshot() {
+    for (status, headers, expected) in [(200, "", 90_000.0), (429, "Retry-After: 120", 120_000.0)] {
+        let mut h = started();
+        h.read(77);
+        let request = h.take(POSITIONS);
+        let body = format!(
+            r#"{{"code":100410,"msg":"请稍后重试; unblocked after {:013.0}"}}"#,
+            h.now + 90_000.0
+        );
+        h.e.handle(
+            h.now,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers,
+                    body: &body,
+                },
+            },
+        );
+        h.pump();
+        let error = h.failure(77);
+        assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+        assert_eq!(error.retry_after_ms, Some(expected));
+        assert_eq!(error.venue_code.as_deref(), Some("100410"));
+        assert!(!error.message.contains("expected list"));
+        assert_eq!(h.open(), 0.1);
+    }
+}
+
+#[test]
+fn a_later_transport_failure_cannot_inherit_an_old_rate_limit() {
+    let mut h = started();
+    h.read(78);
+    h.answer(POSITIONS, 200, r#"{"code":100410,"msg":"请稍后重试"}"#);
+    assert_eq!(h.failure(78).kind, Some(ErrorKind::RateLimited));
+    h.read(79);
+    let request = h.take(POSITIONS);
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: request.id,
+            error: "connection lost",
+        },
+    );
+    h.pump();
+    assert_eq!(h.failure(79).kind, Some(ErrorKind::Network));
+    assert_eq!(h.failure(79).retry_after_ms, None);
+}
+
 const KEY: &str = "/openApi/user/auth/userDataStream";
 const MODE: &str = "/openApi/swap/v1/positionSide/dual";
 const BALANCE: &str = "/openApi/swap/v3/user/balance";

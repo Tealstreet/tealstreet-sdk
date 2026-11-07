@@ -4,6 +4,7 @@ use crate::how_pool::HowConnection;
 use crate::routing::{HttpRoute, HttpRouteMode, http_packet, insert_header};
 use crate::{Events, HostEvent};
 use futures_util::StreamExt;
+use safe_cex_engine::request_budget::RequestClass;
 use safe_cex_engine::request_context::RoutingIntent;
 use safe_cex_engine::{HttpRequest, Method, RequestId, RequestRoute};
 use std::fmt;
@@ -17,6 +18,7 @@ use tokio::time::Instant;
 pub enum HttpPrepareError {
     Unsupported,
     Expired,
+    ExpiredWithBudget(String),
     Invalid(&'static str),
     Transport(String),
 }
@@ -25,6 +27,7 @@ impl HttpPrepareError {
         match self {
             Self::Unsupported => "HTTP transport preparation is unsupported",
             Self::Expired => "transport request timed out",
+            Self::ExpiredWithBudget(message) => message,
             Self::Invalid(message) => message,
             Self::Transport(message) => message,
         }
@@ -48,6 +51,9 @@ pub trait BoundHttp: Send + fmt::Debug {
 }
 
 struct Prepared {
+    started: Instant,
+    class: RequestClass,
+    budget_ms: u32,
     http: reqwest::Client,
     request: RequestId,
     method: Method,
@@ -58,6 +64,8 @@ struct Prepared {
     route: Option<HttpRoute>,
     proxy_header: Option<(String, String)>,
     tunnel: Option<HowConnection>,
+    guard: Option<super::IoGuard>,
+    venue: Option<std::sync::Arc<str>>,
 }
 impl fmt::Debug for Prepared {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -72,6 +80,9 @@ enum Packet {
     How(HowConnection, String),
 }
 struct Bound {
+    started: Instant,
+    class: RequestClass,
+    budget_ms: u32,
     request: RequestId,
     deadline: Instant,
     packet: Packet,
@@ -79,6 +90,8 @@ struct Bound {
     proxied: bool,
     /// Venue host and the way it went, for a transport failure's log line; never a URL.
     route: String,
+    guard: Option<super::IoGuard>,
+    venue: Option<std::sync::Arc<str>>,
 }
 
 /// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`.
@@ -124,13 +137,27 @@ pub(super) fn prepare(
     transport: &NetworkTransport,
     request: HttpRequest,
     intent: Option<RoutingIntent>,
+    class: Option<RequestClass>,
 ) -> HttpPrepareFuture {
     let http = transport.http.clone();
     let routing = transport.routing.clone();
-    let deadline = Instant::now()
-        + Duration::from_millis(u64::from(request.timeout_ms.unwrap_or(20_000).max(1)));
+    let guard = transport.io_guard.clone();
+    let venue = transport.venue.clone();
+    let started = Instant::now();
+    let class = class.unwrap_or_else(|| RequestClass::legacy(request.method, &request.url));
+    let budget_ms = class.timeout_ms(request.timeout_ms);
+    let deadline = started + Duration::from_millis(u64::from(budget_ms));
+    let timeout_message = move || {
+        format!(
+            "HTTP request timed out ({})",
+            class.diagnostic(budget_ms, started.elapsed().as_millis())
+        )
+    };
     Box::pin(async move {
         let operation = async {
+            if !super::io_allowed(&guard) {
+                return Err(HttpPrepareError::Invalid("account IO authority expired"));
+            }
             let origin = origin(&request.url)?;
             let route = match routing.as_ref() {
                 Some(state) => Some(
@@ -181,14 +208,28 @@ pub(super) fn prepare(
                         .collect();
                     // The account's open socket for this route, opened (or reopened) on demand.
                     let connection = state.how.connection(url, headers, state.tokens.clone());
-                    connection
-                        .ready()
+                    let readiness = deadline.min(started + Duration::from_secs(30));
+                    tokio::time::timeout_at(readiness, connection.ready())
                         .await
-                        .map_err(HttpPrepareError::Transport)?;
+                        .map_err(|_| {
+                            HttpPrepareError::ExpiredWithBudget(format!(
+                                "HTTP tunnel readiness timed out ({})",
+                                class.diagnostic(budget_ms, started.elapsed().as_millis())
+                            ))
+                        })?
+                        .map_err(|error| {
+                            HttpPrepareError::Transport(format!(
+                                "{error} ({})",
+                                class.diagnostic(budget_ms, started.elapsed().as_millis())
+                            ))
+                        })?;
                     tunnel = Some(connection);
                 }
             }
             Ok(Box::new(Prepared {
+                started,
+                class,
+                budget_ms,
                 http,
                 request: request.id,
                 method: request.method,
@@ -199,11 +240,13 @@ pub(super) fn prepare(
                 route,
                 proxy_header,
                 tunnel,
+                guard,
+                venue,
             }) as Box<dyn PreparedHttp>)
         };
         tokio::time::timeout_at(deadline, operation)
             .await
-            .map_err(|_| HttpPrepareError::Expired)?
+            .map_err(|_| HttpPrepareError::ExpiredWithBudget(timeout_message()))?
     })
 }
 
@@ -212,8 +255,15 @@ impl PreparedHttp for Prepared {
         mut self: Box<Self>,
         mut packet: HttpRequest,
     ) -> Result<Box<dyn BoundHttp>, HttpPrepareError> {
+        if !super::io_allowed(&self.guard) {
+            return Err(HttpPrepareError::Invalid("account IO authority expired"));
+        }
         if Instant::now() >= self.deadline {
-            return Err(HttpPrepareError::Expired);
+            return Err(HttpPrepareError::ExpiredWithBudget(format!(
+                "HTTP request timed out ({})",
+                self.class
+                    .diagnostic(self.budget_ms, self.started.elapsed().as_millis())
+            )));
         }
         if packet.id != self.request
             || packet.method != self.method
@@ -297,39 +347,55 @@ impl PreparedHttp for Prepared {
         };
         let route = route_label(&self.origin, &packet);
         Ok(Box::new(Bound {
+            started: self.started,
+            class: self.class,
+            budget_ms: self.budget_ms,
             request: self.request,
             deadline: self.deadline,
             packet,
             proxied,
             route,
+            guard: self.guard.clone(),
+            venue: self.venue.clone(),
         }))
     }
 }
 
 impl BoundHttp for Bound {
     fn ready(&self) -> bool {
-        Instant::now() < self.deadline
+        Instant::now() < self.deadline && super::io_allowed(&self.guard)
     }
 
     fn dispatch(self: Box<Self>, events: Events) -> AbortHandle {
         let Self {
+            started: request_started,
+            class,
+            budget_ms,
             request,
             deadline,
             packet,
             proxied,
             route,
+            guard,
+            venue,
         } = *self;
         let started = Instant::now();
         // These are the last controllable transport API calls. Route/token/HOW
         // preparation and packet validation have all finished before this point.
-        let response: Pin<Box<dyn Future<Output = Result<(), String>> + Send>> = match packet {
-            Packet::Direct(http, packet) => {
-                let response = http.execute(*packet);
-                Box::pin(direct_response(response, request, events.clone(), proxied))
+        let response_events = events.clone();
+        let response = async move {
+            if !super::io_allowed(&guard) {
+                return Err("account IO authority expired".to_owned());
             }
-            Packet::How(tunnel, packet) => {
-                let response_events = events.clone();
-                Box::pin(async move { tunnel.request(request, packet, response_events).await })
+            match packet {
+                Packet::Direct(http, packet) => {
+                    direct_response(http.execute(*packet), request, response_events, proxied).await
+                }
+                Packet::How(tunnel, packet) => {
+                    tunnel
+                        .request(request, packet, response_events, guard)
+                        .await
+                }
             }
         };
         tokio::spawn(async move {
@@ -341,9 +407,20 @@ impl BoundHttp for Bound {
             let error = match result {
                 Ok(Ok(())) => return,
                 Ok(Err(error)) => error,
-                Err(_) => "transport request timed out".into(),
+                Err(_) => format!(
+                    "HTTP request timed out ({})",
+                    class.diagnostic(budget_ms, request_started.elapsed().as_millis())
+                ),
             };
-            super::log_request_failure(&route, &error, started.elapsed());
+            super::log_request_failure(
+                &route,
+                &format!(
+                    "{error} ({})",
+                    class.diagnostic(budget_ms, request_started.elapsed().as_millis())
+                ),
+                started.elapsed(),
+                venue.as_deref(),
+            );
             let _ = events.send(HostEvent::HttpFailed(request, error));
         })
         .abort_handle()
@@ -498,6 +575,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn io_guard_rechecks_bound_and_scheduled_packets_without_sending_them() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        for after_dispatch in [false, true] {
+            let (url, server) = answer_once("200 OK", "ok").await;
+            let allowed = Arc::new(AtomicBool::new(true));
+            let gate = allowed.clone();
+            let transport = NetworkTransport::new()
+                .with_io_guard(Arc::new(move || gate.load(Ordering::Acquire)));
+            let packet = request(&url);
+            let prepared = transport
+                .prepare_http(packet.clone(), RoutingIntent::Primary)
+                .await
+                .unwrap();
+            let bound = prepared.bind(packet).unwrap();
+            assert!(bound.ready());
+            let (events, mut replies) = tokio::sync::mpsc::unbounded_channel();
+            if after_dispatch {
+                bound.dispatch(events);
+                allowed.store(false, Ordering::Release);
+            } else {
+                allowed.store(false, Ordering::Release);
+                assert!(!bound.ready());
+                bound.dispatch(events);
+            }
+            let failure = tokio::time::timeout(Duration::from_secs(2), replies.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(failure, HostEvent::HttpFailed(_, ref text) if text == "account IO authority expired")
+            );
+            assert!(!server.is_finished());
+            server.abort();
+            assert!(server.await.unwrap_err().is_cancelled());
+        }
+        // Working control uses the same executor and a real loopback HTTP responder.
+        let (url, server) = answer_once("200 OK", "ok").await;
+        let transport = NetworkTransport::new().with_io_guard(Arc::new(|| true));
+        let packet = request(&url);
+        let bound = transport
+            .prepare_http(packet.clone(), RoutingIntent::Primary)
+            .await
+            .unwrap()
+            .bind(packet)
+            .unwrap();
+        let (events, _replies) = tokio::sync::mpsc::unbounded_channel();
+        bound.dispatch(events);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("/private/order")
+        );
+    }
+
+    #[tokio::test]
     async fn prepared_route_binds_exact_signed_bytes_before_synchronous_handoff() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/private/order", listener.local_addr().unwrap());
@@ -578,6 +712,46 @@ mod tests {
                 .contains("x-test-auth: outbound-header-sentinel\r\n")
         );
         assert!(wire.ends_with("{ \"amount\": 1.000, \"id\": 18446744073709551615 }"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn every_class_bounds_preparation_and_reports_the_original_budget() {
+        for class in [
+            RequestClass::Discovery,
+            RequestClass::OrderRead,
+            RequestClass::OrderWrite,
+            RequestClass::History,
+            RequestClass::Read,
+        ] {
+            let transport = NetworkTransport::with_routing(
+                RoutingPlan {
+                    http: HttpRoute {
+                        authorize: true,
+                        ..HttpRoute::default()
+                    },
+                    ..RoutingPlan::default()
+                },
+                Arc::new(|| Box::pin(std::future::pending())),
+            );
+            let mut packet = request("https://venue.invalid/private?signature=secret-sentinel");
+            packet.timeout_ms = None;
+            let future = transport.prepare_http_classified(packet, RoutingIntent::Primary, class);
+            let task = tokio::spawn(future);
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_millis(u64::from(class.budget_ms() - 1))).await;
+            assert!(!task.is_finished());
+            tokio::time::advance(Duration::from_millis(1)).await;
+            let error = task.await.unwrap().unwrap_err();
+            assert!(matches!(error, HttpPrepareError::ExpiredWithBudget(_)));
+            assert_eq!(
+                error.message(),
+                format!(
+                    "HTTP request timed out ({})",
+                    class.diagnostic(class.budget_ms(), u128::from(class.budget_ms()))
+                )
+            );
+            assert!(!error.message().contains("secret-sentinel"));
+        }
     }
 
     #[tokio::test(start_paused = true)]
@@ -787,7 +961,10 @@ mod tests {
         let mut packet = request("https://venue.invalid/private");
         packet.timeout_ms = Some(10);
         let result = transport.prepare_http(packet, RoutingIntent::Primary).await;
-        assert!(matches!(result, Err(HttpPrepareError::Expired)));
+        assert!(matches!(
+            result,
+            Err(HttpPrepareError::ExpiredWithBudget(_))
+        ));
     }
 
     #[tokio::test]

@@ -1039,3 +1039,219 @@ fn a_refusal_outside_a_genuine_entry_is_a_caller_bug() {
     });
     e.start(0.);
 }
+
+#[test]
+fn history_default_is_medium_and_issued_deadlines_never_renew() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        callback: Some(|cx| {
+            use crate::request_budget::RequestClass;
+            let context = cx.admit_http_command(read_policy()).unwrap();
+            assert_eq!(context.request_class(), RequestClass::History);
+            assert_eq!(context.deadline(), cx.now + 30_000.);
+            let retry = context.retry(
+                crate::request_context::RetryEvidence::ReadFailure,
+                cx.now + 5_000.,
+            );
+            assert!(retry.is_err(), "a budget grants no retry authority");
+            let child = cx.http_leg_context(&context, read_policy()).unwrap();
+            assert_eq!(child.deadline(), cx.now + 20_000.);
+            assert_eq!(context.deadline(), cx.now + 30_000.);
+            assert_eq!(child.request_class(), RequestClass::History);
+            let explicit = Policy {
+                timeout_ms: 1_234,
+                ..read_policy()
+            };
+            let child = cx.http_leg_context(&context, explicit).unwrap();
+            assert_eq!(child.deadline(), cx.now + 1_234.);
+            cx.now += 25_000.;
+            let page = cx.http_leg_context(&context, read_policy()).unwrap();
+            assert_eq!(page.deadline(), context.deadline());
+            assert_eq!(page.deadline() - cx.now, 5_000.);
+            assert_eq!(page.request_class(), RequestClass::History);
+        }),
+        ..Default::default()
+    });
+    e.start(0.);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        1.,
+        Event::Command(Command::Query {
+            command: 7,
+            query: Query::Fills {
+                symbol: None,
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        }),
+    );
+    assert_eq!(e.venue.calls, 1);
+}
+
+#[test]
+fn live_order_reads_keep_the_short_default() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        callback: Some(|cx| {
+            let context = cx.admit_http_command(read_policy()).unwrap();
+            assert_eq!(
+                context.request_class(),
+                crate::request_budget::RequestClass::OrderRead
+            );
+            assert_eq!(context.deadline(), cx.now + 20_000.);
+        }),
+        ..Default::default()
+    });
+    e.start(0.);
+    e.drain_actions().for_each(drop);
+    e.handle(1., Event::Command(Command::FetchAccount { command: 7 }));
+}
+
+#[test]
+fn definitive_order_lookup_is_short_even_though_it_is_a_query() {
+    let command = Command::Query {
+        command: 7,
+        query: Query::OrderByClientId {
+            symbol: "BTCUSD".into(),
+            client_order_id: "id".into(),
+        },
+    };
+    assert_eq!(
+        crate::request_budget::RequestClass::command(&command),
+        crate::request_budget::RequestClass::OrderRead
+    );
+}
+
+#[test]
+fn catalogue_refresh_and_closed_position_actions_use_read_budgets() {
+    use crate::request_budget::RequestClass;
+    assert_eq!(
+        RequestClass::venue_action(&VenueAction::RefreshMarkets),
+        RequestClass::Discovery
+    );
+    assert_eq!(
+        RequestClass::venue_action(&VenueAction::FetchClosedPositions {
+            symbol: None,
+            from_ms: None,
+            to_ms: None
+        }),
+        RequestClass::History
+    );
+}
+
+#[test]
+fn candle_commands_preserve_the_ts_clients_explicit_twenty_second_bound() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        callback: Some(|cx| {
+            let context = cx.admit_http_command(read_policy()).unwrap();
+            assert_eq!(
+                context.request_class(),
+                crate::request_budget::RequestClass::OrderRead
+            );
+            assert_eq!(context.deadline(), cx.now + 20_000.);
+        }),
+        ..Default::default()
+    });
+    e.start(0.);
+    e.drain_actions().for_each(drop);
+    e.handle(1., Event::Command(command()));
+    assert_eq!(e.venue.calls, 1);
+}
+
+#[test]
+fn background_issuance_reserves_a_bounded_catalogue_ceiling() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        outside: Some(|cx| {
+            cx.store.set_loaded(|loaded| {
+                loaded.markets = true;
+                loaded.tickers = true;
+            });
+            let context = cx.http_context(Scope::Background, read_policy()).unwrap();
+            assert_eq!(
+                context.request_class(),
+                crate::request_budget::RequestClass::Discovery
+            );
+            assert_eq!(context.deadline(), cx.now + 60_000.);
+            let context = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        timeout_ms: 1_234,
+                        ..read_policy()
+                    },
+                )
+                .unwrap();
+            assert_eq!(context.deadline(), cx.now + 1_234.);
+        }),
+        ..Default::default()
+    });
+    e.start(0.);
+}
+
+#[test]
+fn background_http_preparation_distinguishes_catalogues_from_live_data() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        outside: Some(|cx| {
+            cx.store.set_loaded(|loaded| {
+                loaded.markets = true;
+                loaded.tickers = true;
+            });
+            for path in [
+                "markets",
+                "markets/summary",
+                "depth",
+                "tickers",
+                "trades",
+                "funding",
+                "mark-price",
+            ] {
+                let context = if path == "markets" {
+                    cx.http_context(Scope::Background, read_policy())
+                } else {
+                    cx.http_live_context(Scope::Background, read_policy())
+                }
+                .unwrap();
+                cx.request_managed(
+                    context,
+                    None,
+                    Method::Get,
+                    format!("https://background.test/{path}"),
+                    None,
+                    (),
+                )
+                .unwrap();
+            }
+        }),
+        ..Default::default()
+    });
+    e.start(100.);
+    let requests = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                crate::request_context::HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => Some((preparation, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 7);
+    for (index, (preparation, request)) in requests.into_iter().enumerate() {
+        let class = if index == 0 {
+            crate::request_budget::RequestClass::Discovery
+        } else {
+            crate::request_budget::RequestClass::Read
+        };
+        assert_eq!(request.timeout_ms, Some(class.budget_ms()));
+        assert_eq!(e.http_request_class(preparation), Some(class));
+    }
+}

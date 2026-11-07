@@ -37,6 +37,7 @@ impl Transport for Quiet {
 struct AlgoVenue {
     book: Book,
     commands: Arc<Mutex<Vec<String>>>,
+    hold_placements: bool,
 }
 impl Venue for AlgoVenue {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -117,7 +118,9 @@ impl Venue for AlgoVenue {
             _ => "null".into(),
         };
         self.commands.lock().unwrap().push(format!("{command:?}"));
-        cx.done(id, result);
+        if !(self.hold_placements && matches!(command, Command::PlaceOrders { .. })) {
+            cx.done(id, result);
+        }
     }
     fn book(&self, _: &str) -> Option<&Book> {
         Some(&self.book)
@@ -132,13 +135,19 @@ struct Algos {
     inbox: mpsc::UnboundedSender<AlgoInput>,
     out: mpsc::UnboundedReceiver<String>,
     seen: Vec<Value>,
+    commands: Arc<Mutex<Vec<String>>>,
 }
 
 impl Algos {
     async fn start() -> Self {
+        Self::with_held_placements(false).await
+    }
+    async fn with_held_placements(hold_placements: bool) -> Self {
+        let commands: Arc<Mutex<Vec<String>>> = Arc::default();
         let engine = safe_cex_engine::test_support::seeded_engine(AlgoVenue {
             book: Book::default(),
-            commands: Arc::default(),
+            commands: commands.clone(),
+            hold_placements,
         });
         let config = ServerConfig {
             flush_every: Duration::from_millis(1),
@@ -184,6 +193,7 @@ impl Algos {
             inbox,
             out,
             seen: Vec::new(),
+            commands,
         }
     }
 
@@ -844,6 +854,87 @@ async fn a_twap_slice_chase_names_its_twap_and_its_stop_is_told_by_the_twap() {
                     json!({"kind": "chase", "id": own[0]["id"]}),
                     json!({"kind": "twap", "id": twap_id}),
                 ]
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn router_fence_parks_a_pending_slice_and_chase_without_any_cancel_or_replay() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::with_held_placements(true).await;
+            algos.op("twap:start", web_twap());
+            algos.op("chaser:start", web_chase(None));
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while algos.commands.lock().unwrap().len() < 2 {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let before = algos.commands.lock().unwrap().clone();
+            assert!(
+                before
+                    .iter()
+                    .all(|command| command.starts_with("PlaceOrders")),
+                "{before:?}"
+            );
+            let (stopped, stop) = tokio::sync::oneshot::channel();
+            let stopped = Mutex::new(Some(stopped));
+            algos
+                .inbox
+                .send(AlgoInput::RouterFence {
+                    stopped: Box::new(move |kept| {
+                        if let Some(sender) = stopped.lock().unwrap().take() {
+                            let _ = sender.send(kept);
+                        }
+                    }),
+                })
+                .unwrap();
+            let kept = tokio::time::timeout(Duration::from_secs(2), stop)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(kept.summary().contains("Resting orders were kept"));
+            let mut frames = Vec::new();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while let Some(text) = algos.out.recv().await {
+                    frames.push(serde_json::from_str::<Value>(&text).unwrap());
+                }
+            })
+            .await
+            .unwrap();
+            let notices: Vec<_> = frames
+                .iter()
+                .filter(|frame| frame["d"]["op"] == "error")
+                .collect();
+            assert_eq!(notices.len(), 1);
+            assert_eq!(notices[0]["d"]["data"][1]["forceToast"], true);
+            assert!(
+                frames
+                    .iter()
+                    .any(|frame| frame["d"]["op"] == "twap:stateUpdate"
+                        && frame["d"]["data"]
+                            .as_object()
+                            .is_some_and(|rows| !rows.is_empty()
+                                && rows.values().all(|row| row["state"]["status"] == "paused"))),
+                "{frames:?}"
+            );
+            assert!(
+                frames.iter().any(|frame| frame["d"]["op"] == "store"
+                    && frame["d"]["data"]["activeChasers"] == json!([])
+                    && frame["d"]["data"]["activeTWAPs"]
+                        .as_array()
+                        .is_some_and(|rows| !rows.is_empty()
+                            && rows.iter().all(|row| row["status"] == "paused"))),
+                "{frames:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(
+                *algos.commands.lock().unwrap(),
+                before,
+                "no cancel, amend, remaining slice or continuation after park"
             );
         })
         .await;

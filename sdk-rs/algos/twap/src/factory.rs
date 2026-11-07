@@ -104,6 +104,11 @@ impl TwapFactory {
         }
     }
 
+    /// A stopped row can still have a slice on the wire; hosts must await it.
+    pub fn pending_placements(&self) -> usize {
+        self.inner.placing.get()
+    }
+
     /// Start a TWAP for a typed caller such as the exec `twap` command, with
     /// the same validation and effects as `twap:start`. Returns the new id.
     pub fn start(&self, options: TwapOptions) -> Result<String, String> {
