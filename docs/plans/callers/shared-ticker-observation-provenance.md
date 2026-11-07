@@ -19,4 +19,9 @@ remain authoritative: Binance, Bybit, AsterDEX, ApeX, Paradex and Hyperliquid
 explicitly record supplied unchanged references; other producers retain their
 existing changed-field/snapshot observations. No destination infers a supplied
 field from an unrelated source update, timer or cached value. The 5 s protective
-reference bound is unchanged; future source observations cannot be fresh yet.
+reference bound and predicate remain byte-identical to master. Protective vetoes
+read only local host receipt times (`ticker_seen_at`/`reference_seen_at`); source
+`observedAt` lives in a separate provenance sidecar and section 24. Imported source
+clocks, including old or future clocks, never overwrite local receipt freshness.
+Unchanged shared values retain master's existing changed-value receipt behavior;
+source-time-only updates and cached snapshots preserve provenance independently.

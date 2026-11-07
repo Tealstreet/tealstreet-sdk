@@ -277,7 +277,7 @@ pub fn apply(
                             return Err(IngestError("ticker observation identity mismatch"));
                         }
                         if apply {
-                            store.import_reference_times(row as u32, times);
+                            store.import_observation_times(row as u32, times);
                         }
                     }
                 }

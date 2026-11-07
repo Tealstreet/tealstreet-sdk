@@ -64,6 +64,8 @@ pub struct Store {
     /// Host time each row's last, mark and index price was last observed: changed,
     /// or explicitly reported unchanged by its venue. -inf before any data.
     ticker_seen_at: Vec<[f64; 3]>,
+    /// Source-domain provenance, never the local protective-veto receipt clock.
+    ticker_observed_at: Vec<[f64; 3]>,
     pub(crate) export_ticker_observations: bool,
     /// The engine's current host time, set at each entry, so rows can be dated.
     clock: f64,
@@ -382,6 +384,7 @@ impl Store {
         self.changes.tickers_replaced = true;
         self.ticker_masks = vec![0; self.tickers.len()];
         self.ticker_seen_at = vec![[self.clock; 3]; self.tickers.len()];
+        self.ticker_observed_at = vec![[self.clock; 3]; self.tickers.len()];
         self.dirty_tickers.clear();
         self.set_loaded(|loaded| loaded.tickers = true);
     }
@@ -410,12 +413,24 @@ impl Store {
     pub fn observe_ticker_fields(&mut self, symbol: &str, mask: u16) {
         if let Some(index) = self.ticker_index(symbol) {
             self.mark_references_seen(index, mask);
+            self.mark_observations_seen(index, mask);
+        }
+    }
+
+    // Bits 2, 3 and 4 of `TICKER_FIELDS` are last, mark and index.
+    fn mark_references_seen(&mut self, index: u32, mask: u16) {
+        if let Some(seen) = self.ticker_seen_at.get_mut(index as usize) {
+            for (slot, bit) in [2, 3, 4].into_iter().enumerate() {
+                if mask & (1 << bit) != 0 {
+                    seen[slot] = self.clock;
+                }
+            }
         }
     }
 
     // High mask bits track observation changes independently of value deltas.
-    fn set_reference_times(&mut self, index: u32, times: [f64; 3]) {
-        if let Some(seen) = self.ticker_seen_at.get_mut(index as usize) {
+    fn set_observation_times(&mut self, index: u32, times: [f64; 3]) {
+        if let Some(seen) = self.ticker_observed_at.get_mut(index as usize) {
             let mut mask = 0;
             for slot in 0..3 {
                 if seen[slot].to_bits() != times[slot].to_bits() {
@@ -434,21 +449,21 @@ impl Store {
     }
 
     // Bits 2, 3 and 4 of `TICKER_FIELDS` are last, mark and index.
-    fn mark_references_seen(&mut self, index: u32, mask: u16) {
-        if let Some(mut times) = self.ticker_seen_at.get(index as usize).copied() {
+    fn mark_observations_seen(&mut self, index: u32, mask: u16) {
+        if let Some(mut times) = self.ticker_observed_at.get(index as usize).copied() {
             for (slot, bit) in [2, 3, 4].into_iter().enumerate() {
                 if mask & (1 << bit) != 0 {
                     times[slot] = self.clock;
                 }
             }
-            self.set_reference_times(index, times);
+            self.set_observation_times(index, times);
         }
     }
 
     pub(crate) fn apply_shared_ticker(&mut self, ticker: &crate::public_feed::PublicTicker) {
         let before = self
             .ticker_index(&ticker.symbol)
-            .and_then(|index| self.ticker_seen_at.get(index as usize))
+            .and_then(|index| self.ticker_observed_at.get(index as usize))
             .copied();
         self.update_ticker(&ticker.symbol, |target| ticker.apply(target));
         if let (Some(source), Some(index)) = (ticker.observed_at, self.ticker_index(&ticker.symbol))
@@ -462,12 +477,12 @@ impl Store {
                     times[slot] = source[slot].unwrap_or(f64::NEG_INFINITY);
                 }
             }
-            self.set_reference_times(index, times);
+            self.set_observation_times(index, times);
         }
     }
 
-    pub(crate) fn import_reference_times(&mut self, index: u32, times: [f64; 3]) {
-        self.set_reference_times(index, times);
+    pub(crate) fn import_observation_times(&mut self, index: u32, times: [f64; 3]) {
+        self.set_observation_times(index, times);
     }
 
     pub(crate) fn ticker_revision(&self) -> u64 {
@@ -494,6 +509,7 @@ impl Store {
         self.tickers.push(ticker);
         self.ticker_masks.push(0);
         self.ticker_seen_at.push([f64::NEG_INFINITY; 3]);
+        self.ticker_observed_at.push([f64::NEG_INFINITY; 3]);
         self.ticker_by_symbol.insert(symbol.into(), index);
         self.changes.tickers_replaced = true;
         Some(index)
@@ -555,6 +571,7 @@ impl Store {
             return;
         }
         self.mark_references_seen(index, mask);
+        self.mark_observations_seen(index, mask);
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         let slot = &mut self.ticker_masks[index as usize];
         if *slot == 0 {
@@ -1325,7 +1342,7 @@ impl Store {
         {
             w.begin(section::TICKER_OBSERVATIONS);
             if changes.tickers_replaced {
-                for (index, times) in self.ticker_seen_at.iter().enumerate() {
+                for (index, times) in self.ticker_observed_at.iter().enumerate() {
                     w.f64(index as f64);
                     w.f64s(times.iter().copied());
                 }
@@ -1333,7 +1350,7 @@ impl Store {
                 for &(index, mask) in &pending.ticker_deltas {
                     if mask & 0x7000 != 0 {
                         w.f64(index as f64);
-                        w.f64s(self.ticker_seen_at[index as usize]);
+                        w.f64s(self.ticker_observed_at[index as usize]);
                     }
                 }
             }

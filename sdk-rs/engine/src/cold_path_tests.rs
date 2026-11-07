@@ -32,6 +32,38 @@ fn market(symbol: &str) -> Market {
     }
 }
 
+fn observed_reference(
+    store: &mut Store,
+    symbol: &str,
+    reference: crate::model::StopTriggerType,
+) -> f64 {
+    use crate::wire::{FrameWriter, section, sections};
+    let row = store
+        .tickers()
+        .iter()
+        .position(|ticker| ticker.symbol == symbol)
+        .unwrap();
+    let slot = match reference {
+        crate::model::StopTriggerType::LastPrice => 1,
+        crate::model::StopTriggerType::MarkPrice => 2,
+        crate::model::StopTriggerType::IndexPrice => 3,
+    };
+    let export = store.export_ticker_observations;
+    store.export_ticker_observations = true;
+    let mut writer = FrameWriter::new(vec![], 0.);
+    store.write(&store.everything(), &mut writer);
+    let frame = writer.finish();
+    store.export_ticker_observations = export;
+    let (_, bytes) = sections(&frame)
+        .find(|(kind, _)| *kind == section::TICKER_OBSERVATIONS)
+        .unwrap();
+    f64::from_le_bytes(
+        bytes[row * 32 + slot * 8..row * 32 + slot * 8 + 8]
+            .try_into()
+            .unwrap(),
+    )
+}
+
 fn quote(json: &str) -> PublicTicker {
     serde_json::from_str(json).unwrap()
 }
@@ -180,17 +212,17 @@ fn shared_reference_observations_keep_source_time_even_when_values_do_not_change
         &mut store,
         &shared(r#"{"symbol":"BTC","mark":100,"observedAt":[null,8500,null]}"#),
     );
-    assert_eq!(store.reference_seen_at("BTC", MarkPrice), Some(8_500.));
-    assert_eq!(store.reference_seen_at("BTC", LastPrice), Some(1_000.));
-    assert_eq!(store.reference_seen_at("BTC", IndexPrice), Some(1_000.));
+    assert_eq!(observed_reference(&mut store, "BTC", MarkPrice), 8_500.);
+    assert_eq!(observed_reference(&mut store, "BTC", LastPrice), 1_000.);
+    assert_eq!(observed_reference(&mut store, "BTC", IndexPrice), 1_000.);
     store.set_clock(20_000.);
     copy_shared_tickers(
         &mut store,
         &shared(r#"{"symbol":"BTC","mark":100,"observedAt":[null,8500,null]}"#),
     );
     assert_eq!(
-        store.reference_seen_at("BTC", MarkPrice),
-        Some(8_500.),
+        observed_reference(&mut store, "BTC", MarkPrice),
+        8_500.,
         "replay and local restoration never date cached data as now"
     );
     assert!(crate::protective_amend::fresh_reference(&store, "BTC", MarkPrice, 20_000.).is_none());
@@ -198,14 +230,19 @@ fn shared_reference_observations_keep_source_time_even_when_values_do_not_change
         &mut store,
         &shared(r#"{"symbol":"BTC","mark":101,"observedAt":[null,null,null]}"#),
     );
-    assert!(
-        crate::protective_amend::fresh_reference(&store, "BTC", MarkPrice, 20_000.).is_none(),
-        "explicitly unobserved values are not fresh"
+    assert_eq!(
+        observed_reference(&mut store, "BTC", MarkPrice),
+        f64::NEG_INFINITY
+    );
+    assert_eq!(
+        crate::protective_amend::fresh_reference(&store, "BTC", MarkPrice, 20_000.),
+        Some(101.),
+        "source provenance cannot replace a fresh local changed-value receipt"
     );
     copy_shared_tickers(&mut store, &shared(r#"{"symbol":"BTC","mark":102}"#));
     assert_eq!(
-        store.reference_seen_at("BTC", MarkPrice),
-        Some(20_000.),
+        observed_reference(&mut store, "BTC", MarkPrice),
+        20_000.,
         "old producer retains changed-value behavior"
     );
 }
@@ -314,7 +351,8 @@ fn source_observations_survive_frame_fed_snapshots_and_time_only_deltas() {
         true,
     )
     .unwrap();
-    assert_eq!(target.reference_seen_at("BTC", MarkPrice), Some(1_000.));
+    assert_eq!(observed_reference(&mut target, "BTC", MarkPrice), 1_000.);
+    assert_eq!(target.reference_seen_at("BTC", MarkPrice), Some(20_000.));
     source.take_pending();
     source.set_clock(8_500.);
     source.observe_ticker_fields("BTC", 1 << 3);
@@ -329,8 +367,9 @@ fn source_observations_survive_frame_fed_snapshots_and_time_only_deltas() {
         false,
     )
     .unwrap();
-    assert_eq!(target.reference_seen_at("BTC", MarkPrice), Some(8_500.));
-    assert!(crate::protective_amend::fresh_reference(&target, "BTC", MarkPrice, 20_000.).is_none());
+    assert_eq!(observed_reference(&mut target, "BTC", MarkPrice), 8_500.);
+    assert_eq!(target.reference_seen_at("BTC", MarkPrice), Some(20_000.));
+    assert!(crate::protective_amend::fresh_reference(&target, "BTC", MarkPrice, 25_001.).is_none());
 }
 
 #[test]
@@ -353,18 +392,18 @@ fn partial_shared_updates_cannot_freshen_cached_omitted_references() {
     store.set_markets(vec![market("BTC")]);
     copy_shared_tickers(&mut store, &[("BTC".into(), cached)].into_iter().collect());
     assert_eq!(
-        store.reference_seen_at("BTC", crate::model::StopTriggerType::MarkPrice),
-        Some(8500.)
+        observed_reference(&mut store, "BTC", crate::model::StopTriggerType::MarkPrice),
+        8500.
     );
     assert!(
         crate::protective_amend::fresh_reference(
             &store,
             "BTC",
             crate::model::StopTriggerType::MarkPrice,
-            8000.
+            25_001.
         )
         .is_none(),
-        "a future source clock cannot grant freshness"
+        "source provenance cannot extend the local receipt bound"
     );
 }
 
@@ -396,5 +435,54 @@ fn malformed_observation_batch_does_not_freshen_any_reference() {
             .is_err()
         );
         assert_eq!(target.reference_seen_at("BTC", MarkPrice), Some(1000.));
+        assert_eq!(observed_reference(&mut target, "BTC", MarkPrice), 1000.);
     }
+}
+
+fn check_shared_observation_clock(source: f64) {
+    use crate::model::StopTriggerType::MarkPrice;
+    let mut store = Store::default();
+    store.set_clock(1_000.);
+    store.set_markets(vec![market("BTC")]);
+    store.set_tickers(vec![Ticker {
+        symbol: "BTC".into(),
+        mark: 99.,
+        ..Default::default()
+    }]);
+    store.set_clock(20_000.);
+    copy_shared_tickers(
+        &mut store,
+        &[(
+            "BTC".into(),
+            quote(&format!(
+                r#"{{"symbol":"BTC","mark":100,"observedAt":[null,{source},null]}}"#
+            )),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    assert_eq!(store.reference_seen_at("BTC", MarkPrice), Some(20_000.));
+    assert_eq!(observed_reference(&mut store, "BTC", MarkPrice), source);
+    assert_eq!(
+        crate::protective_amend::fresh_reference(&store, "BTC", MarkPrice, 20_000.),
+        Some(100.)
+    );
+    assert_eq!(
+        crate::protective_amend::fresh_reference(&store, "BTC", MarkPrice, 25_000.),
+        Some(100.)
+    );
+    assert_eq!(
+        crate::protective_amend::fresh_reference(&store, "BTC", MarkPrice, 25_001.),
+        None
+    );
+}
+
+#[test]
+fn shared_observation_clock_older_than_local_receipt_does_not_refuse_a_live_mark() {
+    check_shared_observation_clock(1_000.);
+}
+
+#[test]
+fn shared_observation_clock_ahead_of_local_receipt_does_not_refuse_a_live_mark() {
+    check_shared_observation_clock(1_000_000.);
 }
