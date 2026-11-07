@@ -205,7 +205,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
   backpack: 1_948_672,
-  binance: 2_223_104,
+  // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
+  // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
+  // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
+  // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
+  binance: 2_235_392,
   bingx: 2_085_888,
   bitget: 2_434_048,
   bitgetusdc: 2_434_048,
