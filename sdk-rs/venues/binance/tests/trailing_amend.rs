@@ -406,3 +406,48 @@ fn engine_ambiguity_408_503_replacement_controls_do_not_put_back() {
         assert!(no_writes(&h), "{status}: {:?}", h.paths());
     }
 }
+
+#[test]
+fn engine_ambiguity_put_back_replaces_stale_definitive_refusal_words() {
+    for (status, code) in [(429, -1003), (200, -1015), (429, -1022)] {
+        let mut h = ready();
+        amend(&mut h, 907, "5550", 97.0);
+        let cancel = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            cancel.id,
+            200,
+            "",
+            r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+        );
+        let replacement = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            replacement.id,
+            400,
+            "",
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let restore = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            restore.id,
+            status,
+            "",
+            &format!(r#"{{"code":{code},"msg":"uncertain write"}}"#),
+        );
+        assert!(no_writes(&h), "{status}/{code}: {:?}", h.paths());
+        let error = &h.failures.iter().find(|(id, _)| *id == 907).unwrap().1;
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}/{code}: {error:?}"
+        );
+        assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
+        assert!(
+            error.message.contains("unknown"),
+            "{status}/{code}: {error:?}"
+        );
+        assert!(
+            error.message.contains("Check Open Orders"),
+            "{status}/{code}: {error:?}"
+        );
+    }
+}

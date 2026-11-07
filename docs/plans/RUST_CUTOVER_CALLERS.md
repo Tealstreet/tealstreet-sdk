@@ -10529,6 +10529,9 @@ Cancel, Amend and Setting, including batch rows and accepted prefixes. Reads
 keep their native signature retry, rate-limit delay and outcome-free contract.
 Journal projection cannot demote a recorded Unknown after an accepted sibling
 or when an older result wrapper calls it Rejected or KnownPartial.
+An engine-sealed ambiguous put-back replaces earlier definitive refusal words,
+including KnownPartial, with Unknown and Check Open Orders. It grants no
+protection claim or additional write.
 
 The real-engine audit cases are centrally blocked for Binance, ApeX Omni,
 AsterDEX, Bybit, BingX, Bitrue, OKX and Crypto.com. This does not convert raw

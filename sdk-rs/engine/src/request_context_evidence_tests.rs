@@ -1207,3 +1207,48 @@ fn released_ambiguity_projection_never_demotes_a_recorded_unknown() {
         assert_eq!(writes.fail(VenueError::new("fallback")).unwrap(), projected);
     }
 }
+
+#[test]
+fn later_unproven_write_replaces_known_partial_refusal_words() {
+    const REFUSED: &str = "The original stop was canceled and its replacement refused";
+    for known_partial in [false, true] {
+        for status in [408, 429, 500, 503] {
+            let mut writes = CommandWrites::new(3).unwrap();
+            released(&mut writes, 1);
+            writes
+                .result(RequestId(1), accepted(vec!["original-cancel".into()]))
+                .unwrap();
+            released(&mut writes, 2);
+            let refusal = VenueError::new(REFUSED).outcome(Outcome::Rejected);
+            writes
+                .result(
+                    RequestId(2),
+                    if known_partial {
+                        WriteResult::KnownPartial(refusal)
+                    } else {
+                        WriteResult::Rejected(refusal)
+                    },
+                )
+                .unwrap();
+            let before = writes.project_failure(VenueError::new("fallback")).unwrap();
+            assert_eq!(before.message, REFUSED);
+            assert_eq!(before.outcome, None);
+            released(&mut writes, 3);
+            writes
+                .unproven_result(RequestId(3), status, |_| {})
+                .unwrap();
+            let error = writes.project_failure(VenueError::new("fallback")).unwrap();
+            assert_eq!(
+                error.message, UNKNOWN_AFTER_REFUSAL,
+                "{known_partial}/{status}"
+            );
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_eq!(error.protection, None);
+            assert_eq!(
+                error.partial.as_ref().unwrap().order_ids,
+                ["original-cancel"]
+            );
+            assert_eq!(writes.fail(VenueError::new("fallback")).unwrap(), error);
+        }
+    }
+}

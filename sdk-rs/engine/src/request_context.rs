@@ -2182,7 +2182,11 @@ impl CommandWrites {
         // The text a settled refusal gave: stale once a later write is unknown.
         let refusal_text = retained.is_some()
             || self.attempts.iter().any(|attempt| {
-                self.terminal(attempt) && matches!(attempt.result, Some(WriteResult::Rejected(_)))
+                self.terminal(attempt)
+                    && matches!(
+                        attempt.result,
+                        Some(WriteResult::Rejected(_) | WriteResult::KnownPartial(_))
+                    )
             });
         let selected = retained.or_else(|| select(true)).or_else(|| select(false));
         let mut overflow = self.attempts.iter().any(|attempt| attempt.id_overflow);
@@ -2282,6 +2286,9 @@ impl CommandWrites {
             error.message = message.clone();
         } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
             error.message = UNKNOWN_AFTER_REFUSAL.into();
+            if overflow {
+                evidence::mark_id_overflow(&mut error);
+            }
         }
         #[cfg(feature = "http-plans")]
         if let Some(note) = note {
