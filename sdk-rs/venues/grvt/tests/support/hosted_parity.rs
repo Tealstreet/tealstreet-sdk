@@ -36,9 +36,10 @@ impl Parity {
                 work.receipt.expiry_ms.unwrap() - 3_600_000.,
             )
             .unwrap();
-            let decoded: Vec<_> = output[2..]
-                .as_bytes()
-                .chunks_exact(2)
+            let decoded: Vec<_> = output.as_bytes()[2..]
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
                 .collect();
             assert_eq!(
