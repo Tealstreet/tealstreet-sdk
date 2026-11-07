@@ -1015,12 +1015,15 @@ mod tests {
             !urls.iter().any(|u| u.starts_with(TABLE_TUNNEL)),
             "{urls:?}"
         );
-        // 14 strategy hosts and 6 fallbacks, each a relay under the tunnel.
+        // 15 strategy hosts and 6 fallbacks, each a relay under the tunnel.
         let relayed = urls
             .iter()
             .filter(|u| u.starts_with(&format!("{to}?ts-relay=")))
             .count();
-        assert_eq!(relayed, 20);
+        assert_eq!(relayed, 21);
+        assert!(urls.contains(&format!(
+            "{to}?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2F"
+        )));
         // Other services on the tunnel's host keep their own paths.
         assert_eq!(
             urls.iter()
