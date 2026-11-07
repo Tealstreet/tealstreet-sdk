@@ -247,7 +247,7 @@ fn a_frame_at_the_idle_deadline_retires_and_one_before_it_refreshes() {
 /// admission. Before open the connect deadline belongs to its timer: a frame
 /// there is refused without retiring the socket.
 #[test]
-fn control_free_feeds_meet_only_the_idle_deadline_at_message_admission() {
+fn control_free_feeds_have_no_auth_snapshot_or_first_pong_deadline() {
     for (auth, traffic) in [
         (AuthMode::Required, TrafficPolicy::AnyText),
         (AuthMode::None, TrafficPolicy::PongOnly),
@@ -344,6 +344,43 @@ fn admitted_data_keeps_silence_evidence_for_control_free_and_native_frames() {
                 .socket_driver
                 .data_silent_for(feed, 1_000. + IDLE),
             None
+        );
+    }
+}
+
+#[test]
+fn watched_silence_expires_before_delivery_on_control_free_and_native_frames() {
+    for controls in [ControlPolicy::None, ControlPolicy::Native] {
+        let mut declared = policy(controls, AuthMode::None, TrafficPolicy::AnyText);
+        declared.data_silence = Some(crate::socket_lifecycle::DataSilence {
+            after_ms: 5_000.,
+            streams: &["tick."],
+        });
+        let mut h = Harness::new(declared);
+        let socket = h.open(0.);
+        let feed = h.engine.venue.feed.unwrap();
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut h.engine.store,
+                io: &mut h.engine.io,
+            };
+            cx.set_socket_interests(feed, vec![Interest::from_wire_args("tick.BTC")])
+                .unwrap();
+        }
+        h.engine.process_socket_work(0.);
+        h.collect();
+        h.frame(4_999., socket, "early data");
+        h.frame(9_999., socket, "at silence expiry");
+        assert_eq!(h.delivered(), ["early data"], "{controls:?}");
+        assert_eq!(h.closed, [socket], "{controls:?}");
+        assert_eq!(
+            h.engine.venue.control_calls.get(),
+            usize::from(controls == ControlPolicy::Native)
+        );
+        assert_eq!(
+            h.engine.venue.log.last().unwrap(),
+            &format!("retired {:?} None", RetireReason::Timeout(Timeout::Silent))
         );
     }
 }
