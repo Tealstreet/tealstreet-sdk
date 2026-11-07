@@ -1714,3 +1714,139 @@ fn refused_with(status: u16, refusal: &str) {
     assert_eq!(failures.len(), 1, "{failures:?}");
     assert!(failures[0].message.contains("authenticationError"));
 }
+
+#[test]
+fn missing_liquidation_is_unknown_for_rest_flex_and_single_collateral() {
+    for account in [
+        r#"{"result":"success","accounts":{"flex":{"type":"multiCollateralMarginAccount","portfolioValue":1000,"availableMargin":800,"initialMargin":150,"maintenanceMargin":50}}}"#,
+        r#"{"result":"success","accounts":{"fi_xbtusd":{"type":"marginAccount","auxiliary":{"pv":1000,"af":800},"triggerEstimates":{"lt":80}}}}"#,
+    ] {
+        let (mut e, socket) = ready();
+        let reqs = poll(&mut e, socket);
+        let accounts = reqs.iter().find(|r| r.url.contains("/accounts")).unwrap();
+        reply(&mut e, accounts, 200, account);
+        let positions = reqs
+            .iter()
+            .find(|r| r.url.contains("/openpositions"))
+            .unwrap();
+        reply(
+            &mut e,
+            positions,
+            200,
+            r#"{"result":"success","openPositions":[{"symbol":"PF_XBTUSD","side":"long","size":2,"price":100}]}"#,
+        );
+        let p = e.store().position("PF_XBTUSD:long").unwrap();
+        assert!(
+            p.liquidation_price.is_nan(),
+            "unknown must not become zero: {p:?}"
+        );
+        assert!(serde_json::to_value(p).unwrap()["liquidationPrice"].is_null());
+    }
+}
+
+#[test]
+fn websocket_unknown_liquidation_does_not_discard_or_zero_the_position() {
+    // Reported zero is an unavailable threshold, not a usable liquidation price.
+    // Nonpositive numbers and numeric strings must also clear a prior value.
+    for feed in ["open_positions", "open_positions_snapshot"] {
+        for field in [
+            "",
+            r#","liquidation_threshold":null"#,
+            r#","liquidation_threshold":"""#,
+            r#","liquidation_threshold":"N/A""#,
+            r#","liquidation_threshold":"NaN""#,
+            r#","liquidation_threshold":"Infinity""#,
+            r#","liquidation_threshold":0"#,
+            r#","liquidation_threshold":"0""#,
+            r#","liquidation_threshold":-0.0"#,
+            r#","liquidation_threshold":-1"#,
+            r#","liquidation_threshold":"-1""#,
+            r#","liquidation_threshold":true"#,
+            r#","liquidation_threshold":false"#,
+            r#","liquidation_threshold":{}"#,
+            r#","liquidation_threshold":[]"#,
+            r#","liquidation_threshold":{"unusable":[true,{"nested":"value"}]}"#,
+            r#","liquidation_threshold":[{"nested":[1,2,3]},false]"#,
+        ] {
+            let (mut e, socket) = ready();
+            message(&mut e, socket, NOW, POSITION);
+            message(
+                &mut e,
+                socket,
+                NOW + 1.0,
+                &format!(
+                    r#"{{"feed":"{feed}","positions":[{{"instrument":"PF_XBTUSD","balance":3,"entry_price":100,"mark_price":120{field}}}]}}"#
+                ),
+            );
+            let p = e.store().position("PF_XBTUSD:long").unwrap();
+            assert_eq!(
+                p.contracts, 3.0,
+                "a bad optional price must not discard its row: {field}"
+            );
+            assert!(p.liquidation_price.is_nan(), "{feed} {field}: {p:?}");
+            assert!(serde_json::to_value(p).unwrap()["liquidationPrice"].is_null());
+        }
+    }
+}
+
+#[test]
+fn websocket_positive_liquidation_prices_remain_usable() {
+    for (raw, expected) in [("67.8", 67.8), (r#""67.8""#, 67.8)] {
+        let (mut e, socket) = ready();
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &format!(
+                r#"{{"feed":"open_positions","positions":[{{"instrument":"PF_XBTUSD","balance":2,"entry_price":100,"mark_price":120,"liquidation_threshold":{raw}}}]}}"#
+            ),
+        );
+        assert_eq!(e.store().positions()[0].liquidation_price, expected);
+    }
+}
+
+fn frame_liquidation_prices(frame: &[u8]) -> Vec<f64> {
+    let mut at = 16;
+    while at + 8 <= frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let length = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 8 {
+            let count = u32::from_le_bytes(frame[at + 8..at + 12].try_into().unwrap()) as usize;
+            let column = (at + 12 + count * 8 + 7) & !7;
+            return (0..count)
+                .map(|i| {
+                    let start = column + 6 * count * 8 + i * 8;
+                    f64::from_le_bytes(frame[start..start + 8].try_into().unwrap())
+                })
+                .collect();
+        }
+        at += 8 + length;
+    }
+    panic!("positions section missing");
+}
+
+#[test]
+fn unknown_liquidation_survives_the_native_frame_column() {
+    for field in [
+        "",
+        r#","liquidation_threshold":0"#,
+        r#","liquidation_threshold":-2"#,
+    ] {
+        let (mut e, socket) = ready();
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &format!(
+                r#"{{"feed":"open_positions","positions":[{{"instrument":"PF_XBTUSD","balance":2,"entry_price":100,"mark_price":120{field}}}]}}"#
+            ),
+        );
+        let frame = e.take_frame(NOW).unwrap();
+        let prices = frame_liquidation_prices(frame);
+        assert_eq!(prices.len(), 1);
+        assert!(
+            prices[0].is_nan(),
+            "unusable threshold must be unknown in the wire column: {field}"
+        );
+    }
+}

@@ -629,7 +629,7 @@ function resolvePositionPriceConstant(tok: string, ctx: PreprocessContext): numb
       throw new Error(`$liq: multiple positions on ${ctx.symbol}, ambiguous`);
     }
     const liq = positions[0].liquidationPrice;
-    if (!Number.isFinite(liq) || liq <= 0) {
+    if (liq === null || !Number.isFinite(liq) || liq <= 0) {
       throw new Error(`$liq: liquidation price not available on ${ctx.symbol}`);
     }
     return liq;
@@ -835,7 +835,6 @@ export function resolveDeferredCaptures(
   }
   return { command: result, emptyCaptures };
 }
-
 
 /**
  * Substitute only the condition half of a `when` form. See `WHEN_COMMAND`.
