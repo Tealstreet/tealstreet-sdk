@@ -145,6 +145,12 @@ Offline protocol fixtures follow the [technical migration guide](https://docs.cd
 and [AsyncAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-asyncapi.json).
 No live private authentication, account request, or order is part of validation.
 
+The CI private replay for the `intx` profile (`harness/coinbase-drb-tape.mjs`) runs the
+WASM engine through drb auth, private reads and the private stream. The TS INTX
+implementation is retired and cannot model drb, so that tape is replayed by Rust
+alone and compared against the tape's declared expected account. Its strict result
+stays FAIL with one declared known failure (the retired TS oracle), never parity.
+
 Private read failures retain S0's classified kind and native error fields in
 command failures and startup diagnostics. Rejected credentials terminate the
 startup through `startup_read_refused` and stop further gateway authentication
