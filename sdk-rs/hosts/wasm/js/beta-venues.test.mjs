@@ -13,7 +13,7 @@ import { ExchangeError } from './host.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
-  'polymarket', 'breakoutprop', 'txflow', 'weex',
+  'polymarket', 'txflow', 'weex',
   'bitrue',
 ];
 

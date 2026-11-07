@@ -81,6 +81,12 @@ describe('BaseExchange.signWsAuth output formats', () => {
     expect(result.error).toContain('CoinbaseExchange');
   });
 
+  it('requires the Rust device codec for Backpack Ed25519 instead of returning an HMAC', async () => {
+    const result = await sign('backpack-ed25519', '{"payload":"fixture"}');
+    expect(result.wsAuthSignature).toBeUndefined();
+    expect(result.error).toContain('requires the Rust engine signer');
+  });
+
   it('errors instead of mis-signing an unknown output format', async () => {
     const result = await sign('some-future-format', 'anything');
     expect(result.wsAuthSignature).toBeUndefined();

@@ -11,7 +11,7 @@ const account = (exchange: string, name = `${exchange}-main`) =>
   ({ name, exchange, key: 'saved-key', secret: 'saved-secret', active: true }) as unknown as ExchangeAccountConfig;
 
 describe('removed venues on saved CLI accounts', () => {
-  // breakoutprop still has metadata (it enforces the tunnel), so it must refuse before login checks.
+  // breakoutprop was removed after bitmex (#3224); it once kept tunnel-enforcing metadata, so the refusal must precede login checks.
   it.each(['bitmex', 'bitmextestnet', 'breakoutprop'])(
     'refuses %s typed before login or network work',
     async (exchange) => {

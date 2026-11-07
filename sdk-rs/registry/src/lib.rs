@@ -12,7 +12,6 @@ mod mexc_setup;
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -34,7 +33,7 @@ mod mexc_setup;
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-venues requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
@@ -87,8 +86,6 @@ use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 use safe_cex_venue_bitunix::{BitunixFutures, Options as BitunixOptions};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
-#[cfg(feature = "breakoutprop")]
-use safe_cex_venue_breakoutprop::{BreakoutProp, Options as BreakoutOptions};
 #[cfg(feature = "bybit")]
 use safe_cex_venue_bybit::{
     BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
@@ -257,19 +254,6 @@ fn finish<T: Visit, V: Venue + 'static>(
     Ok(visitor.visit(engine))
 }
 
-#[cfg(feature = "breakoutprop")]
-fn breakoutprop_rules(options: &EngineOptions) -> Result<(), VenueError> {
-    // Market data needs a DXtrade session too, so public accounts are not exempt.
-    if options.key.as_deref().is_none_or(str::is_empty)
-        || options.secret.as_deref().is_none_or(str::is_empty)
-    {
-        return Err(invalid(
-            "BreakoutProp market data requires a legacy DXtrade username and password",
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(feature = "polymarket")]
 fn hex_of(value: &str, digits: usize) -> bool {
     value.len() == digits && value.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -348,7 +332,7 @@ fn orderly_rules(options: &EngineOptions) -> Result<(), VenueError> {
 #[cfg(feature = "asterdex")]
 const ASTERDEX_MAIN_WALLET_REQUIRED: &str = "Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with your login wallet — do not replace the main wallet with the API/vault wallet.";
 
-/// Backpack's provider copy of the configured key and Ed25519 seed (option B).
+/// Backpack's trusted native compatibility setup; the caller consumes raw input.
 /// A probe signature refuses a malformed or non-32-byte seed before startup.
 #[cfg(feature = "backpack")]
 struct BackpackSignerSetup {
@@ -368,7 +352,7 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     });
     // Declared PublicRead keeps a valid read key signing in public-only mode,
     // with no primary ever built or probed (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md).
-    // Backpack's own provider (dual custody) applies the one shared rule.
+    // Backpack's compatibility setup applies the same declared PublicRead rule.
     let read_policy = construction::read_credentials_policy("backpack");
     let primary_allowed = !public_read_excludes_primary(read_policy, options.public_data_only);
     if options.public_data_only && read_policy != construction::ReadCredentialsPolicy::PublicRead {
@@ -487,8 +471,6 @@ fn orderly_signer(
 /// Whether this build constructs `venue`.
 pub fn supported(venue: &str) -> bool {
     match venue {
-        #[cfg(feature = "breakoutprop")]
-        "breakoutprop" => true,
         #[cfg(feature = "grvt")]
         "grvt" => true,
         #[cfg(feature = "coinbase")]
@@ -557,7 +539,6 @@ pub fn supported(venue: &str) -> bool {
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "blofin",
@@ -579,7 +560,7 @@ pub fn supported(venue: &str) -> bool {
     feature = "okx"
 ))]
 fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
-    const DELEGATED: [&str; 9] = [
+    const DELEGATED: [&str; 8] = [
         "hyperliquid",
         "paradex",
         "lighter",
@@ -588,7 +569,6 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
         "coinbase",
         "coinbasespot",
         "polymarket",
-        "breakoutprop",
     ];
     // Without a remote signer, missing credentials simply mean a public account.
     if options.public_data_only || !options.remote_signing || DELEGATED.contains(&venue) {
@@ -730,6 +710,31 @@ pub fn prepare_local_signer_for(
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
         payload_signing_rules(venue, options, false)?;
         return lighter_setup::native(options, signer_setup_policy_for(venue, options));
+    }
+    #[cfg(feature = "backpack")]
+    if venue == "backpack" {
+        // Preserve native legacy validation precedence while consuming both seeds
+        // before the venue exists. JSON-capsule and external setup already own refs.
+        let setup = backpack_provider(options)?;
+        if let Some(Err(safe_cex_venue_backpack::sign::ReadCredentialsError::Configuration(
+            message,
+        ))) = setup.read_status
+        {
+            return Err(invalid(message));
+        }
+        options.backpack_read_status = setup.read_status;
+        for value in [&mut options.key, &mut options.secret] {
+            safe_cex_crypto::secrets::erase(value);
+        }
+        if let Some(mut read) = options.read_credentials.take() {
+            read.erase_secrets();
+        }
+        return Ok((
+            setup.provider.unwrap_or_else(|| {
+                std::sync::Arc::new(safe_cex_crypto::signer::LocalSigner::new())
+            }),
+            setup.identities,
+        ));
     }
     let policy = signer_setup_policy_for(venue, options);
     let read_policy = construction::read_credentials_policy(venue);
@@ -1019,6 +1024,33 @@ fn admit_json_setup(
         &identities,
         public_data_only,
     )?;
+    #[cfg(feature = "backpack")]
+    if venue == "backpack" {
+        // Match legacy trusted setup's seed-width refusal before startup I/O.
+        for identity in [&identities.primary, &identities.secondary]
+            .into_iter()
+            .flatten()
+        {
+            let work = safe_cex_engine::signing::SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![safe_cex_engine::signing::Operation::Sign {
+                    algorithm: safe_cex_engine::signing::Algorithm::Ed25519,
+                    key: identity
+                        .signing_ref()
+                        .map_err(|_| invalid("Invalid Backpack signer setup"))?
+                        .clone(),
+                    payload: vec![safe_cex_engine::signing::PayloadPart::Bytes {
+                        bytes: Vec::new(),
+                    }],
+                }],
+            };
+            provider
+                .sign_ready(&work)
+                .ok_or_else(|| invalid("Invalid Backpack signer setup"))?
+                .map_err(|_| invalid("Backpack Ed25519 seed must be 32 bytes"))?;
+        }
+    }
     #[cfg(feature = "apexomni")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::ApexOmni) {
         return apexomni_admit(provider, identities);
@@ -1224,8 +1256,12 @@ pub fn build<T: Visit>(
             && options.signing.is_none()
         {
             let (provider, identities) = prepare_local_signer_for(venue, &mut options)?;
+            let empty_backpack = cfg!(feature = "backpack")
+                && venue == "backpack"
+                && identities.primary.is_none()
+                && identities.secondary.is_none();
             options.signing = Some(identities);
-            Some(provider)
+            if empty_backpack { None } else { Some(provider) }
         } else {
             None
         };
@@ -1394,7 +1430,6 @@ pub fn build_with_signer<T: Visit>(
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
-        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "blofin",
@@ -1458,35 +1493,6 @@ pub fn build_with_signer<T: Visit>(
         },
     };
     match venue {
-        #[cfg(feature = "breakoutprop")]
-        "breakoutprop" => {
-            breakoutprop_rules(&options)?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    BreakoutProp::new(BreakoutOptions {
-                        key: options.key.take().unwrap_or_default(),
-                        secret: options.secret.take().unwrap_or_default(),
-                        subaccount: options.subaccount.take(),
-                        public_data_only: options.public_data_only,
-                        tick_interval: if options.polling_enabled == Some(false) {
-                            f64::INFINITY
-                        } else {
-                            safe_cex_engine::engine::bounded_tick_interval(
-                                options.tick_interval.take().unwrap_or(2_000.0),
-                            )
-                        },
-                        timeout_ms: options
-                            .recv_window
-                            .unwrap_or(20_000.0)
-                            .clamp(1.0, u32::MAX as f64) as u32,
-                    }),
-                    entropy,
-                )?,
-            )
-        }
         #[cfg(feature = "grvt")]
         "grvt" => {
             let identities = options.signing.take().unwrap_or_default();
@@ -1915,25 +1921,34 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "backpack")]
         "backpack" => {
-            // Transitional dual custody (RUST_BACKPACK_SIGNER_ADMISSION.md, option
-            // B): managed trading signs through this provider, while unadopted
-            // account reads and private WS auth keep the raw fields. Remove before master.
-            let setup = backpack_provider(&options)?;
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Backpack credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid(
+                    "Backpack signing refs require an installed provider",
+                ));
+            }
             let mut engine = Engine::new(
                 Backpack::new(BackpackOptions {
-                    identity: setup.identities.primary.clone(),
-                    read_identity: setup.identities.secondary.clone(),
-                    read_credentials_status: setup.read_status,
-                    read_credentials: options.read_credentials.take(),
+                    identity: identities.primary.clone(),
+                    read_identity: identities.secondary.clone(),
+                    read_credentials_status: options.backpack_read_status,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     recv_window: options.recv_window.take(),
+                    ..Default::default()
                 }),
                 entropy,
             )?;
-            engine.set_signer(setup.provider)?;
-            engine.set_identities(setup.identities)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "blofin")]
@@ -2146,22 +2161,47 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "woo")]
-        "woo" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "woo" => {
+            if [&options.key, &options.secret]
+                .iter()
+                .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "WOO credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut identities = options.signing.take().unwrap_or_default();
+            // An incomplete local primary still denotes a public-only account.
+            identities.primary = identities.primary.filter(|identity| {
+                !identity.credential.0.is_empty()
+                    && identity.signing_ref().is_ok_and(|key| !key.0.is_empty())
+            });
+            for identity in [&identities.primary, &identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 Woo::new(WooOptions {
-                    read_credentials: options.read_credentials.take(),
+                    credentials: identities.primary.clone(),
+                    read_signing: identities.secondary.clone(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     application_id: options.application_id.take(),
+                    ..Default::default()
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bybit")]
         "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -2382,7 +2422,6 @@ pub struct KucoinExtra {
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -2432,6 +2471,11 @@ pub struct EngineOptions {
     /// of the material (`ReadCredentials::status`); None when no read key.
     #[serde(default)]
     pub read_credentials_valid: Option<bool>,
+    /// Trusted Backpack compatibility setup retains validation only, never material.
+    #[cfg(feature = "backpack")]
+    #[serde(skip)]
+    pub backpack_read_status:
+        Option<Result<(), safe_cex_venue_backpack::sign::ReadCredentialsError>>,
     #[cfg(feature = "blofin")]
     #[serde(default)]
     pub broker_attribution: bool,
@@ -2511,7 +2555,6 @@ pub struct EngineOptions {
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
-        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "blofin",
@@ -2549,7 +2592,6 @@ pub struct EngineOptions {
     #[cfg(any(
         feature = "backpack",
         feature = "bitrue",
-        feature = "breakoutprop",
         feature = "binance",
         feature = "bybit",
         feature = "mexc"
@@ -2609,15 +2651,9 @@ pub struct EngineOptions {
     #[cfg(feature = "bybit")]
     #[serde(default)]
     pub hyrotrader: Option<HyroConfig>,
-    #[cfg(any(feature = "orderly", feature = "breakoutprop"))]
+    #[cfg(feature = "orderly")]
     #[serde(default)]
     pub tick_interval: Option<f64>,
-    #[cfg(feature = "breakoutprop")]
-    #[serde(default)]
-    pub subaccount: Option<String>,
-    #[cfg(feature = "breakoutprop")]
-    #[serde(default)]
-    pub polling_enabled: Option<bool>,
 }
 #[cfg(any(
     feature = "coinbase",
@@ -2626,7 +2662,6 @@ pub struct EngineOptions {
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -2695,7 +2730,6 @@ impl EngineOptions {
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",

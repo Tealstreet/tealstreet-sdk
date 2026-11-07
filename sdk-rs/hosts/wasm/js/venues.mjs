@@ -18,7 +18,6 @@ const families = Object.freeze({
   bitrue: 'bitrue',
   bitunix: 'bitunix',
   blofin: 'blofin',
-  breakoutprop: 'breakoutprop',
   bybit: 'bybit',
   bybitdemo: 'bybit',
   bybitinverse: 'bybit',
