@@ -276,7 +276,10 @@ struct Planned {
 enum Effect {
     Metadata(String),
     ProtectiveQuote(String),
-    ProtectiveAmend(Vec<Order>),
+    ProtectiveAmend {
+        sources: Vec<Order>,
+        updated: Vec<Order>,
+    },
     ResolveAmend {
         id: String,
         price: f64,
@@ -2309,6 +2312,25 @@ impl BitgetFutures {
         let Pending::Trade(request) = pending else {
             return Ok(());
         };
+        if let Effect::ProtectiveAmend { sources, .. } = &request.call.effect {
+            let unchanged = sources.iter().all(|source| {
+                store.order(&source.id).is_some_and(|current| {
+                    let mut expected = source.clone();
+                    // An identical refresh changes its receipt, not the native amendment.
+                    expected.last_update = current.last_update;
+                    current == &expected
+                })
+            });
+            return if unchanged {
+                Ok(())
+            } else {
+                Err(VenueError::new(
+                    "Bitget protective edit source changed; no amendment sent, refresh before editing",
+                )
+                .kind(ErrorKind::InvalidInput)
+                .outcome(Outcome::NotSent))
+            };
+        }
         let Effect::Cancel { .. } = &request.call.effect else {
             return Ok(());
         };
@@ -2504,7 +2526,10 @@ impl BitgetFutures {
             job.calls.push_back(Planned {
                 path: paths::MODIFY_ORDER,
                 payload,
-                effect: Effect::ProtectiveAmend(updated),
+                effect: Effect::ProtectiveAmend {
+                    sources: linked,
+                    updated,
+                },
             });
             return Ok(());
         }
@@ -2538,7 +2563,10 @@ impl BitgetFutures {
             job.calls.push_back(Planned {
                 path: "/api/v3/trade/modify-strategy-order",
                 payload,
-                effect: Effect::ProtectiveAmend(updated),
+                effect: Effect::ProtectiveAmend {
+                    sources: linked,
+                    updated,
+                },
             });
             return Ok(());
         }
@@ -3289,7 +3317,7 @@ impl BitgetFutures {
             }
         }
         if error.is_none()
-            && let Effect::ProtectiveAmend(_) = &request.call.effect
+            && let Effect::ProtectiveAmend { .. } = &request.call.effect
         {
             let echoed = parsed
                 .as_ref()
@@ -3391,7 +3419,7 @@ impl BitgetFutures {
             }
             let native_unchanged = !uncertain
                 && explicit_rejection
-                && matches!(request.call.effect, Effect::ProtectiveAmend(_));
+                && matches!(request.call.effect, Effect::ProtectiveAmend { .. });
             if native_unchanged {
                 message.push_str("; your stop is unchanged");
             }
@@ -3506,8 +3534,8 @@ impl BitgetFutures {
             return;
         }
         match &request.call.effect {
-            Effect::ProtectiveAmend(rows) => {
-                for row in rows {
+            Effect::ProtectiveAmend { updated, .. } => {
+                for row in updated {
                     if self.order_revision(&row.id) <= request.stream_revision
                         && !self.order_terminal(&row.id)
                     {
@@ -4735,7 +4763,7 @@ impl Planned {
             | Effect::ConfirmPlanGone { .. } => Intent::Read,
             Effect::Place { .. } => Intent::Place,
             Effect::Cancel { .. } => Intent::Cancel,
-            Effect::Amend { .. } | Effect::ProtectiveAmend(_) => Intent::Amend,
+            Effect::Amend { .. } | Effect::ProtectiveAmend { .. } => Intent::Amend,
             Effect::Leverage { .. } | Effect::Margin { .. } | Effect::Mode(_) => Intent::Setting,
         }
     }

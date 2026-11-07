@@ -65,6 +65,15 @@ fn trailing(h: &mut Harness) {
     h.private_message(r#"{"arg":{"topic":"strategy-order"},"data":[{"category":"USDT-FUTURES","type":"trailing_stop","orderId":"trail","symbol":"BTCUSDT","qty":"0.01","side":"sell","posSide":"long","reduceOnly":"yes","status":"pending","trailingStopParams":{"activationPrice":"95","activationType":"market","trailType":"distance","trailVariance":"5","preOrderType":"market"}}]}"#);
 }
 fn held(h: &mut Harness) -> safe_cex_engine::request_context::Permit {
+    held_call(h, "cancel").0
+}
+fn held_call(
+    h: &mut Harness,
+    path: &str,
+) -> (
+    safe_cex_engine::request_context::Permit,
+    safe_cex_engine::HttpRequest,
+) {
     for _ in 0..8 {
         h.engine.prepare_dispatch(h.now);
         let actions: Vec<_> = h.engine.drain_actions().collect();
@@ -77,7 +86,7 @@ fn held(h: &mut Harness) -> safe_cex_engine::request_context::Permit {
                         request,
                         ..
                     } => {
-                        assert!(request.url.contains("cancel"));
+                        assert!(request.url.contains(path));
                         h.engine.http_prepared(
                             h.now,
                             preparation,
@@ -90,8 +99,8 @@ fn held(h: &mut Harness) -> safe_cex_engine::request_context::Permit {
                     HttpAction::Bind {
                         permit, request, ..
                     } => {
-                        assert!(request.url.contains("cancel"));
-                        return permit;
+                        assert!(request.url.contains(path));
+                        return (permit, request);
                     }
                     _ => {}
                 },
@@ -99,7 +108,93 @@ fn held(h: &mut Harness) -> safe_cex_engine::request_context::Permit {
             }
         }
     }
-    panic!("no held cancel binding")
+    panic!("no held {path} binding")
+}
+
+fn native_amend_rechecks_sibling(uta_mode: bool) {
+    for update in ["unchanged", "receipt", "sibling"] {
+        let mut h = if uta_mode { uta() } else { Harness::classic() };
+        let row = if uta_mode {
+            r#"{"arg":{"topic":"strategy-order"},"data":[{"category":"USDT-FUTURES","orderId":"pair","symbol":"BTCUSDT","tpslMode":"partial","qty":"0.5","side":"sell","posSide":"long","stopLoss":"80","slTriggerBy":"market","slOrderType":"market","takeProfit":"120","tpTriggerBy":"market","tpOrderType":"market","status":"pending"}]}"#
+        } else {
+            r#"{"arg":{"channel":"orders"},"data":[{"orderId":"1","symbol":"BTCUSDT","size":"2","baseVolume":"0","price":"90","side":"buy","orderType":"limit","status":"live","presetStopLossPrice":"80","presetStopSurplusPrice":"120"}]}"#
+        };
+        h.private_message(row);
+        let (target, sibling, path, field) = if uta_mode {
+            (
+                "pair__stop_loss",
+                "pair__take_profit",
+                "/modify-strategy-order",
+                "takeProfit",
+            )
+        } else {
+            (
+                "1__stop_loss",
+                "1__take_profit",
+                "/modify-order",
+                "newPresetStopSurplusPrice",
+            )
+        };
+        h.engine
+            .handle(h.now, Event::Command(edit(target, Some(85.0), None)));
+        let (permit, request) = held_call(&mut h, path);
+        let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload[field], "120");
+        if update != "unchanged" {
+            h.now += 1.0;
+            let text = if update == "sibling" {
+                row.replace("\"120\"", "\"130\"")
+            } else {
+                row.to_owned()
+            };
+            let socket = h
+                .sockets
+                .iter()
+                .find(|(_, url)| url.ends_with("/private"))
+                .unwrap()
+                .0;
+            h.engine.handle(
+                h.now,
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+        }
+        let sibling_price = if update == "sibling" { 130.0 } else { 120.0 };
+        assert_eq!(
+            h.engine.store().order(sibling).unwrap().price,
+            sibling_price
+        );
+        let claim = h.engine.claim_http(h.now, permit);
+        assert_eq!(
+            matches!(claim, Ok(Claim::Released(_))),
+            update != "sibling",
+            "uta={uta_mode}, {update}: {claim:?}"
+        );
+        if update == "sibling" {
+            h.collect();
+            let error = h
+                .failures
+                .last()
+                .expect("stale amendment refused before sending");
+            assert_eq!(error.outcome, Some(Outcome::NotSent));
+            assert_eq!(error.protection, None);
+            assert!(error.legacy_text().contains("no amendment sent"));
+            assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+            assert_eq!(h.engine.store().order(sibling).unwrap().price, 130.0);
+        }
+    }
+}
+
+#[test]
+fn native_uta_amend_rechecks_sibling_at_final_claim() {
+    native_amend_rechecks_sibling(true);
+}
+
+#[test]
+fn classic_preset_amend_rechecks_sibling_at_final_claim() {
+    native_amend_rechecks_sibling(false);
 }
 
 #[test]

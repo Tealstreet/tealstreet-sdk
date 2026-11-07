@@ -5,6 +5,10 @@ retain both presets. UTA partial TP/SL edits use `modify-strategy-order` and
 retain each leg's trigger reference, execution type and limit price. A native
 refusal leaves protection unchanged; an ambiguous reply never starts a cancel.
 
+Native modifications recheck their source rows immediately before sending. A
+sibling update while an edit is being prepared refuses the stale edit without a
+write; refresh before editing again.
+
 Full-mode UTA strategy edits, trailing edits and unsupported attached edits
 retain the cancel/place path. Every destructive claim, including a 40009 re-sign,
 checks the original rows, position mode, size rules and a genuine own-source
