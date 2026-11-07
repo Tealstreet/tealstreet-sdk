@@ -732,9 +732,10 @@ test('#3191 run 42249705679 retains measured Paradex headroom', () => {
 
 test('#3229 Backpack hosted signing (run 42352281022, job 128343086016) retains CI headroom', () => {
   const measured = 1_994_139;
-  const cap = measured + 10 * 1024;
+  const cap = 2_004_992;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   const current = WASM_VENUE_OVERRIDES.backpack;
-  assert.ok(current >= cap, 'Backpack retains CI size plus 10 KiB');
+  assert.equal(current, cap, 'Backpack retains CI size plus 10 KiB, rounded up to the KiB');
   assert.equal(wasmBudgetError(measured, 'venue', 'backpack'), undefined);
   assert.equal(wasmBudgetError(current, 'venue', 'backpack'), undefined);
   assert.match(wasmBudgetError(current + 1, 'venue', 'backpack'), /exceeds/);
