@@ -55,6 +55,7 @@ export class BumpCommand extends TradingBaseCommand {
     if (
       args[i] &&
       args.length > i + 1 &&
+      !['buy', 'buys', 'sell', 'sells', 'top', 'bottom'].includes(args[i]) &&
       this.validateSymbols(exchange, [args[i]]).length > 0
     ) {
       symbol = this.validateSymbols(exchange, [args[i]])[0];
@@ -114,10 +115,18 @@ export class BumpCommand extends TradingBaseCommand {
     const invalid = this.refuseUnknownArgs(ctx, Array.from({ length: i }, (_, index) => index));
     if (invalid) return invalid;
 
-    // Legacy flag fallback
+    const flagBuys = this.hasFlag(ctx, 'buys', 'b');
+    const flagSells = this.hasFlag(ctx, 'sells', 's');
+    if (
+      (flagBuys && flagSells) ||
+      (side === OrderSide.Buy && flagSells) ||
+      (side === OrderSide.Sell && flagBuys)
+    ) {
+      return this.error('Conflicting side selectors. Nothing was changed.');
+    }
     if (side === null) {
-      if (this.hasFlag(ctx, 'buys', 'b')) side = OrderSide.Buy;
-      else if (this.hasFlag(ctx, 'sells', 's')) side = OrderSide.Sell;
+      if (flagBuys) side = OrderSide.Buy;
+      else if (flagSells) side = OrderSide.Sell;
     }
 
     const targetSymbol = symbol ?? ctx.symbol;

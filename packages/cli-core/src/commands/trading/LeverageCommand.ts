@@ -34,7 +34,7 @@ export class LeverageCommand extends TradingBaseCommand {
     }
     const invalid = this.refuseUnknownOrderArgs(ctx, args[1] ? [1] : []);
     if (invalid) return invalid;
-    const targetSymbol = this.getTargetSymbol(ctx, []);
+    const targetSymbol = args[2] ? this.validateSymbols(exchange, [args[2]])[0] ?? ctx.symbol : ctx.symbol;
     const arg = this.getArg(ctx, 1);
 
     // Read path — `lev` with no argument or a non-numeric word ("lev show").

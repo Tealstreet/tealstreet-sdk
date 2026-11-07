@@ -43,8 +43,12 @@ optional reduce-only / post-only / bracket stop-loss and take-profit.
 Symbol overrides must be complete market names, base symbols, or supported
 base+quote aliases; an arbitrary prefix never selects a market. Every member
 of a buy/sell/chase symbol list must resolve. TWAP and swarm accept one symbol
-per command. Duplicate or conflicting modifiers and numeric operands with
-trailing text are refused. `po` requires `at PRICE` or `best`; it cannot be
+per command. Repeated targets are refused after resolving aliases, including
+`BTC,BTCUSDT` when both select the same market. A loaded alias such as `NEXT`
+is a symbol in a symbol slot; keywords belong to the command and position
+where they are parsed. Conflicting side selectors such as
+`bump buy +100 --sells` are refused before any amendment. Duplicate or
+conflicting modifiers and numeric operands with trailing text are refused. `po` requires `at PRICE` or `best`; it cannot be
 applied to a market order.
 
 Use `stop PRICE` for an attached stop loss and `tp PRICE` for an attached

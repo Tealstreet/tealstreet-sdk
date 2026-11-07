@@ -27,6 +27,10 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       return this.error('Exchange does not support placing orders');
     }
 
+    ctx = this.resolveLeadingSymbolSlot(ctx, 1);
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['reduce'], ['po'], ['best', 'at'], ['stop'], ['tp']]);
+    if (duplicate) return duplicate;
+
     // Fail closed on a typo'd explicit symbol. Without this, an
     // unresolved symbol token is silently dropped and the order routes
     // to the focused symbol — e.g. `buy $100 XBTUSD` on an exchange

@@ -79,6 +79,10 @@ export class TwapCommand extends TradingBaseCommand {
   readonly requiresConnection = true;
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
+    const sideIndex = ctx.args._[1]?.toLowerCase() === 'chase' ? 2 : 1;
+    if (['buy', 'sell'].includes(ctx.args._[sideIndex]?.toLowerCase())) {
+      ctx = this.resolveLeadingSymbolSlot(ctx, sideIndex + 1);
+    }
     const args = this.getRawArgs(ctx);
     const duplicate = this.refuseDuplicateModifiers(ctx, [
       ['timeout'], ['fail'], ['into', 'slices'], ['over', 'duration'], ['reduce'], ['chaser'],

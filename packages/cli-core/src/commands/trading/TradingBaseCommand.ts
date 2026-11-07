@@ -9,17 +9,22 @@ import { resolveCompleteMarketSymbol, resolveMarketSymbol } from '../../utils/re
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
 import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
 
-const ORDER_GRAMMAR_WORDS = new Set([
-  'buy', 'sell', 'buys', 'sells', 'at', 'stop', 'tp', 'trigger', 'best', 'po', 'reduce',
-  'into', 'over', 'duration', 'slices', 'chaser', 'timeout', 'fail', 'market', 'next',
-  'from', 'to', 'taker', 'irregular', 'top', 'bottom', 'first', 'last',
-  'long', 'short', 'longs', 'shorts', 'all', 'allpos', 'isolated', 'cross',
-]);
-
 /**
  * Base class for trading commands with utility methods for size/price processing
  */
 export abstract class TradingBaseCommand extends BaseCommand {
+  // Resolve the leading symbol slot before scanning modifiers, so an alias
+  // such as REDUCE has only its symbol role in this position.
+  protected resolveLeadingSymbolSlot(ctx: CommandContext, index: number): CommandContext {
+    const token = ctx.args._[index];
+    if (!ctx.exchange || !token) return ctx;
+    const symbols = this.validateSymbols(ctx.exchange, token.split(','));
+    if (symbols.length === 0) return ctx;
+    const args = [...ctx.args._];
+    args[index] = symbols.join(',');
+    return { ...ctx, args: { ...ctx.args, _: args } };
+  }
+
   protected refuseUnknownOrderArgs(
     ctx: CommandContext,
     consumed: number[],
@@ -288,11 +293,21 @@ export abstract class TradingBaseCommand extends BaseCommand {
         .map(position => position.symbol);
     }
     const resolved = symbols.map(symbol => {
-      if (this.tokenLooksLikeNonSymbol(symbol) || ORDER_GRAMMAR_WORDS.has(symbol.trim().toLowerCase())) return undefined;
+      if (this.tokenLooksLikeNonSymbol(symbol)) return undefined;
       const complete = resolveCompleteMarketSymbol(exchange.store?.markets, symbol);
       return complete !== undefined && this.validateSymbol(exchange, complete) ? complete : undefined;
     });
-    return resolved.every((symbol): symbol is string => symbol !== undefined) ? resolved : [];
+    if (!resolved.every((symbol): symbol is string => symbol !== undefined)) return [];
+    this.assertUniqueSymbols(resolved);
+    return resolved;
+  }
+
+  protected assertUniqueSymbols(symbols: string[]): void {
+    const seen = new Set<string>();
+    for (const symbol of symbols) {
+      if (seen.has(symbol)) throw new Error(`Duplicate market target "${symbol}". Nothing was sent.`);
+      seen.add(symbol);
+    }
   }
 
   /**

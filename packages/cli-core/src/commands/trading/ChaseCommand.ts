@@ -390,6 +390,9 @@ export class ChaseCommand extends TradingBaseCommand {
       return this.error('Not connected to exchange');
     }
 
+    if (['buy', 'sell'].includes(ctx.args._[1]?.toLowerCase())) {
+      ctx = this.resolveLeadingSymbolSlot(ctx, 2);
+    }
     const args = this.getRawArgs(ctx);
     const assignment = this.refuseOrderAssignments(ctx);
     if (assignment) return assignment;
@@ -431,6 +434,8 @@ export class ChaseCommand extends TradingBaseCommand {
     // resting order. We let it through. Spawning a NEW chaser is
     // gated below.
     if (this.simulationGate(ctx)) return this.success();
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['reduce'], ['to']]);
+    if (duplicate) return duplicate;
     const side = sideStr as OrderSide;
     const positionSide = side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long;
     const reduceOnly = this.hasArgValue(args, 'reduce');
