@@ -119,6 +119,7 @@ impl Venue for Probe {
         panic!("managed open reached legacy handler");
     }
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+        cx.record_socket_topic(&[text]);
         self.log.push(format!("message {text}"));
         self.proposals_at_delivery
             .push(cx.io.socket_proposals.len());
@@ -498,4 +499,56 @@ fn native_control_frames_keep_their_transitions() {
     h.frame(70_999., socket, "late");
     assert_eq!(h.delivered(), ["before-pong", "text-after-pong"]);
     assert_eq!(h.closed, [socket]);
+}
+
+#[test]
+fn topic_stats_follow_actual_ingress_and_publish_only_changed_rows() {
+    let mut h = Harness::new(control_free());
+    let socket = h.open(0.);
+    let feed = h.engine.venue.feed.unwrap();
+    {
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut h.engine.store,
+            io: &mut h.engine.io,
+        };
+        cx.set_socket_interests(
+            feed,
+            vec![
+                Interest::from_wire_args("one"),
+                Interest::from_wire_args("two"),
+            ],
+        )
+        .unwrap();
+    }
+    h.collect();
+    let frame = h.engine.take_frame(0.).unwrap();
+    let (_, rows) = crate::wire::sections(frame)
+        .find(|(kind, _)| *kind == crate::wire::section::MESSAGE_HANDLER_STATS)
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(rows[0..4].try_into().unwrap()), 2);
+    assert_eq!(u32::from_le_bytes(rows[4..8].try_into().unwrap()), 1);
+    h.frame(10., socket, "one");
+    h.frame(20., SocketId(999), "two");
+    assert!(h.engine.take_frame(999.).is_none());
+    let frame = h.engine.take_frame(1_000.).unwrap();
+    let (_, rows) = crate::wire::sections(frame)
+        .find(|(kind, _)| *kind == crate::wire::section::MESSAGE_HANDLER_STATS)
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(rows[0..4].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(rows[4..8].try_into().unwrap()), 0);
+    assert_eq!(f64::from_le_bytes(rows[24..32].try_into().unwrap()), 990.);
+    let snapshot = h.engine.snapshot_frame(1_001.);
+    let (_, rows) = crate::wire::sections(snapshot)
+        .find(|(kind, _)| *kind == crate::wire::section::MESSAGE_HANDLER_STATS)
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(rows[0..4].try_into().unwrap()), 2);
+    assert_eq!(u32::from_le_bytes(rows[4..8].try_into().unwrap()), 1);
+    assert!(f64::from_le_bytes(rows[48..56].try_into().unwrap()).is_nan());
+    let mut cx = Cx {
+        now: 1_002.,
+        store: &mut h.engine.store,
+        io: &mut h.engine.io,
+    };
+    assert!(!cx.record_socket_topic(&["two"]));
 }

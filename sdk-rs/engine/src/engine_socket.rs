@@ -34,6 +34,62 @@ pub(super) struct Continuation<P> {
 }
 
 impl<P> Cx<'_, P> {
+    /// A decoded data topic, using borrowed fragments of its native subscription key.
+    pub fn record_socket_topic(&mut self, parts: &[&str]) -> bool {
+        if let Some((epoch, received_at)) = self.io.core.socket_stats_message {
+            return self
+                .io
+                .core
+                .socket_driver
+                .state
+                .record_topic(epoch, parts, received_at);
+        }
+        false
+    }
+
+    /// Binance-style native topics use a lowercase symbol and a case-sensitive suffix.
+    pub fn record_socket_symbol_topic(&mut self, symbol: &str, suffix: impl std::fmt::Display) {
+        struct Lower<'a>(&'a str);
+        impl std::fmt::Display for Lower<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                use std::fmt::Write;
+                for ch in self.0.chars() {
+                    f.write_char(ch.to_ascii_lowercase())?;
+                }
+                Ok(())
+            }
+        }
+        self.record_socket_topic_fmt(format_args!("{}{suffix}", Lower(symbol)));
+    }
+
+    /// Format an existing native key into bounded stack storage, never a frame allocation.
+    pub fn record_socket_topic_fmt(&mut self, args: std::fmt::Arguments<'_>) {
+        use std::fmt::Write;
+        struct Key {
+            bytes: [u8; 1024],
+            len: usize,
+        }
+        impl Write for Key {
+            fn write_str(&mut self, value: &str) -> std::fmt::Result {
+                let end = self.len + value.len();
+                if end > self.bytes.len() {
+                    return Err(std::fmt::Error);
+                }
+                self.bytes[self.len..end].copy_from_slice(value.as_bytes());
+                self.len = end;
+                Ok(())
+            }
+        }
+        let mut key = Key {
+            bytes: [0; 1024],
+            len: 0,
+        };
+        if key.write_fmt(args).is_ok() {
+            self.record_socket_topic(&[
+                std::str::from_utf8(&key.bytes[..key.len]).expect("formatted UTF-8")
+            ]);
+        }
+    }
     fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut CoreCx<'_>) -> R) -> R {
         self.core().with_socket_driver(f)
     }
@@ -891,8 +947,10 @@ impl<V: Venue> Engine<V> {
                     };
                     assert!(cx.io.core.socket_message.is_none());
                     cx.io.core.socket_message = Some((epoch, now));
+                    cx.io.core.socket_stats_message = Some((epoch, now));
                     Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
                     cx.io.core.socket_message = None;
+                    cx.io.core.socket_stats_message = None;
                 }
             }
             Event::WsBinary { data, .. } => {

@@ -677,6 +677,7 @@ impl Venue for PhemexPerpetuals {
             Err(error) => return Self::public_unreadable(cx, &error, text),
         };
         if e.method == "perp_market24h_pack_p.update" {
+            cx.record_socket_topic(&["0:tickers"]);
             #[derive(serde::Deserialize)]
             struct Pack<'a> {
                 #[serde(borrow)]
@@ -732,6 +733,7 @@ impl Venue for PhemexPerpetuals {
                 }
             }
         } else if e.orderbook_p.is_some() {
+            cx.record_socket_topic(&["1:book:", &e.symbol]);
             if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text)
                 .inspect_err(|error| Self::public_unreadable(cx, error, text))
             {
@@ -763,6 +765,7 @@ impl Venue for PhemexPerpetuals {
             }
             k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
             for r in k.kline_p {
+                cx.record_socket_topic_fmt(format_args!("2:candle:{}:{}", e.symbol, r.1.0 as u32));
                 for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
                     s == &e.symbol.to_ascii_uppercase()
                         && resolution(*i).is_some_and(|n| n as f64 == r.1.0)

@@ -3,6 +3,7 @@ import type {
   Candle,
   FetchedLeverage,
   Market,
+  MessageHandlerStatsType,
   Order,
   OrderBook,
   OrderFillEvent,
@@ -95,7 +96,51 @@ export class FrameApplier {
   private marketUnits: QuantityUnits[] = [];
   private venueUnits: QuantityUnits = 'base';
 
+  private nativeStatsGroups = new Set<MessageHandlerStatsType>();
+
   constructor(private readonly store: Store) {}
+
+  /** A frame-fed trading engine does not own its source's subscription diagnostics. */
+  applyMessageHandlerStats(frame: Frame): void {
+    const stats = this.readMessageHandlerStats(frame);
+    if (stats) this.store.update({ messageHandlerStats: stats });
+  }
+
+  private readMessageHandlerStats(frame: Frame): StoreUpdate['messageHandlerStats'] {
+    const stats = frame.messageHandlerStats?.();
+    if (!stats) return undefined;
+    const groups: MessageHandlerStatsType[] = ['public', 'business', 'futures', 'private'];
+    const buckets: NonNullable<StoreUpdate['messageHandlerStats']> = {
+      public: {},
+      business: {},
+      futures: {},
+      private: {},
+      ...this.store.messageHandlerStats,
+    };
+    const owned = new Set<MessageHandlerStatsType>();
+    for (let i = 0; i < stats.count; i++) owned.add(groups[stats.group(i)]);
+    if (stats.replace) {
+      for (const group of this.nativeStatsGroups) buckets[group] = {};
+      for (const group of owned) buckets[group] = {};
+    }
+    const copied = new Set<MessageHandlerStatsType>();
+    const now = Date.now();
+    for (let i = 0; i < stats.count; i++) {
+      const group = groups[stats.group(i)];
+      const age = stats.ageMs(i);
+      if (!copied.has(group)) {
+        buckets[group] = { ...buckets[group] };
+        copied.add(group);
+      }
+      buckets[group]![stats.topic(i)] = {
+        lastMessageTimestamp: Number.isFinite(age) ? now - age : 0,
+        lastCallbacksCount: stats.subscribed(i) && Number.isFinite(age) ? 1 : 0,
+        hadHandlers: true,
+      };
+    }
+    if (stats.replace) this.nativeStatsGroups = owned;
+    return buckets;
+  }
 
   /** Forwarding workers skip book reconstruction before transferring the frame. */
   apply(frame: Frame, applyBooks = true): void {
@@ -110,6 +155,10 @@ export class FrameApplier {
         errors.push(error);
       }
     };
+    attempt(() => {
+      const stats = this.readMessageHandlerStats(frame);
+      if (stats) update.messageHandlerStats = stats;
+    });
     let markets: ReturnType<Frame['markets']>;
     let tickers: ReturnType<Frame['tickers']>;
     let symbols = this.marketSymbols;

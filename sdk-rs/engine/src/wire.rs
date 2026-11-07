@@ -58,6 +58,8 @@ pub mod section {
     pub const ORDERS_READ: u16 = 23;
     /// Optional [ticker row, last/mark/index source-observed-at] f64 rows.
     pub const TICKER_OBSERVATIONS: u16 = 24;
+    /// Per-subscription group, topic ref, subscribed/active flags and monotonic message age.
+    pub const MESSAGE_HANDLER_STATS: u16 = 25;
 }
 
 pub mod status_flag {

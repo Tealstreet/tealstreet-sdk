@@ -1,4 +1,6 @@
 import type { EngineSocketChannel, EngineSocketStats } from '@tealstreet/safe-cex-wasm/host';
+import type { StoreData } from '../../types';
+import type { MessageHandlersStats } from '../types';
 
 /**
  * Rust venues watch their own sockets and reconnect after up to a minute of
@@ -10,6 +12,7 @@ export interface RustSocketOwner {
   /** Undefined until the engine host starts. */
   readonly socketHost: RustSocketHost | undefined;
   readonly isDisposed: boolean;
+  readonly store?: Pick<StoreData, 'messageHandlerStats'>;
 }
 
 export interface RustSocketHost {
@@ -19,6 +22,7 @@ export interface RustSocketHost {
   redialWaitingSockets(): void;
 }
 
+const emptyStats: MessageHandlersStats = {};
 const emptyLog = { toArray: (): string[] => [] };
 
 /**
@@ -30,8 +34,9 @@ const emptyLog = { toArray: (): string[] => [] };
 export class RustSocketHandle {
   readonly lastLog = emptyLog;
   readonly isReconnectPauseActive = false;
-  /** Venues track their own subscriptions; there are no per-topic stats to report. */
-  readonly messageHandlersStats = {};
+  get messageHandlersStats(): MessageHandlersStats {
+    return this.owner.store?.messageHandlerStats?.[this.channel] ?? emptyStats;
+  }
   /** Patched by `disablePublicWebsockets`; the engine's feed policy suppresses public sockets. */
   connectAndSubscribe: () => void = () => {};
 

@@ -946,6 +946,7 @@ impl Backpack {
         let Some(raw) = envelope.data else {
             return Ok(());
         };
+        cx.record_socket_topic(&[&envelope.stream]);
         if envelope.stream.starts_with("account.orderUpdate") {
             let d: OrderEvent<'_> = match serde_json::from_str(raw.get()) {
                 Ok(d) => d,

@@ -393,3 +393,17 @@ retains exact `filledInPlacementUnits` after native leaves. Inverse fills cannot
 be reconstructed by dividing base fills by a quote contract multiplier. OKX
 reports USD-normalized position PnL, so its frame consumer does not label that
 number as native coin PnL.
+
+## Native subscription diagnostics
+
+SCXF section 25 replaces the native-owned `messageHandlerStats` buckets on
+subscription changes and snapshots; periodic updates change only named topics.
+Separate shared public-provider buckets remain intact.
+Each native row carries a stable topic ID, public/business/futures/private group,
+subscribed/active flags and message age in milliseconds (NaN before data).
+`lastCallbacksCount` is one for a released subscription that has ever delivered
+and zero before its first receipt or after retirement;
+`hadHandlers` is true. Never-received timestamps stay zero. Empty snapshots clear
+unsubscribed topics. `FrameApplier.applyMessageHandlerStats` projects source
+telemetry separately for frame-fed trading engines, which own financial state
+but have no account socket subscriptions of their own.

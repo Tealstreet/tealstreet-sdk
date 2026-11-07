@@ -973,6 +973,7 @@ impl WeexFutures {
         let Some(data) = event.d else {
             return true;
         };
+        cx.record_socket_topic(&[event.e]);
         match event.e {
             "positions" => {
                 self.account.revision += 1;

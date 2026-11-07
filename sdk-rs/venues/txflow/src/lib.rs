@@ -442,6 +442,7 @@ impl TxFlow {
         }
         match frame {
             PublicFrame::Contexts(rows) => {
+                cx.record_socket_topic(&["@allAssetCtxs|||||||"]);
                 for row in rows.ctxs {
                     if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
                         let mask = Self::context_mask(&row.ctx);
@@ -451,6 +452,7 @@ impl TxFlow {
                 }
             }
             PublicFrame::Context(row) => {
+                cx.record_socket_topic(&["@activeAssetCtx|", &row.coin, "||||||"]);
                 if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
                     let mask = Self::context_mask(&row.ctx);
                     Self::context(cx, &symbol, row.ctx);
@@ -458,6 +460,7 @@ impl TxFlow {
                 }
             }
             PublicFrame::Ticker(row) => {
+                cx.record_socket_topic_fmt(format_args!("@ticker|||||||{}", row.instrument_id));
                 if let Some(instrument) = self.instruments.get(&row.instrument_id) {
                     let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);
@@ -477,6 +480,7 @@ impl TxFlow {
                 }
             }
             PublicFrame::Depth(row) => {
+                cx.record_socket_topic(&["@l2Book|", &row.coin, "||||||"]);
                 if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned)
                     && let Some(ladder) = self.books.get_mut(&symbol)
                     && ladder.time.is_none_or(|t| row.time >= t)
@@ -505,6 +509,7 @@ impl TxFlow {
             }
             PublicFrame::Candle(data) => {
                 let mut apply = |row: CandleRow<'_>| {
+                    cx.record_socket_topic(&["@candle|", &row.s, "|", &row.i, "|||||"]);
                     if let Some(symbol) = self.coin_symbol(&row.s)
                         && let Some(interval) = Interval::parse(&row.i)
                         && self.candles.contains_key(&(symbol.to_owned(), interval))

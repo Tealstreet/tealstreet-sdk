@@ -1227,6 +1227,11 @@ export class RustEngineExchange extends BaseExchange {
       return;
     }
     this.sourceBaseline = true;
+    try {
+      this.applier.applyMessageHandlerStats(new Frame(frame));
+    } catch (error) {
+      console.error(`${this.name} source subscription stats refused`, error);
+    }
     host.flush();
     if (this.sourceOrdersAwaited !== undefined && sourceFrameHasOrders(frame)) this.settleSourceOrders();
   };

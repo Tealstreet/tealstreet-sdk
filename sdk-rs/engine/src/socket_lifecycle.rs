@@ -442,6 +442,57 @@ impl Interests {
             .sum()
     }
 }
+// Decode route aliases once at subscription setup; never parse JSON on frame receipt.
+fn observation_route(key: &str) -> Option<String> {
+    let root: serde_json::Value = serde_json::from_str(key).ok()?;
+    let topic = root.get("subscription").unwrap_or(&root);
+    let text = |name| {
+        topic
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+    };
+    if let Some(kind) = topic.get("type").and_then(serde_json::Value::as_str) {
+        return Some(format!(
+            "@{kind}|{}|{}|{}|{}|{}|{}|{}",
+            text("coin"),
+            text("interval"),
+            text("user"),
+            text("dex"),
+            topic
+                .get("fast")
+                .filter(|v| **v == true)
+                .map_or(String::new(), |v| v.to_string()),
+            topic
+                .get("nSigFigs")
+                .filter(|v| !v.is_null())
+                .map_or(String::new(), |v| v.to_string()),
+            topic
+                .get("instrumentId")
+                .or_else(|| topic.get("instrument_id"))
+                .filter(|v| !v.is_null())
+                .map_or(String::new(), |v| v.to_string())
+        ));
+    }
+    let feed = topic.get("feed")?.as_str()?;
+    let products = topic.get("product_ids")?.as_array()?;
+    let product = if products.len() == 1 {
+        products[0].as_str().unwrap_or("")
+    } else {
+        ""
+    };
+    Some(format!("@{feed}|{product}"))
+}
+
+struct TopicStats {
+    id: String,
+    received: Option<f64>,
+    public_topic: bool,
+    dirty: bool,
+    subscribed: bool,
+    observed: bool,
+}
+
 struct Feed {
     policy: FeedPolicy,
     generation: u64,
@@ -453,6 +504,9 @@ struct Feed {
     ever_ready: bool,
     pong_seen: bool,
     interests: Interests,
+    message_stats: Map<Arc<str>, TopicStats>,
+    implicit_stats: bool,
+    stats_routes: Map<String, Arc<str>>,
 }
 
 /// A native subscription encoder, called through one shared vtable.
@@ -533,6 +587,9 @@ pub(crate) struct Lifecycle {
     current_sockets: SocketIndex,
     #[cfg(test)]
     socket_lookups: std::cell::Cell<usize>,
+    stats_dirty: bool,
+    stats_replace: bool,
+    stats_published_at: Option<f64>,
     pending_frames: usize,
     external_queue_bytes: usize,
     #[cfg(not(target_arch = "wasm32"))]
@@ -547,6 +604,133 @@ impl Drop for Lifecycle {
     }
 }
 impl Lifecycle {
+    /// Record only the subscription whose data was decoded on the current epoch.
+    pub(crate) fn record_topic(&mut self, epoch: Epoch, parts: &[&str], now: f64) -> bool {
+        let Some(f) = self.feeds.get_mut(epoch.feed.0) else {
+            return false;
+        };
+        if f.epoch != Some(epoch) || !now.is_finite() {
+            return false;
+        }
+        if f.implicit_stats && f.phase == Phase::Ready {
+            if let Some(stats) = f.message_stats.get_mut("private") {
+                stats.received = Some(stats.received.map_or(now, |previous| previous.max(now)));
+                stats.dirty = true;
+                stats.observed = true;
+                self.stats_dirty = true;
+            }
+            return true;
+        }
+        let found = if let [topic] = parts {
+            f.message_stats
+                .0
+                .binary_search_by(|(key, _)| key.as_ref().cmp(topic))
+        } else {
+            f.message_stats.0.binary_search_by(|(key, _)| {
+                key.bytes().cmp(parts.iter().flat_map(|part| part.bytes()))
+            })
+        };
+        let index = match found {
+            Ok(index) => index,
+            Err(_) => {
+                let Ok(route) = f.stats_routes.0.binary_search_by(|(key, _)| {
+                    key.bytes().cmp(parts.iter().flat_map(|part| part.bytes()))
+                }) else {
+                    return false;
+                };
+                let key = &f.stats_routes.0[route].1;
+                let Ok(index) = f
+                    .message_stats
+                    .0
+                    .binary_search_by(|(candidate, _)| candidate.cmp(key))
+                else {
+                    return false;
+                };
+                index
+            }
+        };
+        let (_, stats) = &mut f.message_stats.0[index];
+        if !stats.subscribed {
+            return false;
+        }
+        stats.received = Some(stats.received.map_or(now, |previous| previous.max(now)));
+        stats.dirty = true;
+        stats.observed = true;
+        self.stats_dirty = true;
+        true
+    }
+
+    pub(crate) fn stats_due(&mut self, now: f64) -> bool {
+        if !self.stats_dirty
+            || !now.is_finite()
+            || self.stats_published_at.is_some_and(|at| now - at < 1_000.)
+        {
+            return false;
+        }
+        self.stats_published_at = Some(now);
+        self.stats_dirty = false;
+        true
+    }
+
+    pub(crate) fn stats_published(&mut self) {
+        self.stats_replace = false;
+        for feed in &mut self.feeds {
+            for stats in feed.message_stats.0.iter_mut().map(|(_, stats)| stats) {
+                stats.dirty = false;
+            }
+        }
+    }
+
+    pub(crate) fn write_stats<'a>(
+        &'a self,
+        writer: &mut crate::wire::FrameWriter<'a>,
+        now: f64,
+        snapshot: bool,
+    ) {
+        if self.feeds.is_empty() {
+            return;
+        }
+        writer.begin(crate::wire::section::MESSAGE_HANDLER_STATS);
+        let full = snapshot || self.stats_replace;
+        writer.u32(
+            self.feeds
+                .iter()
+                .map(|f| {
+                    f.message_stats
+                        .values()
+                        .filter(|stats| full || stats.dirty)
+                        .count()
+                })
+                .sum::<usize>() as u32,
+        );
+        writer.u32(u32::from(full));
+        for f in &self.feeds {
+            let group = match f.policy.role {
+                SocketChannel::Public => 0,
+                SocketChannel::Business => 1,
+                SocketChannel::Private => 3,
+            };
+            for (_, stats) in f
+                .message_stats
+                .iter()
+                .filter(|(_, stats)| full || stats.dirty)
+            {
+                let subscribed = if f.implicit_stats {
+                    f.phase == Phase::Ready
+                } else {
+                    stats.subscribed
+                };
+                let topic = writer.string(&stats.id);
+                writer.u32(if stats.public_topic { 0 } else { group });
+                writer.u32(topic);
+                writer.u32(u32::from(subscribed) | (u32::from(subscribed && stats.observed) << 1));
+                writer.u32(0);
+                writer.f64(stats.received.map_or(f64::NAN, |at| (now - at).max(0.)));
+            }
+        }
+        writer.end();
+    }
+
     pub(crate) fn reserve_external(&mut self, bytes: usize) -> Result<(), SocketError> {
         let total = self
             .feeds
@@ -624,6 +808,11 @@ impl Lifecycle {
             observer.observe(InterestObservation::Cleared { feed });
         }
         f.interests.released.clear();
+        for (_, stats) in &mut f.message_stats.0 {
+            stats.subscribed = false;
+            stats.observed = false;
+            stats.dirty = true;
+        }
         self.retire(feed)
     }
     pub(crate) fn stop_all(&mut self) -> Vec<Retirement> {
@@ -649,6 +838,21 @@ impl Lifecycle {
             return Err(SocketError::Capacity);
         }
         let id = FeedId(self.feeds.len());
+        let implicit_stats = policy.role == SocketChannel::Private;
+        let mut message_stats = Map::default();
+        if implicit_stats {
+            message_stats.insert(
+                Arc::from("private"),
+                TopicStats {
+                    id: format!("{}.private", id.0),
+                    received: None,
+                    public_topic: false,
+                    dirty: true,
+                    subscribed: false,
+                    observed: false,
+                },
+            );
+        }
         self.feeds.push(Feed {
             policy,
             generation: 0,
@@ -660,6 +864,9 @@ impl Lifecycle {
             ever_ready: false,
             pong_seen: false,
             interests: Interests::default(),
+            message_stats,
+            implicit_stats,
+            stats_routes: Map::default(),
         });
         Ok(id)
     }
@@ -691,6 +898,11 @@ impl Lifecycle {
             observer.observe(InterestObservation::Cleared { feed });
         }
         f.interests.released.clear();
+        for (_, stats) in &mut f.message_stats.0 {
+            stats.subscribed = false;
+            stats.observed = false;
+            stats.dirty = true;
+        }
         f.interests.clear_queue(&mut self.pending_frames);
         self.current_sockets.insert(socket.0, epoch);
         Ok(epoch)
@@ -795,6 +1007,8 @@ impl Lifecycle {
             let reopened = f.ever_ready;
             f.ever_ready = true;
             f.phase = Phase::Ready;
+            self.stats_dirty = true;
+            self.stats_replace = true;
             Ok(Some(reopened))
         }
     }
@@ -844,6 +1058,8 @@ impl Lifecycle {
             let reopened = f.ever_ready;
             f.ever_ready = true;
             f.phase = Phase::Ready;
+            self.stats_dirty = true;
+            self.stats_replace = true;
             return AuthTransition::Accepted {
                 epoch,
                 ready,
@@ -903,6 +1119,13 @@ impl Lifecycle {
             observer.observe(InterestObservation::Cleared { feed });
         }
         f.interests.released.clear();
+        for (_, stats) in &mut f.message_stats.0 {
+            stats.subscribed = false;
+            stats.observed = false;
+            stats.dirty = true;
+        }
+        self.stats_dirty = true;
+        self.stats_replace = true;
         Some(Retirement {
             epoch,
             invalidation: f.policy.invalidation,
@@ -930,6 +1153,11 @@ impl Lifecycle {
                 observer.observe(InterestObservation::Cleared { feed: *feed });
             }
             f.interests.released.clear();
+            for (_, stats) in &mut f.message_stats.0 {
+                stats.subscribed = false;
+                stats.observed = false;
+                stats.dirty = true;
+            }
         }
         feeds
             .into_iter()
@@ -1216,6 +1444,66 @@ impl Lifecycle {
             revision,
             queue,
         };
+        let f = &mut self.feeds[feed.0];
+        if !f.interests.desired.is_empty() && f.implicit_stats {
+            f.message_stats.remove("private");
+            f.implicit_stats = false;
+        }
+        for (key, _) in f.interests.desired.iter() {
+            if !f.message_stats.contains_key(key) {
+                let route = observation_route(key);
+                let public_topic = route.as_ref().is_some_and(|route| {
+                    [
+                        "@allMids|",
+                        "@fastAssetCtxs|",
+                        "@allAssetCtxs|",
+                        "@activeAssetCtx|",
+                        "@ticker|",
+                        "@l2Book|",
+                        "@bbo|",
+                        "@candle|",
+                        "@trades|",
+                    ]
+                    .iter()
+                    .any(|prefix| route.starts_with(prefix))
+                });
+                if let Some(route) = route {
+                    f.stats_routes.insert(route, key.clone());
+                    if let Ok(root) = serde_json::from_str::<serde_json::Value>(key)
+                        && let (Some(feed), Some(products)) = (
+                            root.get("feed").and_then(|v| v.as_str()),
+                            root.get("product_ids").and_then(|v| v.as_array()),
+                        )
+                    {
+                        for product in products.iter().filter_map(|v| v.as_str()) {
+                            f.stats_routes
+                                .insert(format!("@{feed}|{product}"), key.clone());
+                        }
+                    }
+                }
+                f.message_stats.insert(
+                    key.clone(),
+                    TopicStats {
+                        id: format!("{}.{}", feed.0, key),
+                        received: None,
+                        public_topic,
+                        dirty: true,
+                        subscribed: false,
+                        observed: false,
+                    },
+                );
+            }
+        }
+        f.message_stats.0.retain(|(key, _)| {
+            f.implicit_stats
+                || f.interests.desired.contains_key(key)
+                || f.interests.released.contains_key(key)
+        });
+        f.stats_routes
+            .0
+            .retain(|(_, key)| f.message_stats.contains_key(key));
+        self.stats_dirty = true;
+        self.stats_replace = true;
         self.pending_frames = pending_frames;
         Ok(revision)
     }
@@ -1255,6 +1543,11 @@ impl Lifecycle {
                         interest: &row,
                     });
                 }
+                if let Some(stats) = f.message_stats.get_mut(key.as_ref()) {
+                    stats.observed = false;
+                    stats.subscribed = true;
+                    stats.dirty = true;
+                }
                 f.interests.released.insert(key, row);
             } else {
                 #[cfg(not(target_arch = "wasm32"))]
@@ -1267,9 +1560,19 @@ impl Lifecycle {
                         interest: row,
                     });
                 }
+                if let Some(stats) = f.message_stats.get_mut(key.as_ref()) {
+                    stats.subscribed = false;
+                    stats.observed = false;
+                    stats.dirty = true;
+                }
                 f.interests.released.remove(&key);
+                if !f.interests.desired.contains_key(&key) {
+                    f.message_stats.remove(&key);
+                }
             }
         }
+        self.stats_dirty = true;
+        self.stats_replace = true;
         Some(queued.batch.text)
     }
 }
@@ -1303,7 +1606,7 @@ mod sorted {
     use std::ops::Index;
 
     #[derive(Clone, Debug)]
-    pub(super) struct Map<K, V>(Vec<(K, V)>);
+    pub(super) struct Map<K, V>(pub(super) Vec<(K, V)>);
 
     impl<K, V> Default for Map<K, V> {
         fn default() -> Self {
@@ -1323,6 +1626,15 @@ mod sorted {
             K: Borrow<Q>,
         {
             self.find(key).ok().map(|i| &self.0[i].1)
+        }
+        pub(super) fn get_mut<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<&mut V>
+        where
+            K: Borrow<Q>,
+        {
+            self.0
+                .binary_search_by(|(k, _)| k.borrow().cmp(key))
+                .ok()
+                .map(|i| &mut self.0[i].1)
         }
         pub(super) fn contains_key<Q: Ord + ?Sized>(&self, key: &Q) -> bool
         where
@@ -1388,14 +1700,15 @@ mod sorted {
         }
     }
 
-    #[cfg(test)]
     impl<K: Ord, V> Map<K, V> {
         pub(super) fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
             self.0.iter().map(|(k, v)| (k, v))
         }
+        #[cfg(test)]
         pub(super) fn keys(&self) -> impl Iterator<Item = &K> {
             self.0.iter().map(|(k, _)| k)
         }
+        #[cfg(test)]
         pub(super) fn len(&self) -> usize {
             self.0.len()
         }
@@ -2899,5 +3212,101 @@ mod tests {
         assert_eq!(l.release_batch(current, false).as_deref(), Some("+:A"));
         assert_eq!(l.release_batch(current, false).as_deref(), Some("+:B"));
         assert_eq!(l.release_batch(current, false), None);
+    }
+    #[test]
+    fn topic_stats_follow_release_data_reconnect_and_unsubscribe() {
+        let (mut l, feed, epoch) = started(AuthMode::None);
+        l.replace_interests(
+            feed,
+            vec![interest("ticker.BTC"), interest("book.BTC")],
+            encode,
+        )
+        .unwrap();
+        l.record_topic(epoch, &["ticker.BTC"], 1.);
+        assert!(
+            l.feeds[feed.0].message_stats["ticker.BTC"]
+                .received
+                .is_none()
+        );
+        while l.release_batch(epoch, false).is_some() {}
+        l.record_topic(epoch, &["ticker.", "BTC"], 2.);
+        assert_eq!(
+            l.feeds[feed.0].message_stats["ticker.BTC"].received,
+            Some(2.)
+        );
+        assert_eq!(l.feeds[feed.0].message_stats["book.BTC"].received, None);
+        assert!(l.stats_due(2.));
+        l.record_topic(epoch, &["ticker.BTC"], 3.);
+        assert!(!l.stats_due(1_001.));
+        assert!(l.stats_due(1_002.));
+        let id = l.feeds[feed.0].message_stats["ticker.BTC"].id.clone();
+        let retired = l.retire(feed).unwrap();
+        l.record_topic(epoch, &["ticker.BTC"], 4.);
+        assert_eq!(
+            l.feeds[feed.0].message_stats["ticker.BTC"].received,
+            Some(3.)
+        );
+        l.retired(retired.epoch, true).unwrap();
+        l.grant_retry(feed).unwrap();
+        let next = l.begin(feed, SocketId(2)).unwrap();
+        l.opened(next).unwrap();
+        l.replay_interests(feed, encode).unwrap();
+        while l.release_batch(next, false).is_some() {}
+        l.record_topic(next, &["ticker.BTC"], 1_004.);
+        assert_eq!(l.feeds[feed.0].message_stats["ticker.BTC"].id, id);
+        assert_eq!(
+            l.feeds[feed.0].message_stats["ticker.BTC"].received,
+            Some(1_004.)
+        );
+        l.replace_interests(feed, vec![interest("book.BTC")], encode)
+            .unwrap();
+        while l.release_batch(next, false).is_some() {}
+        l.record_topic(next, &["ticker.BTC"], 1_005.);
+        assert!(!l.feeds[feed.0].message_stats.contains_key("ticker.BTC"));
+    }
+
+    #[test]
+    fn topic_stats_preserve_monotonic_time_and_do_not_refresh_neighbours() {
+        let (mut l, feed, epoch) = started(AuthMode::None);
+        l.replace_interests(feed, vec![interest("one"), interest("two")], encode)
+            .unwrap();
+        while l.release_batch(epoch, false).is_some() {}
+        l.record_topic(epoch, &["one"], 100.);
+        l.record_topic(epoch, &["one"], 50.);
+        l.record_topic(epoch, &["two"], f64::NAN);
+        assert_eq!(l.feeds[feed.0].message_stats["one"].received, Some(100.));
+        assert_eq!(l.feeds[feed.0].message_stats["two"].received, None);
+        let mut writer = crate::wire::FrameWriter::new(Vec::new(), 150.);
+        l.write_stats(&mut writer, 150., true);
+        let bytes = writer.finish();
+        let (_, rows) = crate::wire::sections(&bytes)
+            .find(|(kind, _)| *kind == crate::wire::section::MESSAGE_HANDLER_STATS)
+            .unwrap();
+        assert_eq!(u32::from_le_bytes(rows[0..4].try_into().unwrap()), 2);
+        assert_eq!(u32::from_le_bytes(rows[16..20].try_into().unwrap()), 3);
+        assert_eq!(f64::from_le_bytes(rows[24..32].try_into().unwrap()), 50.);
+        assert!(f64::from_le_bytes(rows[48..56].try_into().unwrap()).is_nan());
+    }
+
+    #[test]
+    fn topic_stats_compile_json_aliases_only_for_the_named_subscription() {
+        let (mut l, feed, epoch) = started(AuthMode::None);
+        let key = r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#;
+        l.replace_interests(feed, vec![interest(key)], encode)
+            .unwrap();
+        while l.release_batch(epoch, false).is_some() {}
+        l.record_topic(epoch, &["@l2Book|ETH||||||"], 10.);
+        assert_eq!(l.feeds[feed.0].message_stats[key].received, None);
+        l.record_topic(epoch, &["@l2Book|BTC||||||"], 11.);
+        assert_eq!(l.feeds[feed.0].message_stats[key].received, Some(11.));
+        assert!(l.feeds[feed.0].message_stats[key].public_topic);
+    }
+    #[test]
+    fn topic_stats_keep_implicit_private_subscription_when_managed_interests_are_empty() {
+        let (mut l, feed, epoch) = started(AuthMode::None);
+        l.replace_interests(feed, Vec::new(), encode).unwrap();
+        assert!(l.record_topic(epoch, &["private"], 5.));
+        assert_eq!(l.feeds[feed.0].message_stats["private"].received, Some(5.));
+        assert!(l.feeds[feed.0].message_stats["private"].observed);
     }
 }
