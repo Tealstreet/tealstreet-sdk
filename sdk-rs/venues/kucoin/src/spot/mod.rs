@@ -17,6 +17,7 @@ use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, 
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, Method, PublicFeedPolicy, Query, Response, SocketChannel,
     SocketId, SubscriptionTopic, TimerId, Venue, VenueError,
@@ -186,7 +187,13 @@ impl KucoinSpot {
         }
     }
     fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        let context = match cx.http_context(
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -941,7 +948,7 @@ impl KucoinSpot {
             if let Some(b) = self.books.get_mut(symbol).filter(|b| b.subscribers > 0)
                 && let Ok(d) = serde_json::from_str::<Depth>(data.get())
             {
-                let time = d.timestamp.map_or(cx.now, |n| n.0);
+                let time = d.timestamp.map_or(cx.protocol_now(), |n| n.0);
                 if time < b.last {
                     return;
                 }
@@ -1059,7 +1066,22 @@ fn candle(text: &str) -> Result<Candle, String> {
 }
 
 impl Venue for KucoinSpot {
+    fn http_plans() -> bool {
+        false
+    }
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Read(read) => Self::startup_reads(&read.pending),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Balance(_) => S::BALANCE,
+            Pending::Orders(read) if read.lookup.is_none() && read.root.is_none() => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1113,7 +1135,8 @@ impl Venue for KucoinSpot {
         // Decode high-volume ticker envelopes and prices together, without a raw-data rescan.
         if channel == 0
             && self.sockets[channel].ready
-            && let Ok(m) = serde_json::from_str::<PriceMessage>(text)
+            && let Some(m) =
+                wire::scan_price(text).or_else(|| serde_json::from_str::<PriceMessage>(text).ok())
             && m.kind == "message"
             && m.topic.starts_with("/market/ticker")
         {
@@ -1531,7 +1554,7 @@ impl Venue for KucoinSpot {
                     let _ =
                         cx.fail_context(&context, VenueError::new("invalid KuCoin Spot candles"));
                 } else {
-                    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                    safe_cex_engine::model::sort_candles_by_time(&mut rows);
                     let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
                 }
             }
@@ -1637,7 +1660,7 @@ impl Venue for KucoinSpot {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Read(read) => {
                 let (pending, error) = crate::clock::failed(cx, *read, error);
                 self.on_sign_error(cx, pending, error);
@@ -1647,7 +1670,7 @@ impl Venue for KucoinSpot {
                 self.fail_account_identity(cx, &root, command, error)
             }
             other => self.on_http_failed(cx, other, error),
-        }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
@@ -1840,7 +1863,7 @@ impl Venue for KucoinSpot {
                     );
                     return;
                 };
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let start = match (limit, from_ms) {
                     (None, Some(from)) => from,
                     _ => {
@@ -1947,7 +1970,7 @@ impl KucoinSpot {
                     owner: Box::new(HistoryRows::new(
                         ReadCompletion::from_context(cx, command, root.clone())
                             .expect("fresh KuCoin Spot read root"),
-                        |rows| Ok(format!("[{}]", rows.join(","))),
+                        |rows| Ok(format!("[{}]", rows.join_with(","))),
                     )),
                 };
                 self.send_read(cx, root, &path, pending);
@@ -2088,4 +2111,22 @@ mod execution_retention {
         // Retention and dedupe remain independent native history domains.
         assert!(venue.fills.is_empty() && venue.terminal.is_empty());
     }
+}
+
+#[test]
+fn review_caller_lookup_is_not_a_startup_read() {
+    let pending = Pending::Orders(ReadOrders {
+        revision: 0,
+        symbols: VecDeque::new(),
+        symbol: "BTC-USDT".into(),
+        page: 1,
+        rows: SnapshotBuilder::default(),
+        seeds: vec![],
+        lookup: Some((1, "caller-link".into())),
+        root: None,
+    });
+    assert_eq!(
+        KucoinSpot::startup_reads(&pending),
+        safe_cex_engine::startup::Sections::NONE
+    );
 }

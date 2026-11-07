@@ -988,3 +988,86 @@ fn preflight_failure_converts_an_owned_error_once_and_keeps_the_terminal() {
         1
     );
 }
+
+/// A venue declaring no Plans: the engine skips every per-event Plan sweep for it.
+#[derive(Default)]
+struct Planless(Probe);
+impl Venue for Planless {
+    type Pending = ();
+    fn http_plans() -> bool {
+        false
+    }
+    fn capabilities(&self) -> Capabilities {
+        self.0.capabilities()
+    }
+    fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        self.0.start(cx);
+    }
+    fn on_open(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId) {
+        self.0.on_open(cx, socket);
+    }
+    fn on_close(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, code: u16) {
+        self.0.on_close(cx, socket, code);
+    }
+    fn on_message(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, text: &str) {
+        self.0.on_message(cx, socket, text);
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, ()>, timer: TimerId) {
+        self.0.on_timer(cx, timer);
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, ()>, pending: (), response: Response<'_>) {
+        self.0.on_response(cx, pending, response);
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, ()>, pending: (), error: &str) {
+        self.0.on_request_failed(cx, pending, error);
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+        self.0.on_command(cx, command);
+    }
+    fn book(&self, symbol: &str) -> Option<&Book> {
+        self.0.book(symbol)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        self.0.books()
+    }
+}
+
+#[test]
+fn a_venue_declaring_no_plans_cannot_open_a_preflight() {
+    let mut declared = engine();
+    assert!(declared.io.core.http_plans_declared);
+    begin(&mut declared, 7, PreflightPurpose::ReadOnly);
+
+    let mut planless = crate::test_support::seeded_engine(Planless::default());
+    assert!(!planless.io.core.http_plans_declared);
+    for purpose in [
+        PreflightPurpose::ReadOnly,
+        PreflightPurpose::WriteAfterReads,
+    ] {
+        // A declaration bug is loud under test and refused, not issued, in release.
+        let issued = catch_unwind(AssertUnwindSafe(|| {
+            f(&mut planless, |cx| cx.issue_preflight(7, policy(purpose)))
+        }));
+        assert_eq!(issued.is_err(), cfg!(debug_assertions));
+        match issued {
+            Err(panic) => {
+                assert!(
+                    panic
+                        .downcast_ref::<&str>()
+                        .is_some_and(|message| message.contains("http_plans() false"))
+                );
+            }
+            Ok(refused) => assert_eq!(refused.err(), Some(Error::Invalid)),
+        }
+    }
+    assert!(!planless.io.core.request_contexts.has_plans());
+    assert!(!planless.io.core.request_contexts.has_retirements());
+}
+
+fn f<R>(engine: &mut Engine<Planless>, op: impl FnOnce(&mut Cx<'_, ()>) -> R) -> R {
+    op(&mut Cx {
+        now: 0.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    })
+}

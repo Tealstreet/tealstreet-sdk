@@ -21,6 +21,7 @@ import {
   HiddenTimerLateness,
   maximumTimerLateness,
 } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
+import { budgetDiagnostic, requestBudgetMs, requestClass } from '@tealstreet/http-over-websocket/src/requestBudget';
 import { stripDiagnosticUrlQueries } from '@tealstreet/http-over-websocket/src/diagnosticUrl';
 import {
   onTunnelFailing,
@@ -43,6 +44,7 @@ import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
+import { PUBLIC_PROXY_READ_HOSTS, readsViaPublicProxy } from './tealstreet/publicCorsAllowlist';
 import {
   isTealstreetProxyAuthFailureBody,
   proxyAuthorizationHeader,
@@ -151,6 +153,8 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
 /** Headers that carry a venue credential: never sent toward the public proxy. */
 const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
   'authorization',
+  'x-ts-grvt-session',
+  'x-grvt-account-id',
   ...Object.values(secondaryReadHeaders).map((name) => name!.toLowerCase()),
 ]);
 
@@ -390,6 +394,10 @@ const isPublicBinanceRead = (exchange: ExchangeName, request: Request, credentia
   (credentialIntent === 'public' && ['binance', 'binancepm', 'binanceinverse'].includes(exchange)) ||
   (credentialIntent === undefined && publicBinanceRequest(exchange, request));
 
+/** The account's tunnel setting under the venue's default: BingX tunnels unless switched off. */
+const tunnelFlagOn = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
+  exchange === 'bingx' ? options.tealstreetTunnel !== false : Boolean(options.tealstreetTunnel);
+
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
   exchange === 'paradex'
@@ -397,8 +405,8 @@ const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =
     : ['hyperliquid', 'hyperliquidspot', 'kucoin', 'kucoinspot'].includes(exchange)
       ? !options.publicDataOnly
       : exchange === 'bingx'
-        ? !options.publicDataOnly && options.tealstreetTunnel !== false
-        : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && Boolean(options.tealstreetTunnel);
+        ? !options.publicDataOnly && tunnelFlagOn(exchange, options)
+        : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && tunnelFlagOn(exchange, options);
 
 // A browser engine on public data only keeps the account's tunnel flag but not the
 // tunnel; the flag must not suppress the proxy, or a venue whose public REST refuses
@@ -620,7 +628,12 @@ const httpTransport = (
       [request.signal, controller.signal, reroute.abandon].filter((s): s is AbortSignal => s !== undefined),
     );
     const started = reroute.rerouted?.startedAt ?? Date.now();
-    const deadlineMs = Math.max(1, request.timeoutMs ?? 20_000);
+    const kind = requestClass(request.method, request.url, request.requestClass);
+    const deadlineMs = requestBudgetMs(kind, request.timeoutMs);
+    const timeoutError = () => Object.assign(new HttpPreparationError('timedOut'), {
+      message: `HTTP request timed out (${budgetDiagnostic(kind, deadlineMs, Date.now() - started)})`,
+      requestClass: kind, budgetMs: deadlineMs, elapsedMs: Math.max(0, Date.now() - started),
+    });
     const remaining = () => Math.max(0, deadlineMs - (Date.now() - started));
     let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
     let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
@@ -672,7 +685,7 @@ const httpTransport = (
     };
     const timer = setTimeout(() => {
       settleDeadline(true);
-      controller.abort(new HttpPreparationError('timedOut'));
+      controller.abort(timeoutError());
     }, remaining());
     signal.addEventListener('abort', onAbort, { once: true });
     const cancel = () => {
@@ -684,7 +697,7 @@ const httpTransport = (
     const active = () => {
       signal.throwIfAborted();
       if (disposed) throw new Error('Engine transport disposed');
-      if (remaining() <= 0) throw new HttpPreparationError('timedOut');
+      if (remaining() <= 0) throw timeoutError();
     };
     const beforeRelease = <T>(operation: () => T): T => {
       try {
@@ -696,7 +709,7 @@ const httpTransport = (
         cancel();
         if (error instanceof TradeTunnelTimeoutError) proxyAuthorization?.failed(relayFailed(exchange, error));
         if (intent !== undefined && error instanceof TradeTunnelTimeoutError)
-          throw new HttpPreparationError('timedOut');
+          throw timeoutError();
         throw error;
       }
     };
@@ -762,6 +775,7 @@ const httpTransport = (
       const hostHeaders = AxiosHeaders.from(venueHeaders(exchange, options));
       const config = {
         method: request.method,
+        requestClass: kind,
         url: target,
         baseURL: request.url,
         headers: AxiosHeaders.from({ ...request.headers, ...venueHeaders(exchange, options) }),
@@ -777,7 +791,7 @@ const httpTransport = (
           signal,
         );
       signal.throwIfAborted();
-      if (remaining() <= 0) throw new HttpPreparationError('timedOut');
+      if (remaining() <= 0) throw timeoutError();
       if (
         signed &&
         (request.url !== signed.url ||
@@ -886,7 +900,7 @@ const httpTransport = (
       const budgetGeneration =
         !cached && infoBudget && request.method === 'POST' && original.pathname === '/info'
           ? await untilAborted(
-              infoRead!.wait(() => infoBudget.wait(original.origin, request.body, started + deadlineMs, signal)),
+              infoRead!.wait(() => infoBudget.wait(original.origin, request.body, started + deadlineMs, signal, request.readClass)),
               signal,
             )
           : undefined;
@@ -913,6 +927,7 @@ const httpTransport = (
           if (
             packet.request !== request.request ||
             packet.method !== request.method ||
+            packet.readClass !== request.readClass ||
             new URL(packet.url).origin !== original.origin ||
             packet.route !== request.route ||
             packet.signal !== request.signal ||
@@ -967,7 +982,7 @@ const httpTransport = (
           if (cached) {
             ready = cacheFresh;
             send = () => {
-              if (!cacheFresh()) throw new HttpPreparationError('timedOut');
+              if (!cacheFresh()) throw timeoutError();
               return Promise.resolve(cached);
             };
           } else if (tunnelAdapter) {
@@ -1145,7 +1160,7 @@ const httpTransport = (
       // The relay never prepared it, and nobody called it off: the relay is down.
       if (tunnelAdapter && !prepared && !disposed && !request.signal?.aborted && !reroute.abandon?.aborted)
         proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
-      if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw new HttpPreparationError('timedOut');
+      if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw timeoutError();
       throw error;
     }
   };
@@ -1338,6 +1353,19 @@ export const createEngineTransport = (
         infoFacts,
       )
     : undefined;
+  // A keyless public-data engine (a mirror's chart source) on an opted-in venue holds no
+  // credential, so its reads to allowlisted hosts leave through the public CORS proxy, off the
+  // trading fleet's IPs, unless the account is plain direct; the signed-packet guard still
+  // refuses anything credentialed.
+  const keylessPublicReads =
+    publicCorsHttp !== undefined &&
+    PUBLIC_PROXY_READ_HOSTS[exchange] !== undefined &&
+    options.publicDataOnly === true &&
+    !options.key &&
+    !options.secret &&
+    !options.passphrase &&
+    (options.tealstreetProxy === true || tunnelFlagOn(exchange, options)) &&
+    !DIRECT_PUBLIC_READS.has(exchange);
   const readOptions =
     SECONDARY_READ_KEYS_ENABLED && credentials?.hasSecondary
       ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
@@ -1415,7 +1443,9 @@ export const createEngineTransport = (
                 ? readHttp
                 : intent === 'public' && DIRECT_PUBLIC_READS.has(exchange)
                   ? directHttp
-                  : intent === 'public' &&
+                  : intent === 'public' && keylessPublicReads && readsViaPublicProxy(exchange, packet.url)
+                    ? publicCorsHttp
+                    : intent === 'public' &&
                       readHttp &&
                       !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
                     ? readHttp
@@ -1440,7 +1470,9 @@ export const createEngineTransport = (
         (!['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange) ||
           hasHeader(request.headers, secondaryReadHeaders[exchange]!))
         ? readHttp.request(nativeRequest)
-        : http.request(nativeRequest);
+        : keylessPublicReads && readsViaPublicProxy(exchange, request.url)
+          ? publicCorsHttp!.request(nativeRequest)
+          : http.request(nativeRequest);
     },
     dispose: () => {
       http.dispose();

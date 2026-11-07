@@ -219,3 +219,50 @@ test('sticky failure on normal native return suppresses that turn of actions', (
   assert.equal(r.sockets.length, 0);
   assert.equal(r.timers.size, 0);
 });
+
+test('a passed post-call check covers the next entry: one failed() read per engine call', () => {
+  let reads = 0;
+  const r = rig({ failed: () => { reads++; return false; } });
+  r.host.execute(socketAction);
+  const { callbacks } = r.sockets[0];
+  callbacks.onOpen();
+  assert.equal(reads, 2);
+  for (const text of ['a', 'b', 'c']) callbacks.onMessage(text);
+  assert.equal(reads, 5);
+  assert.deepEqual(r.calls.slice(-3), ['wsMessageBytes', 'wsMessageBytes', 'wsMessageBytes']);
+});
+
+test('a failure set by one engine call is observed before the next call acts', () => {
+  let fatal = false;
+  let entries = 0;
+  const r = rig({ failed: () => fatal, wsMessageBytes() { entries++; if (entries === 2) fatal = true; } });
+  r.host.execute(socketAction);
+  const { callbacks } = r.sockets[0];
+  for (const text of ['a', 'b', 'c']) callbacks.onMessage(text);
+  assert.equal(entries, 2);
+  assert.equal(r.host.dead, true);
+  assert.match(r.host.deadError.message, /stopped unexpectedly|identities exhausted/);
+});
+
+test('an engine entry outside invoke and a non-fatal throw both restore the pre-call check', () => {
+  let fatal = false;
+  let reads = 0;
+  let entries = 0;
+  const r = rig({
+    failed: () => { reads++; return fatal; },
+    cancelHostedSigning() { fatal = true; },
+    wsMessageBytes() { entries++; if (entries === 2) throw new TypeError('ordinary export failure'); },
+  });
+  r.host.execute(socketAction);
+  const { callbacks } = r.sockets[0];
+  callbacks.onMessage('verified');
+  assert.equal(reads, 2);
+  assert.throws(() => callbacks.onMessage('throws'), TypeError);
+  assert.equal(reads, 2, 'a verified engine skips the pre-call read');
+  callbacks.onMessage('checked');
+  assert.equal(reads, 4, 'the call after a non-fatal throw is checked before and after');
+  r.host.cancelEngineHostedSigning(1);
+  callbacks.onMessage('blocked');
+  assert.equal(entries, 3, 'the direct entry failure is observed before the next call acts');
+  assert.equal(r.host.dead, true);
+});

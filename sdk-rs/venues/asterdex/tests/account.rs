@@ -20,6 +20,7 @@ struct H {
     sockets: Vec<(SocketId, String)>,
     timers: Vec<(TimerId, f64)>,
     done: Vec<(u32, Result<String, String>)>,
+    failures: Vec<safe_cex_engine::VenueError>,
     logs: Vec<String>,
     errors: Vec<String>,
     closed: Vec<SocketId>,
@@ -34,17 +35,24 @@ impl H {
         Self::pending_mode_with_orders("[]")
     }
     fn pending_mode_with_orders(open_orders: &str) -> Self {
-        let mut h = Self {
-            engine: support::engine(Options {
+        Self::options_with_orders(
+            Options {
                 key: Some("documented-key".into()),
                 secret: Some("synthetic-secret".into()),
                 ..Default::default()
-            }),
+            },
+            open_orders,
+        )
+    }
+    fn options_with_orders(options: Options, open_orders: &str) -> Self {
+        let mut h = Self {
+            engine: support::engine(options),
             now: 1700000000000.0,
             requests: vec![],
             sockets: vec![],
             timers: vec![],
             done: vec![],
+            failures: vec![],
             logs: vec![],
             errors: vec![],
             closed: vec![],
@@ -83,6 +91,7 @@ impl H {
                     self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.failures.push(error.clone());
                     self.done.push((command, Err(error.legacy_text())))
                 }
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
@@ -121,6 +130,16 @@ impl H {
             request: r.id,
             response: Response {
                 status: 200,
+                headers: "",
+                body,
+            },
+        });
+    }
+    fn respond_status(&mut self, r: HttpRequest, status: u16, body: &str) {
+        self.event(Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status,
                 headers: "",
                 body,
             },
@@ -1629,4 +1648,595 @@ fn a_refused_key_ends_the_start_with(refused: &str) {
     assert_eq!(failures.len(), 1, "{failures:?}");
     let words = serde_json::from_str::<serde_json::Value>(refused).unwrap();
     assert!(failures[0].message.contains(words["msg"].as_str().unwrap()));
+}
+
+fn guarded_stop() -> H {
+    let mut h = H::pending_mode_with_orders(
+        r#"[{"orderId":991,"symbol":"BTCUSDT","type":"STOP_MARKET","side":"BUY","price":"0","stopPrice":"110","origQty":"2","executedQty":"0","reduceOnly":true,"closePosition":false,"workingType":"MARK_PRICE","priceProtect":true,"clientOrderId":"original-stop","positionSide":"BOTH","status":"NEW"}]"#,
+    );
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":false}"#);
+    h.engine.store_mut().update_ticker("BTCUSDT", |t| {
+        t.last = 90.0;
+        t.mark = 100.0;
+    });
+    h
+}
+fn amend_guarded_stop(h: &mut H, price: f64) {
+    h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+        command: 991,
+        id: "991".into(),
+        price: Some(price),
+        amount: None,
+    }));
+}
+#[test]
+fn protective_amend_wrong_side_and_stale_mark_never_cancel() {
+    for stale in [false, true] {
+        let mut h = guarded_stop();
+        if stale {
+            h.now += 5001.0;
+        }
+        amend_guarded_stop(&mut h, if stale { 105.0 } else { 95.0 });
+        assert!(
+            !h.requests.iter().any(|r| r.url.contains("/order?")),
+            "{:?}",
+            h.requests
+        );
+        assert_eq!(
+            h.engine.store().order("991").unwrap().status,
+            OrderStatus::Open
+        );
+        assert!(result(&h, 991).is_err());
+    }
+}
+#[test]
+fn protective_amend_refusal_restores_exact_original_stop_once() {
+    let mut h = guarded_stop();
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    assert!(replacement.url.contains("stopPrice=105"));
+    h.respond(
+        replacement,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let restore = h.take("/order");
+    for parameter in [
+        "side=BUY",
+        "type=STOP_MARKET",
+        "quantity=2",
+        "reduceOnly=true",
+        "stopPrice=110",
+        "workingType=MARK_PRICE",
+        "priceProtect=TRUE",
+        "newClientOrderId=original-stop",
+    ] {
+        assert!(
+            restore.url.contains(parameter),
+            "{parameter}: {}",
+            restore.url
+        );
+    }
+    h.respond(restore, r#"{"orderId":992}"#);
+    assert!(result(&h, 991).as_ref().unwrap_err().contains("put back"));
+    assert_eq!(
+        h.failures.last().unwrap().protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+}
+const RATE_LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests."}"#;
+
+/// The ambiguous leg may have placed protection; an earlier refusal remains true.
+fn assert_unknown_stop(h: &H) {
+    let error = result(h, 991).as_ref().unwrap_err();
+    assert!(
+        error.contains("outcome is unknown. Check Open Orders"),
+        "{error}"
+    );
+    let words = error.to_ascii_lowercase();
+    assert!(!words.contains("unprotected"), "{error}");
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    assert_eq!(h.failures.last().unwrap().protection, None);
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+}
+
+fn assert_unknown_replacement(h: &H) {
+    assert_unknown_stop(h);
+    let error = result(h, 991).as_ref().unwrap_err();
+    assert!(!error.contains("refused"), "{error}");
+}
+
+fn assert_unknown_put_back(h: &H) {
+    assert_unknown_stop(h);
+    let error = result(h, 991).as_ref().unwrap_err();
+    assert!(!error.to_ascii_lowercase().contains("no stop"), "{error}");
+}
+#[test]
+fn protective_amend_rate_limited_restore_is_unknown_not_unprotected() {
+    for body in [RATE_LIMITED, ""] {
+        let mut h = guarded_stop();
+        amend_guarded_stop(&mut h, 105.0);
+        let cancel = h.take("/order");
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replacement = h.take("/order");
+        h.respond(
+            replacement,
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let restore = h.take("/order");
+        assert!(restore.url.contains("stopPrice=110"));
+        h.respond_status(restore, 429, body);
+        assert_unknown_put_back(&h);
+    }
+}
+#[test]
+fn protective_amend_rate_limited_replacement_is_unknown_and_never_put_back() {
+    for body in [RATE_LIMITED, ""] {
+        let mut h = guarded_stop();
+        amend_guarded_stop(&mut h, 105.0);
+        let cancel = h.take("/order");
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replacement = h.take("/order");
+        h.respond_status(replacement, 429, body);
+        assert_unknown_replacement(&h);
+    }
+}
+#[test]
+fn protective_amend_restore_refusal_is_visible_and_never_retries() {
+    let mut h = guarded_stop();
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    for _ in 0..2 {
+        let request = h.take("/order");
+        assert_eq!(request.method, safe_cex_engine::Method::Post);
+        assert!(request.url.contains("type=STOP_MARKET"));
+        h.respond(
+            request,
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+    }
+    assert_eq!(
+        h.failures.last().unwrap().protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    let error = result(&h, 991).as_ref().unwrap_err();
+    assert!(
+        error.contains("BTCUSDT") && error.contains("no stop"),
+        "{error}"
+    );
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+}
+
+#[test]
+fn protective_amend_final_claim_rechecks_price_and_unwinds_before_a_followup() {
+    use safe_cex_engine::request_context::{HttpAction, Prepared};
+    for stale in [false, true] {
+        let mut h = guarded_stop();
+        h.engine.handle(
+            h.now,
+            Event::Command(safe_cex_engine::Command::AmendOrder {
+                command: 991,
+                id: "991".into(),
+                price: Some(105.0),
+                amount: None,
+            }),
+        );
+        h.engine.prepare_dispatch(h.now);
+        let queued: Vec<_> = h.engine.drain_actions().collect();
+        let preparation = queued
+            .into_iter()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { preparation, .. } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("cancel preparation");
+        if stale {
+            h.now += 5001.0;
+        } else {
+            h.engine
+                .store_mut()
+                .update_ticker("BTCUSDT", |t| t.mark = 106.0);
+        }
+        h.engine.http_prepared(
+            h.now,
+            preparation,
+            Prepared {
+                id: 991,
+                expires_at: None,
+            },
+        );
+        let bind = h
+            .engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("cancel bind");
+        assert!(h.engine.claim_http(h.now, bind).is_err());
+        h.collect();
+        assert_eq!(
+            h.engine.store().order("991").unwrap().status,
+            OrderStatus::Open
+        );
+        assert_eq!(
+            h.failures.last().unwrap().outcome,
+            Some(safe_cex_engine::Outcome::NotSent)
+        );
+        assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+        h.ws(json!({"id":42,"result":[]}));
+        h.engine
+            .store_mut()
+            .update_ticker("BTCUSDT", |t| t.mark = 99.0);
+        h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 992,
+            id: "991".into(),
+            price: Some(105.0),
+            amount: None,
+        }));
+        assert!(
+            h.requests.iter().any(|r| r.url.contains("/order?")),
+            "followup stale={stale}: {:?} {:?}",
+            h.done,
+            h.requests
+        );
+        let cancel = h.take("/order");
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replacement = h.take("/order");
+        h.respond(replacement, r#"{"orderId":992}"#);
+        assert!(result(&h, 992).is_ok());
+    }
+}
+
+#[test]
+fn protective_amend_uses_native_contract_reference_and_preserves_close_all_on_restore() {
+    let mut h = guarded_stop();
+    h.ws(json!({"e":"ORDER_TRADE_UPDATE","E":h.now,"o":{"i":991,"s":"BTCUSDT","S":"BUY","o":"STOP_MARKET","ot":"STOP_MARKET","X":"NEW","p":"0","sp":"110","q":"0","z":"0","R":false,"cp":true,"wt":"CONTRACT_PRICE","pP":false,"c":"close-all","ps":"SHORT"}}));
+    // Last=90, mark=100: a BUY stop at95 is valid only for CONTRACT_PRICE.
+    amend_guarded_stop(&mut h, 95.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    assert!(replacement.url.contains("workingType=CONTRACT_PRICE"));
+    h.respond(
+        replacement,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let restore = h.take("/order");
+    for field in [
+        "closePosition=true",
+        "positionSide=SHORT",
+        "workingType=CONTRACT_PRICE",
+        "priceProtect=FALSE",
+        "stopPrice=110",
+        "newClientOrderId=close-all",
+    ] {
+        assert!(restore.url.contains(field), "{field}: {}", restore.url);
+    }
+    assert!(!restore.url.contains("quantity=") && !restore.url.contains("reduceOnly="));
+    h.respond(restore, r#"{"orderId":992}"#);
+    assert_eq!(
+        h.failures.last().unwrap().protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+}
+
+#[test]
+fn protective_amend_v3_valid_path_and_restore_keep_native_signing() {
+    for refused in [false, true] {
+        let mut h = H::options_with_orders(
+            Options::v3_wallet(),
+            r#"[{"orderId":991,"symbol":"BTCUSDT","type":"TAKE_PROFIT_MARKET","side":"SELL","price":"0","stopPrice":"110","origQty":"2","executedQty":"0","reduceOnly":true,"closePosition":false,"workingType":"MARK_PRICE","priceProtect":false,"clientOrderId":"original-tp","status":"NEW"}]"#,
+        );
+        h.reply("/positionSide/dual", r#"{"dualSidePosition":false}"#);
+        h.engine
+            .store_mut()
+            .update_ticker("BTCUSDT", |t| t.mark = 100.0);
+        amend_guarded_stop(&mut h, 105.0);
+        let cancel = h.take("/order");
+        assert!(cancel.url.contains("/fapi/v3/order?"));
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replace = h.take("/order");
+        assert!(
+            replace.url.contains("type=TAKE_PROFIT_MARKET")
+                && replace.url.contains("stopPrice=105")
+        );
+        if refused {
+            h.respond(
+                replace,
+                r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+            );
+            let restore = h.take("/order");
+            for field in [
+                "/fapi/v3/order?",
+                "type=TAKE_PROFIT_MARKET",
+                "stopPrice=110",
+                "workingType=MARK_PRICE",
+                "newClientOrderId=original-tp",
+                "signature=",
+            ] {
+                assert!(restore.url.contains(field), "{field}: {}", restore.url);
+            }
+            h.respond(restore, r#"{"orderId":992}"#);
+            assert_eq!(
+                h.failures.last().unwrap().protection,
+                Some(safe_cex_engine::error::Protection::Restored)
+            );
+        } else {
+            h.respond(replace, r#"{"orderId":992}"#);
+            assert!(result(&h, 991).is_ok());
+        }
+    }
+}
+
+#[test]
+fn protective_amend_unknown_replacement_never_sends_another_stop() {
+    let mut h = guarded_stop();
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond(replacement,r#"{"code":-1007,"msg":"Timeout waiting for response from backend server. Send status unknown; execution status unknown."}"#);
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+    let error = h.failures.last().unwrap();
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.protection, None);
+    assert!(error.message.contains("BTCUSDT"));
+}
+#[test]
+fn protective_amend_missing_native_flags_refuses_before_cancel() {
+    let mut h = guarded_stop();
+    // An incomplete native update cannot authorize guessed restore parameters.
+    h.ws(json!({"e":"ORDER_TRADE_UPDATE","E":h.now,"o":{"i":991,"s":"BTCUSDT","S":"BUY","o":"STOP_MARKET","ot":"STOP_MARKET","X":"NEW","p":"0","sp":"110","q":"2","z":"0","wt":"MARK_PRICE","pP":true,"c":"original-stop"}}));
+    amend_guarded_stop(&mut h, 105.0);
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+    assert_eq!(
+        h.engine.store().order("991").unwrap().status,
+        OrderStatus::Open
+    );
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+}
+#[test]
+fn protective_amend_ws_omitted_price_protect_retains_only_the_same_native_orders_flag() {
+    let mut h = guarded_stop();
+    h.ws(json!({"e":"ORDER_TRADE_UPDATE","E":h.now+1.0,"o":{"i":991,"s":"BTCUSDT","S":"BUY","o":"STOP_MARKET","ot":"STOP_MARKET","X":"NEW","p":"0","sp":"110","q":"2","z":"0","R":true,"cp":false,"wt":"MARK_PRICE","c":"original-stop","ps":"BOTH"}}));
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond(
+        replacement,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let restore = h.take("/order");
+    assert!(restore.url.contains("priceProtect=TRUE"));
+}
+
+#[test]
+fn protective_amend_checks_the_rounded_wire_trigger_and_size_only_edits() {
+    for size_only in [false, true] {
+        let mut h = guarded_stop();
+        h.engine.store_mut().update_ticker("BTCUSDT", |t| {
+            t.mark = if size_only { 111.0 } else { 100.002 }
+        });
+        h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 991,
+            id: "991".into(),
+            price: (!size_only).then_some(100.004),
+            amount: size_only.then_some(1.0),
+        }));
+        assert_eq!(
+            h.engine.store().order("991").unwrap().status,
+            OrderStatus::Open
+        );
+        assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+        assert_eq!(
+            h.failures.last().unwrap().outcome,
+            Some(safe_cex_engine::Outcome::NotSent)
+        );
+    }
+}
+
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
+#[test]
+fn protective_amend_restore_sealed_on_a_5xx_says_its_outcome_is_unknown() {
+    for status in [408, 503] {
+        let mut h = guarded_stop();
+        amend_guarded_stop(&mut h, 105.0);
+        let cancel = h.take("/order");
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replacement = h.take("/order");
+        h.respond(
+            replacement,
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let restore = h.take("/order");
+        assert_eq!(restore.method, safe_cex_engine::Method::Post);
+        h.respond_status(restore, status, "");
+        let error = h.failures.last().unwrap().clone();
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("immediately trigger"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}"
+        );
+        assert_eq!(error.protection, None, "{status}");
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.method == safe_cex_engine::Method::Post),
+            "{status}: never resent"
+        );
+    }
+}
+
+fn guarded_row(row: &str) -> H {
+    let mut h = H::pending_mode_with_orders(&format!("[{row}]"));
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":false}"#);
+    h.engine.store_mut().update_ticker("BTCUSDT", |t| {
+        t.last = 90.0;
+        t.mark = 100.0;
+    });
+    h
+}
+
+// STOP and TAKE_PROFIT rest a limit; the replacement placed only market stops, so an
+// edit silently turned a stop-limit into a stop-market. They are refused before any cancel.
+#[test]
+fn a_limit_stop_edit_is_refused_before_any_cancel() {
+    for (kind, stop) in [("STOP", "110"), ("TAKE_PROFIT", "80")] {
+        let mut h = guarded_row(&format!(
+            r#"{{"orderId":991,"symbol":"BTCUSDT","type":"{kind}","side":"BUY","price":"111","stopPrice":"{stop}","origQty":"2","executedQty":"0","reduceOnly":true,"closePosition":false,"workingType":"MARK_PRICE","priceProtect":false,"timeInForce":"GTC","clientOrderId":"limit-stop","positionSide":"BOTH","status":"NEW"}}"#
+        ));
+        amend_guarded_stop(&mut h, if kind == "STOP" { 105.0 } else { 85.0 });
+        assert!(
+            !h.requests.iter().any(|r| r.url.contains("/order")),
+            "{kind}: {:?}",
+            h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+        );
+        let error = result(&h, 991).as_ref().unwrap_err();
+        assert!(
+            error.contains("stop-limit was not changed"),
+            "{kind}: {error}"
+        );
+        assert_eq!(
+            h.engine.store().order("991").unwrap().status,
+            OrderStatus::Open
+        );
+    }
+}
+
+// An undocumented code may have placed the replacement: unknown, never a refusal that
+// puts the old stop back beside it.
+#[test]
+fn an_unlisted_code_on_the_replacement_is_unknown_and_never_put_back() {
+    let mut h = guarded_stop();
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond(
+        replacement,
+        r#"{"code":-9999,"msg":"Internal processing issue."}"#,
+    );
+    assert_unknown_replacement(&h);
+}
+
+#[test]
+fn the_replacement_keeps_the_originals_price_protection() {
+    for protect in [true, false] {
+        let mut h = guarded_row(&format!(
+            r#"{{"orderId":991,"symbol":"BTCUSDT","type":"STOP_MARKET","side":"BUY","price":"0","stopPrice":"110","origQty":"2","executedQty":"0","reduceOnly":true,"closePosition":false,"workingType":"MARK_PRICE","priceProtect":{protect},"clientOrderId":"original-stop","positionSide":"BOTH","status":"NEW"}}"#
+        ));
+        amend_guarded_stop(&mut h, 105.0);
+        let cancel = h.take("/order");
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replacement = h.take("/order");
+        let expected = if protect {
+            "priceProtect=TRUE"
+        } else {
+            "priceProtect=FALSE"
+        };
+        assert!(replacement.url.contains(expected), "{}", replacement.url);
+    }
+}
+
+// An ordinary limit order's replacement is not a protective write: an undocumented code
+// stays the definitive refusal it is on master, with no unknown wording or protection.
+#[test]
+fn an_ordinary_replacement_refused_with_an_unlisted_code_stays_refused() {
+    let mut h = H::new();
+    h.ws(order(10.0, "NEW", "0", 1));
+    h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+        command: 40,
+        id: "123".into(),
+        price: Some(105.0),
+        amount: None,
+    }));
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":123,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond(
+        replacement,
+        r#"{"code":-9999,"msg":"Internal processing issue."}"#,
+    );
+    // Exactly master's terminal: the order is gone and its replacement refused.
+    let error = h.failures.last().unwrap();
+    assert!(
+        error.message.contains("order is gone") && error.message.contains("replacement refused"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert!(!error.message.contains("unknown"), "{error:?}");
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+}
+
+// -1015 TOO_MANY_ORDERS is a documented rate limit: on a stop's replacement it may have
+// placed the order, so it is unknown and never put back, whatever the HTTP status.
+#[test]
+fn a_too_many_orders_replacement_is_unknown_and_never_put_back() {
+    let mut h = guarded_stop();
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond_status(
+        replacement,
+        400,
+        r#"{"code":-1015,"msg":"Too many new orders."}"#,
+    );
+    assert_unknown_replacement(&h);
+}
+
+// The put-back is a protective write too: an undocumented code on it is unknown, and
+// nothing is sent again.
+#[test]
+fn an_unlisted_code_on_the_put_back_is_unknown_and_never_resent() {
+    let mut h = guarded_stop();
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond(
+        replacement,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let restore = h.take("/order");
+    assert!(restore.url.contains("stopPrice=110"));
+    h.respond(
+        restore,
+        r#"{"code":-9999,"msg":"Internal processing issue."}"#,
+    );
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    assert_eq!(h.failures.last().unwrap().protection, None);
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
 }

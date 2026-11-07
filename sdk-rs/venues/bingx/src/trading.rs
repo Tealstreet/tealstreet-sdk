@@ -4,6 +4,8 @@
 use crate::Pending;
 #[path = "trading/context.rs"]
 mod context;
+#[path = "trading/protection.rs"]
+pub(crate) mod protection;
 #[path = "trading/venue_state.rs"]
 mod venue_state;
 
@@ -35,6 +37,7 @@ const ORDER: &str = "/openApi/swap/v2/trade/order";
 const CANCEL_ALL: &str = "/openApi/swap/v2/trade/allOpenOrders";
 const AMEND: &str = "/openApi/swap/v1/trade/amend";
 const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
+const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
 
 pub struct Request {
     command: CommandId,
@@ -45,6 +48,8 @@ pub struct Request {
     method: Method,
     path: &'static str,
     params: Params,
+    protective: bool,
+    restoring: bool,
 }
 impl Request {
     pub fn settings_scope(&self) -> Option<Option<&str>> {
@@ -121,6 +126,10 @@ struct Job {
     replaces_cancelled: Option<(String, OrderSide, OrderType)>,
     // A limit's cancelReplace may cancel and then refuse the placement.
     replaces_order: Option<String>,
+    guard: Option<protection::Guard>,
+    restore: Option<Params>,
+    restoring: bool,
+    cancelled: bool,
     // A failed bracket leaves the placed entry without the protection the user asked for.
     entry_with_brackets: Option<String>,
 }
@@ -168,15 +177,17 @@ struct Observation {
     position_side: String,
     attached: bool,
     native_status: String,
+    original: Option<protection::Original>,
 }
 #[derive(Default)]
 pub struct Trading {
     jobs: HashMap<CommandId, Run>,
+    references: HashMap<String, protection::References>,
     /// Retired settings writes whose metadata custody finishes at the next callback.
     retired_settings: Vec<CommandId>,
     observed: HashMap<String, Observation>,
     /// Frame-fed: source observations whose order has not been ingested yet.
-    pending_observed: HashMap<String, (String, String, bool, String)>,
+    pending_observed: HashMap<String, (String, String, bool, String, Option<protection::Original>)>,
     /// Frame-fed: the data source knows the position mode (VENUE_STATE).
     mode_known: bool,
     /// tradeMinUSDT by contract id. Market limits carry no value minimum.
@@ -210,6 +221,8 @@ struct Data<'a> {
     status: Cow<'a, str>,
     #[serde(default, borrow)]
     quantity: Option<Number<'a>>,
+    #[serde(default, borrow, alias = "filled")]
+    executed_qty: Option<Number<'a>>,
     #[serde(default, borrow, deserialize_with = "object_order")]
     order: Option<Box<Data<'a>>>,
     #[serde(default, borrow)]
@@ -219,6 +232,8 @@ struct Data<'a> {
     #[serde(default, borrow)]
     cancel_result: Cow<'a, str>,
     #[serde(default, borrow)]
+    cancel_order_id: Option<Id<'a>>,
+    #[serde(default, borrow)]
     new_order_result: Cow<'a, str>,
     #[serde(default, borrow)]
     replace_result: Cow<'a, str>,
@@ -227,7 +242,8 @@ struct Data<'a> {
 }
 impl Data<'_> {
     fn has_order_claim(&self) -> bool {
-        self.order_id.is_some()
+        self.cancel_order_id.is_some()
+            || self.order_id.is_some()
             || self.order_id_text.is_some()
             || self.new_order_id.is_some()
             || self.order.is_some()
@@ -244,6 +260,7 @@ impl Data<'_> {
             .iter()
             .chain(self.order_id_text.iter())
             .chain(self.new_order_id.iter())
+            .chain(self.cancel_order_id.iter())
         {
             let id = id.text();
             if !id.trim().is_empty() {
@@ -266,6 +283,29 @@ impl Data<'_> {
                 .chain(nested),
         )
     }
+    fn matches_symbol(&self, symbol: &str) -> bool {
+        (self.symbol.is_empty() || self.symbol.replace('-', "") == symbol)
+            && self.order.as_ref().is_none_or(|o| o.matches_symbol(symbol))
+            && self
+                .new_order_response
+                .as_ref()
+                .is_none_or(|o| o.matches_symbol(symbol))
+    }
+    fn proves_cancel(&self, ids: &[String]) -> bool {
+        ids.len() == 1
+            && self.id().ok().flatten().as_deref() == Some(&ids[0])
+            && (matches!(self.status.as_ref(), "CANCELED" | "CANCELLED" | "EXPIRED")
+                || self.order.as_ref().is_some_and(|o| o.proves_cancel(ids)))
+            && (self.executed_qty.as_ref().is_some_and(|n| n.value() == 0.0)
+                || self.order.as_ref().is_some_and(|o| o.proves_cancel(ids)))
+            && self.canceled().is_ok()
+            && self.unfilled()
+            && self.failed.as_ref().is_none_or(Vec::is_empty)
+    }
+    fn unfilled(&self) -> bool {
+        self.executed_qty.as_ref().is_none_or(|n| n.value() == 0.0)
+            && self.order.as_ref().is_none_or(|o| o.unfilled())
+    }
     fn canceled(&self) -> Result<(), String> {
         if !self.status.is_empty()
             && !matches!(self.status.as_ref(), "CANCELED" | "CANCELLED" | "EXPIRED")
@@ -279,6 +319,16 @@ impl Data<'_> {
             order.canceled()?;
         }
         Ok(())
+    }
+    fn open_placement(&self) -> bool {
+        let own = self.status.is_empty()
+            || matches!(self.status.as_ref(), "NEW" | "OPEN" | "PENDING" | "WORKING");
+        own && (matches!(self.status.as_ref(), "NEW" | "OPEN" | "PENDING" | "WORKING")
+            || self.order.as_ref().is_some_and(|o| o.open_placement()))
+            && self
+                .order
+                .as_ref()
+                .is_none_or(|o| o.status.is_empty() || o.open_placement())
     }
     fn accepted(&self) -> Result<(), String> {
         if !self.status.is_empty()
@@ -434,8 +484,15 @@ impl Trading {
                 position_side: position_side.into(),
                 attached,
                 native_status: native_status.into(),
+                original: None,
             },
         );
+    }
+
+    pub(crate) fn observe_original(&mut self, id: &str, original: Option<protection::Original>) {
+        if let Some(seen) = self.observed.get_mut(id) {
+            seen.original = original;
+        }
     }
 
     pub fn retain_open_orders(&mut self, store: &safe_cex_engine::Store) {
@@ -574,7 +631,7 @@ impl Trading {
         let Some(run) = self.jobs.get_mut(&command) else {
             return;
         };
-        if run.error.is_some() && !run.job.continue_on_error {
+        if run.error.is_some() && !run.job.continue_on_error && !run.job.restoring {
             let plan = run.plan.clone();
             let error = run.error.clone().unwrap();
             let _ = cx.fail_plan(&plan, error);
@@ -628,6 +685,13 @@ impl Trading {
                     return;
                 }
             }
+            if let Some(words) = run.job.unknown_words() {
+                let _ = cx.present_plan_failure(&plan, words);
+            }
+            let protective = run.job.guard.is_some()
+                && (matches!(step.call, Call::Cancel { .. } | Call::Replace { .. })
+                    || run.job.restoring);
+            let restoring = run.job.restoring;
             cx.command_progress(command, step.receipts);
             self.queue(
                 cx,
@@ -641,6 +705,8 @@ impl Trading {
                     method: step.method,
                     path: step.path,
                     params: step.params,
+                    protective,
+                    restoring,
                 },
             );
         } else {
@@ -707,6 +773,11 @@ impl Trading {
         };
         // A transport loss arrives here too; only a call never sent is certainly not live.
         let note = partial_failure_note(run, &request, error.outcome != Some(Outcome::NotSent));
+        let error = if run.job.cancelled {
+            run.job.protection_error(error, false)
+        } else {
+            error
+        };
         let _ = run.error.get_or_insert(error.clone());
         if run.job.continue_on_error
             && cx
@@ -765,7 +836,81 @@ impl Trading {
             data.evidence_ids(&mut evidence);
         }
         let call = &request.call;
-        let absent = envelope.as_ref().is_ok_and(|e| e.code == 80016)
+        let guarded = self
+            .jobs
+            .get(&request.command)
+            .is_some_and(|r| r.job.guard.is_some());
+        let restoring = self
+            .jobs
+            .get(&request.command)
+            .is_some_and(|r| r.job.restoring);
+        let rate_limited = guarded
+            && (response.status == 429 || envelope.as_ref().is_ok_and(|e| e.code == 100410));
+        let consistent_symbol = self
+            .jobs
+            .get(&request.command)
+            .and_then(|r| r.job.guard.as_ref())
+            .is_none_or(|g| data.is_none_or(|d| d.matches_symbol(&g.order.symbol)));
+        let current_unfilled = self
+            .jobs
+            .get(&request.command)
+            .and_then(|r| r.job.guard.as_ref())
+            .is_none_or(|g| {
+                cx.store.order(&g.order.id).is_some_and(|o| {
+                    let mut current = o.clone();
+                    current.status = g.order.status;
+                    current.last_update = g.order.last_update;
+                    matches!(o.status, OrderStatus::Open | OrderStatus::Canceled)
+                        && o.filled == 0.0
+                        && current == g.order
+                })
+            });
+        let cancel_proven = consistent_symbol
+            && current_unfilled
+            && match call {
+                Call::Replace { old_id } => data.is_some_and(|d| {
+                    d.cancel_order_id.as_ref().map(Id::text).as_deref() == Some(old_id)
+                        && matches!(d.cancel_result.as_ref(), "SUCCESS" | "true" | "TRUE")
+                        && d.unfilled()
+                        && d.failed.as_ref().is_none_or(Vec::is_empty)
+                }),
+                Call::Cancel { ids, .. } => data.is_some_and(|d| d.proves_cancel(ids)),
+                _ => false,
+            };
+        let missing_cancel_proof = guarded
+            && envelope.as_ref().is_ok_and(|e| e.code == 0)
+            && matches!(call, Call::Cancel { .. } | Call::Replace { .. })
+            && !cancel_proven;
+        let half_refused = guarded
+            && !rate_limited
+            && (200..300).contains(&response.status)
+            && cancel_proven
+            && matches!(call, Call::Replace { .. })
+            && data.is_some_and(|d| {
+                d.new_order_result == "FAILED"
+                    && (d.replace_result.is_empty() || d.replace_result == "FAILED")
+                    && d.new_order_id.is_none()
+                    && d.new_order_response.is_none()
+                    && d.order_id.is_none()
+                    && d.order_id_text.is_none()
+                    && d.order.is_none()
+                    && d.status.is_empty()
+            });
+        let missing_order = ((200..300).contains(&response.status) || response.status == 400)
+            && matches!(
+                call,
+                Call::Cancel { .. } | Call::Amend { .. } | Call::Replace { .. }
+            )
+            && envelope
+                .as_ref()
+                .is_ok_and(|e| context::missing_order(e.code, &e.msg));
+        if missing_order {
+            let _ = cx.present_plan_failure(&request.plan, MISSING_ORDER_WORDS);
+        }
+        let absent = envelope
+            .as_ref()
+            .is_ok_and(|e| e.code == 80016 || missing_order)
+            && !guarded
             && matches!(
                 call,
                 Call::Cancel {
@@ -773,7 +918,8 @@ impl Trading {
                     ..
                 }
             );
-        let canceled = matches!(call, Call::Replace { .. })
+        let canceled = (!guarded || cancel_proven)
+            && matches!(call, Call::Replace { .. })
             && data.is_some_and(|data| {
                 matches!(data.cancel_result.as_ref(), "SUCCESS" | "true" | "TRUE")
             });
@@ -782,7 +928,11 @@ impl Trading {
             .map_err(|e| unknown(format!("Invalid BingX trading response: {e}")))
             .and_then(|e| {
                 if e.code != 0 && !absent {
-                    return Err(unknown(format!("BingX {}: {}", e.code, e.msg)));
+                    return Err(unknown(if missing_order {
+                        MISSING_ORDER_WORDS.into()
+                    } else {
+                        format!("BingX {}: {}", e.code, e.msg)
+                    }));
                 }
                 decode(
                     &request.call,
@@ -790,6 +940,46 @@ impl Trading {
                     absent,
                 )
             });
+        let decoded = if restoring
+            && decoded.is_ok()
+            && (!data.is_some_and(Data::open_placement)
+                || decoded.as_ref().is_ok_and(|ids| {
+                    self.jobs
+                        .get(&request.command)
+                        .and_then(|r| r.job.guard.as_ref())
+                        .is_some_and(|g| ids.iter().any(|id| id == &g.order.id))
+                })) {
+            Err(unknown(
+                "BingX put-back did not prove a fresh open protection order",
+            ))
+        } else {
+            decoded
+        };
+        let decoded = if guarded && (rate_limited || half_refused || missing_cancel_proof) {
+            Err(unknown(if rate_limited {
+                "BingX outcome unknown, check Open Orders"
+            } else if half_refused {
+                "BingX replacement was refused after its target was canceled"
+            } else {
+                "BingX cancellation did not prove the target; outcome unknown, check Open Orders"
+            }))
+        } else {
+            decoded
+        };
+        let decoded = if guarded
+            && matches!(call, Call::Replace { .. })
+            && data.is_some_and(|d| {
+                let success = |s: &str| matches!(s, "SUCCESS" | "true" | "TRUE");
+                !d.new_order_result.is_empty()
+                    && !d.replace_result.is_empty()
+                    && success(&d.new_order_result) != success(&d.replace_result)
+            }) {
+            Err(unknown(
+                "BingX replacement results contradict each other; check Open Orders",
+            ))
+        } else {
+            decoded
+        };
         let result = if let (true, Ok(ids)) = (
             envelope.as_ref().is_ok_and(|e| e.code == 0),
             decoded.as_ref(),
@@ -851,18 +1041,32 @@ impl Trading {
                 let lost = safe_cex_engine::error::order_gone_text(symbol, !refused);
                 message = format!("{lost}: {message}");
             }
-            let native = envelope.as_ref().ok().map(|e| Native {
-                code: NativeCode::Int(e.code),
-                message: &e.msg,
-            });
+            let native = if half_refused {
+                Some(Native {
+                    code: NativeCode::Text("FAILED"),
+                    message: "newOrderResult",
+                })
+            } else {
+                envelope.as_ref().ok().map(|e| Native {
+                    code: NativeCode::Int(e.code),
+                    message: &e.msg,
+                })
+            };
             let timestamp = crate::sign::timestamp::refused(response.body);
-            let table = if native
+            let table = if half_refused {
+                &protection::REPLACEMENT_FAILED
+            } else if restoring && (timestamp || envelope.as_ref().is_ok_and(|e| e.code == 100001))
+            {
+                &protection::RESTORE_AUTH
+            } else if native
                 .as_ref()
                 .is_some_and(|n| context::names_duplicate_client_id(n.message))
             {
                 &context::DUPLICATE_TABLE
             } else if timestamp {
                 &context::TIMESTAMP_TABLE
+            } else if missing_order {
+                &context::MISSING_ORDER_TABLE
             } else {
                 &TABLE
             };
@@ -873,7 +1077,12 @@ impl Trading {
                     return;
                 }
             };
-            let fact = if data.is_some_and(Data::has_order_claim)
+            let fact = if half_refused {
+                fact
+            } else if rate_limited
+                || (guarded && matches!(call, Call::Replace { .. }))
+                || missing_cancel_proof
+                || data.is_some_and(Data::has_order_claim)
                 || canceled
                 || envelope.as_ref().is_ok_and(|e| e.code == 0)
                 || (matches!(fact.verdict(), Verdict::Satisfied(_))
@@ -944,20 +1153,76 @@ impl Trading {
             let _ = cx.finish_plan_call(&request.plan, &request.slot, &request.context);
             return;
         };
+        if guarded
+            && cancel_proven
+            && (canceled || (matches!(call, Call::Cancel { .. }) && result.is_ok()))
+        {
+            run.job.cancelled = true;
+        }
         match result {
-            Ok(ids) => run.native_ids.extend(ids),
+            Ok(ids) => {
+                run.native_ids.extend(ids);
+                if restoring {
+                    if let Some(error) = run.error.take() {
+                        run.error = Some(run.job.protection_error(error, true));
+                    }
+                    run.job.restoring = false;
+                }
+            }
             Err(error) => {
-                let _ = run.error.get_or_insert(error);
+                let definite = error.outcome == Some(Outcome::Rejected) && !rate_limited;
+                let error = if run.job.cancelled {
+                    run.job.protection_error(error, false)
+                } else {
+                    error
+                };
+                if guarded || run.error.is_none() {
+                    run.error = Some(error);
+                }
+                if guarded {
+                    run.job.steps.clear();
+                }
+                if guarded
+                    && run.job.cancelled
+                    && definite
+                    && !restoring
+                    && let Some(params) = run.job.restore.take()
+                {
+                    run.job.steps.push_back(Step {
+                        receipts: Vec::new(),
+                        method: Method::Post,
+                        path: ORDER,
+                        params,
+                        call: Call::Place,
+                    });
+                    run.job.restoring = true;
+                } else {
+                    run.job.restoring = false;
+                }
             }
         }
         // An ordered write continues only from this call's accepted DATA.
-        let settled =
-            if !run.job.continue_on_error && run.error.is_none() && !run.job.steps.is_empty() {
-                cx.continue_serial_plan(&request.plan, &request.slot, &request.context, SERIAL)
-                    .map(|slot| run.next = Some(slot))
-            } else {
-                cx.finish_plan_call(&request.plan, &request.slot, &request.context)
-            };
+        let settled = if !run.job.continue_on_error
+            && (run.error.is_none() || run.job.restoring)
+            && !run.job.steps.is_empty()
+        {
+            cx.continue_serial_plan(
+                &request.plan,
+                &request.slot,
+                &request.context,
+                if run.job.restoring {
+                    safe_cex_engine::request_context::plan::SerialCall {
+                        attempts: 1,
+                        ..SERIAL
+                    }
+                } else {
+                    SERIAL
+                },
+            )
+            .map(|slot| run.next = Some(slot))
+        } else {
+            cx.finish_plan_call(&request.plan, &request.slot, &request.context)
+        };
         if settled.is_err() {
             let _ = cx.fail_plan(&request.plan, unknown("BingX write settlement refused"));
             return;
@@ -1146,9 +1411,7 @@ impl Trading {
         }
         if full {
             params = params.str("closePosition", "true");
-        } else if !cx.store.hedged()
-            && (kind == "TRIGGER_MARKET" || o.reduce_only == Some(true) && !stop)
-        {
+        } else if !cx.store.hedged() && (kind == "TRIGGER_MARKET" || o.reduce_only == Some(true)) {
             params = params.boolean("reduceOnly", true);
         }
         let size = if full {
@@ -1325,28 +1588,6 @@ impl Trading {
                 .trigger_type
                 .ok_or("Trigger amendment requires a reconciled trigger price source")?;
             working_type(source)?;
-            let ticker = cx
-                .store
-                .ticker(&o.symbol)
-                .ok_or("Trigger amendment requires a current trigger price")?;
-            let reference = match source {
-                StopTriggerType::MarkPrice => ticker.mark,
-                StopTriggerType::LastPrice => ticker.last,
-                StopTriggerType::IndexPrice => unreachable!("validated trigger source"),
-            };
-            if !reference.is_finite() || reference <= 0.0 {
-                return Err(
-                    "Trigger amendment requires a valid price for its trigger source".into(),
-                );
-            }
-            let immediate = match (kind, o.side) {
-                (OrderType::StopLoss, OrderSide::Sell)
-                | (OrderType::TakeProfit, OrderSide::Buy) => next >= reference,
-                _ => next <= reference,
-            };
-            if immediate {
-                return Err("Replacement trigger would execute immediately".into());
-            }
             let opts = PlaceOrderOpts {
                 symbol: o.symbol.clone(),
                 kind,
@@ -1385,7 +1626,75 @@ impl Trading {
                     params.str("type", &meta.native_kind)
                 };
             }
+            let guard = protection::Guard {
+                order: o.clone(),
+                trigger: Some(next),
+                kind,
+                source: Some(source),
+                closing: o.reduce_only
+                    || o.close == Some(true)
+                    || matches!(
+                        (meta.position_side.as_str(), o.side),
+                        ("LONG", OrderSide::Sell) | ("SHORT", OrderSide::Buy)
+                    ),
+            };
+            guard
+                .check(cx.store, &self.references, cx.now, false)
+                .map_err(|e| e.message)?;
+            if !meta.attached
+                && matches!(
+                    meta.native_kind.as_str(),
+                    "STOP_MARKET" | "TAKE_PROFIT_MARKET"
+                )
+                && let Some(original) = meta
+                    .original
+                    .as_ref()
+                    .filter(|v| v.matches(o, &meta.native_kind, &meta.position_side))
+                && let Some(mut params) = original.params()
+            {
+                params = params
+                    .num("stopPrice", next)
+                    .str("cancelReplaceMode", "STOP_ON_FAILURE")
+                    .integer(
+                        "cancelOrderId",
+                        id.parse()
+                            .map_err(|_| "Order id is not a numeric int64; stop not changed")?,
+                    )
+                    .str(
+                        "cancelRestrictions",
+                        if meta.native_status == "PENDING" {
+                            "ONLY_PENDING"
+                        } else {
+                            "ONLY_NEW"
+                        },
+                    );
+                let mut job = one(
+                    Method::Post,
+                    REPLACE,
+                    params,
+                    Call::Replace { old_id: id.into() },
+                );
+                job.guard = Some(guard);
+                job.restore = original.params();
+                return Ok(job);
+            }
+            if let Some(original) = meta
+                .original
+                .as_ref()
+                .filter(|v| v.matches(o, &meta.native_kind, &meta.position_side))
+            {
+                let params = original.params().ok_or(
+                    "Exact native protection parameters are unavailable; stop not changed",
+                )?;
+                if replacement.len() != 1 {
+                    return Err(
+                        "Cannot split an exact native protective edit; stop not changed".into(),
+                    );
+                }
+                replacement[0].params = params.num("stopPrice", next);
+            }
             let mut job = self.cancel(cx, &[id.into()])?;
+            job.guard = Some(guard);
             job.continue_on_error = false;
             job.replaces_cancelled = Some((opts.symbol.clone(), opts.side, opts.kind));
             if let Some(Step {
@@ -1486,6 +1795,23 @@ impl Trading {
             identity,
         }];
         job.replaces_order = Some(o.symbol.clone());
+        if o.reduce_only {
+            let guard = protection::Guard {
+                order: o.clone(),
+                trigger: None,
+                kind: o.kind,
+                source: None,
+                closing: true,
+            };
+            guard
+                .check(cx.store, &self.references, cx.now, false)
+                .map_err(|e| e.message)?;
+            job.guard = Some(guard);
+            job.restore = meta
+                .original
+                .as_ref()
+                .and_then(protection::Original::params);
+        }
         Ok(job)
     }
     fn leverage(

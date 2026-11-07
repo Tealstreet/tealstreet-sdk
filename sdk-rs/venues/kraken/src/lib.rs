@@ -211,15 +211,16 @@ impl Kraken {
         if self.ticker_in_flight {
             return;
         }
-        let context =
-            match cx.http_context(Scope::Background, public_context::policy(Operation::Read)) {
-                Ok(context) => context,
-                Err(reason) => {
-                    self.discovery.failed(cx, true);
-                    cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
-                    return;
-                }
-            };
+        let context = match cx
+            .http_live_context(Scope::Background, public_context::policy(Operation::Read))
+        {
+            Ok(context) => context,
+            Err(reason) => {
+                self.discovery.failed(cx, true);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
+                return;
+            }
+        };
         self.ticker_in_flight = true;
         self.live_tickers.begin();
         match cx.request_managed(
@@ -342,7 +343,7 @@ impl Kraken {
             return;
         }
         let step = interval.ms();
-        let to = to_ms.unwrap_or(cx.now);
+        let to = to_ms.unwrap_or(cx.protocol_now());
         let from = from_ms.unwrap_or(to - step * f64::from(limit.unwrap_or(500).clamp(1, 5000)));
         if !from.is_finite() || !to.is_finite() || from < 0.0 || from > to {
             if command.is_some() {
@@ -413,7 +414,7 @@ impl Kraken {
         let policy = public_context::policy(Operation::Read);
         let issued = match root {
             Some(root) => cx.http_leg_context(root, policy),
-            None => cx.http_context(Scope::Background, policy),
+            None => cx.http_live_context(Scope::Background, policy),
         };
         let leg = match issued {
             Ok(leg) => leg,
@@ -536,6 +537,9 @@ fn resolution(interval: Interval) -> Option<&'static str> {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
+    fn http_plans() -> bool {
+        false
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }
@@ -563,6 +567,16 @@ impl Venue for Kraken {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::FillsAccount,
@@ -1126,7 +1140,7 @@ impl Venue for Kraken {
                     );
                     return;
                 }
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
                 if let Some(root) = &root {
                     if let Some(context) = &context {
@@ -1191,16 +1205,18 @@ impl Venue for Kraken {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        if matches!(pending, Pending::Candles { .. }) {
-            self.candles_failed(cx, pending, error);
-        } else {
-            match pending {
-                Pending::PublicTrades(r, child) => {
-                    self.public_trades_preparation_failed(cx, *r, Some(child), error)
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if matches!(pending, Pending::Candles { .. }) {
+                self.candles_failed(cx, pending, error);
+            } else {
+                match pending {
+                    Pending::PublicTrades(r, child) => {
+                        self.public_trades_preparation_failed(cx, *r, Some(child), error)
+                    }
+                    pending => self.on_sign_error(cx, pending, error),
                 }
-                pending => self.on_sign_error(cx, pending, error),
             }
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

@@ -4061,3 +4061,260 @@ fn keepalive_rate_evidence_cannot_mask_a_later_provider_refusal() {
         assert_eq!(h.failures.iter().filter(|(id, _)| *id == 999).count(), 1);
     }
 }
+
+#[test]
+fn protective_references_keep_the_real_field_receipt_through_seed_and_live_updates() {
+    for (working_type, live_last, allowed) in [
+        ("CONTRACT_PRICE", None, false),
+        ("MARK_PRICE", None, true),
+        ("CONTRACT_PRICE", Some(false), false),
+        ("CONTRACT_PRICE", Some(true), true),
+        ("MARK_PRICE", Some(false), true),
+    ] {
+        let orders = serde_json::json!({"code":0,"data":{"orders":[{
+            "orderId":ORDER_ID,"symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL",
+            "status":"NEW","origQty":"0.1","executedQty":"0","stopPrice":"59000",
+            "positionSide":"BOTH","reduceOnly":true,"workingType":working_type
+        }]}})
+        .to_string();
+        let mut h = Harness::unstarted();
+        h.respond("/quote/contracts", 200, MARKETS);
+        h.respond("/quote/ticker", 200, DAILY);
+        if live_last.is_none() {
+            h.now += 5001.;
+        }
+        h.respond("/quote/premiumIndex", 200, PREMIUM);
+        let mut h = Harness::finish_ready(h, &orders);
+        if let Some(last_present) = live_last {
+            h.now += 5001.;
+            let public = h
+                .sockets
+                .iter()
+                .find(|(_, u)| !u.contains("listenKey="))
+                .unwrap()
+                .0;
+            h.event(Event::WsOpened { socket: public });
+            let mut row = serde_json::json!({"symbol":"BTC-USDT","fairPrice":"60001","indexPrice":"60002","fundingRate":"0.01"});
+            if last_present {
+                row["tradePrice"] = "60000".into();
+            }
+            h.event(Event::WsMessage {
+                socket: public,
+                text:
+                    &serde_json::json!({"dataType":"market.contracts","data":{"contracts":[row]}})
+                        .to_string(),
+            });
+        }
+        h.event(Event::Command(Command::AmendOrder {
+            command: 304,
+            id: ORDER_ID.into(),
+            price: Some(59100.),
+            amount: None,
+        }));
+        assert_eq!(
+            h.requests
+                .iter()
+                .any(|r| r.url.ends_with("/trade/cancelReplace")),
+            allowed,
+            "{working_type}/{live_last:?}: {:?}",
+            h.failures
+        );
+        if !allowed {
+            let error = &h.failures.iter().find(|(id, _)| *id == 304).unwrap().1;
+            assert!(error.message.contains("reference stale"), "{error:?}");
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+            assert_eq!(
+                h.engine.store().order(ORDER_ID).unwrap().status,
+                OrderStatus::Open
+            );
+        }
+    }
+}
+
+#[test]
+fn a_refused_premium_envelope_cannot_renew_a_protective_reference() {
+    let orders = serde_json::json!({"code":0,"data":{"orders":[{
+        "orderId":ORDER_ID,"symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL",
+        "status":"NEW","origQty":"0.1","executedQty":"0","stopPrice":"59000",
+        "positionSide":"BOTH","reduceOnly":true,"workingType":"MARK_PRICE"
+    }]}})
+    .to_string();
+    let mut h = Harness::unstarted();
+    h.respond("/quote/contracts", 200, MARKETS);
+    h.respond("/quote/ticker", 200, DAILY);
+    h.now += 5001.;
+    h.respond(
+        "/quote/premiumIndex",
+        200,
+        &PREMIUM.replacen("\"code\":0", "\"code\":100410", 1),
+    );
+    let mut h = Harness::finish_ready(h, &orders);
+    h.event(Event::Command(Command::AmendOrder {
+        command: 305,
+        id: ORDER_ID.into(),
+        price: Some(59100.),
+        amount: None,
+    }));
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/trade/cancelReplace"))
+    );
+    let error = &h.failures.iter().find(|(id, _)| *id == 305).unwrap().1;
+    assert!(error.message.contains("reference stale"), "{error:?}");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+}
+
+#[test]
+fn native_stop_snapshot_supplies_exact_put_back_parameters_and_frame_provenance() {
+    use safe_cex_engine::{Venue, error::Protection};
+    let orders = serde_json::json!({"code":0,"data":{"orders":[{
+        "orderId":ORDER_ID,"symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL",
+        "status":"NEW","origQty":"0.1","executedQty":"0","stopPrice":"59000",
+        "positionSide":"BOTH","reduceOnly":true,"closePosition":false,"workingType":"CONTRACT_PRICE",
+        "stopGuaranteed":false,"priceProtect":true,"positionId":8389765519993909001_u64
+    }]}}).to_string();
+    let mut h = Harness::ready_with_orders(&orders);
+    let state = h.engine.venue().export_venue_state().unwrap();
+    assert_eq!(state[0], 2);
+    assert!(String::from_utf8_lossy(&state).contains("8389765519993909001"));
+    let mut source = safe_cex_engine::Store::default();
+    source.set_markets(h.engine.store().markets().to_vec());
+    source.set_tickers(h.engine.store().tickers().to_vec());
+    source.set_orders(h.engine.store().orders().to_vec());
+    source.set_positions(h.engine.store().positions().to_vec());
+    let pending = source.take_pending();
+    let mut writer = wire::FrameWriter::new(Vec::new(), h.now);
+    source.write(&pending, &mut writer);
+    writer.venue_state(&state);
+    let frame = writer.finish();
+    let mut destination = support::engine(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    });
+    destination.set_frame_fed().unwrap();
+    destination.start(h.now);
+    let contracts = safe_cex_engine::test_support::prepared_actions(&mut destination, h.now)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    destination.handle(
+        h.now,
+        Event::HttpResponse {
+            request: contracts.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: MARKETS,
+            },
+        },
+    );
+    safe_cex_engine::test_support::prepared_actions(&mut destination, h.now);
+    destination.apply_frame(h.now, &frame, true).unwrap();
+    destination.handle(
+        h.now,
+        Event::Command(Command::AmendOrder {
+            command: 302,
+            id: ORDER_ID.into(),
+            price: Some(59100.),
+            amount: None,
+        }),
+    );
+    let outgoing = safe_cex_engine::test_support::prepared_actions(&mut destination, h.now);
+    assert!(
+        !outgoing.iter().any(|a| matches!(a, Action::Http(_))),
+        "a frame cannot invent a fresh local reference: {outgoing:?}"
+    );
+    assert!(
+        outgoing.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { error, .. })
+            if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.message.contains("reference stale"))),
+        "{outgoing:?}"
+    );
+
+    h.event(Event::Command(Command::AmendOrder {
+        command: 301,
+        id: ORDER_ID.into(),
+        price: Some(59100.),
+        amount: None,
+    }));
+    let edit = h.take("/trade/cancelReplace");
+    let body: serde_json::Value = serde_json::from_str(edit.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["reduceOnly"], true);
+    assert_eq!(body["workingType"], "CONTRACT_PRICE");
+    assert_eq!(body["stopPrice"].as_f64(), Some(59100.));
+    h.reply(edit.id,200,&serde_json::json!({"code":0,"data":{"cancelOrderId":ORDER_ID,"cancelResult":"SUCCESS","newOrderResult":"FAILED"}}).to_string());
+    let restore = h.take("/trade/order");
+    let body: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["stopPrice"].as_f64(), Some(59000.));
+    assert_eq!(body["quantity"].as_f64(), Some(0.1));
+    assert_eq!(body["positionId"].as_u64(), Some(8389765519993909001));
+    assert_eq!(body["reduceOnly"], true);
+    assert_eq!(body["priceProtect"], true);
+    assert_eq!(body["stopGuaranteed"], false);
+    assert_eq!(body["workingType"], "CONTRACT_PRICE");
+    h.reply(
+        restore.id,
+        200,
+        r#"{"code":0,"data":{"orderId":"555","status":"NEW"}}"#,
+    );
+    let error = &h
+        .failures
+        .iter()
+        .find(|(command, _)| *command == 301)
+        .unwrap()
+        .1;
+    assert_eq!(error.protection, Some(Protection::Restored), "{error:?}");
+}
+
+#[test]
+fn trigger_market_keeps_native_guarantee_flags_without_guessing_a_put_back() {
+    let orders = serde_json::json!({"code":0,"data":{"orders":[{
+        "orderId":ORDER_ID,"symbol":"BTC-USDT","type":"TRIGGER_MARKET","side":"SELL",
+        "status":"NEW","origQty":"0.1","executedQty":"0","stopPrice":"59000",
+        "positionSide":"BOTH","reduceOnly":true,"workingType":"CONTRACT_PRICE","stopGuaranteed":true
+    }]}})
+    .to_string();
+    let mut h = Harness::ready_with_orders(&orders);
+    h.event(Event::Command(Command::AmendOrder {
+        command: 303,
+        id: ORDER_ID.into(),
+        price: Some(59100.),
+        amount: None,
+    }));
+    let cancel = h.take("/trade/order");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(cancel.id,200,&serde_json::json!({"code":0,"data":{"orderId":ORDER_ID,"status":"CANCELED","executedQty":"0"}}).to_string());
+    let replacement = h.take("/trade/order");
+    assert_eq!(replacement.method, Method::Post);
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "TRIGGER_MARKET");
+    assert_eq!(body["stopGuaranteed"], true);
+    assert_eq!(body["workingType"], "CONTRACT_PRICE");
+    assert_eq!(body["reduceOnly"], true);
+    h.reply(
+        replacement.id,
+        200,
+        r#"{"code":110411,"msg":"would trigger"}"#,
+    );
+    assert_eq!(
+        h.failures
+            .iter()
+            .find(|(c, _)| *c == 303)
+            .unwrap()
+            .1
+            .protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.ends_with("/trade/order"))
+    );
+}

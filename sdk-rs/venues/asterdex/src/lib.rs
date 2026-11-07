@@ -26,6 +26,7 @@ use safe_cex_engine::socket_lifecycle::{
     Interest as SocketInterest, Invalidation, LifecycleEvent, MAX_FRAME_BYTES, SocketCapabilities,
     SocketError, TrafficPolicy,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CredentialSlot, Cx, ErrorKind, PublicFeedPolicy, Response, SocketChannel, SocketId,
     SubscriptionTopic, TimerId, Venue, VenueError, json, num,
@@ -699,6 +700,9 @@ impl AsterDex {
             let price = num::parse(&event.p);
             cx.store
                 .update_ticker(&event.s, |ticker| ticker.last = price);
+            if price.is_finite() && price > 0.0 {
+                cx.store.observe_ticker_fields(&event.s, 1 << 2);
+            }
         }
     }
 
@@ -778,9 +782,15 @@ fn is_partial_stream(stream: &str) -> bool {
 }
 
 fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
+    let last = event
+        .c
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(num::parse);
+    let observed = last.is_some_and(|price| price > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
-        if let Some(value) = event.c.as_deref().filter(|s| !s.is_empty()) {
-            ticker.last = num::parse(value);
+        if let Some(value) = last {
+            ticker.last = value;
         }
         if let Some(value) = event.percentage.as_deref().filter(|s| !s.is_empty()) {
             ticker.percentage = num::parse(value);
@@ -792,12 +802,21 @@ fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
             ticker.quote_volume = num::parse(value);
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 2);
+    }
 }
 
 fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
+    let mark = event
+        .p
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(num::parse);
+    let observed = mark.is_some_and(|price| price > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
-        if let Some(value) = event.p.as_deref().filter(|s| !s.is_empty()) {
-            ticker.mark = num::parse(value);
+        if let Some(value) = mark {
+            ticker.mark = value;
         }
         if let Some(value) = event.i.as_deref().filter(|s| !s.is_empty()) {
             ticker.index = num::parse(value);
@@ -809,6 +828,9 @@ fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
             ticker.funding_time = value;
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 3);
+    }
 }
 
 fn collect_interest(body: &str, output: &mut HashMap<String, f64>) {
@@ -922,6 +944,15 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
 }
 
 impl Venue for AsterDex {
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.stop_release_veto(store, pending, release)
+    }
+
     #[inline]
     fn managed_sockets() -> bool {
         true
@@ -951,6 +982,17 @@ impl Venue for AsterDex {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Signed(request) => Self::startup_reads(&request.pending),
+            Pending::ExchangeInfo { .. } => S::MARKETS,
+            Pending::Daily { .. } | Pending::OpenInterest { initial: true, .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             stp_controls: self.version == Version::V3,
@@ -1645,7 +1687,7 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
             format!(
                 "Aster skipped {} malformed {kind} row(s): {}",
                 skipped.len(),
-                skipped.join(", ")
+                skipped.join_with(", ")
             ),
         );
     }

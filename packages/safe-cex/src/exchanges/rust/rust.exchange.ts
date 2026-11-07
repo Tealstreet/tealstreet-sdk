@@ -289,10 +289,29 @@ export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngin
   loadWasmEngine = loader;
 };
 
-const synchronizedEngineTransport = (): Transport => ({
-  ...nativeTransport(),
-  now: () => virtualClock.getCurrentTimeMs(),
-});
+const synchronizedEngineTransport = (noteClockJump: (now: number, utc: number) => void): Transport => {
+  // Keep scheduling stable across clock corrections and clocks that stop in
+  // suspend. Clock reads only record a correction; EngineHost applies it later.
+  const origin = virtualClock.getCurrentTimeMs();
+  const started = performance.now();
+  let sampledMonotonic = started;
+  let sampledWall = Date.now();
+  return {
+    ...nativeTransport(),
+    now: () => {
+      const monotonic = performance.now();
+      const wall = Date.now();
+      const now = origin + (monotonic - started);
+      if (Number.isFinite(monotonic) && Number.isFinite(wall)) {
+        const divergence = (wall - sampledWall) - (monotonic - sampledMonotonic);
+        if (Math.abs(divergence) > 1_000) noteClockJump(now, virtualClock.getCurrentTimeMs());
+        sampledMonotonic = monotonic;
+        sampledWall = wall;
+      }
+      return now;
+    },
+  };
+};
 let engineTransport: (() => Transport) | undefined;
 /** Explicit hosts own their clock; omit the factory to restore the synchronized SDK default. */
 export const setRustEngineTransport = (factory?: () => Transport) => {
@@ -452,6 +471,17 @@ const LOADED_SECTIONS = [
   [LOADED_FLAG.BALANCE, 'balance'],
 ] as const;
 
+/** A source answers an orders ask on dispatch; its orders come in a later frame, within the refresh deadline. */
+const SOURCE_ORDERS_FRAME_DEADLINE_MS = 30_000;
+
+const sourceFrameHasOrders = (buffer: ArrayBuffer): boolean => {
+  try {
+    return Boolean(new Frame(buffer).orders());
+  } catch {
+    return false;
+  }
+};
+
 /** Frames whose clock samples estimate the data source's offset, and the change worth resetting it for. */
 const SOURCE_CLOCK_SAMPLES = 20;
 const SOURCE_CLOCK_STEP_MS = 25;
@@ -483,6 +513,7 @@ export class RustEngineExchange extends BaseExchange {
   private host?: EngineHostType;
   private readReconnectDiagnostics?: ReturnType<typeof createEngineTransport>['reconnectDiagnostics'];
   private engineNow = (): number => virtualClock.getCurrentTimeMs();
+  private utcNow = (): number => virtualClock.getCurrentTimeMs();
   private engineFailure?: Error;
   private publicFeedDisabled = false;
   /** Why a start that never finishes has not: a venue answer is not a slow connection. */
@@ -577,6 +608,7 @@ export class RustEngineExchange extends BaseExchange {
   }
   private hostInitialization?: Promise<void>;
   private startup?: Promise<void>;
+  private stopTimeSync?: () => void;
   private startupState: 'idle' | 'pending' | 'ready' | 'failed' = 'idle';
   private startupFailure?: Error;
   private readonly attemptedPlacementSymbols = new Set<string>();
@@ -1023,7 +1055,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private wooJournal = async (opts: Parameters<BaseExchange['fetchHistoricalPositions']>[0]) => {
-    const to = opts.to ?? this.engineNow();
+    const to = opts.to ?? this.utcNow();
     const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
     const orders = await this.fetchHistoricalOrders({ from, to });
     const records = wooOrdersToPositionRecords(orders, {
@@ -1186,6 +1218,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.sourceBaseline = true;
     host.flush();
+    if (this.sourceOrdersAwaited !== undefined && sourceFrameHasOrders(frame)) this.settleSourceOrders();
   };
 
   /**
@@ -1231,15 +1264,37 @@ export class RustEngineExchange extends BaseExchange {
     this.refreshSourceOrders(ask.symbols);
   };
 
+  /** Source order reads asked for and not yet answered: the held writes they settle are still open. */
+  private sourceOrderReads = 0;
+  /** An answered ask whose orders frame has not landed yet; the deadline stops a lost frame holding forever. */
+  private sourceOrdersAwaited: ReturnType<typeof setTimeout> | undefined;
+
   private refreshSourceOrders = (symbols?: string[]) => {
     if (this.isDisposed || this.engineFailure) return;
     const checks = this.sourceCancelChecks;
     this.sourceCancelChecks = [];
-    void this.refreshAccountOrders(symbols, checks.length ? checks : undefined).catch((error: unknown) => {
-      if (this.isDisposed) return;
-      const reason = error instanceof Error ? error.message : String(error);
-      this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
-    });
+    this.sourceOrderReads += 1;
+    void this.refreshAccountOrders(symbols, checks.length ? checks : undefined)
+      .then(
+        () => {
+          if (this.isDisposed) return;
+          clearTimeout(this.sourceOrdersAwaited);
+          this.sourceOrdersAwaited = setTimeout(this.settleSourceOrders, SOURCE_ORDERS_FRAME_DEADLINE_MS);
+        },
+        (error: unknown) => {
+          if (this.isDisposed) return;
+          const reason = error instanceof Error ? error.message : String(error);
+          this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
+        },
+      )
+      .finally(() => {
+        this.sourceOrderReads -= 1;
+      });
+  };
+
+  private settleSourceOrders = () => {
+    clearTimeout(this.sourceOrdersAwaited);
+    this.sourceOrdersAwaited = undefined;
   };
 
   /** Data source: send orders, for these symbols or the account, from a read sent after this call. */
@@ -1534,10 +1589,13 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = options;
     const publicDataOnly = this.isPublicDataOnly;
+    let pendingProtocolTime: { now: number; utc: number } | undefined;
     const routedTransport = createEngineTransport(
       this.name,
       options,
-      (transportFactory ?? synchronizedEngineTransport)(),
+      transportFactory ? transportFactory() : synchronizedEngineTransport((now, utc) => {
+        pendingProtocolTime = { now, utc };
+      }),
       this.signerSetup,
       (message) => this.emitAndLogError(message),
       (notice) => {
@@ -1617,6 +1675,7 @@ export class RustEngineExchange extends BaseExchange {
         lighterWsRoute: Boolean(options.tealstreetWsRoute),
         vault,
         hyperliquidBuilder,
+        hyperliquidFastBook: options.hyperliquidFastBook === true,
         enableSpotMarkets: Boolean(enableSpotMarkets),
         enableInverseMarkets: Boolean(options.enableInverseMarkets && !options.externalPublicData),
         enableOptionMarkets: Boolean(options.enableOptionMarkets),
@@ -1680,6 +1739,13 @@ export class RustEngineExchange extends BaseExchange {
         {
           commandTimeoutMs: this.commandTimeoutMs,
           ownsEngine: true,
+          ...(!transportFactory ? { protocolTime: () => {
+            // Sample only outside the HTTP handoff. now() itself never calls Rust.
+            transport.now();
+            const correction = pendingProtocolTime;
+            pendingProtocolTime = undefined;
+            return correction;
+          } } : {}),
           ...(this.signerSetup instanceof DelegatedSignerSetup
             ? { signer: this.signerSetup.signer, signerAlgorithms: this.signerSetup.signerAlgorithms }
             : {}),
@@ -1696,11 +1762,16 @@ export class RustEngineExchange extends BaseExchange {
     try {
       const capabilities = host.capabilities();
       this.adoptEngineCapabilities(capabilities);
+      if (!transportFactory) {
+        host.syncHostTime(virtualClock.getCurrentTimeMs());
+        this.stopTimeSync = virtualClock.subscribeToTimeSync((utc) => host.syncHostTime(utc));
+      }
     } catch (error) {
       host.dispose();
       throw error;
     }
     this.engineNow = () => transport.now();
+    if (transportFactory) this.utcNow = () => transport.now();
     this.host = host;
   };
 
@@ -1828,7 +1899,7 @@ export class RustEngineExchange extends BaseExchange {
       if (inert.has(method) || typeof members[method] !== 'function') continue;
       const local = members[method] as (...args: unknown[]) => Promise<unknown>;
       // An engine-owning instance calls straight through, keeping its own synchronous refusals.
-      members[method] = (...args: unknown[]) => {
+      const route = (...args: unknown[]) => {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
@@ -1858,7 +1929,44 @@ export class RustEngineExchange extends BaseExchange {
           },
         );
       };
+      members[method] = FRAME_FED_WRITES.has(method)
+        ? (...args: unknown[]) => this.trackWrite(() => route(...args))
+        : route;
     }
+  }
+
+  private writesInFlight = 0;
+
+  private trackWrite = <T>(send: () => Promise<T>): Promise<T> => {
+    this.writesInFlight += 1;
+    let sent: Promise<T>;
+    try {
+      sent = Promise.resolve(send());
+    } catch (error) {
+      this.writesInFlight -= 1;
+      throw error;
+    }
+    return sent.finally(() => {
+      this.writesInFlight -= 1;
+    });
+  };
+
+  /** A user write here has not answered, or an uncertain one still waits for its source's orders. */
+  get hasUnsettledWrites(): boolean {
+    return (
+      this.writesInFlight > 0 ||
+      this.sourceOrdersAsk !== undefined ||
+      this.sourceCancelChecks.length > 0 ||
+      this.sourceOrderReads > 0 ||
+      this.sourceOrdersAwaited !== undefined
+    );
+  }
+
+  /** The startup sections this engine applied from frames itself; carried or seeded rows never set these. */
+  get appliedSections(): Record<(typeof LOADED_SECTIONS)[number][1], boolean> {
+    const sections = {} as Record<(typeof LOADED_SECTIONS)[number][1], boolean>;
+    for (const [flag, name] of LOADED_SECTIONS) sections[name] = (this.nativeLoaded & flag) === flag;
+    return sections;
   }
 
   private receiveCommandProgress = (progress: CommandProgress) => {
@@ -1932,7 +2040,7 @@ export class RustEngineExchange extends BaseExchange {
           markErrorReported(error);
           this.dispose();
         },
-        sharedFeed.policy,
+        { ...sharedFeed.policy, observations: new Frame(this.host.snapshot()).tickerObservations?.() !== undefined },
       );
       try {
         await this.sharedPublicFeed.connect();
@@ -2080,6 +2188,7 @@ export class RustEngineExchange extends BaseExchange {
     // Refreshed on every symbol selection, and a read can refuse routinely (portfolio margin).
     try {
       await this.untilNativeData(LOADED_FLAG.MARKETS, 'markets');
+      if (this.isDisposed || !Object.hasOwn(this.store.marketsBySymbol, symbol)) return;
       if (capabilities.maxLeverage === 'query') {
         await this.fetchSymbolMaxLeverage(symbol);
         return;
@@ -2139,7 +2248,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.publicFeedObservers.size) {
       let publicChanged = catalogChanged;
       try {
-        publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas());
+        publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas() || frame.tickerObservations?.());
       } catch (error) {
         needsSnapshot = true;
         console.error('Engine public feed section failed', error);
@@ -2298,6 +2407,11 @@ export class RustEngineExchange extends BaseExchange {
       this.refreshSourceOrders(named.includes('') ? undefined : named);
     }
     this.emitter.emit('engine-event', event);
+    // Only an explicit clock-advice listener replaces the generic info log.
+    if (event.code === 'bybit.clock.corrected' && event.level === 'info' && this.emitter.hasListeners('clock-advice')) {
+      this.emitter.emit('clock-advice', event);
+      return;
+    }
     if (event.level === 'error')
       this.emitAndLogError(
         event.code === 'ws.public_unavailable'
@@ -2310,8 +2424,14 @@ export class RustEngineExchange extends BaseExchange {
           sentryTags: startupDiagnosticTags(event),
         },
       );
-    else if (event.level !== 'debug')
-      this.log(event.message, event.level === 'warn' ? LogSeverity.Warning : LogSeverity.Info, event);
+    else if (event.level !== 'debug') {
+      // Browser logging consumes the string, not the optional structured third argument.
+      const message =
+        event.code === 'bitget.account.mode' || event.code === 'bitget.close.diagnostic'
+          ? JSON.stringify(event)
+          : event.message;
+      this.log(message, event.level === 'warn' ? LogSeverity.Warning : LogSeverity.Info, event);
+    }
   };
 
   get socketHost() {
@@ -3201,7 +3321,7 @@ export class RustEngineExchange extends BaseExchange {
     const ready = this.writeCapabilitiesFor('scheduleCancel');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.scheduleCancel) throw new Error('scheduleCancel is unavailable for this venue');
-    if (time != null && time < this.engineNow() + 5_000)
+    if (time != null && time < this.utcNow() + 5_000)
       throw new Error('Hyperliquid scheduleCancel time must be at least 5 seconds in the future');
     await this.command({ op: 'scheduleCancel', ...(time == null ? {} : { time }) });
   };
@@ -3390,7 +3510,7 @@ export class RustEngineExchange extends BaseExchange {
    * under-counted history presented as complete is the failure the journal refuses.
    */
   private bybitJournal = async (opts: { account: string; from?: number; to?: number }) => {
-    const to = opts.to ?? this.engineNow();
+    const to = opts.to ?? this.utcNow();
     const from = opts.from ?? to - 7 * 24 * 60 * 60 * 1000;
     if (this.isPublicDataOnly) return [];
     const rows = await this.fetchClosedPositionRows({ from, to }, false);
@@ -3585,7 +3705,18 @@ export class RustEngineExchange extends BaseExchange {
 
   /** The engine re-sends the venue's subscribe for this live stream; a venue that cannot logs why. */
   repairOHLCV = (opts: Pick<OHLCVOptions, 'symbol' | 'interval'>) => {
-    if (!this.publicDemandReady || !this.candleListeners.has(`${opts.symbol}:${opts.interval}`)) return;
+    const unsent = !this.publicDemandReady
+      ? 'public data is not ready'
+      : !this.candleListeners.has(`${opts.symbol}:${opts.interval}`) && 'no candle listener';
+    if (unsent) {
+      this.log(`${this.name} candles ${opts.symbol} ${opts.interval} repair not sent: ${unsent}`, LogSeverity.Warning);
+      return;
+    }
+    // A shared-feed account holds no public topics; its source's socket carries the stream.
+    if (this.sharedPublicFeed) {
+      this.sharedPublicFeed.send({ op: 'repair', symbol: opts.symbol, interval: opts.interval });
+      return;
+    }
     this.subscriptionCommand({
       op: 'repairSubscription',
       topic: { kind: 'candles', symbol: opts.symbol, interval: opts.interval },
@@ -3603,9 +3734,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.stopTimeSync?.();
+    this.stopTimeSync = undefined;
     clearTimeout(this.sourceOrdersTimer);
     this.sourceOrdersTimer = undefined;
     this.sourceOrdersAsk = undefined;
+    this.settleSourceOrders();
     this.candleSource?.dispose();
     this.candleSource = undefined;
     this.algoControlWatch?.dispose();

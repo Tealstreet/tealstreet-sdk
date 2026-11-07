@@ -237,9 +237,9 @@ impl MexcFutures {
             params.extend([
                 (
                     "start_time",
-                    safe_cex_engine::num::format(cx.now - 89.0 * 86400000.0),
+                    safe_cex_engine::num::format(cx.protocol_now() - 89.0 * 86400000.0),
                 ),
-                ("end_time", safe_cex_engine::num::format(cx.now)),
+                ("end_time", safe_cex_engine::num::format(cx.protocol_now())),
             ]);
             params.push(if snapshot.scope == Scope::Plan {
                 ("states", "1".into())
@@ -1645,6 +1645,20 @@ impl MexcFutures {
         payload: String,
         pending: Pending,
     ) {
+        let pending = match pending {
+            Pending::Trade(request) if self.trading_is_protective(request.command) => {
+                self.queue_protective(cx, method, path, payload, request);
+                return;
+            }
+            pending => pending,
+        };
+        if let Pending::Trade(request) = &pending
+            && let Err(error) = self.protective_send_guard(cx, request)
+        {
+            let command = request.command;
+            self.trade_failed(cx, command, super::trading::protective_not_sent(error));
+            return;
+        }
         use safe_cex_engine::credential_selection::{CredentialRole, Slots};
         let slots = Slots::new(
             self.credentials.clone(),

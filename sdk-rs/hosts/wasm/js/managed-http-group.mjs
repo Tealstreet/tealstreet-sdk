@@ -24,7 +24,7 @@ export function bindGroup(manager, action, reason) {
       const { resource } = entries[i];
       if (member.packet) {
         resource.diagnostic = requestFailureFields(member.packet);
-        resource.bound = resource.prepared.bind({ ...member.packet, headers: Object.fromEntries(member.packet.headers), signal: resource.controller.signal });
+        resource.bound = resource.prepared.bind({ ...member.packet, readClass: resource.readClass, headers: Object.fromEntries(member.packet.headers), signal: resource.controller.signal });
         resource.phase = 'bound';
         resource.groupRequest = member.packet.request;
       }

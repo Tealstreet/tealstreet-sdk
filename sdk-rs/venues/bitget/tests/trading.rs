@@ -515,7 +515,7 @@ fn canceling_virtual_child_cancels_parent_and_tombstones_both_siblings() {
 #[test]
 fn classic_sized_stop_amend_zero_preserves_size() {
     let mut h = Harness::classic();
-    h.private_message(r#"{"arg":{"channel":"orders-algo"},"data":[{"orderId":"3","symbol":"BTCUSDT","size":"0.5","triggerPrice":"80","holdSide":"long","planType":"loss_plan","status":"live"}]}"#);
+    h.private_message(r#"{"arg":{"channel":"orders-algo"},"data":[{"orderId":"3","symbol":"BTCUSDT","size":"0.5","triggerPrice":"80","executePrice":"0","holdSide":"long","planType":"loss_plan","status":"live"}]}"#);
     h.command(Command::AmendOrder {
         command: 1,
         id: "3".into(),
@@ -967,6 +967,15 @@ fn retained_conditional_cancels_require_their_own_semantic_ack() {
                 assert_eq!(payload["symbol"], "BTCUSDT");
             }
             h.reply(cancel, 200, bad_ack);
+            if let Some(i) = h
+                .requests
+                .iter()
+                .position(|r| r.url.contains("orderId=retained-conditional"))
+            {
+                // A classic empty plan acknowledgement reads the plan back; still listed.
+                let confirm = h.requests.remove(i);
+                h.reply(confirm.id, 200, r#"{"code":"00000","data":{"entrustedList":[{"orderId":"retained-conditional","symbol":"BTCUSDT","planStatus":"live"}],"endId":"retained-conditional"}}"#);
+            }
             assert!(
                 h.done
                     .iter()
@@ -1362,7 +1371,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             r#"{"code":"429","msg":"Too Many Requests"}"#,
-            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
         ),
         // Ruled 2026-10-25: a 5xx write is the engine's unproven answer.
         (
@@ -1394,6 +1403,44 @@ fn write_failures_are_classified_without_changing_their_text() {
                 Some(Outcome::Rejected),
             ),
         ),
+        // The reduce-only position refusal, by its code, its text, or both;
+        // the text wins over an absent or different code, in any case.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available","errorCode":"40757"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"position","errorCode":"40757"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"not enough position is available.","errorCode":"40999"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            400,
+            r#"{"code":"40757","msg":"position"}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            400,
+            r#"{"code":"40999","msg":"Not enough position is available"}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        // The text never upgrades an unproven code to a refusal.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available","errorCode":"40010"}]}}"#,
+            (None, Some(Outcome::Unknown)),
+        ),
         // Per-row outcome change: a row coded with an unproven code (40010,
         // 40725, 45001) is now Unknown, where a code-less row was Rejected.
         (
@@ -1421,7 +1468,8 @@ fn write_failures_are_classified_without_changing_their_text() {
         );
         assert_eq!(h.done.last().unwrap().1, Err(error.legacy_text()));
         if status == 400 {
-            assert_eq!(error.venue_code.as_deref(), Some("40762"));
+            let own: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(error.venue_code.as_deref(), own["code"].as_str(), "{body}");
         }
     }
     // Transport loss on a write is Unknown.
@@ -1640,6 +1688,7 @@ fn a_nuke_account_cancel_on_classic_sends_the_product_wide_cancel_all() {
         "pos_profit",
         "pos_loss",
         "track_plan",
+        "moving_plan",
     ] {
         assert!(h.done.iter().all(|(id, _)| *id != 21), "{plan}");
         let (request, sent) = body(&mut h, "/api/v2/mix/order/cancel-plan-order");
@@ -1817,6 +1866,15 @@ fn whole_position_tp_and_sl_cancel_resolve_only_when_the_requested_id_is_acknowl
                     &json!({"code":"00000","data":{"successList":accepted,"failureList":failures}})
                         .to_string(),
                 );
+                if let Some(i) = h
+                    .requests
+                    .iter()
+                    .position(|r| r.url.contains("orderId=target-plan"))
+                {
+                    // An empty acknowledgement reads the plan back; still listed.
+                    let confirm = h.requests.remove(i);
+                    h.reply(confirm.id, 200, r#"{"code":"00000","data":{"entrustedList":[{"orderId":"target-plan","symbol":"BTCUSDT","planStatus":"live"}],"endId":"target-plan"}}"#);
+                }
                 let result = &h.done.iter().find(|(id, _)| *id == 92).unwrap().1;
                 let proven = matches!(
                     acknowledgement,

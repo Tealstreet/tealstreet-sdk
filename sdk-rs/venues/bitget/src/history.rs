@@ -7,6 +7,7 @@ use safe_cex_engine::request_context::{
     CommandEntryError, Context, Operation, Owner, Policy, RetryPolicy,
 };
 use safe_cex_engine::signing::Identity;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     CommandId, Cx, ErrorKind, HistoryDecodeReason, HistorySchema, Method, Query, Response, TimerId,
     VenueError, json::ArrayAt, num,
@@ -323,7 +324,7 @@ impl BitgetFutures {
         command: CommandId,
         query: Query,
     ) {
-        let windows = self.query_windows(&query, cx.now);
+        let windows = self.query_windows(&query, cx.protocol_now());
         let public = matches!(query, Query::PublicTrades { .. });
         let (credential, identity) = if windows.is_ok() && !public {
             self.read_selection(endpoint(&query, self.account.uta))
@@ -352,7 +353,7 @@ impl BitgetFutures {
                 return;
             }
         };
-        if !public && query_from(&query).is_some_and(|from| from < oldest_kept(cx.now)) {
+        if !public && query_from(&query).is_some_and(|from| from < oldest_kept(cx.protocol_now())) {
             completion.incomplete(
                 safe_cex_engine::history::IncompleteReason::RetentionLimit,
                 "Bitget keeps 90 days; the older part of this range was not read",
@@ -448,7 +449,7 @@ impl BitgetFutures {
                 .iter()
                 .map(|(k, v)| format!("{k}={}", sign::encode(v)))
                 .collect::<Vec<_>>()
-                .join("&")
+                .join_with("&")
         );
         let at = if r.uta && matches!(r.query, Query::Income { .. }) {
             ArrayAt::Path(&["data", "list"])
@@ -961,6 +962,9 @@ impl BitgetFutures {
             }
         };
         let cursor = cursor.filter(|_| r.page_count > 0);
+        let missing_orders_cursor = cursor.is_none()
+            && matches!(&r.query, Query::OrderHistory { limit, .. }
+                if r.page_count >= limit.unwrap_or(100).clamp(1, 100) as usize);
         r.page_count = 0;
         let admitted = (|| {
             let leg = r.leg.as_ref().expect("validated physical page");
@@ -983,6 +987,19 @@ impl BitgetFutures {
         }
         r.retries = 0;
         r.pages += 1;
+        if missing_orders_cursor {
+            let _ = r.rows.finish_with(
+                cx,
+                Err(VenueError::new(
+                    "Bitget full order-history page has no cursor",
+                )),
+                |mut rows| {
+                    rows.sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
+                    encode_rows(&rows)
+                },
+            );
+            return;
+        }
         if let Some(cursor) = cursor {
             if !r.cursors.insert(cursor.clone()) {
                 let _ = r.rows.reject(

@@ -99,7 +99,10 @@ What it captures:
 - `Log::error` conditions: drain and break-glass deadlines, router-lease
   fencing, a failing signer, and algo shutdown deadlines;
 - the native host's account start failures and venue, relay and HTTP-tunnel
-  transport failures, through `safe_cex_native::report`.
+  transport failures, through `safe_cex_native::report`. Each account's
+  transport is built `with_venue`, so its failures carry `venue` beside `kind`
+  and `target` (host and route, never a URL). The shared HTTP-tunnel socket
+  pool serves many venues and reports none.
 
 Warnings are not sent.
 
@@ -344,7 +347,8 @@ untracked users return 503 without changing inventory. Expiry uses both wall-clo
 `POST /admin/router-lease/summary` accepts an empty body or `{}` under the
 same on-box admin guard. It returns only
 `{routerBoxId, enforced, enableGraceUntil, capacity, remaining, trackedUsers,
-fencedUsers, wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+fencedUsers, wouldFenceUsers, liveWouldFenceUsers, liveUsersWithoutLease, checkedAt}`;
+no user or account IDs.
 `capacity` stays 4096; `remaining` is capacity minus the same snapshot's
 `trackedUsers`. Inventory holds distinct users for the process lifetime, not
 just active users: accepted epoch/sequence high-water marks are never evicted.
@@ -355,7 +359,10 @@ future authenticated router retirement watermark; expiry alone is insufficient.
 wall-clock and monotonic expiry, independently of shadow/enforcement mode.
 `fencedUsers` counts the per-user actual `fenced` flag. Hosted users with private
 accounts (including parked accounts) or authenticated sockets are deduplicated;
-those with no lease record count as `liveUsersWithoutLease`. Pending authenticated
+those with no lease record count as `liveUsersWithoutLease`, and those whose record
+has `wouldFence` count as `liveWouldFenceUsers`. `wouldFenceUsers` still counts every
+tracked record, so `wouldFenceUsers - liveWouldFenceUsers` is departed users: a user
+who moved home to the other box keeps an expired record here. Pending authenticated
 upgrade reservations count as sockets. Anonymous public data and drain latches
 alone do not count as hosted activity. Reading the summary never creates lease
 records for absent users. `enableGraceUntil` is the active explicit enable-grace
@@ -363,7 +370,8 @@ deadline only while enforcement is on, otherwise null. It uses the same
 absolute/monotonic expiry predicate as the heartbeat ACK and never grants grace
 on restart. Without an explicit active deadline, ungranted tracked users count
 as fenced immediately in enforcement mode. Operators gate enabling on both boxes reporting
-`wouldFenceUsers == 0 && liveUsersWithoutLease == 0`. This is a current-state
+`liveUsersWithoutLease == 0 && liveWouldFenceUsers == 0`; departed records alone do not
+block it. This is a current-state
 snapshot, not an admission latch or takeover proof.
 
 ### Rollout and recovery
@@ -474,6 +482,15 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
 - **Token check:** `proxyToken` is an RS256 JWT, verified with today's `PROXY_PUBLIC_KEY`. That key is copied verbatim into `src/auth.rs`.
 - **Claims:** it needs a nonempty string `userId` claim and an unexpired `exp`.
   - Once verified, the `userId` binds both the socket and any resume.
+  - Optional `chatHandle` is the authenticated user's `chat_users.username`,
+    supplied by NX when minting the signed proxy JWT. Only 1–32 ASCII letters,
+    digits, `_` and `-` are retained; absent, non-string or invalid values fall
+    back to the tag alone without refusing the token. No email/name fallback.
+  - Session-start and existing engine account labels append `chat=<handle>` to
+    the existing 12-hex user tag. The handle grants no access and never replaces
+    `userId`, `user_tag`, account keys, routing or resume ownership. Browser init
+    fields and query parameters cannot set it. Existing account labels retain
+    their build-time value; the session-start line maps each fresh token's handle.
   - At `exp + 30s` the socket closes with 1008. That 30s is the same reconnect grace as `PROXY_TOKEN_RECONNECT_GRACE_MS`.
 - **Use of the token:** it is also the per-socket proxy token behind the account's `ProxyTokenProvider` (see Routing). It is never logged.
 - **Unauthenticated sockets:** they may only `init` the public pseudo-account `__pub_bybit`.

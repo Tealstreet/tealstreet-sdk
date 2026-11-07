@@ -39,6 +39,14 @@ impl Venue for Probe {
     fn http_release() -> safe_cex_engine::HttpRelease<Self> {
         safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.inner.http_release_veto(store, pending, release)
+    }
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         self.inner.http_pacing()
     }
@@ -1961,26 +1969,35 @@ fn a_price_only_amend_of_a_partly_filled_order_sends_what_is_left() {
 }
 
 #[test]
-fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
+fn a_partial_stop_replacement_refusal_names_the_removed_protection() {
     let (mut e, socket) = boot();
-    e.handle(1500., Event::WsMessage { socket, text: r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"# });
+    let state = support::STATE.replace("\"szi\":\"2\"", "\"szi\":\"-10\"");
+    e.handle(1400.,Event::WsMessage {socket,text:&format!(r#"{{"channel":"clearinghouseState","data":{{"user":"0x14791697260e4c9a71f18484c9f997b308e59325","dex":"","clearinghouseState":{state}}}}}"#)});
+    let row = json!({"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Stop Market","triggerPx":"110","reduceOnly":true,"isTrigger":true});
+    e.handle(
+        1500.,
+        Event::WsMessage {
+            socket,
+            text: &json!({"channel":"orderUpdates","data":[{"order":row,"status":"open"}]})
+                .to_string(),
+        },
+    );
     e.drain_actions().for_each(drop);
-    e.store_mut().update_order("9", |row| {
-        row.kind = safe_cex_engine::model::OrderType::StopLoss;
-    });
-    let symbol = e.store().order("9").unwrap().symbol.clone();
     let amended = command(
         &mut e,
         NOW,
         Command::AmendOrder {
             command: OWNER,
             id: "9".into(),
-            // A buy stop must pass the local mark guard before testing venue refusal.
             price: Some(115.),
             amount: None,
         },
     );
-    let amended = answer_amend_read(&mut e, &amended, &status_body("10", "6", "open"));
+    let amended = answer_amend_read(
+        &mut e,
+        &amended,
+        &json!({"status":"order","order":{"order":row,"status":"open"}}).to_string(),
+    );
     let cancel = native_release(&mut e, &amended);
     respond(
         &mut e,
@@ -1989,33 +2006,40 @@ fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
         200,
         r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
     );
-    let settled: Vec<_> = e.drain_actions().collect();
-    let paced = prepare_for_pacing(&mut e, NOW + 1., &settled);
+    let a: Vec<_> = e.drain_actions().collect();
+    let paced = prepare_for_pacing(&mut e, NOW + 1., &a);
     let (timer, at) = paced
         .iter()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if *at_ms > NOW + 1. => Some((*timer, *at_ms)),
             _ => None,
         })
-        .expect("same-owner replacement pacing");
+        .unwrap();
     e.handle(at, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
-    let replacement = native_release_at(&mut e, at, &actions);
+    let a: Vec<_> = e.drain_actions().collect();
+    let replacement = native_release_at(&mut e, at, &a);
     respond(
         &mut e,
         at + 1.,
         &replacement,
         200,
-        &statuses_reply("Order would trigger immediately"),
+        &statuses_reply("Invalid TP/SL price."),
     );
-    let settled: Vec<_> = e.drain_actions().collect();
-    let result = results(&settled, OWNER);
+    let a: Vec<_> = e.drain_actions().collect();
+    let result = results(&a, OWNER);
+    assert_eq!(result.len(), 1);
     let error = result[0].as_ref().unwrap_err();
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
     assert!(
-        error.message.contains(&symbol) && error.message.contains("no stop"),
+        error.message.contains("stop removed") && error.message.contains("please re-place"),
         "{}",
         error.message
     );
+    assert!(e.store().order("9").is_none());
+    no_trade(&a);
 }
 
 #[test]
@@ -2284,6 +2308,23 @@ fn a_failed_read_refuses_the_amend_and_cancels_nothing() {
     assert_eq!(
         result[0].as_ref().unwrap_err().outcome,
         Some(Outcome::NotSent)
+    );
+    // The failure names the amend read, so a report shows which read did not answer.
+    let kinds: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "request.failed" => {
+                event.fields.iter().find(|(name, _)| *name == "readKind")
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![&(
+            "readKind",
+            safe_cex_engine::log::Value::Str("amendSource".into())
+        )]
     );
 }
 

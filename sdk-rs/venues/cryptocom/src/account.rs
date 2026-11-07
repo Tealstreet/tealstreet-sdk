@@ -1011,7 +1011,7 @@ impl Cryptocom {
                     self.message_id,
                     quoted("subscribe"),
                     serde_json::to_string(&channels).unwrap(),
-                    cx.now as u64
+                    cx.protocol_now() as u64
                 ),
             );
             self.reconcile(cx);
@@ -1168,5 +1168,16 @@ impl Cryptocom {
             _ => {}
         }
         Ok(())
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.read {
+            Read::Balance => S::BALANCE,
+            Read::Positions => S::POSITIONS,
+            Read::Orders | Read::AdvancedOrders => S::ORDERS,
+        }
     }
 }

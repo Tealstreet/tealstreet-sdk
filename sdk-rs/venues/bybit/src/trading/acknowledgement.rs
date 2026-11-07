@@ -3,6 +3,7 @@
 //! matched to the request by echo, never by position alone. A shape this module
 //! rejects is a malformed acknowledgement: the engine records it as unproven.
 use safe_cex_engine::classify::decode_int;
+use safe_cex_engine::text::JoinWith;
 use serde_json::value::RawValue;
 
 /// Rows a batch acknowledgement may carry; larger answers are malformed.
@@ -158,6 +159,22 @@ fn object(raw: &RawValue) -> Result<Fields<'_>, Malformed> {
         return Err(Malformed);
     }
     serde_json::from_str(raw.get()).map_err(|_| Malformed)
+}
+
+/// Trading-stop returns an empty result, without per-order echoes or statuses.
+pub(crate) fn position_setting(
+    result: Option<&RawValue>,
+    ext: Option<&RawValue>,
+) -> Result<(), Malformed> {
+    if !object(result.ok_or(Malformed)?)?.0.is_empty() {
+        return Err(Malformed);
+    }
+    if let Some(ext) = ext
+        && !object(ext)?.0.is_empty()
+    {
+        return Err(Malformed);
+    }
+    Ok(())
 }
 
 /// A bounded array of raw elements.
@@ -422,7 +439,7 @@ fn child_diagnostic(
     }
     format!(
         "children=[{}]; omitted={}",
-        children.join(";"),
+        children.join_with(";"),
         total.saturating_sub(DIAGNOSTIC_CHILDREN)
     )
 }
@@ -627,7 +644,7 @@ pub(crate) fn cancel_diagnostic(
         order_ids.len(),
         results.as_ref().map_or(0, Vec::len),
         statuses.as_ref().map_or(0, Vec::len),
-        failure_codes.join(","),
+        failure_codes.join_with(","),
         echoed_targets.iter().filter(|count| **count > 1).count(),
         native_ids - target_matches,
     );
@@ -753,6 +770,36 @@ pub(crate) fn cancelled_all(result: Option<&RawValue>) -> Result<Vec<String>, Ma
     Ok(ids)
 }
 
+/// A whole amend refusal that provably names nothing but `order_id`: `result` absent
+/// or holding only that `orderId` and a text `orderLinkId`; `retExtInfo` absent or
+/// holding only an empty `list`. Duplicate, mistyped or unknown fields are malformed.
+pub(crate) fn clean_amend_refusal(
+    result: Option<&RawValue>,
+    ext: Option<&RawValue>,
+    order_id: &str,
+) -> Result<(), Malformed> {
+    if let Some(result) = result {
+        let fields = object(result)?;
+        for (key, _) in &fields.0 {
+            match key.as_str() {
+                "orderId" if fields.text("orderId")?.as_deref() == Some(order_id) => {}
+                "orderLinkId" if fields.text("orderLinkId")?.is_some() => {}
+                _ => return Err(Malformed),
+            }
+        }
+    }
+    if let Some(ext) = ext {
+        let fields = object(ext)?;
+        for (key, _) in &fields.0 {
+            match key.as_str() {
+                "list" if elements(fields.required("list")?)?.is_empty() => {}
+                _ => return Err(Malformed),
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Bounded native IDs a malformed or contradictory answer carried, as
 /// reconciliation evidence only: the `result` object's own ID or every row of
 /// its list, and nothing at all when any row is not a well-formed object.
@@ -793,7 +840,7 @@ pub(crate) fn margin_reasons(result: Option<&RawValue>) -> Option<String> {
         .into_iter()
         .filter_map(non_empty)
         .collect();
-    (!text.is_empty()).then(|| text.join(", "))
+    (!text.is_empty()).then(|| text.join_with(", "))
 }
 
 /// `/v5/account/set-margin-mode`: `true` is proven success (no reasons). A

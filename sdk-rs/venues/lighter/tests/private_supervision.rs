@@ -239,6 +239,25 @@ impl Rig {
     }
 }
 
+/// Legacy pinged a read-only private socket every 20 s; a direct one every 10 s.
+#[test]
+fn a_read_only_private_socket_pings_every_twenty_seconds() {
+    for (failures, expected) in [(0, 6), (3, 3)] {
+        let mut rig = Rig::new();
+        for _ in 0..failures {
+            rig.fail_before_open(1006);
+        }
+        let socket = rig.socket;
+        rig.open();
+        let actions = rig.advance(rig.now + 60_500.0);
+        let pings = sent(&actions, socket)
+            .iter()
+            .filter(|t| t.contains(r#""type":"ping""#))
+            .count();
+        assert_eq!(pings, expected, "after {failures} failures");
+    }
+}
+
 /// Legacy lighter.ws-private.ts: three early 1006/1008 failures on the direct route.
 #[test]
 fn three_early_failures_on_the_direct_route_reconnect_read_only() {

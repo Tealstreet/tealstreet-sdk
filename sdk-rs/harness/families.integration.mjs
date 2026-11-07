@@ -9,6 +9,7 @@ import { wasmBudgetError } from './wasm-budget.mjs';
 import { checkAdvertisedCommands, constructionProfiles } from './capability-conformance.mjs';
 import { checkHyperliquidLocalSigning } from './hyperliquid-local-signing.mjs';
 import { checkParadexLocalSigning } from './paradex-local-signing.mjs';
+import { checkLighterModifySigning } from './lighter-modify-signing.mjs';
 
 const pkg = new URL('../hosts/wasm/pkg/', import.meta.url);
 const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.url), 'utf8')
@@ -38,6 +39,7 @@ for (const family of selectedFamilies) {
       await checkHyperliquidLocalSigning(engine.WasmEngine, true);
     }
     if (family === 'paradex') await checkParadexLocalSigning(engine.WasmEngine);
+    if (family === 'lighter') await checkLighterModifySigning(engine.WasmEngine);
     if (family === 'apexomni') {
       const corpus = JSON.parse(readFileSync(new URL('../crypto/tests/fixtures/zklink/npm-wasm.json', import.meta.url)));
       const seed = corpus.cases[0].seed;

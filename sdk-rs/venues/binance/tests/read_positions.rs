@@ -73,7 +73,7 @@ fn pm() -> Harness {
     h.respond(PM, 200, USDM_RISK);
     h.respond("/papi/v1/balance", 200, PM_BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, "[]");
-    h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
     for path in ["/public/ws", "/market/ws", "/pm/ws"] {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
@@ -109,6 +109,7 @@ fn coinm() -> Harness {
     h.respond(COIN, 200, COIN_RISK);
     h.respond("/dapi/v1/account",200,r#"{"assets":[{"asset":"BTC","walletBalance":"1","availableBalance":"0.8","initialMargin":"0.1","unrealizedProfit":"0.01"}]}"#);
     h.respond("/dapi/v1/openOrders", 200, "[]");
+    h.respond("/dapi/v1/openAlgoOrders", 200, "[]");
     let private = h.socket("/ws/coin-key").unwrap();
     h.event(Event::WsOpened { socket: private });
     h.answer_open_position_read();

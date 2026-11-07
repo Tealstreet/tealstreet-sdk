@@ -36,6 +36,13 @@ pub struct ErrorReport<'a> {
     /// The engine's error kind and the venue's code, for a start failure.
     pub error_kind: Option<&'a str>,
     pub venue_code: Option<&'a str>,
+    /// The venue a transport serves, when its host named one (`with_venue`).
+    pub venue: Option<&'a str>,
+    /// For a start failure: the first startup section not yet loaded when it
+    /// failed (what had not loaded, never which read failed), and whether the
+    /// venue refused a bootstrap read over the key.
+    pub startup_unloaded: Option<&'static str>,
+    pub startup_refused: Option<bool>,
 }
 
 static SINK: OnceLock<fn(&ErrorReport<'_>)> = OnceLock::new();

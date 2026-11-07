@@ -34,11 +34,14 @@ export interface HttpPacket {
   request?: number;
   method: string;
   route?: 'direct' | 'publicCors' | 'primary' | 'secondary';
+  requestClass?: 'discovery' | 'orderRead' | 'orderWrite' | 'history' | 'read';
   /** Remaining original lifecycle timeout, never renewed by binding. */
   timeoutMs?: number;
   url: string;
   headers: Record<string, string>;
   body?: string;
+  /** Native admission hint; never sent as an HTTP header or payload field. */
+  readClass?: 'normal' | 'critical' | 'reconciliation' | 'bulk';
   signal?: AbortSignal;
 }
 export interface PreparedHttp {
@@ -311,7 +314,7 @@ export interface SignResult {
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
-  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' };
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'kucoin-batch' };
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
@@ -337,6 +340,10 @@ export interface SignMeta {
 export type Signer = (request: SignRequest, context: { signal: AbortSignal; meta?: SignMeta }) => Promise<SignResult> | SignResult;
 
 export interface EngineHostOptions {
+  /** Drain a newly observed protocol clock correction at a host entry, outside
+   * physical HTTP handoffs. Must only sample/drain data, never call the engine.
+   * A refused correction stays pending in the host until a later successful entry. */
+  protocolTime?: () => { now: number; utc: number } | undefined;
   /** Transfer raw engine allocation ownership after successful construction.
    * Defaults false; borrowed callers dispose the host, then free their engine.
    * Trap cleanup is best effort. */
@@ -453,6 +460,7 @@ export interface WasmEngineLike {
   health?(): string;
   /** JSON of the venue's capability record. */
   capabilities(): string;
+  syncHostTime?(now: number, utc: number): boolean;
   start(now: number): string;
   command(json: string, now: number): string;
   /** `algos` builds: `now` is the engine clock, `wall` epoch ms. */
@@ -494,6 +502,7 @@ export interface WasmEngineLike {
   addressSetupRetired?(token: string, now: number): string;
   /** Optional engine ownership export; invalid or absent data retains the legacy context. */
   signMeta?(attempt: number): string | undefined;
+  httpReadClass?(request: number): 0 | 1 | 2 | 3;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
@@ -530,7 +539,7 @@ export class EngineHost {
   hostedSigning(input: HostedSigningInput): Promise<HostedSigningOutput>;
   /** Device answer for a keyless server's wallet ws-auth request, signed by the
    * local provider; refuses an injected signer. Returns the `0x` hex result. */
-  hostedWalletSigning(input: { toSign: string; outputFormat: 'hyperliquid-l1' | 'hyperliquid-address' | 'lighter-tx' | 'paradex-stark' | 'paradex-public' }): string;
+  hostedWalletSigning(input: { toSign: string; outputFormat: 'grvt-order' | 'grvt-address' | 'hyperliquid-l1' | 'hyperliquid-address' | 'lighter-tx' | 'paradex-stark' | 'paradex-public' }): string;
   /** Resolves with the command's result for commands that report one. */
   command(command: { op: string; [field: string]: unknown }, options?: CommandOptions): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */
@@ -538,6 +547,7 @@ export class EngineHost {
   /** Apply one data-source frame to a `frameFed` engine; a snapshot resets its account state first. */
   applyFrame(frame: ArrayBuffer | Uint8Array, snapshot: boolean): void;
   /** A `frameFed` engine's data-source clock minus this host's, in ms. */
+  syncHostTime(utc: number, observedNow?: number): void;
   setSourceClockOffset(offsetMs: number | undefined): void;
   snapshot(): ArrayBuffer;
   accountSnapshot(): ArrayBuffer;

@@ -42,6 +42,7 @@ const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as Exch
       }),
     );
   const engine = {
+    syncHostTime: () => true,
     capabilities: () => engineCapabilities(venue),
     construction: () => JSON.stringify({ frameFed, canSign: true, publicDataOnly: false }),
     start: () => {
@@ -580,6 +581,42 @@ describe('frame-fed main-thread mirror', () => {
     ]);
   });
 
+  // 19pt8s: a source answers an orders ask on dispatch; the hold lifts with the orders frame after it.
+  describe('a source orders read', () => {
+    const asked = async () => {
+      const fake = fakeEngine();
+      exchange = mirrorWith(fake).exchange;
+      await exchange.frameFedReady;
+      exchange.ingestSourceFrame(consumerFrame({ markets: [] }), true);
+      (exchange as unknown as { refreshSourceOrders: (symbols?: string[]) => void }).refreshSourceOrders(['BTCUSDT']);
+      await vi.waitFor(() => expect((exchange as unknown as { sourceOrderReads: number }).sourceOrderReads).toBe(0));
+      return exchange;
+    };
+
+    it('stays unsettled past its answer until a frame carrying orders lands', async () => {
+      const mirror = await asked();
+      expect(mirror.hasUnsettledWrites).toBe(true);
+      mirror.ingestSourceFrame(consumerFrame({ tickers: [] }), false);
+      expect(mirror.hasUnsettledWrites).toBe(true);
+      mirror.ingestSourceFrame(consumerFrame({ orders: [] }), false);
+      expect(mirror.hasUnsettledWrites).toBe(false);
+    });
+
+    it('settles at the refresh deadline when no orders frame comes', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const mirror = await asked();
+        expect(mirror.hasUnsettledWrites).toBe(true);
+        vi.advanceTimersByTime(29_000);
+        expect(mirror.hasUnsettledWrites).toBe(true);
+        vi.advanceTimersByTime(1_000);
+        expect(mirror.hasUnsettledWrites).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('drops source deltas until a snapshot, then ingests in order', async () => {
     const fake = fakeEngine();
     exchange = mirrorWith(fake).exchange;
@@ -611,6 +648,8 @@ describe('frame-fed main-thread mirror', () => {
   });
 
   it("measures its data source's clock from the frames it ingests", async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     const fake = fakeEngine();
     exchange = mirrorWith(fake).exchange;
     await exchange.frameFedReady;

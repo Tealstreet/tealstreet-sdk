@@ -16,6 +16,7 @@ struct Feed {
     feed: Option<FeedId>,
     retired: Vec<RetireReason>,
     sent: Vec<String>,
+    delivered: usize,
 }
 
 fn policy() -> FeedPolicy {
@@ -52,6 +53,8 @@ impl Venue for Feed {
     fn socket_control(&self, _: &Store, _: FeedId, _: bool, text: &str) -> Control {
         if text == "pong" {
             Control::Pong
+        } else if text.starts_with("account") {
+            Control::Unwatched
         } else {
             Control::Other
         }
@@ -95,7 +98,9 @@ impl Venue for Feed {
         Some((self.feed?, "tick.BTC".into()))
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {
+        self.delivered += 1;
+    }
     fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
     fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
     fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
@@ -215,6 +220,22 @@ fn a_socket_answering_pings_but_carrying_no_data_is_reconnected() {
     assert_eq!(h.silent_retirements(), 1, "{:?}", h.engine.venue.retired);
     h.advance(70_000.);
     assert_eq!(h.connects, 2, "the silent socket was redialled");
+}
+
+#[test]
+fn unwatched_traffic_is_delivered_but_never_proves_the_streams_alive() {
+    let mut h = Harness::subscribed(&["tick.BTC"]);
+    h.message("tick.BTC 100");
+    for second in (10..=50).step_by(10) {
+        h.advance(f64::from(second) * 1_000.);
+        h.message("account BTC position");
+    }
+    h.advance(62_000.);
+    assert_eq!(
+        h.engine.venue.delivered, 6,
+        "account frames still reach the venue"
+    );
+    assert_eq!(h.silent_retirements(), 1, "{:?}", h.engine.venue.retired);
 }
 
 #[test]

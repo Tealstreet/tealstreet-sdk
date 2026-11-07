@@ -176,7 +176,8 @@ impl Woo {
             .filter(|_| method == Method::Get);
         let key = read.map_or(key.as_str(), |r| r.key.as_str());
         let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
-        let request = sign::request(key, secret, cx.now, method, path, &params, body);
+        let utc = cx.protocol_now();
+        let request = sign::request(key, secret, utc, method, path, &params, body);
         let url = if request.path.starts_with("https://") {
             request.path
         } else {
@@ -503,7 +504,8 @@ impl Woo {
         }
         let size = limit.unwrap_or(500).clamp(1, 1000);
         let ms = interval.ms();
-        let recent = (((cx.now / ms).floor() * ms - to.unwrap_or(0.0)).abs() / ms) < 100.0;
+        let recent =
+            (((cx.protocol_now() / ms).floor() * ms - to.unwrap_or(0.0)).abs() / ms) < 100.0;
         let (mut url, at) = if recent {
             (
                 format!(
@@ -548,6 +550,9 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn http_plans() -> bool {
+        false
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -560,6 +565,15 @@ impl Venue for Woo {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Seed(read) => read.startup_sections(),
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::WooOrders,
@@ -762,7 +776,7 @@ impl Venue for Woo {
                 mut rows,
                 bad,
             } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 {
                     let result: Result<String, String> = if bad {
                         Err("Invalid WOO candle page".into())
@@ -911,10 +925,10 @@ impl Venue for Woo {
         reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Seed(read) => self.seed_precommit_failed(cx, *read, reason, error),
             other => self.on_sign_error(cx, other, error),
-        }
+        });
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {

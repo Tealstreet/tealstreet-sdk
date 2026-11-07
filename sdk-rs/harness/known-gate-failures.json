@@ -146,7 +146,7 @@
   "failures": [
     {
       "venue": "apexomni",
-      "tapeSha256": "92aeb5da0edbc708b87b262f0fe646935306ad040a5a41233ba38d8e3520ba09",
+      "tapeSha256": "d851f4fbe8ee28b264d7e949b44de4bfc50e4dbf755cb3314eef02a177922eaf",
       "tape": "sdk-rs/harness/tapes/apexomni-private.jsonl",
       "diagnostics": [
         {
@@ -1247,7 +1247,7 @@
     },
     {
       "venue": "binanceinverse",
-      "tapeSha256": "a0a35640cbdb5fdd8f43a14188cc4113290683b1e625e131f6da0e9b8b38f94b",
+      "tapeSha256": "2e29220370a438c5424ffcacff131bfbd7dc6dfafc1aede4bf2f476edf608d91",
       "tape": "sdk-rs/harness/tapes/binanceinverse-private.jsonl",
       "diagnostics": [
         {
@@ -1308,7 +1308,7 @@
     },
     {
       "venue": "binancepm",
-      "tapeSha256": "aef98183e725ca464ac67b55e40ee27f826d785a705a6dbb728e4717d5b853b1",
+      "tapeSha256": "c37534b929ea81c1959f2eb8f585f6305f34c43a03bb7a3bb5107f7319083bda",
       "tape": "sdk-rs/harness/tapes/binancepm-private.jsonl",
       "diagnostics": [
         {
@@ -17591,19 +17591,6 @@
           "keys": [
             "checkpoint 0 account.positions.length",
             "checkpoint 0 account.positions[1]"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "hyrotrader",
-      "tapeSha256": "3b8707627d73033b373751308e10655a8a9c70363e03ec1a43f1c820cfdbc6e0",
-      "tape": "sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz",
-      "diagnostics": [
-        {
-          "divergence": "Seven interleaved pairs did not establish the required 10% improvement; retain the observed performance failure, including if a later sample passes.",
-          "keys": [
-            "performance steady-state CPU: Rust must be at least 10% below TS"
           ]
         }
       ]
@@ -36320,19 +36307,6 @@
     },
     {
       "venue": "kucoin",
-      "tapeSha256": "2bab19c1b1e616e2ab5005d12d0261ec7f5cb23afc45c0ede8a01d0f0f733c43",
-      "tape": "sdk-rs/harness/fixtures/kucoin-public.jsonl.gz",
-      "diagnostics": [
-        {
-          "divergence": "Raw book seed/depth differs at this boundary; final tape-derived book corrections do not erase interim differences.",
-          "keys": [
-            "checkpoint 0 books.ETHUSDT"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "kucoin",
       "tapeSha256": "7271b023a3dfbb91dc2a5d8e0223d6fca801e664ac3654bb060d62f37919628b",
       "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
       "diagnostics": [
@@ -39737,7 +39711,7 @@
     },
     {
       "venue": "okx",
-      "tapeSha256": "bd0a74076e742e252227923bd8c23dfb3febf93b5b302c46a4a27b831ba73489",
+      "tapeSha256": "74a118f8e887d45e9d4dc243cf48cbaf5b3a829fe553b4091073ca30bb7bed1c",
       "tape": "sdk-rs/harness/tapes/okx-private.jsonl",
       "diagnostics": [
         {
@@ -39993,7 +39967,7 @@
     },
     {
       "venue": "okxdemo",
-      "tapeSha256": "4fba7373abdab9574b2ac95b8e9b47945147636888192aae70867c083dba2dc1",
+      "tapeSha256": "9185854cc09dbad9b9142b3e5b15812b66813e4e413caa84467bf864807149af",
       "tape": "sdk-rs/harness/tapes/okxdemo-private.jsonl",
       "diagnostics": [
         {
@@ -40249,7 +40223,7 @@
     },
     {
       "venue": "okxeu",
-      "tapeSha256": "e5e22bb3d8e5a5a50bfee63416dc691403e0be87460d0dab2e7fffa6d6f024c3",
+      "tapeSha256": "16a59dcbb227ea25238e7708803b49c8b87e26ca6863d1de9a7a6dfce3851ea9",
       "tape": "sdk-rs/harness/tapes/okxeu-private.jsonl",
       "diagnostics": [
         {
@@ -40663,7 +40637,7 @@
     },
     {
       "venue": "okxeudemo",
-      "tapeSha256": "3230f647ad0c24e4fe69e74fcf343b92859e308e485814172167d7d315efd060",
+      "tapeSha256": "1e3d0e42eaf44165351a876997b0894d25655d2fa031aabd46c6e5a693a7eb78",
       "tape": "sdk-rs/harness/tapes/okxeudemo-private.jsonl",
       "diagnostics": [
         {

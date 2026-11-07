@@ -6,8 +6,8 @@ import { parseArgs } from 'node:util';
 
 // Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
-// total package size; Sam raised the combined ceiling to 16 MiB on 2026-10-27.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_216 });
+// total package size; Sam raised the combined ceiling to 17 MiB on 2026-11-06 after #3140 measured 16,778,652 B.
+export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_792 });
 // #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB);
 // #2224 serial call pacing: CI 1,482,920, +1 KiB under the 2 KiB shared-code rule.
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
@@ -145,40 +145,118 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #3073 run 41931095253 measured bitget and bitgetusdc 2,334,811 B.
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB; siblings equal.
 // #3094 run 42062090938 measured bybit 2,214,254 B; CI size plus 10 KiB rounded up to the KiB.
-// #3111 run 42096897919 measured hyperliquid and hyperliquidspot 2,106,939 B; CI + 10 KiB rounded up, siblings equal.
+// #3106 run 42097859473, job 127493304972: hyperliquid 2,108,435 B at 8d94727188a.
+// CI size plus 10 KiB rounded up to the KiB; hyperliquidspot shares the family cap.
+// #2314 Lighter managed sockets: job 127434185656 measured lighter 2,034,142 B;
+// CI size plus 10 KiB rounded up to the KiB, lighter-robinhood equal to lighter.
+// #3118 run 42112075305 measured asterdex 2,139,837 B; CI size plus 10 KiB, rounded up to the KiB.
+// #3114 run 42104530272 measured hyperliquid 2,106,596 B: a single-venue family pays the outlined
+// shared-ticker/orders-held calls without the combined dedup. CI size plus 10 KiB rounded up; siblings equal.
+// #3122 run 42126229513 measured paradex 2,239,351 and blofin 1,979,025 B (guarded stop edits,
+// put-back, BloFin native amends and read-backs). CI size plus 10 KiB, rounded up to the KiB.
+// #3127 run 42140111861 measured kucoin 1,681,540 B (guarded futures stop edits and put-back).
+// CI size plus 10 KiB, rounded up to the KiB.
+// #3128 run 42146728975 measured apexomni 2,002,359 B: amends stream as serial Plans (cancel proof
+// and put-back). CI size plus 10 KiB, rounded up to the KiB.
+// #3130 run 42154583609 measured backpack 1,926,668 B: trigger amends stream as serial Plans
+// (proof read and put-back). CI size plus 10 KiB, rounded up to the KiB.
+// #3138 run 42166643605 measured bitrue 1,829,700 B: guarded stop edits, cancel-proof polling and
+// put-back. CI size plus 10 KiB, rounded up to the KiB.
+// #3140 run 42172778210 measured breakoutprop 1,554,817 B on composed checkout 451287ba0229.
+// CI size plus 10 KiB, rounded up to the KiB.
+// #3199 run 42280800704, job 128112974377 at a527a7ccff0 measured okx 1,973,874 B.
+// CI size plus 10 KiB rounded up to the KiB; all OKX variants share the okx family cap.
+// #3202 run 42280173727 measured bitget 2,379,303 B; CI size plus 10 KiB rounded up
+// to the KiB, bitgetusdc equal to bitget.
+// #3198 + #3201 combined on master 6228bbef939 (#3206 CI merge-ref job) measured bitget
+// 2,364,891 B; CI size plus 10 KiB rounded up to the KiB, bitgetusdc equal to bitget.
+// #3143 run 42181736999 measured hyperliquid 2,126,281 B: the public data watch, error-channel
+// refusals and Control::Unwatched. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
+// #3152 run 42200843544, job 127838799471 measured bingx 2,063,923 B.
+// CI size plus 10 KiB, rounded up to the KiB.
+// #3149 run 42197163575 measured hyperliquid 2,143,008 B: activeAssetData scoping, the
+// FetchLeverage read and subscription.count. CI size plus 10 KiB, rounded up; siblings equal.
+// #3158 run 42215250423, job 127884302751 measured lighter 2,068,697 B.
+// CI size plus 10 KiB, rounded up to the KiB; lighter-robinhood equal.
+// #3170 on master (merge a5bd5e671b6), run 42318845632, jobs 128238566076 and 128238565994
+// measured kucoin 1,791,027 B and kucoinspot 2,346,832 B.
+// Independent family caps: CI size plus 10 KiB, rounded up to the KiB.
+// #3168 run 42227488436, job 127925185663 measured bybit 2,246,685 B.
+// Guarded Partial edits add serial Plans, terminal/lineage reads and one-shot put-back.
+// ddi2il standing rule: CI + 10 KiB rounded up; all Bybit variants share this family cap.
+// #3145 run 42218930349 job 127896386942 measured hyperliquid 2,153,944 B: trades as last for
+// watched coins. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
+// #3150 final runtime, same-run comparison 42258955401: PR merge d820d0d012d vs
+// exact master first-parent 0115ba8df07. Source head d04b192d1b1; URL/RPC tables removed.
+// Only over-cap families receive measured CI bytes + 10 KiB, rounded up to a KiB; HL siblings equal.
+// #3187 run 42251340763 measured binance 2,212,299 B: PM algo migration and cancel proof.
+// CI size plus 10 KiB, rounded up; all Binance aliases use this single family cap.
+// #3178 run 42239151280, job 127965614325: Hyperliquid 2,154,756 B at 81206ca3c02.
+// CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
+// #3188 startup attribution, run 42260192686 at cda38ed52a9: CI + 10 KiB rounded up.
+// Only measured over-cap families grow; shared siblings stay equal and larger incoming caps win.
+// #3207 run 42279265759, job 128106963965 measured Bitget 2,390,477 B.
+// CI size plus 10 KiB rounded up to KiB; BitgetUSDC shares the family cap.
+// #3202 on #3207 (merge 62c3b59c872), run 42305638406, job 128195021443 measured Bitget
+// 2,409,448 B. CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
+// #3219 drb public on master, source 58c9e8eb9: CI run 42352093025, job 128342498489
+// measured web Coinbase at 1,924,268 B. CI + 10 KiB rounded up; Coinbase Spot shares the family cap.
+// #3220 KuCoin hosted signing: run 42324881707, job 128258225940 measured 1,827,119 B.
+// CI size plus 10 KiB rounded up to KiB; KuCoin Spot retains its existing cap.
+// #3210 run 42320236420, job 128244910061 measured Bitget 2,422,853 B at 191de16bd7d.
+// CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
+// #3193 at ad4f1d6d5d9: seven CI measurements + 10 KiB, rounded up to KiB.
+// Later master caps win per family; shared-family siblings remain equal.
+// #3111 historical run 42096897919 measured HL siblings at 2,106,939 B; current larger caps retained.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 1_984_512,
-  asterdex: 2_137_088,
-  backpack: 1_887_232,
-  binance: 2_206_720,
-  bingx: 2_036_736,
-  bitget: 2_345_984,
-  bitgetusdc: 2_345_984,
-  bitrue: 1_821_696,
-  bitunix: 1_849_344,
-  blofin: 1_963_008,
-  breakoutprop: 1_512_448,
-  bybit: 2_225_152,
-  coinbase: 1_826_816,
-  cryptocom: 1_727_488,
-  grvt: 1_780_736,
-  hyperliquid: 2_117_632,
-  hyperliquidspot: 2_117_632,
+  apexomni: 2_024_448,
+  asterdex: 2_161_664,
+  backpack: 1_948_672,
+  // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
+  // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
+  // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
+  // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
+  binance: 2_236_416,
+  bingx: 2_085_888,
+  bitget: 2_434_048,
+  bitgetusdc: 2_434_048,
+  bitrue: 1_851_392,
+  bitunix: 1_863_680,
+  blofin: 2_001_920,
+  breakoutprop: 1_580_032,
+  bybit: 2_270_208,
+  coinbase: 1_935_360,
+  cryptocom: 1_740_800,
+  // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
+  // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
+  // CI size plus 10 KiB, rounded up to the KiB.
+  grvt: 1_954_816,
+  // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
+  // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
+  // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
+  // Hyperliquid 2,184,857 B. CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
+  hyperliquid: 2_195_456,
+  hyperliquidspot: 2_195_456,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
-  kucoin: 1_681_408,
-  kucoinspot: 2_264_064,
-  lighter: 2_001_920,
-  'lighter-robinhood': 2_001_920,
-  mexc: 1_755_136,
-  okx: 1_947_648,
-  orderly: 1_732_608,
-  paradex: 2_234_368,
-  phemex: 2_065_408,
-  polymarket: 1_600_512,
-  txflow: 1_838_080,
-  weex: 1_936_384,
-  woo: 2_399_232,
+  kucoin: 1_838_080,
+  kucoinspot: 2_357_248,
+  lighter: 2_093_056,
+  'lighter-robinhood': 2_093_056,
+  // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
+  mexc: 1_872_896,
+  okx: 1_986_560,
+  orderly: 1_744_896,
+  // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
+  paradex: 2_266_112,
+  // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
+  // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
+  phemex: 2_091_008,
+  polymarket: 1_611_776,
+  txflow: 1_852_416,
+  weex: 1_948_672,
+  // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
+  woo: 2_428_928,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

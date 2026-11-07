@@ -78,6 +78,7 @@ pub struct BreakoutProp {
     last_portfolio_version: Option<u64>,
     order_revision: u64,
     trading: trading::TradingState,
+    bbo: HashMap<String, trading::protection::Bbo>,
     terminal_orders: HashMap<String, f64>,
     books: HashMap<String, (usize, Book)>,
     candles: HashMap<(String, Interval), usize>,
@@ -107,6 +108,7 @@ pub(crate) enum Operation {
     },
     Quotes {
         rows: Vec<Ticker>,
+        receipts: Vec<f64>,
         invalid: bool,
         validated_time: Option<String>,
     },
@@ -156,12 +158,14 @@ impl Operation {
             }
             Self::Quotes {
                 rows,
+                receipts,
                 invalid,
                 validated_time,
             } => {
                 rows.clear();
                 *invalid = false;
                 *validated_time = None;
+                receipts.clear();
             }
             Self::Candles { rows, invalid, .. } => {
                 rows.clear();
@@ -225,6 +229,7 @@ impl BreakoutProp {
             last_portfolio_version: None,
             order_revision: 0,
             trading: trading::TradingState::default(),
+            bbo: HashMap::new(),
             terminal_orders: HashMap::new(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -340,6 +345,13 @@ impl BreakoutProp {
         if let Operation::Portfolio { revision, .. } = &mut pending.operation {
             *revision = self.order_revision;
         }
+        if let Operation::Trade(request) = &pending.operation
+            && let Err(error) = request.protective_guard(cx, self)
+        {
+            self.fail_operation(cx, pending.operation, not_sent(error));
+            self.drive(cx);
+            return;
+        }
         let operation = &pending.operation;
         let spec = self.request_spec(cx, operation);
         let (method, path, body) = match spec {
@@ -360,6 +372,11 @@ impl BreakoutProp {
         }
         if method == Method::Delete {
             headers.push(("If-Match", "*".into()));
+        }
+        if let Operation::Trade(request) = operation
+            && let Some(etag) = request.conditional_etag()
+        {
+            headers.push(("If-Match", etag.to_owned()));
         }
         let stream = operation.stream();
         let path = path.trim_start_matches('/');
@@ -608,6 +625,7 @@ impl BreakoutProp {
                 cx,
                 Operation::Quotes {
                     rows: Vec::new(),
+                    receipts: Vec::new(),
                     invalid: false,
                     validated_time: None,
                 },
@@ -747,8 +765,15 @@ impl BreakoutProp {
         self.poll(cx);
     }
 
-    fn publish_quotes(&mut self, cx: &mut Cx<'_, Pending>, rows: Vec<Ticker>) {
-        for ticker in &rows {
+    fn publish_quotes(&mut self, cx: &mut Cx<'_, Pending>, rows: Vec<Ticker>, receipts: Vec<f64>) {
+        for (ticker, at) in rows.iter().zip(receipts) {
+            self.bbo.insert(
+                ticker.symbol.clone(),
+                trading::protection::Bbo {
+                    bid: (ticker.bid, at),
+                    ask: (ticker.ask, at),
+                },
+            );
             if let Some((_, book)) = self.books.get_mut(&ticker.symbol) {
                 book.load_sorted(BookSide::Bids, [(ticker.bid, 1.0)]);
                 book.load_sorted(BookSide::Asks, [(ticker.ask, 1.0)]);
@@ -876,6 +901,7 @@ impl BreakoutProp {
                 self.arm_poll(cx);
             }
             Operation::Quotes { .. } => {
+                self.bbo.clear();
                 self.quotes_pending = false;
                 cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 self.arm_poll(cx);
@@ -897,6 +923,9 @@ impl BreakoutProp {
 }
 
 impl Venue for BreakoutProp {
+    fn http_plans() -> bool {
+        false
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }
@@ -905,6 +934,18 @@ impl Venue for BreakoutProp {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &pending.operation {
+            Operation::Discover | Operation::Instruments { .. } | Operation::Details { .. } => {
+                S::MARKETS
+            }
+            Operation::Quotes { .. } => S::TICKERS,
+            Operation::Portfolio { .. } => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             public_catalogue_validation: true,
@@ -968,6 +1009,11 @@ impl Venue for BreakoutProp {
         }
         if !(200..300).contains(&response.status) {
             let mut error = http_failure(response.status);
+            if response.status == 429
+                && matches!(&pending.operation,Operation::Trade(trade) if trade.protective_write())
+            {
+                error.outcome = Some(Outcome::Unknown);
+            }
             // The amend's history read precedes the replacement, which was never sent.
             if matches!(&pending.operation, Operation::Trade(request) if request.method == Method::Get)
             {
@@ -978,7 +1024,7 @@ impl Venue for BreakoutProp {
             return;
         }
         match pending.operation {
-            Operation::Trade(request) => self.on_trade_response(cx, request, response.body),
+            Operation::Trade(request) => self.on_trade_response(cx, request, response),
             Operation::Portfolio {
                 revision,
                 initial,
@@ -1076,6 +1122,7 @@ impl Venue for BreakoutProp {
             }
             Operation::Quotes {
                 rows,
+                receipts,
                 invalid,
                 validated_time,
             } => {
@@ -1085,13 +1132,14 @@ impl Venue for BreakoutProp {
                         cx,
                         Operation::Quotes {
                             rows,
+                            receipts,
                             invalid,
                             validated_time,
                         },
                         "Invalid DXtrade quotes response".into(),
                     );
                 } else {
-                    self.publish_quotes(cx, rows);
+                    self.publish_quotes(cx, rows, receipts);
                 }
             }
             Operation::Candles {
@@ -1161,6 +1209,7 @@ impl Venue for BreakoutProp {
             }
             Operation::Quotes {
                 rows,
+                receipts,
                 invalid,
                 validated_time,
             } => {
@@ -1181,6 +1230,7 @@ impl Venue for BreakoutProp {
                         if validated_time.as_deref() != Some(row.time.as_ref()) {
                             *validated_time = Some(row.time.into_owned());
                         }
+                        receipts.push(cx.now);
                         rows.push(Ticker {
                             id: row.symbol.to_string(),
                             symbol: row.symbol.into_owned(),

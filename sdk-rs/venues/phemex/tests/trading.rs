@@ -43,6 +43,21 @@ fn raw(e: &mut Engine<PhemexPerpetuals>, r: &HttpRequest, body: &str) -> Vec<Act
     e.drain_actions().collect()
 }
 
+fn raw_status(e: &mut Engine<PhemexPerpetuals>, r: &HttpRequest, status: u16) -> Vec<Action> {
+    e.handle(
+        1001.,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status,
+                headers: "",
+                body: "",
+            },
+        },
+    );
+    e.drain_actions().collect()
+}
+
 fn respond(e: &mut Engine<PhemexPerpetuals>, r: &HttpRequest, body: Value) -> Vec<Action> {
     raw(e, r, &body.to_string())
 }
@@ -68,17 +83,50 @@ fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
         .expect("failed command")
 }
 
+/// Fresh prices and a long to protect: an amended stop's cancel needs both.
+fn protected_long(e: &mut Engine<PhemexPerpetuals>) {
+    e.store_mut().update_ticker("BTCUSDT", |t| {
+        t.mark = 69_000.;
+        t.last = 69_000.;
+        t.index = 69_000.;
+    });
+    e.store_mut().set_positions(vec![Position {
+        id: "BTCUSDT".into(),
+        symbol: "BTCUSDT".into(),
+        side: PositionSide::Long,
+        entry_price: 69000.,
+        notional: 34500.,
+        leverage: 10.,
+        margin_type: Some(MarginType::Cross),
+        position_mode: Some(PositionMode::Oneway),
+        unrealized_pnl: 0.,
+        realized_pnl: None,
+        contracts: 0.5,
+        liquidation_price: 0.,
+        margin_size: None,
+        last_update: None,
+    }]);
+}
+
 fn command(e: &mut Engine<PhemexPerpetuals>, c: Command) -> Vec<Action> {
     e.handle(1000., Event::Command(c));
     e.drain_actions().collect()
 }
 
 fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
+    engine_with_socket_policy(mode, safe_cex_engine::PublicFeedPolicy::Direct)
+}
+
+fn engine_with_socket_policy(
+    mode: &str,
+    policy: safe_cex_engine::PublicFeedPolicy,
+) -> (Engine<PhemexPerpetuals>, SocketId) {
     let mut e = support::prepared_engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
     });
+    e.set_public_feed_policy(policy).unwrap();
     e.start(0.);
     let a: Vec<_> = e.drain_actions().collect();
     let mut a = raw(&mut e, &requests(&a)[0], PRODUCTS);
@@ -1074,6 +1122,7 @@ fn standalone_stop_loss_amend_preserves_last_price_trigger() {
     o.trigger_type = Some(StopTriggerType::LastPrice);
     o.price = 68000.;
     e.store_mut().upsert_order(o);
+    protected_long(&mut e);
     let a = command(
         &mut e,
         Command::AmendOrder {
@@ -1104,6 +1153,7 @@ fn standalone_take_profit_amend_preserves_mark_price_trigger() {
     o.trigger_type = Some(StopTriggerType::MarkPrice);
     o.price = 71000.;
     e.store_mut().upsert_order(o);
+    protected_long(&mut e);
     let a = command(
         &mut e,
         Command::AmendOrder {
@@ -2196,7 +2246,10 @@ fn non_success_write_keeps_typed_native_diagnostics_without_proving_rejection() 
             "HTTP {status}"
         );
         assert_eq!(error.outcome, Some(Outcome::Unknown), "HTTP {status}");
-        assert_eq!(error.retry_after_ms, (status == 429).then_some(2000.));
+        assert_eq!(
+            error.retry_after_ms,
+            (matches!(status, 408 | 429) || status >= 500).then_some(2000.)
+        );
         assert!(writes(&a).is_empty());
         assert!(e.store().order("unproven-id").is_none());
         assert_eq!(
@@ -3403,6 +3456,7 @@ fn a_moved_partial_stop_keeps_its_quantity_after_a_deactivated_ack() {
             json!({"orderID":"old","symbol":"BTCUSDT","side":"Sell","posSide":"Merged","orderType":"Stop","ordStatus":"Untriggered","orderQtyRq":"0.5","cumQtyRq":"0","leavesQtyRq":"0","priceRp":"0","stopPxRp":"68000","stopDirection":"Falling","trigger":"ByMarkPrice","execInst":"CloseOnTrigger"}),
         ],
     );
+    protected_long(&mut e);
     let cancel = amend_old(&mut e);
     let a = respond(
         &mut e,
@@ -3469,33 +3523,79 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     assert!(error.contains("order is gone"), "{error}");
 }
 
-#[test]
-fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
-    let (mut e, _) = authenticated("OneWay");
+fn refused_stop_replacement(e: &mut Engine<PhemexPerpetuals>) -> Vec<Action> {
     let mut stop = order("old");
     stop.kind = OrderType::StopLoss;
     stop.side = OrderSide::Sell;
     stop.reduce_only = true;
     stop.trigger_type = Some(StopTriggerType::MarkPrice);
     stop.time_in_force = Some(TimeInForce::GoodTillCancel);
+    stop.price = 68000.;
     e.store_mut().upsert_order(stop);
-    let cancel = amend_old(&mut e);
+    protected_long(e);
+    let cancel = amend_old(e);
     let a = respond(
-        &mut e,
+        e,
         &cancel,
         json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
     );
     let replacement = &writes(&a)[0];
-    let a = raw(
-        &mut e,
+    assert_eq!(p(replacement, "stopPxRp").as_deref(), Some("67900"));
+    raw(
+        e,
         replacement,
         r#"{"code":11001,"msg":"TE_NO_ENOUGH_AVAILABLE_BALANCE","data":null}"#,
+    )
+}
+
+#[test]
+fn a_refused_stop_replacement_puts_the_original_back_once() {
+    let (mut e, _) = authenticated("OneWay");
+    let a = refused_stop_replacement(&mut e);
+    let restore = &writes(&a)[0];
+    assert_eq!(
+        p(restore, "stopPxRp").as_deref(),
+        Some("68000"),
+        "the original trigger"
     );
-    let error = done(&a).unwrap_err();
+    assert_eq!(p(restore, "triggerType").as_deref(), Some("ByMarkPrice"));
+    let a = respond(&mut e, restore, ack(restore, "new"));
+    let error = failure(&a);
     assert!(
-        error.contains("Your BTCUSDT long position has no stop"),
-        "{error}"
+        error.message.contains("is unchanged") && error.message.contains("put back"),
+        "{}",
+        error.message
     );
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+    assert!(writes(&a).is_empty(), "one put-back only");
+}
+
+#[test]
+fn a_refused_put_back_says_the_position_is_unprotected() {
+    let (mut e, _) = authenticated("OneWay");
+    let a = refused_stop_replacement(&mut e);
+    let restore = &writes(&a)[0];
+    let a = raw(
+        &mut e,
+        restore,
+        r#"{"code":11001,"msg":"TE_NO_ENOUGH_AVAILABLE_BALANCE","data":null}"#,
+    );
+    let error = failure(&a);
+    assert!(
+        error
+            .message
+            .contains("Your BTCUSDT long position has no stop"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert!(writes(&a).is_empty(), "never retried");
 }
 
 #[test]
@@ -3750,4 +3850,793 @@ fn a_replacement_waiting_on_its_cancel_rereads_the_account() {
             "no reread at {at}"
         );
     }
+}
+
+/// A resting sell stop at 68000 on a long, moved to 67900 (last 69000).
+fn resting_stop(e: &mut Engine<PhemexPerpetuals>) {
+    let mut stop = order("old");
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.reduce_only = true;
+    stop.trigger_type = Some(StopTriggerType::LastPrice);
+    stop.time_in_force = Some(TimeInForce::GoodTillCancel);
+    stop.price = 68000.;
+    e.store_mut().upsert_order(stop);
+    protected_long(e);
+}
+
+#[test]
+fn a_stale_crossed_filled_or_flat_stop_at_the_final_claim_cancels_nothing() {
+    for (case, reason) in [
+        ("stale", "reference is stale"),
+        ("crossed", "already crossed"),
+        ("filled", "changed or filled"),
+        ("flat", "no position"),
+    ] {
+        let mut e = engine();
+        resting_stop(&mut e);
+        e.handle(
+            1000.,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "old".into(),
+                price: Some(67900.),
+                amount: None,
+            }),
+        );
+        // Between planning and the cancel's final claim.
+        match case {
+            "stale" => e.handle(
+                7000.,
+                Event::TimerFired {
+                    timer: safe_cex_engine::TimerId(424_242),
+                },
+            ),
+            "crossed" => e.store_mut().update_ticker("BTCUSDT", |t| t.last = 67850.),
+            "filled" => {
+                e.store_mut().update_order("old", |o| o.filled = 0.05);
+            }
+            _ => e.store_mut().set_positions(vec![]),
+        }
+        let a: Vec<Action> = e.drain_actions().collect();
+        assert!(writes(&a).is_empty(), "{case}: no cancel");
+        let error = failure(&a);
+        assert!(error.message.contains(reason), "{case}: {}", error.message);
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::NotSent),
+            "{case}"
+        );
+        assert_eq!(
+            error.protection, None,
+            "{case}: a refusal is never Unprotected"
+        );
+        assert_eq!(
+            e.store().order("old").unwrap().status,
+            OrderStatus::Open,
+            "{case}"
+        );
+    }
+}
+
+/// A leg whose row carries no trigger source is replaced on the source the
+/// entry was placed with (here the mark default), so the veto checks the mark.
+#[test]
+fn a_leg_crossed_on_the_mark_but_not_the_last_cancels_nothing() {
+    let mut e = engine();
+    let mut entry = opts("");
+    entry.stop_loss = Some(68000.);
+    let sent = writes(&command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 2,
+            orders: vec![entry],
+        },
+    ));
+    assert_eq!(p(&sent[0], "slTrigger").as_deref(), Some("ByMarkPrice"));
+    assert!(done(&respond(&mut e, &sent[0], ack(&sent[0], "entry"))).is_ok());
+    e.store_mut().update_order("entry", |o| {
+        o.filled = 0.004;
+        o.stop_loss = Some(68000.);
+    });
+    let mut sl = order("entry__stop_loss");
+    sl.parent_id = Some("entry".into());
+    sl.kind = OrderType::StopLoss;
+    sl.side = OrderSide::Sell;
+    sl.trigger_type = None;
+    sl.price = 68000.;
+    e.store_mut().upsert_order(sl);
+    protected_long(&mut e);
+    e.handle(
+        1000.,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "entry__stop_loss".into(),
+            price: Some(67900.),
+            amount: None,
+        }),
+    );
+    // The mark falls through the new stop before the cancel's final claim;
+    // the last price does not.
+    e.store_mut().update_ticker("BTCUSDT", |t| t.mark = 67850.);
+    let a: Vec<Action> = e.drain_actions().collect();
+    assert!(writes(&a).is_empty(), "no cancel: {a:?}");
+    let error = failure(&a);
+    assert!(
+        error.message.contains("already crossed the mark price"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(error.protection, None);
+}
+
+/// A buy limit entry carrying a 68000 stop loss; its leg is edited to 67900.
+fn bracketed_entry(e: &mut Engine<PhemexPerpetuals>, filled: f64) {
+    let mut parent = order("old");
+    parent.amount = 0.1;
+    parent.filled = filled;
+    parent.remaining = 0.1 - filled;
+    parent.stop_loss = Some(68000.);
+    parent.time_in_force = Some(TimeInForce::GoodTillCancel);
+    e.store_mut().upsert_order(parent);
+    let mut sl = order("old__stop_loss");
+    sl.parent_id = Some("old".into());
+    sl.kind = OrderType::StopLoss;
+    sl.side = OrderSide::Sell;
+    sl.trigger_type = Some(StopTriggerType::LastPrice);
+    sl.price = 68000.;
+    e.store_mut().upsert_order(sl);
+    protected_long(e);
+}
+fn refused_leg_replacement(e: &mut Engine<PhemexPerpetuals>) -> Vec<Action> {
+    let a = command(
+        e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old__stop_loss".into(),
+            price: Some(67900.),
+            amount: None,
+        },
+    );
+    let cancel = &writes(&a)[0];
+    let a = respond(
+        e,
+        cancel,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+    );
+    let replacement = &writes(&a)[0];
+    assert_eq!(p(replacement, "stopLossRp").as_deref(), Some("67900"));
+    raw(
+        e,
+        replacement,
+        r#"{"code":11001,"msg":"TE_NO_ENOUGH_AVAILABLE_BALANCE","data":null}"#,
+    )
+}
+
+#[test]
+fn an_attached_stop_edit_never_guesses_a_parent_put_back() {
+    let mut e = engine();
+    bracketed_entry(&mut e, 0.);
+    let a = refused_leg_replacement(&mut e);
+    assert!(
+        writes(&a).is_empty(),
+        "an attached shape is not guessed back"
+    );
+    assert_eq!(
+        failure(&a).protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert!(
+        failure(&a).message.contains("re-place"),
+        "{}",
+        failure(&a).message
+    );
+}
+
+#[test]
+fn a_refused_leg_edit_on_a_partly_filled_entry_says_the_stop_was_removed() {
+    let mut e = engine();
+    bracketed_entry(&mut e, 0.04);
+    let a = refused_leg_replacement(&mut e);
+    assert!(
+        writes(&a).is_empty(),
+        "an unprovable original is not put back"
+    );
+    let error = failure(&a);
+    assert!(
+        error.message.contains("stop was removed") && error.message.contains("re-place"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+}
+
+#[test]
+fn an_unknown_stop_replacement_is_never_put_back_or_resent() {
+    for body in [
+        r#"{"code":11085,"msg":"TE_DUPLICATED_ORDER_ID","data":null}"#,
+        r#"{"code":0,"data":"not an order"}"#,
+    ] {
+        let mut e = engine();
+        resting_stop(&mut e);
+        let cancel = amend_old(&mut e);
+        let a = respond(
+            &mut e,
+            &cancel,
+            json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+        );
+        let replacement = &writes(&a)[0];
+        let a = raw(&mut e, replacement, body);
+        assert!(writes(&a).is_empty(), "{body}: nothing more is sent");
+        let error = failure(&a);
+        assert_eq!(error.protection, None, "{body}");
+        assert!(
+            error.message.contains("may have no stop"),
+            "{body}: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn a_second_write_on_the_stop_while_it_is_replaced_is_refused() {
+    for second in [
+        Command::CancelOrders {
+            command: 2,
+            ids: vec!["old".into()],
+        },
+        Command::AmendOrder {
+            command: 2,
+            id: "old".into(),
+            price: Some(67800.),
+            amount: None,
+        },
+    ] {
+        let mut e = engine();
+        resting_stop(&mut e);
+        let cancel = amend_old(&mut e);
+        let a = respond(
+            &mut e,
+            &cancel,
+            json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+        );
+        let replacement = writes(&a)[0].clone();
+        let a = command(&mut e, second);
+        assert!(
+            writes(&a).is_empty(),
+            "the second write waits out the first"
+        );
+        let a = raw(
+            &mut e,
+            &replacement,
+            r#"{"code":11001,"msg":"TE_NO_ENOUGH_AVAILABLE_BALANCE","data":null}"#,
+        );
+        assert_eq!(writes(&a).len(), 1, "one put-back only");
+    }
+}
+
+/// Phemex opening trigger orders are disabled, so a stop entry is never cancelled
+/// to be replaced: its edit is refused before anything is sent.
+#[test]
+fn a_stop_entry_edit_is_refused_before_its_cancel() {
+    let mut e = engine();
+    let mut entry = order("old");
+    entry.kind = OrderType::Conditional;
+    entry.trigger_type = Some(StopTriggerType::LastPrice);
+    entry.time_in_force = Some(TimeInForce::GoodTillCancel);
+    entry.price = 70000.;
+    e.store_mut().upsert_order(entry);
+    protected_long(&mut e);
+    let a = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(70100.),
+            amount: None,
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert!(
+        failure(&a)
+            .message
+            .contains("opening trigger orders are disabled")
+    );
+    assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+}
+
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
+#[test]
+fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
+    for status in [408, 503] {
+        let (mut e, _) = authenticated("OneWay");
+        let a = refused_stop_replacement(&mut e);
+        let restore = &writes(&a)[0];
+        let a = raw_status(&mut e, restore, status);
+        let error = failure(&a);
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("TE_NO_ENOUGH"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}"
+        );
+        assert_eq!(error.protection, None, "{status}");
+        assert!(writes(&a).is_empty(), "{status}: never resent");
+    }
+}
+
+fn protective_exit_frame(
+    e: &mut Engine<PhemexPerpetuals>,
+    socket: SocketId,
+    rows: Vec<Value>,
+) -> Vec<Action> {
+    let text =
+        json!({"type":"incremental","timestamp":3_000_000_000_u64,"orders_p":rows}).to_string();
+    e.handle(
+        1002.,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    e.drain_actions().collect()
+}
+
+fn protective_cancel_wait(e: &mut Engine<PhemexPerpetuals>) {
+    let cancel = amend_old(e);
+    let a = respond(
+        e,
+        &cancel,
+        json!({"code":0,"data":pending_cancel_ack("old")}),
+    );
+    assert!(
+        writes(&a).is_empty(),
+        "cancel proof is required before any create"
+    );
+}
+
+fn protective_canceled_stop() -> Value {
+    let mut row = stop_cancel_ack("old");
+    row["orderQtyRq"] = json!("0.1");
+    row
+}
+
+fn protective_sparse_fill(symbol: &str) -> Value {
+    json!({"orderID":"neighbor","symbol":symbol,"side":"Buy","posSide":"Merged",
+        "ordType":"Limit","ordStatus":"PartiallyFilled","orderQty":"0.1","priceRp":"69000",
+        "execID":"sparse-fill","execQty":"0.02","execPriceRp":"69000","tradeType":"Trade"})
+}
+
+#[test]
+fn protective_post_cancel_rate_pause_is_unknown_and_unprotected() {
+    let (mut e, socket) = authenticated("OneWay");
+    resting_stop(&mut e);
+    protective_cancel_wait(&mut e);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 88,
+            orders: vec![opts("throttle")],
+        },
+    );
+    let throttle = writes(&a).remove(0);
+    raw_status(&mut e, &throttle, 429);
+    let a = protective_exit_frame(&mut e, socket, vec![protective_canceled_stop()]);
+    assert!(writes(&a).is_empty(), "a pause cannot restore or resend");
+    let error = failure(&a);
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(
+        error.kind,
+        Some(safe_cex_engine::error::ErrorKind::RateLimited)
+    );
+    assert!(error.retry_after_ms.is_some_and(|ms| ms > 0.0));
+    assert!(error.message.contains("re-place"), "{}", error.message);
+    assert!(
+        !error.message.contains("mutation was not sent"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        a.iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 1, .. })
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn protective_post_cancel_same_symbol_fill_reports_unprotected() {
+    for symbol in ["BTCUSDT", "btcusdt"] {
+        let (mut e, socket) = authenticated("OneWay");
+        resting_stop(&mut e);
+        protective_cancel_wait(&mut e);
+        protective_exit_frame(&mut e, socket, vec![protective_sparse_fill(symbol)]);
+        let a = protective_exit_frame(&mut e, socket, vec![protective_canceled_stop()]);
+        assert!(
+            writes(&a).is_empty(),
+            "an unproven fill cannot cause a guessed restore"
+        );
+        let error = failure(&a);
+        assert_eq!(
+            error.protection,
+            Some(safe_cex_engine::error::Protection::Unprotected)
+        );
+        assert!(error.message.contains("re-place"), "{}", error.message);
+    }
+}
+
+#[test]
+fn protective_post_cancel_cross_symbol_fill_does_not_drop_the_replacement() {
+    for before_cancel in [false, true] {
+        let (mut e, socket) = authenticated("OneWay");
+        let btc = e.store().market("BTCUSDT").unwrap().clone();
+        let mut eth = btc.clone();
+        eth.id = "ETHUSDT".into();
+        eth.symbol = "ETHUSDT".into();
+        e.store_mut().set_markets(vec![btc, eth]);
+        resting_stop(&mut e);
+        if before_cancel {
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("ETHUSDT")]);
+        }
+        protective_cancel_wait(&mut e);
+        if !before_cancel {
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("ETHUSDT")]);
+        }
+        let a = protective_exit_frame(&mut e, socket, vec![protective_canceled_stop()]);
+        assert_eq!(writes(&a).len(), 1, "before_cancel={before_cancel}: {a:?}");
+        assert_eq!(p(&writes(&a)[0], "stopPxRp").as_deref(), Some("67900"));
+        assert_eq!(p(&writes(&a)[0], "orderQtyRq").as_deref(), Some("0.1"));
+    }
+}
+
+#[test]
+fn a_partly_filled_standalone_stop_is_vetoed_before_cancel() {
+    let mut e = engine();
+    resting_stop(&mut e);
+    e.store_mut().update_order("old", |order| {
+        order.filled = 0.01;
+        order.remaining = 0.09;
+    });
+    let a = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(failure(&a).protection, None);
+    assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+}
+
+#[test]
+fn protective_post_cancel_frame_fed_fill_refusal_is_explicit_even_on_another_symbol() {
+    for symbol in [Some("BTCUSDT"), Some("ETHUSDT"), None] {
+        let (mut source, socket) = authenticated("OneWay");
+        let btc = source.store().market("BTCUSDT").unwrap().clone();
+        let mut eth = btc.clone();
+        eth.id = "ETHUSDT".into();
+        eth.symbol = "ETHUSDT".into();
+        source.store_mut().set_markets(vec![btc, eth]);
+        resting_stop(&mut source);
+        let initial = source.snapshot_frame(1002.).to_vec();
+        let mut fed = support::prepared_engine(Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            ..Options::default()
+        });
+        fed.set_frame_fed().unwrap();
+        fed.start(0.);
+        let a: Vec<_> = fed.drain_actions().collect();
+        raw(&mut fed, &requests(&a)[0], PRODUCTS);
+        fed.apply_frame(1002., &initial, true).unwrap();
+        fed.drain_actions().for_each(drop);
+        let a = at(
+            &mut fed,
+            1003.,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "old".into(),
+                price: Some(67900.),
+                amount: None,
+            }),
+        );
+        let cancel = writes(&a).remove(0);
+        let a = reply(
+            &mut fed,
+            1004.,
+            &cancel,
+            200,
+            &json!({"code":0,"data":pending_cancel_ack("old")}).to_string(),
+        );
+        assert!(writes(&a).is_empty(), "wait for terminal cancel proof");
+        if let Some(symbol) = symbol {
+            protective_exit_frame(&mut source, socket, vec![protective_sparse_fill(symbol)]);
+        }
+        protective_exit_frame(&mut source, socket, vec![protective_canceled_stop()]);
+        let uncertain = source.snapshot_frame(1006.).to_vec();
+        fed.apply_frame(1006., &uncertain, false).unwrap();
+        let a = safe_cex_engine::test_support::prepared_actions(&mut fed, 1006.);
+        if symbol.is_none() {
+            assert_eq!(
+                writes(&a).len(),
+                1,
+                "a terminal frame wakes the replacement"
+            );
+            assert_eq!(p(&writes(&a)[0], "stopPxRp").as_deref(), Some("67900"));
+            continue;
+        }
+        assert!(
+            writes(&a).is_empty(),
+            "v1 retains its conservative global fill veto"
+        );
+        assert!(
+            a.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 1, .. })
+            )),
+            "{symbol:?}: {a:?}; old={:?}",
+            fed.store().order("old")
+        );
+        let error = failure(&a);
+        assert_eq!(
+            error.protection,
+            Some(safe_cex_engine::error::Protection::Unprotected),
+            "{symbol:?}: {error:?}"
+        );
+        assert!(error.message.contains("re-place"), "{symbol:?}: {error:?}");
+    }
+}
+
+#[test]
+fn an_unreconciled_same_symbol_fill_at_final_claim_vetoes_the_cancel() {
+    let (mut e, socket) = authenticated("OneWay");
+    resting_stop(&mut e);
+    e.handle(
+        1000.,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        }),
+    );
+    // Planning succeeded; the sparse execution arrives before signing releases the cancel.
+    let a = protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("BTCUSDT")]);
+    assert!(writes(&a).is_empty());
+    let error = failure(&a);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(error.protection, None);
+    assert!(
+        error
+            .message
+            .contains("fills are awaiting order reconciliation")
+    );
+    assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+}
+
+#[test]
+fn ordinary_replacement_text_matches_master() {
+    for (status, body) in [
+        (
+            200,
+            r#"{"code":11082,"msg":"TE_RISK_LIMIT_EXCEEDED","data":null}"#,
+        ),
+        (503, ""),
+    ] {
+        let (mut e, _) = authenticated("OneWay");
+        e.store_mut().upsert_order(order("old"));
+        let cancel = amend_old(&mut e);
+        let a = respond(
+            &mut e,
+            &cancel,
+            json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+        );
+        let a = reply(&mut e, 1002., &writes(&a)[0], status, body);
+        let error = failure(&a);
+        let expected = if status == 200 {
+            "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order is gone: it was canceled and its replacement refused"
+        } else {
+            "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+        };
+        assert_eq!(error.message, expected);
+        assert_eq!(error.legacy_text(), expected);
+        assert_eq!(error.protection, None);
+        assert!(writes(&a).is_empty());
+    }
+}
+
+#[test]
+fn ordinary_cross_symbol_fills_allow_planning_and_replacement() {
+    for before_plan in [true, false] {
+        let (mut e, socket) = authenticated("OneWay");
+        let btc = e.store().market("BTCUSDT").unwrap().clone();
+        let mut eth = btc.clone();
+        eth.id = "ETHUSDT".into();
+        eth.symbol = "ETHUSDT".into();
+        e.store_mut().set_markets(vec![btc, eth]);
+        e.store_mut().upsert_order(order("old"));
+        if before_plan {
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("ETHUSDT")]);
+        }
+        protective_cancel_wait(&mut e);
+        if !before_plan {
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("ETHUSDT")]);
+        }
+        let a = protective_exit_frame(&mut e, socket, vec![canceled_row("old")]);
+        assert_eq!(writes(&a).len(), 1, "before_plan={before_plan}: {a:?}");
+        assert_eq!(p(&writes(&a)[0], "priceRp").as_deref(), Some("67900"));
+    }
+}
+
+#[test]
+fn ordinary_same_symbol_fills_veto_planning_or_replacement() {
+    for before_plan in [true, false] {
+        let (mut e, socket) = authenticated("OneWay");
+        e.store_mut().upsert_order(order("old"));
+        if before_plan {
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("BTCUSDT")]);
+        } else {
+            protective_cancel_wait(&mut e);
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("BTCUSDT")]);
+        }
+        let a = if before_plan {
+            command(
+                &mut e,
+                Command::AmendOrder {
+                    command: 1,
+                    id: "old".into(),
+                    price: Some(67900.),
+                    amount: None,
+                },
+            )
+        } else {
+            protective_exit_frame(&mut e, socket, vec![canceled_row("old")])
+        };
+        assert!(writes(&a).is_empty());
+        assert!(done(&a).is_err());
+        assert_eq!(
+            failure(&a).message,
+            if before_plan {
+                "Phemex fills are awaiting order reconciliation; wait before amending"
+            } else {
+                "Phemex order changed while canceling; replacement was not sent"
+            }
+        );
+        assert_eq!(failure(&a).protection, None);
+    }
+}
+
+#[test]
+fn ordinary_post_cancel_pause_says_the_order_was_canceled_and_needs_replacement() {
+    let (mut e, socket) = authenticated("OneWay");
+    e.store_mut().upsert_order(order("old"));
+    protective_cancel_wait(&mut e);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 88,
+            orders: vec![opts("throttle")],
+        },
+    );
+    raw_status(&mut e, &writes(&a)[0], 429);
+    let a = protective_exit_frame(&mut e, socket, vec![canceled_row("old")]);
+    assert!(writes(&a).is_empty());
+    assert_eq!(
+        failure(&a).message,
+        "Phemex order was canceled; replacement not sent (rate limited); re-place it"
+    );
+    assert_eq!(failure(&a).protection, None);
+    assert_eq!(
+        e.store().order("old").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        a.iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 1, .. })
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn ordinary_pause_before_cancel_still_says_the_mutation_was_not_sent() {
+    let (mut e, _) = authenticated("OneWay");
+    let a = command(
+        &mut e,
+        Command::Venue {
+            command: 88,
+            action: safe_cex_engine::VenueAction::ReadPositions,
+        },
+    );
+    raw_status(&mut e, &requests(&a)[0], 429);
+    e.store_mut().upsert_order(order("old"));
+    let a = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert_eq!(
+        failure(&a).message,
+        "Phemex requests are rate limited; mutation was not sent"
+    );
+    assert_eq!(failure(&a).protection, None);
+    assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+}
+
+#[test]
+fn fresh_local_mark_allows_a_protective_edit_despite_old_shared_source_provenance() {
+    let (mut e, _) = engine_with_socket_policy("OneWay", safe_cex_engine::PublicFeedPolicy::Shared);
+    let mut stop = order("old");
+    stop.kind = OrderType::StopLoss;
+    stop.reduce_only = true;
+    stop.side = OrderSide::Sell;
+    stop.trigger_type = Some(StopTriggerType::MarkPrice);
+    stop.price = 68000.;
+    e.store_mut().upsert_order(stop);
+    protected_long(&mut e);
+    e.apply_public_feed(
+        20_000.,
+        serde_json::from_str(
+            r#"{"tickers":[{"symbol":"BTCUSDT","mark":69001,"observedAt":[null,1000,null]}]}"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    e.handle(
+        20_000.,
+        Event::Command(Command::AmendOrder {
+            command: 10,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let sent = writes(&actions);
+    assert_eq!(
+        sent.len(),
+        1,
+        "a fresh local mark permits the guarded cancel: {actions:?}"
+    );
+    assert_eq!(sent[0].method, Method::Delete);
+    assert_eq!(
+        e.store()
+            .reference_seen_at("BTCUSDT", StopTriggerType::MarkPrice),
+        Some(20_000.)
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }

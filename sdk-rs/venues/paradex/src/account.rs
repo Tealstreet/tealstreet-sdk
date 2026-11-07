@@ -634,6 +634,15 @@ impl Account {
         }
     }
     fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, mut request: Queued) {
+        // The last moment before an amend's destructive cancel leaves: after any
+        // JWT refresh it waited on, against the Store as it is now.
+        if let Pending::Trade(trade) = &request.pending
+            && let Some(guard) = trade.stop_guard()
+            && let Err(error) = guard.validate(self, cx.store, cx.now)
+        {
+            self.failed.push((request.pending, error));
+            return;
+        }
         if let Pending::Trade(trade) = &request.pending {
             trade.report_progress(cx);
         }
@@ -2790,4 +2799,17 @@ pub(crate) fn auth_token(body: &str) -> Option<String> {
             .filter(|s| !s.trim().is_empty())
             .or(t.token.filter(|s| !s.trim().is_empty()))
     })
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Auth { .. } => S::ACCOUNT,
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
 }

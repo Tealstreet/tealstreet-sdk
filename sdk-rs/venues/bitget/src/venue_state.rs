@@ -1,10 +1,10 @@
-//! VENUE_STATE v1: the write-path facts a frame-fed Bitget engine needs and the
-//! store does not hold. `[1, flags]`, then the plan types and the trailing
+//! VENUE_STATE v2: the write-path facts a frame-fed Bitget engine needs and the
+//! store does not hold. `[2, flags]`, then plan types, trailing and execution
 //! states by order id, sorted so equal state always encodes to equal bytes.
 //! Flags: bit 0 the account type is detected, bit 1 it is UTA.
 use std::collections::HashMap;
 
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 const DETECTED: u8 = 1;
 const UTA: u8 = 2;
 
@@ -13,6 +13,7 @@ pub(crate) struct VenueState {
     pub uta: bool,
     pub plans: HashMap<String, String>,
     pub trailing: HashMap<String, (String, f64)>,
+    pub execution_prices: HashMap<String, f64>,
 }
 
 pub(crate) fn encode(
@@ -20,6 +21,7 @@ pub(crate) fn encode(
     uta: bool,
     plans: &HashMap<String, String>,
     trailing: &HashMap<String, (String, f64)>,
+    execution_prices: &HashMap<String, f64>,
 ) -> Vec<u8> {
     let flags = if detected { DETECTED } else { 0 } | if uta { UTA } else { 0 };
     let mut out = vec![VERSION, flags];
@@ -38,13 +40,21 @@ pub(crate) fn encode(
         text(&mut out, kind);
         out.extend_from_slice(&variance.to_le_bytes());
     }
+    let mut execution_prices: Vec<_> = execution_prices.iter().collect();
+    execution_prices.sort_unstable_by_key(|(id, _)| *id);
+    out.extend_from_slice(&(execution_prices.len() as u32).to_le_bytes());
+    for (id, price) in execution_prices {
+        text(&mut out, id);
+        out.extend_from_slice(&price.to_le_bytes());
+    }
     out
 }
 
 /// `None` for another version or malformed bytes: the engine keeps its state.
 pub(crate) fn decode(bytes: &[u8]) -> Option<VenueState> {
     let mut reader = Reader(bytes);
-    if reader.take(1)? != [VERSION] {
+    let version = reader.take(1)?[0];
+    if !matches!(version, 1 | VERSION) {
         return None;
     }
     let flags = reader.take(1)?[0];
@@ -60,11 +70,25 @@ pub(crate) fn decode(bytes: &[u8]) -> Option<VenueState> {
         let variance = f64::from_le_bytes(reader.take(8)?.try_into().ok()?);
         trailing.insert(id, (kind, variance));
     }
+    let mut execution_prices = HashMap::new();
+    for _ in 0..if version == VERSION {
+        reader.count()?
+    } else {
+        0
+    } {
+        let id = reader.text()?;
+        let price = f64::from_le_bytes(reader.take(8)?.try_into().ok()?);
+        if !price.is_finite() || price < 0.0 {
+            return None;
+        }
+        execution_prices.insert(id, price);
+    }
     reader.0.is_empty().then_some(VenueState {
         detected: flags & DETECTED != 0,
         uta: flags & UTA != 0,
         plans,
         trailing,
+        execution_prices,
     })
 }
 
@@ -105,18 +129,35 @@ mod tests {
             ("a".into(), "normal_plan".into()),
         ]);
         let trailing = HashMap::from([("t".into(), ("percentage".into(), 0.5))]);
-        let bytes = encode(true, true, &plans, &trailing);
-        assert_eq!(bytes, encode(true, true, &plans.clone(), &trailing.clone()));
+        let execution_prices = HashMap::from([("b".into(), 79.0)]);
+        let bytes = encode(true, true, &plans, &trailing, &execution_prices);
+        assert_eq!(
+            bytes,
+            encode(
+                true,
+                true,
+                &plans.clone(),
+                &trailing.clone(),
+                &execution_prices
+            )
+        );
         let state = decode(&bytes).unwrap();
         assert!(state.detected && state.uta);
         assert_eq!(state.plans, plans);
         assert_eq!(state.trailing, trailing);
+        assert_eq!(state.execution_prices, execution_prices);
     }
 
     #[test]
     fn refuses_another_version_and_truncated_bytes() {
-        let bytes = encode(true, false, &HashMap::new(), &HashMap::new());
-        assert!(decode(&[2, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_none());
+        let bytes = encode(
+            true,
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert!(decode(&[3, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_none());
         assert!(decode(&bytes[..bytes.len() - 1]).is_none());
         let state = decode(&bytes).unwrap();
         assert!(state.detected && !state.uta);

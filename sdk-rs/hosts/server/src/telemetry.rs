@@ -34,6 +34,8 @@ const TAGS: &[&str] = &[
     "venue_code",
     "venue",
     "target",
+    "startup_unloaded",
+    "startup_refused",
 ];
 const EXTRAS: &[&str] = &["user_tag", "suppressed_since_last_event"];
 
@@ -489,6 +491,10 @@ pub struct Report<'a> {
     pub target: Option<&'a str>,
     pub error_kind: Option<&'a str>,
     pub venue_code: Option<&'a str>,
+    /// A start failure's first unloaded section (`markets`..`positions`): what had
+    /// not loaded, never which read failed.
+    pub startup_unloaded: Option<&'static str>,
+    pub startup_refused: Option<bool>,
 }
 
 impl Report<'_> {
@@ -500,6 +506,12 @@ impl Report<'_> {
             ("target", self.target),
             ("error_kind", self.error_kind),
             ("venue_code", self.venue_code),
+            ("startup_unloaded", self.startup_unloaded),
+            (
+                "startup_refused",
+                self.startup_refused
+                    .map(|refused| if refused { "true" } else { "false" }),
+            ),
         ] {
             if let Some(value) = value {
                 tags.insert(key.to_owned(), value.to_owned());
@@ -539,9 +551,15 @@ pub fn capture(report: &Report<'_>) {
 
 /// The native host's account-start and transport failures.
 fn native_report(report: &safe_cex_native::report::ErrorReport<'_>) {
+    capture(&from_native(report));
+}
+
+/// A native report as a Sentry report: the transport's venue when it named one,
+/// else the label's. The label is `user_tag account venue`; the account name
+/// stays in the journal.
+fn from_native<'a>(report: &safe_cex_native::report::ErrorReport<'a>) -> Report<'a> {
     use safe_cex_native::report::ErrorKind;
-    // The label is `user_tag account venue`; the account name stays in the journal.
-    let words: Vec<&str> = report
+    let words: Vec<&'a str> = report
         .label
         .unwrap_or_default()
         .split_whitespace()
@@ -551,15 +569,19 @@ fn native_report(report: &safe_cex_native::report::ErrorReport<'_>) {
         ErrorKind::SocketOpenFailed => "venue, relay or tunnel socket did not open",
         ErrorKind::RequestFailed => "venue request failed in transport",
     };
-    capture(&Report {
+    Report {
         kind: report.kind.as_str(),
         summary,
         user_tag: (words.len() >= 2).then(|| words[0].to_owned()),
-        venue: (words.len() >= 2).then(|| words[words.len() - 1]),
+        venue: report
+            .venue
+            .or_else(|| (words.len() >= 2).then(|| words[words.len() - 1])),
         target: report.target,
         error_kind: report.error_kind,
         venue_code: report.venue_code,
-    });
+        startup_unloaded: report.startup_unloaded,
+        startup_refused: report.startup_refused,
+    }
 }
 
 #[cfg(test)]
@@ -779,6 +801,73 @@ mod tests {
     }
 
     #[test]
+    fn the_tag_allowlist_is_exactly_this_closed_set() {
+        assert_eq!(
+            TAGS,
+            [
+                "service",
+                "box",
+                "kind",
+                "error_kind",
+                "venue_code",
+                "venue",
+                "target",
+                "startup_unloaded",
+                "startup_refused",
+            ]
+        );
+        assert_eq!(EXTRAS, ["user_tag", "suppressed_since_last_event"]);
+    }
+
+    #[test]
+    fn a_start_failure_carries_its_cause_tags_and_nothing_else_leaves() {
+        use safe_cex_native::report::{ErrorKind, ErrorReport};
+        let events = captured(Identity::default(), || {
+            let mut event = from_native(&ErrorReport {
+                kind: ErrorKind::AccountStartFailed,
+                label: Some("a1b2c3 Main account binance"),
+                target: None,
+                error_kind: Some("authInvalid"),
+                venue_code: Some("-2015"),
+                venue: None,
+                startup_unloaded: Some("balance"),
+                startup_refused: Some(true),
+            })
+            .event();
+            for (key, value) in [
+                ("account", "Main account"),
+                ("user_id", "auth0|opaque-user"),
+                ("http_status", "401"),
+                ("message", "Invalid API-key, IP, or permissions for action"),
+                ("api_key", "k3y"),
+            ] {
+                event.tags.insert(key.into(), value.into());
+            }
+            event.extra.insert("account".into(), "Main account".into());
+            sentry::capture_event(event);
+        });
+        let tags: Vec<_> = events[0]
+            .tags
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(
+            tags,
+            [
+                ("error_kind", "authInvalid"),
+                ("kind", "account.start_failed"),
+                ("service", "exchange-server"),
+                ("startup_refused", "true"),
+                ("startup_unloaded", "balance"),
+                ("venue", "binance"),
+                ("venue_code", "-2015"),
+            ]
+        );
+        assert_eq!(events[0].extra.keys().collect::<Vec<_>>(), ["user_tag"]);
+        assert_eq!(events[0].message.as_deref(), Some("account start failed"));
+    }
+
+    #[test]
     fn a_report_carries_its_summary_never_error_text() {
         let event = report_event(&Report {
             kind: "account.start_failed",
@@ -875,5 +964,60 @@ mod tests {
             let _ = std::panic::catch_unwind(|| panic!("caught on an engine thread"));
         });
         assert_eq!(FLUSHES.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn transport_reports_carry_their_venue_and_route_but_no_url() {
+        use safe_cex_native::report::{ErrorKind, ErrorReport};
+        let events = captured(Identity::default(), || {
+            for (venue, target) in [
+                (Some("bybitdemo"), "api-demo.bybit.com direct"),
+                (None, "ws.okx.com"),
+            ] {
+                sentry::capture_event(
+                    from_native(&ErrorReport {
+                        kind: ErrorKind::RequestFailed,
+                        label: None,
+                        target: Some(target),
+                        error_kind: None,
+                        venue_code: None,
+                        venue,
+                        startup_unloaded: None,
+                        startup_refused: None,
+                    })
+                    .event(),
+                );
+            }
+        });
+        let tags = |event: &Event<'static>| {
+            event
+                .tags
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            tags(&events[0]),
+            [
+                ("kind".to_owned(), "transport.request_failed".to_owned()),
+                ("service".to_owned(), "exchange-server".to_owned()),
+                ("target".to_owned(), "api-demo.bybit.com direct".to_owned()),
+                ("venue".to_owned(), "bybitdemo".to_owned()),
+            ]
+        );
+        assert!(!events[1].tags.contains_key("venue"));
+        // An account's start failure still takes its venue from the label.
+        let start = from_native(&ErrorReport {
+            kind: ErrorKind::AccountStartFailed,
+            label: Some("a1b2c3 Main account kraken"),
+            target: None,
+            error_kind: Some("auth"),
+            venue_code: None,
+            venue: None,
+            startup_unloaded: None,
+            startup_refused: None,
+        });
+        assert_eq!(start.venue, Some("kraken"));
+        assert_eq!(start.user_tag.as_deref(), Some("a1b2c3"));
     }
 }

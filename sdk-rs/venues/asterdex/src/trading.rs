@@ -166,9 +166,39 @@ pub(crate) const ASTER: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
+        // Aster futures v3 "20xx - Processing Issues": the order was rejected.
+        Row {
+            key: Key::Int(-2010),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2016),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-2028, -2018),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2031),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
     ],
     success: &[Key::Int(200)],
     unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: ASTER_STATUS,
+};
+
+/// A stop's replacement or put-back: an undocumented code may have placed the
+/// order, so it is unknown, never a refusal that earns a put-back or a resend.
+pub(crate) const ASTER_PROTECTIVE: CodeTable = CodeTable {
+    rows: ASTER.rows,
+    success: ASTER.success,
+    unlisted: Verdict::Unknown(None),
     status: ASTER_STATUS,
 };
 
@@ -240,6 +270,9 @@ struct Job {
     /// The next serial call's slot, from admission or the last continuation.
     slot: Option<Slot>,
     reserved_places: usize,
+    guard: Option<StopGuard>,
+    restore: Option<Planned>,
+    restoring: bool,
     steps: VecDeque<Planned>,
     ids: Vec<String>,
     successes: usize,
@@ -280,6 +313,63 @@ pub struct TradingState {
     // Placement ACKs can precede both REST reconciliation and the private NEW.
     // Keep routing provenance only until Store/terminal sees the ID or cancellation.
     acknowledged: HashMap<String, String>,
+    pub(crate) protections: HashMap<String, NativeProtection>,
+}
+
+#[derive(Clone)]
+pub(crate) struct NativeProtection {
+    pub(crate) order: Order,
+    pub(crate) query: Query,
+    pub(crate) reference: StopTriggerType,
+    pub(crate) price_protect: bool,
+}
+
+struct StopGuard {
+    order: Order,
+    price: f64,
+    reference: StopTriggerType,
+}
+impl StopGuard {
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        let unchanged = || format!("Your {} stop was not changed", self.order.symbol);
+        if store.order(&self.order.id) != Some(&self.order) {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "{}: the original order changed before cancellation",
+                unchanged()
+            ))));
+        }
+        let current = store
+            .reference_seen_at(&self.order.symbol, self.reference)
+            .filter(|seen| *seen <= now)
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    store,
+                    &self.order.symbol,
+                    self.reference,
+                    now,
+                )
+            });
+        let label = if self.reference == StopTriggerType::MarkPrice {
+            "mark"
+        } else {
+            "last"
+        };
+        let Some(current) = current else {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "{}: a fresh {label} price is required before cancellation",
+                unchanged()
+            ))));
+        };
+        let below =
+            (self.order.kind == OrderType::StopLoss) == (self.order.side == OrderSide::Sell);
+        if (below && self.price >= current) || (!below && self.price <= current) {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "{}: the replacement would trigger immediately against the {label} price",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
 }
 
 /// TS's exact decimal policy: plain decimals, at most 18 fractional digits,
@@ -627,7 +717,7 @@ impl AsterDex {
                     .steps
                     .iter()
                     .filter(|step| matches!(step.call, Call::Place { .. }))
-                    .count();
+                    .count() + usize::from(job.restore.is_some());
                 if job.reserved_places > 0 {
                     let reserved = self
                         .trading
@@ -782,7 +872,10 @@ impl AsterDex {
         let Some(job) = self.trading.jobs.get_mut(&id) else {
             return;
         };
-        let next = if job.error.is_some() && !job.continue_on_error {
+        let next = if job.error.is_some()
+            && !job.continue_on_error
+            && !(job.restoring && !job.steps.is_empty())
+        {
             None
         } else {
             job.steps.pop_front()
@@ -792,6 +885,16 @@ impl AsterDex {
             let Some(slot) = job.slot.take() else {
                 return;
             };
+            // A 408 or 5xx on a put-back is sealed before this venue sees it:
+            // say what is unknown rather than repeat the replacement's refusal.
+            if job.restoring
+                && let Some((symbol, ..)) = &job.replacing_stop
+            {
+                let words = format!(
+                    "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                );
+                let _ = cx.present_plan_failure(&plan, words);
+            }
             let path = self.path(step.endpoint);
             // The request layer consumes the pending request and reports any
             // signing failure through on_trade_response, including synchronous
@@ -857,6 +960,7 @@ impl AsterDex {
         let unproven = response
             .as_ref()
             .is_ok_and(|r| r.status == 408 || r.status >= 500);
+        let status_429 = response.as_ref().is_ok_and(|r| r.status == 429);
         let outcome = match response {
             Ok(ref response) => venue_error(response).map_or(Ok(response.body), Err),
             Err(error) => Err((0, error.to_owned())),
@@ -876,6 +980,9 @@ impl AsterDex {
             outcome => outcome,
         };
         let replied = outcome.is_ok();
+        // A 429 or a documented rate-limit code (-1003 TOO_MANY_REQUESTS, -1015
+        // TOO_MANY_ORDERS) may have placed the order: a guarded leg's outcome is unknown.
+        let rate_limited = status_429 || matches!(outcome, Err((-1003 | -1015, _)));
         let mut placed = None;
         let mut result = None;
         let outcome = match (request.call, outcome) {
@@ -1034,6 +1141,12 @@ impl AsterDex {
         }
         // A status-only refusal takes its kind and outcome from the table's status rows.
         let mut status_error = None;
+        let protective = was_place
+            && self
+                .trading
+                .jobs
+                .get(&command)
+                .is_some_and(|job| job.replacing_stop.is_some());
         if let Some(leg) = leg.filter(|_| !reported) {
             let _ = match &outcome {
                 _ if replied
@@ -1061,12 +1174,23 @@ impl AsterDex {
                         .jobs
                         .get(&command)
                         .filter(|_| was_place)
-                        .and_then(|job| job.gone_text(false))
-                    {
+                        .and_then(|job| {
+                            job.gone_text(
+                                rate_limited
+                                    || protective
+                                        && protective_failure(*code, message.clone()).outcome
+                                            == Some(Outcome::Unknown),
+                            )
+                        }) {
                         Some(gone) => format!("{gone}: {message}"),
                         None => message.clone(),
                     };
-                    match cx.classify_write(leg, &ASTER, native, told) {
+                    let table = if protective {
+                        &ASTER_PROTECTIVE
+                    } else {
+                        &ASTER
+                    };
+                    match cx.classify_write(leg, table, native, told) {
                         Ok(fact) => {
                             if native.is_none() {
                                 status_error = Some(fact.error().clone());
@@ -1089,11 +1213,39 @@ impl AsterDex {
                     .map(|_| None),
             };
         }
+        if was_place && let Some(job) = self.trading.jobs.get_mut(&command) {
+            if outcome.is_err() && !job.restoring && !transport && !unproven && !replied {
+                let definitive = outcome.as_ref().err().is_some_and(|(code, message)| {
+                    matches!(
+                        protective_failure(*code, message.clone()).outcome,
+                        Some(Outcome::Rejected)
+                    )
+                });
+                if definitive
+                    && !rate_limited
+                    && let Some(restore) = job.restore.take()
+                {
+                    job.steps.clear();
+                    job.steps.push_back(restore);
+                    job.restoring = true;
+                }
+            } else if outcome.is_ok()
+                && job.restoring
+                && let Some(error) = &mut job.error
+            {
+                error.protection = Some(safe_cex_engine::error::Protection::Restored);
+                error.presents = true;
+                error.message = format!(
+                    "Your {} stop is unchanged: its replacement was refused, so the old stop was put back as a new order",
+                    job.replacing_stop.as_ref().map_or("", |(s, _, _)| s)
+                );
+            }
+        }
         // The fact is recorded: continue the serial plan into the next native
         // step, or settle this last call before the terminal.
         if let (Some(leg), Some((plan, slot))) = (leg, &plan) {
             let continues = self.trading.jobs.get(&command).is_some_and(|job| {
-                !job.steps.is_empty() && (job.continue_on_error || outcome.is_ok())
+                !job.steps.is_empty() && (job.continue_on_error || outcome.is_ok() || job.restoring)
             });
             if continues {
                 match cx.continue_serial_plan(plan, slot, leg, serial()) {
@@ -1125,7 +1277,7 @@ impl AsterDex {
                 Ok(()) => job.successes += 1,
                 Err((code, message)) => {
                     cx.command_error(command, message.clone());
-                    let mut error = status_error.unwrap_or_else(|| failure(code, message));
+                    let mut error = status_error.unwrap_or_else(|| failure(code, message.clone()));
                     // An earlier leg that may have executed keeps the command unknown.
                     if unproven
                         || job
@@ -1135,10 +1287,27 @@ impl AsterDex {
                     {
                         error.outcome = Some(Outcome::Unknown);
                     }
+                    let guarded = was_place && job.gone_text(true).is_some();
+                    if guarded && rate_limited
+                        || protective
+                            && protective_failure(code, message.clone()).outcome
+                                == Some(Outcome::Unknown)
+                    {
+                        error.outcome = Some(Outcome::Unknown);
+                    }
                     let unknown = error.outcome == Some(Outcome::Unknown);
                     job.sweep_failed |= was_sweep;
                     if was_place && let Some(gone) = job.gone_text(unknown) {
-                        error.message = format!("{gone}: {}", error.message);
+                        error.protection =
+                            (!unknown).then_some(safe_cex_engine::error::Protection::Unprotected);
+                        error.presents = true;
+                        // A status-only refusal already carries the gone text it was classified with.
+                        let detail = if rate_limited {
+                            &message
+                        } else {
+                            &error.message
+                        };
+                        error.message = format!("{gone}: {detail}");
                     }
                     job.error = Some(error);
                 }
@@ -1199,6 +1368,42 @@ impl AsterDex {
             ..Job::default()
         }
     }
+    // Only the destructive cancel is guarded; the final claim reads current
+    // Store state synchronously and a veto follows the engine's normal unwind.
+    pub(crate) fn stop_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Pending::Signed(signed) = pending else {
+            return Ok(());
+        };
+        let Pending::Trade(request) = &signed.pending else {
+            return Ok(());
+        };
+        if let Call::Cancel {
+            filled_at_amend: Some(_),
+            ..
+        } = &request.call
+            && let Some(guard) = self
+                .trading
+                .jobs
+                .get(&request.command)
+                .filter(|job| {
+                    request.plan.as_ref().is_some_and(|(plan, _)| {
+                        job.plan
+                            .as_ref()
+                            .is_some_and(|own| own.owner() == plan.owner())
+                    })
+                })
+                .and_then(|job| job.guard.as_ref())
+        {
+            guard.validate(store, release.time.raw_ms)?;
+        }
+        Ok(())
+    }
+
     fn plan_amend(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1245,28 +1450,6 @@ impl AsterDex {
                 "Aster replacement worth {value} is below the {minimum} minimum; the order is unchanged"
             ));
         }
-        // A stop that would trigger at once is refused after the old one is gone.
-        if conditional
-            && let Some(trigger) = price
-            && let Some(reference) = cx
-                .store
-                .ticker(&order.symbol)
-                .map(|t| {
-                    if order.trigger_type == Some(StopTriggerType::LastPrice) {
-                        t.last
-                    } else {
-                        t.mark
-                    }
-                })
-                .filter(|p| p.is_finite() && *p > 0.0)
-        {
-            let below = (order.kind == OrderType::StopLoss) == (order.side == OrderSide::Sell);
-            if (below && trigger >= reference) || (!below && trigger <= reference) {
-                return Err(format!(
-                    "Aster would trigger this stop immediately: {trigger} is past {reference}; the order was not changed"
-                ));
-            }
-        }
         let replacement = PlaceOrderOpts {
             symbol: order.symbol.clone(),
             kind: order.kind,
@@ -1280,11 +1463,66 @@ impl AsterDex {
             ..empty_order()
         };
         // Format and validate before canceling the live order.
-        let place = self.plan_place_inner(cx, &[replacement], Some(id), position_side)?;
+        let mut place = self.plan_place_inner(cx, &[replacement], Some(id), position_side)?;
         if let Some(error) = place.error {
             return Err(error.message);
         }
         let mut job = self.plan_cancel(std::slice::from_ref(order), false);
+        if conditional {
+            let native = self.trading.protections.get(id)
+                .filter(|native| native.order == *order)
+                .ok_or_else(|| format!("Your {} stop was not changed: its exact native parameters must be refreshed before cancellation", order.symbol))?;
+            // STOP and TAKE_PROFIT rest a limit: the replacement places only market stops, and
+            // moving the trigger alone would leave a stale limit, so they are not edited at all.
+            if matches!(native.query.value("type"), Some("STOP" | "TAKE_PROFIT")) {
+                return Err(format!(
+                    "Your {} stop-limit was not changed: AsterDEX limit stops cannot be edited without losing their limit price; cancel it and place a new one",
+                    order.symbol
+                ));
+            }
+            if order.filled != 0.0 {
+                return Err(format!(
+                    "Your {} stop was not changed: it already has fills",
+                    order.symbol
+                ));
+            }
+            let step = place
+                .steps
+                .front()
+                .ok_or("Aster replacement has no native order")?;
+            let trigger = step
+                .query
+                .value("stopPrice")
+                .and_then(|p| p.parse::<f64>().ok())
+                .ok_or("Aster replacement has no trigger")?;
+            let guard = StopGuard {
+                order: order.clone(),
+                price: trigger,
+                reference: native.reference,
+            };
+            guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
+            // The replacement keeps the original's price protection, as its put-back does.
+            if let Some(step) = place.steps.front_mut() {
+                step.query = std::mem::replace(&mut step.query, Query::new()).str(
+                    "priceProtect",
+                    if native.price_protect {
+                        "TRUE"
+                    } else {
+                        "FALSE"
+                    },
+                );
+            }
+            job.guard = Some(guard);
+            job.restore = Some(Planned {
+                method: Method::Post,
+                endpoint: "order",
+                query: native.query.clone(),
+                call: Call::Place {
+                    symbol: order.symbol.clone(),
+                    position_side,
+                },
+            });
+        }
         job.steps.extend(place.steps);
         job.replacing_stop = conditional.then(|| (order.symbol.clone(), order.side, order.kind));
         job.replacing_order = (!conditional).then(|| order.symbol.clone());
@@ -1649,6 +1887,28 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
     }
 }
 
+/// `failure` for a stop's replacement or put-back: a code `ASTER` does not list as a
+/// refusal leaves the write unknown, as `ASTER_PROTECTIVE` classifies it.
+fn protective_failure(code: i64, message: String) -> VenueError {
+    let listed = {
+        let native = Native {
+            code: NativeCode::Int(code),
+            message: refusal_1000(&message)
+                .filter(|_| code == -1000)
+                .unwrap_or(&message),
+        };
+        // Every refusal verdict is listed; only an unknown or satisfied answer is not.
+        !matches!(
+            ASTER_PROTECTIVE.verdict(&native, Intent::Place),
+            Verdict::Unknown(_) | Verdict::Satisfied(_)
+        )
+    };
+    let mut error = failure(code, message);
+    if !listed && error.outcome == Some(Outcome::Rejected) {
+        error.outcome = Some(Outcome::Unknown);
+    }
+    error
+}
 /// A trading failure classified by its Aster code; code 0 is a transport
 /// failure, a non-JSON HTTP error or an unproven acknowledgement.
 fn failure(code: i64, message: String) -> VenueError {

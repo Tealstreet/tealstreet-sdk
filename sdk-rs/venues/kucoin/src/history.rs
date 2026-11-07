@@ -4,6 +4,7 @@ use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory as CursorHistor
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, WindowOrder};
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Query, TimerId, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -351,7 +352,7 @@ impl Kucoin {
             );
             return;
         }
-        let end = to.unwrap_or_else(|| cx.now.floor());
+        let end = to.unwrap_or_else(|| cx.protocol_now().floor());
         let start = from.unwrap_or((end - DAY as f64).max(0.0));
         let (Some(start), Some(end)) = (millis(start), millis(end)) else {
             let Ok(context) = cx.admit_http_command(local_read_policy()) else {
@@ -523,7 +524,7 @@ impl Kucoin {
                 params.push(format!("currentPage={}&pageSize=50", r.page));
             }
         }
-        let endpoint = format!("{path}?{}", params.join("&"));
+        let endpoint = format!("{path}?{}", params.join_with("&"));
         let at = match r.kind {
             Kind::Income => ArrayAt::Path(&["data", "dataList"]),
             Kind::Trades => ArrayAt::Path(&["data"]),
