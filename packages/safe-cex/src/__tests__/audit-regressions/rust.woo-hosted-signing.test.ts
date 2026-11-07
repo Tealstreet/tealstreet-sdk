@@ -109,7 +109,7 @@ it.each([false, true])('preserves legacy broker insertion before signing (testne
   for (const vector of [vectors[8], vectors[10]]) {
     const input = request(vector);
     const field = vector.path.includes('/v1/') ? 'broker_id' : 'brokerId';
-    delete input.config!.data[field];
+    delete (input.config!.data as Record<string, unknown>)[field];
     const before = structuredClone(input);
     const localInput = structuredClone(input); localInput.config!.headers = {};
     const local = await signHttpCapture(createAPI({ key: 'fixture-public', secret, testnet } as ExchangeOptions,
