@@ -15,7 +15,7 @@ fn fail_catalogue(mode: u8) {
     let symbol = if mode >= 4 {
         "BTC-USD"
     } else {
-        "BTC-PERP-INTX"
+        "BTC_USDC-PERPETUAL"
     };
     engine.start(0.);
     let catalogue = engine
@@ -122,6 +122,11 @@ fn fail_catalogue(mode: u8) {
         })
         .unwrap();
     assert_eq!(retry.url, catalogue.url);
+    let recovered_body = if mode >= 4 {
+        support::PRODUCTS.to_owned()
+    } else {
+        support::drb_response("public/get_instruments", &retry)
+    };
     engine.handle(
         1201.,
         Event::HttpResponse {
@@ -129,10 +134,31 @@ fn fail_catalogue(mode: u8) {
             response: Response {
                 status: 200,
                 headers: "",
-                body: if mode >= 4 { r#"{"products":[{"product_type":"SPOT","product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"1","price_percentage_change_24h":"0"}],"pagination":{"has_next":false}}"# } else { support::INSTRUMENTS },
+                body: &recovered_body,
             },
         },
     );
+    if mode < 4 {
+        let summary = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        let body = support::drb_response("public/get_book_summary_by_currency", &summary);
+        engine.handle(
+            1201.,
+            Event::HttpResponse {
+                request: summary.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+    }
     let recovered: Vec<_> = engine.drain_actions().collect();
     assert!(engine.store().loaded().markets);
     assert!(!recovered.iter().any(|action| matches!(
@@ -158,7 +184,7 @@ fn fail_catalogue(mode: u8) {
     assert!(
         engine
             .drain_actions()
-            .any(|action| matches!(action, Action::WsSend { text, .. } if text.contains("level2"))),
+            .any(|action| matches!(action, Action::WsSend { text, .. } if text.contains(if mode < 4 { "book.BTC_USDC-PERPETUAL.100ms" } else { "level2" }))),
         "subscription intent survives catalogue recovery"
     );
 }

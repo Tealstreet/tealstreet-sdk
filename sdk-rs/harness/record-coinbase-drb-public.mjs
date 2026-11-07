@@ -16,13 +16,15 @@ const calls = [
   ['public/get_tradingview_chart_data', { instrument_name: instrument, resolution: '1', start_timestamp: start, end_timestamp: start + 3_600_000 }],
   ['public/get_funding_rate_history', { instrument_name: instrument, start_timestamp: start - 86_400_000, end_timestamp: start }],
 ];
-for (const [method, params] of calls) {
-  const url = `https://drb.coinbase.com/api/v2/${method}?${new URLSearchParams(params)}`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+for (const [index, [method, params]] of calls.entries()) {
+  const httpMethod = method === 'public/get_tradingview_chart_data' ? 'GET' : 'POST';
+  const url = `https://drb.coinbase.com/api/v2/${method}${httpMethod === 'GET' ? `?${new URLSearchParams(params)}` : ''}`;
+  const requestBody = httpMethod === 'GET' ? undefined : JSON.stringify({ jsonrpc: '2.0', id: index + 1, method, params });
+  const response = await fetch(url, { method: httpMethod, ...(requestBody ? { headers: { 'Content-Type': 'application/json' }, body: requestBody } : {}), signal: AbortSignal.timeout(20_000) });
   const text = await response.text();
   const body = JSON.parse(text);
   if (!response.ok || body.error || body.result === undefined) throw new Error(`${method}: ${text}`);
-  records.push({ type: 'http', t: Date.now() - epoch, method, params, url, status: response.status, body: text });
+  records.push({ type: 'http', t: Date.now() - epoch, method, params, url, httpMethod, requestBody, status: response.status, body: text });
   console.log(`${method}: ${text.length} bytes`);
 }
 const url = 'wss://streams.drb.coinbase.com/ws/api/v2';

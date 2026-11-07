@@ -128,7 +128,8 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Field<T> {
 #[derive(Deserialize)]
 struct Envelope {
     jsonrpc: String,
-    id: RpcId,
+    #[serde(default)]
+    id: Field<RpcId>,
     // Preserve result:null, reject duplicate envelope fields via struct serde.
     #[serde(default)]
     result: Field<Value>,
@@ -141,6 +142,7 @@ struct InFlight {
     deadline: f64,
     intent: Intent,
     pool: usize,
+    identifierless_http_read: bool,
 }
 
 struct Bucket {
@@ -241,16 +243,34 @@ impl Transport {
         }) {
             return Err("drb invalid bearer authorization".into());
         }
+        // The production chart route is GET-only and its response has no RPC ID.
+        // Keep credit admission, timeout and engine HTTP correlation in this transport.
+        let chart_get = method == "public/get_tradingview_chart_data";
+        let mut url = format!("{HTTP_URL}/{method}");
+        if chart_get {
+            let params = params.as_object().ok_or("drb invalid chart parameters")?;
+            for (index, (key, value)) in params.iter().enumerate() {
+                url.push(if index == 0 { '?' } else { '&' });
+                safe_cex_engine::url::encode_into(&mut url, key);
+                url.push('=');
+                let value = match value {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => return Err("drb invalid chart parameter value".into()),
+                };
+                safe_cex_engine::url::encode_into(&mut url, &value);
+            }
+        }
         let (id, body) = self.prepare(Channel::Http, method, params, cx.now)?;
         let mut headers = vec![("Content-Type", "application/json".into())];
         if let Some(value) = authorization {
             headers.push(("Authorization", value.into()));
         }
         let request = cx.request(
-            Method::Post,
-            format!("{HTTP_URL}/{method}"),
+            if chart_get { Method::Get } else { Method::Post },
+            url,
             headers,
-            Some(body),
+            (!chart_get).then_some(body),
             pending,
         );
         cx.request_timeout(request, REQUEST_TIMEOUT_MS);
@@ -347,6 +367,8 @@ impl Transport {
                 deadline: now + f64::from(REQUEST_TIMEOUT_MS),
                 intent,
                 pool,
+                identifierless_http_read: channel == Channel::Http
+                    && method == "public/get_tradingview_chart_data",
             },
         );
         Ok((id, body))
@@ -398,9 +420,13 @@ impl Transport {
             headers: "",
             body,
         };
-        let envelope = serde_json::from_str::<Envelope>(body)
-            .ok()
-            .filter(|e| e.jsonrpc == "2.0" && e.id == id);
+        let envelope = serde_json::from_str::<Envelope>(body).ok().filter(|e| {
+            e.jsonrpc == "2.0"
+                && match &e.id {
+                    Field::Present(actual) => *actual == id,
+                    Field::Missing => pending.identifierless_http_read,
+                }
+        });
         let Some(envelope) = envelope else {
             return Err(Failure {
                 verdict: classify::verdict(
