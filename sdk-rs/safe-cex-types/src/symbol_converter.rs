@@ -19,7 +19,6 @@ fn name(exchange: &ExchangeName) -> &'static str {
         ExchangeName::Bitrue => "bitrue",
         ExchangeName::Bitunix => "bitunix",
         ExchangeName::Blofin => "blofin",
-        ExchangeName::Breakoutprop => "breakoutprop",
         ExchangeName::Bybit => "bybit",
         ExchangeName::Bybitdemo => "bybitdemo",
         ExchangeName::Bybitinverse => "bybitinverse",

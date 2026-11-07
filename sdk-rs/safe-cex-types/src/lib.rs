@@ -1444,8 +1444,6 @@ pub enum ExchangeName {
     Bitunix,
     #[serde(rename = "blofin")]
     Blofin,
-    #[serde(rename = "breakoutprop")]
-    Breakoutprop,
     #[serde(rename = "bybit")]
     Bybit,
     #[serde(rename = "bybitdemo")]
@@ -5018,8 +5016,6 @@ mod strict_codecs {
         Bitunix,
         #[serde(rename = "blofin")]
         Blofin,
-        #[serde(rename = "breakoutprop")]
-        Breakoutprop,
         #[serde(rename = "bybit")]
         Bybit,
         #[serde(rename = "bybitdemo")]
@@ -7270,11 +7266,6 @@ mod strict_codecs {
                         .unwrap()
                         .to_owned(),
                     serde_json::to_value(ExchangeName::Blofin)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(ExchangeName::Breakoutprop)
                         .unwrap()
                         .as_str()
                         .unwrap()
