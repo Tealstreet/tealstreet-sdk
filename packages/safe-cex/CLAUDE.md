@@ -1841,12 +1841,20 @@ Relay-failure notices strip URL queries from upstream error messages before
 reporting reconnect state. Request configs and signed dispatch bytes are retained
 unchanged; the web Sentry hooks provide independent diagnostic redaction.
 
-Unsigned Bybit mainnet market responses with native `retCode: 10006` generate
+Unsigned Bybit mainnet market responses with HTTP 429 or native `retCode`
+10006, 429 or legacy 10018 generate
 one causal transport diagnostic through the exchange log/Sentry channel (no
 additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+Observation runs at the shared host-transport response boundary for managed and
+legacy requests on tunnel, proxy, direct and public-CORS routes. Streamed bodies
+are observed lazily with a 1 MiB bound for native-code detection; incomplete or
+failed streams cannot supply a native-code notice. HTTP 429 reports once at the
+response headers regardless of body content, size or stream completion, without
+consuming the body. Status-only notices carry HTTP 429 instead of a guessed
+native code.
 
 
 Hyperliquid `/info` admission shares a token bucket across account workers through
