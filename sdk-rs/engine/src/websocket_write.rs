@@ -332,12 +332,14 @@ impl<V: Venue> Engine<V> {
         else {
             unreachable!()
         };
-        if !matches!(self.io.core.sockets.role_of(socket), Some(1 | 2)) {
+        if !matches!(self.io.core.sockets.role_of(socket), Some(1 | 2))
+            || !self.io.core.sockets.is_open(socket)
+        {
             self.http_preparation_failed(
                 now,
                 preparation,
                 Error::Revoked,
-                VenueError::new("WebSocket write connection is no longer live"),
+                VenueError::new("WebSocket write connection is not open; no frame sent"),
             );
             crate::signing_dispatch::wipe(&mut Action::Http(request));
             return Err(Error::Revoked);

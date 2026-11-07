@@ -1,4 +1,11 @@
 fn websocket_fixture(signed: bool) -> (Engine<Probe>, Context, SocketId) {
+    let (mut engine, context, socket) = websocket_connecting_fixture(signed);
+    engine.handle(0., Event::WsOpened { socket });
+    engine.drain_actions().for_each(drop);
+    (engine, context, socket)
+}
+
+fn websocket_connecting_fixture(signed: bool) -> (Engine<Probe>, Context, SocketId) {
     let mut engine = crate::test_support::seeded_engine(Probe::default());
     engine.enable_websocket_write_host();
     engine.start(0.);
@@ -28,6 +35,23 @@ fn websocket_fixture(signed: bool) -> (Engine<Probe>, Context, SocketId) {
     cx.io.core.request_contexts.dispatch = None;
     engine.drain_actions().for_each(drop);
     (engine, context, socket)
+}
+
+#[test]
+fn websocket_write_claim_before_handshake_is_not_sent() {
+    let (mut engine, context, socket) = websocket_connecting_fixture(false);
+    let request = queue_websocket_write(&mut engine, &context, socket, false);
+    let binding = engine
+        .drain_actions()
+        .find_map(WebSocketWriteBinding::from_action)
+        .expect("bound write on a connecting socket");
+    assert!(engine.claim_websocket_write(0., binding).is_err());
+    assert!(engine.venue.releases.is_empty());
+    assert!(engine.http_release(request).is_none());
+    assert_eq!(engine.venue.failures.len(), 1);
+    assert_eq!(engine.venue.failures[0].1, Some(crate::Outcome::NotSent));
+    engine.handle(1., Event::WsOpened { socket });
+    assert!(websocket_frames(&drain_websocket_actions(&mut engine)).is_empty());
 }
 
 fn queue_websocket_write(

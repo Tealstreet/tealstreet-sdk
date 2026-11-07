@@ -6133,6 +6133,7 @@ impl<V: Venue> Engine<V> {
                 polls.set_policy(now, scale, ceiling_ms, &mut sink);
             }
             Event::WsOpened { socket } => {
+                cx.io.core.sockets.opened(socket);
                 cx.io.core.health.ws_opened = cx.io.core.health.ws_opened.saturating_add(1);
                 self.venue.on_open(&mut cx, socket)
             }
@@ -8226,7 +8227,7 @@ fn orders_held_notice(
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
 #[derive(Default)]
 struct SocketRoles {
-    live: Vec<(SocketId, u8)>,
+    live: Vec<(SocketId, u8, bool)>,
     /// Private sockets alone, so the per-frame check scans one or two ids.
     private: Vec<SocketId>,
     /// Closes per role whose replacement connect has not happened yet.
@@ -8245,7 +8246,19 @@ impl SocketRoles {
     fn role_of(&self, socket: SocketId) -> Option<u8> {
         self.live
             .iter()
-            .find_map(|(id, role)| (*id == socket).then_some(*role))
+            .find_map(|(id, role, _)| (*id == socket).then_some(*role))
+    }
+
+    fn opened(&mut self, socket: SocketId) {
+        if let Some((_, _, opened)) = self.live.iter_mut().find(|(id, _, _)| *id == socket) {
+            *opened = true;
+        }
+    }
+
+    fn is_open(&self, socket: SocketId) -> bool {
+        self.live
+            .iter()
+            .any(|(id, _, opened)| *id == socket && *opened)
     }
 
     fn connected(&mut self, socket: SocketId, channel: &SocketChannel, health: &mut Health) {
@@ -8255,7 +8268,7 @@ impl SocketRoles {
             *awaiting -= 1;
             health.reconnects = health.reconnects.saturating_add(1);
         }
-        self.live.push((socket, role));
+        self.live.push((socket, role, false));
         if role == 1 {
             self.private.push(socket);
         }
@@ -8264,10 +8277,10 @@ impl SocketRoles {
     /// Whether `socket` was a live role socket. Only an unexpected close makes
     /// the role's next connect a reconnect.
     fn closed(&mut self, socket: SocketId, unexpected: bool) -> bool {
-        let Some(index) = self.live.iter().position(|(id, _)| *id == socket) else {
+        let Some(index) = self.live.iter().position(|(id, _, _)| *id == socket) else {
             return false;
         };
-        let (_, role) = self.live.swap_remove(index);
+        let (_, role, _) = self.live.swap_remove(index);
         if unexpected {
             self.awaiting_reconnect[role as usize] =
                 self.awaiting_reconnect[role as usize].saturating_add(1);

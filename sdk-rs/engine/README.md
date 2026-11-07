@@ -15,10 +15,11 @@ identities are accepted.
 
 The managed request lifecycle holds the intent until signing completes, then
 emits an opaque `WebSocketWriteBinding` in the existing outbound envelope. The
-native transport claims its single-use permit immediately before sending through
-the same `Venue::http_release` registration, `http_release_veto`, pacing and write journal
-as HTTP mutations. Both drain and final claim check the socket. The shared
-lifecycle's HTTP packet is an internal carrier for the frame text; it never
+native transport claims its single-use permit inside the physical socket writer,
+immediately before `start_send`, through the same `Venue::http_release`
+registration, `http_release_veto`, pacing and write journal as HTTP mutations.
+Both drain and final claim check the socket; final claim requires its completed
+handshake. The shared lifecycle's HTTP packet carries the frame text; it never
 reaches an HTTP executor. Only successful release permits a socket send.
 Signing recipes see `WsSend` and cannot replace its socket identity. A credentialed
 context requires a signing recipe; an unsigned context cannot attach one.
@@ -32,8 +33,15 @@ after release remains an uncertain write. There is no implicit socket retry.
 If pacing is not ready at the final claim, the intent fails before send.
 
 Hosts must register their final claim handoff with `enable_websocket_write_host`.
-The native host implements it. WASM and custom hosts without that registration
-refuse submission before any signing or preparation; the existing browser
+The native host implements it through `Transport::connect_socket` and its
+connection-owned `WebSocketWriter`. The writer checks an open socket and writer
+readiness before invoking the claim callback, then hands off the frame without
+an async queue or yield. Connecting, busy, closed and unsupported writers fail
+as `NotSent` without claiming; physical send or flush failures after claim are
+`Unknown`. Legacy string queues carry control traffic only. Custom native
+transports default to no mutation writer and must opt into this contract.
+WASM and custom hosts without that registration refuse submission before any
+signing or preparation; the existing browser
 bridge has no WebSocket mutation handoff.
 
 Managed feed sockets and HTTP Mutation groups are refused: their current
