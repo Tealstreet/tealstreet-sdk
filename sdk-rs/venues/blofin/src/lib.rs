@@ -514,6 +514,9 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::terminal_failure_text)
+    }
     fn managed_sockets() -> bool {
         true
     }

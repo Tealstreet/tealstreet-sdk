@@ -260,9 +260,16 @@ fn combined_leg_cancel_unlisted_code_retains_uncertainty_guidance() {
     assert_combined_leg_cancel_unknown("999999");
 }
 
+#[derive(Clone, Copy, Debug)]
+enum WriteFailure {
+    Response(u16, &'static str),
+    HttpFailed,
+    Timeout,
+}
+
 #[test]
 fn dispatched_ambiguity_covers_every_write_path() {
-    for (status, response) in [
+    let responses = [
         (
             200,
             r#"{"code":"103013","msg":"internal failure","data":[]}"#,
@@ -319,6 +326,30 @@ fn dispatched_ambiguity_covers_every_write_path() {
             200,
             r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"102014","msg":"refused"},{"orderId":"12","tpslId":"91","algoId":"78","code":"","msg":"internal failure"}]}"#,
         ),
+        (
+            200,
+            r#"{"code":"102014","msg":"envelope refusal","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"103013","msg":"internal failure"}]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"102014","msg":"envelope refusal","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"999999","msg":"internal failure"}]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"102014","msg":"envelope refusal","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"","msg":"internal failure"}]}"#,
+        ),
+        (
+            400,
+            r#"{"code":"102014","msg":"envelope refusal","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"103013","msg":"internal failure"}]}"#,
+        ),
+        (
+            400,
+            r#"{"code":"102014","msg":"envelope refusal","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"999999","msg":"internal failure"}]}"#,
+        ),
+        (
+            400,
+            r#"{"code":"102014","msg":"envelope refusal","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"","msg":"internal failure"}]}"#,
+        ),
         (429, "{}"),
         (429, r#"{"code":"152401","msg":"Invalid signature"}"#),
         (200, r#"{"code":"429","msg":"Too Many Requests"}"#),
@@ -329,7 +360,26 @@ fn dispatched_ambiguity_covers_every_write_path() {
         (408, r#"{"code":"152401","msg":"Invalid signature"}"#),
         (500, r#"{"code":"152401","msg":"Invalid signature"}"#),
         (503, r#"{"code":"152401","msg":"Invalid signature"}"#),
-    ] {
+    ];
+    assert_dispatched_ambiguity(
+        responses
+            .into_iter()
+            .map(|(status, body)| WriteFailure::Response(status, body)),
+    );
+}
+
+#[test]
+fn dispatched_http_failed_covers_every_write_path() {
+    assert_dispatched_ambiguity([WriteFailure::HttpFailed]);
+}
+
+#[test]
+fn dispatched_timeout_covers_every_write_path() {
+    assert_dispatched_ambiguity([WriteFailure::Timeout]);
+}
+
+fn assert_dispatched_ambiguity(failures: impl IntoIterator<Item = WriteFailure>) {
+    for failure in failures {
         for operation in [
             "create",
             "protective-create",
@@ -547,30 +597,86 @@ fn dispatched_ambiguity_covers_every_write_path() {
                 .unwrap()
             };
             let orders = live_orders(&h);
-            h.respond_status(request, status, response);
-            assert_eq!(h.failures.len(), 1, "{operation} {status}");
+            match failure {
+                WriteFailure::Response(status, response) => {
+                    h.respond_status(request, status, response)
+                }
+                WriteFailure::HttpFailed => {
+                    h.handle(
+                        h.now + 1.,
+                        Event::HttpFailed {
+                            request: request.id,
+                            error: "fixture connection reset",
+                        },
+                    );
+                    h.collect();
+                }
+                WriteFailure::Timeout => {
+                    let deadline = h.now + f64::from(request.timeout_ms.unwrap());
+                    let timer = h
+                        .actions
+                        .iter()
+                        .rev()
+                        .find_map(|action| match action {
+                            Action::SetTimer { timer, at_ms } if *at_ms == deadline => Some(*timer),
+                            _ => None,
+                        })
+                        .expect("released write has a deadline timer");
+                    h.handle(deadline, Event::TimerFired { timer });
+                    h.collect();
+                }
+            }
+            assert_eq!(h.failures.len(), 1, "{operation} {failure:?}");
             let error = &h.failures[0];
             assert_eq!(
                 error.outcome,
                 Some(safe_cex_engine::Outcome::Unknown),
-                "{operation} {status}: {error:?}"
+                "{operation} {failure:?}: {error:?}"
             );
-            assert_eq!(error.protection, None, "{operation} {status}: {error:?}");
+            if matches!(failure, WriteFailure::HttpFailed) {
+                assert!(
+                    error.legacy_text().contains("fixture connection reset")
+                        || error
+                            .venue_message
+                            .as_deref()
+                            .is_some_and(|message| message.contains("fixture connection reset")),
+                    "transport diagnostic retained: {operation}: {error:?}"
+                );
+                if operation != "protective-put-back" {
+                    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
+                }
+            }
+            if matches!(failure, WriteFailure::Timeout) && operation != "protective-put-back" {
+                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+            }
+            assert_eq!(error.protection, None, "{operation} {failure:?}: {error:?}");
             assert!(
                 error.message.to_lowercase().contains("unknown"),
-                "{operation} {status}: {error:?}"
+                "{operation} {failure:?}: {error:?}"
             );
             assert!(
                 error.message.contains("Check Open Orders"),
-                "{operation} {status}: {error:?}"
+                "{operation} {failure:?}: {error:?}"
             );
             assert!(
                 !error.message.contains("refused")
                     || (operation == "protective-put-back"
                         && error.message.contains("put-back's outcome is unknown")),
-                "{operation} {status}: {error:?}"
+                "{operation} {failure:?}: {error:?}"
             );
             assert!(!error.message.contains("has no stop"), "{error:?}");
+            for action in &h.actions {
+                if let Action::Notice(Notice::CommandError {
+                    command: 7,
+                    message,
+                }) = action
+                {
+                    assert!(
+                        message.contains("unknown") && message.contains("Check Open Orders"),
+                        "warning uses final outcome: {operation} {failure:?}: {message}"
+                    );
+                }
+            }
             let after = h.e.store().setting("BTCUSDT").unwrap();
             assert_eq!(after.leverage.to_bits(), settings.leverage.to_bits());
             assert_eq!(
@@ -583,7 +689,7 @@ fn dispatched_ambiguity_covers_every_write_path() {
             );
             assert_eq!(after.margin_type, settings.margin_type);
             assert!(!h.e.store().hedged());
-            assert_eq!(live_orders(&h), orders, "{operation} {status}");
+            assert_eq!(live_orders(&h), orders, "{operation} {failure:?}");
             assert!(
                 h.pending
                     .iter()

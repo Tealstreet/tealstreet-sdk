@@ -46,3 +46,11 @@ that remove one combined TP/SL leg. An uncertain replacement or put-back never
 authorizes another POST or claims the position is definitively unprotected.
 This also applies to row-level errors under a success envelope: a blank row
 code with unexpected failure text cannot acknowledge a cancel or native edit.
+
+BloFin renders terminal write failures and warnings after the engine journal
+chooses the final classification. Unknown writes always say Check Open Orders,
+including transport loss and timeouts on settings, native stop edits, and combined
+TP/SL leg removal. The original diagnostic remains in the message or native
+diagnostic fields. Definite refusals keep their wording; an unknown response
+never permits another POST. The trading table covers these failures for every
+write path, including replacement and put-back dispatches.

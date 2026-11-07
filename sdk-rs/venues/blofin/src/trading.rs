@@ -24,6 +24,17 @@ const CALL_MS: u32 = 20_000;
 /// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
 /// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
 const UNKNOWN_WRITE: &str = "BloFin write outcome is unknown. Check Open Orders";
+
+pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
+    if error.outcome == Some(Outcome::Unknown)
+        && !(error.message.contains("unknown") && error.message.contains("Check Open Orders"))
+    {
+        format!("{UNKNOWN_WRITE}: {}", error.message)
+    } else {
+        error.message.clone()
+    }
+}
+
 const CODES: CodeTable = CodeTable {
     rows: &[
         Row {
@@ -424,6 +435,29 @@ fn failed_row<'r, 'a>(rows: &'r [ResultRow<'a>], intent: Intent) -> Option<&'r R
                 )
         })
         .or_else(|| rows.iter().find(|row| row.failed()))
+}
+
+fn failed_detail<'r>(
+    code: &'r str,
+    message: &'r str,
+    rows: &'r [ResultRow<'_>],
+    intent: Intent,
+) -> Option<(&'r str, &'r str)> {
+    let row = failed_row(rows, intent).map(|row| (&*row.code, &*row.msg));
+    // Aggregate failure/partial-success envelopes defer to their physical rows.
+    let aggregate = matches!(code, "1" | "2") && row.is_some();
+    let envelope = (code != "0" && !aggregate).then_some((code, message));
+    envelope
+        .into_iter()
+        .chain(row)
+        .find(|(code, message)| {
+            matches!(
+                CODES.verdict(&native(code, message), intent),
+                Verdict::Unknown(_)
+            )
+        })
+        .or(row)
+        .or(envelope)
 }
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -2633,22 +2667,12 @@ impl Blofin {
         let parsed = serde_json::from_str::<Reply<'_>>(response.body);
         if !(200..300).contains(&response.status) {
             let detail = parsed.as_ref().ok().and_then(|reply| {
-                if reply.code != "0" {
-                    return (!reply.code.is_empty()).then_some((&*reply.code, &*reply.msg));
-                }
-                // A success envelope on an HTTP failure cannot hide an uncertain row.
-                reply
-                    .data
-                    .as_ref()?
-                    .as_slice()
-                    .iter()
-                    .find(|row| {
-                        matches!(
-                            CODES.verdict(&native(&row.code, &row.msg), request.step.intent()),
-                            Verdict::Unknown(_)
-                        )
-                    })
-                    .map(|row| (&*row.code, &*row.msg))
+                failed_detail(
+                    &reply.code,
+                    &reply.msg,
+                    reply.data.as_ref().map_or(&[], ResultRows::as_slice),
+                    request.step.intent(),
+                )
             });
             let native = detail.map(|(code, message)| native(code, message));
             let error = if let Effect::Setting = &request.step.effect {
@@ -2902,10 +2926,9 @@ impl Blofin {
             Effect::Setting => {
                 let refused = failed_row(&rows, request.step.intent());
                 if reply.code != "0" || refused.is_some() {
-                    let (code, message) = match refused {
-                        Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
-                        _ => (&*reply.code, &*reply.msg),
-                    };
+                    let (code, message) =
+                        failed_detail(&reply.code, &reply.msg, &rows, request.step.intent())
+                            .expect("failed setting answer");
                     let error =
                         setting_failure(request.step.path, response.status, Some((code, message)));
                     return Err(record_failed(
@@ -2936,10 +2959,9 @@ impl Blofin {
                     }
                     return Ok(());
                 }
-                let (code, msg) = match refused {
-                    Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
-                    _ => (&*reply.code, &*reply.msg),
-                };
+                let (code, msg) =
+                    failed_detail(&reply.code, &reply.msg, &rows, request.step.intent())
+                        .expect("failed TP/SL answer");
                 let message = format!("BloFin TP/SL amend {code}: {msg}");
                 let error = record_failed(cx, context, Some(native(code, msg)), &message);
                 // Only a definite refusal falls back; one that may have landed must not stack a cancel.
@@ -2963,11 +2985,9 @@ impl Blofin {
                     cx.store.invalidate_order_snapshots();
                     return Ok(());
                 }
-                // A row speaks for its order, whatever the envelope says.
-                let (code, msg) = match refused {
-                    Some(row) => (&*row.code, &*row.msg),
-                    None => (&*reply.code, &*reply.msg),
-                };
+                let (code, msg) =
+                    failed_detail(&reply.code, &reply.msg, &rows, request.step.intent())
+                        .expect("failed native amendment answer");
                 let gone = matches!(code, "1000" | "102068")
                     || (code == "500"
                         && msg
