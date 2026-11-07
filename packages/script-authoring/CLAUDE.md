@@ -179,13 +179,17 @@ shared constants let `@tealstreet/cli` leave web's dependency graph entirely.
 
 Consequences to preserve:
 
-- **`scripts/generate-script-types-bundle.ts` writes here.** Never hand-edit
-  `script-types-bundle.ts`; fix the generators.
+- **The monorepo's `scripts/generate-script-types-bundle.ts` writes here.**
+  That root orchestrator is absent from the mirror; its per-package generators
+  are mirrored. Never hand-edit `script-types-bundle.ts`; fix the generators.
 - **The drift test is a release gate and must stay wired.** It re-runs the type
-  generators and byte-compares, which is what stops a release shipping stale
-  `types.d.ts` to users. It runs in `ci.yaml` and `cli-release.yml` explicitly,
-  because root `yarn test-ci` filters to `tealstreet-next` and would never
-  reach `packages/`.
+  generators in memory and compares the committed declarations, which stops a
+  release shipping stale `types.d.ts` to users. It imports the mirrored package
+  generators directly; missing tooling must fail, never skip the check. Mirror
+  CI runs `corepack yarn check:script-types` explicitly before its general checks,
+  independently of Turbo caching. The check never writes generated output.
+  Its bundler's TypeScript dependency is pinned to the repository's JS compiler
+  API version; the native TS7 package does not expose that API.
 - **A package must not depend on an app.** If something here needs a value from
   `apps/cli`, that value is in the wrong place.
 - **`mirrors/copy.bara.sky` includes `packages/script-authoring/**`**, because

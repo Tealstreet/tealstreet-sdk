@@ -1,46 +1,52 @@
 /**
  * Drift test for `script-types-bundle.ts` — re-runs the per-package
- * generators in-memory and compares against the on-disk artifact that
+ * generators in-memory and compares against the committed declarations that
  * the CLI binary inlines at compile time.
  *
  * The CLI seeds the assembled bundle as `~/.tealstreet/scripts/
  * types.d.ts` on every launch (see `scripts-templates.ts`). If the
  * committed bundle goes stale, user editors silently load mismatched
- * types. This test is the gate that catches that — failing CI forces a
- * `yarn generate:types` + commit before merge.
+ * types. This gate fails CI until the bundle is regenerated from the
+ * current source types and committed alongside them.
  *
  * The generators do real TypeScript work (`dts-bundle-generator` +
  * a full TS program over `safe-cex/src/**`), so the in-memory rerun
- * is non-trivial — give it a generous timeout. The cost is paid once
- * per CI run, which is the right tradeoff for the drift-safety
- * guarantee.
+ * is non-trivial — give it a generous timeout. CI invokes this check
+ * explicitly, independently of package-task caching.
  */
-import * as fs from 'fs';
-import * as path from 'path';
-
 import { describe, expect, it } from 'vitest';
 
-const ON_DISK_PATH = path.join(__dirname, 'script-types-bundle.ts');
+import { generateCoreMonacoTypes } from '../../script-api-core/scripts/generate-monaco-types';
+import { generateWebMonacoTypes } from '../../script-api-web/scripts/generate-monaco-types';
+import { CORE_TYPES_DTS, WEB_TYPES_DTS } from './script-types-bundle';
+
 const DRIFT_TEST_TIMEOUT_MS = 180_000;
 
-// The orchestrator this drift gate re-runs (`scripts/generate-script-types-bundle.ts`)
-// is a monorepo-root build script. It is deliberately NOT part of the OSS
-// mirror slice — the mirror is a fast pre-check, while the authoritative drift
-// gate runs in the monorepo on sync-back (see docs/safe-cex-cli-mirror-plan.md
-// §9). The partial-dynamic specifier below is resolved by Vite as a glob over
-// `scripts/`: it matches in the monorepo (gate runs in full) and matches
-// nothing in the mirror, where the dir is absent (import rejects → block
-// skips). A template specifier also keeps tsc from binding the module, so the
-// mirror's typecheck stays clean without the file present.
-const generatorName = 'generate-script-types-bundle';
-const generator = await import(`../../../scripts/${generatorName}.ts`).catch(() => null);
+// Both package generators ship in the mirror; the root orchestrator does not.
+// Import them directly so missing tooling fails instead of silently skipping.
+// The empty module marker is redundant inside an ambient module declaration.
+// Only strings are built here: this gate never writes a generated file.
+function ambientModule(name: string, declarations: string): string {
+  const body = declarations.replace(/^export \{\};\s*$/gm, '').trimEnd();
+  return `declare module '${name}' {\n${body}\n}\n`;
+}
 
-describe.skipIf(generator === null)('script-types-bundle drift', () => {
-  it('on-disk bundle matches what the generators emit right now', () => {
-    const onDisk = fs.readFileSync(ON_DISK_PATH, 'utf8');
-    const rebuilt = generator.renderBundleFile(generator.buildBundle());
-    expect(rebuilt).toBe(onDisk);
-  }, DRIFT_TEST_TIMEOUT_MS);
+describe('script-types-bundle drift', () => {
+  it(
+    'committed core declarations match the current source types',
+    () => {
+      expect(CORE_TYPES_DTS).toBe(ambientModule('@tealstreet/script-api-core', generateCoreMonacoTypes()));
+    },
+    DRIFT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'committed web declarations match the current source types',
+    () => {
+      expect(WEB_TYPES_DTS).toBe(ambientModule('@tealstreet/script-api-web', generateWebMonacoTypes()));
+    },
+    DRIFT_TEST_TIMEOUT_MS,
+  );
 });
 
 /**
@@ -66,8 +72,6 @@ describe.skipIf(generator === null)('script-types-bundle drift', () => {
  * The list is curated, not exhaustive — if someone adds a NEW host
  * symbol later, extend this list in the same PR.
  */
-import { CORE_TYPES_DTS } from './script-types-bundle';
-
 const HOST_ONLY_SYMBOLS = [
   'InProcessProxy',
   'ApiProxy',
