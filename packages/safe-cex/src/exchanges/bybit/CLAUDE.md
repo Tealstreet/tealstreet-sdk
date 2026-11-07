@@ -747,7 +747,7 @@ a matched rejection follows the existing rejection path. A failed filtered
 lookup leaves the outcome unknown and cannot justify a create retry.
 
 See `docs/plans/callers/bybit-order-history-status.md` for the caller census
-and replay coverage. The Bybit private gate now checks a history result whose
+and replay coverage. The separate Bybit history gate checks a result whose
 cancelled orders exist only in filtered pages, including duplicate IDs and
 independent reuse of the same cursor token.
 
@@ -1207,12 +1207,12 @@ instead of pretending its exchange name is `bybitdemo`:
     endpoint which they'll poll every 30 s and surface revocation
     within 30 s. Preferable to inferring state from `retCode 10003`
     once that lifecycle signal exists.
-  Deferred OAuth/server-held credential design lives in
-  `docs/plans/HYROTRADER_OAUTH_V2.md`; do not implement a browser-held
-  OAuth credential path. Sam's current direction is that OAuth-linked HyroTrader
-  private trading should run through `services/exchange-server` because every
-  private request may need Tealstreet-held signing material. OAuth has no known
-  end-user launch timeline yet.
+    Deferred OAuth/server-held credential design lives in
+    `docs/plans/HYROTRADER_OAUTH_V2.md`; do not implement a browser-held
+    OAuth credential path. Sam's current direction is that OAuth-linked HyroTrader
+    private trading should run through `services/exchange-server` because every
+    private request may need Tealstreet-held signing material. OAuth has no known
+    end-user launch timeline yet.
 - reconciliation is USDT-only (`linear`, `settleCoin=USDT`) because the simulator
   contract does not support Bybit's USDC linear branch
 - order placement sends a generated `orderLinkId` because the simulator requires
@@ -2072,7 +2072,6 @@ Shared consumers must refresh their source then restart provider/accounts throug
 the existing identity-change contract. Hyro retains its USDT perpetual filter
 and normal 10 s ping deadline; 5 s watch wakes never imply an early ping.
 
-
 ## Rust private row admission
 
 Ordinary REST order/position snapshots and WS order/position arrays admit healthy
@@ -2090,7 +2089,6 @@ repair. Orders use the existing bounded retry cadence; positions use account
 polling. Strict Hyro handshake/account evidence and financial execution/history
 coverage remain separate. Structural/envelope or paging failures never establish
 authoritative empty exposure.
-
 
 Rust acknowledged leverage writes (including native leverage-not-modified replies)
 advance the existing positions revision before publishing the selected leverage.
