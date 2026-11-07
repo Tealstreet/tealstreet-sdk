@@ -5,6 +5,7 @@ pub mod drb;
 pub mod drb_auth;
 mod history;
 mod local_context;
+mod private_drb;
 mod public;
 mod rest;
 pub mod sign;
@@ -47,6 +48,7 @@ pub enum Pending {
     Account(account::Request, bool),
     Trading(trading::Request),
     History(history::Request),
+    PrivateDrb(private_drb::Request),
 }
 pub struct Coinbase {
     /// Shared derivatives transport; stream modules opt in through this state.
@@ -61,6 +63,7 @@ pub struct Coinbase {
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
     pub(crate) history: history::History,
+    pub(crate) private_drb: private_drb::Private,
 }
 impl Coinbase {
     pub fn new(options: Options) -> Result<Self, String> {
@@ -96,6 +99,7 @@ impl Coinbase {
             account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
+            private_drb: private_drb::Private::default(),
         })
     }
 }
@@ -117,6 +121,19 @@ impl Coinbase {
 }
 
 impl Venue for Coinbase {
+    fn session_bearer(&self, generation: u64) -> safe_cex_engine::request_context::SessionBearer {
+        self.private_drb.bearer(generation)
+    }
+    fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
+        self.private_drb.bearer_revision(generation)
+    }
+    fn read_root_retired(
+        &mut self,
+        _: safe_cex_engine::request_context::Owner,
+        pending: Vec<Pending>,
+    ) {
+        self.drb_private_retired(pending);
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -129,6 +146,7 @@ impl Venue for Coinbase {
                 public::Request::Products { .. } | public::Request::Instruments { .. },
             ) => S::PUBLIC,
             Pending::Account(request, _) => request.startup_sections(),
+            Pending::PrivateDrb(request) => request.startup_sections(),
             _ => S::NONE,
         }
     }
@@ -161,17 +179,17 @@ impl Venue for Coinbase {
         }
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if !self.public_open(cx, socket) {
+        if !self.drb_private_open(cx, socket) && !self.public_open(cx, socket) {
             self.private_on_open(cx, socket);
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
-        if !self.public_message(cx, socket, text) {
+        if !self.drb_private_message(cx, socket, text) && !self.public_message(cx, socket, text) {
             self.private_on_message(cx, socket, text);
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if !self.public_close(cx, socket) {
+        if !self.drb_private_close(cx, socket) && !self.public_close(cx, socket) {
             self.private_on_close(cx, socket);
         }
     }
@@ -181,6 +199,7 @@ impl Venue for Coinbase {
             Pending::Account(p, read) => self.private_on_response(cx, p, read, response),
             Pending::Trading(p) => self.trading_response(cx, p, response),
             Pending::History(p) => self.history_response(cx, p, response),
+            Pending::PrivateDrb(p) => self.drb_private_response(cx, p, response),
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
@@ -189,6 +208,7 @@ impl Venue for Coinbase {
             Pending::Account(p, _) => self.private_on_item(cx, p, item),
             Pending::Trading(_) => {}
             Pending::History(p) => self.history_item(cx, p, item),
+            Pending::PrivateDrb(_) => {}
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -197,10 +217,14 @@ impl Venue for Coinbase {
             Pending::Account(p, _) => self.private_failed(cx, p, error),
             Pending::Trading(p) => self.trading_failed(cx, p, error),
             Pending::History(p) => self.history_failed(cx, p, error),
+            Pending::PrivateDrb(p) => self.drb_private_failed(cx, p, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if !self.rest_timer(cx, timer) && !self.public_timer(cx, timer) {
+        if !self.drb_private_timer(cx, timer)
+            && !self.rest_timer(cx, timer)
+            && !self.public_timer(cx, timer)
+        {
             self.private_on_timer(cx, timer);
         }
     }
@@ -214,6 +238,9 @@ impl Venue for Coinbase {
             );
             return;
         }
+        let Some(command) = self.drb_history_command(cx, command) else {
+            return;
+        };
         if let Some(Command::Query { command, query }) = self
             .public_command(cx, command)
             .and_then(|command| self.trading_command(cx, command))

@@ -1,8 +1,11 @@
+//! Offline regression oracles for legacy Advanced Trade codecs and trading.
+//! Production INTX startup is covered by private_drb; this unit fixture alone
+//! explicitly selects the old protocol so Spot/CFM shared-code coverage remains.
+use crate::{Coinbase, Options};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketId, TimerId,
 };
-use safe_cex_venue_coinbase::{Coinbase, Options};
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 5_000.0;
@@ -38,15 +41,15 @@ struct Session {
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
-        let mut e = safe_cex_engine::test_support::seeded_engine(
-            Coinbase::new(Options {
-                key: "organizations/test/apiKeys/test".into(),
-                secret: STANDARD.encode([7; 32]),
-                spot_only: spot,
-                ..Default::default()
-            })
-            .unwrap(),
-        );
+        let mut venue = Coinbase::new(Options {
+            key: "organizations/test/apiKeys/test".into(),
+            secret: STANDARD.encode([7; 32]),
+            spot_only: spot,
+            ..Default::default()
+        })
+        .unwrap();
+        venue.account.legacy_protocol_fixture = true;
+        let mut e = safe_cex_engine::test_support::seeded_engine(venue);
         e.start(1000.0);
         Self {
             e,
