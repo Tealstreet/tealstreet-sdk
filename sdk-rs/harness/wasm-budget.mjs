@@ -251,7 +251,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
   phemex: 2_091_008,
   polymarket: 1_611_776,
-  txflow: 1_852_416,
+  // Provisional for the TxFlow public-decode crate (local +56,921 B); replaced by its CI size + 10 KiB.
+  txflow: 1_912_832,
   weex: 1_948_672,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
