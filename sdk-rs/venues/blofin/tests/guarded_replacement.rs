@@ -142,6 +142,45 @@ fn a_refused_put_back_is_typed_unprotected_and_never_retried() {
 
 const RATE_LIMITED: &str = r#"{"code":"429","msg":"Too Many Requests"}"#;
 
+#[test]
+fn documented_http400_replacement_refusal_puts_the_original_back_once() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond_status(
+        replacement,
+        400,
+        r#"{"code":"102014","msg":"trigger refused","data":[]}"#,
+    );
+    let restore = h.take("batch-orders");
+    assert_eq!(body(&restore)[0]["size"], "6");
+    assert_eq!(body(&restore)[0]["slTriggerPrice"], "55000");
+    h.respond(
+        restore,
+        r#"{"code":"0","data":[{"orderId":"13","code":"0"}]}"#,
+    );
+    assert_eq!(failure(&h).unwrap().protection, Some(Protection::Restored));
+    assert!(writes(&h).is_empty());
+}
+
+#[test]
+fn unproven_http400_replacement_never_claims_unprotected_or_puts_back() {
+    for response in [
+        r#"{"code":"103013","msg":"internal failure","data":[]}"#,
+        r#"{"code":"","msg":"internal failure","data":[]}"#,
+        r#"{"code":"999999","msg":"internal failure","data":[]}"#,
+        "Bad Request",
+    ] {
+        let mut h = Harness::new();
+        partly_filled(&mut h);
+        edit_stop(&mut h, 56000.0);
+        let replacement = to_replacement(&mut h);
+        h.respond_status(replacement, 400, response);
+        assert_unknown_stop(&h);
+    }
+}
+
 /// A 429 may have placed the order, so it is unknown, never Unprotected.
 fn assert_unknown_stop(h: &Harness) {
     let error = failure(h).expect("the edit did not finish");

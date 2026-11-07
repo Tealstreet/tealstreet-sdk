@@ -2614,13 +2614,10 @@ impl Blofin {
                     .filter(|reply| !reply.code.is_empty())
                     .map(|reply| (&*reply.code, &*reply.msg));
                 setting_failure(request.step.path, response.status, detail)
-            } else if response.status == 429 {
-                http_failure(response.status, response.body).kind(ErrorKind::RateLimited)
             } else {
                 http_failure(response.status, response.body)
             };
-            record_failed(cx, context, native, &error.message);
-            return Err(error);
+            return Err(record_failed(cx, context, native, &error.message));
         }
         let reply = match parsed {
             Ok(reply) => reply,
@@ -2645,18 +2642,12 @@ impl Blofin {
                 };
                 if rows.len() != *count {
                     if reply.code != "0" && rows.is_empty() {
-                        let maybe_live = outcome_unknown(&reply.code, &reply.msg);
-                        let message = if maybe_live {
-                            UNKNOWN_WRITE.to_owned()
-                        } else {
-                            message
-                        };
-                        record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
-                        return Err(if maybe_live {
-                            unknown(message)
-                        } else {
-                            VenueError::new(message)
-                        });
+                        return Err(record_failed(
+                            cx,
+                            context,
+                            Some(native(&reply.code, &reply.msg)),
+                            &message,
+                        ));
                     }
                     let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
                     return Err(unknown(UNKNOWN_WRITE));
@@ -2744,18 +2735,13 @@ impl Blofin {
             }
             Effect::Cancel(targets) => {
                 if reply.code != "0" && rows.is_empty() {
-                    let maybe_live = outcome_unknown(&reply.code, &reply.msg);
-                    let message = if maybe_live {
-                        UNKNOWN_WRITE.to_owned()
-                    } else {
-                        format!("BloFin cancellation rejected: {}", reply.msg)
-                    };
-                    record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
-                    return Err(if maybe_live {
-                        unknown(message)
-                    } else {
-                        VenueError::new(message)
-                    });
+                    let message = format!("BloFin cancellation rejected: {}", reply.msg);
+                    return Err(record_failed(
+                        cx,
+                        context,
+                        Some(native(&reply.code, &reply.msg)),
+                        &message,
+                    ));
                 }
                 let mut matched: Vec<Option<&ResultRow<'_>>> = vec![None; targets.len()];
                 let mut unproven = rows.len() != targets.len();
@@ -2882,19 +2868,14 @@ impl Blofin {
                         Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
                         _ => (&*reply.code, &*reply.msg),
                     };
-                    let native = native(code, message);
                     let error =
-                        if matches!(CODES.verdict(&native, Intent::Setting), Verdict::Unknown(_)) {
-                            unknown(UNKNOWN_WRITE)
-                        } else {
-                            setting_failure(
-                                request.step.path,
-                                response.status,
-                                Some((code, message)),
-                            )
-                        };
-                    record_failed(cx, context, Some(native), &error.message);
-                    return Err(error);
+                        setting_failure(request.step.path, response.status, Some((code, message)));
+                    return Err(record_failed(
+                        cx,
+                        context,
+                        Some(native(code, message)),
+                        &error.message,
+                    ));
                 }
                 let accepted = WriteFact::Accepted { order_ids: vec![] };
                 let _ = cx.http_write_fact(context, accepted, None);
@@ -2922,12 +2903,10 @@ impl Blofin {
                     _ => (&*reply.code, &*reply.msg),
                 };
                 let message = format!("BloFin TP/SL amend {code}: {msg}");
-                record_failed(cx, context, Some(native(code, msg)), &message);
+                let error = record_failed(cx, context, Some(native(code, msg)), &message);
                 // Only a definite refusal falls back; one that may have landed must not stack a cancel.
-                if outcome_unknown(code, msg) {
-                    return Err(unknown(format!(
-                        "{message}; whether the leg was removed is unknown. Check Open Orders"
-                    )));
+                if !definite_refusal(&error) {
+                    return Err(error);
                 }
                 let fallback = std::mem::take(&mut job.amend_fallback);
                 for step in fallback.into_iter().rev() {
@@ -2956,27 +2935,18 @@ impl Blofin {
                         && msg
                             .to_ascii_lowercase()
                             .contains("filled, triggered, canceled or does not exist"));
-                let unknown_outcome = !gone && outcome_unknown(code, msg);
                 let message = if gone {
                     format!(
                         "Your {symbol} was already filled, triggered or canceled; nothing was edited"
                     )
-                } else if unknown_outcome {
-                    format!(
-                        "BloFin edit {code}: {msg}; whether your {symbol} changed is unknown. Check Open Orders"
-                    )
                 } else {
                     format!("Your {symbol} is unchanged: BloFin refused the edit ({code}: {msg})")
                 };
-                record_failed(cx, context, Some(native(code, msg)), &message);
+                let error = record_failed(cx, context, Some(native(code, msg)), &message);
                 if gone {
                     self.reconcile_orders(cx);
                 }
-                Err(if unknown_outcome {
-                    unknown(message)
-                } else {
-                    VenueError::new(message).outcome(Outcome::Rejected)
-                })
+                Err(error)
             }
             Effect::Verify(_) | Effect::VerifyTpsl { .. } | Effect::VerifyAmend(_) => {
                 unreachable!("a Read call")
@@ -3162,28 +3132,32 @@ fn record_failed(
     context: &Context,
     native: Option<Native<'_>>,
     message: &str,
-) {
-    // A native rate response can arrive inside HTTP 200. Keep its diagnostic
-    // evidence, but do not present the unknown write as a definitive refusal.
-    let message = if native
-        .as_ref()
-        .is_some_and(|n| n.code == NativeCode::Int(429))
-    {
-        UNKNOWN_WRITE
-    } else {
-        message
-    };
-    match cx.classify_write(context, &CODES, native.as_ref(), message.to_owned()) {
+) -> VenueError {
+    // Classify the delivered attempt before choosing its presentation or fallback.
+    // Unknown guidance must be in the journal, not only in the later terminal.
+    let classified = cx
+        .classify_write(context, &CODES, native.as_ref(), UNKNOWN_WRITE.to_owned())
+        .and_then(|fact| {
+            if matches!(fact.verdict(), Verdict::Unknown(_)) {
+                Ok(fact)
+            } else {
+                cx.classify_write(context, &CODES, native.as_ref(), message.to_owned())
+            }
+        });
+    match classified {
         Ok(fact) => {
+            let error = fact.error().clone();
             let failed = WriteFact::Failed {
                 fact,
                 known_effects: false,
             };
             let _ = cx.http_write_fact(context, failed, None);
+            error
         }
         // A released write never ends factless.
         Err(_) => {
-            let _ = cx.http_write_unproven(context, message.to_owned());
+            let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
+            unknown(UNKNOWN_WRITE)
         }
     }
 }

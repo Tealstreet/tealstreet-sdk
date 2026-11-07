@@ -38,3 +38,9 @@ when a native setting response proves neither success nor refusal, including a
 blank code in HTTP 200. They retain native diagnostics, leave local settings
 unchanged and never resend the POST. Documented setting refusals still name the
 setting and its actual code/message.
+
+Every failed write uses the dispatched attempt's classifier verdict before
+choosing journal text or a fallback. Internal errors, blank codes and unlisted
+codes retain Unknown guidance on HTTP 200 and HTTP 400, including native edits
+that remove one combined TP/SL leg. An uncertain replacement or put-back never
+authorizes another POST or claims the position is definitively unprotected.

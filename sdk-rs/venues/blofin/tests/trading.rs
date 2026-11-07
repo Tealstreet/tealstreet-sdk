@@ -28,6 +28,28 @@ fn seed_order(h: &mut Harness, id: &str, extra: &str) {
     h.ws(&format!(r#"{{"arg":{{"channel":"orders"}},"data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"{id}","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"{extra}}}]}}"#));
 }
 
+fn seed_attached_entry(h: &mut Harness, filled: u32) {
+    h.modes();
+    h.reply("account/positions", r#"{"code":"0","data":[]}"#);
+    h.reply(
+        "balances",
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
+    );
+    let state = if filled == 0 {
+        "live"
+    } else {
+        "partially_filled"
+    };
+    h.reply("orders-pending", &format!(r#"{{"code":"0","data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"12","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","filledSize":"{filled}","price":"60000","state":"{state}","tpTriggerPrice":"65000","slTriggerPrice":"55000"}}]}}"#));
+    for path in [
+        "orders-pending",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        h.reply(path, r#"{"code":"0","data":[]}"#);
+    }
+}
+
 #[test]
 fn unknown_placement_rows_present_uncertainty_instead_of_rejection() {
     for (code, message) in [
@@ -189,9 +211,86 @@ fn missing_write_error_code_requires_uncertainty_guidance() {
     assert_codeless_write_requires_uncertainty(r#"{"msg":"internal failure","data":[]}"#);
 }
 
+fn assert_combined_leg_cancel_unknown(code: &str) {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","slTriggerPrice":"55000","slOrderPrice":"-1","state":"live"}]}"#);
+    h.handle(
+        1.0,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["91__take_profit".into()],
+        }),
+    );
+    h.collect();
+    let request = h.take("amend-tpsl");
+    h.respond(
+        request,
+        &serde_json::json!({"code": code, "msg": "internal failure", "data": []}).to_string(),
+    );
+    let [error] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures)
+    };
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let text = error.legacy_text();
+    assert!(
+        text.contains("unknown") && text.contains("Check Open Orders"),
+        "{text}"
+    );
+    assert!(
+        !h.pending
+            .iter()
+            .any(|r| r.method == safe_cex_engine::Method::Post)
+    );
+}
+
 #[test]
-fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
+fn combined_leg_cancel_internal_code_retains_uncertainty_guidance() {
+    assert_combined_leg_cancel_unknown("103013");
+}
+
+#[test]
+fn combined_leg_cancel_blank_code_retains_uncertainty_guidance() {
+    assert_combined_leg_cancel_unknown("");
+}
+
+#[test]
+fn combined_leg_cancel_unlisted_code_retains_uncertainty_guidance() {
+    assert_combined_leg_cancel_unknown("999999");
+}
+
+#[test]
+fn dispatched_ambiguity_covers_every_write_path() {
     for (status, response) in [
+        (
+            200,
+            r#"{"code":"103013","msg":"internal failure","data":[]}"#,
+        ),
+        (200, r#"{"code":"","msg":"internal failure","data":[]}"#),
+        (
+            200,
+            r#"{"code":"999999","msg":"internal failure","data":[]}"#,
+        ),
+        (
+            400,
+            r#"{"code":"103013","msg":"internal failure","data":[]}"#,
+        ),
+        (400, r#"{"code":"","msg":"internal failure","data":[]}"#),
+        (
+            400,
+            r#"{"code":"999999","msg":"internal failure","data":[]}"#,
+        ),
+        (400, r#"{"msg":"internal failure","data":[]}"#),
+        (400, "Bad Request"),
+        (
+            200,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"103013","msg":"internal failure"}]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"999999","msg":"internal failure"}]}"#,
+        ),
         (429, "{}"),
         (429, r#"{"code":"152401","msg":"Invalid signature"}"#),
         (200, r#"{"code":"429","msg":"Too Many Requests"}"#),
@@ -206,18 +305,42 @@ fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
         for operation in [
             "create",
             "protective-create",
+            "algo-create",
             "amend",
             "amend-replacement",
+            "protective-replacement",
+            "protective-put-back",
             "cancel",
             "protective-amend",
             "protective-cancel",
-            "setting",
+            "algo-amend",
+            "algo-cancel",
+            "attached-amend",
+            "combined-tp-cancel",
+            "combined-sl-cancel",
+            "leverage",
+            "margin-mode",
+            "position-mode",
         ] {
             let mut h = Harness::new();
             h.open_private();
-            h.seed();
-            seed_order(&mut h, "12", "");
-            h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","state":"live"}]}"#);
+            if matches!(
+                operation,
+                "protective-replacement" | "protective-put-back" | "attached-amend"
+            ) {
+                seed_attached_entry(&mut h, if operation != "attached-amend" { 4 } else { 0 });
+            } else {
+                h.seed();
+                seed_order(&mut h, "12", "");
+            }
+            let sibling = if operation.starts_with("combined-") {
+                r#","slTriggerPrice":"55000","slOrderPrice":"-1""#
+            } else {
+                ""
+            };
+            h.ws(&format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","state":"live"{sibling}}}]}}"#));
+            h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","algoId":"78","orderType":"trigger","side":"buy","size":"3","triggerPrice":"61000","orderPrice":"60900","triggerPriceType":"mark","marginMode":"isolated","positionSide":"long","state":"live"}]}"#);
+            fresh_prices(&mut h);
             let protective =
                 h.e.store()
                     .orders()
@@ -227,53 +350,95 @@ fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
                     .id
                     .clone();
             let (command, path) = match operation {
-                "create" | "protective-create" => {
-                    let kind = if operation == "create" {
-                        "market"
-                    } else {
-                        "stop_market"
+                "create" | "protective-create" | "algo-create" => {
+                    let kind = match operation {
+                        "create" => "market",
+                        "protective-create" => "stop_market",
+                        _ => "conditional",
                     };
-                    let orders = serde_json::from_value(serde_json::json!([{"symbol":"BTCUSDT","type":kind,"side":"sell","amount":1,"price":55000,"reduceOnly":true}])).unwrap();
+                    let orders = serde_json::from_value(serde_json::json!([{"symbol":"BTCUSDT","type":kind,"side":"sell","amount":1,"price":55000,"triggerPrice":61000,"reduceOnly":operation != "algo-create"}])).unwrap();
                     (
                         Command::PlaceOrders { command: 7, orders },
-                        if operation == "create" {
-                            "batch-orders"
-                        } else {
-                            "order-tpsl"
+                        match operation {
+                            "create" => "batch-orders",
+                            "protective-create" => "order-tpsl",
+                            _ => "order-algo",
                         },
                     )
                 }
-                "amend" | "amend-replacement" | "protective-amend" => (
+                "amend"
+                | "amend-replacement"
+                | "protective-replacement"
+                | "protective-put-back"
+                | "protective-amend"
+                | "attached-amend"
+                | "algo-amend" => (
                     Command::AmendOrder {
                         command: 7,
-                        id: if operation.starts_with("amend") {
-                            "12".into()
-                        } else {
-                            protective.clone()
+                        id: match operation {
+                            "amend" | "amend-replacement" => "12".into(),
+                            "protective-replacement" | "protective-put-back" | "attached-amend" => {
+                                "12__stop_loss".into()
+                            }
+                            "algo-amend" => "78".into(),
+                            _ => protective.clone(),
                         },
-                        price: Some(66000.0),
+                        price: Some(
+                            if operation == "protective-replacement"
+                                || operation == "protective-put-back"
+                                || operation == "attached-amend"
+                            {
+                                56000.0
+                            } else {
+                                66000.0
+                            },
+                        ),
                         amount: None,
                     },
-                    if operation.starts_with("amend") {
-                        "cancel-batch-orders"
-                    } else {
-                        "amend-tpsl"
+                    match operation {
+                        "amend"
+                        | "amend-replacement"
+                        | "protective-replacement"
+                        | "protective-put-back" => "cancel-batch-orders",
+                        "attached-amend" => "amend-order",
+                        "algo-amend" => "amend-algo",
+                        _ => "amend-tpsl",
                     },
                 ),
-                "cancel" | "protective-cancel" => (
+                "cancel" | "protective-cancel" | "algo-cancel" | "combined-tp-cancel"
+                | "combined-sl-cancel" => (
                     Command::CancelOrders {
                         command: 7,
-                        ids: vec![if operation == "cancel" {
-                            "12".into()
-                        } else {
-                            protective.clone()
+                        ids: vec![match operation {
+                            "cancel" => "12".into(),
+                            "algo-cancel" => "78".into(),
+                            "combined-tp-cancel" => "91__take_profit".into(),
+                            "combined-sl-cancel" => "91__stop_loss".into(),
+                            _ => protective.clone(),
                         }],
                     },
-                    if operation == "cancel" {
-                        "cancel-batch-orders"
-                    } else {
-                        "cancel-tpsl"
+                    match operation {
+                        "cancel" => "cancel-batch-orders",
+                        "algo-cancel" => "cancel-algo",
+                        "combined-tp-cancel" | "combined-sl-cancel" => "amend-tpsl",
+                        _ => "cancel-tpsl",
                     },
+                ),
+                "margin-mode" => (
+                    Command::SetMarginType {
+                        command: 7,
+                        symbol: "BTCUSDT".into(),
+                        isolated: true,
+                    },
+                    "set-margin-mode",
+                ),
+                "position-mode" => (
+                    Command::SetPositionMode {
+                        command: 7,
+                        symbol: None,
+                        hedged: true,
+                    },
+                    "set-position-mode",
                 ),
                 _ => (
                     Command::SetLeverage {
@@ -287,8 +452,16 @@ fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
             };
             h.handle(1.0, Event::Command(command));
             h.collect();
+            assert!(
+                h.pending.iter().any(|r| r.url.contains(path)),
+                "{operation}: {:?}",
+                h.failures
+            );
             let mut request = h.take(path);
-            if operation == "amend-replacement" {
+            if matches!(
+                operation,
+                "amend-replacement" | "protective-replacement" | "protective-put-back"
+            ) {
                 h.respond(
                     request,
                     r#"{"code":"0","data":[{"orderId":"12","code":"0"}]}"#,
@@ -306,9 +479,46 @@ fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
                     .unwrap();
                 h.handle(at, Event::TimerFired { timer });
                 h.collect();
-                h.reply("order-detail", r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"0"}}"#);
+                let filled = if operation != "amend-replacement" {
+                    4
+                } else {
+                    0
+                };
+                h.reply("order-detail", &format!(r#"{{"code":"0","data":{{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"{filled}"}}}}"#));
                 request = h.take("batch-orders");
+                if operation == "protective-put-back" {
+                    h.respond(
+                        request,
+                        r#"{"code":"102014","msg":"trigger refused","data":[]}"#,
+                    );
+                    request = h.take("batch-orders");
+                }
             }
+            assert_eq!(request.method, safe_cex_engine::Method::Post, "{operation}");
+            let settings = h.e.store().setting("BTCUSDT").unwrap();
+            let live_orders = |h: &Harness| {
+                serde_json::to_value(
+                    h.e.store()
+                        .orders()
+                        .iter()
+                        .filter(|o| o.status != safe_cex_engine::model::OrderStatus::Creating)
+                        .cloned()
+                        .map(|mut order| {
+                            // Pending UI statuses clear when the command ends.
+                            if matches!(
+                                order.status,
+                                safe_cex_engine::model::OrderStatus::Updating
+                                    | safe_cex_engine::model::OrderStatus::Canceling
+                            ) {
+                                order.status = safe_cex_engine::model::OrderStatus::Open;
+                            }
+                            order
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap()
+            };
+            let orders = live_orders(&h);
             h.respond_status(request, status, response);
             assert_eq!(h.failures.len(), 1, "{operation} {status}");
             let error = &h.failures[0];
@@ -317,7 +527,7 @@ fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
                 Some(safe_cex_engine::Outcome::Unknown),
                 "{operation} {status}: {error:?}"
             );
-            assert_eq!(error.protection, None);
+            assert_eq!(error.protection, None, "{operation} {status}: {error:?}");
             assert!(
                 error.message.to_lowercase().contains("unknown"),
                 "{operation} {status}: {error:?}"
@@ -326,8 +536,26 @@ fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
                 error.message.contains("Check Open Orders"),
                 "{operation} {status}: {error:?}"
             );
-            assert!(!error.message.contains("refused"), "{error:?}");
-            assert!(!error.message.contains("no stop"), "{error:?}");
+            assert!(
+                !error.message.contains("refused")
+                    || (operation == "protective-put-back"
+                        && error.message.contains("put-back's outcome is unknown")),
+                "{operation} {status}: {error:?}"
+            );
+            assert!(!error.message.contains("has no stop"), "{error:?}");
+            let after = h.e.store().setting("BTCUSDT").unwrap();
+            assert_eq!(after.leverage.to_bits(), settings.leverage.to_bits());
+            assert_eq!(
+                after.buy_leverage.map(f64::to_bits),
+                settings.buy_leverage.map(f64::to_bits)
+            );
+            assert_eq!(
+                after.sell_leverage.map(f64::to_bits),
+                settings.sell_leverage.map(f64::to_bits)
+            );
+            assert_eq!(after.margin_type, settings.margin_type);
+            assert!(!h.e.store().hedged());
+            assert_eq!(live_orders(&h), orders, "{operation} {status}");
             assert!(
                 h.pending
                     .iter()

@@ -41,13 +41,13 @@ fn issue(h: &mut Harness, command: Command, path: &str) -> HttpRequest {
     h.take(path)
 }
 
-fn assert_unknown_setting(command: Command, path: &str, response: &str) {
+fn assert_unknown_setting(command: Command, path: &str, status: u16, response: &str) {
     let mut h = Harness::new();
     h.seed();
     let before = h.e.store().setting("BTCUSDT").unwrap();
     let request = issue(&mut h, command, path);
     assert_eq!(request.method, Method::Post);
-    h.respond(request, response);
+    h.respond_status(request, status, response);
     let [error] = h.failures.as_slice() else {
         panic!("{path}: expected one terminal failure: {:?}", h.failures);
     };
@@ -71,6 +71,7 @@ fn blank_code_leverage_response_requires_uncertainty_guidance() {
     assert_unknown_setting(
         command,
         path,
+        200,
         r#"{"code":"","msg":"internal failure","data":[]}"#,
     );
 }
@@ -81,6 +82,7 @@ fn blank_code_margin_mode_response_requires_uncertainty_guidance() {
     assert_unknown_setting(
         command,
         path,
+        200,
         r#"{"code":"","msg":"internal failure","data":[]}"#,
     );
 }
@@ -91,6 +93,7 @@ fn blank_code_position_mode_response_requires_uncertainty_guidance() {
     assert_unknown_setting(
         command,
         path,
+        200,
         r#"{"code":"","msg":"internal failure","data":[]}"#,
     );
 }
@@ -104,7 +107,22 @@ fn missing_and_unproven_native_setting_codes_keep_uncertainty_guidance() {
         r#"{"code":"0","data":[{"code":"103013","msg":"internal failure"}]}"#,
     ] {
         for (command, _, path) in settings() {
-            assert_unknown_setting(command, path, response);
+            assert_unknown_setting(command, path, 200, response);
+        }
+    }
+}
+
+#[test]
+fn non2xx_setting_failures_without_refusal_proof_keep_uncertainty_guidance() {
+    for response in [
+        r#"{"code":"103013","msg":"internal failure","data":[]}"#,
+        r#"{"code":"","msg":"internal failure","data":[]}"#,
+        r#"{"code":"999999","msg":"internal failure","data":[]}"#,
+        r#"{"msg":"internal failure","data":[]}"#,
+        "Bad Request",
+    ] {
+        for (command, _, path) in settings() {
+            assert_unknown_setting(command, path, 400, response);
         }
     }
 }
@@ -156,6 +174,10 @@ fn http_setting_failures_distinguish_transport_status_from_vendor_evidence() {
             r#"{"code":"152001","msg":"Invalid parameter"}"#,
             Some(("152001", "Invalid parameter")),
         ),
+        (
+            r#"{"code":"110019","msg":"Close positions first"}"#,
+            Some(("110019", "Close positions first")),
+        ),
         ("Bad Request", None),
     ] {
         for (command, kind, path) in settings() {
@@ -176,13 +198,23 @@ fn http_setting_failures_distinguish_transport_status_from_vendor_evidence() {
                 expected.map(|(_, message)| message),
                 "{error:?}"
             );
-            assert!(
-                error
-                    .message
-                    .contains(&format!("BloFin {kind} setting rejected")),
-                "{error:?}"
-            );
-            assert!(error.message.contains("HTTP 400"), "{error:?}");
+            if expected.is_some() {
+                assert_eq!(error.outcome, Some(Outcome::Rejected), "{error:?}");
+                assert!(
+                    error
+                        .message
+                        .contains(&format!("BloFin {kind} setting rejected")),
+                    "{error:?}"
+                );
+                assert!(error.message.contains("HTTP 400"), "{error:?}");
+            } else {
+                assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+                assert!(error.legacy_text().contains("unknown"), "{error:?}");
+                assert!(
+                    error.legacy_text().contains("Check Open Orders"),
+                    "{error:?}"
+                );
+            }
             assert!(!h.pending.iter().any(|r| r.method == Method::Post));
         }
     }
