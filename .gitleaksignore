@@ -132,3 +132,5 @@ c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-r
 # Coinbase drb private-read tests: the same literal organizations/test/apiKeys/test identity.
 e04fb41d82604593df72ae0f8cda00df6920eac5:sdk-rs/venues/coinbase/tests/support/legacy_account.rs:generic-api-key:45
 e04fb41d82604593df72ae0f8cda00df6920eac5:sdk-rs/venues/coinbase/tests/support/private_drb.rs:generic-api-key:99
+# Coinbase drb trading tests: literal organizations/test/apiKeys/trading identity.
+2eed0db71cc4266533447b132794062520dc9b71:sdk-rs/venues/coinbase/tests/support/trading_drb.rs:generic-api-key:21
