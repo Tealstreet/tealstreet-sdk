@@ -350,6 +350,14 @@ export class DefaultStore implements Store {
       mutableTarget.index = source.index;
       changed = true;
     }
+    if (
+      target.observedAt?.some((time, slot) => time !== source.observedAt?.[slot]) ||
+      (!target.observedAt && source.observedAt)
+    ) {
+      if (source.observedAt) mutableTarget.observedAt = [...source.observedAt];
+      else delete mutableTarget.observedAt;
+      changed = true;
+    }
     if (target.midPrice !== source.midPrice) {
       if (source.midPrice === undefined) delete mutableTarget.midPrice;
       else mutableTarget.midPrice = source.midPrice;
@@ -545,6 +553,8 @@ export class DefaultStore implements Store {
     let patchedWorkerTickers = false;
     let patchedWorkerMarkets = false;
     const packedTickerDeltas = changes.tickerDeltas;
+    const tickerObservations = changes.tickerObservations;
+    if (tickerObservations) delete ensureMutableChanges().tickerObservations;
 
     if (packedTickerDeltas !== undefined) {
       delete ensureMutableChanges().tickers;
@@ -557,7 +567,7 @@ export class DefaultStore implements Store {
         delete ensureMutableChanges().tickers;
         patchedWorkerTickers = patchChanged;
       } else {
-        normalizedChanges = { ...changes, tickers: changes.tickers.map(this.stripTickerInfo) };
+        normalizedChanges = { ...normalizedChanges, tickers: changes.tickers.map(this.stripTickerInfo) };
       }
     }
 
@@ -605,7 +615,8 @@ export class DefaultStore implements Store {
       ? this.applyPackedTickerDeltasInPlace(packedTickerDeltas)
       : false;
 
-    let hasChanges = patchedWorkerTickers || patchedWorkerMarkets || patchedWorkerTickerDeltas;
+    let hasChanges =
+      Boolean(tickerObservations?.length) || patchedWorkerTickers || patchedWorkerMarkets || patchedWorkerTickerDeltas;
     for (const _key in normalizedChanges) {
       hasChanges = true;
       break;
@@ -658,6 +669,10 @@ export class DefaultStore implements Store {
         this.marketsMap[market.id] = market;
         this.marketsBySymbolMap[market.symbol] = market;
       });
+    }
+    for (const [row, times] of tickerObservations ?? []) {
+      const ticker = this.state.tickers[row];
+      if (ticker) (ticker as Writable<Ticker>).observedAt = [...times];
     }
     this.notify(fromWorker);
   };
