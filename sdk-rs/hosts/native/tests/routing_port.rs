@@ -6,6 +6,40 @@ use safe_cex_native::resolve::{
 };
 use serde::Deserialize;
 
+#[test]
+fn woo_private_relay_keeps_the_application_id_for_proxy_and_tunnel_accounts() {
+    // Shared routing support does not enable WOO on the native Hosted server.
+    assert!(safe_cex_native::resolve::rest_base_url("woo", false).is_err());
+    for flags in [
+        serde_json::json!({"tealstreetProxy": true}),
+        serde_json::json!({"tealstreetTunnel": true}),
+    ] {
+        let mut options = flags;
+        options["applicationId"] = "application-123".into();
+        options["hasKey"] = true.into();
+        let inputs: RoutingInputs =
+            serde_json::from_value(options).expect("public application metadata");
+        let plan =
+            resolve_routing_plan("woo", &inputs, "https://api.woox.io", Provider::Tealstreet)
+                .unwrap();
+        let host = plan
+            .ws
+            .private
+            .host
+            .expect("private socket must use the fleet relay");
+        let url = reqwest::Url::parse(&host).unwrap();
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "ts-relay")
+                .unwrap()
+                .1,
+            "wss://wss.woox.io/v2/ws/private/stream/application-123"
+        );
+        assert!(plan.ws.private.fallback.is_none());
+        assert!(plan.ws.public.host.is_none());
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Case {
