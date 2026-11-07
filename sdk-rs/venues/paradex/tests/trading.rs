@@ -1964,6 +1964,11 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
     let request = h.take("/orders");
     h.respond(request, 200, "{}");
     assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        h.result(8),
+        Err("Paradex write outcome is unknown. Check Open Orders")
+    );
+    assert!(h.failures[0].venue_message.is_some());
     // Transport loss on a write is Unknown.
     let mut h = private();
     place(&mut h, 8, vec![opts(OrderType::Limit)]);
@@ -1980,6 +1985,11 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
+    assert_eq!(
+        h.result(8),
+        Err("Paradex write outcome is unknown. Check Open Orders")
+    );
+    assert_eq!(h.failures[0].venue_message.as_deref(), Some("reset"));
     // Unsupported controls were never sent.
     for command in [
         Command::FetchStpMode { command: 9 },
@@ -2016,6 +2026,51 @@ fn several_failed_placements_share_an_outcome_only_when_they_agree() {
         h.respond(request, second, "");
         assert_eq!(h.failures.len(), 1);
         assert_eq!(h.failures[0].outcome, outcome, "{second}");
+    }
+}
+
+#[test]
+fn aggregation_normalizes_transport_unknown_warning() {
+    for lost_first in [false, true] {
+        let mut h = private();
+        let mut second = opts(OrderType::Market);
+        second.client_order_id = Some("second".into());
+        place(&mut h, 73, vec![opts(OrderType::Market), second]);
+        for lost in [lost_first, !lost_first] {
+            let request = take_method(&mut h, Method::Post, "/orders");
+            if lost {
+                h.e.handle(
+                    h.now,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "fixture connection reset",
+                    },
+                );
+                h.collect();
+            } else {
+                h.respond(
+                    request,
+                    400,
+                    r#"{"error":"INVALID_PRICE","message":"definitive refusal"}"#,
+                );
+            }
+        }
+        let [error] = h.failures.as_slice() else {
+            panic!("{:?}", h.failures)
+        };
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let text = error.legacy_text().to_ascii_lowercase();
+        assert!(
+            text.contains("unknown") && text.contains("check open orders"),
+            "{error:?}"
+        );
+        assert!(text.contains("definitive refusal"), "{text}");
+        assert!(!text.contains("connection reset"), "{text}");
+        assert!(
+            !h.pending.iter().any(|r| r.method != Method::Get),
+            "no resend or put-back: {:?}",
+            h.pending
+        );
     }
 }
 

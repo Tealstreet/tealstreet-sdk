@@ -1590,6 +1590,8 @@ impl Orderly {
         error: VenueError,
         uncertain: bool,
     ) {
+        let lost = uncertain || error.outcome == Some(Outcome::Unknown);
+        let error = if lost { ambiguous_write(error) } else { error };
         match request.step.effect {
             Effect::Place(order) if !uncertain => cx.store.remove_orders(&[&order.id]),
             Effect::Place(order) => {
@@ -1650,7 +1652,6 @@ impl Orderly {
         };
         // The first uncertainty owns the terminal warning and its diagnostics;
         // a definitive earlier refusal must not hide a later ambiguous write.
-        let lost = uncertain || error.outcome == Some(Outcome::Unknown);
         if lost
             && job
                 .error
@@ -1852,7 +1853,7 @@ fn answer_failure(response: Response<'_>, message: String, write: bool) -> Venue
 }
 
 fn ambiguous_write(mut error: VenueError) -> VenueError {
-    error.venue_message = Some(error.message);
+    error.venue_message.get_or_insert(error.message);
     error.message = "Orderly write outcome is unknown. Check Open Orders".into();
     error.outcome(Outcome::Unknown)
 }

@@ -1241,7 +1241,11 @@ fn lost_place_cancel_and_amend_preserve_optimistic_state_and_reconcile_without_r
             !out.iter()
                 .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
         );
-        assert!(done(out, 71).is_err());
+        let error = done(out, 71).unwrap_err().to_ascii_lowercase();
+        assert!(
+            error.contains("unknown") && error.contains("check open orders"),
+            "{error}"
+        );
     }
 }
 
@@ -1764,6 +1768,114 @@ const AMBIGUOUS_WRITES: &[(u16, &str)] = &[
     (503, r#"{"success":false,"code":-1103,"message":"refused"}"#),
     (504, "gateway timeout"),
 ];
+
+#[test]
+fn aggregation_normalizes_transport_and_native_unknown_warnings() {
+    use safe_cex_engine::{ErrorKind, Method, Outcome};
+    let refused = Some((400, r#"{"success":false,"code":-1103,"message":"refused"}"#));
+    let rate = Some((
+        429,
+        r#"{"success":false,"code":-1003,"message":"rate limit"}"#,
+    ));
+    let native = [-1000, -1011, -1012]
+        .map(|code| format!(r#"{{"success":false,"code":{code},"message":"native uncertainty"}}"#));
+    for (first_reply, second_reply) in [
+        (refused, None),
+        (None, refused),
+        (None, rate),
+        (rate, None),
+        (Some((200, native[0].as_str())), rate),
+        (Some((200, native[1].as_str())), rate),
+        (Some((200, native[2].as_str())), rate),
+    ] {
+        let (mut e, _) = ready();
+        requests(&mut e);
+        e.handle(
+            2000.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 91,
+                symbol: "BTCUSDC".into(),
+            }),
+        );
+        for (reply_shape, path) in [
+            (first_reply, "/v1/orders?"),
+            (second_reply, "/v1/algo/orders?"),
+        ] {
+            let writes: Vec<_> = requests(&mut e)
+                .into_iter()
+                .filter(|r| r.method != Method::Get)
+                .collect();
+            assert_eq!(
+                writes.len(),
+                1,
+                "exactly one independent cancellation: {writes:?}"
+            );
+            let request = &writes[0];
+            assert_eq!(request.method, Method::Delete);
+            assert!(request.url.contains(path));
+            if let Some((status, body)) = reply_shape {
+                reply(&mut e, request, status, body);
+            } else {
+                e.handle(
+                    2000.,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "fixture connection reset",
+                    },
+                );
+            }
+        }
+        let out = actions(&mut e);
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+            "no resend or put-back: {out:?}"
+        );
+        let errors: Vec<_> = out
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1);
+        let error = errors[0];
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        let text = error.legacy_text().to_ascii_lowercase();
+        assert!(
+            text.contains("unknown") && text.contains("check open orders"),
+            "{error:?}"
+        );
+        assert!(
+            !text.contains("refused") && !text.contains("connection reset"),
+            "{text}"
+        );
+        if first_reply.is_none() || first_reply == refused {
+            assert_eq!(error.kind, Some(ErrorKind::Network));
+            assert_eq!(
+                error.venue_message.as_deref(),
+                Some("fixture connection reset")
+            );
+        } else if first_reply == rate {
+            assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+            assert_eq!(error.venue_code.as_deref(), Some("-1003"));
+            assert_eq!(
+                error.venue_message.as_deref(),
+                Some("Orderly HTTP 429: rate limit")
+            );
+        } else {
+            assert!(
+                error
+                    .venue_message
+                    .as_deref()
+                    .unwrap()
+                    .contains("native uncertainty")
+            );
+            let body: serde_json::Value = serde_json::from_str(first_reply.unwrap().1).unwrap();
+            assert_eq!(error.venue_code, Some(body["code"].to_string()));
+        }
+    }
+}
 
 #[test]
 fn aggregation_keeps_unknown_warning_for_mixed_family_cancellation() {

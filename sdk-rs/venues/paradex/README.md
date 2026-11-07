@@ -26,6 +26,8 @@ requests reject. Failed or ambiguous writes are never automatically replayed.
 HTTP 429, 408, and 5xx after dispatch explicitly report an unknown outcome and
 ask the caller to Check Open Orders. Native refusal text on these responses is
 diagnostic evidence only and cannot authorize a protective put-back.
+Transport loss and unusable write acknowledgements carry the same warning before
+aggregation, while preserving the original diagnostic separately.
 Independent placement operations continue after a failure, preserving accepted
 IDs in the result and reporting failed client identities at Error level. Failed
 entries skip their attached children; a rejected TP/SL child reports an Error

@@ -692,10 +692,16 @@ fn partial_batch_errors_return_every_acknowledged_id_for_network_and_venue_failu
         assert_eq!(result["totalOrderCount"], 2);
         assert_eq!(result["failedOrderIndex"], 1);
         assert!(result["message"].as_str().unwrap().contains(if network {
-            "lost second"
+            "outcome is unknown. Check Open Orders"
         } else {
             "insufficient"
         }));
+        if network {
+            assert_eq!(
+                h.failures[0].venue_message.as_deref(),
+                Some("lost second response")
+            );
+        }
         assert!(h.e.store().order("first-accepted").is_some());
         assert_eq!(h.writes(), 0);
     }
@@ -1302,6 +1308,14 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
+    assert_eq!(
+        h.failures[0].message,
+        "Polymarket write outcome is unknown. Check Open Orders"
+    );
+    assert_eq!(
+        h.failures[0].venue_message.as_deref(),
+        Some("connection reset")
+    );
 }
 
 #[test]
@@ -1336,6 +1350,38 @@ fn failures_after_an_effective_step_are_never_rejected_or_not_sent() {
     assert_eq!(error.message, "Polymarket market is inactive");
     assert_eq!(error.outcome, None);
     assert_ne!(error.outcome, Some(Outcome::Unknown));
+}
+
+#[test]
+fn aggregation_normalizes_transport_unknown_warning() {
+    let mut h = H::new();
+    h.command(Command::PlaceOrders {
+        command: 91,
+        orders: vec![order(), order(), order()],
+    });
+    h.response("/order", 200, &ack("accepted"));
+    let request = h.take("/order");
+    h.event(Event::HttpFailed {
+        request: request.id,
+        error: "fixture connection reset",
+    });
+    let [error] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures)
+    };
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted"]);
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("fixture connection reset")
+    );
+    let text = error.legacy_text().to_ascii_lowercase();
+    assert!(
+        text.contains("unknown") && text.contains("check open orders"),
+        "{error:?}"
+    );
+    assert!(!text.contains("connection reset"), "{text}");
+    assert_eq!(h.writes(), 0, "no resend or third placement");
 }
 
 #[test]

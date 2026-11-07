@@ -900,13 +900,16 @@ impl Polymarket {
         let error = self.note_replacement_lost(request.command(), placing, error);
         self.trading_finish(cx, request.command(), Err(error));
     }
-    /// An amend's replacement failed after its cancel landed: the order no longer rests.
+    /// Normalize uncertainty before describing an amend whose cancel already landed.
     fn note_replacement_lost(
         &self,
         command: CommandId,
         placing: bool,
         mut error: VenueError,
     ) -> VenueError {
+        if error.outcome == Some(Outcome::Unknown) {
+            error = ambiguous_write(error);
+        }
         if placing
             && let Some(job) = self.trading.jobs.get(&command)
             && job.ids.is_empty()
@@ -946,13 +949,18 @@ pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
 /// or that a canceled order's replacement is absent. Account reads still use
 /// `http_failure` directly.
 fn write_failure(status: u16, message: String) -> VenueError {
-    let mut error = http_failure(status, message);
+    let error = http_failure(status, message);
     if matches!(status, 408 | 429 | 500..) {
-        error.venue_message = Some(error.message);
-        error.message = "Polymarket write outcome is unknown. Check Open Orders".into();
-        error.outcome = Some(Outcome::Unknown);
+        ambiguous_write(error)
+    } else {
+        error
     }
-    error
+}
+
+fn ambiguous_write(mut error: VenueError) -> VenueError {
+    error.venue_message.get_or_insert(error.message);
+    error.message = "Polymarket write outcome is unknown. Check Open Orders".into();
+    error.outcome(Outcome::Unknown)
 }
 
 /// Refused before any request was sent.

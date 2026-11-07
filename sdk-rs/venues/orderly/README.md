@@ -38,6 +38,8 @@ retrying; native diagnostics remain available separately from that message.
 If the regular and algo bulk cancellations have mixed failures, the terminal
 error retains the first ambiguous failure's warning and diagnostics so an
 earlier definitive refusal cannot hide the unknown outcome.
+The same warning covers lost transport responses and native Unknown codes;
+normalization preserves the original diagnostic even across multiple failures.
 
 The shared SDK engine transport preserves signed request bytes through direct
 requests, REST proxies and the raw HTTP-over-WebSocket adapter. Intermediary

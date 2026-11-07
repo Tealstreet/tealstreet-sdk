@@ -1416,6 +1416,9 @@ impl Trading {
                 }
             }
             Err(mut error) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    error = ambiguous_write(error);
+                }
                 let gone_stop = match &request.kind {
                     Kind::Place {
                         replaces: Some(stop),
@@ -2361,13 +2364,18 @@ fn answer_failure(status: u16, message: String) -> VenueError {
 /// Weaken the failure before job aggregation or protective restore decisions;
 /// keep read failures and definitive native refusals unchanged.
 fn write_failure(status: u16, message: String) -> VenueError {
-    let mut error = answer_failure(status, message);
+    let error = answer_failure(status, message);
     if matches!(status, 408 | 429 | 500..) {
-        error.venue_message = Some(error.message);
-        error.message = "Paradex write outcome is unknown. Check Open Orders".into();
-        error.outcome = Some(Outcome::Unknown);
+        ambiguous_write(error)
+    } else {
+        error
     }
-    error
+}
+
+fn ambiguous_write(mut error: VenueError) -> VenueError {
+    error.venue_message.get_or_insert(error.message);
+    error.message = "Paradex write outcome is unknown. Check Open Orders".into();
+    error.outcome(Outcome::Unknown)
 }
 
 #[cfg(test)]
