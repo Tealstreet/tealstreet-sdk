@@ -14,3 +14,7 @@ REST `ticker/bookTicker` still seeds startup prices. Daily ticker and mark-price
 frames update their own fields without overwriting PM bid/ask. The fixtures in
 `tests/pm_ticker_bidask.rs` model a 0.1% move between all-market samples and
 assert that the ticker and depth book agree on the venue's best prices.
+
+The PM replay adapter in `sdk-rs/harness/binance-protocol.mjs` derives the same
+real-time subscriptions from the TypeScript reference's own market catalogue.
+Every per-symbol topic remains visible to strict replay comparison.
