@@ -1048,18 +1048,22 @@ impl Venue for Grvt {
         }
         if let Err(error) = wire::check(&response) {
             let code = wire::code(&response);
-            let (restoring, needs_rejection_proof) = if let Job::Trade(request) = &pending.job {
+            let (restoring, protective, ambiguous_write) = if let Job::Trade(request) = &pending.job
+            {
                 (
                     request.is_restore(),
-                    request.is_protective() || !request.is_read(),
+                    request.is_protective(),
+                    !request.is_read()
+                        && request.failed_outcome(&response) == safe_cex_engine::Outcome::Unknown,
                 )
             } else {
-                (false, false)
+                (false, false, false)
             };
             if code == "1000"
                 && !pending.auth_resent
                 && !restoring
-                && (!needs_rejection_proof || wire::venue_rejected(&response))
+                && !ambiguous_write
+                && (!protective || (response.status != 429 && wire::venue_rejected(&response)))
                 && !matches!(pending.job, Job::Account(account::Request::Login))
                 && !matches!(pending.job, Job::Markets { .. } | Job::Candles(_))
                 && !matches!(&pending.job,Job::History(request) if request.is_public())

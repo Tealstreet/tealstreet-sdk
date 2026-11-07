@@ -41,7 +41,11 @@ impl Request {
         self.plan.protection.is_some()
     }
     pub(crate) fn failed_outcome(&self, response: &Response<'_>) -> Outcome {
-        crate::wire::write_outcome(response)
+        if !self.is_read() && matches!(response.status, 408 | 429 | 500..) {
+            Outcome::Unknown
+        } else {
+            crate::wire::write_outcome(response)
+        }
     }
     pub(crate) fn is_restore(&self) -> bool {
         self.plan

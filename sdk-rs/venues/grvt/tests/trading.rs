@@ -3086,3 +3086,45 @@ fn ambiguous_cancel_and_setting_errors_never_refresh_or_replay() {
         }
     }
 }
+
+#[test]
+fn ambiguous_read_native_errors_keep_the_existing_outcome() {
+    for session_proxy in [false, true] {
+        for (status, expected) in [
+            (429, safe_cex_engine::Outcome::Rejected),
+            (408, safe_cex_engine::Outcome::Rejected),
+            (503, safe_cex_engine::Outcome::Unknown),
+        ] {
+            let (mut engine, _, _, _) = boot_capturing_public_session(
+                CATALOG,
+                Some(AUTHORIZED),
+                OPEN_ORDERS,
+                session_proxy,
+            );
+            let read = http(
+                command(
+                    &mut engine,
+                    Command::CancelSymbolOrders {
+                        command: 905,
+                        symbol: "BTC_USDT_PERP".into(),
+                    },
+                ),
+                "open_orders",
+            );
+            let actions = reply(
+                &mut engine,
+                &read,
+                status,
+                r#"{"c":1001,"m":"controlled read refusal"}"#,
+            );
+            assert_eq!(
+                failure(&actions).outcome,
+                Some(expected),
+                "proxy={session_proxy} HTTP {status}"
+            );
+            assert!(!actions.iter().any(|action| matches!(action,
+                Action::Http(request) if request.url.ends_with("cancel_order") || request.url.ends_with("create_order")
+            )));
+        }
+    }
+}
