@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import '../reference/orderly/orderly.encryption';
 
+import { exchangeMetadata } from '../../exchangeMetadata';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
 import { DefaultStore } from '../../store/store.base';
@@ -53,7 +54,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
     for (const name of ['coinbase', 'coinbasespot', ...orderlyNames] as ExchangeName[]) {
       const options: ExchangeOptions = { key: 'hosted-key', secret: '', remoteSigner, privateOnly: true };
       await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
-      expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrow(`${name} isn't available for Hosted accounts yet; reconnect with your own API key to trade it.`);
+      expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrow(`${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`);
     }
     expect(clock).not.toHaveBeenCalled();
   });
