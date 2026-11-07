@@ -40,11 +40,9 @@ export function formatPositionLine(position: Position, market?: Market): ChartLi
  * Format order for chart display
  * Returns null if order has no valid price (e.g., market orders)
  */
-export function formatOrderLine(order: Order, _pricePrecision?: number): ChartLine | null {
+export function formatOrderLine(order: Order, market?: Market): ChartLine | null {
   const side = order.side === 'buy' ? 'buy' : 'sell';
-  const sizeStr = Math.abs(order.amount)
-    .toFixed(4)
-    .replace(/\.?0+$/, '');
+  const sizeStr = formatBaseSize(order.remaining, market);
 
   let type: ChartLine['type'] = 'limit';
   let label = `Limit ${sizeStr}`;
@@ -543,7 +541,7 @@ export class ChartCommand extends TradingBaseCommand {
         chartLines.push(positionLine);
       }
       for (const order of orders) {
-        const orderLine = formatOrderLine(order, pricePrecision);
+        const orderLine = formatOrderLine(order, market);
         if (orderLine) {
           chartLines.push(orderLine);
         }

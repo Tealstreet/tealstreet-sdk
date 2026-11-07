@@ -559,7 +559,7 @@ async function startWatchChart(
     const positionLine = position ? formatPositionLine(position, market) : null;
     if (positionLine) chartLines.push(positionLine);
     for (const order of orders) {
-      const orderLine = formatOrderLine(order, pricePrecision);
+      const orderLine = formatOrderLine(order, market);
       if (orderLine) chartLines.push(orderLine);
     }
 

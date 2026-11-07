@@ -125,6 +125,8 @@ region owner), `status-line.ts`, `footer.ts`, `footer-segments.ts`.
 Order and position sizes (`o`, `ps`, `p`, the prompt, charts, and the footer
 `position` segment) are base-asset amounts, shown to the market's base lot step
 (lot step × contract size); a step of 1 or more shows whole units.
+Order tables, chart annotations (including SL/TP/trailing orders), and the chase
+monitor's current-order row show the remaining base amount after partial fills.
 Inverse contracts have a price-dependent base size, so fractional amounts use
 up to eight significant digits rather than a fixed decimal count. Small nonzero
 positions and remaining order sizes stay visible.
