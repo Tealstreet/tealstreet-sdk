@@ -16,6 +16,7 @@ use safe_cex_engine::selected_read::{
 };
 use safe_cex_engine::socket_lifecycle::{FeedId, SocketError};
 use safe_cex_engine::store::Store;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, Cx, Fill, Response, SocketId, TimerId, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -90,6 +91,18 @@ fn reject<T>(
     );
     for id in ids {
         rows.reject_in(Some(id), symbol);
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::Balance => S::BALANCE,
+            _ => S::NONE,
+        }
     }
 }
 
@@ -211,6 +224,9 @@ pub struct Account {
     snapshot_floor: u64,
     terminal: HashMap<String, (u64, OrderStatus)>,
     cancelling: HashMap<String, f64>,
+    /// Resting STOP_MARKET and TAKE_PROFIT_MARKET orders: an edit or put-back
+    /// keeps the market type, which fills through a gap where a limit may not.
+    market_triggers: HashSet<String>,
     seen: HashSet<String>,
     seen_queue: VecDeque<String>,
     progress: HashMap<String, Progress>,
@@ -228,6 +244,17 @@ impl Account {
     }
     /// An accepted cancel fences older reads and hides the order briefly; only
     /// a venue terminal event tombstones it, so an order the venue kept reappears.
+    pub(crate) fn note_trigger_type(&mut self, raw: &wire::OrderRow<'_>) {
+        let resting = matches!(raw.status.as_ref(), "PENDING" | "OPEN" | "UNTRIGGERED");
+        if resting && matches!(raw.kind.as_ref(), "STOP_MARKET" | "TAKE_PROFIT_MARKET") {
+            self.market_triggers.insert(raw.id.clone());
+        } else {
+            self.market_triggers.remove(&raw.id);
+        }
+    }
+    pub(crate) fn market_trigger(&self, id: &str) -> bool {
+        self.market_triggers.contains(id)
+    }
     pub(crate) fn note_cancel(&mut self, id: &str, now: f64) {
         self.record_order(id, None);
         self.cancelling.retain(|_, at| now - *at < CANCEL_GRACE_MS);
@@ -918,6 +945,7 @@ impl ApexOmni {
                             cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "ApeX owned order has unavailable market metadata; preserving previous orders");
                             return Err("unknown owned order market".into());
                         }
+                        self.account.note_trigger_type(&raw);
                         map_order(cx.store, &raw, cx.now)
                     })
                 {
@@ -1450,7 +1478,7 @@ impl ApexOmni {
                 .map(|args| args.get())
                 .filter(|args| args.starts_with('[') && *args != "[]")
                 .map(str::to_owned)
-                .unwrap_or_else(|| format!(r#"["{}"]"#, cx.now as u64));
+                .unwrap_or_else(|| format!(r#"["{}"]"#, cx.protocol_now() as u64));
             cx.send(socket, format!(r#"{{"op":"pong","args":{args}}}"#));
         }
         if message.op == "pong" || message.ret_msg == "pong" || message.pong.is_some() {
@@ -1496,7 +1524,7 @@ impl ApexOmni {
                     code::ROW_SKIPPED,
                     format!(
                         "ApeX private stream skipped malformed {kind} rows ({})",
-                        skipped.join(", ")
+                        skipped.join_with(", ")
                     ),
                 );
             }
@@ -1749,6 +1777,7 @@ impl ApexOmni {
         raw: &wire::OrderRow<'_>,
         snapshot: bool,
     ) {
+        self.account.note_trigger_type(raw);
         let rows = match map_order(cx.store, raw, cx.now) {
             Ok(rows) => rows,
             Err(error) => {
@@ -1774,6 +1803,7 @@ impl ApexOmni {
             &raw.id,
             raw.cum_success_fill_size.unwrap_or(0.0),
             matches!(raw.status.as_ref(), "FILLED" | "EXPIRED"),
+            matches!(raw.status.as_ref(), "FILLED" | "EXPIRED" | "CANCELED"),
             raw.updated_at
                 .or(raw.updated_time)
                 .map(execution_milliseconds)

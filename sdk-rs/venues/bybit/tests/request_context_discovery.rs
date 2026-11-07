@@ -7,8 +7,8 @@ use safe_cex_engine::Event;
 use safe_cex_venue_bybit::{Endpoints, Variant};
 use support::{Harness, INSTRUMENTS, Options, PRELAUNCH, TICKERS};
 
-/// Startup discovery's bound (the engine's DISCOVERY_TIMEOUT_MS).
-const WINDOW: Option<u32> = Some(60_000);
+/// Startup discovery's bound (the engine's discovery timeout plus readiness allowance).
+const WINDOW: Option<u32> = Some(90_000);
 const DISCOVERY: [&str; 2] = ["/v5/market/instruments-info", "/v5/market/tickers"];
 
 fn public(variant: Variant, rest: &str) -> Options {
@@ -90,7 +90,7 @@ fn an_admission_refused_discovery_read_retries_through_the_same_backoff() {
     assert!(
         retried
             .timeout_ms
-            .is_some_and(|ms| (60_000..=60_001).contains(&ms)),
+            .is_some_and(|ms| (90_000..=90_001).contains(&ms)),
         "{:?}",
         retried.timeout_ms
     );
@@ -103,7 +103,7 @@ fn an_expired_discovery_window_retries_like_transport_loss() {
     h.respond("status=PreLaunch", 200, PRELAUNCH);
     let read = h.take("/v5/market/instruments-info");
     assert_eq!(read.timeout_ms, WINDOW);
-    h.advance(60_001.);
+    h.advance(90_001.);
     assert!(!h.has_request("/v5/market/instruments-info"));
     h.advance(1_000.);
     assert!(h.has_request("/v5/market/instruments-info"));
@@ -131,7 +131,7 @@ fn a_late_discovery_answer_publishes_no_rows() {
     let mut h = Harness::started(public(Variant::Linear, ""));
     h.respond("status=PreLaunch", 200, PRELAUNCH);
     let read = h.take("/v5/market/instruments-info");
-    h.advance(60_001.);
+    h.advance(90_001.);
     h.reply(read.id, 200, INSTRUMENTS);
     assert!(!h.engine.store().loaded().markets);
     assert!(h.engine.store().markets().is_empty());
@@ -194,7 +194,7 @@ fn a_reply_past_its_deadline_before_the_timer_still_retries() {
         let read = h.take("/v5/market/instruments-info");
         // The final assert must see a new discovery request, not a queued one.
         assert!(!h.has_request("/v5/market/instruments-info"));
-        h.now += 60_001.;
+        h.now += 90_001.;
         h.reply(read.id, 200, body);
         assert!(h.engine.store().markets().is_empty(), "no rows published");
         h.advance(120_000.);
@@ -213,7 +213,7 @@ fn a_discovery_answer_on_a_retired_read_still_retries() {
     h.respond("status=PreLaunch", 200, PRELAUNCH);
     let read = h.take("/v5/market/instruments-info");
     // Answered at the very end of its window: delivered, but no longer live.
-    h.advance(60_000.);
+    h.advance(90_000.);
     h.reply(read.id, 200, INSTRUMENTS);
     h.advance(70_000.);
     assert!(

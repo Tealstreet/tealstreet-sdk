@@ -132,3 +132,74 @@ fn a_lighter_device_refuses_other_scopes_formats_and_bare_bytes() {
         Err(SignError::Unavailable)
     ));
 }
+
+#[test]
+fn tx17_hosted_signing_binds_every_field_for_each_deployment() {
+    use safe_cex_venue_lighter::sign::statement;
+    const MODIFY: &str = r#"{"kind":"txs","chainId":304,"accountIndex":42,"apiKeyIndex":3,"txs":[{"txType":17,"nonce":7,"expiredAt":1700000600000,"modify":{"MarketIndex":1,"Index":42,"BaseAmount":2000,"Price":7900,"TriggerPrice":8500}}]}"#;
+    let decode = |s: &str| {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let public = safe_cex_crypto::lighter::public_key(&decode(&SECRET[2..])).unwrap();
+    for (venue, testnet, chain) in [
+        ("lighter", false, 304),
+        ("lighter", true, 300),
+        ("lighter-robinhood", false, 466324),
+        ("lighter-robinhood", true, 300),
+    ] {
+        let text = MODIFY.replace("\"chainId\":304", &format!("\"chainId\":{chain}"));
+        let own = statement::Owner {
+            chain_id: chain,
+            account_index: Some(42),
+            api_key_index: 3,
+        };
+        let derived = statement::derive(&text, &own).unwrap();
+        let sig = sign(venue, &account(Some("42"), testnet), &text, "lighter-tx").unwrap();
+        let bytes = decode(&sig[2..]);
+        assert!(
+            safe_cex_crypto::lighter::schnorr_verify(&derived.preimages[0], &public, &bytes)
+                .unwrap()
+        );
+        for (from, to) in [
+            ("\"nonce\":7", "\"nonce\":8"),
+            ("\"expiredAt\":1700000600000", "\"expiredAt\":1700000600001"),
+            ("\"MarketIndex\":1", "\"MarketIndex\":2"),
+            ("\"Index\":42", "\"Index\":43"),
+            ("\"BaseAmount\":2000", "\"BaseAmount\":2001"),
+            ("\"Price\":7900", "\"Price\":7901"),
+            ("\"TriggerPrice\":8500", "\"TriggerPrice\":8501"),
+        ] {
+            let changed = text.replacen(from, to, 1);
+            assert_ne!(changed, text);
+            let other = statement::derive(&changed, &own).unwrap();
+            assert!(
+                !safe_cex_crypto::lighter::schnorr_verify(&other.preimages[0], &public, &bytes)
+                    .unwrap(),
+                "{venue}/{from}"
+            );
+        }
+        for (from, to) in [
+            ("\"accountIndex\":42", "\"accountIndex\":43"),
+            ("\"apiKeyIndex\":3", "\"apiKeyIndex\":4"),
+            ("\"txType\":17", "\"txType\":15"),
+            ("\"modify\":{", "\"modify\":{\"ReduceOnly\":1,"),
+            ("\"MarketIndex\":1", "\"MarketIndex\":255"),
+            ("\"BaseAmount\":2000", "\"BaseAmount\":0"),
+            ("\"Index\":42", "\"Index\":0"),
+        ] {
+            assert!(
+                sign(
+                    venue,
+                    &account(Some("42"), testnet),
+                    &text.replacen(from, to, 1),
+                    "lighter-tx"
+                )
+                .is_err(),
+                "{venue}/{to}"
+            );
+        }
+    }
+}

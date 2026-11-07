@@ -53,6 +53,7 @@ fn provider() -> (Arc<LocalSigner>, Identity) {
                 key: ExtraKey::ZklinkSeed,
                 field: ExtraFieldPolicy::RequiredForPrivate,
                 encoding: Some(KeyEncoding::Hex),
+                trim: false,
             }),
             ..Default::default()
         }),

@@ -19,6 +19,7 @@ use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
     Interest, Invalidation, LifecycleEvent, RetireReason, SocketError, TrafficPolicy,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -209,7 +210,7 @@ pub struct State {
     fills: HashSet<String>,
     fill_queue: VecDeque<(String, u64)>,
     fill_floor: u64,
-    uncertain_fills: HashMap<String, u64>,
+    uncertain_fills: HashMap<String, (String, u64)>,
     uncertainty_overflow: bool,
     reconcile: HashMap<String, Reconcile>,
     reconcile_timer: Option<TimerId>,
@@ -409,10 +410,13 @@ impl State {
             .retain(|_, entry| !entry.lost.is_empty() || !entry.cancel.is_empty());
     }
     /// Frame-fed: removes each symbol's lost placements whose signed expiry
-    /// is at or before `cover`, returning the symbol and that expiry.
-    pub(crate) fn take_proven_lost(&mut self, cover: f64) -> Vec<(String, f64)> {
+    /// is at or before its `cover`, returning the symbol and that expiry.
+    pub(crate) fn take_proven_lost(
+        &mut self,
+        cover: impl Fn(&str) -> Option<f64>,
+    ) -> Vec<(String, f64)> {
         let proven: Vec<_> = (self.reconcile.iter())
-            .filter(|(_, entry)| entry.not_before <= cover)
+            .filter(|(symbol, entry)| cover(symbol).is_some_and(|cover| entry.not_before <= cover))
             .map(|(symbol, entry)| (symbol.clone(), entry.not_before))
             .collect();
         for (symbol, _) in &proven {
@@ -441,6 +445,16 @@ impl State {
         self.uncertainty_overflow
             || !self.uncertain_fills.is_empty()
             || self.source_unreconciled_fills
+    }
+    pub fn has_unreconciled_fills_for(&self, symbol: &str, id: &str) -> bool {
+        self.uncertainty_overflow
+            || self.source_unreconciled_fills
+            || self
+                .uncertain_fills
+                .iter()
+                .any(|(order, (filled_symbol, _))| {
+                    order == id || filled_symbol.eq_ignore_ascii_case(symbol)
+                })
     }
     pub fn order_pos_side(&self, id: &str) -> Option<&str> {
         self.order_sides
@@ -653,6 +667,7 @@ impl PhemexPerpetuals {
                     invalidation: Invalidation::Required,
                     subscription_interval_ms: 0.,
                     close_floors: &[],
+                    data_silence: None,
                 })?;
                 self.account.feed = Some(feed);
                 feed
@@ -1590,7 +1605,7 @@ impl PhemexPerpetuals {
                             .account
                             .uncertain_fills
                             .get(row.order_id.as_ref())
-                            .is_some_and(|time| version >= *time)
+                            .is_some_and(|(_, time)| version >= *time)
                     {
                         self.account.uncertain_fills.remove(row.order_id.as_ref());
                     }
@@ -1831,7 +1846,7 @@ impl PhemexPerpetuals {
             format!(
                 "Phemex cancel-all on {symbol} sent while placement {} has an unknown outcome; \
                  it is canceled if the open-order read after its signed expiry finds it",
-                ids.join(", ")
+                ids.join_with(", ")
             ),
         );
         let covered = self.mint_late_subjects(cx, preflight, symbol, &lost);
@@ -1914,7 +1929,7 @@ impl PhemexPerpetuals {
                 code::CHILD_LEG_FAILED,
                 format!(
                     "Phemex order {} landed after cancel-all on {symbol}; check the position",
-                    filled.join(", ")
+                    filled.join_with(", ")
                 ),
             );
         }
@@ -2058,6 +2073,15 @@ impl PhemexPerpetuals {
             self.orders_read_failed(cx, read, "malformed open-order envelope");
             return;
         };
+        // Before this response's own writes: whether the stream changed the
+        // symbol after the read went out, so its census is older than the rows.
+        let outran = cx
+            .orders_read_refusals(
+                safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&[&read.symbol]),
+                |_| true,
+                &[],
+            )
+            .is_some_and(|refused| !refused.is_empty());
         let data = envelope
             .data
             .map(RawValue::get)
@@ -2078,6 +2102,8 @@ impl PhemexPerpetuals {
             return;
         };
         let mut complete = true;
+        // Another symbol's rows: the answer is not this symbol's list.
+        let mut foreign = false;
         let mut published = Vec::new();
         let mut listed = HashSet::new();
         let list_len = rows.len();
@@ -2094,7 +2120,11 @@ impl PhemexPerpetuals {
                 complete = false;
                 continue;
             };
-            if row.symbol.to_ascii_uppercase() != read.symbol || row.terminal() {
+            if row.symbol.to_ascii_uppercase() != read.symbol {
+                foreign = true;
+                continue;
+            }
+            if row.terminal() {
                 continue;
             }
             listed.insert(row.order_id.to_string());
@@ -2148,7 +2178,16 @@ impl PhemexPerpetuals {
         } else {
             None
         };
-        if receipt.is_none() {
+        if receipt.is_none()
+            && !self.commit_orders_read(
+                cx,
+                &read.symbol,
+                &published,
+                &listed,
+                (complete, !foreign),
+                list_len,
+            )
+        {
             for order in published {
                 cx.store.upsert_order(order);
             }
@@ -2182,9 +2221,23 @@ impl PhemexPerpetuals {
         }
         if let Some(entry) = self.account.reconcile.get_mut(&symbol) {
             entry.reading = false;
-            entry.failures = 0;
-            let mut gone = std::mem::take(&mut entry.unconfirmed);
-            let resting = std::mem::take(&mut entry.resting);
+            if outran {
+                // Its absences prove nothing: the rows stay owed, read again on the
+                // failure backoff, and a clean read removes the genuinely gone ones.
+                entry.generation += 1;
+                entry.failures = entry.failures.saturating_add(1);
+                let wait =
+                    cx.jittered(Backoff::new(1_000.0, 5, f64::INFINITY).delay(entry.failures));
+                entry.not_before = entry.not_before.max(cx.now + wait);
+            } else {
+                entry.failures = 0;
+            }
+            let (mut gone, resting) = if outran {
+                (Vec::new(), Vec::new())
+            } else {
+                let unconfirmed = std::mem::take(&mut entry.unconfirmed);
+                (unconfirmed, std::mem::take(&mut entry.resting))
+            };
             if list_len < RESTING_LIST_MAX_ROWS {
                 gone.extend(resting);
             }
@@ -2206,6 +2259,65 @@ impl PhemexPerpetuals {
             }
         }
         self.orders_reconcile(cx);
+    }
+    /// Commits a read's rows with the cover its send time proves: the symbol's rows,
+    /// less those it shows gone, plus the ones it found. A read that is not
+    /// complete, or not this symbol's list (`proves`), commits them with no cover. False when the stream changed
+    /// the symbol after the read went out: its rows stand, and the read proves nothing.
+    fn commit_orders_read(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        published: &[Order],
+        listed: &HashSet<String>,
+        (complete, proves): (bool, bool),
+        list_len: usize,
+    ) -> bool {
+        let entry = self.account.reconcile.get(symbol);
+        let cut = list_len >= RESTING_LIST_MAX_ROWS;
+        let gone = |id: &String| {
+            complete
+                && !listed.contains(id)
+                && entry.is_some_and(|entry| {
+                    entry.unconfirmed.contains(id) || (!cut && entry.resting.contains(id))
+                })
+        };
+        let mut rows: Vec<Order> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|order| order.symbol == symbol && !gone(&order.id))
+            .cloned()
+            .collect();
+        rows.extend_from_slice(published);
+        let unproven = if complete && proves && !cut {
+            vec![]
+        } else {
+            vec![symbol.to_owned()]
+        };
+        cx.commit_orders_read(
+            safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&[symbol]),
+            |_| true,
+            rows,
+            &unproven,
+        )
+        .is_some_and(|refused| refused.is_empty())
+    }
+    /// A refresh ask: each named symbol owes a read, paced as any other. One already
+    /// owed is read after the ask anyway; one out when asked, the engine asks again.
+    pub(crate) fn owe_order_reads(&mut self, cx: &mut Cx<'_, Pending>, symbols: &[String]) {
+        let mut owed = false;
+        for symbol in symbols.iter().filter(|symbol| !symbol.is_empty()) {
+            if !self.account.reconcile.contains_key(symbol) {
+                self.account
+                    .reconcile
+                    .insert(symbol.clone(), Reconcile::default());
+                owed = true;
+            }
+        }
+        if owed {
+            self.orders_reconcile(cx);
+        }
     }
     pub(crate) fn orders_read_failed(
         &mut self,
@@ -2268,8 +2380,13 @@ impl PhemexPerpetuals {
                 self.account
                     .uncertain_fills
                     .entry(row.order_id.to_string())
-                    .and_modify(|time| *time = (*time).max(version))
-                    .or_insert(version);
+                    .and_modify(|(symbol, time)| {
+                        *time = (*time).max(version);
+                        if !symbol.eq_ignore_ascii_case(&row.symbol) {
+                            self.account.uncertainty_overflow = true;
+                        }
+                    })
+                    .or_insert_with(|| (row.symbol.to_string(), version));
             } else {
                 self.account.uncertainty_overflow = true;
                 cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,"Phemex execution reconciliation capacity exceeded; reconnecting for an authoritative snapshot");

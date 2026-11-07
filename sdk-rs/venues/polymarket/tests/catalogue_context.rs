@@ -5,8 +5,8 @@ use safe_cex_venue_polymarket::{Options, Polymarket, PolymarketOptions};
 
 type Driver = Engine<Polymarket>;
 const START: f64 = 10.;
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const DEADLINE: f64 = START + DISCOVERY_DEADLINE_MS;
 const TOKEN: &str =
     "107505882767731489358349912513945399560393482969656700824895970500493757150417";

@@ -1444,8 +1444,6 @@ pub enum ExchangeName {
     Bitunix,
     #[serde(rename = "blofin")]
     Blofin,
-    #[serde(rename = "breakoutprop")]
-    Breakoutprop,
     #[serde(rename = "bybit")]
     Bybit,
     #[serde(rename = "bybitdemo")]
@@ -1492,10 +1490,6 @@ pub enum ExchangeName {
     Kodiakfi,
     #[serde(rename = "mode")]
     Mode,
-    #[serde(rename = "salsadex")]
-    Salsadex,
-    #[serde(rename = "tealstreet-dex")]
-    TealstreetDex,
     #[serde(rename = "txflow")]
     Txflow,
     #[serde(rename = "what")]
@@ -5022,8 +5016,6 @@ mod strict_codecs {
         Bitunix,
         #[serde(rename = "blofin")]
         Blofin,
-        #[serde(rename = "breakoutprop")]
-        Breakoutprop,
         #[serde(rename = "bybit")]
         Bybit,
         #[serde(rename = "bybitdemo")]
@@ -5070,10 +5062,6 @@ mod strict_codecs {
         Kodiakfi,
         #[serde(rename = "mode")]
         Mode,
-        #[serde(rename = "salsadex")]
-        Salsadex,
-        #[serde(rename = "tealstreet-dex")]
-        TealstreetDex,
         #[serde(rename = "txflow")]
         Txflow,
         #[serde(rename = "what")]
@@ -7282,11 +7270,6 @@ mod strict_codecs {
                         .as_str()
                         .unwrap()
                         .to_owned(),
-                    serde_json::to_value(ExchangeName::Breakoutprop)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
                     serde_json::to_value(ExchangeName::Bybit)
                         .unwrap()
                         .as_str()
@@ -7398,16 +7381,6 @@ mod strict_codecs {
                         .unwrap()
                         .to_owned(),
                     serde_json::to_value(ExchangeName::Mode)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(ExchangeName::Salsadex)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(ExchangeName::TealstreetDex)
                         .unwrap()
                         .as_str()
                         .unwrap()

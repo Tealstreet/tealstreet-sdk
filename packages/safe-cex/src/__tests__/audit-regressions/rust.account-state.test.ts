@@ -123,6 +123,7 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
       quantityUnitsCode(name),
     );
   const native: WasmEngineLike = {
+    syncHostTime: () => true,
     capabilities: () => engineCapabilities(name),
     start: vi.fn(idle),
     wsOpen: idle,
@@ -498,7 +499,7 @@ describe('Rust native current-account reads', () => {
     ]);
   });
 
-  it.each(['woo', 'grvt', 'kucoin', 'kucoinspot', 'polymarket', 'breakoutprop'] as ExchangeName[])(
+  it.each(['woo', 'grvt', 'kucoin', 'kucoinspot', 'polymarket'] as ExchangeName[])(
     '%s preserves its native venue-global cancel-all command',
     async (name) => {
       const r = fixture(name);
@@ -670,17 +671,36 @@ describe('Rust native current-account reads', () => {
     expect((await nuking).warning).toBeUndefined();
   });
 
-  it('never issues the proving read under 500 ms after a close, even with the store already flat', async () => {
-    const r = fixture();
+  it.each(['bybit', 'bybitdemo'] as const)(
+    'never issues the %s proving read under 500 ms after a close, even with the store already flat',
+    async (venue) => {
+      const r = fixture(venue);
+      await r.start();
+      r.update({ positions: [position()] });
+      const nuking = r.exchange.nukePositions();
+      await vi.advanceTimersByTimeAsync(499);
+      expect(placeRead(r)).toContain('placeOrders');
+      expect(placeRead(r)).not.toContain('readPositions');
+      await vi.advanceTimersByTimeAsync(2);
+      expect(placeRead(r).filter((op) => op === 'readPositions')).toHaveLength(1);
+      await nuking;
+    },
+  );
+
+  it('stops a bybitdemo nuke after a failed proof following a close', async () => {
+    const r = fixture('bybitdemo');
     await r.start();
     r.update({ positions: [position()] });
-    const nuking = r.exchange.nukePositions();
-    await vi.advanceTimersByTimeAsync(499);
-    expect(placeRead(r)).toContain('placeOrders');
-    expect(placeRead(r)).not.toContain('readPositions');
-    await vi.advanceTimersByTimeAsync(2);
-    expect(placeRead(r).filter((op) => op === 'readPositions')).toHaveLength(1);
-    await nuking;
+    const cause = Object.assign(new Error('positions snapshot unavailable'), { kind: 'network' });
+    const read = vi.spyOn(r.exchange, 'readPositions').mockRejectedValue(cause);
+    const nuking = r.exchange.nukePositions().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await nuking).toMatchObject({
+      message: 'Nuke could not confirm the account is flat: positions snapshot unavailable',
+      cause,
+    });
+    expect(read).toHaveBeenCalledOnce();
+    expect(r.commands.filter((c) => c.op === 'placeOrders')).toHaveLength(1);
   });
 
   it('does not report flat from a flat store while the read still shows a position', async () => {

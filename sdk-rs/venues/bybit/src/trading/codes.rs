@@ -188,10 +188,45 @@ pub(crate) const BYBIT: CodeTable = CodeTable {
     status: &[(403, Verdict::Unknown(Some(ErrorKind::RateLimited)))],
 };
 
+// Selected only for a MarginMode call carrying this native code. Intent::Setting
+// alone also covers leverage, position mode and protective-order operations.
+pub(crate) const MARGIN_MODE_ALREADY_SET: CodeTable = CodeTable {
+    rows: &[only(
+        Key::Int(110026),
+        Verdict::Satisfied(SatisfiedIntent::Setting),
+        Intent::Setting,
+    )],
+    ..BYBIT
+};
+
+const fn protective_rows() -> [Row; BYBIT.rows.len()] {
+    let mut rows = [row(Key::Int(0), Verdict::Unknown(None)); BYBIT.rows.len()];
+    let mut index = 0;
+    while index < rows.len() {
+        rows[index] = BYBIT.rows[index];
+        if let Verdict::Refused(ErrorKind::RateLimited) = rows[index].verdict {
+            rows[index].verdict = Verdict::Unknown(Some(ErrorKind::RateLimited));
+        }
+        if let Verdict::Satisfied(SatisfiedIntent::Setting) = rows[index].verdict {
+            rows[index].verdict = Verdict::Unknown(None);
+        }
+        index += 1;
+    }
+    rows
+}
+
+pub(crate) const PROTECTIVE: CodeTable = CodeTable {
+    rows: &protective_rows(),
+    unlisted: Verdict::Unknown(None),
+    ..BYBIT
+};
+
 #[cfg(test)]
 #[test]
 fn the_bybit_table_satisfies_the_engine_invariants() {
     safe_cex_engine::classify::assert_table(&BYBIT);
+    safe_cex_engine::classify::assert_table(&MARGIN_MODE_ALREADY_SET);
+    safe_cex_engine::classify::assert_table(&PROTECTIVE);
 }
 
 #[cfg(test)]

@@ -25,6 +25,8 @@ use tokio::sync::{Notify, mpsc, oneshot, watch};
 const STARTUP_WAIT: Duration = Duration::from_secs(30);
 const FLUSH_EVERY: Duration = Duration::from_millis(50);
 const MARKETS_RELOAD_MIN_INTERVAL_MS: f64 = 60_000.;
+/// A rate-limited venue that names no wait is left alone this long.
+const RATE_LIMIT_WAIT_MS: f64 = 10_000.;
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// Candle command deadline; the engine's own reads time out well inside it.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
@@ -54,6 +56,9 @@ struct Shared {
     startup_over: Cell<bool>,
     startup_signal: Notify,
     last_error: RefCell<Option<String>>,
+    /// Until when the venue's rate limit holds every request back, on `now_ms`, and why.
+    rate_limited_until: Cell<f64>,
+    rate_limit_reason: RefCell<Option<String>>,
     pending: RefCell<HashMap<u32, oneshot::Sender<Result<String, String>>>>,
     frames: RefCell<Option<watch::Sender<u64>>>,
 }
@@ -72,9 +77,17 @@ impl Shared {
     fn on_notice(&self, notice: Notice) {
         match notice {
             Notice::CommandDone { command, result } => self.settle(command, Ok(result)),
-            Notice::CommandFailed { command, error } => self.settle(command, Err(error.message)),
+            Notice::CommandFailed { command, error } => {
+                if error.kind == Some(safe_cex_engine::ErrorKind::RateLimited) {
+                    let wait = error.retry_after_ms.unwrap_or(RATE_LIMIT_WAIT_MS);
+                    let until = self.rate_limited_until.get().max(now_ms() + wait);
+                    self.rate_limited_until.set(until);
+                    *self.rate_limit_reason.borrow_mut() = Some(error.message.clone());
+                }
+                self.settle(command, Err(error.message));
+            }
             Notice::Event(event) => self.on_event(event),
-            Notice::StartupFailed { error } => {
+            Notice::StartupFailed { error, .. } => {
                 self.error_seq.set(self.error_seq.get() + 1);
                 eprintln!("[candle-server] exchange startup failed: {}", error.message);
                 *self.last_error.borrow_mut() = Some(error.message);
@@ -127,6 +140,11 @@ impl Shared {
         }
     }
 
+    fn rate_limited_for(&self, now: f64) -> Option<f64> {
+        let left = self.rate_limited_until.get() - now;
+        (left > 0.).then_some(left)
+    }
+
     fn settle(&self, command: u32, result: Result<String, String>) {
         if let Some(reply) = self.pending.borrow_mut().remove(&command) {
             let _ = reply.send(result);
@@ -162,6 +180,15 @@ impl Resident {
 
     pub fn last_error(&self) -> Option<String> {
         self.shared.last_error.borrow().clone()
+    }
+
+    pub fn last_rate_limit(&self) -> Option<String> {
+        self.shared.rate_limit_reason.borrow().clone()
+    }
+
+    /// How long the venue's rate limit still holds requests back, if it does.
+    pub fn rate_limited_for(&self, now: f64) -> Option<f64> {
+        self.shared.rate_limited_for(now)
     }
 
     pub fn knows_symbol(&self, symbol: &str) -> bool {
@@ -461,6 +488,40 @@ mod tests {
         assert_eq!(shared.error_seq.get(), 1);
         assert_eq!(shared.last_error.borrow().as_deref(), Some("read failed"));
         assert!(shared.startup_read_failed.get());
+    }
+
+    fn failed(kind: safe_cex_engine::ErrorKind, retry_after_ms: Option<f64>) -> Notice {
+        let mut error =
+            safe_cex_engine::VenueError::new("Bybit klines: Too many visits").kind(kind);
+        error.retry_after_ms = retry_after_ms;
+        Notice::CommandFailed { command: 7, error }
+    }
+
+    #[test]
+    fn a_rate_limited_command_holds_the_venue_for_its_retry_after() {
+        let shared = Shared::default();
+        shared.on_notice(failed(
+            safe_cex_engine::ErrorKind::RateLimited,
+            Some(15_000.),
+        ));
+        let now = now_ms();
+        let held = shared.rate_limited_for(now).expect("held");
+        assert!((14_000. ..=15_000.).contains(&held), "{held}");
+        assert_eq!(shared.rate_limited_for(now + 15_001.), None);
+        assert_eq!(
+            shared.rate_limit_reason.borrow().as_deref(),
+            Some("Bybit klines: Too many visits")
+        );
+    }
+
+    #[test]
+    fn a_rate_limit_naming_no_wait_holds_ten_seconds_and_other_failures_hold_nothing() {
+        let shared = Shared::default();
+        shared.on_notice(failed(safe_cex_engine::ErrorKind::Network, None));
+        assert_eq!(shared.rate_limited_for(now_ms()), None);
+        shared.on_notice(failed(safe_cex_engine::ErrorKind::RateLimited, None));
+        let held = shared.rate_limited_for(now_ms()).expect("held");
+        assert!((9_000. ..=10_000.).contains(&held), "{held}");
     }
 
     #[test]

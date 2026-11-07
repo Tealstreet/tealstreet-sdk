@@ -194,6 +194,36 @@ pub struct Applied {
     pub settings: bool,
     /// The source's VENUE_STATE payload, for `Venue::apply_venue_state`.
     pub venue_state: Option<Vec<u8>>,
+    /// The source's `order_read_covers` bit, from a frame carrying CAPABILITIES.
+    pub read_covers: Option<bool>,
+    /// A valid `ORDERS_READ` revision 1; malformed or another revision reads as absent.
+    pub orders_read: Option<ReadCovers>,
+}
+
+/// The source's read covers (`Store::write_orders_read`), on its clock: the
+/// account cover, and each symbol's newer one. A full table each frame.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ReadCovers {
+    pub account: Option<f64>,
+    pub symbols: Vec<(String, f64)>,
+}
+
+impl ReadCovers {
+    /// What speaks for `symbol` (`""`: every symbol, so the account alone).
+    pub fn cover(&self, symbol: &str) -> Option<f64> {
+        if symbol.is_empty() {
+            return self.account;
+        }
+        let own = self
+            .symbols
+            .iter()
+            .find(|(covered, _)| covered == symbol)
+            .map(|(_, sent)| *sent);
+        match (self.account, own) {
+            (Some(account), Some(own)) => Some(account.max(own)),
+            (account, own) => account.or(own),
+        }
+    }
 }
 
 /// Apply one parsed frame. `snapshot` resets the account sections first.
@@ -220,6 +250,38 @@ pub fn apply(
             section::MARKETS => {}
             section::TICKERS => tickers(store, &mut *state, frame, section)?,
             section::TICKER_DELTAS => ticker_deltas(store, state, frame, section)?,
+            section::TICKER_OBSERVATIONS => {
+                if section.revision != 0 || !section.payload.len().is_multiple_of(32) {
+                    return Err(IngestError("invalid ticker observation section"));
+                }
+                // Validate the whole observation batch before changing any reference.
+                for apply in [false, true] {
+                    let mut cursor = Cursor::new(section.payload);
+                    while cursor.at < section.payload.len() {
+                        let row = cursor.f64()?;
+                        let times = [cursor.f64()?, cursor.f64()?, cursor.f64()?];
+                        if row.fract() != 0.
+                            || !(0.0..state.source_tickers.len() as f64).contains(&row)
+                            || times
+                                .iter()
+                                .any(|v| !(v.is_finite() && *v >= 0. || *v == f64::NEG_INFINITY))
+                        {
+                            return Err(IngestError("invalid ticker observation"));
+                        }
+                        if store
+                            .tickers()
+                            .get(row as usize)
+                            .map(|ticker| &ticker.symbol)
+                            != state.source_tickers.get(row as usize)
+                        {
+                            return Err(IngestError("ticker observation identity mismatch"));
+                        }
+                        if apply {
+                            store.import_observation_times(row as u32, times);
+                        }
+                    }
+                }
+            }
             section::ORDERS => {
                 orders(store, state, frame, section)?;
                 applied.orders = true;
@@ -240,12 +302,51 @@ pub fn apply(
             section::VENUE_STATE => {
                 applied.venue_state = Some(venue_state(section)?.to_vec());
             }
+            section::CAPABILITIES => {
+                applied.read_covers = Cursor::new(section.payload)
+                    .u32()
+                    .ok()
+                    .map(|flags| flags & 1 << crate::Capabilities::ORDER_READ_COVERS_BIT != 0);
+            }
+            section::ORDERS_READ => applied.orders_read = orders_read(frame, section),
             // Books, candles, fills and the rest are the data source's display
             // data: the UI takes them from the source, a writer never reads them.
             _ => {}
         }
     }
     Ok(applied)
+}
+
+/// `ORDERS_READ` revision 1 (`Store::write_orders_read`). `None` for anything
+/// else: a source bug must not stall the page's frames, and absent lifts nothing.
+fn orders_read(frame: &Frame<'_>, section: &Section<'_>) -> Option<ReadCovers> {
+    if section.revision != 1 {
+        return None;
+    }
+    let mut cursor = Cursor::new(section.payload);
+    let count = cursor.u32().ok()? as usize;
+    if count > section.payload.len() / 12 {
+        return None;
+    }
+    cursor.align8();
+    let account = match cursor.f64().ok()? {
+        sent if sent.is_nan() => None,
+        sent if sent.is_finite() => Some(sent),
+        _ => return None,
+    };
+    let mut symbols = Vec::with_capacity(count);
+    for _ in 0..count {
+        let symbol = frame.strings.required(cursor.u32().ok()?).ok()?;
+        symbols.push((symbol.to_owned(), 0.0));
+    }
+    cursor.align8();
+    for (symbol, sent) in &mut symbols {
+        *sent = cursor.f64().ok().filter(|sent| sent.is_finite())?;
+        if symbol.is_empty() {
+            return None;
+        }
+    }
+    (cursor.at == section.payload.len()).then_some(ReadCovers { account, symbols })
 }
 
 /// `VENUE_STATE`: a u32 length, then the venue's own encoding.
@@ -553,6 +654,7 @@ fn orders(
             column.push(c.f64()?);
         }
     }
+    use crate::model::order_trigger_word as word;
     let mut extra_triggers = Vec::with_capacity(count);
     for _ in 0..count {
         extra_triggers.push(c.u32()?);
@@ -569,13 +671,14 @@ fn orders(
         let extra = OrderExtra {
             take_profit_known: false,
             stop_loss_known: false,
-            tp_trigger_type: optional(&TRIGGER, tp_sl & 0xff)?,
-            sl_trigger_type: optional(&TRIGGER, (tp_sl >> 8) & 0xff)?,
+            tp_trigger_type: optional(&TRIGGER, (tp_sl >> word::TP_SHIFT) & word::TRIGGER_MASK)?,
+            sl_trigger_type: optional(&TRIGGER, (tp_sl >> word::SL_SHIFT) & word::TRIGGER_MASK)?,
             remaining_native: present(column(7)),
             filled_in_placement_units: present(column(8)),
             remaining_notional: present(column(9)),
             conditional_order_price: present(column(10)),
             reject_reason: optional(&REJECT, flags >> 4)?,
+            native_algo: tp_sl & word::NATIVE_ALGO != 0,
         };
         orders.push(Order {
             id: strings.required(id)?.to_owned(),
@@ -819,7 +922,9 @@ fn status(
         bits.positions = has(loaded_flag::POSITIONS);
     });
     store.set_hedged(flags & status_flag::HEDGED != 0);
-    store.set_latency(latency);
+    store.set_latency_sample(
+        (flags & status_flag::LATENCY_MEASURED != 0 || latency > 0.0).then_some(latency),
+    );
     Ok(())
 }
 
@@ -858,6 +963,173 @@ pub(crate) mod tests {
         let applied = apply(&mut store, &mut IngestState::default(), &parsed, false).unwrap();
         assert_eq!(applied.venue_state.as_deref(), Some(&b"abc"[..]));
         assert!(parse(&frame[..12]).is_err());
+    }
+
+    /// Read covers (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.2): ingest
+    /// before step 2 takes the orders beside an ORDERS_READ section and
+    /// ignores the section, so a page that predates covers is unchanged.
+    #[test]
+    fn an_orders_read_section_parses_beside_its_orders() {
+        use crate::order_read_cover::{OrderReadMark, OrderReadScope};
+        let mut source = Store::default();
+        let read = OrderReadMark {
+            seq: source.order_read_sequence(),
+            sent: 7.,
+            epoch: 0,
+        };
+        let order = crate::model::Order {
+            id: "a".into(),
+            parent_id: None,
+            status: crate::model::OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: crate::model::OrderType::Limit,
+            side: crate::model::OrderSide::Buy,
+            price: 10.,
+            amount: 1.,
+            filled: 0.,
+            remaining: 1.,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        };
+        source.commit_orders_read(
+            read,
+            OrderReadScope::Account {
+                key: "all",
+                account: &["all"],
+            },
+            |_| true,
+            vec![order],
+            &[],
+        );
+        assert_eq!(sections_of(&source, section::ORDERS_READ).len(), 1);
+        let (store, applied) = round_trip(&source);
+        assert!(applied.orders);
+        let ids: Vec<&str> = store.orders().iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, ["a"]);
+        assert_eq!(
+            applied.orders_read,
+            Some(ReadCovers {
+                account: Some(7.),
+                symbols: vec![]
+            })
+        );
+    }
+
+    /// One frame of an `ORDERS_READ` payload the test writes by hand.
+    fn orders_read_frame(revision: u16, write: impl FnOnce(&mut FrameWriter<'_>)) -> Vec<u8> {
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin_revision(section::ORDERS_READ, revision);
+        write(&mut writer);
+        writer.end();
+        writer.finish()
+    }
+
+    fn read_covers_of(frame: &[u8]) -> Option<ReadCovers> {
+        let mut store = Store::default();
+        let mut state = IngestState::default();
+        apply(&mut store, &mut state, &parse(frame).unwrap(), false)
+            .expect("a bad ORDERS_READ is never an ingest error")
+            .orders_read
+    }
+
+    #[test]
+    fn symbol_covers_parse_and_a_symbol_takes_the_newer_of_its_own_and_the_accounts() {
+        let frame = orders_read_frame(1, |w| {
+            w.u32(2);
+            w.pad();
+            w.f64(5.);
+            let refs = [w.string("BTCUSDT"), w.string("ETHUSDT")];
+            w.u32s(refs);
+            w.pad();
+            w.f64s([9., 3.]);
+        });
+        let covers = read_covers_of(&frame).unwrap();
+        assert_eq!(covers.cover("BTCUSDT"), Some(9.));
+        assert_eq!(covers.cover("ETHUSDT"), Some(5.));
+        assert_eq!(covers.cover("SOLUSDT"), Some(5.));
+        assert_eq!(
+            covers.cover(""),
+            Some(5.),
+            "every symbol: the account alone"
+        );
+    }
+
+    #[test]
+    fn a_malformed_or_other_revision_orders_read_reads_as_absent() {
+        let valid = |w: &mut FrameWriter<'_>| {
+            w.u32(0);
+            w.pad();
+            w.f64(5.);
+        };
+        assert!(read_covers_of(&orders_read_frame(1, valid)).is_some());
+        assert_eq!(read_covers_of(&orders_read_frame(0, valid)), None);
+        assert_eq!(read_covers_of(&orders_read_frame(2, valid)), None);
+        // A count the section cannot hold.
+        let frame = orders_read_frame(1, |w| {
+            w.u32(1_000);
+            w.pad();
+            w.f64(5.);
+        });
+        assert_eq!(read_covers_of(&frame), None);
+        // A cover that is not a time.
+        let frame = orders_read_frame(1, |w| {
+            w.u32(0);
+            w.pad();
+            w.f64(f64::INFINITY);
+        });
+        assert_eq!(read_covers_of(&frame), None);
+        let frame = orders_read_frame(1, |w| {
+            w.u32(1);
+            w.pad();
+            w.f64(f64::NAN);
+            let refs = [w.string("BTCUSDT")];
+            w.u32s(refs);
+            w.pad();
+            w.f64s([f64::NAN]);
+        });
+        assert_eq!(read_covers_of(&frame), None);
+        // A symbol reference outside the string table.
+        let frame = orders_read_frame(1, |w| {
+            w.u32(1);
+            w.pad();
+            w.f64(5.);
+            w.u32s([77]);
+            w.pad();
+            w.f64s([6.]);
+        });
+        assert_eq!(read_covers_of(&frame), None);
+        // Truncated.
+        let frame = orders_read_frame(1, |w| w.u32(0));
+        assert_eq!(read_covers_of(&frame), None);
+    }
+
+    #[test]
+    fn the_read_covers_bit_comes_only_from_a_capabilities_record() {
+        let bit = |record: crate::Capabilities| {
+            let mut writer = FrameWriter::new(Vec::new(), 0.0);
+            record.write(&mut writer);
+            let frame = writer.finish();
+            let mut store = Store::default();
+            let mut state = IngestState::default();
+            apply(&mut store, &mut state, &parse(&frame).unwrap(), true)
+                .unwrap()
+                .read_covers
+        };
+        let on = crate::Capabilities {
+            order_read_covers: true,
+            ..crate::Capabilities::BASE
+        };
+        assert_eq!(bit(on), Some(true));
+        assert_eq!(bit(crate::Capabilities::BASE), Some(false));
+        let (_, applied) = round_trip(&Store::default());
+        assert_eq!(applied.read_covers, None, "no record, no answer");
     }
 
     use crate::model::{Balance, CoinBalance, CurrencyBalance, MarginType};
@@ -1296,6 +1568,66 @@ pub(crate) mod tests {
         assert_eq!(store.positions(), source.positions());
     }
 
+    /// ORDERS' trigger word: bit 16 carries `native_algo` both ways, a word without it
+    /// is exactly the pre-flag encoding, and a decoder that masks bits 0-15 (every older
+    /// build, Rust or JS) reads the same triggers whether or not it is set.
+    #[test]
+    fn the_native_algo_bit_round_trips_and_older_decoders_mask_it_away() {
+        use crate::model::order_trigger_word::{self as word, encode};
+        use crate::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, StopTriggerType};
+        let extra = |native_algo| OrderExtra {
+            tp_trigger_type: Some(StopTriggerType::LastPrice),
+            sl_trigger_type: Some(StopTriggerType::IndexPrice),
+            native_algo,
+            ..OrderExtra::default()
+        };
+        let plain = encode(&extra(false));
+        let flagged = encode(&extra(true));
+        // The pre-flag formula: each trigger + 1, sl shifted by 8; nothing above bit 15.
+        let tp = StopTriggerType::LastPrice as u32 + 1;
+        let sl = StopTriggerType::IndexPrice as u32 + 1;
+        assert_eq!(plain, tp | (sl << 8));
+        assert_eq!(flagged, plain | (1 << 16));
+        // An older decoder's masks.
+        for w in [plain, flagged] {
+            assert_eq!((w & 0xff, (w >> 8) & 0xff), (tp, sl));
+        }
+        // This decoder on an older producer's word: no flag.
+        assert_eq!(plain & word::NATIVE_ALGO, 0);
+        let order = |id: &str, native_algo| Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSD_PERP".into(),
+            kind: OrderType::StopLoss,
+            side: OrderSide::Sell,
+            price: 90.0,
+            amount: 7.0,
+            filled: 0.0,
+            remaining: 7.0,
+            reduce_only: true,
+            close: Some(false),
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 1.0,
+            trigger_type: Some(StopTriggerType::MarkPrice),
+            take_profit: None,
+            stop_loss: None,
+            extra: Some(OrderExtra {
+                remaining_native: Some(7.0),
+                ..extra(native_algo)
+            }),
+        };
+        let mut source = Store::default();
+        source.set_orders(vec![order("algo", true), order("legacy", false)]);
+        let (store, applied) = round_trip(&source);
+        assert!(applied.orders);
+        assert_eq!(store.orders(), source.orders());
+        let flag = |id: &str| store.order(id).unwrap().extra.as_ref().unwrap().native_algo;
+        assert!(flag("algo"));
+        assert!(!flag("legacy"));
+    }
+
     #[test]
     fn deltas_follow_the_source_row_even_when_a_symbol_repeats() {
         let mut source = Store::default();
@@ -1313,6 +1645,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn latency_presence_survives_frame_fed_ingest() {
+        let mut source = Store::default();
+        let mut target = Store::default();
+        let mut state = IngestState::default();
+        target.set_latency(9.0);
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        source.write(&source.account_snapshot(), &mut writer);
+        let frame = writer.finish();
+        apply(&mut target, &mut state, &parse(&frame).unwrap(), true).unwrap();
+        assert_eq!(target.latency(), None);
+        source.set_latency(0.0);
+        ingest(&mut source, &mut state, &mut target, false);
+        assert_eq!(target.latency(), Some(0.0));
+        source.set_latency(25.0);
+        ingest(&mut source, &mut state, &mut target, false);
+        assert_eq!(target.latency(), Some(25.0));
+        source.set_latency_sample(None);
+        ingest(&mut source, &mut state, &mut target, false);
+        assert_eq!(target.latency(), None);
+    }
+
+    #[test]
     fn status_carries_account_loaded_bits_hedged_and_latency_but_not_markets() {
         let mut source = Store::default();
         source.set_hedged(true);
@@ -1325,7 +1679,7 @@ pub(crate) mod tests {
         let mut store = Store::default();
         ingest(&mut source, &mut IngestState::default(), &mut store, true);
         assert!(store.hedged());
-        assert_eq!(store.latency(), 42.5);
+        assert_eq!(store.latency(), Some(42.5));
         let loaded = store.loaded();
         assert!(loaded.balance && loaded.positions);
         assert!(!loaded.orders && !loaded.tickers && !loaded.markets);

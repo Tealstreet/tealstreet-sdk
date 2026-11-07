@@ -36,6 +36,7 @@ struct List {
     markets: Vec<Market>,
     classifications: HashMap<String, InstrumentClassification>,
     derivatives: HashMap<String, DerivativeProduct>,
+    order_caps: HashMap<String, OrderCaps>,
 }
 pub struct Page {
     generation: u64,
@@ -44,6 +45,7 @@ pub struct Page {
     markets: Vec<Market>,
     classifications: HashMap<String, InstrumentClassification>,
     derivatives: HashMap<String, DerivativeProduct>,
+    order_caps: HashMap<String, OrderCaps>,
     rejected: bool,
 }
 #[derive(Deserialize)]
@@ -216,6 +218,7 @@ impl BybitLinear {
                 markets: Vec::new(),
                 classifications: HashMap::new(),
                 derivatives: HashMap::new(),
+                order_caps: HashMap::new(),
                 rejected: false,
             }),
             read: None,
@@ -281,6 +284,11 @@ impl BybitLinear {
         }
         page.classifications
             .insert(market.symbol.clone(), classification_from_wire(&row));
+        if !self.variant.is_spot()
+            && let Some(caps) = OrderCaps::from_wire(&row)
+        {
+            page.order_caps.insert(market.symbol.clone(), caps);
+        }
         if let Some(product) = product {
             page.derivatives.insert(market.symbol.clone(), product);
         }
@@ -301,7 +309,7 @@ impl BybitLinear {
         }) {
             return;
         }
-        let pause = discovery_rate_limit_pause_ms(&response, cx.now);
+        let pause = venue_rate_limit_pause_ms(&response, cx.protocol_now());
         self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         if venue_error(&response).is_some() {
             // The table's kind and native code; a discovery pause is a rate limit.
@@ -349,6 +357,7 @@ impl BybitLinear {
         list.markets.extend(page.markets);
         list.classifications.extend(page.classifications);
         list.derivatives.extend(page.derivatives);
+        list.order_caps.extend(page.order_caps);
         let cursor = envelope
             .result
             .next_page_cursor
@@ -392,6 +401,7 @@ impl BybitLinear {
         let mut catalogs = HashMap::new();
         let mut classifications = HashMap::new();
         let mut derivatives = HashMap::new();
+        let mut order_caps = HashMap::new();
         let mut markets = Vec::new();
         for category in self.categories() {
             let mut rows = Vec::<Market>::new();
@@ -411,6 +421,7 @@ impl BybitLinear {
                 }
                 classifications.extend(std::mem::take(&mut list.classifications));
                 derivatives.extend(std::mem::take(&mut list.derivatives));
+                order_caps.extend(std::mem::take(&mut list.order_caps));
             }
             catalogs.insert(category, rows.clone());
             markets.extend(rows);
@@ -464,6 +475,7 @@ impl BybitLinear {
         self.catalogs = catalogs;
         self.classification = classifications;
         self.derivatives = derivatives;
+        self.order_caps = order_caps;
         self.published_catalogs = self.catalogs.len();
         let selected = self.category;
         for category in self.categories() {

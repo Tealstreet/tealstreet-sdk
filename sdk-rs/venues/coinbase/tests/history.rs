@@ -553,9 +553,10 @@ fn assert_partial(d: &mut Driver, expected: &[&str]) {
     assert_eq!(gaps.len(), 1);
     assert_eq!(gaps[0].level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        gaps[0].fields,
-        vec![("command", safe_cex_engine::Value::Num(77.0))]
+        gaps[0].fields[..1],
+        [("command", safe_cex_engine::Value::Num(77.0))]
     );
+    assert_eq!(gaps[0].fields[1].0, "reason");
 }
 
 #[test]

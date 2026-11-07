@@ -176,6 +176,7 @@ impl TxFlow {
                 invalidation: Invalidation::Required,
                 subscription_interval_ms: 150.,
                 close_floors: &[],
+                data_silence: None,
             })?;
             conn.feed = Some(feed);
             feed
@@ -189,7 +190,8 @@ impl TxFlow {
                 "{}/{}",
                 REST_URL.replacen("https:", "wss:", 1),
                 if api { "api-ws" } else { "ws" }
-            )),
+            ))
+            .public_topics(!api && cx.public_feed_policy() == PublicFeedPolicy::Direct),
         )?;
         Ok(())
     }

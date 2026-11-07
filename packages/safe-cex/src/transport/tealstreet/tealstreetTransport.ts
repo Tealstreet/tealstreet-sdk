@@ -1,10 +1,15 @@
 import type { CreateAxiosDefaults } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../../types';
+import { payloadSignedViaPublicProxy } from '../publicProxyGuard';
 import type { ResolvedRouting, TransportProvider } from '../types';
 
 import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import { bindProxyTokenLookup, getProxyToken, ProxyTokenUnavailableError } from '../../accessToken';
-import { resolveLighterDeploymentProfile } from '../../exchanges/lighter/lighter.types';
+import {
+  bindProxyTokenLookup,
+  getProxyToken,
+  lastProxyKeyFailure,
+  ProxyTokenUnavailableError,
+} from '../../accessToken';
 import {
   axiosHttpOverWebsocketAdapter,
   bigIntAxiosHttpOverWebsocketAdapter,
@@ -48,8 +53,10 @@ export const isTealstreetProxyAuthFailureBody = (body: unknown): boolean => {
 export const PROXY_TOKEN_WAIT_MS = 15_000;
 const PROXY_TOKEN_POLL_MS = 500;
 
-const proxyAuthorizationMissingMessage = (exchange: ExchangeName): string =>
-  `[${exchange}] Tealstreet proxy authorization missing: no proxy token within ${PROXY_TOKEN_WAIT_MS / 1000}s, so the private request was not sent`;
+const proxyAuthorizationMissingMessage = (exchange: ExchangeName): string => {
+  const failure = lastProxyKeyFailure();
+  return `[${exchange}] Tealstreet proxy authorization missing: no proxy token within ${PROXY_TOKEN_WAIT_MS / 1000}s${failure ? ` (${failure})` : ''}, so the private request was not sent`;
+};
 
 /** A non-empty proxy token, or `ProxyTokenUnavailableError` once the wait is over. */
 const awaitProxyToken = async (exchange: ExchangeName, signal?: AbortSignal): Promise<string> => {
@@ -66,7 +73,7 @@ const awaitProxyToken = async (exchange: ExchangeName, signal?: AbortSignal): Pr
 };
 
 export const proxyAuthorizationHeader = (exchange: ExchangeName): string =>
-  exchange === 'grvt' || exchange === 'mexc' || exchange === 'paradex' || exchange === 'breakoutprop'
+  exchange === 'grvt' || exchange === 'mexc' || exchange === 'paradex'
     ? 'Tealstreet-Authorization'
     : 'Authorization';
 
@@ -99,17 +106,13 @@ export const getProxyForAxios = (
       : '';
 
 /** Tealstreet's own proxy pools, tradetunnel and Caddy passthroughs. */
-const lighterUsesRestProxy = (exchange: string, options: { testnet?: boolean }): boolean =>
-  (exchange === 'lighter' || exchange === 'lighter-robinhood') &&
-  resolveLighterDeploymentProfile({ exchangeName: exchange, testnet: options.testnet }).usesRestProxy;
-
 export const tealstreetTransport: TransportProvider = {
   name: 'tealstreet',
 
   rest: ({ exchange, options, config, routing, serverHeaders, credentialIntent }) => {
     // Legacy sent all Lighter REST, reads and sendTx, through the public CORS proxy on the
     // profiles marked usesRestProxy, whatever the account's proxy flag; a tunnel already egresses via us.
-    if (lighterUsesRestProxy(exchange, options) && !options.tealstreetTunnel) {
+    if (payloadSignedViaPublicProxy(exchange, options) && !options.tealstreetTunnel) {
       return { baseURL: `${getPublicCorsProxy()}/${config?.baseURL}`, proxied: false, authorize: async () => {} };
     }
     // GRVT and blofin cannot use the tunnel, so a tunnel request for them means the proxy.
@@ -135,7 +138,7 @@ export const tealstreetTransport: TransportProvider = {
         const token = await awaitProxyToken(exchange, request.signal as AbortSignal | undefined);
 
         // Use Tealstreet-Authorization when the venue has its own Authorization
-        // semantics. Breakout DXtrade and MEXC WEB/APP sessions own Authorization; MEXC
+        // semantics. MEXC WEB/APP sessions own Authorization; MEXC
         // OPEN-API auth rides on ApiKey/Request-Time/Signature headers.
         // The proxy will check Tealstreet-Authorization first, then fall back to Authorization
         markRestProxyHeader(request);

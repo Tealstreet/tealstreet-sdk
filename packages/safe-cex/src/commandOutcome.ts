@@ -1,7 +1,7 @@
-import type { BuilderAuthorizationDetail, OrderIdentityReceipt } from '@tealstreet/safe-cex-wasm/host';
+import type { BuilderAuthorizationDetail, HistoryDecodeDetail, OrderIdentityReceipt } from '@tealstreet/safe-cex-wasm/host';
 import type { ErrorCategory } from './health/errorPatterns';
 
-import { builderAuthorizationOf } from '@tealstreet/safe-cex-wasm/host';
+import { builderAuthorizationOf, historyDecodeOf } from '@tealstreet/safe-cex-wasm/host';
 
 // Frozen errors must retain their identity and command outcome. Weak membership
 // carries only reporting state and cannot keep completed operations alive.
@@ -78,9 +78,13 @@ export type SerializedCommandError = {
   outcome?: CommandOutcome;
   /** Rust venue classification (`ExchangeError`); absent where the venue did not classify. */
   kind?: ExchangeErrorKind;
+  causeCode?: string;
+  historyDecode?: HistoryDecodeDetail;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
+  /** A stop or take-profit edit refused after its cancel: the old order was put back, or nothing protects the position. */
+  protection?: 'restored' | 'unprotected';
   clientOrderId?: string;
   clientOrderIds?: string[];
   /** Correlates this immutable snapshot with later native receipt events. */
@@ -102,6 +106,9 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   const result: SerializedCommandError = {
     message: typeof source.message === 'string' ? source.message : String(value),
   };
+  if (typeof source.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(source.causeCode)) result.causeCode = source.causeCode;
+  const historyDecode = historyDecodeOf(source.historyDecode);
+  if (historyDecode) result.historyDecode = historyDecode;
   const errorReported = isErrorReported(value) ? true : source.errorReported;
   if (typeof errorReported === 'boolean') result.errorReported = errorReported;
   for (const key of ['name', 'stack', 'command', 'clientOrderId', 'receiptKey', 'venueCode', 'venueMessage'] as const) {
@@ -130,6 +137,7 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   if (typeof source.retryAfterMs === 'number' && Number.isFinite(source.retryAfterMs) && source.retryAfterMs >= 0) {
     result.retryAfterMs = source.retryAfterMs;
   }
+  if (source.protection === 'restored' || source.protection === 'unprotected') result.protection = source.protection;
   for (const key of ['clientOrderIds', 'actualClientOrderIds', 'partialOrderIds'] as const) {
     const ids = source[key];
     if (Array.isArray(ids) && ids.every((id): id is string => typeof id === 'string')) result[key] = [...ids];

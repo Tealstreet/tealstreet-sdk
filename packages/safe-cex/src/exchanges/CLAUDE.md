@@ -788,7 +788,7 @@ early-return; cryptocom and polymarket instead compute a URL-derived
 to tag.
 
 An exchange with no per-URL **market-data** test (bitget, phemex, bingx,
-bitrue, kucoin futures, grvt, breakoutprop) needs that distinction established
+bitrue, kucoin futures, grvt) needs that distinction established
 first, which is a signing change, not a tagging one. Some of those do have a
 per-URL early return for something else — bingx's `LISTEN_KEY` — which is not the same thing and does not cover their market data.
 
@@ -965,7 +965,7 @@ threshold" before "finishing" the migration. `asterdex`'s
 `cleanupMessageHandlerStats(stream)` calls target keys that are never recorded;
 dead, but harmless.
 
-**`blofin`, `breakoutprop` and `orderly` never call `recordMessageHandlerStats`
+**`blofin` and `orderly` never call `recordMessageHandlerStats`
 at all** — only the cleanup side. Their datafeed list in the connection popup is
 therefore empty and this watchdog is blind on them: a subscription that silently
 stops delivering there produces no signal of any kind. That is a bigger gap than

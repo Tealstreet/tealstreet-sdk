@@ -30,6 +30,22 @@ const PAGE_TIMEOUT_MS: u32 = 20_000;
 pub struct Request {
     command: CommandId,
     leg: Leg,
+    resync: Resync,
+}
+
+struct Replay {
+    url: String,
+    query: Query,
+}
+
+enum Resync {
+    Page(Option<Replay>),
+    Clock { page: Replay },
+}
+impl Resync {
+    fn is_clock(&self) -> bool {
+        matches!(self, Self::Clock { .. })
+    }
 }
 
 enum Root {
@@ -482,7 +498,7 @@ impl BinanceFutures {
                 // A start alone reads only its first 7 days; an old one answers empty.
                 let windows = match (from_ms, to_ms) {
                     (Some(from), Some(to)) => split(from, to),
-                    (Some(from), None) if order_id.is_none() => split(from, cx.now),
+                    (Some(from), None) if order_id.is_none() => split(from, cx.protocol_now()),
                     _ => VecDeque::from([(from_ms, to_ms)]),
                 };
                 if self.begin(cx, command, signed, |completion| InFlight::Fills {
@@ -527,7 +543,7 @@ impl BinanceFutures {
                 limit,
             } => {
                 // A start alone with no limit walks up to now, not one page from the start.
-                let open_end = limit.is_none().then(|| cx.now.floor());
+                let open_end = limit.is_none().then(|| cx.protocol_now().floor());
                 let walk = match (
                     from_ms,
                     to_ms.or(open_end.filter(|end| from_ms.is_some_and(|from| *end > from))),
@@ -754,10 +770,31 @@ impl BinanceFutures {
         url: String,
         query: Query,
     ) {
+        self.send_history_page(cx, command, url, query, false);
+    }
+
+    fn send_history_page(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        url: String,
+        query: Query,
+        resynced: bool,
+    ) {
         let Some(owned) = self.history.reads.get(&command) else {
             return;
         };
-        let pending = |leg| Pending::History(Box::new(Request { command, leg }));
+        let replay = (matches!(owned.root, Root::Signed(_)) && !resynced).then(|| Replay {
+            url: url.clone(),
+            query: query.clone(),
+        });
+        let pending = |leg| {
+            Pending::History(Box::new(Request {
+                command,
+                leg,
+                resync: Resync::Page(replay),
+            }))
+        };
         let queued = match &owned.root {
             Root::Signed(root) => {
                 match root.leg(
@@ -798,6 +835,80 @@ impl BinanceFutures {
                 let _ = cx.finish_http_context(request.leg.context());
             }
             self.history_admission_failed(cx, command, error);
+        }
+    }
+
+    fn history_clock_request(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        old_leg: Leg,
+        page: Replay,
+    ) {
+        let Some(owned) = self.history.reads.get(&command) else {
+            return;
+        };
+        let mut policy = crate::reads::policy(None);
+        policy.timeout_ms = 5_000;
+        let clock = cx.http_leg_context(owned.root.context(), policy);
+        let _ = cx.finish_http_context(old_leg.context());
+        let clock = match clock {
+            Ok(clock) => clock,
+            Err(error) => return self.history_admission_failed(cx, command, error),
+        };
+        let pending = Pending::History(Box::new(Request {
+            command,
+            leg: Leg::Public(clock.clone()),
+            resync: Resync::Clock { page },
+        }));
+        let url = format!("{}{}", self.urls.rest, self.paths.server_time);
+        if let Err((Pending::History(request), error)) =
+            cx.request_managed(clock, None, Method::Get, url, None, pending)
+        {
+            let _ = cx.finish_http_context(request.leg.context());
+            self.history_admission_failed(cx, command, error);
+        }
+    }
+
+    fn history_clock_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        leg: Leg,
+        page: Replay,
+        response: Response<'_>,
+    ) {
+        #[derive(Deserialize)]
+        struct ServerTime {
+            #[serde(rename = "serverTime")]
+            server_time: u64,
+        }
+        let sample = serde_json::from_str::<ServerTime>(response.body)
+            .ok()
+            .filter(|time| time.server_time > 0 && time.server_time <= 9_007_199_254_740_991);
+        let result = if venue_error(&response).is_some() {
+            Err(crate::account::read_error(&response))
+        } else if let Some(time) = sample {
+            // Do not add route/preparation latency to the observed clock: Binance
+            // rejects timestamps a second ahead, even with a larger recvWindow.
+            if cx.observe_protocol_time(time.server_time as f64) {
+                Ok(())
+            } else {
+                Err(VenueError::new("Invalid Binance server time")
+                    .kind(safe_cex_engine::ErrorKind::Internal))
+            }
+        } else {
+            Err(VenueError::new("Invalid Binance server time")
+                .kind(safe_cex_engine::ErrorKind::Internal))
+        };
+        let _ = cx.finish_http_context(leg.context());
+        match result {
+            Ok(()) => self.send_history_page(cx, command, page.url, page.query, true),
+            Err(error) => {
+                if let Some(owned) = self.history.reads.remove(&command) {
+                    owned.read.end(cx, Err(error), true);
+                }
+            }
         }
     }
 
@@ -945,6 +1056,9 @@ impl BinanceFutures {
         let custody = match (&owned.root, &request.leg) {
             (Root::Signed(root), Leg::Signed(leg)) => root.validate_delivery(cx, leg),
             (Root::Public(root), Leg::Public(leg)) => cx.validate_read_http_delivery(root, leg),
+            (Root::Signed(root), Leg::Public(leg)) if request.resync.is_clock() => {
+                cx.validate_read_http_delivery(root.context(), leg)
+            }
             _ => Err(Error::Revoked),
         };
         custody.is_ok() && owned.read.validate(cx, request.leg.context()).is_ok()
@@ -961,6 +1075,10 @@ impl BinanceFutures {
     ) {
         // A failure carries no body, so its root's owner decides custody. One leg per
         // query is in flight, so a failed leg of this root is the current one.
+        let strict = match request.resync {
+            Resync::Clock { .. } => true,
+            Resync::Page(_) => strict,
+        };
         let current = self
             .history
             .reads
@@ -978,18 +1096,28 @@ impl BinanceFutures {
         request: Request,
         response: Response<'_>,
     ) {
-        let current = self.history_current(cx, &request);
-        let command = request.command;
-        let leg = request.leg.context();
-        let owned = match self.history.reads.remove(&command) {
-            Some(owned) if current => owned,
-            stale => {
-                if let Some(owned) = stale {
-                    self.history.reads.insert(command, owned);
-                }
-                let _ = cx.finish_http_context(leg);
+        if !self.history_current(cx, &request) {
+            let _ = cx.finish_http_context(request.leg.context());
+            return;
+        }
+        let request = match request.resync {
+            Resync::Clock { page } => {
+                self.history_clock_response(cx, request.command, request.leg, page, response);
                 return;
             }
+            Resync::Page(Some(page))
+                if venue_error(&response).is_some_and(|(code, _)| code == -1021) =>
+            {
+                self.history_clock_request(cx, request.command, request.leg, page);
+                return;
+            }
+            resync => Request { resync, ..request },
+        };
+        let command = request.command;
+        let leg = request.leg.context();
+        let Some(owned) = self.history.reads.remove(&command) else {
+            let _ = cx.finish_http_context(leg);
+            return;
         };
         let Owned { root, mut read } = owned;
         if let InFlight::Lookup {

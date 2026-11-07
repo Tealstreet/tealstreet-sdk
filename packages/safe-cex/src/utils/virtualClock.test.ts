@@ -26,6 +26,7 @@ describe('virtualClock', () => {
     (virtualClock as any).server = null;
     (virtualClock as any).client = null;
     (virtualClock as any).offsetMs = 0;
+    (virtualClock as any).receivedTimeSync = false;
     (virtualClock as any).syncInFlight = null;
     virtualClock.setServerTimeSource(undefined);
   });
@@ -240,6 +241,7 @@ describe('virtualClock', () => {
       const originalWindow = global.window;
       (global as any).window = undefined;
 
+      virtualClock.syncFromServerTime(Date.now());
       await virtualClock.start();
 
       expect(virtualClock.started).toBe(true);
@@ -251,6 +253,7 @@ describe('virtualClock', () => {
       const originalWindow = global.window;
       (global as any).window = undefined;
 
+      virtualClock.syncFromServerTime(Date.now());
       await virtualClock.start();
       const startedFirst = virtualClock.started;
 
@@ -279,6 +282,53 @@ describe('virtualClock', () => {
 
       (global as any).window = originalWindow;
     });
+  });
+
+  it('publishes the existing Node OS-clock refresh to protocol-clock subscribers without venue I/O', async () => {
+    runtime.node = true;
+    const observed = vi.fn();
+    const unsubscribe = virtualClock.subscribeToTimeSync(observed);
+    try {
+      await virtualClock.syncClientServerTime();
+      expect(observed).toHaveBeenLastCalledWith(Date.now());
+      vi.setSystemTime(Date.now() + 162 * 86_400_000);
+      await virtualClock.syncClientServerTime();
+      expect(observed).toHaveBeenCalledTimes(2);
+      expect(observed).toHaveBeenLastCalledWith(Date.now());
+      expect(axios.get).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      runtime.node = false;
+    }
+  });
+
+  it('waits for the first host sync in a browser worker, with one notification', async () => {
+    const originalWindow = global.window;
+    (global as any).window = undefined;
+    let done = false;
+    const start = virtualClock.start().then(() => { done = true; });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    const observed = vi.fn();
+    const unsubscribe = virtualClock.subscribeToTimeSync(observed);
+    const utc = Date.now() + 162 * 86_400_000;
+    virtualClock.syncFromServerTime(utc);
+    await start;
+    expect(done).toBe(true);
+    expect(virtualClock.getCurrentTimeMs()).toBe(utc);
+    expect(observed).toHaveBeenCalledExactlyOnceWith(utc);
+    unsubscribe();
+    (global as any).window = originalWindow;
+  });
+
+  it('fails startup clearly rather than anchoring an unsynchronized worker clock', async () => {
+    const originalWindow = global.window;
+    (global as any).window = undefined;
+    const refused = expect(virtualClock.start()).rejects.toThrow('Clock synchronization did not arrive from the host');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await refused;
+    expect((virtualClock as any).syncListeners.size).toBe(0);
+    (global as any).window = originalWindow;
   });
 
   describe('time source order', () => {

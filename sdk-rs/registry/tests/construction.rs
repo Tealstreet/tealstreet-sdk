@@ -177,24 +177,6 @@ const WALLET: &str = "0x1111111111111111111111111111111111111111";
 const PRIVATE_KEY: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
 #[test]
-fn breakoutprop_needs_dxtrade_credentials_even_for_market_data() {
-    let message = "BreakoutProp market data requires a legacy DXtrade username and password";
-    for options in [
-        r#"{"publicDataOnly":true}"#,
-        r#"{"key":"user"}"#,
-        r#"{"key":"user","secret":""}"#,
-        r#"{"secret":"password"}"#,
-    ] {
-        assert_eq!(rejected("breakoutprop", options), message, "{options}");
-    }
-    construct(
-        "breakoutprop",
-        r#"{"publicDataOnly":true,"key":"user","secret":"password"}"#,
-    )
-    .unwrap();
-}
-
-#[test]
 fn polymarket_private_accounts_need_a_wallet_key_and_coherent_l2_credentials() {
     let account =
         |polymarket: &str| format!(r#"{{"key":"{PRIVATE_KEY}","polymarket":{polymarket}}}"#);
@@ -244,15 +226,7 @@ fn orderly_private_accounts_need_an_application_id_and_base58_ed25519_keys() {
     // 31 zero bytes: valid base58, one byte short of an Ed25519 key.
     let key = "1111111111111111111111111111111";
     let valid = "11111111111111111111111111111111";
-    for venue in [
-        "orderly",
-        "tealstreet-dex",
-        "kodiakfi",
-        "mode",
-        "salsadex",
-        "what",
-        "woofi",
-    ] {
+    for venue in ["orderly", "kodiakfi", "mode", "what", "woofi"] {
         for application in [
             r#""#,
             r#","applicationId":"""#,
@@ -362,7 +336,6 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
         "lighter",
         "coinbase",
         "polymarket",
-        "breakoutprop",
     ] {
         assert_ne!(
             construct(venue, r#"{"remoteSigning":true}"#)

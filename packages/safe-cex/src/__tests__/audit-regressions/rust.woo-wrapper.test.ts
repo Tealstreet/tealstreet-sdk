@@ -52,9 +52,11 @@ describe('Rust WOO execution history boundary', () => {
   });
 
   it('registers WOO beside Orderly brokers and preserves caller IDs and slippage through placement', async () => {
-    expect(isRustVenue('woo')).toBe(false);
-    expect(isRustVenue('woofi')).toBe(false);
-    expect(isRustVenue('kodiakfi')).toBe(false);
+    for (const name of ['woo', 'woofi', 'kodiakfi', 'mode', 'what'] as const) {
+      expect(isRustVenue(name), name).toBe(true);
+    }
+    // Retired-name rejection moved to the untyped loader boundary in
+    // sdk-rs/hosts/wasm/js/beta-venues.test.mjs.
     const { exchange, command } = setup();
     const opts = { symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 1,
       maxSlippagePct: 0.25, clientOrderId: '9007199254740991' };

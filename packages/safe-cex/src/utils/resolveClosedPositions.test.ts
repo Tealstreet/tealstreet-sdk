@@ -110,3 +110,13 @@ describe('resolveClosedPositions', () => {
     expect(result.unavailableReason).toBeTruthy();
   });
 });
+
+it('propagates a reported read failure instead of trying derived data or claiming no history', async () => {
+  const error = new Error('relay disconnected');
+  let derived = false;
+  await expect(resolveClosedPositions({
+    fetchClosedPnl: async () => { throw error; },
+    deriveClosedPositions: async () => { derived = true; return []; },
+  }, opts, false)).rejects.toBe(error);
+  expect(derived).toBe(false);
+});

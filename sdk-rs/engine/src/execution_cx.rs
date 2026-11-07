@@ -16,13 +16,6 @@ impl ExecutionHandle {
     }
 }
 
-impl<P> Io<P> {
-    #[inline]
-    pub(super) fn rearm_execution_timer(&mut self) {
-        self.core_io().rearm_execution_timer()
-    }
-}
-
 impl crate::engine::CoreIo<'_> {
     pub(super) fn rearm_execution_timer(&mut self) {
         // Called on every HTTP completion; skip the scan when no group exists.
@@ -435,7 +428,7 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .begin_planned_execution(&plan, &shared, &founder_root, key, self.now)
             .expect("reserved before Plan admission");
-        self.io.rearm_execution_timer();
+        self.io.core_io().rearm_execution_timer();
         Ok((plan, ExecutionHandle(root), founder_root))
     }
 

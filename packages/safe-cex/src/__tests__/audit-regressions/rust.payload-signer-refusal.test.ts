@@ -195,7 +195,7 @@ describe('factory and worker loaders', () => {
   it('OUT names refuse without constructing a hosted TS class', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
     // Coinbase is beta-admitted; native delegated-signing refusal is covered above.
-    for (const name of ['bitrue', 'tealstreet-dex'] as const) {
+    for (const name of ['bitrue'] as const) {
       // The hosted loader serves keyless remote signing only.
       expect(isKeylessRemoteSigned(name, signed()), name).toBe(false);
       for (const options of [signed(), signed({ engine: undefined })]) {

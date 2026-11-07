@@ -71,10 +71,6 @@
       "value": "blofin"
     },
     {
-      "name": "Breakoutprop",
-      "value": "breakoutprop"
-    },
-    {
       "name": "Bybit",
       "value": "bybit"
     },
@@ -165,14 +161,6 @@
     {
       "name": "Mode",
       "value": "mode"
-    },
-    {
-      "name": "Salsadex",
-      "value": "salsadex"
-    },
-    {
-      "name": "TealstreetDex",
-      "value": "tealstreet-dex"
     },
     {
       "name": "Txflow",

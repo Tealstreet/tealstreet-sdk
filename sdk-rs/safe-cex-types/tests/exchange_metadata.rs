@@ -3,15 +3,23 @@ mod identity;
 use safe_cex_types::{ExchangeName, exchange_metadata::*};
 
 #[test]
+fn the_current_roster_accepts_options_and_refuses_retired_brokers() {
+    let options: ExchangeName = serde_json::from_str("\"binanceoptions\"").unwrap();
+    assert_eq!(serde_json::to_value(options).unwrap(), "binanceoptions");
+    for retired in ["salsadex", "tealstreet-dex"] {
+        assert!(serde_json::from_value::<ExchangeName>(serde_json::json!(retired)).is_err());
+    }
+}
+
+#[test]
 fn full_metadata_native_fields_unified_mobile_and_domains() {
     let table = exchange_metadata();
-    assert_eq!(table.len(), 50); // Includes the source-owned Binance Options record.
-    let options = get_exchange_metadata("binanceoptions", false).unwrap();
-    assert_eq!(options.exchange_name, ExchangeName::Binanceoptions);
-    assert_eq!(
-        serde_json::to_value(&options.exchange_name).unwrap(),
-        "binanceoptions"
-    );
+    let roster: Vec<String> =
+        serde_json::from_str(include_str!("fixtures/exchange-metadata-roster.json")).unwrap();
+    assert_eq!(roster.len(), 47);
+    let mut native_names = table.keys().cloned().collect::<Vec<_>>();
+    native_names.sort();
+    assert_eq!(native_names, roster);
     let inverse = get_exchange_metadata("binanceinverse", false).unwrap();
     assert_eq!(inverse.exchange_name, ExchangeName::Binanceinverse);
     assert_eq!(inverse.pretty_name, "Binance Inverse");

@@ -62,7 +62,6 @@ const SOURCE_CONSUMER_FILES = ['bitget/bitget.family.ts', 'kraken/kraken.fills.t
 
 // Kept venue code outside the beta families, each for a named runtime consumer.
 const NON_BETA_KEPT_FAMILIES: Record<string, string> = {
-  grvt: 'index.ts exports the GRVT builder-authorization helpers the web app uses',
   txflow: 'rust/rust.exchange.ts applies the TxFlow client order ID rule',
 };
 

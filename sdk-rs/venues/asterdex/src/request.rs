@@ -609,10 +609,21 @@ impl AsterDex {
         policy: Policy,
         recipe: Option<Box<dyn safe_cex_engine::SignStep>>,
     ) -> bool {
+        let issue = if matches!(
+            &unsent.pending,
+            Pending::Daily { .. }
+                | Pending::OpenInterest { .. }
+                | Pending::Klines { .. }
+                | Pending::DepthRead { .. }
+        ) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
         let read = match (unsent.read.clone(), &unsent.root) {
             (Some(read), _) => Ok(read),
             (None, Some(root)) => cx.http_leg_context(root, policy),
-            (None, None) => cx.http_context(Scope::Background, policy),
+            (None, None) => issue(cx, Scope::Background, policy),
         };
         let read = match read {
             Ok(read) => read,
@@ -1066,8 +1077,8 @@ mod tests {
         }
     }
 
-    /// Startup discovery's bound (the engine's DISCOVERY_TIMEOUT_MS).
-    const DISCOVERY_TIMEOUT_MS: u32 = 60_000;
+    /// Startup discovery gets 60 s for the read plus 30 s for transport readiness.
+    const DISCOVERY_DEADLINE_MS: u32 = 90_000;
 
     /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
     fn jittered(actual: f64, nominal: f64) -> bool {
@@ -1649,7 +1660,7 @@ mod tests {
         let request = h.take("/exchangeInfo");
         assert!(request.headers.is_empty());
         // An unsigned startup catalogue read carries the discovery bound.
-        assert_eq!(request.timeout_ms, Some(DISCOVERY_TIMEOUT_MS));
+        assert_eq!(request.timeout_ms, Some(DISCOVERY_DEADLINE_MS));
         h.event(Event::HttpStart {
             request: request.id,
             status: 200,

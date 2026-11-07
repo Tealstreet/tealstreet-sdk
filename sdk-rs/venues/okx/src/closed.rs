@@ -13,6 +13,7 @@ use safe_cex_engine::selected_read::{
     CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot,
     SelectedRead,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, TimerId, VenueError, num};
 use serde::Deserialize;
@@ -127,7 +128,7 @@ impl Okx {
                 history: ReadCursorHistory::new(completion, walk, |reason| match reason {
                     Stall::PageBudget => format!("OKX closed positions stopped at the {MAX_PAGES}-page cap; older positions were not fetched"),
                     _ => "OKX closed positions stopped at a repeated cursor; older positions were not fetched".into(),
-                }, |rows| Ok(format!("[{}]", rows.join(",")))),
+                }, |rows| Ok(format!("[{}]", rows.join_with(",")))),
                 leg: None,
                 instrument,
                 before: from_ms,

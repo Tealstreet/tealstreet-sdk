@@ -2,6 +2,23 @@
 mod build_support;
 
 #[test]
+fn kucoin_broker_setup_declaration_does_not_enable_dispatch_or_hosted_signing() {
+    let output = build_support::generate(
+        r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+        "kucoin":{"signerSetup":{
+            "primary":{"extra":{"key":"kucoinBroker","encoding":"utf8","trim":true}},
+            "secondary":{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}}}
+    }}"#,
+    )
+    .unwrap();
+    assert!(output.contains("ExtraKey::KucoinBroker"));
+    assert!(output.contains("ExtraFieldPolicy::AliasPrimary"));
+    assert!(output.contains("trim: true"));
+    assert!(output.contains("dispatch_signing: false"));
+    assert!(output.contains("enabled: false"));
+}
+
+#[test]
 fn two_families_declare_owned_presentation_without_enabling_runtime_admission() {
     for (name, header) in [
         ("okx", "OK-ACCESS-PASSPHRASE"),

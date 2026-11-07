@@ -277,7 +277,7 @@ impl Polymarket {
             .address
             .as_deref()
             .ok_or("Polymarket signer unavailable")?;
-        let seconds = (cx.now / 1000.0).floor() as u64;
+        let seconds = (cx.protocol_now() / 1000.0).floor() as u64;
         let headers = sign::l2_headers(
             credentials,
             address,
@@ -1327,6 +1327,19 @@ fn log_skip(
     account
         .skip_logged
         .report(cx, asset.to_owned(), level, message);
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance => S::BALANCE,
+            Self::Orders(_) => S::ORDERS,
+            Self::Positions(_) => S::POSITIONS,
+            Self::Time => S::ACCOUNT,
+            Self::Derive => S::ACCOUNT,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -48,6 +48,7 @@ it.each([
       constructor(venue: string, options: string) {
         constructor(venue, JSON.parse(options));
       }
+      syncHostTime() { return true; }
       capabilities() {
         return engineCapabilities('bybit', { options: enableOptionMarkets });
       }
@@ -93,6 +94,7 @@ it('rejects legacy TS public providers before native product construction', asyn
     constructor(venue: string, options: string) {
       constructor(venue, JSON.parse(options));
     }
+    syncHostTime() { return true; }
     capabilities() {
       return engineCapabilities('bybit', { options: true });
     }
@@ -116,6 +118,7 @@ it('keeps combined native products enabled with an explicit shared-feed policy',
     constructor(venue: string, options: string) {
       constructor(venue, JSON.parse(options));
     }
+    syncHostTime() { return true; }
     capabilities() {
       return engineCapabilities('bybit', { options: true });
     }

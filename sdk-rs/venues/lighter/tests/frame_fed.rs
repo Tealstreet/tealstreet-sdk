@@ -420,3 +420,41 @@ fn a_source_refresh_settings_re_reads_the_account_snapshot_and_writes_nothing() 
         sent[0].url
     );
 }
+
+#[test]
+fn v1_frame_keeps_identity_and_ordinary_writes_but_never_grants_mark_freshness() {
+    let (mut e, mut timers) = page_engine();
+    e.apply_frame(NOW, &source_frame(), true).unwrap();
+    e.store_mut().update_order("42", |o| {
+        o.kind = OrderType::StopLoss;
+        o.price = 80.0;
+        o.side = OrderSide::Sell;
+        o.reduce_only = true;
+    });
+    e.store_mut().update_ticker("ETH", |t| t.mark = 100.0);
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 77,
+            id: "42".into(),
+            price: Some(85.0),
+            amount: None,
+        }),
+    );
+    let out = run(&mut e, &mut timers, NOW + 1000.0);
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed{command:77,error}) if error.outcome==Some(Outcome::NotSent)&&error.message.contains("reference stale"))),"{out:?}");
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
+    e.handle(
+        NOW + 1000.0,
+        Event::Command(Command::CancelOrders {
+            command: 78,
+            ids: vec!["42".into()],
+        }),
+    );
+    let out = run(&mut e, &mut timers, NOW + 1000.0);
+    assert!(
+        out.iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.contains("nextNonce"))),
+        "v1 identity remains loaded: {out:?}"
+    );
+}

@@ -7,12 +7,12 @@ import { gunzipSync } from 'node:zlib';
 import { buildBinanceOptionsTape } from '../../../../../sdk-rs/harness/private-tape-binanceoptions.mjs';
 import { buildBitgetUtaTape } from '../../../../../sdk-rs/harness/private-tape-bitget-uta.mjs';
 import { buildBitgetInverseTape } from '../../../../../sdk-rs/harness/private-tape-bitgetinverse.mjs';
-import { coinbasePrivateTape } from '../../../../../sdk-rs/harness/private-tape-coinbase.mjs';
 import { canonicalUrl, Tape } from '../../../../../sdk-rs/harness/tape.mjs';
 import { venueOf } from '../../../../../sdk-rs/harness/venues.mjs';
 import { HYROTRADER_SIMULATOR_URL, HYROTRADER_SIMULATOR_WS_URL } from '../../exchanges/bybit/bybit.types';
 import { directTransport } from '../../transport/direct';
 import { prepareRecordedHttp } from '../support/managedHttp';
+import { coinbaseDrbPublicRecords, coinbaseDrbPublicResponse } from '../support/coinbaseDrb';
 
 type RecordRow = {
   type: string;
@@ -46,8 +46,6 @@ type HyperSpotMetaInput = {
 };
 type KrakenSpotPairInput = { wsname?: string };
 
-type BreakoutQuote = { symbol: string; bid: number; ask: number };
-
 type BinanceInstrumentInput = {
   symbol: string;
   baseAsset: string;
@@ -59,7 +57,7 @@ type BinanceInstrumentInput = {
   contractSize?: number;
 };
 
-const orderlyAliases = new Set(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+const orderlyAliases = new Set(['kodiakfi', 'mode', 'what', 'woofi']);
 const txflowPublicCorsProxy = 'https://txflow-cutover-cors.invalid';
 
 /** Test input only: no network, no SDK store writes and no fabricated empty replies. */
@@ -91,11 +89,8 @@ export const realVenue = (name: ExchangeName) => {
     records = buildBinanceOptionsTape({ isPublic: true }) as RecordRow[];
     source = 'private-tape-binanceoptions.mjs public records';
   } else if (name === 'coinbase') {
-    // Main Coinbase keyless mode is legacy INTX. The captured public tape is
-    // spot-only, so use the documented INTX instruments input, with no keys.
-    // This proves compatibility, not availability of the retired live route.
-    records = coinbasePrivateTape({ profile: 'intx' }).records as RecordRow[];
-    source = 'private-tape-coinbase.mjs legacy INTX public records';
+    records = coinbaseDrbPublicRecords;
+    source = 'venues/coinbase/tests/fixtures/drb-public.jsonl (live public gateway capture)';
   } else {
     const file = new URL(`../../../../../sdk-rs/harness/fixtures/${fixture}-public.jsonl.gz`, import.meta.url);
     records = gunzipSync(readFileSync(file))
@@ -104,7 +99,6 @@ export const realVenue = (name: ExchangeName) => {
       .split('\n')
       .map((line) => JSON.parse(line));
     source = `${fixture}-public.jsonl.gz`;
-    if (name === 'breakoutprop') source += ' (documented-scripted DXtrade session, not a live recording)';
   }
   // Never replay commands or a private account payload from a schema builder.
   records = records.filter((record) => record.type === 'http' || record.type === 'ws' || record.type === 'config');
@@ -113,12 +107,6 @@ export const realVenue = (name: ExchangeName) => {
       record.type === 'http'
         ? record.url!.includes('/mix/market/')
         : record.type === 'ws' && record.url!.endsWith('/ws/public'),
-    );
-  if (name === 'coinbase')
-    records = records.filter((record) =>
-      record.type === 'http'
-        ? record.url!.includes('api.international.coinbase.com')
-        : record.type === 'ws' && record.url === 'wss://advanced-trade-ws.coinbase.com',
     );
 
   const venue = venueOf(name === 'binancepm' ? 'binance' : name);
@@ -133,7 +121,6 @@ export const realVenue = (name: ExchangeName) => {
       : {}),
     ...(orderlyAliases.has(name) ? { applicationId: venue.publicOptions.applicationId } : {}),
     ...(name === 'polymarket' ? { polymarket: venue.publicOptions.polymarket } : {}),
-    ...(name === 'breakoutprop' ? { ...venue.publicOptions, subaccount: venue.options.subaccount } : {}),
     ...(name === 'hyrotrader' ? { extra: { hyrotraderMode: 'demo' } } : {}),
   };
   const restore: (() => void)[] = [];
@@ -175,15 +162,6 @@ export const realVenue = (name: ExchangeName) => {
   const tape = new Tape(records, venue, false, 2000, 'rust', [], options);
   const polling = venue.polling === true;
   let pollingEpoch: number | undefined;
-  const publicPollResponses: Array<{ status: number; quotes: BreakoutQuote[] }> = [];
-  const breakoutQuotes: BreakoutQuote[][] =
-    name === 'breakoutprop'
-      ? records
-          .filter((row) => row.type === 'http' && new URL(row.url!).pathname.endsWith('/marketdata'))
-          .map((row) =>
-            (JSON.parse(row.body!).events as BreakoutQuote[]).map(({ symbol, bid, ask }) => ({ symbol, bid, ask })),
-          )
-      : [];
   // Spot pair IDs and COIN-M settlement/contract sizes come directly from
   // their distinct recorded exchangeInfo endpoints, not the engine output.
   const binanceMarkets =
@@ -336,6 +314,7 @@ export const realVenue = (name: ExchangeName) => {
     async request({ method, url, body, headers, signal }) {
       signal?.throwIfAborted();
       requests.push(`${method} ${url}`);
+      if (name === 'coinbase') return coinbaseDrbPublicResponse({ method, url, body, headers });
       // Polling records become available with real elapsed input time. Start
       // after WASM initialization, at the first actual request, and leave the
       // native engine's timers and store publication untouched.
@@ -350,15 +329,6 @@ export const realVenue = (name: ExchangeName) => {
         : url;
       const response = tape.respond(method, venueUrl, body, headers);
       if (response.status === 599) errors.push(`Untaped ${method} ${url}${body ? ` ${body}` : ''}`);
-      if (polling && method === 'POST' && new URL(url).pathname.endsWith('/marketdata') && response.status === 200)
-        publicPollResponses.push({
-          status: response.status,
-          quotes: (JSON.parse(response.body).events as BreakoutQuote[]).map(({ symbol, bid, ask }) => ({
-            symbol,
-            bid,
-            ask,
-          })),
-        });
       return { status: response.status, headers: response.headers, body: new TextEncoder().encode(response.body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -371,8 +341,6 @@ export const realVenue = (name: ExchangeName) => {
     errors,
     source,
     polling,
-    publicPollResponses,
-    breakoutQuotes,
     binanceMarkets,
     spotMarkets,
     predictionMarkets,

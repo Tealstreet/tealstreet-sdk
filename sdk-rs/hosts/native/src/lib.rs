@@ -7,6 +7,7 @@
 
 mod how_pool;
 mod managed_http;
+pub mod report;
 mod routing;
 mod server;
 mod socket_health;
@@ -20,8 +21,8 @@ pub use routing::{
 #[cfg(feature = "venues")]
 pub use server::spawn_venue_account;
 pub use server::{
-    AccountHandle, BookLevels, ClientLink, FrameServer, InputRefused, Outgoing, ServerConfig,
-    spawn_account,
+    AccountHandle, BookLevels, ClientLink, DisposalCause, FrameServer, InputRefused, Outgoing,
+    ServerConfig, spawn_account,
 };
 pub use socket_health::{
     SOCKET_STALE_MS, SocketDiagnostics, SocketHealth, SocketStats, SocketSummary,
@@ -32,6 +33,7 @@ pub use transport::{
 #[cfg(feature = "nonce-drain")]
 pub use transport::{DrainFuture, Drained};
 
+use safe_cex_engine::socket_lifecycle::{InterestObservation, InterestObserver};
 use safe_cex_engine::{
     Action, Command, Engine, Event, Notice, RequestId, SocketId, TimerId, Venue, VenueError,
 };
@@ -125,6 +127,7 @@ pub struct Host<V: Venue, T: Transport> {
     inbox: mpsc::UnboundedReceiver<HostEvent>,
     sockets: HashMap<SocketId, mpsc::UnboundedSender<String>>,
     socket_health: socket_health::SocketTracker,
+    legacy_interest_observer: Option<InterestObserver>,
     timers: HashMap<TimerId, AbortHandle>,
     managed_http: managed_http::Requests,
     signing_tasks: HashMap<RequestId, managed_http::Task>,
@@ -192,6 +195,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
             inbox,
             sockets: HashMap::new(),
             socket_health: Default::default(),
+            legacy_interest_observer: None,
             timers: HashMap::new(),
             managed_http: Default::default(),
             signing_tasks: HashMap::new(),
@@ -323,6 +327,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 host.report_terminal(&mut on_notice);
                 if cleanup.is_err() {
                     on_notice(Notice::StartupFailed {
+                        read_refusal: false,
                         error: VenueError::new("Address setup cleanup failed")
                             .kind(safe_cex_engine::ErrorKind::Internal),
                     });
@@ -402,6 +407,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
             // Deliberately outside the panic classifier: consumer failures are
             // never disguised as another engine terminal result.
             on_notice(Notice::StartupFailed {
+                read_refusal: false,
                 error: error.clone(),
             });
         }
@@ -420,6 +426,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
         self.managed_http.clear();
         self.signing_tasks.clear();
         self.sockets.clear();
+        if let Some(observer) = &self.legacy_interest_observer {
+            observer.observe(InterestObservation::Dropped);
+        }
         self.socket_health.clear();
         for (_, timer) in self.timers.drain() {
             timer.abort();
@@ -477,11 +486,17 @@ impl<V: Venue, T: Transport> Host<V, T> {
             }
             HostEvent::WsClosed(socket, code) => {
                 self.sockets.remove(&socket);
+                if let Some(observer) = &self.legacy_interest_observer {
+                    observer.observe(InterestObservation::TransportClosed { socket });
+                }
                 self.socket_health.closed(socket, Some(code));
                 engine.handle(now, Event::WsClosed { socket, code })
             }
             HostEvent::WsRouteExhausted(socket) => {
                 self.sockets.remove(&socket);
+                if let Some(observer) = &self.legacy_interest_observer {
+                    observer.observe(InterestObservation::TransportClosed { socket });
+                }
                 self.socket_health.closed(socket, None);
                 engine.handle(now, Event::WsRouteExhausted { socket })
             }
@@ -546,9 +561,11 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     url,
                     headers,
                     channel,
+                    public_topics,
                     context,
                 } => {
-                    self.socket_health.connecting(socket, channel.clone());
+                    self.socket_health
+                        .connecting(socket, channel.clone(), public_topics);
                     let outgoing = self.transport.connect_encoding(
                         binary,
                         socket,
@@ -562,12 +579,24 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 }
                 Action::WsSend { socket, text } => {
                     if let Some(outgoing) = self.sockets.get(&socket) {
-                        let _ = outgoing.send(text);
+                        if let Some(observer) = &self.legacy_interest_observer {
+                            if outgoing.send(text.clone()).is_ok() {
+                                observer.observe(InterestObservation::TransportSent {
+                                    socket,
+                                    text: &text,
+                                });
+                            }
+                        } else {
+                            let _ = outgoing.send(text);
+                        }
                     }
                 }
                 // Dropping the sender closes the socket.
                 Action::WsClose { socket } => {
                     self.sockets.remove(&socket);
+                    if let Some(observer) = &self.legacy_interest_observer {
+                        observer.observe(InterestObservation::TransportClosed { socket });
+                    }
                     self.socket_health.closed(socket, None);
                 }
                 Action::Http(request) => self.transport.request(request, self.events.clone()),
@@ -825,7 +854,7 @@ mod timer_tests {
         assert!(events.is_closed());
         let notices = notices.lock().unwrap();
         assert_eq!(notices.len(), 1);
-        assert!(matches!(&notices[0], Notice::StartupFailed { error }
+        assert!(matches!(&notices[0], Notice::StartupFailed { error, .. }
             if error.kind == Some(safe_cex_engine::ErrorKind::Internal)
             && error.outcome == Some(safe_cex_engine::Outcome::Unknown)));
     }
@@ -871,7 +900,7 @@ mod timer_tests {
         assert!(!engine.failed());
         assert_eq!(notices.len(), 1);
         assert!(
-            matches!(&notices[0], Notice::StartupFailed { error } if error.message == "fixture startup refusal")
+            matches!(&notices[0], Notice::StartupFailed { error, .. } if error.message == "fixture startup refusal")
         );
     }
 

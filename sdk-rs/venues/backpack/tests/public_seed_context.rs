@@ -36,8 +36,8 @@ struct Packet {
     preparation: Option<Preparation>,
 }
 
-/// Startup discovery's bound (the engine's DISCOVERY_TIMEOUT_MS).
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+/// Startup discovery's bound (the engine's discovery timeout plus readiness allowance).
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 fn packets(e: &mut Driver) -> Vec<Packet> {
     e.drain_actions()
         .filter_map(|action| match action {
@@ -209,7 +209,7 @@ fn equality(seed: Seed) {
     assert_unpublished(&e, seed);
 }
 // NEW policy: the legacy raw observations have no 20-second managed bound; startup
-// discovery runs on the engine's 60-second discovery bound.
+// discovery runs on the engine's 90-second discovery bound.
 #[test]
 fn markets_discovery_deadline_equality() {
     equality(Seed::Markets);

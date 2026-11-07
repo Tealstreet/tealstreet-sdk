@@ -3,14 +3,15 @@
 //! the position mode is known, and amends need each open order's native
 //! observation (kind, position side, attached, native status).
 //!
-//! Version 1, little-endian: a version byte; a flags byte (mode known); the
+//! Version 2, little-endian: a version byte; a flags byte (mode known); the
 //! observations sorted by order id, each as strings (a u32 length and UTF-8
 //! bytes) plus an attached byte. The observed order itself is the store's: a
 //! frame-fed engine's ingested ORDERS are its reconcile.
-use super::{Observation, Trading};
+//! Readers also accept v1, which omits originals and grants no put-back provenance.
+use super::{Observation, Trading, protection};
 use safe_cex_engine::model::OrderStatus;
 
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 const MODE_KNOWN: u8 = 1;
 
 fn put_str(out: &mut Vec<u8>, value: &str) {
@@ -39,11 +40,19 @@ impl<'a> Reader<'a> {
 }
 
 /// One decoded observation: order id, native kind, position side, attached, native status.
-type Row = (String, String, String, bool, String);
+type Row = (
+    String,
+    String,
+    String,
+    bool,
+    String,
+    Option<protection::Original>,
+);
 
 fn decode(bytes: &[u8]) -> Option<(bool, Vec<Row>)> {
     let mut reader = Reader(bytes);
-    if reader.u8()? != VERSION {
+    let version = reader.u8()?;
+    if !matches!(version, 1 | VERSION) {
         return None;
     }
     let mode_known = reader.u8()? & MODE_KNOWN != 0;
@@ -51,7 +60,18 @@ fn decode(bytes: &[u8]) -> Option<(bool, Vec<Row>)> {
     for _ in 0..reader.u32()? {
         let (id, kind, side) = (reader.string()?, reader.string()?, reader.string()?);
         let attached = reader.u8()? != 0;
-        rows.push((id, kind, side, attached, reader.string()?));
+        let status = reader.string()?;
+        let original = if version == VERSION {
+            let original = reader.string()?;
+            if original.is_empty() {
+                None
+            } else {
+                Some(serde_json::from_str(&original).ok()?)
+            }
+        } else {
+            None
+        };
+        rows.push((id, kind, side, attached, status, original));
     }
     reader.0.is_empty().then_some((mode_known, rows))
 }
@@ -70,6 +90,14 @@ impl Trading {
             put_str(&mut out, &seen.position_side);
             out.push(u8::from(seen.attached));
             put_str(&mut out, &seen.native_status);
+            put_str(
+                &mut out,
+                &seen
+                    .original
+                    .as_ref()
+                    .map(|v| serde_json::to_string(v).expect("native scalar provenance"))
+                    .unwrap_or_default(),
+            );
         }
         out
     }
@@ -85,11 +113,15 @@ impl Trading {
             return false;
         };
         self.mode_known = mode_known;
+        // A frame arrival cannot translate the source's local receipt clock.
+        self.references.clear();
         self.observed.clear();
         // Held until their order is ingested: unchanged state is never resent.
         self.pending_observed = rows
             .into_iter()
-            .map(|(id, kind, side, attached, status)| (id, (kind, side, attached, status)))
+            .map(|(id, kind, side, attached, status, original)| {
+                (id, (kind, side, attached, status, original))
+            })
             .collect();
         self.refresh_observed(store);
         true
@@ -105,8 +137,10 @@ impl Trading {
             .cloned()
             .collect();
         for id in ready {
-            if let (Some((native_kind, position_side, attached, native_status)), Some(order)) =
-                (self.pending_observed.remove(&id), store.order(&id))
+            if let (
+                Some((native_kind, position_side, attached, native_status, original)),
+                Some(order),
+            ) = (self.pending_observed.remove(&id), store.order(&id))
             {
                 self.observed.insert(
                     id,
@@ -116,6 +150,7 @@ impl Trading {
                         position_side,
                         attached,
                         native_status,
+                        original,
                     },
                 );
             }
@@ -162,6 +197,7 @@ mod tests {
         store.set_orders(vec![order.clone()]);
         let mut source = Trading::default();
         source.observe_order(&order, "LIMIT", "LONG", false, "NEW");
+        source.observe_original("1", Some(serde_json::from_str(r#"{"symbol":"BTC-USDT","type":"LIMIT","side":"BUY","positionSide":"LONG","quantity":1,"price":100}"#).unwrap()));
         let closed = Order {
             id: "2".into(),
             ..order.clone()
@@ -186,9 +222,10 @@ mod tests {
             ("LIMIT", "LONG", false, "NEW")
         );
         assert!(seen.order == order);
+        assert!(seen.original.is_some());
 
         let mut other = bytes.clone();
-        other[0] = 2;
+        other[0] = 3;
         assert!(!copy.apply_venue_state(&other, &store));
         assert!(!copy.apply_venue_state(&bytes[..bytes.len() - 1], &store));
         let mut trailing = bytes.clone();
@@ -199,6 +236,31 @@ mod tests {
             1,
             "a refused state leaves the applied one"
         );
+
+        let mut legacy = vec![1, MODE_KNOWN];
+        legacy.extend_from_slice(&2u32.to_le_bytes());
+        for (id, kind, side, attached) in [
+            ("1", "LIMIT", "LONG", false),
+            ("2", "STOP_MARKET", "BOTH", true),
+        ] {
+            for text in [id, kind, side] {
+                put_str(&mut legacy, text);
+            }
+            legacy.push(u8::from(attached));
+            put_str(&mut legacy, "NEW");
+        }
+        assert!(copy.apply_venue_state(&legacy, &store));
+        assert!(copy.mode_known);
+        assert!(
+            copy.observed["1"].original.is_none(),
+            "v1 must remove old v2 restoration authority"
+        );
+        assert!(copy.pending_observed["2"].4.is_none());
+        assert_eq!(copy.observed["1"].native_kind, "LIMIT");
+        assert_eq!(copy.pending_observed["2"].0, "STOP_MARKET");
+        assert!(!copy.apply_venue_state(&legacy[..legacy.len() - 1], &store));
+        legacy.push(0);
+        assert!(!copy.apply_venue_state(&legacy, &store));
 
         // A later frame carrying the order completes its waiting observation.
         store.set_orders(vec![order.clone(), closed.clone()]);

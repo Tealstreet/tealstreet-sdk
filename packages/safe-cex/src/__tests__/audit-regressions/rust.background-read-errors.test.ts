@@ -7,6 +7,8 @@ import type { ExchangeName } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
+import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
+
 import { LogSeverity } from '../../types';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -40,9 +42,14 @@ it('keeps a failed symbol-switch leverage read at warning level', async () => {
 
 it('keeps a failed symbol metadata refresh at warning level, with no rejection for the worker', async () => {
   const mexc = rejecting('mexc');
+  // This fixture tests a running engine's failed read, after its catalogue is ready.
+  Object.assign(mexc.exchange, { nativeLoaded: LOADED_FLAG.MARKETS });
+  Object.assign(mexc.exchange.store.marketsBySymbol, { BTCUSDT: { symbol: 'BTCUSDT' } });
+  vi.spyOn(mexc.exchange, 'start').mockResolvedValue();
   const logs = vi.fn();
   mexc.exchange.on('log', logs);
   await expect(mexc.exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();
+  expect(mexc.command).toHaveBeenCalledWith({ op: 'fetchLeverage', symbol: 'BTCUSDT' });
   expect(logs).toHaveBeenCalledWith(expect.stringContaining('Error refreshing leverage for BTCUSDT'), LogSeverity.Warning);
   expect(mexc.errors).not.toHaveBeenCalled();
 });

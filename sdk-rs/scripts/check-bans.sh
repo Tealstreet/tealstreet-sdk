@@ -70,7 +70,7 @@ fi
 # native host each one sits inside tokio::time::timeout on the same line. The one
 # open, transport::open_socket, is bounded by every caller.
 unbounded=$(grep -rnE --include='*.rs' '\b(ws|socket|open|sink)\s*\.\s*(send|flush|close)\(.*\)\s*\.await|connect_async\(' hosts/native/src \
-  | grep -v 'timeout' | grep -vE '^hosts/native/src/transport\.rs:[0-9]+:\s*tokio_tungstenite::connect_async\(request\)$' || true)
+  | grep -v 'timeout' || true)
 if [[ -n $unbounded ]]; then
   echo 'BANNED: a native socket open or write outside a timeout (wrap it in tokio::time::timeout)'
   echo "$unbounded"
@@ -94,6 +94,10 @@ if ! python3 scripts/check-credential-selection.test.py || ! python3 scripts/che
 fi
 
 if ! python3 scripts/check-credential-only.test.py || ! python3 scripts/check-credential-only.py; then
+  status=1
+fi
+
+if ! python3 scripts/check-plan-declarations.test.py || ! python3 scripts/check-plan-declarations.py; then
   status=1
 fi
 

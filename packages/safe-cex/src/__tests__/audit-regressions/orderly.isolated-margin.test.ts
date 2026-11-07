@@ -58,7 +58,7 @@ const createExchange = () => {
   return { exchange, store };
 };
 
-const orderlyFamily = ['woofi', 'kodiakfi', 'mode', 'salsadex', 'what', 'tealstreet-dex'] as const;
+const orderlyFamily = ['woofi', 'kodiakfi', 'mode', 'what'] as const;
 
 describe('audit regression: Orderly isolated-margin support', () => {
   it('maps documented REST margin, leverage, and allocated-margin fields', () => {

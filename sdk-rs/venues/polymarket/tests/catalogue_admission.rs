@@ -9,8 +9,8 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_polymarket::{Options, Pending, Polymarket};
 
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const GOOD: &str = r#"{"markets":[{"conditionId":"c","slug":"election","active":true,"clobTokenIds":"[\"1\"]","outcomes":"[\"Yes\"]"}]}"#;
 struct Pressure {
     inner: Polymarket,

@@ -69,6 +69,11 @@ behavior changes, update or delete that snapshot in the same PR.
   `/api/exchange_proxy` (same proxy fleet, so the same IPs), skipping hosts the
   fleet does not forward (`proxyFleetAllowlist.ts`); requests already prepared
   keep the tunnel. Each activation reports `Tunnel unreachable; …` to Sentry.
+  One handshake earlier, at the first failed 443 handshake (`tunnelFailing` /
+  `onTunnelFailing`), unsigned public-intent reads move to the HTTP proxy:
+  new ones at once, and one still waiting in tunnel readiness abandons that
+  preparation (nothing has been sent) and re-prepares on the proxy within its
+  original deadline. Signed requests wait for the outage, as before.
 - `ReconnectingWebSocket` handles connection resilience
 - Token-based authentication with expiry checking
 - Latency tracking for tunnel (client↔proxy) and exchange (proxy↔exchange)
@@ -123,6 +128,22 @@ yarn test           # Vitest
   `prepareLegacy` and the Axios function retain the existing parser/simulation
   behavior and provide no engine release guarantee. An epoch change invalidates
   a managed preparation before dispatch; cancellation never closes a shared peer.
+  Readiness also requires native OPEN and the current connected loop generation:
+  a browser can retire a socket while its close callback is still deferred after
+  sleep. Each actual open resets clock/token readiness. Bind/ready reject stale
+  resources with `HTTP_PREPARATION_STALE` before claim, so the engine re-prepares
+  and re-signs within the original deadline; no post-send failure is replayed.
+- `requestBudget.ts` is the TS/Rust HTTP budget reference: discovery/catalogue
+  60 s, history pages 30 s, order reads and writes 20 s, other reads 20 s.
+  GETs accept closed `requestClass` hints or use exact path components, never
+  query/body values, to select a default. Non-GET methods always use the write
+  label, ignoring hints for longer classes. Managed posted reads retain their
+  explicit remaining engine deadline. Explicit finite positive
+  `config.timeout` wins (including an explicit 20 s); zero, negative, NaN and
+  infinity use the class default, and timers stay within 2147483647 ms.
+  `TradeTunnelTimeoutError`/readiness failures carry `requestClass`, `budgetMs`,
+  `elapsedMs` and include them in their sanitized message. Missing-token deadline
+  errors retain their authorization classification and include the same facts.
 - Axios `config.timeout` is one deadline for the complete tunnel request, not
   only the post-send response wait. Token retrieval, socket/time sync,
   authentication, simulation, and response handling all consume the same
@@ -130,6 +151,16 @@ yarn test           # Vitest
   without closing a shared connection or cancelling another request's refresh.
   When the deadline expires, the adapter rejects with
   `TradeTunnelTimeoutError` and must not transmit the now-stale request.
+- Socket opening, time sync and authorization share a readiness cap of 30 s,
+  bounded by the original request deadline. Exceeding that cap raises
+  `TradeTunnelReadinessError`, a timeout subclass; readiness never resets the deadline.
+  It carries `readiness` (`stage`: connect / timeSync / authReply, the reconnect
+  loop's phase and seconds in it, lane port, tunnel outage), also spelled out in
+  its message. A deadline spent waiting on the proxy token, mid-fetch or between
+  polls, is `ProxyTokenUnavailableError` instead. A request waiting on a socket
+  whose loop is `retry-scheduled` redials it at once, once per wait and at most
+  every 5 s per socket (`redialIfBackingOff`), instead of sitting out a backoff
+  a wake or network drop left behind.
 - A `Bad` authentication state is connection-scoped. Concurrent Axios requests
   share one refresh/token-send attempt per `HOWWebSocket` through the adapter's
   weak single-flight map, so one bad-token episode emits one `rpc.auth` frame.
@@ -194,3 +225,46 @@ The 25 s silence watchdog that redials starts on open as well as on each pong,
 so a socket that opens and never speaks is replaced. Both stalls ran every
 request out to its deadline for the connection's lifetime
 (`src/HOWWebSocket.reconnect.test.ts`).
+
+Initial readiness is latched only after socket creation and handler attachment.
+If the configured URL getter or URL construction throws before then, the next
+request may attempt initialization again; no HTTP was dispatched.
+
+**CONNECTING also has a wall-clock bound.** RWS has a 4 s `connectionTimeout`,
+armed only after creating its native socket; that one timer can be deferred, and
+`redialIfBackingOff` deliberately handles only `retry-scheduled`. HOW therefore
+checks actual dial age (or phase age before native construction) every 1 s while
+not open, on visible `visibilitychange`, document `resume`, window `pageshow`,
+and on every request-readiness poll. The audit expires a connect only past 6 s
+(the 4 s native timeout plus a 2 s margin), so native timeouts win when timers run normally. It uses RWS
+`timeoutConnecting()` on the same wrapper, retaining retry count and growing
+backoff. A request that expires a connect also consumes its immediate-redial
+budget, so it cannot immediately reset that backoff. Only attempts with a dialed
+URL count toward the existing two-failure 8443→443 fallback; a pre-dial stall
+retries without counting a handshake. Close notification survives native close
+throwing, and deferred work from retired attempts cannot overwrite current state.
+Fresh connects, open sockets and scheduled normal backoff are untouched; opening stops the
+watchdog, and disposal removes its timer/listeners. Fully frozen JS cannot run a
+repair; the first runnable check uses wall-clock age rather than assuming a timer
+fired. This reconnects the transport only: no account reload, deadline renewal,
+or replay of HTTP already sent (`HOWWebSocket.connect-timeout.test.ts` and the
+real-stack managed/legacy request-entry controls).
+
+Relay failure, readiness, timeout and send-state diagnostics retain only URL
+origin/path; signed queries and outgoing frame bodies/headers are never copied
+into display messages or previews. Original Axios config and signed wire bytes
+remain intact for interceptors and dispatch.
+Diagnostic strings normalize percent/JSON escapes through at most four layers;
+newly exposed secrets or deeper encoding discard the whole string. Nested auth
+fields, header tuples and secret-bearing object keys are scrubbed before logging.
+HTML normalization covers decimal/hex entities and quot/apos/lt/gt/amp. Base64
+and base64url tokens are checked for auth names, with four nesting levels,
+64 candidate tokens and 4096 bytes per token; excess discards the whole token.
+
+Automatic 25 s silence recovery uses RWS `retryConnection()` on the same wrapper,
+preserving its current retry counter and normal delay. Explicit manual/wake
+reconnects retain their reset semantics; the existing 5 s stable-uptime reset is
+unchanged. Close diagnostics retain only route/port, phase, initiator and lifetime
+buckets. An abnormal native close is unknown, not proof of a server close.
+HOW's existing timers record maximum lateness only when delivered while hidden;
+no new polling timer or keepalive protocol is introduced.

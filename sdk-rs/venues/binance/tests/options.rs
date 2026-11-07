@@ -705,6 +705,16 @@ fn a_refused_key_fails_the_start_instead_of_polling() {
         r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}"#,
     );
     assert_eq!(h.startup_failures.len(), 1, "{:?}", h.startup_failures);
+    assert_eq!(h.startup_failures[0].venue_code.as_deref(), Some("-2015"));
+    let notice = h
+        .events
+        .iter()
+        .find(|event| event.code == safe_cex_engine::log::code::AUTH_REJECTED)
+        .expect("auth refusal");
+    assert!(
+        notice.fields.contains(&("venueCode", "-2015".into())),
+        "{notice:?}"
+    );
 }
 
 #[test]

@@ -395,9 +395,10 @@ fn owned_partial(actions: &[Action], expected_rows: usize) {
         .expect("incomplete history must identify its caller");
     assert_eq!(marker.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        marker.fields,
-        vec![("command", safe_cex_engine::Value::Num(41.0))]
+        marker.fields[..1],
+        [("command", safe_cex_engine::Value::Num(41.0))]
     );
+    assert_eq!(marker.fields[1].0, "reason");
     let (done_index, result) = actions
         .iter()
         .enumerate()

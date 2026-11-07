@@ -11,7 +11,7 @@ use std::collections::{HashSet, VecDeque};
 
 const NOW: f64 = 1_000.;
 // Startup public reads before markets and tickers load get the engine's discovery deadline.
-const DISCOVERY_DEADLINE_MS: u32 = 60_000;
+const DISCOVERY_DEADLINE_MS: u32 = 90_000;
 const READ_TIMEOUT_MS: u32 = 20_000;
 const SPOT: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"1","markPx":"1"}]]"#;
 
@@ -46,8 +46,14 @@ fn release<V: Venue>(engine: &mut Engine<V>, testnet: bool) -> Vec<Action> {
                 } => {
                     assert_eq!(intent, RoutingIntent::Public);
                     let loaded = engine.store().loaded();
-                    let bound = if loaded.markets && loaded.tickers {
+                    let bound = if matches!(
+                        engine.http_read_class(request.id),
+                        safe_cex_engine::HttpReadClass::Critical
+                            | safe_cex_engine::HttpReadClass::Reconciliation
+                    ) {
                         READ_TIMEOUT_MS
+                    } else if loaded.markets && loaded.tickers {
+                        60_000
                     } else {
                         DISCOVERY_DEADLINE_MS
                     };

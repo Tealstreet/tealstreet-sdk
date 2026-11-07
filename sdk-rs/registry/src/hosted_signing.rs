@@ -6,8 +6,19 @@ use safe_cex_engine::signing::{
 use safe_cex_engine::signing_policy::{RemoteSigningPolicy, SignatureEncoding};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "backpack")]
+mod backpack;
+
+#[cfg(feature = "kucoin")]
+mod kucoin;
+
 #[derive(Clone, Copy, Deserialize)]
 pub enum OutputFormat {
+    #[cfg(feature = "backpack")]
+    #[serde(rename = "backpack-ed25519")]
+    BackpackEd25519,
+    #[serde(rename = "kucoin-batch")]
+    KucoinBatch,
     #[serde(rename = "hex")]
     Hex,
     #[serde(rename = "base64")]
@@ -141,6 +152,15 @@ impl<'de> Deserialize<'de> for Input {
 /// Formatting metadata remains bound to its one capture token.
 #[derive(Clone, Copy)]
 pub enum OutputKind {
+    #[cfg(feature = "backpack")]
+    Backpack {
+        ws: bool,
+    },
+    #[cfg(feature = "kucoin")]
+    Kucoin {
+        broker: bool,
+        ws: bool,
+    },
     Credential,
     Http(RemoteSigningPolicy),
     /// Bitunix HTTP: the double-SHA256 work, with the MAC as its last value.
@@ -159,6 +179,8 @@ impl OutputKind {
     /// Value count and MAC position of the captured work's result.
     fn layout(self) -> (usize, Option<usize>) {
         match self {
+            #[cfg(feature = "kucoin")]
+            Self::Kucoin { broker, .. } => (if broker { 4 } else { 3 }, Some(1)),
             Self::Credential => (1, None),
             Self::Http(policy) if policy.passphrase_header.is_some() => (3, Some(1)),
             Self::DoubleSha256Http(_) | Self::WsAuth(OutputFormat::BitunixDoubleSha256) => {
@@ -283,6 +305,8 @@ fn family(venue: &str) -> bool {
         || bitget
         || (cfg!(feature = "bingx") && venue == "bingx")
         || (cfg!(feature = "blofin") && venue == "blofin")
+        || (cfg!(feature = "backpack") && venue == "backpack")
+        || (cfg!(feature = "kucoin") && venue == "kucoin")
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
@@ -293,6 +317,73 @@ pub fn prepare(
     identities: &Identities,
     input: Input,
 ) -> Result<(SignRequest, OutputKind), SignError> {
+    #[cfg(feature = "backpack")]
+    if venue == "backpack" {
+        match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => {
+                return backpack::prepare(
+                    identities,
+                    payload,
+                    SignReceipt {
+                        stamp_ms: Some(stamp_ms),
+                        ..Default::default()
+                    },
+                    false,
+                );
+            }
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::BackpackEd25519,
+            } => return backpack::prepare(identities, to_sign, SignReceipt::default(), true),
+            Input::WsAuth { .. } => return Err(SignError::Unsupported),
+            Input::Credential {} => {}
+        }
+    }
+    #[cfg(feature = "kucoin")]
+    if venue == "kucoin" {
+        match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => {
+                return kucoin::prepare(
+                    identities,
+                    payload,
+                    SignReceipt {
+                        stamp_ms: Some(stamp_ms),
+                        ..Default::default()
+                    },
+                    false,
+                );
+            }
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::KucoinBatch,
+            } => return kucoin::prepare(identities, to_sign, SignReceipt::default(), true),
+            Input::WsAuth { .. } => return Err(SignError::Unsupported),
+            Input::Credential {} => {}
+        }
+    }
+    #[cfg(feature = "backpack")]
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::BackpackEd25519,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::KucoinBatch,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
     let identity = identities.primary.as_ref().ok_or(SignError::Unavailable)?;
     identity.validate().map_err(|_| SignError::InvalidRequest)?;
     let context = Context {
@@ -375,6 +466,14 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    #[cfg(feature = "backpack")]
+    if let OutputKind::Backpack { ws } = kind {
+        return backpack::finish(ws, result);
+    }
+    #[cfg(feature = "kucoin")]
+    if let OutputKind::Kucoin { broker, ws } = kind {
+        return kucoin::finish(broker, ws, result);
+    }
     let (expected, mac_index) = kind.layout();
     if result.values.len() != expected {
         return Err(SignError::InvalidResult);
@@ -415,6 +514,13 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         return Err(SignError::InvalidResult);
     }
     let signature = match kind {
+        #[cfg(feature = "backpack")]
+        OutputKind::Backpack { .. } => unreachable!(),
+        #[cfg(feature = "backpack")]
+        OutputKind::WsAuth(OutputFormat::BackpackEd25519) => return Err(SignError::Unsupported),
+        #[cfg(feature = "kucoin")]
+        OutputKind::Kucoin { .. } => unreachable!(),
+        OutputKind::WsAuth(OutputFormat::KucoinBatch) => return Err(SignError::Unsupported),
         OutputKind::Credential => unreachable!(),
         OutputKind::Http(policy) | OutputKind::DoubleSha256Http(policy) => {
             match policy.signature_encoding {
@@ -760,6 +866,17 @@ mod presentation_tests {
 mod input_parse_tests {
     use super::*;
 
+    #[cfg(not(feature = "backpack"))]
+    #[test]
+    fn backpack_codec_is_absent_without_venue_feature() {
+        for input in [
+            r#"{"kind":"wsAuth","toSign":"x","outputFormat":"backpack-ed25519"}"#,
+            r#"["wsAuth","x","backpack-ed25519"]"#,
+        ] {
+            assert!(parse(input).is_err(), "{input}");
+        }
+    }
+
     /// The wasm host maps every parse failure to `InvalidRequest` this way.
     fn parse(input: &str) -> Result<Input, SignError> {
         serde_json::from_str(input).map_err(|_| SignError::InvalidRequest)
@@ -789,6 +906,15 @@ mod input_parse_tests {
             ));
         }
         for (format, input) in [
+            #[cfg(feature = "backpack")]
+            (
+                "backpack-ed25519",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"backpack-ed25519"}"#,
+            ),
+            (
+                "kucoin-batch",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"kucoin-batch"}"#,
+            ),
             (
                 "hex",
                 r#"{"kind":"wsAuth","toSign":"x","outputFormat":"hex"}"#,
@@ -818,6 +944,9 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    #[cfg(feature = "backpack")]
+                    OutputFormat::BackpackEd25519 => "backpack-ed25519",
+                    OutputFormat::KucoinBatch => "kucoin-batch",
                     OutputFormat::Hex => "hex",
                     OutputFormat::Base64 => "base64",
                     OutputFormat::Base64Hex => "hex-base64",

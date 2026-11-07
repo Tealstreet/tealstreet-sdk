@@ -376,7 +376,13 @@ impl BinanceFutures {
         } else {
             None
         };
-        let Ok(context) = cx.http_context(
+        let issue = if matches!(kind, Kind::Tickers | Kind::Marks) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let Ok(context) = issue(
+            cx,
             Scope::Background,
             reads::policy(selected.as_ref().map(|(c, _)| c.clone())),
         ) else {
@@ -488,6 +494,7 @@ impl BinanceFutures {
                     match ReadCompletion::from_context(cx, id, request.context.clone()) {
                         Ok(mut completion) => {
                             completion.incomplete(
+                                safe_cex_engine::history::IncompleteReason::PageFull,
                                 "history is INCOMPLETE: Binance Options read one page and it was full",
                             );
                             let _ = completion.finish(cx, Ok(result));
@@ -515,15 +522,19 @@ impl BinanceFutures {
         }
         let refused = crate::account::venue_error(&response)
             .filter(|(code, _)| *code == -2015)
-            .map(|(_, message)| message.to_owned());
+            .map(|(code, message)| {
+                VenueError::new(message)
+                    .kind(ErrorKind::AuthInvalid)
+                    .venue_code(code.to_string())
+            });
         let result = crate::account::venue_error(&response).map_or_else(
             || self.publish_options(cx, &mut request, response.body),
             |(_, message)| Err(error(message)),
         );
         self.option_state.busy.remove(&request.kind);
         // A refused key ends the start; polling it would never load the account.
-        if let Some(message) = refused {
-            cx.startup_read_refused(&VenueError::new(message).kind(ErrorKind::AuthInvalid));
+        if let Some(error) = refused {
+            cx.startup_read_refused(&error);
         }
         let _ = cx.finish_http_context(&request.context);
         match result {
@@ -1096,4 +1107,18 @@ fn optional_native_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u
     #[derive(Deserialize)]
     struct Id(#[serde(deserialize_with = "native_id")] u64);
     Option::<Id>::deserialize(d).map(|id| id.map(|id| id.0))
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.kind {
+            Kind::Markets => S::MARKETS,
+            Kind::Tickers | Kind::Marks => S::TICKERS,
+            Kind::Balance => S::BALANCE,
+            Kind::Positions => S::POSITIONS,
+            Kind::Orders => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
 }

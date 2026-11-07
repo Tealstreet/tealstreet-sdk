@@ -298,7 +298,35 @@ fn milliseconds(ns: u64) -> f64 {
 }
 
 impl PhemexPerpetuals {
+    pub(super) fn history_symbol(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Option<String> {
+        if let Some(market) = cx.store.market(symbol) {
+            return Some(market.symbol.clone());
+        }
+        let mut matches = cx.store.markets().iter().filter(|market| {
+            market.symbol.eq_ignore_ascii_case(symbol)
+                || market.id.eq_ignore_ascii_case(symbol)
+                || self
+                    .native_symbol(&market.symbol)
+                    .eq_ignore_ascii_case(symbol)
+        });
+        let market = matches.next()?;
+        // An alias must identify one listed contract, never a guessed settlement product.
+        matches.next().is_none().then(|| market.symbol.clone())
+    }
+
+    pub(super) fn history_symbol_error() -> VenueError {
+        VenueError::new(
+            "Phemex history requires a known symbol; select a listed USDT/USDC perpetual market",
+        )
+        .kind(safe_cex_engine::ErrorKind::InvalidInput)
+        .venue_code("unknown-symbol")
+    }
+
     pub(crate) fn finish_local_history(cx: &mut Cx<'_, Pending>, result: Result<&str, &str>) {
+        Self::finish_local_history_result(cx, result.map_err(VenueError::new));
+    }
+
+    fn finish_local_history_result(cx: &mut Cx<'_, Pending>, result: Result<&str, VenueError>) {
         let Ok(context) = cx.admit_http_command(Policy {
             operation: Operation::Read,
             credential: None,
@@ -344,10 +372,10 @@ impl PhemexPerpetuals {
                     Self::finish_local_history(cx, Err("Invalid Phemex client order ID"));
                     return;
                 }
-                if cx.store.market(&symbol).is_none() {
+                let Some(symbol) = self.history_symbol(cx, &symbol) else {
                     Self::finish_local_history(cx, Ok(r#"{"found":false,"definitive":false}"#));
                     return;
-                }
+                };
                 client_id = Some(client_order_id);
                 (Some(symbol), None, None, Some(1), None, Kind::Lookup)
             }
@@ -375,8 +403,11 @@ impl PhemexPerpetuals {
             Self::finish_local_history(cx, Err("Phemex private history requires credentials"));
             return;
         }
-        let Some(symbol) = symbol.filter(|s| cx.store.market(s).is_some()) else {
-            Self::finish_local_history(cx, Err("Phemex history requires a known symbol"));
+        let Some(symbol) = symbol
+            .as_deref()
+            .and_then(|symbol| self.history_symbol(cx, symbol))
+        else {
+            Self::finish_local_history_result(cx, Err(Self::history_symbol_error()));
             return;
         };
         if !bounds(from, to) {

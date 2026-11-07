@@ -169,3 +169,14 @@ it('carries an actual command-correlated host event through the worker JSON resu
     host.dispose();
   }
 });
+
+it.each(['structured', 'json'])('returns a failed closed-PnL worker read as a correlated typed failure (%s)', async (kind) => {
+  const { main, read, calls } = transport((value) => kind === 'json' ? JSON.parse(JSON.stringify(value)) : structuredClone(value), 'fetchClosedPnl');
+  const error = Object.assign(new Error('relay disconnected'), { kind: 'network', venueCode: 'transport' });
+  read.mockRejectedValueOnce(error);
+  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    await expect(main.callMethodInWorker('fetchClosedPnl', { symbol: 'BTCUSDT' })).rejects.toMatchObject({ message: 'relay disconnected', kind: 'network', venueCode: 'transport' });
+    expect(calls.at(-1)?.data).toMatchObject({ success: false, requestId: expect.any(String) });
+  } finally { consoleError.mockRestore(); }
+});

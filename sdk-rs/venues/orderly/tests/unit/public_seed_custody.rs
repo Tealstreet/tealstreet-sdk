@@ -3,8 +3,8 @@ use safe_cex_engine::request_context::{Error, HttpAction, Preparation, Prepared}
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice};
 use std::sync::{Arc, Mutex};
 
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const MARKETS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":20,"base_imr":0.01}]}}"#;
 
 struct Probe {

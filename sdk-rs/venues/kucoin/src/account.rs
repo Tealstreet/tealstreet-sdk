@@ -10,6 +10,12 @@ use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
 const SKIP_LOG_LIMIT: usize = 4_096;
 
+enum ReadFailure<'a> {
+    Http,
+    Transport,
+    Signing(&'a safe_cex_engine::VenueError),
+}
+
 #[derive(Clone)]
 pub(crate) enum Read {
     Positions,
@@ -31,7 +37,7 @@ pub struct Request {
     /// A position row without a symbol: absence removes no stored position.
     unidentified: bool,
     page: u32,
-    retries: u8,
+    pub(crate) retries: u8,
     invalid: bool,
 }
 impl Request {
@@ -225,6 +231,13 @@ impl OrderRow<'_> {
         if self.stop_price_type.is_empty() {
             order.trigger_type = old.trigger_type;
         }
+        if !matches!(self.order_type, "limit" | "market")
+            && !matches!(self.event, "limit" | "market")
+            && let Some(extra) = &mut order.extra
+        {
+            extra.conditional_order_price =
+                old.extra.as_ref().and_then(|e| e.conditional_order_price);
+        }
     }
 
     fn orders(&self, store: &Store, now: f64) -> Vec<Order> {
@@ -348,6 +361,13 @@ impl OrderRow<'_> {
             extra: Some(OrderExtra {
                 remaining_native: Some(remaining),
                 filled_in_placement_units: Some(self.filled_size.get()),
+                conditional_order_price: (is_stop && raw_type == "limit").then_some(
+                    if self.price.get() != 0.0 {
+                        self.price.get()
+                    } else {
+                        self.order_price.get()
+                    },
+                ),
                 ..Default::default()
             }),
         };
@@ -575,6 +595,11 @@ impl Kucoin {
             hydrated.kind = order.kind;
             hydrated.client_order_id.clone_from(&order.client_order_id);
             hydrated.trigger_type = order.trigger_type;
+            hydrated
+                .extra
+                .get_or_insert_default()
+                .conditional_order_price =
+                order.extra.as_ref().and_then(|e| e.conditional_order_price);
             cx.store.upsert_order(hydrated);
         }
         self.account.incomplete_orders.remove(id);
@@ -781,9 +806,28 @@ impl Kucoin {
     pub(crate) fn account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
+        request: Request,
+        status: u16,
+        body: &str,
+    ) {
+        self.account_result(cx, request, status, body, ReadFailure::Http);
+    }
+    pub(crate) fn account_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        signing_error: Option<&safe_cex_engine::VenueError>,
+    ) {
+        let failure = signing_error.map_or(ReadFailure::Transport, ReadFailure::Signing);
+        self.account_result(cx, request, 0, "", failure);
+    }
+    fn account_result(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
         mut request: Request,
         status: u16,
         body: &str,
+        failure: ReadFailure<'_>,
     ) {
         let envelope = serde_json::from_str::<Envelope>(body);
         let good = (200..300).contains(&status)
@@ -791,7 +835,9 @@ impl Kucoin {
             && envelope.as_ref().is_ok_and(|e| e.code == "200000");
         let rejected_signature = envelope.as_ref().is_ok_and(|e| e.code == "400005");
         if !good {
-            if request.retries < if rejected_signature { 1 } else { 2 } {
+            if !envelope.as_ref().is_ok_and(|e| e.code == "400002")
+                && request.retries < if rejected_signature { 1 } else { 2 }
+            {
                 request.retries += 1;
                 request.invalid = false;
                 // A failed page cannot leave rows staged from that page.
@@ -809,27 +855,45 @@ impl Kucoin {
                 return;
             }
             let path = request.path(cx.store);
+            let (source, signing_error) = match failure {
+                ReadFailure::Http => ("http", None),
+                ReadFailure::Transport => ("transport", None),
+                ReadFailure::Signing(error) => ("signing", Some(error)),
+            };
+            let envelope = envelope.as_ref().ok();
+            let invalid_snapshot = request.invalid;
+            let mut error = safe_cex_engine::VenueError::new(format!(
+                "KuCoin private read failed: {path}; source={source} signError={} HTTP={} invalidSnapshot={invalid_snapshot} code={} msg={}",
+                signing_error.is_some(),
+                if status == 0 {
+                    "none".into()
+                } else {
+                    status.to_string()
+                },
+                envelope.map_or("none", |e| e.code),
+                envelope.map_or("none", |e| e.msg),
+            ));
+            if let Some(signing_error) = signing_error {
+                // Engine signing errors are closed enum messages, never provider text or payloads.
+                error.message.push_str(&format!(
+                    " signingStep=atomicGraph signingError={}",
+                    signing_error.message
+                ));
+                error.kind = signing_error.kind;
+                error.outcome = signing_error.outcome;
+            }
+            if let Some(envelope) = envelope {
+                error = error.venue_code(envelope.code).venue_message(envelope.msg);
+                if envelope.code == crate::wire::IP_REFUSED {
+                    error = error.ip_whitelist_refused();
+                }
+            }
             cx.startup_read_refused(&crate::wire::write_failure(
                 status,
                 body,
-                format!("KuCoin refused the API key on {path}"),
+                error.message.clone(),
             ));
-            match envelope.as_ref() {
-                Ok(e) if e.code == crate::wire::IP_REFUSED => cx.retried_failure_error(
-                    "kucoin.account:773",
-                    &safe_cex_engine::VenueError::new(format!(
-                        "KuCoin private read failed: {path}: {} ({})",
-                        e.msg, e.code
-                    ))
-                    .venue_code(e.code)
-                    .venue_message(e.msg)
-                    .ip_whitelist_refused(),
-                ),
-                _ => cx.retried_failure(
-                    "kucoin.account:773",
-                    format!("KuCoin private read failed: {path}"),
-                ),
-            }
+            cx.retried_failure_error("kucoin.account:773", &error);
             if let Read::Margin(symbol) | Read::Leverage(symbol) = &request.read {
                 self.account.metadata.remove(symbol);
             }
@@ -1467,4 +1531,17 @@ fn row_identity(item: &str, field: &str) -> Option<String> {
     let row: Row<'_> = serde_json::from_str(item).ok()?;
     let value = if field == "id" { row.id } else { row.symbol }?;
     (!value.is_empty()).then(|| value.into_owned())
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &self.read {
+            Read::Balance => S::BALANCE,
+            Read::Positions => S::POSITIONS,
+            Read::Orders(_) => S::ORDERS,
+            Read::Mode => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
 }

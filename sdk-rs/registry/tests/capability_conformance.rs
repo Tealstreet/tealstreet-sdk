@@ -113,10 +113,6 @@ fn every_compiled_advertised_rest_book_handler_dispatches_with_valid_fixture_sta
     let mut dispatched = 0;
     for name in names.into_iter().filter(|name| supported(name)) {
         let mut options = serde_json::json!({ "publicDataOnly": true, "testnet": true });
-        if name == "breakoutprop" {
-            options["key"] = "user".into();
-            options["secret"] = "password".into();
-        }
         if name == "hyrotrader" {
             options["endpoints"] = serde_json::json!({
                 "rest": "https://hyro.test", "publicWs": "wss://hyro.test/public", "privateWs": "wss://hyro.test/private",

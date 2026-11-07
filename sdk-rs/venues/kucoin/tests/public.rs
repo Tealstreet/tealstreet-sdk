@@ -3,10 +3,13 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
 };
 use safe_cex_venue_kucoin::{Kucoin, Options};
+mod support;
+use support::credentials::Options as Input;
 
 const MARKET: &str = r#"{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001,"expireDate":null,"isInverse":false}"#;
 fn requests(e: &mut Engine<Kucoin>) -> Vec<HttpRequest> {
-    e.drain_actions()
+    support::actions(e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -438,11 +441,18 @@ fn disconnected_generation_cannot_collide_with_recreated_book() {
 
 #[test]
 fn missing_private_passphrase_rejects_before_public_or_private_reads() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        ..Default::default()
-    }));
+    let mut e = support::credentials::engine(
+        Input {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            ..Default::default()
+        },
+        |mut options| {
+            options.credentials.as_mut().unwrap().passphrase = None;
+            Kucoin::new(options)
+        },
+    );
     e.start(0.0);
     assert!(requests(&mut e).is_empty());
     assert!(!e.store().loaded().balance);
@@ -714,7 +724,8 @@ fn awaiting_welcome() -> (Engine<Kucoin>, SocketId, safe_cex_engine::TimerId) {
         .unwrap();
     e.handle(1.0, Event::WsOpened { socket });
     assert!(
-        e.drain_actions()
+        support::actions(&mut e)
+            .into_iter()
             .all(|a| matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
     );
     (e, socket, timer)
@@ -804,12 +815,15 @@ fn missing_welcome_reconnects_even_if_an_early_pong_arrives() {
 
 #[test]
 fn private_snapshot_starts_once_before_ticker_and_launch_independent_of_welcome() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        ..Default::default()
-    }));
+    let mut e = support::credentials::engine(
+        Input {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     answer(
@@ -857,7 +871,8 @@ fn private_snapshot_starts_once_before_ticker_and_launch_independent_of_welcome(
         .unwrap();
     e.handle(1.0, Event::WsOpened { socket });
     assert!(
-        e.drain_actions()
+        support::actions(&mut e)
+            .into_iter()
             .all(|a| matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
     );
     welcome(&mut e, socket);

@@ -1,7 +1,6 @@
-// The Vultr Tokyo proxy fleet: one reserved IP per proxy in
-// infra/tofu/proxy-fleet/proxies.tf (apps/web's newEgressIps.test.ts holds the two
-// equal). Since docs/plans/AWS_EXIT.md step 3e the master build sends every private
-// path through it, so this is the only list master asks users to whitelist.
+// Vultr Tokyo reserved egresses, pinned to infra/tofu/proxy-fleet/proxies.tf by web tests.
+// Master's transport metadata uses this pool; whitelist.ts also displays legacy
+// AWS pools and extras for rollback and whitelabels until the legacy app retires.
 export const privateProxyIpsVultrTokyo = [
   '167.179.112.217',
   '45.63.121.235',

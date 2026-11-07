@@ -149,9 +149,10 @@ fn owned_partial(actions: &[Action], count: usize) -> Value {
     assert_eq!(markers.len(), 1, "exactly one completeness marker");
     assert_eq!(markers[0].1.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        markers[0].1.fields,
-        vec![("command", safe_cex_engine::Value::Num(91.0))]
+        markers[0].1.fields[..1],
+        [("command", safe_cex_engine::Value::Num(91.0))]
     );
+    assert_eq!(markers[0].1.fields[1].0, "reason");
     let completed: Vec<_> = actions
         .iter()
         .enumerate()

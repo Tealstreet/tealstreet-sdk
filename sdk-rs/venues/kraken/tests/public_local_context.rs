@@ -6,7 +6,7 @@ use safe_cex_engine::{
 use safe_cex_venue_kraken::{Kraken, KrakenSpot, Options};
 
 // Startup public reads before markets and tickers load get the engine's discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 
 fn public_options() -> Options {
     Options {

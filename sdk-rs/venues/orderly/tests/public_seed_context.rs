@@ -5,8 +5,8 @@ use safe_cex_engine::{Action, Engine, Event, HttpRequest, Method, Notice, Respon
 use safe_cex_venue_orderly::{Options, Orderly};
 
 type Driver = Engine<Orderly>;
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const TICKERS_AT: f64 = 100.;
 
 fn start(testnet: bool) -> Driver {

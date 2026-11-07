@@ -12,6 +12,18 @@ on:
         type: choice
         options: [family, combined]
         default: family
+      cpu_budget_diagnostic:
+        description: Run only the fixed non-certifying TxFlow A/A budget experiment
+        type: boolean
+        default: false
+      cpu_budget_profile:
+        description: Add separate GC and optimization traces after the A/A experiment
+        type: boolean
+        default: false
+      wasm_size_compare_pr:
+        description: PR number for a diagnostic same-run merge versus master-parent wasm size comparison
+        type: string
+        default: ''
       mutation_barrier_size:
         description: Compare standalone Bybit barrier capability off/on on this exact checkout
         type: boolean
@@ -33,6 +45,7 @@ on:
       - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
       - '.github/actions/install-binaryen/**'
+      - '.github/actions/fetch-rust-history/**'
   # Unfiltered so "Rust / required coverage" always reports for branch protection;
   # the scope job applies the push path list and skips coverage outside it.
   pull_request:
@@ -68,7 +81,7 @@ jobs:
   scope:
     name: Rust / scope
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       relevant: ${{ steps.scope.outputs.relevant }}
     defaults:
@@ -77,7 +90,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -86,14 +102,172 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node sdk-rs/harness/ci-scope.mjs
+          WASM_SIZE_COMPARE_PR: ${{ inputs.wasm_size_compare_pr }}
+        run: |
+          if [ '${{ github.event_name }}' = workflow_dispatch ] && [ -n "$WASM_SIZE_COMPARE_PR" ]; then
+            echo 'relevant=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ '${{ github.event_name }}' = workflow_dispatch ] && [ '${{ inputs.cpu_budget_diagnostic }}' = true ]; then
+            echo 'relevant=false' >> "$GITHUB_OUTPUT"
+          else
+            node sdk-rs/harness/ci-scope.mjs
+          fi
+
+  wasm-size-source:
+    name: Rust / select immutable wasm size comparison
+    if: github.event_name == 'workflow_dispatch' && inputs.wasm_size_compare_pr != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      merge: ${{ steps.source.outputs.merge }}
+      base: ${{ steps.source.outputs.base }}
+      head: ${{ steps.source.outputs.head }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Select one GitHub PR merge for every comparison job
+        id: source
+        env:
+          COMPARE_PR: ${{ inputs.wasm_size_compare_pr }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$COMPARE_PR" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$COMPARE_PR" > "$RUNNER_TEMP/size-pr.json"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const pr = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/size-pr.json`));
+          assert.equal(pr.state, 'open');
+          assert.equal(pr.base.ref, 'master');
+          assert.equal(pr.head.repo.full_name, process.env.GITHUB_REPOSITORY);
+          JS
+          git fetch --no-tags --depth=2 origin "refs/pull/$COMPARE_PR/merge"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const pr = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/size-pr.json`));
+          const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+          const merge = git('rev-parse', 'FETCH_HEAD');
+          const parents = git('show', '-s', '--format=%P', merge).split(' ');
+          assert.equal(parents.length, 2, 'GitHub PR merge required');
+          assert.equal(parents[1], pr.head.sha, 'PR head moved during selection; retry');
+          appendFileSync(process.env.GITHUB_OUTPUT, `merge=${merge}\nbase=${parents[0]}\nhead=${parents[1]}\n`);
+          console.log({ merge, base: parents[0], head: parents[1] });
+          JS
+
+  wasm-size-comparison:
+    name: Rust / same-run wasm size (${{ matrix.family }})
+    needs: wasm-size-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, bitunix, blofin, bybit, coinbase, cryptocom, grvt, hyperliquid, kraken, kucoin, kucoinspot, lighter, mexc, okx, orderly, paradex, phemex, polymarket, txflow, weex, woo, combined]
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
+      EXPECTED_MERGE_SHA: ${{ needs.wasm-size-source.outputs.merge }}
+      EXPECTED_BASE_SHA: ${{ needs.wasm-size-source.outputs.base }}
+      EXPECTED_HEAD_SHA: ${{ needs.wasm-size-source.outputs.head }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.wasm-size-source.outputs.merge }}
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+            sdk-rs/target
+          key: ${{ runner.os }}-cargo-size-compare-${{ matrix.family }}-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-family-${{ matrix.family }}-
+            ${{ runner.os }}-cargo-combined-
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
+      - uses: ./.github/actions/prefetch-cargo
+      - uses: ./.github/actions/install-binaryen
+      - name: Measure both revisions with identical pinned tools
+        run: node sdk-rs/harness/compare-wasm-size.mjs --family '${{ matrix.family }}' --out '${{ runner.temp }}/wasm-size-comparison'
+      - name: Retain paired modules and provenance
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-size-comparison-${{ matrix.family }}
+          path: ${{ runner.temp }}/wasm-size-comparison/
+          if-no-files-found: error
+          retention-days: 14
+
+  cpu-budget-diagnostic:
+    name: Rust / diagnostic A-A budget (${{ matrix.slot }})
+    if: github.event_name == 'workflow_dispatch' && inputs.cpu_budget_diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - name: Download the immutable original TxFlow module
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh run download 41853782572 --repo Tealstreet/tealstreet-sdk
+          --name ci-wasm-txflow --dir '${{ runner.temp }}/txflow-module'
+      - name: Fixed diagnostic experiment (never CPU certification evidence)
+        run: |
+          module=$(find '${{ runner.temp }}/txflow-module' -name safe_cex_wasm.js -print -quit)
+          test -n "$module"
+          args=()
+          if [ '${{ inputs.cpu_budget_profile }}' = true ]; then args+=(--profile); fi
+          node sdk-rs/harness/cpu-budget-diagnostic.mjs --module "$module" --out '${{ runner.temp }}/cpu-budget' "${args[@]}"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cpu-budget-diagnostic-${{ matrix.slot }}
+          path: ${{ runner.temp }}/cpu-budget/
+          if-no-files-found: error
+          retention-days: 14
 
   selection:
     needs: scope
     if: needs.scope.outputs.relevant == 'true'
     name: Rust / affected coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.select.outputs.full }}
       checkoutSha: ${{ steps.select.outputs.checkoutSha }}
@@ -111,7 +285,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -133,7 +310,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -151,13 +331,14 @@ jobs:
     needs: selection
     name: Rust / banned patterns
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
-          # The shrink-only request provenance ratchet verifies immutable base
-          # and parent manifests, never a caller-supplied enlarged inventory.
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - name: Reject JavaScript emulation and deleted-port dependencies
         run: ./scripts/check-bans.sh
 
@@ -183,6 +364,11 @@ jobs:
           - check: engine-feature-modes
             timeout: 90
             command: python3 scripts/test-http-plan-feature-modes.py
+          - check: metadata
+            command: |
+              node --test safe-cex-types/tests/metadata-freshness.test.cjs
+              cargo clippy --locked -p safe-cex-types --test exchange_metadata -- -D warnings
+              cargo test --locked -p safe-cex-types --test exchange_metadata
           # The restored master candle-cache crates (mono candle-server image) build
           # alone, with master's serde_json features, never unified into the port.
           - check: candle-cache
@@ -220,14 +406,14 @@ jobs:
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
       - uses: actions/setup-node@v4
-        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers' || matrix.check == 'candle-cache'
+        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers' || matrix.check == 'metadata' || matrix.check == 'candle-cache'
         with:
           node-version: 22
       - uses: ./.github/actions/prepare-yarn
-        if: matrix.check == 'candle-cache'
+        if: matrix.check == 'metadata' || matrix.check == 'candle-cache'
         id: yarn
       - uses: ./.github/actions/install-yarn
-        if: matrix.check == 'candle-cache'
+        if: matrix.check == 'metadata' || matrix.check == 'candle-cache'
         with:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
@@ -700,9 +886,6 @@ jobs:
       - name: Kraken Spot compiled auth and atomic amendment contracts
         if: matrix.venue == 'krakenspot'
         run: corepack yarn rust:test-krakenspot-parity
-      - name: Breakout compiled account, startup and polling controls
-        if: matrix.venue == 'breakoutprop'
-        run: corepack yarn rust:test-breakoutprop-parity
       - name: Backpack selected public-only history contracts
         if: matrix.venue == 'backpack'
         run: corepack yarn -s node --test sdk-rs/harness/backpack-history.integration.mjs
@@ -747,10 +930,15 @@ jobs:
             corepack yarn "rust:private-tape-$venue"
             corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --books ''
           done
+      - name: Bybit filtered terminal order history (strict correctness)
+        if: matrix.venue == 'bybit'
+        run: |
+          corepack yarn rust:private-tape-bybit --history-only --out sdk-rs/harness/tapes/bybit-history-private.jsonl
+          corepack yarn -s rust:gate:record --venue bybit --tape sdk-rs/harness/tapes/bybit-history-private.jsonl --books ''
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
         run: |
-          for venue in orderly tealstreet-dex kodiakfi woofi mode salsadex what; do
+          for venue in orderly kodiakfi woofi mode what; do
             for network in mainnet testnet; do
               extra=()
               suffix=''
@@ -759,6 +947,9 @@ jobs:
               corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue$suffix-private.jsonl" --books ''
             done
           done
+      - name: Coinbase drb public replay and startup deadline
+        if: matrix.venue == 'coinbase'
+        run: node sdk-rs/harness/coinbase-drb-public.integration.mjs sdk-rs/hosts/wasm/pkg/ci-replay/safe_cex_wasm.js
       - name: Coinbase product and CDP algorithm variants (correctness)
         if: matrix.venue == 'coinbase'
         run: |
@@ -791,15 +982,11 @@ jobs:
     needs: selection
     if: needs.selection.outputs.replayRequired == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.venue == 'binance' && 45 || 30 }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Legacy DXtrade has no anonymous API; this public fixture is documented/scripted.
-          - venue: breakoutprop
-            books: BTCUSD,ETHUSD
-            private_script: rust:private-tape-breakoutprop
           - venue: apexomni
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-apexomni
@@ -903,6 +1090,11 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1013,13 +1205,13 @@ jobs:
           node sdk-rs/harness/cpu-ci.mjs --command prepare --suite '${{ matrix.venue }}'
           --out '${{ runner.temp }}/cpu-runtime-first' --mode '${{ inputs.replay_artifact == 'combined' && 'combined' || 'family' }}'
       - name: Public data (correctness, CPU and memory)
-        run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}' --runs 9
+        run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}' --runs 16
       - name: OKX inverse public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okx --tape sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 9
+        run: corepack yarn -s rust:gate:record --venue okx --tape sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 16
       - name: OKX EEA X-Perps public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 9
+        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 16
       - name: Account and trading (correctness)
         if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |
@@ -1038,13 +1230,13 @@ jobs:
       - name: Binance Spot, COIN-M and portfolio margin public variants
         if: matrix.venue == 'binance'
         run: |
-          corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
-          corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP --runs 9
-          corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT --runs 9
+          corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 16
+          corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP --runs 16
+          corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT --runs 16
       # CPU cohort authentication binds each public case to one step named "public".
       - name: Binance European Options public data (correctness, CPU and memory)
         if: matrix.venue == 'binance'
-        run: corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions.jsonl --books '' --runs 9
+        run: corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions.jsonl --books '' --runs 16
       - name: Binance European Options account and trading (correctness)
         if: matrix.venue == 'binance'
         run: |
@@ -1066,9 +1258,6 @@ jobs:
       - name: Kraken Spot compiled auth and atomic amendment contracts
         if: matrix.venue == 'krakenspot'
         run: corepack yarn rust:test-krakenspot-parity
-      - name: Breakout compiled account, startup and polling controls
-        if: matrix.venue == 'breakoutprop'
-        run: corepack yarn rust:test-breakoutprop-parity
       - name: Backpack selected public-only history contracts
         if: matrix.venue == 'backpack'
         run: corepack yarn -s node --test sdk-rs/harness/backpack-history.integration.mjs
@@ -1088,7 +1277,7 @@ jobs:
         run: corepack yarn rust:test-bitget-parity
       - name: OKX EU X-Perp public products (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 9
+        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 16
       - name: OKX account and trading variants (correctness)
         if: matrix.venue == 'okx'
         run: |
@@ -1100,12 +1289,12 @@ jobs:
       - name: Bybit inverse/spot/demo public data (correctness, CPU and memory)
         if: matrix.venue == 'bybit'
         run: |
-          corepack yarn -s rust:gate:record --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 9
-          corepack yarn -s rust:gate:record --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
-          corepack yarn -s rust:gate:record --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
+          corepack yarn -s rust:gate:record --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 16
+          corepack yarn -s rust:gate:record --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 16
+          corepack yarn -s rust:gate:record --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 16
       - name: Hyro documented public contract (live endpoints not configured)
         if: matrix.venue == 'bybit'
-        run: corepack yarn -s rust:gate:record --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
+        run: corepack yarn -s rust:gate:record --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 16
       - name: Bybit variants account and trading (documented correctness)
         if: matrix.venue == 'bybit'
         run: |
@@ -1113,10 +1302,15 @@ jobs:
             corepack yarn "rust:private-tape-$venue"
             corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
           done
+      - name: Bybit filtered terminal order history (strict correctness)
+        if: matrix.venue == 'bybit'
+        run: |
+          corepack yarn rust:private-tape-bybit --history-only --out sdk-rs/harness/tapes/bybit-history-private.jsonl
+          corepack yarn -s rust:gate:record --venue bybit --tape sdk-rs/harness/tapes/bybit-history-private.jsonl --books ''
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
         run: |
-          for venue in orderly tealstreet-dex kodiakfi woofi mode salsadex what; do
+          for venue in orderly kodiakfi woofi mode what; do
             for network in mainnet testnet; do
               extra=()
               suffix=''
@@ -1156,14 +1350,6 @@ jobs:
           name: cpu-cohort-${{ matrix.venue }}
           path: sdk-rs/harness/out/cpu-collection/cohort/
           retention-days: 14
-          if-no-files-found: error
-      - name: Retain the eligible original runtime bytes
-        if: steps.cpu_collect.outputs.has_eligible == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: cpu-runtime-${{ matrix.venue }}
-          path: ${{ steps.cpu_prepare.outputs.runtime_path }}/
-          retention-days: 3
           if-no-files-found: error
       - name: Retain strict gate reports and artifact budgets
         if: always()
@@ -1212,7 +1398,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1259,16 +1448,16 @@ jobs:
     if: always() && needs.selection.outputs.replayRequired == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 32
-    outputs:
-      has_eligible: ${{ steps.plan.outputs.has_eligible }}
-      matrix: ${{ steps.plan.outputs.matrix }}
     defaults:
       run:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1282,7 +1471,7 @@ jobs:
       # Offline revalidation re-reads every public tape, including this generated one.
       - name: Generate Binance Options public CPU input
         run: corepack yarn rust:private-tape-binanceoptions --public
-      - name: Authenticate complete first evidence and select eligible cases
+      - name: Authenticate complete first evidence per suite
         id: plan
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -1297,43 +1486,9 @@ jobs:
           if-no-files-found: error
 
 
-  cpu-second:
-    name: Rust / CPU remeasurement (${{ matrix.suite }})
-    needs: cpu-plan
-    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.cpu-plan.outputs.matrix) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 42
-    defaults:
-      run:
-        working-directory: .
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # No install, compilation, module build, or measurement fallback here.
-      - name: Public CPU remeasurement from sealed original runtime
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/cpu-ci.mjs --command second --suite '${{ matrix.suite }}' --out '${{ runner.temp }}/cpu-runtime-second'
-      - name: Retain CPU remeasurement results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: cpu-second-${{ matrix.suite }}
-          path: sdk-rs/harness/out/
-          retention-days: 14
-          if-no-files-found: error
-
-
   cpu-certify:
     name: Rust / shared CPU certification
-    needs: [selection, gate, bitget-paired, cpu-plan, cpu-second]
+    needs: [selection, gate, bitget-paired, cpu-plan]
     if: always() && needs.selection.outputs.replayRequired == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 42
@@ -1345,7 +1500,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1375,13 +1533,13 @@ jobs:
 
 
   cpu-final:
-    name: Rust / replay gate (${{ matrix.suite }})
+    name: Rust / CPU gate (${{ matrix.suite }})
     needs: [selection, cpu-certify]
     if: always() && needs.selection.outputs.replayRequired == 'true'
     strategy:
       fail-fast: false
       matrix:
-        suite: [breakoutprop, apexomni, asterdex, woo, binance, bitunix, orderly, coinbase, bitget, bitgetusdc, backpack, blofin, mexc, polymarket, kucoin, kucoinspot, bingx, bybit, okx, cryptocom, weex, grvt, phemex, krakenspot, hyperliquidspot, kraken, lighter, lighter-robinhood, bitrue, hyperliquid, paradex, txflow]
+        suite: [apexomni, asterdex, woo, binance, bitunix, orderly, coinbase, bitget, bitgetusdc, backpack, blofin, mexc, polymarket, kucoin, kucoinspot, bingx, bybit, okx, cryptocom, weex, grvt, phemex, krakenspot, hyperliquidspot, kraken, lighter, lighter-robinhood, bitrue, hyperliquid, paradex, txflow]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:

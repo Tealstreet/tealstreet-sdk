@@ -3,6 +3,7 @@ use crate::{Pending, TxFlow};
 use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, Cx, Query, Response, VenueError, json::ArrayAt};
 use serde::{Deserialize, Serialize};
 
@@ -683,6 +684,6 @@ fn encode_rows(rows: &[Row]) -> Result<String, VenueError> {
         rows.iter()
             .map(|r| r.json.as_str())
             .collect::<Vec<_>>()
-            .join(",")
+            .join_with(",")
     ))
 }

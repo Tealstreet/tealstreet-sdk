@@ -3,7 +3,7 @@ import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/host';
 import { QUANTITY_UNITS } from '@tealstreet/safe-cex-wasm/wire';
 import type { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 
-const ORDERLY = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'];
+const ORDERLY = ['kodiakfi', 'mode', 'what', 'woofi'];
 const OKX = ['okx', 'okxeu', 'okxdemo', 'okxeudemo'];
 
 /**
@@ -12,7 +12,7 @@ const OKX = ['okx', 'okxeu', 'okxdemo', 'okxeudemo'];
  */
 export const engineCapabilities = (venue: string, overrides: Partial<EngineCapabilities> = {}): string => {
   const is = (...names: string[]) => names.includes(venue);
-  const noHistory = is('breakoutprop', 'hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse');
+  const noHistory = is('hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse');
   const noOrdersOrIncome = noHistory || is('apexomni', 'bitrue', 'kucoinspot');
   const record: EngineCapabilities = {
     account: is(
@@ -29,7 +29,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     orderHistory: !noOrdersOrIncome,
     incomeHistory: !noOrdersOrIncome,
     fillsByOrderId: is('grvt'),
-    cancelAll: is('polymarket', 'breakoutprop', 'woo', 'grvt', 'kucoin', 'kucoinspot', ...ORDERLY)
+    cancelAll: is('polymarket', 'woo', 'grvt', 'kucoin', 'kucoinspot', ...ORDERLY)
       ? 'native'
       : is('phemex', 'asterdex', 'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue', ...OKX)
         ? 'eachPlacedSymbol'
@@ -38,10 +38,10 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
       ? 'onReadAndMetadata'
       : is('asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', ...OKX, ...ORDERLY)
         ? 'onRead'
-        : is('mexc', 'woo', 'kraken')
+        : is('mexc', 'woo', 'kraken', 'hyperliquid')
           ? 'onMetadata'
           : 'settings',
-    maxLeverage: is('bitrue') ? 'query' : is('polymarket') ? 'rails' : is('breakoutprop') ? 'unsupported' : 'market',
+    maxLeverage: is('bitrue') ? 'query' : is('polymarket') ? 'rails' : 'market',
     accountLeverage: is(...ORDERLY),
     accountMarginType: is('blofin', 'kucoinspot'),
     cancelWithSymbols: is('asterdex', 'kucoinspot'),
@@ -76,7 +76,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     finiteCommandNumbers: is('coinbase', 'coinbasespot'),
     finiteHistoryBounds: is('coinbase', 'coinbasespot'),
     rejectOrderHistoryFilters: is('txflow', 'coinbase', 'coinbasespot', ...ORDERLY),
-    publicCatalogueValidation: is('breakoutprop'),
+    publicCatalogueValidation: false,
     isolatedBookSubscriptions: is('asterdex'),
     scheduleCancel: is('hyperliquid'),
     orderHistoryNeedsSymbol: is('binance', 'binancepm', 'phemex'),
@@ -90,6 +90,28 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     symbolCancelMissesUnseen: is(
       'krakenspot', 'bitget', 'bitgetinverse', 'bitgetusdc', 'hyperliquid', 'hyperliquidspot', 'lighter',
       'lighter-robinhood', ...OKX, 'blofin', 'hyrotrader', 'paradex', 'phemex',
+    ),
+    orderReadCovers: is(
+      'binance',
+      'binancepm',
+      'binanceinverse',
+      'binancespot',
+      'bingx',
+      'bitget',
+      'bitgetinverse',
+      'bitgetusdc',
+      'blofin',
+      'bybit',
+      'bybitdemo',
+      'bybitinverse',
+      'bybitspot',
+      'hyperliquid',
+      'hyperliquidspot',
+      'lighter',
+      'lighter-robinhood',
+      ...OKX,
+      'paradex',
+      'phemex',
     ),
     ...overrides,
   };

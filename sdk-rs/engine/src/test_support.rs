@@ -23,6 +23,9 @@ impl<V: Venue, F: FnMut(&mut V, &mut Cx<'_, V::Pending>)> Venue for ProbeVenue<V
     fn http_mutation_barriers() -> bool {
         V::http_mutation_barriers()
     }
+    fn http_plans() -> bool {
+        V::http_plans()
+    }
     fn start(&mut self, cx: &mut Cx<'_, V::Pending>) {
         (self.start)(&mut self.venue, cx);
     }

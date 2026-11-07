@@ -52,9 +52,10 @@ fn owned_incomplete(out: &[Action]) {
         .expect("owned semantic history warning");
     assert_eq!(event.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(991.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(991.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     let done = out
         .iter()
         .position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 991, .. })))

@@ -2,9 +2,9 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity,
-    Incarnation, KeyPresence, KeyRef, Operation, PayloadPart, SetupFacts, SignError, SignFuture,
-    SignRequest, SignResult, Signer,
+    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraFieldPolicy, ExtraKey, Identities,
+    Identity, Incarnation, KeyPresence, KeyRef, Operation, PayloadPart, SetupFacts, SignError,
+    SignFuture, SignRequest, SignResult, Signer,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -164,7 +164,6 @@ impl<'de> serde::Deserialize<'de> for Secret {
 }
 
 /// Unicode White_Space trim into a fresh guarded buffer; the input is wiped on drop.
-#[cfg(feature = "trim-signing")]
 fn trimmed(input: Secret) -> Secret {
     let Some(value) = input.0.as_deref() else {
         return input;
@@ -452,11 +451,31 @@ impl LocalSigner {
                 if let Some(encoding) = rule.and_then(|rule| rule.secret_encoding) {
                     identity.secret_encoding = encoding;
                 }
-                if let Some(extra) = rule.and_then(|rule| rule.extra)
-                    && let Some(encoding) = extra.encoding
-                    && let Some(material) = identity.extra.0.get_mut(&extra.key)
-                {
-                    material.encoding = encoding;
+                if let Some(extra) = rule.and_then(|rule| rule.extra) {
+                    if extra.field == ExtraFieldPolicy::AliasPrimary
+                        && identity.extra.0.contains_key(&extra.key)
+                    {
+                        return Err(SignError::InvalidRequest);
+                    }
+                    if let Some(material) = identity.extra.0.get_mut(&extra.key) {
+                        if let Some(encoding) = extra.encoding {
+                            material.encoding = encoding;
+                        }
+                        if extra.trim {
+                            material.value =
+                                trimmed(std::mem::replace(&mut material.value, Secret::absent()));
+                        }
+                    }
+                    if extra.trim
+                        && extra.field == ExtraFieldPolicy::Optional
+                        && identity
+                            .extra
+                            .0
+                            .get(&extra.key)
+                            .is_some_and(|material| material.value.is_empty())
+                    {
+                        identity.extra.0.remove(&extra.key);
+                    }
                 }
             }
         }
@@ -2189,6 +2208,7 @@ mod tests {
                     key: ExtraKey::ZklinkSeed,
                     field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate,
                     encoding: Some(KeyEncoding::Hex),
+                    trim: false,
                 }),
                 ..Default::default()
             }),

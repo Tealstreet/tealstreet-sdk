@@ -69,15 +69,77 @@ impl crate::engine::CoreIo<'_> {
     }
 }
 
-impl<V: Venue> Engine<V> {
+// Concrete metadata is shared across venue engines; move-only continuations
+// remain typed and are reserved separately before any owner is marked.
+struct ReadRootCleanup {
+    owner: Owner,
+    requests: Vec<RequestId>,
+}
+
+impl IoCore {
+    #[inline(never)]
+    fn prepare_read_root_sweep(&self, now: f64) -> Vec<ReadRootCleanup> {
+        let mut cleanup = Vec::new();
+        assert!(
+            cleanup.try_reserve_exact(self.read_roots.len()).is_ok(),
+            "read root expiry storage"
+        );
+        for &(_, id, generation, _) in self.read_roots.iter().filter(|(at, ..)| now >= *at) {
+            let owner = Owner::Command { id, generation };
+            let owned =
+                |managed: &http_lifecycle::Managed| managed.delivery().context.owner() == owner;
+            let count = self
+                .managed_http
+                .values()
+                .filter(|managed| owned(managed))
+                .count();
+            let mut requests = Vec::new();
+            assert!(
+                requests.try_reserve_exact(count).is_ok(),
+                "read root expiry storage"
+            );
+            requests.extend(
+                self.managed_http
+                    .iter()
+                    .filter(|(_, managed)| owned(managed))
+                    .map(|(request, _)| *request),
+            );
+            cleanup.push(ReadRootCleanup { owner, requests });
+        }
+        cleanup
+    }
+
+    #[inline(never)]
+    fn mark_read_root_sweep(&mut self, cleanup: &[ReadRootCleanup]) {
+        // Per request: timer clear and cancel. Per owner: its timer clear,
+        // terminal notice and any classified error notice.
+        let actions = cleanup.iter().fold(0_usize, |actions, root| {
+            actions.saturating_add(root.requests.len().saturating_mul(2).saturating_add(3))
+        });
+        assert!(
+            self.actions.try_reserve(actions).is_ok(),
+            "read root expiry storage"
+        );
+        #[cfg(test)]
+        {
+            self.read_root_sweep_capacity = Some(self.actions.capacity());
+        }
+        for root in cleanup {
+            let Owner::Command { id, generation } = root.owner else {
+                unreachable!()
+            };
+            self.request_contexts.expire_read_root(id, generation);
+        }
+    }
+}
+
+#[cfg(feature = "write-preflight-wait")]
+impl CoreCx<'_> {
     /// A parked write Preflight past its caller's cap fails exactly as an
     /// expired entry does, through the owner-aware Preflight seal; one that left
     /// its park is no longer bounded. Runs outside every command loan.
-    #[cfg(feature = "write-preflight-wait")]
+    #[inline(never)]
     fn expire_write_preflights(&mut self, now: f64) {
-        if self.io.core.write_preflight_waits.is_empty() || !now.is_finite() {
-            return;
-        }
         let mut index = 0;
         while index < self.io.core.write_preflight_waits.len() {
             let (at_ms, preflight, timer) = self.io.core.write_preflight_waits[index].clone();
@@ -89,12 +151,7 @@ impl<V: Venue> Engine<V> {
             // Seal first: the cap leaves the index only once the owner has its
             // terminal, so a refused seal can never strand a parked caller.
             if waiting {
-                let sealed = Cx {
-                    now,
-                    store: &mut self.store,
-                    io: &mut self.io,
-                }
-                .fail_preflight(&preflight, Error::TimedOut.venue_error());
+                let sealed = self.fail_preflight(&preflight, Error::TimedOut.venue_error());
                 if sealed.is_err() {
                     debug_assert!(false, "a due write Preflight cap must seal: {sealed:?}");
                     index += 1;
@@ -105,13 +162,23 @@ impl<V: Venue> Engine<V> {
             self.io.core.actions.push(Action::ClearTimer { timer });
         }
     }
+}
 
+impl<V: Venue> Engine<V> {
     /// Retire every tracked root due at `now` before anything can stamp, run a
     /// codec or lend authority: prepare all, mark all, then per owner discard,
     /// hand back its continuations without a Cx, and seal once.
     pub(super) fn expire_read_roots(&mut self, now: f64) {
         #[cfg(feature = "write-preflight-wait")]
-        self.expire_write_preflights(now);
+        if !self.io.core.write_preflight_waits.is_empty() && now.is_finite() {
+            Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            }
+            .core()
+            .expire_write_preflights(now);
+        }
         if self.io.core.read_roots.is_empty()
             || !now.is_finite()
             || !self.io.core.read_roots.iter().any(|(at, ..)| now >= *at)
@@ -121,63 +188,29 @@ impl<V: Venue> Engine<V> {
         self.io.core.read_roots_expiring = true;
         let scope = SweepScope { engine: self };
         let io = &mut scope.engine.io;
-        let mut due = Vec::new();
-        let mut cleanup = Vec::new();
-        let reserved = due.try_reserve_exact(io.core.read_roots.len()).is_ok()
-            && cleanup.try_reserve_exact(io.core.read_roots.len()).is_ok();
-        assert!(reserved, "read root expiry storage");
-        for &(at, id, generation, _) in &io.core.read_roots {
-            if now >= at {
-                due.push((id, generation));
-            }
-        }
-        // Prepare: every owner's requests and continuation storage, and the
-        // whole sweep's actions in aggregate, before any mark.
-        let mut actions = 0_usize;
-        for &(id, generation) in &due {
-            let owner = Owner::Command { id, generation };
-            let owned =
-                |managed: &http_lifecycle::Managed| managed.delivery().context.owner() == owner;
-            let count = io
-                .core
-                .managed_http
-                .values()
-                .filter(|managed| owned(managed))
-                .count();
-            let mut requests = Vec::new();
-            let mut pending = Vec::new();
-            let reserved = requests.try_reserve_exact(count).is_ok()
-                && pending.try_reserve_exact(count).is_ok();
-            assert!(reserved, "read root expiry storage");
-            // Per request: timer clear and cancel. Per owner: its timer clear,
-            // terminal notice and any classified error notice.
-            actions = actions.saturating_add(count.saturating_mul(2).saturating_add(3));
-            requests.extend(
-                io.core
-                    .managed_http
-                    .iter()
-                    .filter(|(_, managed)| owned(managed))
-                    .map(|(request, _)| *request),
-            );
-            cleanup.push((owner, requests, pending));
-        }
+        let mut pending = Vec::new();
         assert!(
-            io.core.actions.try_reserve(actions).is_ok(),
+            pending.try_reserve_exact(io.core.read_roots.len()).is_ok(),
             "read root expiry storage"
         );
-        #[cfg(test)]
-        {
-            io.core.read_root_sweep_capacity = Some(io.core.actions.capacity());
+        let cleanup = io.core.prepare_read_root_sweep(now);
+        // Typed continuations stay here; reserve every owner's capacity before
+        // the shared mark-all phase can retire any authority.
+        for root in &cleanup {
+            let mut values = Vec::new();
+            assert!(
+                values.try_reserve_exact(root.requests.len()).is_ok(),
+                "read root expiry storage"
+            );
+            pending.push(values);
         }
-        // Mark every due root first: no cleanup can publish for another.
-        for &(id, generation) in &due {
-            io.core.request_contexts.expire_read_root(id, generation);
-        }
-        for (owner, requests, mut pending) in cleanup {
+        io.core.mark_read_root_sweep(&cleanup);
+        for (root, mut pending) in cleanup.iter().zip(pending) {
+            let owner = root.owner;
             let Owner::Command { id, generation } = owner else {
                 unreachable!()
             };
-            for request in requests {
+            for &request in &root.requests {
                 if let Some(held) = scope.engine.io.discard_managed(request) {
                     pending.push(held.value);
                 }

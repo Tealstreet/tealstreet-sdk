@@ -128,6 +128,7 @@ it('applies the configured deadline to the live SDK host while preserving caller
   const requests: Array<{ op: string }> = [];
   const idle = () => '[]';
   const native: WasmEngineLike = {
+    syncHostTime: () => true,
     capabilities: () => engineCapabilities('bybit'),
     start: idle, wsOpen: idle, wsMessage: idle, wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle, httpChunk: idle, httpEnd: idle, httpFailed: idle, timer: idle,
@@ -183,4 +184,112 @@ it('treats a lost catalogue-refresh worker reply as a read timeout', async () =>
   const error = await failure;
   expect(error).toMatchObject({ code: 'COMMAND_TIMEOUT', command: 'refreshMarkets' });
   expect(error).not.toHaveProperty('outcome');
+});
+
+it('labels an interrupted read separately from uncertain writes', async () => {
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  const bridge = () => {};
+  exchange.on('callMethod', bridge);
+  const failure = exchange.callMethodInWorker('fetchOrders').catch((error: unknown) => error);
+  exchange.off('callMethod', bridge);
+  expect(await failure).toMatchObject({ code: 'WORKER_STOPPED', command: 'fetchOrders' });
+  expect(await failure).not.toHaveProperty('outcome');
+  expect(((await failure) as Error).message).not.toContain('interrupted writes');
+});
+
+it('retries a worker candle read once on the replacement bridge and ignores the old reply', async () => {
+  vi.useFakeTimers();
+  // Lighter explicitly fetches candles in the worker.
+  const lighter = new RustEngineExchange(
+    'lighter',
+    { key: '', secret: '', publicDataOnly: true, workerMirror: true },
+    new DefaultStore(),
+  );
+  accounts.push(lighter);
+  const first = vi.fn();
+  lighter.on('callMethod', first);
+  const pending = lighter.callMethodInWorker('fetchOHLCV', { symbol: 'BTCUSDT', interval: '15m' });
+  void pending.catch(() => {});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(first).toHaveBeenCalledOnce();
+  lighter.off('callMethod', first);
+  await vi.advanceTimersByTimeAsync(100);
+  const second = vi.fn(({ requestId }: { requestId: string }) => {
+    lighter.emitter.emit('callMethod:done', {
+      requestId: first.mock.calls[0][0].requestId,
+      success: true,
+      result: ['stale'],
+    });
+    lighter.emitter.emit('callMethod:done', { requestId, success: true, result: [] });
+  });
+  lighter.on('callMethod', second);
+  await vi.advanceTimersByTimeAsync(100);
+  await expect(pending).resolves.toEqual([]);
+  expect(second).toHaveBeenCalledOnce();
+});
+
+it('bounds the replacement bridge wait and never replays an interrupted write', async () => {
+  vi.useFakeTimers();
+  const exchange = new RustEngineExchange(
+    'lighter',
+    { key: '', secret: '', publicDataOnly: true, workerMirror: true },
+    new DefaultStore(),
+  );
+  accounts.push(exchange);
+  const first = vi.fn();
+  exchange.on('callMethod', first);
+  const candle = exchange.fetchOHLCV({ symbol: 'BTCUSDT', interval: '15m' }).catch((error: unknown) => error);
+  const write = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(0);
+  exchange.off('callMethod', first);
+  await vi.advanceTimersByTimeAsync(30_100);
+  expect(await candle).toMatchObject({ message: 'lighter worker bridge was not wired' });
+  expect(await write).toMatchObject({ code: 'COMMAND_TIMEOUT', outcome: 'unknown' });
+  const replacement = vi.fn();
+  exchange.on('callMethod', replacement);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(replacement).not.toHaveBeenCalled();
+});
+
+it('does not retry a second interrupted worker candle read', async () => {
+  vi.useFakeTimers();
+  const exchange = new RustEngineExchange(
+    'lighter',
+    { key: '', secret: '', publicDataOnly: true, workerMirror: true },
+    new DefaultStore(),
+  );
+  accounts.push(exchange);
+  const first = vi.fn();
+  exchange.on('callMethod', first);
+  const pending = exchange.fetchOHLCV({ symbol: 'BTCUSDT', interval: '15m' }).catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(0);
+  exchange.off('callMethod', first);
+  const second = vi.fn();
+  exchange.on('callMethod', second);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(second).toHaveBeenCalledOnce();
+  exchange.off('callMethod', second);
+  await expect(pending).resolves.toMatchObject({ code: 'WORKER_STOPPED' });
+});
+
+it('does not retry a worker candle refusal', async () => {
+  const exchange = new RustEngineExchange(
+    'lighter',
+    { key: '', secret: '', publicDataOnly: true, workerMirror: true },
+    new DefaultStore(),
+  );
+  accounts.push(exchange);
+  const bridge = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', {
+      requestId,
+      success: false,
+      result: { message: 'invalid interval', kind: 'invalidInput' },
+    });
+  });
+  exchange.on('callMethod', bridge);
+  await expect(exchange.fetchOHLCV({ symbol: 'BTCUSDT', interval: '15m' })).rejects.toMatchObject({
+    message: 'invalid interval',
+    kind: 'invalidInput',
+  });
+  expect(bridge).toHaveBeenCalledOnce();
 });
