@@ -739,6 +739,11 @@ impl Coinbase {
         if depth.change_id.is_some_and(|last| id <= last) {
             return true;
         }
+        // An old subscription can still deliver changes while its replacement
+        // snapshot is pending. They cannot establish or invalidate that book.
+        if !depth.live && row["type"] == "change" {
+            return true;
+        }
         let snapshot = row["type"] == "snapshot";
         if !snapshot
             && (row["type"] != "change"

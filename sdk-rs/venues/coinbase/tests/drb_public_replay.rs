@@ -388,6 +388,60 @@ fn separate_books_have_independent_change_ids_and_repair_clears_only_its_book() 
 }
 
 #[test]
+fn repair_ignores_changes_until_the_replacement_snapshot_without_resetting_other_books() {
+    let mut s = Replay::ready();
+    let eth = "ETH_USDC-PERPETUAL";
+    for symbol in [SYMBOL, eth] {
+        s.command(Command::SubscribeOrderBook {
+            symbol: symbol.into(),
+        });
+    }
+    let frames = s.frames("book.");
+    s.message(&frames[0].to_string());
+    s.message(&frames[1].to_string());
+    let expected_bids = s.engine.venue().book(SYMBOL).unwrap().bids().to_vec();
+    let expected_asks = s.engine.venue().book(SYMBOL).unwrap().asks().to_vec();
+    let mut second = frames[0].clone();
+    second["params"]["channel"] = json!(format!("book.{eth}.100ms"));
+    second["params"]["data"]["instrument_name"] = json!(eth);
+    second["params"]["data"]["change_id"] = json!(1);
+    s.message(&second.to_string());
+    let other_bids = s.engine.venue().book(eth).unwrap().bids().to_vec();
+    let other_asks = s.engine.venue().book(eth).unwrap().asks().to_vec();
+
+    s.command(Command::RepairSubscription(
+        safe_cex_engine::SubscriptionTopic::OrderBook {
+            symbol: SYMBOL.into(),
+        },
+    ));
+    assert!(s.engine.venue().book(SYMBOL).is_none());
+    assert_eq!(frames[2]["params"]["data"]["type"], "change");
+    // This packet was in flight on the old subscription when repair began.
+    s.message(&frames[2].to_string());
+    assert!(s.engine.venue().book(SYMBOL).is_none());
+    let other = s
+        .engine
+        .venue()
+        .book(eth)
+        .expect("repair must keep the other book live");
+    assert_eq!(other.bids(), other_bids);
+    assert_eq!(other.asks(), other_asks);
+    assert!(
+        !s.engine
+            .drain_actions()
+            .any(|action| matches!(action, Action::WsClose { .. } | Action::WsConnect { .. }))
+    );
+
+    // The ignored delta must not establish a sequence watermark. The fresh
+    // snapshot establishes it, and ordinary sequenced changes apply again.
+    s.message(&frames[0].to_string());
+    s.message(&frames[1].to_string());
+    let repaired = s.engine.venue().book(SYMBOL).unwrap();
+    assert_eq!(repaired.bids(), expected_bids);
+    assert_eq!(repaired.asks(), expected_asks);
+}
+
+#[test]
 fn older_ticker_notifications_cannot_rewind_prices_or_funding() {
     let mut s = Replay::ready();
     let frames = s.frames("ticker.");

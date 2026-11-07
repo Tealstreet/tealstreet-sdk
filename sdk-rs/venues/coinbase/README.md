@@ -7,6 +7,10 @@ public, account and trading streams; S0 does not switch legacy routes itself.
 
 Integration contract:
 
+- Public order-book repair clears only the repaired book. In-flight changes are
+  ignored until its replacement snapshot arrives, then normal sequence checks
+  resume; other live books keep their state and shared socket.
+
 - HTTP takes the caller's engine-issued `request_context::Context` and an optional
   engine `request_context::Session` handle. Private methods require that session;
   its `Venue::session_bearer` callback supplies the current token at preparation,
