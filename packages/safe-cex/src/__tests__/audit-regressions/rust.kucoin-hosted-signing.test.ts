@@ -5,6 +5,7 @@ import { createHmac } from 'node:crypto';
 
 import { expect, it, vi } from 'vitest';
 
+import { exchangeMetadata } from '../../exchangeMetadata';
 import { assertBetaAccount } from '../../exchanges/rust/betaVenues';
 import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
@@ -15,7 +16,13 @@ it('admits KuCoin remote custody while undeclared venues still refuse before sig
   expect(deriveRemoteSigningPolicy('kucoin')?.enabled).toBe(true);
   expect(() => assertBetaAccount('kucoin', { remoteSigner })).not.toThrow();
   for (const name of ['kucoinspot', 'krakenspot', 'cryptocom'] as const) {
-    expect(() => assertBetaAccount(name, { remoteSigner })).toThrow('delegated signing is unsupported in this build');
+    const prettyName = exchangeMetadata[name].prettyName;
+    expect(() => assertBetaAccount(name, { remoteSigner })).toThrow(
+      `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
+    );
+    expect(() => assertBetaAccount(name, { payloadSigner: vi.fn() })).toThrow(
+      `${prettyName} delegated signing is unsupported in this build`,
+    );
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });

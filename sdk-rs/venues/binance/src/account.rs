@@ -635,7 +635,7 @@ impl BinanceFutures {
             native_orders: Vec::new(),
             native_strategies: Vec::new(),
             regular: None,
-            algo: (self.is_spot() || self.is_inverse()).then(Vec::new),
+            algo: self.is_spot().then(Vec::new),
             skipped: SnapshotCoverage::default(),
             rejected_symbols: HashMap::new(),
             failed: false,
@@ -651,7 +651,7 @@ impl BinanceFutures {
             None,
             Pending::Account(Request::OpenOrders { generation }),
         );
-        if self.is_spot() || self.is_inverse() {
+        if self.is_spot() {
             return;
         }
         let conditional = if self.options.portfolio_margin {
@@ -1537,6 +1537,17 @@ impl BinanceFutures {
                     });
                 });
                 rejected.extend(undecodable);
+                // COIN-M algo rows say so on the row itself, so the routing reaches a
+                // frame-fed engine with the order (stops placed before the migration lack it).
+                if self.is_inverse() {
+                    for order in &mut orders {
+                        order.extra = Some(OrderExtra {
+                            remaining_native: Some(order.remaining),
+                            native_algo: true,
+                            ..OrderExtra::default()
+                        });
+                    }
+                }
                 if parsed.is_ok() {
                     self.account.trailing = trailing;
                 }
@@ -2706,7 +2717,11 @@ impl BinanceFutures {
                     trigger_type: trigger_type(kind, o.wt.as_deref()),
                     take_profit: None,
                     stop_loss: None,
-                    extra: None,
+                    extra: self.is_inverse().then(|| OrderExtra {
+                        remaining_native: Some(amount),
+                        native_algo: true,
+                        ..OrderExtra::default()
+                    }),
                 });
             }
             _ => {}

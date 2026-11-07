@@ -111,35 +111,31 @@ pub struct PhemexPerpetuals {
     /// The last product read skipped a malformed row, so an unknown symbol may be listed.
     catalogue_partial: bool,
     paused_until: f64,
-    /// When an unreadable public message was last logged; at most one per minute.
-    public_parse_logged_at: Option<f64>,
     account: account::State,
     trading: trading::State,
     history: history::State,
     income: income::State,
 }
-const PUBLIC_PARSE_LOG_MS: f64 = 60_000.0;
-
 impl PhemexPerpetuals {
-    /// A public message that would not parse, logged at most once a minute.
-    fn public_unreadable(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        error: &serde_json::Error,
-        text: &str,
-    ) {
-        if self
-            .public_parse_logged_at
-            .is_some_and(|at| cx.now - at < PUBLIC_PARSE_LOG_MS)
-        {
-            return;
+    /// Report each rejected frame, including its wire type when JSON is readable.
+    fn public_unreadable(cx: &mut Cx<'_, Pending>, error: &serde_json::Error, text: &str) {
+        #[derive(serde::Deserialize)]
+        struct Header<'a> {
+            #[serde(rename = "type", borrow)]
+            kind: Option<&'a serde_json::value::RawValue>,
         }
-        self.public_parse_logged_at = Some(cx.now);
-        let head: String = text.chars().take(200).collect();
+        let header = serde_json::from_str::<Header<'_>>(text).ok();
+        let kind = header
+            .as_ref()
+            .and_then(|header| header.kind)
+            .map_or("unknown", |kind| kind.get());
         cx.notice(
             Level::Warn,
             code::STREAM_MALFORMED,
-            format!("Phemex public message unreadable ({error}): {head}"),
+            format!(
+                "Phemex public message unreadable: bytes={}, type={kind}, error={error}",
+                text.len()
+            ),
         );
     }
 
@@ -166,7 +162,6 @@ impl PhemexPerpetuals {
             discovery: Default::default(),
             catalogue_partial: false,
             paused_until: 0.,
-            public_parse_logged_at: None,
             account: account::State::new(),
             trading: trading::State::default(),
             history: history::State::default(),
@@ -661,8 +656,9 @@ impl Venue for PhemexPerpetuals {
         {
             return;
         }
-        let Ok(e) = serde_json::from_str::<Envelope<'_>>(text) else {
-            return;
+        let e = match serde_json::from_str::<Envelope<'_>>(text) {
+            Ok(e) => e,
+            Err(error) => return Self::public_unreadable(cx, &error, text),
         };
         if e.method == "perp_market24h_pack_p.update" {
             #[derive(serde::Deserialize)]
@@ -670,7 +666,9 @@ impl Venue for PhemexPerpetuals {
                 #[serde(borrow)]
                 data: Vec<Packed<'a>>,
             }
-            if let Ok(p) = serde_json::from_str::<Pack<'_>>(text) {
+            if let Ok(p) = serde_json::from_str::<Pack<'_>>(text)
+                .inspect_err(|error| Self::public_unreadable(cx, error, text))
+            {
                 let mut added = Vec::new();
                 for r in p.data {
                     let symbol = r.0.to_ascii_uppercase();
@@ -718,7 +716,9 @@ impl Venue for PhemexPerpetuals {
                 }
             }
         } else if e.orderbook_p.is_some() {
-            if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text) {
+            if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text)
+                .inspect_err(|error| Self::public_unreadable(cx, error, text))
+            {
                 if r.kind == "snapshot"
                     && !e.orderbook_p.is_some_and(|raw| snapshot_sides(raw.get()))
                 {
@@ -738,14 +738,14 @@ impl Venue for PhemexPerpetuals {
             }
             let mut k = match serde_json::from_str::<K>(text) {
                 Ok(k) => k,
-                Err(error) => return self.public_unreadable(cx, &error, text),
+                Err(error) => return Self::public_unreadable(cx, &error, text),
             };
-            k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
-            // A subscribe answers with history as a snapshot: only its newest row is live.
-            if k.kind == "snapshot" {
-                let newest = k.kline_p.pop();
-                k.kline_p = newest.into_iter().collect();
+            // Subscribe snapshots are history, including their newest row. Only
+            // explicitly incremental frames may enter the live candle path.
+            if k.kind != "incremental" {
+                return;
             }
+            k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
             for r in k.kline_p {
                 for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
                     s == &e.symbol.to_ascii_uppercase()

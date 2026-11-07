@@ -7,6 +7,8 @@ vi.mock('fs', async (importOriginal) => {
     ...actual,
     existsSync: () => true,
     mkdirSync: () => undefined,
+    // The logger truncates ~/.tealstreet/cli.log at import; a fresh CI runner has no such dir.
+    writeFileSync: () => undefined,
     appendFileSync: (_path: unknown, line: string) => void fileLines.push(line),
   };
 });

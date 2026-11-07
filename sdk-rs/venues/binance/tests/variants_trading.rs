@@ -144,16 +144,23 @@ fn spot_brackets_have_no_limit_only_fields() {
     assert!(tp.url.contains("quantity=2"));
 }
 #[test]
-fn coin_m_stops_use_regular_endpoint_and_native_counts() {
+/// The CM-UM integration moved COIN-M stop types to the algo endpoint: /dapi/v1/order
+/// answers them -4120.
+fn coin_m_stops_use_the_algo_endpoint_and_native_counts() {
     let mut h = ready(Variant::CoinM);
     let mut o = order(Variant::CoinM, r#""reduceOnly":true"#);
     o.kind = safe_cex_engine::model::OrderType::StopLoss;
     place(&mut h, vec![o]);
-    let r = h.take("/dapi/v1/order");
-    assert!(r.url.contains("type=STOP_MARKET"));
-    assert!(r.url.contains("stopPrice=99"));
-    assert!(r.url.contains("quantity=2"));
-    assert!(!r.url.contains("algo"));
+    assert!(!h.has_request("/dapi/v1/order?"), "{:?}", h.paths());
+    let r = h.take("/dapi/v1/algoOrder");
+    assert_eq!(r.method, safe_cex_engine::Method::Post);
+    assert_eq!(param(&r.url, "algoType").as_deref(), Some("CONDITIONAL"));
+    assert_eq!(param(&r.url, "type").as_deref(), Some("STOP_MARKET"));
+    assert_eq!(param(&r.url, "triggerPrice").as_deref(), Some("99"));
+    assert_eq!(param(&r.url, "stopPrice"), None);
+    assert_eq!(param(&r.url, "quantity").as_deref(), Some("2"));
+    assert!(param(&r.url, "clientAlgoId").is_some());
+    assert_eq!(param(&r.url, "newClientOrderId"), None);
 }
 #[test]
 fn coin_m_all_native_order_families_cancel_in_one_call() {
@@ -568,7 +575,7 @@ fn inverse_full_stop_requires_zero_input_or_an_explicit_close_intent() {
         let cancel = h.take("/dapi/v1/order");
         assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
         h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":999,"status":"CANCELED","origQty":"0","executedQty":"0"}"#);
-        let placed = h.take("/dapi/v1/order");
+        let placed = h.take("/dapi/v1/algoOrder");
         assert_eq!(param(&placed.url, "closePosition").as_deref(), Some("true"));
         assert!(param(&placed.url, "quantity").is_none());
     }
@@ -702,8 +709,9 @@ fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
             r#"{"orderId":12,"clientOrderId":"caller_1","code":"0"}"#,
             vec![],
         ),
-        (Variant::CoinM, r#"{"orderId":12}"#, vec!["12"]),
-        (Variant::CoinM, r#"{"algoId":13}"#, vec![]),
+        // A COIN-M stop is an algo order: only its algoId names it.
+        (Variant::CoinM, r#"{"algoId":13}"#, vec!["13"]),
+        (Variant::CoinM, r#"{"orderId":12}"#, vec![]),
     ] {
         let mut h = ready(variant);
         let mut input = order(variant, r#""clientOrderId":"caller_1""#);
@@ -716,7 +724,7 @@ fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
         let request = h.take(if variant == Variant::Spot {
             "/api/v3/order"
         } else {
-            "/dapi/v1/order"
+            "/dapi/v1/algoOrder"
         });
         h.reply(request.id, 503, "", body);
         let failure = &h.failures.iter().find(|(id, _)| *id == 77).unwrap().1;
@@ -823,10 +831,17 @@ fn coin_m_trailing_outside_the_callback_range_is_refused_not_clamped() {
         trailing.side = safe_cex_engine::model::OrderSide::Sell;
         trailing.price = Some(price);
         place(&mut h, vec![trailing]);
-        let sent = h.requests.iter().find(|r| r.url.contains("/dapi/v1/order"));
+        // COIN-M trailing stops are algo orders.
+        let sent = h
+            .requests
+            .iter()
+            .find(|r| r.url.contains("/dapi/v1/algoOrder") || r.url.contains("/dapi/v1/order?"));
         match rate {
             Some(rate) => {
+                // Only the algo endpoint: /dapi/v1/order answers this type -4120.
                 let sent = sent.expect("an in-range trailing stop is placed");
+                assert!(sent.url.contains("/dapi/v1/algoOrder"), "{}", sent.url);
+                assert!(!h.has_request("/dapi/v1/order?"), "{:?}", h.paths());
                 assert_eq!(param(&sent.url, "callbackRate").as_deref(), Some(rate));
             }
             None => {
@@ -849,6 +864,7 @@ fn coin_m_trailing_stop_from_the_snapshot_can_be_amended() {
         r#"{"dualSidePosition":false}"#,
     );
     h.respond("/dapi/v1/openOrders",200,r#"[{"avgPrice":"0","clientOrderId":"coin-trail","cumBase":"0","executedQty":"0","orderId":77,"origQty":"2","origType":"TRAILING_STOP_MARKET","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","status":"NEW","stopPrice":"98","closePosition":false,"symbol":"BTCUSD_PERP","time":1,"timeInForce":"GTC","type":"TRAILING_STOP_MARKET","updateTime":1,"workingType":"CONTRACT_PRICE","priceProtect":false,"priceRate":"1.5","activatePrice":"103"}]"#);
+    h.respond("/dapi/v1/openAlgoOrders", 200, "[]");
     h.requests.clear();
     assert!(h.engine.store().order("77").is_some());
     h.event(Event::Command(Command::AmendOrder {
@@ -878,6 +894,7 @@ fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
             200,
             &row.replace(r#""stopPrice":"98""#, &format!(r#""stopPrice":"{stop}""#)),
         );
+        h.respond("/dapi/v1/openAlgoOrders", 200, "[]");
         h.requests.clear();
         h.event(Event::Command(Command::AmendOrder {
             command: 72,
@@ -888,7 +905,9 @@ fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
         let cancel = h.take("/dapi/v1/order");
         assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
         h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":77,"clientOrderId":"coin-trail","status":"CANCELED","origQty":"2","executedQty":"0"}"#);
-        let replacement = h.take("/dapi/v1/order");
+        // A stop placed before the algo migration is cancelled where it lives; its
+        // replacement and put-back are algo orders.
+        let replacement = h.take("/dapi/v1/algoOrder");
         assert_eq!(
             param(&replacement.url, "callbackRate").as_deref(),
             Some("3")
@@ -899,7 +918,7 @@ fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
             "",
             r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
         );
-        let put_back = h.take("/dapi/v1/order");
+        let put_back = h.take("/dapi/v1/algoOrder");
         assert_eq!(
             put_back.method,
             safe_cex_engine::Method::Post,
@@ -907,8 +926,9 @@ fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
         );
         assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
         assert_eq!(
-            param(&put_back.url, "activationPrice").as_deref(),
+            param(&put_back.url, "activatePrice").as_deref(),
             Some("103")
         );
+        assert_eq!(param(&put_back.url, "activationPrice"), None);
     }
 }

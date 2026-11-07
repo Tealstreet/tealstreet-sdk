@@ -1247,7 +1247,7 @@
     },
     {
       "venue": "binanceinverse",
-      "tapeSha256": "a0a35640cbdb5fdd8f43a14188cc4113290683b1e625e131f6da0e9b8b38f94b",
+      "tapeSha256": "2e29220370a438c5424ffcacff131bfbd7dc6dfafc1aede4bf2f476edf608d91",
       "tape": "sdk-rs/harness/tapes/binanceinverse-private.jsonl",
       "diagnostics": [
         {
