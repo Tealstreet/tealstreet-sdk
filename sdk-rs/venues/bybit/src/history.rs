@@ -450,7 +450,7 @@ impl BybitLinear {
             );
             return;
         }
-        let now = cx.now;
+        let now = cx.protocol_now();
         let mut walk = match read {
             Read::OrderByClientId { .. } => {
                 let _ = cx.fail_context(

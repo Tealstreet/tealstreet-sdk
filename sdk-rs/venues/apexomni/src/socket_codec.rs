@@ -110,7 +110,7 @@ impl ApexOmni {
             feed,
             SocketSpec::new(format!(
                 "wss://{host}/realtime_{path}?v=2&timestamp={}&requestId=rust-{request}",
-                cx.now as u64
+                cx.protocol_now() as u64
             ))
             // The host routes by role: `realtime_private` matches no `/private` rule.
             .channel(if private {

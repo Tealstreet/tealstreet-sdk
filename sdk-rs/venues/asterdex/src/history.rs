@@ -400,7 +400,7 @@ impl AsterDex {
                 // A start alone with no limit walks up to now, not one page from the start.
                 let open_end = limit
                     .is_none()
-                    .then(|| cx.now.floor())
+                    .then(|| cx.protocol_now().floor())
                     .filter(|end| from_ms.is_some_and(|from| *end >= from));
                 if let Some((from, to)) = from_ms.zip(to_ms.or(open_end)) {
                     let limit = limit.unwrap_or(500).clamp(1, 1000);
@@ -482,7 +482,7 @@ impl AsterDex {
                 // A start alone with no limit walks up to now, not one page from the start.
                 let open_end = limit
                     .is_none()
-                    .then(|| cx.now.floor())
+                    .then(|| cx.protocol_now().floor())
                     .filter(|end| from_ms.is_some_and(|from| *end > from));
                 if let Some((from, to)) = from_ms.zip(to_ms.or(open_end)) {
                     let limit = limit.unwrap_or(1000).clamp(1, 1000);

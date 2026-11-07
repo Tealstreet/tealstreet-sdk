@@ -1012,7 +1012,7 @@ impl Paradex {
                         },
                         symbol,
                         interval,
-                        (Some(cx.now - step * 3.), Some(cx.now)),
+                        (Some(cx.protocol_now() - step * 3.), Some(cx.protocol_now())),
                         false,
                     );
                 }
@@ -1333,7 +1333,7 @@ impl Paradex {
             p.push_str("&countback=2000&price_kind=last");
             p
         } else {
-            let end = to.unwrap_or(cx.now);
+            let end = to.unwrap_or(cx.protocol_now());
             let start = from.unwrap_or(end - interval_ms(interval).unwrap() * 2000.);
             format!(
                 "/markets/klines?symbol={symbol}&resolution={resolution}&start_at={}&end_at={}&price_kind=last",
@@ -1508,7 +1508,7 @@ impl Paradex {
                 },
                 symbol,
                 interval,
-                (Some(cx.now - step * 3.), Some(cx.now)),
+                (Some(cx.protocol_now() - step * 3.), Some(cx.protocol_now())),
                 false,
             );
             return true;
@@ -1606,7 +1606,7 @@ impl Paradex {
                     },
                     symbol,
                     interval,
-                    (Some(cx.now - step * 3.), Some(cx.now)),
+                    (Some(cx.protocol_now() - step * 3.), Some(cx.protocol_now())),
                     false,
                 );
             }

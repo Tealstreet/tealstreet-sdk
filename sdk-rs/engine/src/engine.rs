@@ -1936,8 +1936,6 @@ struct IoCore {
     http_write_reply: Option<(u16, String)>,
     #[cfg(feature = "repair-mutations")]
     repairs: repair_core::Repairs,
-    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-    http_status_exempt: Option<RequestId>,
     // Reconcile reads the engine owes the venue, one per uncertain seal: the
     // symbols (`None` = all) and the earliest time to ask.
     #[cfg(feature = "order-locks")]
@@ -2235,8 +2233,6 @@ impl Default for IoCore {
             http_write_reply: None,
             #[cfg(feature = "repair-mutations")]
             repairs: Default::default(),
-            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-            http_status_exempt: None,
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             #[cfg(feature = "order-locks")]
@@ -4088,12 +4084,6 @@ pub trait Venue {
     fn public_key_setup(&self) -> Option<(AddressSetupSlots, crate::signing::Algorithm)> {
         None
     }
-    /// A fully parsed native refusal may exempt this delivery from unproven
-    /// HTTP status handling. The default keeps the strict shared policy.
-    fn status_exempt_refusal(&self, _pending: &Self::Pending, _response: Response<'_>) -> bool {
-        false
-    }
-
     /// Read-only native evidence from an unproven managed mutation envelope.
     /// Exact SDK identity namespaces must be validated by the native codec.
     fn unproven_http_evidence(
@@ -4101,6 +4091,16 @@ pub trait Venue {
         _pending: &Self::Pending,
         _response: Response<'_>,
         _evidence: &mut crate::request_context::UnprovenEvidence,
+    ) {
+    }
+
+    /// Rate-limit bookkeeping for a validated delivery, before its Unknown seal.
+    /// No Cx: this cannot send, publish financial rows or complete a command.
+    fn observe_unproven_http_response(
+        &mut self,
+        _now: f64,
+        _pending: &Self::Pending,
+        _response: Response<'_>,
     ) {
     }
 
@@ -4732,7 +4732,7 @@ const STARTUP_REPEAT_MS: f64 = 300_000.0;
 fn watch_startup<P>(
     cx: &mut Cx<'_, P>,
     account: bool,
-    started_at: f64,
+    started_at: Option<f64>,
     mut fields: Vec<(&'static str, Value)>,
 ) -> bool {
     let loaded = cx.store.loaded();
@@ -4756,12 +4756,13 @@ fn watch_startup<P>(
     } else {
         Level::Error
     };
-    let elapsed = cx.now - started_at;
-    // Invalid transport clocks cannot introduce nonfinite diagnostic fields.
-    if cx.now.is_finite() && elapsed.is_finite() {
-        fields.push(("elapsedMs", elapsed.max(0.0).into()));
-        fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
+    if let Some(started_at) = started_at {
+        let elapsed = cx.now - started_at;
+        if started_at.is_finite() && cx.now.is_finite() && elapsed.is_finite() && elapsed >= 0.0 {
+            fields.push(("elapsedMs", elapsed.into()));
+        }
     }
+    fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
     cx.io.core.startup_causes.fields(&missing, &mut fields);
     cx.event(
         level,
@@ -4783,7 +4784,7 @@ pub struct Engine<V: Venue> {
     started: bool,
     /// Checked on handled events, so it adds no timer of its own.
     startup_watch_at: Option<f64>,
-    startup_started_at: f64,
+    startup_started_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
     #[cfg(feature = "order-locks")]
@@ -4950,7 +4951,7 @@ impl<V: Venue> Engine<V> {
             },
             started: false,
             startup_watch_at: None,
-            startup_started_at: 0.0,
+            startup_started_at: None,
             ack_timer: None,
             #[cfg(feature = "order-locks")]
             reconcile_timer: None,
@@ -5088,6 +5089,14 @@ impl<V: Venue> Engine<V> {
             self.io.core.protocol_clock.at(host_now),
             self.io.core.protocol_clock.revision(),
         )
+    }
+
+    /// Synchronize protocol UTC without moving scheduling time. Small host updates
+    /// preserve venue calibration; a >1 s host discontinuity invalidates its old
+    /// baseline (e.g. suspend). Host deadlines stay on `host_now`.
+    pub fn sync_host_time(&mut self, host_now: f64, utc_now: f64) -> bool {
+        self.assert_live();
+        self.io.core.protocol_clock.observe_host(host_now, utc_now)
     }
 
     /// Host configuration is immutable once startup begins.
@@ -5599,7 +5608,7 @@ impl<V: Venue> Engine<V> {
         self.process_socket_work(now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
-        self.startup_started_at = now;
+        self.startup_started_at = now.is_finite().then_some(now);
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
         self.flush_http_owner_retirements();
@@ -11232,6 +11241,32 @@ mod startup_watch_tests {
         engine.store_mut().set_markets(Vec::new());
         assert!(engine.drain_actions().next().is_none());
         assert_eq!(engine.health().snapshots_discarded, 2);
+    }
+
+    #[test]
+    fn startup_elapsed_is_absent_without_a_valid_start_mark() {
+        for start in [None, Some(f64::NAN), Some(f64::INFINITY), Some(2_000.0)] {
+            let mut engine = crate::test_support::seeded_engine(Idle);
+            engine.start(0.0);
+            engine.startup_started_at = start;
+            engine.startup_watch_at = Some(1_000.0);
+            engine.handle(1_000.0, Event::PollScaleChanged { scale: 1.0 });
+            let event = engine
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::Event(e)) if e.code == log_code::STARTUP_INCOMPLETE => {
+                        Some(e)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert!(!event.fields.iter().any(|(name, _)| *name == "elapsedMs"));
+            assert!(
+                event
+                    .fields
+                    .contains(&("deadlineMs", STARTUP_WATCH_MS.into()))
+            );
+        }
     }
 
     #[test]

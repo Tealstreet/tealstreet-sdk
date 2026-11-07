@@ -268,7 +268,7 @@ impl Bingx {
     }
 
     fn note_ban(&mut self, cx: &mut Cx<'_, Pending>, response: &Response<'_>) {
-        self.ban_wait_ms = ban_wait_ms(response, cx.now);
+        self.ban_wait_ms = ban_wait_ms(response, cx.protocol_now());
         if let Some(wait_ms) = self.ban_wait_ms {
             cx.notice(
                 Level::Warn,
@@ -300,7 +300,7 @@ impl Bingx {
         rows: Vec<Candle>,
         valid: bool,
     ) {
-        if let Some(error) = candle_rate_limit(&response, cx.now) {
+        if let Some(error) = candle_rate_limit(&response, cx.protocol_now()) {
             let _ = cx.command_error_context(context, error.message.clone());
             let _ = cx.fail_context(context, error);
             return;
@@ -1296,9 +1296,9 @@ impl Venue for Bingx {
         };
         if let Err(error) = success(response) {
             let typed = if matches!(pending, Pending::Candles { .. }) {
-                candle_rate_limit(&response, cx.now)
+                candle_rate_limit(&response, cx.protocol_now())
             } else {
-                read_rate_limit(&response, cx.now)
+                read_rate_limit(&response, cx.protocol_now())
             };
             self.note_ban(cx, &response);
             self.request_failed(cx, pending, &error, typed.as_ref());
@@ -1456,7 +1456,7 @@ impl Venue for Bingx {
             }
             Pending::Signed(signed) => {
                 if signed.context().is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
-                    if let Some(error) = candle_rate_limit(&response, cx.now) {
+                    if let Some(error) = candle_rate_limit(&response, cx.protocol_now()) {
                         let context = signed.context().expect("checked candle custody");
                         let _ = cx.command_error_context(context, error.message.clone());
                         let _ = cx.fail_context(context, error);
@@ -1496,7 +1496,7 @@ impl Venue for Bingx {
                 {
                     cx.startup_read_refused(&error);
                 }
-                let typed = account::read_refusal(&response, cx.now);
+                let typed = account::read_refusal(&response, cx.protocol_now());
                 self.note_ban(cx, &response);
                 self.request_failed(
                     cx,
@@ -1726,7 +1726,7 @@ impl Venue for Bingx {
                     refuse_candle_query(cx, interval.unsupported("BingX"));
                     return;
                 };
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let start = if limit.is_none() {
                     from_ms.unwrap_or(end - step * 500.)
                 } else {

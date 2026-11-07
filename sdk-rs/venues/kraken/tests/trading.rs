@@ -872,7 +872,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             r#"{"result":"error"}"#.to_owned(),
-            rejected(ErrorKind::RateLimited),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
             "Kraken HTTP 429",
         ),
         (
@@ -884,7 +884,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"result":"error","error":"apiLimitExceeded"}"#.to_owned(),
-            rejected(ErrorKind::RateLimited),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
             "apiLimitExceeded",
         ),
         (
@@ -1085,7 +1085,7 @@ fn beta_non_success_status_keeps_native_error_classification() {
             400,
             "apiLimitExceeded",
             Some(ErrorKind::RateLimited),
-            Outcome::Rejected,
+            Outcome::Unknown,
         ),
         (
             403,

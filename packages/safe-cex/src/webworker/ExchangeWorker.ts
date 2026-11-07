@@ -393,7 +393,7 @@ export class ExchangeWorker {
 
       const isRust = this._exchange instanceof RustEngineExchange;
       const startTimeoutMs = isRust ? RUST_START_TIMEOUT_MS : START_TIMEOUT_MS;
-      const startedAt = Date.now();
+      const startedAt = performance.now();
       const startPromise = this._exchange.start().then(() => 'started' as const);
       // Its calls queue under the engine's own bounds; held here they would wait out the whole start.
       if (isRust) this._flushBufferedCalls();
@@ -408,7 +408,7 @@ export class ExchangeWorker {
           Object.assign(error, {
             safeCexSentryTags: {
               ...(this._exchange instanceof RustEngineExchange ? this._exchange.startupDiagnostics : {}),
-              startup_elapsed_ms: String(Math.max(0, Date.now() - startedAt)),
+              startup_elapsed_ms: String(Math.max(0, performance.now() - startedAt)),
               startup_deadline_ms: String(startTimeoutMs),
             },
           });

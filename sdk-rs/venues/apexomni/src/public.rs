@@ -687,7 +687,7 @@ impl ApexOmni {
         if message.op == "ping" {
             cx.send(
                 socket,
-                format!(r#"{{"op":"pong","args":["{}"]}}"#, cx.now as u64),
+                format!(r#"{{"op":"pong","args":["{}"]}}"#, cx.protocol_now() as u64),
             );
             return true;
         }
@@ -997,7 +997,7 @@ impl ApexOmni {
                 };
                 let limit = limit.filter(|n| *n > 0);
                 let count = limit.unwrap_or(500).min(1500) as f64;
-                let end = to_ms.filter(|n| n.is_finite()).unwrap_or(cx.now) / 1000.0;
+                let end = to_ms.filter(|n| n.is_finite()).unwrap_or(cx.protocol_now()) / 1000.0;
                 let start = if limit.is_none() {
                     from_ms
                         .filter(|n| n.is_finite())
