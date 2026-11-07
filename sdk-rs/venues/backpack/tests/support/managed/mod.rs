@@ -33,7 +33,10 @@ impl Driver {
         options.identity = identities.primary.clone();
         let mut inner = safe_cex_engine::test_support::seeded_engine(Backpack::new(options));
         inner
-            .set_signer(Some(std::sync::Arc::new(provider)))
+            .set_signer(Some(std::sync::Arc::new(super::hosted_parity::Parity {
+                local: provider,
+                ids: identities.clone(),
+            })))
             .unwrap();
         inner.set_identities(identities).unwrap();
         Self { inner, now: 1000.0 }
