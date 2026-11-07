@@ -1,8 +1,8 @@
 {
-  "venues/coinbase/src/public.rs": [
+  "venues/coinbase/src/account.rs": [
     {
-      "old": "632efff5a9082aa22bf2a2a91f0104a93fc1a42f9ccc388478b028220bc3ee02",
-      "new": "1048fbdc0a05786a43250a11e1958597faebcdd23e6a645fab2a6ae668888169"
+      "old": "80d6da32d1ff894feb349435b11b1d16783adf7f241e52f37faea1214194f2e0",
+      "new": "4d1561da3c3bb6270c652b69bdf42ad0a0902a14932d247d9262679033920e7d"
     }
   ]
 }
