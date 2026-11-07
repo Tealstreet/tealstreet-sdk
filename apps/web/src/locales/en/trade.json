@@ -744,6 +744,7 @@
     "scaled-mode-price": "Price",
     "scaled-mode-offset": "Offset",
     "scaled-range-percent-is-zero": "Scaled range percent is zero",
+    "scaled-set-price-range": "Set a price range before placing scaled orders.",
     "scaled-range-price-is-zero": "Scaled range price is zero",
     "scaled-invalid-order-mode": "Invalid scaled order mode",
     "no-order-partials-for-preview": "No order partials found while previewing...",

@@ -31,6 +31,7 @@ pub struct Trading {
     amend_wait: Option<(TimerId, AmendRead)>,
     amend_issuing: bool,
     amend_retry: Option<(TimerId, String, AmendRead)>,
+    retired_intent_timers: Vec<TimerId>,
 }
 /// A read continuation is bound to one genuine preflight and its original bound.
 #[derive(Clone, Copy, PartialEq)]
@@ -632,13 +633,17 @@ impl Hyperliquid {
     }
     fn base_price(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<f64, String> {
         let t = cx.store.ticker(symbol).ok_or("Missing ticker price data")?;
+        // Spot prices at the mid: a watched pair's last is its newest print, which a
+        // thin book can leave far enough off the mid that an IOC limit never fills.
+        let mid = t.mid_price.unwrap_or(0.0);
         if self.spot {
-            return (t.last.is_finite() && t.last > 0.0)
-                .then_some(t.last)
+            return [mid, t.last]
+                .into_iter()
+                .find(|p| p.is_finite() && *p > 0.0)
                 .ok_or_else(|| "Missing valid ticker price data".into());
         }
         let candidates = if self.spot_market(cx, symbol) {
-            [t.last, t.mid_price.unwrap_or(0.0), t.mark, t.index]
+            [mid, t.last, t.mark, t.index]
         } else {
             [t.mark, t.last, t.mid_price.unwrap_or(0.0), t.index]
         };
@@ -752,6 +757,7 @@ impl Hyperliquid {
         Ok((wires, grouping))
     }
     pub(crate) fn pump_trades(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.clear_retired_intent_timers(cx);
         if self.trading.inflight
             || self.trading.builder_wait.is_some()
             || self.trading.amend_wait.is_some()
@@ -1627,6 +1633,7 @@ impl Hyperliquid {
         }
     }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.clear_retired_intent_timers(cx);
         if self.expire_trade_intent(cx, timer) {
             return;
         }

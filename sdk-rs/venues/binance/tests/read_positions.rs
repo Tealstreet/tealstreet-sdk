@@ -73,7 +73,7 @@ fn pm() -> Harness {
     h.respond(PM, 200, USDM_RISK);
     h.respond("/papi/v1/balance", 200, PM_BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, "[]");
-    h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
     for path in ["/public/ws", "/market/ws", "/pm/ws"] {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });

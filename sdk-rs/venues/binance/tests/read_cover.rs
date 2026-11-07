@@ -326,10 +326,7 @@ fn loaded_variant(variant: &str) -> (Harness, &'static [&'static str]) {
                 portfolio_margin: true,
                 ..credentials()
             },
-            &[
-                "/papi/v1/um/openOrders",
-                "/papi/v1/um/conditional/openOrders",
-            ],
+            &["/papi/v1/um/openOrders", "/papi/v1/um/algo/openAlgoOrders"],
         ),
         "coinm" => (
             Options {

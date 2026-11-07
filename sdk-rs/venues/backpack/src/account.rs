@@ -1148,6 +1148,18 @@ impl crate::Backpack {
     }
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &self.data {
+            ReadData::Info { .. } => S::ACCOUNT,
+            ReadData::Balance { .. } => S::BALANCE,
+            ReadData::Positions { .. } => S::POSITIONS,
+            ReadData::Orders { .. } => S::ORDERS,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -439,6 +439,17 @@ impl Hyperliquid {
                 )));
             }
         }
+        // One trades stream per watched coin, shared by its books and charts.
+        for symbol in self.watched_symbols() {
+            if let Some(market) = store.market(symbol) {
+                interests.push(Interest::from_wire_args(public_topic(
+                    "trades",
+                    Some(&market.id),
+                    None,
+                    None,
+                )));
+            }
+        }
         if !self.connection.refused.is_empty() {
             interests.retain(|interest| !self.connection.refused.contains(interest.key.as_ref()));
         }
@@ -474,6 +485,13 @@ impl Hyperliquid {
         }
         for (_, key) in self.topic_interests(store, topic) {
             self.connection.refused.remove(&key);
+        }
+        // The coin's trades stream is retried with the book or chart that watches it.
+        let (SubscriptionTopic::OrderBook { symbol } | SubscriptionTopic::Candles { symbol, .. }) =
+            topic;
+        if let Some(market) = store.market(symbol) {
+            let trades = public_topic("trades", Some(&market.id), None, None);
+            self.connection.refused.remove(&trades);
         }
     }
 
@@ -762,6 +780,8 @@ impl Hyperliquid {
                 }
                 self.clear_private_snapshot_watch(cx);
                 self.connection.open = false;
+                // A reconnect resumes the mid as last until its first trade.
+                self.trade_last.clear();
                 // A new socket tries every topic again; a repeat refusal is reported again.
                 self.connection.refused.clear();
                 self.connection.unanswered.borrow_mut().clear();
@@ -810,8 +830,13 @@ impl Hyperliquid {
                 let value: EncodedTopic<'_> = serde_json::from_str(&interest.wire_args)
                     .map_err(|_| SocketError::InvalidInterest)?;
                 let figures = value.subscription.figures.unwrap_or(0);
-                let book_order = 2 * usize::from(value.subscription.kind == "bbo")
-                    + usize::from(value.subscription.fast);
+                // Within a coin: depth (slow, then fast), then bbo, then trades.
+                let book_order = if value.subscription.kind == "trades" {
+                    3
+                } else {
+                    2 * usize::from(value.subscription.kind == "bbo")
+                        + usize::from(value.subscription.fast)
+                };
                 Ok((
                     interest,
                     ranks

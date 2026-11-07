@@ -182,7 +182,7 @@ impl MexcFutures {
         }
     }
     fn get(&mut self, cx: &mut Cx<'_, Pending>, path: &str, symbol: String, generation: u32) {
-        let context = match cx.http_context(
+        let context = match cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -215,7 +215,13 @@ impl MexcFutures {
         }
     }
     fn stream(&mut self, cx: &mut Cx<'_, Pending>, path: &str, tickers: bool) {
-        let context = match cx.http_context(
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -780,6 +786,22 @@ impl Venue for MexcFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Private { pending, .. } => Self::startup_reads(pending),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(account::Request::Mode) => S::ACCOUNT,
+            Pending::Account(account::Request::Snapshot(read)) => match read.scope {
+                account::Scope::Assets => S::BALANCE,
+                account::Scope::Positions => S::POSITIONS,
+                _ => S::ORDERS,
+            },
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
@@ -1355,32 +1377,34 @@ impl Venue for MexcFutures {
         self.protective_retired(owner)
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        if let Pending::Protective(request) = pending {
-            self.protective_failed(cx, *request, error);
-            return;
-        }
-        if let Pending::Clock(request) = pending {
-            self.clock_failed(cx, *request, error);
-            return;
-        }
-        if matches!(pending, Pending::Private { .. }) {
-            self.private_precommit_failed(
-                cx,
-                pending,
-                safe_cex_engine::request_context::Error::Invalid,
-                error,
-            );
-            return;
-        }
-        match pending {
-            Pending::Candles { context, .. } => {
-                let _ = cx.fail_context(&context, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if let Pending::Protective(request) = pending {
+                self.protective_failed(cx, *request, error);
+                return;
             }
-            Pending::BookQuery { context, .. } => {
-                let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
+            if let Pending::Clock(request) = pending {
+                self.clock_failed(cx, *request, error);
+                return;
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
-        }
+            if matches!(pending, Pending::Private { .. }) {
+                self.private_precommit_failed(
+                    cx,
+                    pending,
+                    safe_cex_engine::request_context::Error::Invalid,
+                    error,
+                );
+                return;
+            }
+            match pending {
+                Pending::Candles { context, .. } => {
+                    let _ = cx.fail_context(&context, error);
+                }
+                Pending::BookQuery { context, .. } => {
+                    let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
+                }
+                pending => self.on_request_failed(cx, pending, &error.message),
+            }
+        });
     }
     fn on_http_preparation_failed(
         &mut self,
@@ -1389,11 +1413,13 @@ impl Venue for MexcFutures {
         reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        if matches!(pending, Pending::Private { .. }) {
-            self.private_precommit_failed(cx, pending, reason, error);
-        } else {
-            self.on_sign_error(cx, pending, error);
-        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if matches!(pending, Pending::Private { .. }) {
+                self.private_precommit_failed(cx, pending, reason, error);
+            } else {
+                self.on_sign_error(cx, pending, error);
+            }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         if let Pending::Protective(request) = pending {

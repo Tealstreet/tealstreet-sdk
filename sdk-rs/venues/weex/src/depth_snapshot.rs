@@ -22,7 +22,7 @@ impl WeexFutures {
         self.next_generation += 1;
         state.generation = self.next_generation;
         let generation = state.generation;
-        let context = match cx.http_context_with_egress(
+        let context = match cx.http_live_context_with_egress(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
