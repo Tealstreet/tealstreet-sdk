@@ -35,7 +35,9 @@ secondary slot uses its own device-owned passphrase and the configured shared
 broker key. KuCoin Spot does not expose an agent/API-wallet signature mode in
 this integration. `PayloadSigner` stays disabled: one canonical request HMAC
 cannot supply the additional setup-owned passphrase and optional broker MACs.
-A configured unsupported mode fails with `unsupported` / `notSent` before I/O.
+A configured unsupported private mode fails with `unsupported` / `notSent`
+before I/O. Explicit public-only accounts ignore all signer configuration and
+install no signing authority; an unused PayloadSigner cannot reject construction.
 
 ## Caller impact and validation
 

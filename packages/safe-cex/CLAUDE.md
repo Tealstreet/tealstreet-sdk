@@ -200,7 +200,7 @@ serialized bodies are preserved. WOO has no signing nonce or wire recvWindow.
 PayloadSigner remains refused because its legacy private lifecycle has no such
 mode; RemoteSigner cannot fall back to it or to local material. Before-dispatch
 signing failures are `notSent`; dispatched ambiguous writes remain `Unknown`.
-WOO RemoteSigner setup refuses any configured secondary credentials with
+Private WOO RemoteSigner setup refuses any configured secondary credentials with
 `unsupported` / `notSent` before native construction or callbacks: its HMAC wire
 cannot select the device's read-key slot. Remove the secondary credentials to
 use Hosted with the primary key, or use read keys in local browser mode.
@@ -208,6 +208,11 @@ Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
+Explicit `publicDataOnly: true` in delegated setup preserves raw mode-intent
+flags but ignores signing callbacks, credentials and setup metadata. It installs
+no provider or identity, advertises no algorithms, and cannot sign. Private-mode
+callback validation, primary/secondary selection and mode refusals remain strict.
+
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.
 RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary

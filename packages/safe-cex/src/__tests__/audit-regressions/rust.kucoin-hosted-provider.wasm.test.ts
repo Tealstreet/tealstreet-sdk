@@ -230,3 +230,33 @@ it.each(['kucoin', 'kucoinspot'] as const)('%s: actual WASM secondary reads bind
   expect(browser.io).not.toHaveBeenCalled();
   expect(server.io).not.toHaveBeenCalled();
 });
+
+
+it.each(['kucoin', 'kucoinspot'] as const)('%s: explicit public-only WASM accounts ignore unused signers and cannot authenticate', async (venue) => {
+  for (const key of ['', 'unused-public-key']) {
+    const payloadSigner = vi.fn();
+    const remoteSigner = { sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn() };
+    const { exchange, io } = fixture(venue, {
+      key, publicDataOnly: true, payloadSigner, remoteSigner,
+      secondary_key: 'unused-read-key', secondary_secret: 'unused-read-secret',
+    });
+    expect(exchange.isPublicDataOnly).toBe(true);
+    const result = await exchange.signHttpRequest({
+      id: 'public', type: 'http', exchangeName: venue,
+      config: { method: 'GET', url: '/api/v1/market/allTickers', baseURL: 'https://api.kucoin.com' },
+    });
+    expect(result.error).toBeUndefined();
+    expect(Object.keys(result.config!.headers).some((header) => /^KC-API-/i.test(header))).toBe(false);
+    const auth = await exchange.signWsAuth({
+      id: 'public-auth', type: 'ws-auth', exchangeName: venue,
+      wsAuth: { outputFormat: 'kucoin-batch', toSign: JSON.stringify({ payload: `${stamp}POST/api/v1/bullet-private` }) },
+    });
+    expect(auth.wsAuthSignature).toBeUndefined();
+    expect(auth.error).toBeTruthy();
+    expect(payloadSigner).not.toHaveBeenCalled();
+    expect(remoteSigner.sign).not.toHaveBeenCalled();
+    expect(remoteSigner.isAvailable).not.toHaveBeenCalled();
+    expect(remoteSigner.onAvailabilityChange).not.toHaveBeenCalled();
+    expect(io).not.toHaveBeenCalled();
+  }
+});

@@ -20,7 +20,7 @@ const publicCredential = (input: unknown, trim: boolean): string | undefined => 
   return key.length ? key : undefined;
 };
 
-/** Presence selects a mode; malformed configured callbacks still fail validation. */
+/** Presence selects a mode; private setup validates malformed configured callbacks. */
 export const selectDelegatedSigningMode = (
   options: Pick<ExchangeOptions, 'remoteSigner' | 'payloadSigner'>,
 ): 'remote' | 'payload' | undefined => options.remoteSigner !== undefined ? 'remote'
@@ -37,6 +37,7 @@ export class DelegatedSignerSetup {
   #abort = new AbortController();
   #pending = new Set<AbortController>();
   #venue: ExchangeName;
+  readonly #publicOnly: boolean;
   #publicMode: Readonly<{ requested: boolean | null; remoteSigner: boolean; payloadSigner: boolean; apiKeyIndexPresent: boolean }>;
   readonly intent: Readonly<{ remoteSigner: boolean; payloadSigner: boolean }>;
   readonly usesPayloadSigner: boolean;
@@ -46,13 +47,26 @@ export class DelegatedSignerSetup {
   readonly signerAlgorithms: readonly SignAlgorithm[];
 
   constructor(name: ExchangeName, options: ExchangeOptions) {
-    this.signerAlgorithms = remoteSignerAlgorithms(name);
+    this.#venue = name;
+    this.#publicOnly = options.publicDataOnly === true;
+    this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
+    this.#publicMode = Object.freeze({ requested: options.publicDataOnly ?? null,
+      ...this.intent, apiKeyIndexPresent: Boolean(options.apiKeyIndex) });
+    this.usesPayloadSigner = !this.#publicOnly && selectDelegatedSigningMode(options) === 'payload';
+    this.signerAlgorithms = this.#publicOnly ? [] : remoteSignerAlgorithms(name);
+    // Explicit public mode grants no signing authority. Do not validate or retain
+    // callbacks, keys, passphrases or setup metadata that this account cannot use.
+    if (this.#publicOnly) {
+      this.#identities = Object.freeze({});
+      this.hasSecondary = false;
+      this.primaryComplete = false;
+      this.credentialPresence = Object.freeze({ key: false, secret: false });
+      return;
+    }
     const metadata = parseLocalSignerMetadata(options.localSigner);
     const setupPolicy = deriveSignerSetupPolicy(name);
     const primaryMetadata = effectiveIdentityMetadata(metadata.primary, setupPolicy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
-    this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
-    this.usesPayloadSigner = selectDelegatedSigningMode(options) === 'payload';
     if (name === 'grvt' && this.usesPayloadSigner) {
       const message = 'GRVT PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
@@ -68,8 +82,6 @@ export class DelegatedSignerSetup {
     if ((this.intent.remoteSigner && (!remoteSigner || typeof remoteSigner.sign !== 'function'
       || typeof remoteSigner.isAvailable !== 'function' || typeof remoteSigner.onAvailabilityChange !== 'function'))
       || (this.intent.payloadSigner && typeof options.payloadSigner !== 'function')) invalid();
-    this.#publicMode = Object.freeze({ requested: options.publicDataOnly ?? null,
-      ...this.intent, apiKeyIndexPresent: Boolean(options.apiKeyIndex) });
     const primary = publicCredential(options.key, primaryMetadata?.trimCredential === true);
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
@@ -123,7 +135,6 @@ export class DelegatedSignerSetup {
         payloadSignerMetadata: options,
       });
     } catch { invalid(); }
-    this.#venue = name;
     this.#identities = identities;
     this.hasSecondary = secondary !== undefined;
     this.primaryComplete = primary !== undefined;
@@ -133,6 +144,10 @@ export class DelegatedSignerSetup {
   /** This stable wrapper owns no callbacks itself. A host may retain it after
    * disposal without retaining authority or admitting another provider call. */
   readonly signer: Signer = async (request, { signal }) => {
+    if (this.#publicOnly) {
+      const message = 'Public-only accounts cannot sign';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     const provider = this.#provider;
     if (!provider || this.#abort.signal.aborted || signal.aborted) return invalid('Delegated signer setup is disposed or canceled');
     if (this.#pending.size >= 64) return invalid('Delegated signer request limit exceeded');
@@ -150,7 +165,7 @@ export class DelegatedSignerSetup {
   };
 
   construct(Constructor: Constructor, venue: string, optionsJson: string): WasmEngineLike {
-    if (this.#consumed || !this.#provider || !this.#identities) invalid('Delegated signer setup has already been consumed or disposed');
+    if (this.#consumed || (!this.#publicOnly && !this.#provider) || !this.#identities) invalid('Delegated signer setup has already been consumed or disposed');
     this.#consumed = true;
     try {
       if (venue !== this.#venue) invalid();
@@ -160,8 +175,8 @@ export class DelegatedSignerSetup {
       const {
         remoteSigner: _remote, payloadSigner: _payload, signing: _signing, readCredentials: _readCredentials, ...safe
       } = withoutSigningCredentials(parsed as ExchangeOptions) as ExchangeOptions & { signing?: unknown; readCredentials?: unknown };
-      return new Constructor(venue, JSON.stringify({ ...safe, signing: this.#identities,
-        remoteSigning: true, payloadSigner: this.usesPayloadSigner, publicMode: this.#publicMode }));
+      return new Constructor(venue, JSON.stringify({ ...safe, ...(this.#publicOnly ? { publicDataOnly: true } : {}), signing: this.#identities,
+        remoteSigning: !this.#publicOnly, payloadSigner: this.usesPayloadSigner, publicMode: this.#publicMode }));
     } catch (error) {
       this.dispose();
       throw error;
