@@ -1564,7 +1564,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 }
 
 /// A refused write answer, classified by HTTP status and WOO's documented
-/// error codes. 408/5xx and malformed answers do not prove a refusal.
+/// error codes. Rate limits, 408/5xx and malformed answers do not prove a refusal.
 pub(crate) fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
     #[derive(Deserialize)]
     struct Code {
@@ -1581,8 +1581,8 @@ pub(crate) fn answer_failure(response: &Response<'_>, message: String) -> VenueE
     };
     match (response.status, code) {
         (408 | 500.., _) => error.outcome(Outcome::Unknown),
+        (429, _) | (_, Some(-1003)) => error.kind(ErrorKind::RateLimited).outcome(Outcome::Unknown),
         (_, Some(-1001 | -1002)) | (401, _) => rejected(error, ErrorKind::AuthInvalid),
-        (_, Some(-1003)) | (429, _) => rejected(error, ErrorKind::RateLimited),
         (403, _) => rejected(error, ErrorKind::AuthPermission),
         (_, Some(-1000 | -1011 | -1012)) => error.outcome(Outcome::Unknown),
         (_, Some(-1004 | -1005 | -1006 | -1008 | -1101 | -1102 | -1103)) => {

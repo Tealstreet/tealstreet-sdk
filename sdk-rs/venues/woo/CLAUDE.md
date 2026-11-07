@@ -23,3 +23,9 @@ the wrong runtime fix.
 The proposal in `docs/plans/RUST_WOO_ENDPOINT_MIGRATION.md` inventories the active
 native REST/socket contracts and next-cut RED gates. It changes no runtime route;
 legacy availability is not proved by an unauthenticated response.
+
+# Dispatched write rate limits
+
+HTTP 429 or WOO code `-1003` after a dispatched write is `RateLimited` with an
+`Unknown` outcome, never proof of refusal or permission to resend. HTTP 429 takes
+precedence over body codes; read retries and pre-send `NotSent` remain separate.

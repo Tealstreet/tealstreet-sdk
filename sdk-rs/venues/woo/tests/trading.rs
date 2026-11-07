@@ -1038,6 +1038,193 @@ fn trailing_amend_refreshes_full_position_quantity_after_cancel_ack() {
 }
 
 #[test]
+fn ordinary_write_rate_limits_are_unknown_without_resigning_or_resending() {
+    assert_write_rate_limits_are_unknown(false);
+}
+
+#[test]
+fn protective_write_rate_limits_are_unknown_without_resigning_or_resending() {
+    assert_write_rate_limits_are_unknown(true);
+}
+
+fn assert_write_rate_limits_are_unknown(protective: bool) {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (status, body, code) in [
+        (
+            429,
+            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+            Some("-1003"),
+        ),
+        (
+            200,
+            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+            Some("-1003"),
+        ),
+        (
+            401,
+            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+            Some("-1003"),
+        ),
+        (429, r#"{"success":false,"message":"too many"}"#, None),
+        (429, "<html>too many</html>", None),
+        (
+            429,
+            r#"{"success":false,"code":-1001,"message":"too many"}"#,
+            Some("-1001"),
+        ),
+    ] {
+        let mut e = engine();
+        let mut o = opts();
+        let path = if protective {
+            o.kind = OrderType::StopLoss;
+            o.side = OrderSide::Sell;
+            o.reduce_only = Some(true);
+            "/v3/algo/order"
+        } else {
+            "/v1/order"
+        };
+        let mut actions = placed(&mut e, vec![o]);
+        let write = req(&actions, Method::Post, path);
+        e.handle(
+            1010.0,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let response_actions: Vec<_> = e.drain_actions().collect();
+        let error = failure(&response_actions).clone();
+        assert_eq!(
+            error.message,
+            if body.starts_with('<') {
+                "WOO response: expected value at line 1 column 1"
+            } else {
+                "WOO request failed: too many"
+            }
+        );
+        assert_eq!(error.venue_code.as_deref(), code);
+        assert_eq!(result(&response_actions), Err(error.legacy_text()));
+        actions.extend(response_actions);
+
+        // Exercise any queued work and a late duplicate answer, not just the immediate reply.
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        for (timer, at) in timers {
+            e.handle(at.max(1011.0), Event::TimerFired { timer });
+            actions.extend(e.drain_actions());
+        }
+        e.handle(
+            60_000.0,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        actions.extend(e.drain_actions());
+        let physical: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(physical.len(), 1, "no second physical request: {actions:?}");
+        assert_eq!(
+            physical
+                .iter()
+                .flat_map(|r| &r.headers)
+                .filter(|(name, value)| *name == "x-api-signature" && !value.is_empty())
+                .count(),
+            1,
+            "exactly one signed packet"
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+                .count(),
+            1
+        );
+        assert_eq!(
+            (error.kind, error.outcome),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
+            "{status} {body}"
+        );
+    }
+}
+
+#[test]
+fn rate_limited_confirmation_reads_still_retry_without_repeating_the_write() {
+    let mut e = engine();
+    e.store_mut()
+        .update_setting("BTCUSDT", |s| s.leverage = 10.0);
+    e.handle(
+        1000.0,
+        Event::Command(Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+            side: None,
+        }),
+    );
+    let a = e.drain_actions().collect::<Vec<_>>();
+    let write = req(&a, Method::Post, "/v1/client/futures_leverage");
+    let a = reply(&mut e, &write, 1010.0, r#"{"success":true}"#);
+    let read = req(&a, Method::Get, "/v1/client/futures_leverage");
+    e.handle(
+        1020.0,
+        Event::HttpResponse {
+            request: read.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"success":false,"code":-1003,"message":"too many"}"#,
+            },
+        },
+    );
+    let a = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
+    let a = tick(&mut e, &a);
+    req(&a, Method::Get, "/v1/client/futures_leverage");
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+    );
+}
+
+#[test]
+fn invalid_orders_remain_not_sent_before_any_signed_request() {
+    for protective in [false, true] {
+        let mut e = engine();
+        let mut o = opts();
+        o.amount = -1.0;
+        if protective {
+            o.kind = OrderType::StopLoss;
+            o.side = OrderSide::Sell;
+        }
+        let a = placed(&mut e, vec![o]);
+        assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+
+#[test]
 fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let unknown = (None, Some(Outcome::Unknown));
@@ -1055,7 +1242,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             r#"{"success":false,"code":-1003,"message":"too many"}"#,
-            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
         ),
         (
             200,
