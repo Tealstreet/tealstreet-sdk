@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { memoryMetricErrors } from './memory.mjs';
 import { compareSnapshots, snapshotCoverageErrors } from './snapshot-compare.mjs';
 import { sameCommandResults } from './tape.mjs';
-import { PUBLIC_REPLAY_PAIRS, CPU_FIELDS, performanceFailures, performanceMetricErrors, performanceObjectives, performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, CPU_FAIL_RATIO, CPU_FIELDS, performanceFailures, performanceMetricErrors, performanceObjectives, performanceOrder } from './performance-policy.mjs';
 import { hasPairedBitgetSteady } from './bitget-paired-steady.mjs';
 
 export const CPU_REMEASURE_RULE = 'all-objective-normalized-two-run-mean-v1';
@@ -114,6 +114,10 @@ export function isCpuOnlyMiss(value, paired) {
 
 export function assessEligibility(first, paired) {
   const errors = cpuOnlyErrors(first, true, paired);
+  // A CPU miss is Rust > 1.00x TS after gate.mjs's in-job re-measure (Sam, 2026-11-07),
+  // so none is eligible: the cross-job remeasure below is unreachable until it is removed.
+  if (!errors.length) for (const objective of objectives(first.report, paired, first.execution?.measuredCheckoutSha))
+    if (!(objective.candidate <= objective.reference * CPU_FAIL_RATIO)) errors.push(`${objective.field}: Rust over 1.00x TS is decided in-job, not remeasured`);
   return { eligible: errors.length === 0, errors, objectives: errors.length ? [] : objectives(first.report, paired, first.execution?.measuredCheckoutSha) };
 }
 

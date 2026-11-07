@@ -24,7 +24,8 @@ import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 import { runAuditedFixer } from './oracle-audit.mjs';
 import { createTsFixes } from './ts-oracle.mjs';
 import { duplicateSymbols, compareCheckpoints, compareSnapshots, valueDifferences, checkpointCoverageErrors, snapshotCoverageErrors } from './snapshot-compare.mjs';
-import { PUBLIC_REPLAY_PAIRS, median, performanceFailures, performanceMetricErrors, performanceOrder, replayRunCount } from './performance-policy.mjs';
+import { writeCpuAnnotations } from './cpu-annotations.mjs';
+import { CPU_SLOWER, PUBLIC_REPLAY_PAIRS, cpuSlower, median, performanceMetricErrors, performanceOrder, performanceVerdict, replayRunCount } from './performance-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -159,13 +160,28 @@ const correctnessRuns = values['correctness-only'] ? 1 : isPrivate ? runs : 1;
 const checkpointPlans = Object.fromEntries(['ts', 'rust'].map((impl) => [impl, expectedCheckpointPlan(tapeRecords, venue, impl)]));
 const results = { ts: [], rust: [] };
 const performanceResults = { ts: [], rust: [] };
+const metricsOf = (impl) => performanceResults[impl].map((output) => output.metrics);
+let remeasure;
 try {
 for (let run = 0; run < correctnessRuns; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 if (!isPrivate && !values['correctness-only']) {
-  for (let run = 0; run < runs; run++)
-    for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
+  const measure = () => {
+    for (let run = 0; run < runs; run++)
+      for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
+  };
+  measure();
+  // One re-measure on this runner before Rust > 1.00x TS fails (Sam, 2026-11-07). Only the
+  // final set is reported and retained, so recorded revalidation never re-measures.
+  const first = recorded ? undefined : performanceVerdict(metricsOf('ts'), metricsOf('rust'));
+  if (first && cpuSlower(first.failures)) {
+    remeasure = { first: first.failures.filter((failure) => failure.includes(`: ${CPU_SLOWER} (`)) };
+    for (const impl of ['ts', 'rust']) performanceResults[impl].length = 0;
+    for (let index = artifacts.length - 1; index >= 0; index--) if (artifacts[index].mode === 'performance') artifacts.splice(index, 1);
+    sampleOrder.length = 0;
+    measure();
+  }
 }
 } catch (error) {
   if (!(error instanceof CommandReplayTimeout)) throw error;
@@ -412,9 +428,16 @@ if (venue.family === 'coinbase')
 
 recorded?.finish();
 const failures = [...differences];
+const warnings = [];
 // A private tape is paced in real time, so it gates correctness only.
-if (!isPrivate && !values['correctness-only']) failures.push(...performanceFailures(
-  performanceResults.ts.map((output) => output.metrics), performanceResults.rust.map((output) => output.metrics)));
+if (!isPrivate && !values['correctness-only']) {
+  const verdict = performanceVerdict(metricsOf('ts'), metricsOf('rust'));
+  failures.push(...verdict.failures);
+  warnings.push(...verdict.warnings);
+  if (remeasure && !cpuSlower(verdict.failures))
+    warnings.push(...remeasure.first.map((failure) => `${failure}; cleared on the one re-measure`));
+}
+warnings.sort();
 // Report order must not depend on the arrival order of keyed replay rows.
 failures.sort();
 writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
@@ -424,10 +447,12 @@ writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   private: isPrivate, books: values.books, runs: isPrivate ? 0 : runs, correctnessRuns, requiredImprovement: 0.10,
   ...(values['correctness-only'] ? { correctnessOnly: true, coverage: { correctness: 'complete', performance: 'not-run' } } : {}),
   status: failures.length ? 'FAIL' : 'PASS', failures, artifacts, fixers: fixerReports,
+  ...(warnings.length ? { warnings } : {}), ...(remeasure ? { remeasure } : {}),
   ...(recorded ? {} : { measurement: { cpu: cpuObservation, sampleOrder } }),
   summary: { ts: t, rust: r },
   samples: { ts: measuredResults.ts.map((output) => output.metrics), rust: measuredResults.rust.map((output) => output.metrics) },
 }, null, 2) + '\n');
+if (!recorded) writeCpuAnnotations({ venue: values.venue, tape: values.tape, failures, warnings, remeasure });
 if (failures.length) {
   console.log(`FAIL (${failures.length})`);
   for (const failure of failures.slice(0, 40)) console.log(`  ${failure}`);
