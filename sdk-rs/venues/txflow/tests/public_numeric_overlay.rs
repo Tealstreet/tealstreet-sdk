@@ -1,4 +1,4 @@
-//! Exact public numeric overlay semantics retained by the WASM throughput profile.
+//! Public numeric overlays must agree on first decode and repeated-frame cache hits.
 mod support;
 
 #[test]
