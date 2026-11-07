@@ -98,7 +98,7 @@ test('workflow controls reject skipped final checks, unconditional second jobs a
     text => text.replace('needs: [selection, gate, bitget-paired, cpu-plan, cpu-second]\n    if: always()', 'needs: [selection, gate, bitget-paired, cpu-plan, cpu-second]\n    if: success()'),
     text => text.replace('needs: [selection, cpu-certify]\n    if: always()', 'needs: cpu-certify\n    if: success()'),
     text => text.replace('timeout-minutes: 5\n    defaults:\n      run:\n        working-directory: .', 'timeout-minutes: 5'),
-    text => text.replace('suite: [breakoutprop,', 'suite: ['),
+    text => text.replace('suite: [apexomni,', 'suite: ['),
     text => text.replace('--command plan --out', '--command plan --suite bitget --out'),
     text => text.replace("--command collect --suite '${{ matrix.venue }}'", "rust:gate:verify --suite '${{ matrix.venue }}'"),
     text => text.replace('matrix: ${{ fromJSON(needs.cpu-plan.outputs.matrix) }}', 'matrix: { suite: [bitget] }'),

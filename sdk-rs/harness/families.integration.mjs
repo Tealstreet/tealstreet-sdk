@@ -17,8 +17,8 @@ const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.u
   .map((line) => line.trim().split(':')[0].replaceAll("'", ''));
 
 test('the venue list is read from the family map', () => {
-  // Two retired broker aliases were deleted; live Orderly family names remain.
-  assert.equal(venues.length, 49);
+  // Pin the live venue and alias inventory so isolation covers every name.
+  assert.equal(venues.length, 48);
   for (const venue of venues) assert.doesNotThrow(() => venueFamily(venue), venue);
 });
 

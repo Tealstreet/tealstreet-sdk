@@ -100,7 +100,6 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
     bitrue: 1_719_296,
     bitunix: 1_727_488,
     blofin: 1_824_768,
-    breakoutprop: 1_420_288,
     bybit: 2_032_640,
     coinbase: 1_720_320,
     cryptocom: 1_612_800,
@@ -681,34 +680,6 @@ test('#3138 Bitrue guarded stop edits (run 42166643605) retain Bitrue headroom',
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
-  }
-});
-
-test('BreakoutProp native protective edits retain measured headroom and the exact boundary', () => {
-  const measured = 1_554_817;
-  const cap = 1_565_696;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  const currentCap = WASM_VENUE_OVERRIDES.breakoutprop;
-  assert.ok(currentCap >= cap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'breakoutprop'), undefined);
-  assert.equal(wasmBudgetError(currentCap, 'venue', 'breakoutprop'), undefined);
-  assert.match(wasmBudgetError(currentCap + 1, 'venue', 'breakoutprop'), /exceeds/);
-});
-
-test('#3193 breakoutprop provenance at ad4f1d6d5d9 keeps the larger composed cap', () => {
-  const measured = 1_568_969;
-  const measuredCap = 1_580_032;
-  const incomingCap = 1_565_696;
-  const cap = 1_580_032;
-  assert.equal(measuredCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(cap, Math.max(incomingCap, measuredCap));
-  for (const name of ['breakoutprop']) {
-    const family = venueFamily(name);
-    assert.equal(family, 'breakoutprop');
-    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
-    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
-    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
 

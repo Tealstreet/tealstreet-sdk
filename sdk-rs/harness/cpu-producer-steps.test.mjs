@@ -167,8 +167,8 @@ for (const [name, mutate, expected] of [
   assert.equal(value.context.bundles.size, 0);
 });
 
-test('empty-inventory original: one refresh materializes all 32 original producers for later bindings', async t => {
-  assert.equal(CPU_REMEASURE_SUITES.length, 32);
+test('empty-inventory original: one refresh materializes all 31 original producers for later bindings', async t => {
+  assert.equal(CPU_REMEASURE_SUITES.length, 31);
   const value = fixture([() => {}], {
     extraProducers: CPU_REMEASURE_SUITES.filter(suite => suite !== 'bitget'),
     mutateJobs: (rows, read) => { if (read === 0) for (const row of rows) row.steps = []; },
@@ -179,8 +179,8 @@ test('empty-inventory original: one refresh materializes all 32 original produce
   assert.ifError(result.error);
   assert.equal(value.calls.jobs, 2, 'one complete refresh serves all later producers');
   assert.equal(value.context.producerStepRefreshes, 1);
-  assert.equal(value.context.bindings.length, 32);
-  assert.equal(value.context.bundles.size, 32);
+  assert.equal(value.context.bindings.length, 31);
+  assert.equal(value.context.bundles.size, 31);
   assert.ok(value.context.bindings.every(binding => binding.job.steps.length === 3));
 });
 
