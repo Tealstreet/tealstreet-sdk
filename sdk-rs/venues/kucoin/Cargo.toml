@@ -18,4 +18,5 @@ serde_json.workspace = true
 workspace = true
 
 [dev-dependencies]
+safe-cex-venues = { path = "../../registry", default-features = false, features = ["kucoin"] }
 safe-cex-engine = { workspace = true, features = ["test-support"] }

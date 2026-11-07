@@ -1000,3 +1000,35 @@ fn a_repair_of_a_refused_candle_sends_its_subscribe_once_more() {
             .any(|n| n.contains("is not subscribed"))
     );
 }
+
+#[test]
+fn unchanged_fast_context_exports_its_real_receipt_time_for_shared_accounts() {
+    use safe_cex_engine::model::StopTriggerType::MarkPrice;
+    let (mut source, socket) = start();
+    source.set_account_startup(false);
+    source.take_frame(1_000.);
+    let text = r#"{"channel":"fastAssetCtxs","data":"q1ZyCnFWsqpWyk0syg6oULJSsjQ3NTDQM1Wq1VFyDfFAkTI2MzXQMwJLVVRWWfmFuTiiyBuamOoZKdXWAgA="}"#;
+    source.handle(2_000., Event::WsMessage { socket, text });
+    source.take_frame(2_001.);
+    source.handle(8_000., Event::WsMessage { socket, text });
+    assert_eq!(
+        source.store().reference_seen_at("BTC-PERP", MarkPrice),
+        Some(8_000.)
+    );
+    let frame = source.take_frame(8_100.).expect("observation frame");
+    assert!(
+        !safe_cex_engine::wire::sections(frame).any(|(kind, _)| kind == 4),
+        "same prices: no value delta"
+    );
+    let (_, bytes) = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == 24)
+        .expect("unchanged observed mark must reach the shared source");
+    let times: Vec<_> = bytes
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|v| f64::from_le_bytes(*v))
+        .collect();
+    assert_eq!(times[2], 8_000.);
+    assert_eq!(source.store().ticker("BTC-PERP").unwrap().mark, 97_500.5);
+}

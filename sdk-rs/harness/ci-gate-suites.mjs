@@ -61,6 +61,7 @@ const suiteCases = (suite) => {
     cases.push(publicCase('bybitinverse', 'BTCUSD,ETHUSD'),
       ...['bybitspot', 'bybitdemo', 'hyrotrader'].map((venue) => publicCase(venue, 'BTCUSDT,ETHUSDT')));
     cases.push(...['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].map((venue) => privateCase(venue)));
+    cases.push(privateCase('bybit', 'bybit-history'));
   } else if (suite === 'okx') {
     cases.push(publicCase('okx', 'BTCUSD,ETHUSD', 'okx-inverse'),
       publicCase('okxeu', xperpBooks, 'okxeu-xperp'), publicCase('okxeu', xperpBooks));

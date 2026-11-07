@@ -53,6 +53,8 @@ export class DelegatedSignerSetup {
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
     this.usesPayloadSigner = selectDelegatedSigningMode(options) === 'payload';
+    const kucoin = name === 'kucoin';
+    if (kucoin && this.usesPayloadSigner) invalid('KuCoin requires RemoteSigner batch custody');
     const remoteSigner = options.remoteSigner;
     const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');
@@ -73,20 +75,23 @@ export class DelegatedSignerSetup {
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     const primaryDropped = setupPolicy.readCredentials === 'publicRead' && publicDataOnly;
-    const primaryPassphrase = resolveSetupPassphrase('primary', primary !== undefined, options.passphrase,
+    const primaryPassphrase = kucoin ? { value: undefined, inheritPrimary: false } : resolveSetupPassphrase('primary', primary !== undefined, options.passphrase,
       options.passphrase, setupPolicy.primary, publicDataOnly);
-    const secondaryPassphrase = resolveSetupPassphrase('secondary', secondary !== undefined, options.secondary_passphrase,
+    const secondaryPassphrase = kucoin ? { value: undefined, inheritPrimary: false } : resolveSetupPassphrase('secondary', secondary !== undefined, options.secondary_passphrase,
       options.passphrase, setupPolicy.secondary, publicDataOnly);
-    const presentsPassphrase = deriveRemoteSigningPolicy(name)?.passphraseHeader !== undefined;
-    const primaryPassphraseRef = presentsPassphrase && primaryPassphrase.value
+    const presentsPassphrase = kucoin || deriveRemoteSigningPolicy(name)?.passphraseHeader !== undefined;
+    const primaryPassphraseRef = kucoin && primary !== undefined ? `delegated/${nanoid()}/passphrase` : presentsPassphrase && primaryPassphrase.value
       ? `delegated/${nanoid()}/passphrase` : undefined;
-    const secondaryPassphraseRef = !presentsPassphrase || secondary === undefined || !secondaryPassphrase.value ? undefined
+    const secondaryPassphraseRef = kucoin && secondary !== undefined ? `delegated/${nanoid()}/passphrase` : !presentsPassphrase || secondary === undefined || !secondaryPassphrase.value ? undefined
       : secondaryPassphrase.inheritPrimary ? primaryPassphraseRef : `delegated/${nanoid()}/passphrase`;
+    const broker = kucoin && options.extra?.kucoinBroker;
+    const brokerRef = broker && broker.partner.trim() && broker.brokerName.trim() ? `delegated/${nanoid()}/broker` : undefined;
     const identity = (stableId: string | undefined, passphrase: string | undefined) => Object.freeze({
       credential: `delegated/${nanoid()}/credential`,
       signing: `delegated/${nanoid()}/signing`,
       ...(stableId === undefined ? {} : { stableId }),
       ...(passphrase === undefined ? {} : { passphrase }),
+      ...(brokerRef === undefined ? {} : { extra: { kucoinBroker: brokerRef } }),
     });
     const identities: SigningIdentities = Object.freeze({
       ...(primary === undefined || primaryDropped ? {} : { primary: identity(primaryMetadata?.stableId, primaryPassphraseRef) }),
@@ -97,9 +102,9 @@ export class DelegatedSignerSetup {
         exchangeName: name,
         identities: {
           ...(identities.primary && primary !== undefined ? { primary: { ...identities.primary, publicCredential: primary,
-            ...(primaryPassphraseRef === undefined ? {} : { passphraseValue: primaryPassphrase.value }) } } : {}),
+            ...(primaryPassphraseRef === undefined || kucoin ? {} : { passphraseValue: primaryPassphrase.value }) } } : {}),
           ...(identities.secondary && secondary !== undefined ? { secondary: { ...identities.secondary, publicCredential: secondary,
-            ...(secondaryPassphraseRef === undefined ? {} : { passphraseValue: secondaryPassphrase.value }) } } : {}),
+            ...(secondaryPassphraseRef === undefined || kucoin ? {} : { passphraseValue: secondaryPassphrase.value }) } } : {}),
         },
         remoteSigner,
         payloadSigner,
