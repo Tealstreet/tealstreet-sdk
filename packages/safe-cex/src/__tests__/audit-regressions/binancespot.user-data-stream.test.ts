@@ -2,13 +2,13 @@ import type { RemoteSigner } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceSpotExchange } from '../../exchanges/binance/binancespot.exchange';
+import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
 import {
   BINANCE_SPOT_HEARTBEAT_REQUEST_ID,
   BINANCE_SPOT_USER_DATA_REQUEST_ID,
   BinancePrivateWebsocket,
   buildBinanceSpotUserDataSignaturePayload,
-} from '../../exchanges/binance/binancespot.ws-private';
+} from '../reference/binance/binancespot.ws-private';
 import { BASE_WS_URL, ENDPOINTS, USER_DATA_RECV_WINDOW } from '../../exchanges/binance/binancespot.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderStatus } from '../../types';

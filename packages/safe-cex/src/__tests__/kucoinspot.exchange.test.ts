@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { KucoinSpotExchange } from '../exchanges/kucoin/kucoinspot.exchange';
-import { KUCOIN_SPOT_ENDPOINTS } from '../exchanges/kucoin/kucoinspot.types';
+import { KucoinSpotExchange } from './reference/kucoin/kucoinspot.exchange';
+import { KUCOIN_SPOT_ENDPOINTS } from './reference/kucoin/kucoinspot.types';
 import { DefaultStore } from '../store/store.base';
 import {
   ExchangeOptions,

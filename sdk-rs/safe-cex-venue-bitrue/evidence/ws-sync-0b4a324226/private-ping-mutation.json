@@ -1,9 +1,0 @@
-{
-  "base_sha": "0b4a32422659e26f7054b5e50b25cea6a6974e33",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n@@ -171,7 +171,7 @@\n     let stringify = host.prepare_stringify()?;\n     let text = host.stringify(stringify, frame)?;\n     host.send(send, text)?;\n-    host.handle_pong(20_000.0)?;\n+    // mutation omits pong registration\n     Ok(())\n }\n pub fn handle_public_ping<T: PingHost>(host: &T, json: T::Value) -> Result<(), T::Error> {\n",
-  "expected_named_assertion": "BITRUE-SYNC-NATIVE-IMMEDIATE-EFFECTS private-ping:0",
-  "runtime_proof": true,
-  "stop_case_name": "private-ping:0",
-  "stop_case_index": 94
-}

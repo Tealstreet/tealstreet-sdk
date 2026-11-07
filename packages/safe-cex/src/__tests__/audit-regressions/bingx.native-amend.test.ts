@@ -2,8 +2,8 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BingxExchange } from '../../exchanges/bingx/bingx.exchange';
-import { ENDPOINTS } from '../../exchanges/bingx/bingx.types';
+import { BingxExchange } from '../reference/bingx/bingx.exchange';
+import { ENDPOINTS } from '../reference/bingx/bingx.types';
 import { DefaultStore } from '../../store/store.base';
 import {
   MarginType,

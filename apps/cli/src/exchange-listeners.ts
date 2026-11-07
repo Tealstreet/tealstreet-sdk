@@ -2,7 +2,8 @@ import type { CLIPlatformAdapter, ExchangeLike } from '../../../packages/cli-cor
 import type { ExchangeHealthMonitor } from '../../../packages/safe-cex/src/health/ExchangeHealthMonitor';
 import { OrderSide, type OrderFillEvent } from '../../../packages/safe-cex/src/types';
 import type { recordFill } from './audit-log';
-import { classifyForCLI, criticalErrorKey } from './error-classifier';
+import { classifyForCLI, criticalErrorKey, errorEventClassification } from './error-classifier';
+import { U } from './console-glyphs';
 import type { logger } from './logger';
 
 export interface ExchangeListenerContext {
@@ -68,7 +69,7 @@ export function setupExchangeListeners(
     if (context.isMonitorMode()) {
       addWatchMessage('fill', fillMsg);
     } else {
-      adapter.printSuccess(`✓ Fill: ${fillMsg}`);
+      adapter.printSuccess(`${U.ok} Fill: ${fillMsg}`);
     }
   });
 
@@ -77,7 +78,7 @@ export function setupExchangeListeners(
     const error = args[0] as string;
     const acctName = accountName || context.getCurrentAccountName() || 'unknown';
     const monitor = context.getHealthMonitor(acctName);
-    const category = monitor ? monitor.processMessage(error, true) : null;
+    const category = monitor ? monitor.processMessage(error, true, errorEventClassification(args[1])) : null;
     const action = classifyForCLI(category, 'error', error);
 
     switch (action.action) {

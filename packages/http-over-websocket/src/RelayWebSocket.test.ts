@@ -1,7 +1,7 @@
-import { AddressInfo } from 'node:net';
+import { AddressInfo, createServer, type Socket } from 'node:net';
 
 import { WebSocketServer, WebSocket as WsClient } from 'ws';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { configureHOW } from './config';
 import { buildRelayUrl, isRelayUrl, parseRelayUrl, RELAY_QUERY_PARAM, RelayWebSocket } from './RelayWebSocket';
@@ -73,18 +73,20 @@ const waitFor = (pred: () => boolean, ms = 3000) =>
 
 describe('relay url helpers', () => {
   it('builds, detects and parses the ts-relay query on the regional tunnel url', () => {
+    // Both regions were fsjnpy143pbz.{asia,jp} (AWS) until AWS_EXIT.md step 3e moved
+    // every region to the one Vultr tunnel host.
     const url = buildRelayUrl('sg', 'wss://stream.bybit.com/v5/private');
     expect(url).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
+      'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
     );
     expect(buildRelayUrl('jp', 'wss://ws.okx.com:8443/ws/v5/private')).toContain(
-      'fsjnpy143pbz.jp.tealstreet.io/tunnel?',
+      'fsjnpy143pbz-tyo.tealstreet.io/tunnel?',
     );
     expect(isRelayUrl(url)).toBe(true);
     expect(isRelayUrl('wss://stream.bybit.com/v5/private?requestId=x')).toBe(false);
     expect(isRelayUrl('not a url')).toBe(false);
     expect(parseRelayUrl(url)).toEqual({
-      tunnelUrl: 'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel',
+      tunnelUrl: 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel',
       upstream: 'wss://stream.bybit.com/v5/private',
     });
   });
@@ -130,6 +132,43 @@ describe('RelayWebSocket', () => {
     await waitFor(() => events.includes('close'));
     expect(ws.readyState).toBe(RelayWebSocket.CLOSED);
     expect(events.filter((e) => e === 'close')).toHaveLength(1);
+    expect(ws.diagnostics.lastClose).toMatchObject({
+      initiator: 'local',
+      phase: 'established',
+      route: 'relay',
+      port: 'other',
+    });
+  });
+
+  it('attributes a close while tunnel authentication is pending to the handshake phase', async () => {
+    configureHOW({ getProxyToken: () => new Promise<string>(() => {}) });
+    const ws = new RelayWebSocket(relayUrlFor(tunnel.url, 'wss://stream.bybit.com/v5/private'));
+    const { events } = collect(ws);
+    await waitFor(() => tunnel.server.clients.size === 1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    ws.close();
+    await waitFor(() => events.includes('close'));
+    expect(ws.diagnostics.lastClose).toMatchObject({ initiator: 'local', phase: 'handshake', route: 'relay' });
+  });
+
+  it('authenticates with the token lookup bound at construction', async () => {
+    let context = 'account-a';
+    configureHOW({
+      getProxyToken: async () => context,
+      bindProxyToken: () => {
+        const bound = context;
+        return async () => bound;
+      },
+    });
+    try {
+      const ws = new RelayWebSocket(relayUrlFor(tunnel.url, 'wss://stream.bybit.com/v5/private'));
+      context = 'account-b';
+      await waitFor(() => tunnel.seen.length > 0);
+      expect(JSON.parse(tunnel.seen[0])).toMatchObject({ type: 'rpc.auth', token: 'account-a' });
+      ws.close();
+    } finally {
+      configureHOW({ bindProxyToken: undefined });
+    }
   });
 
   it('reports error + close and never open when the tunnel refuses the upstream', async () => {
@@ -164,5 +203,41 @@ describe('RelayWebSocket', () => {
     expect(events).not.toContain('open');
     // Nothing was ever sent to the tunnel.
     expect(tunnel.seen).toEqual([]);
+  });
+});
+
+describe('relay handshake timeout', () => {
+  it('closes a socket whose upgrade never completes without an uncaught ws abort error', async () => {
+    // A TCP server that accepts and never answers the HTTP upgrade.
+    const held: Socket[] = [];
+    const server = createServer((socket) => held.push(socket));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown) => uncaught.push(error);
+    process.on('uncaughtException', onUncaught);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const ws = new RelayWebSocket(relayUrlFor(`ws://127.0.0.1:${port}/tunnel`, 'wss://stream.bybit.com/v5/private'));
+      const { events } = collect(ws);
+      await new Promise((resolve) => setImmediate(resolve));
+      vi.advanceTimersByTime(15_000);
+      expect(ws.readyState).toBe(RelayWebSocket.CLOSED);
+      // ws emits its abort error on the next tick; give it several.
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+      expect(uncaught).toEqual([]);
+      expect(events).toEqual(['error', 'close']);
+      expect(ws.diagnostics.lastClose).toMatchObject({
+        initiator: 'local',
+        phase: 'pre-open',
+        route: 'relay',
+        lifetime: 'unknown',
+      });
+    } finally {
+      vi.useRealTimers();
+      process.off('uncaughtException', onUncaught);
+      for (const socket of held) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

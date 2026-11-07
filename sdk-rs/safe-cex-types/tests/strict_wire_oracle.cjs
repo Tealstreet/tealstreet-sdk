@@ -28,6 +28,7 @@ for (const [rust,root,keys] of [
  ['ExchangeAccountConfigBybitSiteId','ExchangeAccountConfig',['bybitSiteId']],
  ['ExchangeAccountConfigHealthStatus','ExchangeAccountConfig',['healthStatus']],
  ['ExchangeOptionsBybitSiteId','ExchangeOptions',['bybitSiteId']],
+ ['ExchangeOptionsExtraHyrotraderMode','ExchangeOptions',['extra','hyrotraderMode']],
  ['ExchangeOptionsExtraAsterdexApiVersion','ExchangeOptions',['extra','asterdexApiVersion']],
  ['ExchangeOptionsExtraLighterBuilderFeeMode','ExchangeOptions',['extra','lighterBuilderFeeMode']],
 ]) { let type=root;for(const key of keys) type=member(type,key);result[rust]=literals(type); }

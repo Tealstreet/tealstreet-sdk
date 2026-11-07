@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildWooLegacyFillsParams } from '../../exchanges/woo/woo.legacy-fills';
+import { buildWooLegacyFillsParams } from '../reference/woo/woo.legacy-fills';
 
 /**
  * WOO `GET /v1/client/trades` parameter vocabulary.

@@ -14,6 +14,14 @@ const debug = (...args: any[]) => console.log('[CrossTradeManager]', ...args);
 
 const FAILURE_THRESHOLD = 2;
 const FAILURE_MUTE_MS = 30_000;
+/**
+ * The engine refuses a symbol whose earlier placement's outcome is unknown until a fresh
+ * order read resolves it. Retrying it every loop only repeats the refusal: hold instead.
+ */
+const UNCERTAIN_HOLD_MS = 15_000;
+const UNCERTAIN_HOLD_MAX_MS = 5 * 60_000;
+const isUncertainRefusal = (error: unknown) =>
+  error instanceof Error && error.message.includes('Placement outcome is uncertain');
 
 export type CrossTradePlaceOrderFn = (
   copier: CrossTradeCopier,
@@ -38,7 +46,7 @@ export class CrossTradeManager {
     isDisposed?: boolean;
   } | null = null;
   private _loopInterval = 3000;
-  private _failures = new Map<string, { failures: number; mutedUntil: number }>();
+  private _failures = new Map<string, { failures: number; mutedUntil: number; holds?: number }>();
   private _getExchange: CrossTradeGetExchangeFn;
   private _placeOrder: CrossTradePlaceOrderFn;
 
@@ -65,6 +73,16 @@ export class CrossTradeManager {
       debug('Muting', key, 'until', new Date(entry.mutedUntil).toISOString());
     }
     this._failures.set(key, entry);
+  }
+
+  private _recordUncertain(account: string, symbol: string) {
+    const key = this._failureKey(account, symbol);
+    const entry = this._failures.get(key) ?? { failures: 0, mutedUntil: 0 };
+    entry.holds = (entry.holds ?? 0) + 1;
+    const holdMs = Math.min(UNCERTAIN_HOLD_MS * 2 ** (entry.holds - 1), UNCERTAIN_HOLD_MAX_MS);
+    entry.mutedUntil = Date.now() + holdMs;
+    this._failures.set(key, entry);
+    console.warn('[CrossTrade] holding after an uncertain placement', { source: 'cross-trade', symbol, holdMs });
   }
 
   private _recordSuccess(account: string, symbol: string) {
@@ -97,12 +115,23 @@ export class CrossTradeManager {
       debug('Skipping below-min-amount order', account, symbol, amount, 'min', market.limits?.amount?.min);
       return;
     }
+    // A breadcrumb per attempt: these orders have no user action behind them in the page.
+    console.info('[CrossTrade] placing', {
+      source: 'cross-trade',
+      exchange: this._getExchange(account)?.name,
+      symbol,
+      side,
+      amount,
+      reduceOnly,
+      execution: copier.execution,
+    });
     try {
       const result = await this._placeOrder(copier, market, referencePrice, account, side, amount, reduceOnly);
       this._recordSuccess(account, symbol);
       return result;
-    } catch (_e) {
-      this._recordFailure(account, symbol);
+    } catch (error) {
+      if (isUncertainRefusal(error)) this._recordUncertain(account, symbol);
+      else this._recordFailure(account, symbol);
     }
   }
 

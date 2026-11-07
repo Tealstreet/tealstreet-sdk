@@ -2,9 +2,9 @@ import type { ExchangeOptions, Market, Position } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
-import { ENDPOINTS } from '../../exchanges/bitunix/bitunix.types';
-import { BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION } from '../../exchanges/bitunix/bitunix.ws-public';
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
+import { ENDPOINTS } from '../reference/bitunix/bitunix.types';
+import { BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION } from '../reference/bitunix/bitunix.ws-public';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
 

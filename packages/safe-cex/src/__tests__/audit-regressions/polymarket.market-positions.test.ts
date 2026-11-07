@@ -5,8 +5,8 @@ import {
   parseGammaMarketTokens,
   PolymarketExchange,
   precisionFromTickSize,
-} from '../../exchanges/polymarket/polymarket.exchange';
-import type { GammaMarketInfo } from '../../exchanges/polymarket/polymarket.types';
+} from '../reference/polymarket/polymarket.exchange';
+import type { GammaMarketInfo } from '../reference/polymarket/polymarket.types';
 
 const gammaMarket = {
   id: '123',
@@ -69,6 +69,28 @@ describe('Polymarket Gamma and Data API contracts', () => {
       info: { tickSize: 0.01, negRisk: true },
     });
     exchange.dispose();
+  });
+
+  it('scopes discovery only when explicit marketSlugs are supplied and keeps every outcome', async () => {
+    for (const marketSlugs of [undefined, ['v2-adapter', 'another-market']]) {
+      const exchange = new PolymarketExchange('polymarket', { key: '', secret: '', publicDataOnly: true, polymarket: { marketSlugs } }, new DefaultStore());
+      const getGammaMarkets = vi.fn().mockResolvedValue([gammaMarket]);
+      (exchange as any).api = { getGammaMarkets };
+      await expect(exchange.fetchMarkets()).resolves.toHaveLength(2);
+      expect(getGammaMarkets).toHaveBeenCalledWith({ active: true, closed: false, ...(marketSlugs === undefined ? {} : { slug: marketSlugs }) });
+      exchange.dispose();
+    }
+  });
+
+  it('rejects invalid explicit marketSlugs before market discovery', async () => {
+    for (const marketSlugs of [[], [''], [' '], ['same', 'same'], [1], 'cafe', Array.from({ length: 101 }, (_, i) => String(i))]) {
+      const exchange = new PolymarketExchange('polymarket', { key: '', secret: '', publicDataOnly: true, polymarket: { marketSlugs: marketSlugs as string[] } }, new DefaultStore());
+      const getGammaMarkets = vi.fn();
+      (exchange as any).api = { getGammaMarkets };
+      await expect(exchange.fetchMarkets()).rejects.toThrow(/marketSlugs/);
+      expect(getGammaMarkets).not.toHaveBeenCalled();
+      exchange.dispose();
+    }
   });
 
   it('maps current Data API holdings instead of replaying trade history', async () => {

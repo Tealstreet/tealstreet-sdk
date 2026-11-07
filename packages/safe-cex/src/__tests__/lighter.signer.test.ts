@@ -2,7 +2,7 @@ import type { ExchangeOptions } from '../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createLighterSignerAdapter } from '../exchanges/lighter/lighter.signer';
+import { createLighterSignerAdapter } from './reference/lighter/lighter.signer';
 
 const getCreateOrderTransactionMock = vi.fn();
 const getCreateOrderTransactionsMock = vi.fn();

@@ -8,6 +8,9 @@ sidebar_position: 8
 Where the CLI binaries come from, how to install them, and how to keep
 yours up to date.
 
+Rust exchange accounts run an engine embedded in the standalone executable.
+There is no separate Rust runtime or WASM asset to install beside the binary.
+
 ---
 
 ## Where releases live
@@ -23,6 +26,14 @@ GitHub. Every release ships the same set of artifacts:
 | `tealstreet-linux-x64`       | Linux x86_64       |
 | `tealstreet-linux-arm64`     | Linux arm64        |
 | `tealstreet-windows-x64.exe` | Windows x64        |
+
+The Disrupt build of the same CLI is published separately to
+[`DisruptTrade/cli`](https://github.com/DisruptTrade/cli/releases) with the
+same five assets named `disrupt-<platform>`. It is GitHub-only: no npm
+package and no Homebrew formula. Install it by downloading the binary for
+your platform from that release page. It logs in through `app.disrupt.trade`,
+keeps its files under `~/.disrupt/`, `disrupt update` polls that repo, and its
+built-in help links to that repository rather than to this site.
 
 A fifth asset, `tealstreet-windows-x64.exe`, covers Windows x64.
 `bun build --compile` appends the `.exe` itself on a Windows target, so the

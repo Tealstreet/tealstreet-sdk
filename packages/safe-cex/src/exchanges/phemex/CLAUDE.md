@@ -62,6 +62,12 @@ throwing from nested destructuring.
 
 ## Startup Sequence
 
+Periodic account reads and terminal-order reconciliation share a checked
+authority revision. Private account/position pushes, socket lifecycle changes,
+and accepted REST commits advance it before updating the store. A pending read
+may commit only while its captured revision still matches, including after any
+symbol-scoped recovery await; stale reads cannot clear newer positions/balances.
+
 The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 
 1. **Parallel fetch** (`Promise.all`):
@@ -81,8 +87,15 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 
 ### Tick Loop
 
+- REST and `accounts_p` pushes use the same balance convention: each currency's
+  `total = accountBalanceRv - position UPnL`, `free = accountBalanceRv - totalUsedBalanceRv`,
+  and `used = totalUsedBalanceRv`. Aggregate `total`, `free`, and `used` sum those
+  independent currency fields; free must not be derived from normalized total.
+  This keeps a fresh REST poll from changing total solely because it followed a
+  WebSocket update, including when UPnL is negative.
 - `tick()` runs on a configurable interval via `options.extra.tickInterval`
 - Each tick calls `fetchPositionsAndBalance()`, which fetches both `currency=USDT` and `currency=USDC`, merges their positions and balances, then returns one complete snapshot for the full store write. If one settlement-account request fails or returns an invalid payload, a successful sibling snapshot still refreshes and the failed currency's last-known balance/positions are retained until its next successful poll. With no prior slice, the unavailable currency is represented as zero so per-market margin lookup fails closed rather than falling back to the sibling aggregate.
+- Rust: an unmappable position row (REST or stream) is skipped and logged; the store keeps that symbol's positions and the currency balance still commits. A REST row without a readable symbol keeps every stored position of that currency. Order rows with unsupported status/type skip the same way; malformed numbers on known order rows still reject the frame.
 - Position row mapping intentionally does not require a populated `marketsBySymbol` index. Full account snapshots filter to known markets before committing the store, while symbol-scoped recovery may need to preserve a valid nonzero REST row during hosted startup or stale-index windows.
 - Order formatting reads zero-size symbol-scoped raw position rows when mapped positions are empty, because Phemex reports one-way mode as `posMode: "OneWay", posSide: "Merged"` even when there is no open position. Dropping those zero rows from the store is correct, but opening orders must still send `posSide: "Merged"` for one-way accounts.
 - On error, logs the error and continues the loop
@@ -91,8 +104,8 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 ## History axes: NONE implemented, but the venue publishes up to three
 
 phemex's history method was an unconditional `return []` — an **unbranded stub**, so
-`isBaseCapabilityFallback` could not see it and it read as a real implementation. Use
-`isInertCapability` when the question is "does this do anything". More importantly, do not
+a brand check could not see it and it read as a real implementation.
+`exchange.capabilities` now treats such a stub as absent. More importantly, do not
 read that stub as a statement about phemex:
 
 | Venue route                               | Axis                          | Notes                                                                    |
@@ -189,11 +202,11 @@ Bid and ask are optional fields -- only included if present (`phemex.ws-public.t
 
 **Orderbook management**: Snapshot-first approach:
 
-1. Subscribe to WS incremental updates (`orderbook_p.subscribe`)
+1. Subscribe to full-depth WS incremental updates (`orderbook_p.subscribe`, `[symbol, false, 0]`). The omitted depth defaults to 30 and leaves deeper REST levels stale. Full-depth periodic snapshots replace the book.
 2. On first WS message, trigger REST snapshot fetch via `/md/v2/fullbook` (limit: 1000)
 3. Buffer all WS updates while snapshot loads
 4. After snapshot arrives, filter buffered updates by `sequence` number (discard updates older than snapshot)
-5. Apply buffered updates, then process subsequent updates incrementally
+5. Apply buffered updates, then process subsequent updates incrementally. Dispatch preserves the outer frame sequence on the book payload; dropping it discards every buffered delta during a slow REST snapshot.
 6. `processOrderBookUpdate` applies each delta through shared `updateOrderBookByPrice`: bids stay descending, asks stay ascending, and zero-amount updates for absent levels are ignored.
 7. If the REST snapshot request fails or times out, the failure is caught locally, logged with a cooldown, and the buffered deltas are cleared so the next WS delta can retry snapshot loading without surfacing an unhandled promise rejection. Late snapshots after unsubscribe/disposal are ignored.
 
@@ -232,7 +245,7 @@ After authentication, subscribes to `aop_p.subscribe` (Account/Order/Position).
 
 **Duplicate order status handling** (`phemex.ws-private.ts:358-367`): When a single message batch contains the same `orderID` with both open and closed statuses, the code detects the closed status update and overrides the open one. This prevents transient open states from appearing in the UI.
 
-**Debounced REST reconciliation on terminal order events**: For non-snapshot `orders_p` messages containing terminal statuses (`filled`, `triggered`, `canceled`, `rejected`), the private WS schedules a 1-second debounced `fetchPositionsAndBalance()` call. This fast-follow sync reduces position-open/close lag when WS position payloads are delayed or partial.
+**Debounced REST reconciliation on terminal order events**: For non-snapshot `orders_p` messages containing terminal statuses (`filled`, `triggered`, `canceled`, `rejected`), the private WS schedules a 1-second debounced `fetchPositionsAndBalance()` call. This fast-follow sync reduces position-open/close lag when WS position payloads are delayed or partial. A scoped recovery read is skipped only when all affected native `posSide` legs have finite nonzero rows in the full snapshot (`Merged` requires a one-way row). Missing/flat legs or unknown native sides still recover. Nonzero full-snapshot IDs remain authoritative even when another leg requires recovery; a lagging scoped row cannot overwrite them.
 
 ## Order Types and Mappings
 
@@ -407,7 +420,7 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 - **Zero-contract guard**: Brand-new zero-contract WS positions are ignored unless they already exist in the store; full cleanup is handled by periodic/full REST sync (`addOrUpdatePositionsFull`)
 - **Filtering**: Only positions for markets present in the store are processed (both REST and WS)
 - **Full replacement on tick**: `tick()` uses `store.addOrUpdatePositionsFull(positions)` which replaces all positions
-- **Terminal-order fast follow**: Filled/canceled/rejected order WS events enqueue their symbols for the debounced sync. The sync fetches the full positions+balance snapshot, then fetches those symbols with `fetchPositions([symbol])` and merges them before the full replacement so just-filled symbols are not lost when the account sweep lags.
+- **Terminal-order fast follow**: Filled/canceled/rejected order WS events enqueue their symbols and affected native position sides for the debounced sync, retaining every affected leg across the debounce window. After the full positions+balance fetch, `fetchPositions([symbol])` runs if any queued leg is missing/flat or its native side is unknown. Long/Short require that exact side; Merged requires a one-way row. Scoped rows may add missing IDs or replace flat IDs, but cannot overwrite finite nonzero full-snapshot IDs. This retains hedge-leg and hosted startup/stale-index recovery without regressing a fresh full-snapshot row. Failed currency slices retain their prior positions through the full-fetch helper and await later polling.
 
 ### Balance
 
@@ -604,3 +617,57 @@ Exchange-specific unit coverage exists for private WS reconciliation:
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clOrdID`, rule 1-40 characters. Replaces the generated `BROKER_ID_…` ID; no prefix is composed.
+- The Rust wrapper uses the same rule and `Tealstreet_…` mint format. Both paths
+  share `BROKER_ID` from `phemex.types.ts`; `phemex.api.ts` re-exports it for
+  existing callers.
+
+
+## Rust income and client-ID reads
+
+The Rust engine adds reported account income through the documented
+`/api-data/futures/v2/tradeAccountDetail` route. It preserves `amountRv` signs
+and `typeDesc` verbatim; it does not derive gross PnL, funding, fees or closed
+positions from the running balance. Both USDT and USDC are walked with the
+shared span pager. Unknown types remain `other`. A failed sibling currency,
+malformed row, oversized page or incomplete coverage is an error, never an
+empty/partial success. These documented schema fixtures are not live account
+validation and do not remove the ingestion/tunnel canary restriction above.
+
+Ledger rows have no documented symbol or transaction ID. Symbol filtering
+therefore fails explicitly. Returned `tranId` is a stable composite of currency,
+creation time, type, amount, running balance and duplicate occurrence. The
+default range is the last 30 days; explicit inclusive bounds use milliseconds.
+
+Rust definitive lookup uses
+`/api-data/g-futures/orders/by-order-id?symbol=...&clOrdID=...`, which includes
+closed orders. Only a successful exact-ID empty result is definitive; failures
+propagate and mismatched/malformed rows fail. Unknown markets return a
+non-definitive miss without I/O. The primary key and primary egress always
+perform this lookup even when ordinary GETs use secondary read credentials.
+`Triggered` still maps to Closed without becoming a terminal store tombstone.
+
+TS still has inert income/order-history fallbacks and a non-definitive lookup
+fallback. Its implemented fill history is a symbol-scoped latest page capped
+at 200, so this sweep does not claim unbounded Phemex TS history.
+
+## Rust socket supervision
+
+The Rust public socket uses `engine::socket::Supervisor`: a 10-second connection deadline, 20-second idle watchdog, native `server.ping` every five seconds, and capped exponential reconnect delay with jitter. Short open/close flaps retain the failure count; sustained traffic resets it. Public reconnect still invalidates book generations and restores active subscriptions.
+
+Rust `setLeverage(symbol, leverage, side)` preserves the opposite hedge leg's
+cached leverage in the required two-field request. Both values retain their
+margin sign: negative in cross, positive in isolated. Only the selected leg's
+settings and positions change after success. Omitting side changes both legs;
+one-way mode uses `leverageRr` and ignores side. An unknown opposite hedge
+leverage fails before a write rather than inventing a replacement value.
+
+Rust `changePositionMode` also requires a symbol and sends one PUT for that
+symbol. A successful mode-only write for a market absent from account rows
+records its confirmed mode separately, without inventing margin or leverage.
+Orders and leverage changes still require the full reconciled context. Fresh
+authoritative account rows replace the mode-only record; reads started before
+the write cannot overwrite it. Conflicting delayed stream rows also wait for
+that authoritative read before replacing the confirmed mode. Missing, unknown
+or rejected symbols never
+trigger writes for other markets. The account hedge indicator reflects whether
+any known symbol remains hedged.

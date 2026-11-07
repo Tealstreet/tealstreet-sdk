@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { WeexExchange } from '../../exchanges/weex/weex.exchange';
-import { ENDPOINTS } from '../../exchanges/weex/weex.types';
+import { WeexExchange } from '../reference/weex/weex.exchange';
+import { ENDPOINTS } from '../reference/weex/weex.types';
 import { DefaultStore } from '../../store/store.base';
 import type { PlaceOrderOpts } from '../../types';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';

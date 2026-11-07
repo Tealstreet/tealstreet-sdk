@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '../transport/registerTealstreetTransport';
 
 import { ENDPOINTS, resolveLighterDeploymentProfile } from '../exchanges/lighter/lighter.types';
-import { LighterPublicWebsocket } from '../exchanges/lighter/lighter.ws-public';
+import { LighterPublicWebsocket } from './reference/lighter/lighter.ws-public';
 import { resolveExchangeRouting } from '../transport/tealstreet/routing/resolveExchangeRouting';
 
 // Lighter's public proxy WS host, now sourced from the routing table (was WS_PROXY_URL.public).
@@ -1004,6 +1004,83 @@ describe('LighterPublicWebsocket routing and backoff', () => {
 
     ws.listenOrderBook('BTCUSDT', callback);
     await vi.advanceTimersByTimeAsync(4_100);
+
+    expect(getOrderBookOrders).toHaveBeenCalledWith(1, 100, expect.objectContaining({ __suppressExchangeError: true }));
+    expect(callback).toHaveBeenCalled();
+  });
+
+  it('keeps active order books on REST fallback while public socket reconnects', async () => {
+    const getOrderBookOrders = vi.fn().mockResolvedValue({
+      bids: [['100', '1']],
+      asks: [['101', '2']],
+    });
+    const parent = createMockParent({
+      store: {
+        markets: [{ id: '1', symbol: 'BTCUSDT' }],
+        marketsBySymbol: {
+          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
+        },
+        positions: [],
+        tickers: [],
+      },
+      orderApi: {
+        getOrderBookOrders,
+      },
+    });
+    const ws = new LighterPublicWebsocket(parent);
+    ws.ws = createMockWs();
+    const callback = vi.fn();
+
+    ws.listenOrderBook('BTCUSDT', callback);
+    await Promise.resolve();
+    await Promise.resolve();
+    getOrderBookOrders.mockClear();
+    callback.mockClear();
+
+    (ws as any).onClose({ code: 1006, reason: '' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getOrderBookOrders).toHaveBeenCalledWith(1, 100, expect.objectContaining({ __suppressExchangeError: true }));
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bids: [expect.objectContaining({ price: 100, amount: 1 })],
+        asks: [expect.objectContaining({ price: 101, amount: 2 })],
+      }),
+    );
+  });
+
+  it('primes active order books from REST when public socket opens after reconnect', async () => {
+    const getOrderBookOrders = vi.fn().mockResolvedValue({
+      bids: [['100', '1']],
+      asks: [['101', '2']],
+    });
+    const parent = createMockParent({
+      store: {
+        markets: [{ id: '1', symbol: 'BTCUSDT' }],
+        marketsBySymbol: {
+          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
+        },
+        positions: [],
+        tickers: [],
+      },
+      orderApi: {
+        getOrderBookOrders,
+      },
+    });
+    const ws = new LighterPublicWebsocket(parent);
+    ws.ws = createMockWs();
+    const callback = vi.fn();
+
+    ws.listenOrderBook('BTCUSDT', callback);
+    await Promise.resolve();
+    await Promise.resolve();
+    getOrderBookOrders.mockClear();
+    callback.mockClear();
+
+    ws.onOpen();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(getOrderBookOrders).toHaveBeenCalledWith(1, 100, expect.objectContaining({ __suppressExchangeError: true }));
     expect(callback).toHaveBeenCalled();

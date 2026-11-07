@@ -244,9 +244,7 @@ impl KeyValueCandleCacheBackend {
                             continue;
                         }
                         let offset = index.rem_euclid(options.chunk_size as i64) as usize;
-                        let Ok(candle) =
-                            serde_json::from_value::<safe_cex_types::Candle>(candle.clone())
-                        else {
+                        let Some(candle) = crate::codec::decode_json_candle(candle) else {
                             continue;
                         };
                         sparse[offset] = Some(candle);

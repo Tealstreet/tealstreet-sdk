@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidPrivateWebSocket } from '../exchanges/hyperliquid/hyperliquid.ws-private';
+import { HyperliquidPrivateWebSocket } from './reference/hyperliquid/hyperliquid.ws-private';
 import { PositionMode, PositionSide } from '../types';
 
 const hasSeenFillMock = vi.fn();
 const markFillSeenMock = vi.fn();
 
-vi.mock('../exchanges/hyperliquid/hyperliquid.cross-cache', () => ({
+vi.mock('./reference/hyperliquid/hyperliquid.cross-cache', () => ({
   hasSeenFill: (...args: any[]) => hasSeenFillMock(...args),
   markFillSeen: (...args: any[]) => markFillSeenMock(...args),
 }));

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { collectAuthParams, getInstruction } from '../../exchanges/backpack/backpack.api';
-import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
-import { buildSigningPayload } from '../../exchanges/backpack/backpack.signing';
-import { BackpackOrderRequest, ENDPOINTS, INSTRUCTIONS } from '../../exchanges/backpack/backpack.types';
+import { collectAuthParams, getInstruction } from '../reference/backpack/backpack.api';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
+import { buildSigningPayload } from '../reference/backpack/backpack.signing';
+import { BackpackOrderRequest, ENDPOINTS, INSTRUCTIONS } from '../reference/backpack/backpack.types';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, OrderSide, OrderTimeInForce, OrderType, PlaceOrderOpts } from '../../types';
 

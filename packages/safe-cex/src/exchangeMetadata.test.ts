@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
 import {
   exchangeMetadata,
   exchangePrettyNames,
@@ -234,6 +235,17 @@ describe('exchangeMetadata', () => {
       expect(coinbaseSpot.enableInPreview).toBe(true);
     });
 
+    it('should keep HyroTrader dev-only until the private relay or HTTPS path is ready', () => {
+      // Plain HTTP simulator private REST/WS works for local dev, but preview
+      // and prod need Hyro HTTPS/WSS private endpoints or a Tealstreet relay.
+      const hyrotrader = exchangeMetadata.hyrotrader;
+
+      expect(hyrotrader.exchangeName).toBe('hyrotrader');
+      expect(hyrotrader.enabled).toBe(false);
+      expect(hyrotrader.enabledInDev).toBe(true);
+      expect(hyrotrader.enableInPreview).toBe(false);
+    });
+
     it('should keep Robinhood Lighter enabled for preview without production rollout', () => {
       const lighterRobinhood = exchangeMetadata['lighter-robinhood'];
 
@@ -260,6 +272,16 @@ describe('exchangeMetadata', () => {
             `${name}: requiresCors is true but privateProxyIps is empty`,
           ).toBeGreaterThan(0);
         }
+      });
+    });
+
+    // Since AWS_EXIT.md step 3e every private path egresses from the Vultr Tokyo fleet,
+    // so the form must never again suggest an AWS pool to whitelist on master.
+    it('every whitelist the account form can show is the Vultr Tokyo fleet', () => {
+      exchanges.forEach((name) => {
+        const m = exchangeMetadata[name];
+        const lists = [m.privateProxyIps, ...Object.values(m.privateProxyRegions)].filter((ips) => ips.length);
+        lists.forEach((ips) => expect(ips, name).toEqual(privateProxyIpsVultrTokyo));
       });
     });
 
@@ -325,6 +347,7 @@ describe('exchangeMetadata', () => {
         'apexomni',
         'asterdex',
         'binance',
+        'binanceinverse',
         'binancespot',
         'binancepm',
         'bingx',
@@ -332,7 +355,6 @@ describe('exchangeMetadata', () => {
         'bitrue',
         'bitunix',
         'blofin',
-        'breakoutprop',
         'bybit',
         'bybitdemo',
         'hyrotrader',
@@ -367,6 +389,7 @@ describe('exchangeMetadata', () => {
 
       expect(mobileSupported).toEqual([
         'binance',
+        'binanceinverse',
         'binancepm',
         'binancespot',
         'bitget',
@@ -410,5 +433,26 @@ describe('exchangeMetadata', () => {
         );
       });
     });
+
+    it('keeps Binance inverse production-enabled after the COIN-M rollout', () => {
+      expect(exchangeMetadata.binanceinverse.enabled).toBe(true);
+      expect(exchangeMetadata.binanceinverse.enabledInDev).toBe(true);
+      expect(exchangeMetadata.binanceinverse.enableInPreview).toBe(true);
+      expect(exchangeMetadata.binanceinverse.requiresCors).toBe(true);
+      expect(exchangeMetadata.binanceinverse.privateProxyRegions).toHaveProperty('JA');
+      expect(exchangeMetadata.binanceinverse.supportsTestnet).toBe(false);
+      expect(exchangeMetadata.binanceinverse.requiresTickersForMarketsLoaded).toBe(true);
+      expect(exchangeMetadata.binanceinverse.latencyDomain).toBe('dapi.binance.com');
+    });
+  });
+});
+
+
+describe('Hyperliquid candle capabilities', () => {
+  it.each(['hyperliquid', 'hyperliquidspot'] as const)('declares the native candle set for %s', (name) => {
+    expect(exchangeMetadata[name].supportsKlineSeconds).toBe(false);
+    expect(exchangeMetadata[name].supportedCandleIntervals).toEqual([
+      '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M',
+    ]);
   });
 });

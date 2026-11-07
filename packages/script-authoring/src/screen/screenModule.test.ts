@@ -155,7 +155,7 @@ describe('the ordinary path', () => {
 });
 
 describe('tiers', () => {
-  it('puts an ordinary panel in the syncing tier', async () => {
+  it('puts an ordinary panel in the strict tier', async () => {
     const { result } = run(`const Component = () => <div>hi</div>;`, ALLOW);
     const screened = await result;
     expect(screened.tier).toBe('strict');
@@ -163,47 +163,38 @@ describe('tiers', () => {
     expect(screened.reason).toBeNull();
   });
 
-  /**
-   * The superuser case. fetch is allowed — it just cannot sync, which is what
-   * keeps it out of reach of anyone holding a stolen session.
-   */
-  it('allows a module that fetches, but only locally', async () => {
+  // fetch earns the standard frame, which allows the network and still syncs.
+  it('allows a module that fetches, in the standard tier', async () => {
     const { result } = run(`fetch('https://api.coinglass.com/x');\nconst Component = () => null;`, ALLOW);
     const screened = await result;
     expect(screened.allowed).toBe(true);
-    expect(screened.tier).toBe('local-only');
-  });
-
-  // Silence here reads as a bug on the author's other device.
-  it('tells the author why a local-only module will not sync', async () => {
-    const { result } = run(`fetch('/x');\nconst Component = () => null;`, ALLOW);
-    const { reason } = await result;
-    expect(reason).toMatch(/not backed up|synced|this device/i);
+    expect(screened.tier).toBe('standard');
+    expect(screened.reason).toBeNull();
   });
 
   /**
    * The ordering invariant, applied to the network rather than to blocks. A
-   * static local-only finding stands whatever the model says, so nothing
-   * written in the source can argue a module back into the syncing tier.
+   * static standard finding stands whatever the model says, so nothing written
+   * in the source can argue a networked module into the strict frame.
    */
-  it('does not let the model lower a static local-only finding', async () => {
+  it('does not let the model lower a static standard finding', async () => {
     const { result } = run(`fetch('/x');\nconst Component = () => null;`, {
       verdict: 'allow',
-      reason: 'Totally ordinary panel, safe to sync.',
+      reason: 'Totally ordinary panel, no network needed.',
       concerns: [],
     });
-    expect((await result).tier).toBe('local-only');
+    expect((await result).tier).toBe('standard');
   });
 
-  it('lets the model RAISE a clean module to local-only', async () => {
+  it('lets the model RAISE a clean module to standard', async () => {
     const { result } = run(`const Component = () => null;`, {
       verdict: 'allow',
       reason: '',
-      concerns: [{ severity: 'local-only', detail: 'Builds a request URL from user input.' }],
+      concerns: [{ severity: 'standard', detail: 'Builds a request URL from user input.' }],
     });
     const screened = await result;
     expect(screened.allowed).toBe(true);
-    expect(screened.tier).toBe('local-only');
+    expect(screened.tier).toBe('standard');
   });
 
   it('reports a blocked module as the blocked tier', async () => {

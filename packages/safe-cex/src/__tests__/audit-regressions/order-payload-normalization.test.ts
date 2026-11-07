@@ -2,9 +2,9 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
-import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { BROKER_ID as OKX_BROKER_ID } from '../../exchanges/okx/okx.types';
 import { DefaultStore } from '../../store/store.base';
 import {
@@ -169,10 +169,13 @@ describe('audit regression: exact order payload normalization', () => {
     });
   });
 
+  // Builds a full Bitget client; under CI load this outruns vitest's 5s default.
   it('matches Bitget V2 market, post-only reduce limit, and TPSL stop contracts', async () => {
     const store = new DefaultStore();
     store.update({ markets: [market('BTCUSDT')] });
     const exchange = new BitgetExchange('bitget', options, store);
+    // This is the V2/Classic payload fixture, not the lazy account-type probe.
+    vi.spyOn(exchange as any, 'ensureAccountTypeDetected').mockResolvedValue(undefined);
     vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
     vi.spyOn(exchange as any, 'getOrderPlanTypeAndAmount').mockReturnValue(['loss_plan', 0.5]);
 
@@ -229,5 +232,5 @@ describe('audit regression: exact order payload normalization', () => {
       size: '0.5',
       triggerType: 'fill_price',
     });
-  });
+  }, 30_000);
 });

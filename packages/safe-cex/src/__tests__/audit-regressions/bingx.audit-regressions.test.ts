@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BingxExchange } from '../../exchanges/bingx/bingx.exchange';
-import { ENDPOINTS } from '../../exchanges/bingx/bingx.types';
-import { BingxPublicWebsocket } from '../../exchanges/bingx/bingx.ws-public';
+import { BingxExchange } from '../reference/bingx/bingx.exchange';
+import { ENDPOINTS } from '../reference/bingx/bingx.types';
+import { BingxPublicWebsocket } from '../reference/bingx/bingx.ws-public';
 import { DefaultStore } from '../../store/store.base';
 import { LogSeverity, MarginType, Order, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 import { getExchangeMetadata } from '../../exchangeMetadata';

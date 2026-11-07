@@ -1,5 +1,5 @@
-import type { CoinbaseStarbaseJsonRpcRequest } from '../../exchanges/coinbase/coinbase.starbase';
-import type { CoinbaseStarbaseCancelOnDisconnectPolicy } from '../../exchanges/coinbase/coinbase.starbase-ws-session';
+import type { CoinbaseStarbaseJsonRpcRequest } from '../reference/coinbase/coinbase.starbase';
+import type { CoinbaseStarbaseCancelOnDisconnectPolicy } from '../reference/coinbase/coinbase.starbase-ws-session';
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -12,8 +12,8 @@ import {
   CoinbaseStarbaseHeartbeatController,
   CoinbaseStarbaseJsonRpcClient,
   CoinbaseStarbaseProtocolError,
-} from '../../exchanges/coinbase/coinbase.starbase';
-import { CoinbaseStarbaseWebsocketSessionController } from '../../exchanges/coinbase/coinbase.starbase-ws-session';
+} from '../reference/coinbase/coinbase.starbase';
+import { CoinbaseStarbaseWebsocketSessionController } from '../reference/coinbase/coinbase.starbase-ws-session';
 
 const AUTH_RESULT = {
   access_token: 'starbase-ws-access-token',
@@ -177,10 +177,10 @@ describe('Coinbase Starbase inert WebSocket session lifecycle', () => {
     ).toThrow(CoinbaseStarbaseProtocolError);
 
     for (const file of [
-      'coinbase.api.ts',
-      'coinbase.exchange.ts',
-      'coinbase.ws-private.ts',
-      'coinbase.ws-public.ts',
+      '../../__tests__/reference/coinbase/coinbase.api.ts',
+      '../../__tests__/reference/coinbase/coinbase.exchange.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-private.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-public.ts',
       '../../createExchangeFromAccount.ts',
       '../../exchangeMetadata.ts',
       '../../transport/tealstreet/routing/routingTable.ts',

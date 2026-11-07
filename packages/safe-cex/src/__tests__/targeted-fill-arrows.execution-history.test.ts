@@ -1,18 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniExchange } from '../exchanges/apexomni/apexomni.exchange';
-import { ENDPOINTS as APEX_ENDPOINTS } from '../exchanges/apexomni/apexomni.types';
-import { BitunixExchange } from '../exchanges/bitunix/bitunix.exchange';
-import { ENDPOINTS as BITUNIX_ENDPOINTS } from '../exchanges/bitunix/bitunix.types';
-import { BlofinExchange } from '../exchanges/blofin/blofin.exchange';
+import { ApexOmniExchange } from './reference/apexomni/apexomni.exchange';
+import { ENDPOINTS as APEX_ENDPOINTS } from './reference/apexomni/apexomni.types';
+import { BitunixExchange } from './reference/bitunix/bitunix.exchange';
+import { ENDPOINTS as BITUNIX_ENDPOINTS } from './reference/bitunix/bitunix.types';
+import { BlofinExchange } from './reference/blofin/blofin.exchange';
 import { ENDPOINTS as BLOFIN_ENDPOINTS } from '../exchanges/blofin/blofin.types';
-import { LighterExchange } from '../exchanges/lighter/lighter.exchange';
+import { LighterExchange } from './reference/lighter/lighter.exchange';
 import { ENDPOINTS as LIGHTER_ENDPOINTS } from '../exchanges/lighter/lighter.types';
-import { OKXExchange } from '../exchanges/okx/okx.exchange';
+import { OKXExchange } from './reference/okx/okx.exchange';
 import { ENDPOINTS as OKX_ENDPOINTS } from '../exchanges/okx/okx.types';
-import { ParadexExchange } from '../exchanges/paradex/paradex.exchange';
-import { ENDPOINTS as PARADEX_ENDPOINTS } from '../exchanges/paradex/paradex.types';
-import { PhemexExchange } from '../exchanges/phemex/phemex.exchange';
+import { ParadexExchange } from './reference/paradex/paradex.exchange';
+import { ENDPOINTS as PARADEX_ENDPOINTS } from './reference/paradex/paradex.types';
+import { PhemexExchange } from './reference/phemex/phemex.exchange';
 import { ENDPOINTS as PHEMEX_ENDPOINTS } from '../exchanges/phemex/phemex.types';
 import { OrderSide } from '../types';
 

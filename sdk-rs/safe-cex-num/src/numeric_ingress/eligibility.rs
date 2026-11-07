@@ -24,6 +24,9 @@ impl<A: JsNumberOutput, B: JsNumberOutput> JsNumberOutput for (A, B) {
         second.check_number_output();
     }
 }
+impl JsNumberOutput for safe_cex_types::retained_json::RetainedJsonInput {
+    fn check_number_output(&self) {}
+}
 impl JsNumberOutput for () {
     fn check_number_output(&self) {}
 }

@@ -2,9 +2,9 @@ import type { Market, OrderFillEvent } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AsterDEXExchange } from '../../exchanges/asterdex/asterdex.exchange';
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
-import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { createIncrementalFills } from '../../utils/incrementalFills';
 

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
-import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
-import { LighterExchange } from '../../exchanges/lighter/lighter.exchange';
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
+import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
+import { LighterExchange } from '../reference/lighter/lighter.exchange';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { DefaultStore } from '../../store/store.base';
 import type { Balance, Order } from '../../types';
 

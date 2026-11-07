@@ -165,10 +165,13 @@ pub fn down_size_reduce_order<T: Borrow<PlaceOrderOpts> + BorrowMut<PlaceOrderOp
         o.symbol == order.symbol
             && o.side == order.side
             && o.r#type == OrderType::Limit
-            && matches!(o.status, OrderStatus::Open | OrderStatus::Creating)
-            && (position.position_mode != Some(PositionMode::Hedged) || o.reduce_only)
-            && ((order.side == OrderSide::Buy && o.price >= price)
-                || (order.side == OrderSide::Sell && o.price <= price))
+            && matches!(
+                o.status,
+                safe_cex_types::ModelField::Value(OrderStatus::Open | OrderStatus::Creating)
+            )
+            && (position.position_mode != Some(PositionMode::Hedged) || o.reduce_only == true)
+            && ((order.side == OrderSide::Buy && o.price.to_number() >= price)
+                || (order.side == OrderSide::Sell && o.price.to_number() <= price))
     }) {
         reduced_size -= ahead.amount;
     }

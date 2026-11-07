@@ -1,5 +1,0 @@
-MEASUREMENT HEAD SHA: 6cc1419ae9921b47373219dba281d68a70af9113
-COMMAND: ["/opt/homebrew/opt/rustup/bin/cargo", "check", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-cryptocom", "--all-targets", "--jobs", "2", "--locked"]
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.46s
-
-MEASURED EXIT: 0

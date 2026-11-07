@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveBybitExecution } from '../exchanges/bybit/bybit.fill-event';
+import { resolveBybitExecution } from './reference/bybit/bybit.fill-event';
 
 /**
  * The numbers here are the ones a user actually saw (Discord, 2026-09-29):

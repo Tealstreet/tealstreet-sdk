@@ -1,2 +1,0 @@
-Input: aebc8ffd331162480d54cfc8d02b4efea0b47840
-Native sub-agent review_polymarket: MERGE within full92 explanation audit; no remaining blocker. Maker control now reaches exact same-class message assertion at2a71dbd69e, recorded0/1/0; all four proof-repair log hashes match. Scripts unchanged from measured2a71 input. Weaker attempt retained/rejected, citations fixed. Final metadata gates were pending during review and excluded from verdict. No native-equivalence claim. No gates executed; all readers stopped.

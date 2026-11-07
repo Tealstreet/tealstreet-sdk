@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapBybitHistoricalOrder } from '../../exchanges/bybit/bybit.order-history';
+import { mapBybitHistoricalOrder } from '../reference/bybit/bybit.order-history';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
 
 /** Shape captured live from `/v5/order/history` (sheet row 6). */

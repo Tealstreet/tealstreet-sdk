@@ -16,6 +16,13 @@ import type { ExchangeName } from '../types';
  */
 
 const multipliers = new Map<string, number>();
+const listeners = new Set<() => void>();
+
+/** Engine pollers consume changes; callers remove the listener on disposal. */
+export const subscribeTickIntervalMultipliers = (listener: () => void): (() => void) => {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+};
 
 /**
  * Reserved key meaning "every exchange".
@@ -35,14 +42,13 @@ const MAX_MULTIPLIER = 60;
 
 export const setTickIntervalMultipliers = (next: Readonly<Record<string, number>> | undefined): void => {
   multipliers.clear();
-  if (!next) return;
-
-  for (const [exchange, raw] of Object.entries(next)) {
+  for (const [exchange, raw] of Object.entries(next ?? {})) {
     if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
     const clamped = Math.min(Math.max(raw, MIN_MULTIPLIER), MAX_MULTIPLIER);
     if (clamped === MIN_MULTIPLIER) continue;
     multipliers.set(exchange, clamped);
   }
+  for (const listener of listeners) listener();
 };
 
 /** 1 when nothing is set for this exchange, so callers can multiply unconditionally. */

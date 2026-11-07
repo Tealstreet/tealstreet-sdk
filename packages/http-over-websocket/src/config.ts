@@ -37,6 +37,11 @@ export async function getProxyToken(): Promise<string> {
   return config.getProxyToken();
 }
 
+/** A token lookup bound to the calling context; call synchronously at request or socket start. */
+export function bindProxyToken(): () => Promise<string> {
+  return config.bindProxyToken?.() ?? getProxyToken;
+}
+
 /**
  * Check if token is expired (calls the configured function)
  */

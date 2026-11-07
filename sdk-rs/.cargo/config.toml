@@ -18,3 +18,8 @@
 # incremental cache to reuse.
 [build]
 incremental = false
+
+# A 128 KiB shadow stack instead of rustc's 1 MiB default: WebAssembly linear
+# memory never shrinks, and nothing in the engine recurses deeply.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=131072"]

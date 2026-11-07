@@ -1,10 +1,21 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isBaseCapabilityFallback } from '../../exchanges/base';
-import { exchangeRegistry } from '../../exchanges/registry';
+import { CAPABILITY_METHODS } from '../../exchanges/base';
 import { DefaultStore } from '../../store/store.base';
+import { legacyVenueRegistry as exchangeRegistry } from '../reference/legacyVenueRegistry';
+
+// Capability discovery needs no Starknet account or remote SDK configuration.
+vi.mock('../reference/paradex/paradex.sdk', async (original) => ({
+  ...(await original<typeof import('../reference/paradex/paradex.sdk')>()),
+  initializeParadexSDK: vi.fn(async () => null),
+}));
 
 /**
  * A base capability stub must be *branded*, or support cannot be detected.
@@ -18,13 +29,13 @@ import { DefaultStore } from '../../store/store.base';
  * than one method.
  */
 const BRANDED_STUBS = [
-  'fetchIncomeHistory',
-  'fetchIncomeHistoryRange',
-  'fetchHistoricalOrders',
-  'fetchClosedPnl',
-  'fetchOptionChain',
-  'fetchOptionExpiries',
-  'fetchAccountGreeks',
+  'incomeHistory',
+  'incomeRange',
+  'orderHistory',
+  'closedPnl',
+  'optionChain',
+  'optionExpiries',
+  'accountGreeks',
 ] as const;
 
 const options: ExchangeOptions = {
@@ -72,31 +83,29 @@ afterEach(() => {
 });
 
 describe('base capability stubs are branded', () => {
-  it.each(BRANDED_STUBS)('%s on an unimplemented venue is detectable as the fallback', async (method) => {
+  it.each(BRANDED_STUBS)('%s on an unimplemented venue is detectable as the fallback', async (capability) => {
     const exchange = await construct(NO_LEDGER_VENUE as ExchangeName);
 
     // The check the journal used to make — true even though nothing is implemented.
-    expect(typeof exchange[method]).toBe('function');
+    expect(typeof exchange[CAPABILITY_METHODS[capability]]).toBe('function');
     // The check it must make instead.
-    expect(isBaseCapabilityFallback(exchange[method], method)).toBe(true);
+    expect(exchange.capabilities[capability]).toBe(false);
   });
 
-  it('a real override is not reported as the fallback', () => {
-    const overridden = async () => [];
-    expect(isBaseCapabilityFallback(overridden, 'fetchIncomeHistory')).toBe(false);
-  });
-
-  it('branding is method-specific, so one stub cannot answer for another', async () => {
+  it('a real override replacing the fallback is reported as the capability', async () => {
     const exchange = await construct(NO_LEDGER_VENUE as ExchangeName);
-    expect(isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchHistoricalOrders')).toBe(false);
+    const records: unknown[] = [];
+    exchange.fetchIncomeHistory = async () => records;
+    expect(exchange.capabilities.incomeHistory).toBe(true);
+    expect(exchange.capabilities.incomeRange).toBe(false);
   });
 
   it.each(['binance', 'bybit', 'bybitinverse', 'okx', 'weex', 'hyperliquid', 'paradex', 'blofin', 'bitunix'])(
     '%s implements the ledger, so it is not reported as the fallback',
     async (name) => {
       const exchange = await construct(name as ExchangeName);
-      expect(isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchIncomeHistory')).toBe(false);
-      expect(isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')).toBe(false);
+      expect(exchange.capabilities.incomeHistory).toBe(true);
+      expect(exchange.capabilities.incomeRange).toBe(true);
     },
   );
 
@@ -104,7 +113,7 @@ describe('base capability stubs are branded', () => {
     '%s implements closed PnL against the venue',
     async (name) => {
       const exchange = await construct(name as ExchangeName);
-      expect(isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')).toBe(false);
+      expect(exchange.capabilities.closedPnl).toBe(true);
     },
   );
 
@@ -115,7 +124,7 @@ describe('base capability stubs are branded', () => {
     '%s implements order history against the venue',
     async (name) => {
       const exchange = await construct(name as ExchangeName);
-      expect(isBaseCapabilityFallback(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')).toBe(false);
+      expect(exchange.capabilities.orderHistory).toBe(true);
     },
   );
 
@@ -124,6 +133,50 @@ describe('base capability stubs are branded', () => {
   // stay on the stub and the metadata flag must stay false, or its tab renders empty.
   it('bybitspot does NOT implement closed PnL', async () => {
     const exchange = await construct('bybitspot' as ExchangeName);
-    expect(isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')).toBe(true);
+    expect(exchange.capabilities.closedPnl).toBe(false);
+  });
+});
+
+describe('exchange.capabilities answers the history axes without brand checks', () => {
+  it('an unimplemented venue reports every axis unavailable', async () => {
+    const exchange = await construct(NO_LEDGER_VENUE);
+    expect(exchange.capabilities).toEqual({
+      startup: true,
+      trading: true,
+      openOrders: true,
+      positions: true,
+      fillHistory: false,
+      orderHistory: false,
+      incomeHistory: false,
+      incomeRange: false,
+      closedPnl: false,
+      optionChain: false,
+      optionExpiries: false,
+      accountGreeks: false,
+    });
+  });
+
+  it('a venue with every axis reports them all', async () => {
+    const exchange = await construct('bybit' as ExchangeName);
+    expect(exchange.capabilities).toEqual({
+      startup: true,
+      trading: true,
+      openOrders: true,
+      positions: true,
+      fillHistory: true,
+      orderHistory: true,
+      incomeHistory: true,
+      incomeRange: true,
+      closedPnl: true,
+      optionChain: true,
+      optionExpiries: true,
+      accountGreeks: true,
+    });
+  });
+
+  it('an empty stub is not an axis', async () => {
+    const exchange = await construct('bybit' as ExchangeName);
+    exchange.fetchHistoricalOrders = async () => [];
+    expect(exchange.capabilities.orderHistory).toBe(false);
   });
 });

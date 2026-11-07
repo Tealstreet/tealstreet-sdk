@@ -38,7 +38,67 @@ Files excluded from the published site (via `docs.exclude` in `apps/documentatio
 
 See [`apps/documentation/cli/CLAUDE.md`](../documentation/cli/CLAUDE.md) if one exists for the authoring convention; the dedicated `/cli/` plugin instance and its sidebar live in `apps/documentation/sidebarsCli.js`.
 
+## Brands — one source, two binaries
+
+`src/brand.ts` is the only place a product name, executable name, config
+directory, web-app URL, docs URL or release repo is spelled. `scripts/build.sh
+<brand>` inlines `TEALSTREET_BRAND` with `--define`; dev runs and tests carry no
+define and resolve to `tealstreet`, so every pinned `~/.tealstreet` and
+`tealstreet-*` expectation in the suite stays valid. The `disrupt` brand logs in
+through `https://app.disrupt.trade` (the apex is a landing page and 404s on `/api/cli/*`), stores under `~/.disrupt/`, and self-updates
+from `DisruptTrade/cli`.
+
+**That URL is the entire auth change.** The web app picks the Auth0 tenant from
+the request host (`tenantFromHost` in `apps/web/src/utils/auth/auth0.ts`), so
+`/api/cli/login` on `disrupt.trade` returns a proxy token whose `userId` is
+already `disrupt:<sub>`. The relay, tradetunnel and `/api/cli/*` routes are
+shared and verify the shared `privateProxyKey`; do not add a brand switch to
+any of them. **Infrastructure names are NOT branded** — `TEALSTREET_*` env vars,
+`--tealstreet-proxy`/`--tealstreet-tunnel` flags, the relay URLs and the HoW
+`Origin: https://preview.tealstreet.io` header (a WAF requirement) stay the
+same on every brand. Renaming them would break docs and scripts for nothing.
+
+Adding a config-dir or display-name literal anywhere under `src/` is a brand
+leak: route it through `BRAND`. One known limit, accepted for v1: both brands
+bind the listener on `127.0.0.1:53219`, so they cannot run at the same time.
+**The disrupt build must never print a tealstreet.io URL** — its `docsUrl` is
+the `DisruptTrade/cli` README, and `src/brand.test.ts` greps the disrupt brand
+for `tealstreet.io`. The internal HoW `Origin` header and the listener's origin
+allowlist are not user-visible and are exempt.
+
+**Docs for a whitelabel are GENERATED, never hand-maintained.**
+`scripts/brand-docs.mjs <brand> <out>` rebrands `apps/documentation/cli` (drops
+front matter and `:::` admonitions so GitHub renders it, rewrites binary name,
+config dir, env prefix, release repo, hosts and the routing flags, writes a
+`README.md` index in sidebar order) and REFUSES if any page still names the
+source brand. Pages whose content genuinely differs — install channels — are
+whole-file overrides in `docs-brands/<brand>/`; keep them in step with the
+source page when it changes. The release workflow pushes the result to the
+brand's release repo under `docs/` on every `<brand>-cli-v*` tag, authored as
+the token's owner, and `BRAND.docsUrl` points there. This is also why the REPL
+and `account add` help on a whitelabel show `--proxy` / `--tunnel` /
+`--ws-route`: both spellings are accepted on every brand (`cli-core`'s
+`getCliBrand().flags` picks which one help shows), so the docs never have to
+print a `--tealstreet-*` flag.
+
+**Release:** `BRAND=disrupt yarn release:patch` pushes `disrupt-cli-vX.Y.Z`.
+`cli-release.yml` derives brand, binary name and repo from the tag prefix and
+skips the npm and Homebrew steps for anything but tealstreet; the Windows smoke
+job skips disrupt tags because its install path is npm. Both brands share
+`package.json`'s version. The release step publishes with
+`DISRUPT_CLI_RELEASE_TOKEN` for disrupt and `TEALSTREET_CLI_RELEASE_TOKEN`
+for tealstreet: the latter is scoped to the Tealstreet org and 403s on
+`DisruptTrade/cli`, which is how v0.10.17 ended up published by hand from a
+local `build.sh disrupt` of the tagged commit.
+
 ## Runtime
+
+`src/rust-engine.ts` initializes the Rust browser artifact from a Bun embedded
+asset; standalone binaries need no workspace or extracted WASM file. Build
+`corepack yarn -s rust:build-wasm` from the repository root before source runs
+or CLI compilation. The `*.wasm.test.ts` consumer tests (selected with
+`SAFE_CEX_WASM_TESTS=1`) prove saved-account native state and an isolated
+compiled binary. They do not prove live routing or authenticated connectivity.
 
 **Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.
 
@@ -365,7 +425,15 @@ delegated to the client over WebSocket.
 
 ² Non-`print` terminal output goes through `writeAbovePrompt` (readline-aware redraw) so async lines don't shred the input buffer; `console.warn`/`console.error` (and lines the taxonomy classifies `critical`) additionally call `setStatus` to mirror the latest notable event on the pinned **top alert bar** (`src/status-line.ts`). The always-on **bottom footer** (`src/footer.ts`) is the other pinned surface — both over one shared scroll region (`src/scroll-region.ts`). See the "Output surfaces" row of the doc-sync table.
 
+**Glyphs: never print a raw `✗ ⚠ ✓ ℹ`, emoji or `Σ`.** `src/console-glyphs.ts` decides ASCII for a human terminal only: stdout must be a TTY, and then the legacy Windows console (no `WT_SESSION`, or a non-UTF-8 code page) or `TEALSTREET_ASCII=1` selects it. Terminal renderers (logger terminal lines, status bar, footer, spinner, watch screens, direct `console.log` UI) use `G`. Content that can reach capture or listener sinks (anything through the platform adapter, e.g. `record list`) uses the canonical `U`, and the terminal sinks (`platform-adapter.ts` terminal branch, the logger's terminal writes, `watch-mode.ts`) apply `terminalText`, a length-preserving transliteration that leaves user data alone. JSON (`emitJson`), redirected output and capture/listener payloads are never rewritten. `console-glyphs.test.ts` fails on any printed glyph outside `G`/`U` or the transliteration table; `console-glyphs.sinks.test.ts` pins JSON, redirect and capture-sink bytes. User doc: [Windows console glyphs](../documentation/cli/reference/output.md#windows-console-glyphs).
+
+**No bare error prefixes.** `console.error/warn` terminal text comes from `terminalErrorText` (`src/error-cause.ts`): every non-string argument contributes `describeCause(arg)` — message fields (including inside `raw_response`, `cause`, `data`, `response`), else code/kind/status, else a 300-character serialization — so `console.error('bybitdemo error', body)` can never print only the prefix.
+
 ³ `console.debug` routes to `logger.debug`, which is gated by `MIN_LOG_LEVEL` (`logger.ts`) — default `info`, so debug lines are **dropped entirely** unless `DEBUG=1`/`DEBUG=true` is set. Don't rely on debug output being in `cli.log` by default.
+
+Bybit timestamp refusals use the Rust engine's per-account clock correction and
+one bounded re-signed retry. A detected system-clock skew prints one warning per
+CLI session, including the measured fast/slow offset and Windows time-sync steps.
 
 HoW/tradetunnel request diagnostics use this same existing console/logging
 path in the CLI: with `DEBUG=1`/`DEBUG=true`, the shared
@@ -395,6 +463,7 @@ count moves. See the root CLAUDE.md rule on `setInterval`.
 yarn dev           # Run with bun
 yarn build         # Build cross-platform binaries (scripts/build.sh)
 yarn release       # Bump + tag + push; tag fires .github/workflows/cli-release.yml (binaries, npm, homebrew).
+                   # BRAND=disrupt yarn release:patch tags disrupt-cli-vX.Y.Z → DisruptTrade/cli, binaries only.
                    # Variants: yarn release:patch | :minor | :major.
                    # NO-ARG DOES NOT BUMP — release.sh only runs `yarn version` when
                    # given an argument, so a bare `yarn release` re-tags the current
@@ -466,6 +535,11 @@ name}` footer segment auto-runs the named script ~1×/sec
   relies on `processSingleCommand` throwing on that shape so `retry`,
   `set ec`, blocking waits, and capture writeback all see failures.
   Do not collapse returned failures back into plain `{ handled: true }`.
+  `command-outcome.ts` restores allowlisted `errorDetails` (including client IDs,
+  unknown outcomes and partial accepted IDs) before the REPL throws. Its retry
+  loop stops on unknown outcomes or accepted partial members; it must never
+  reissue the whole write in those cases. Fully rejected operations retain the
+  explicit retry count and the already-reported flag.
 - **`FilePreprocessStore` (`src/preprocess-store.ts`).** Subclasses
   `MemoryPreprocessStore` from `cli-core` to persist vars/aliases to
   `~/.tealstreet/vars.json` + `~/.tealstreet/aliases.json` after every
@@ -605,18 +679,19 @@ name}` footer segment auto-runs the named script ~1×/sec
   repo. A package may not depend on an app; the shared constants had to live in
   the package. `apps/cli` imports them via
   `@tealstreet/script-authoring/src/...`. Generated
-  artifact, committed. Pipeline: `yarn generate:types` at the repo
-  root runs `scripts/generate-script-types-bundle.ts`, which calls
-  the three per-package `scripts/generate-monaco-types.ts` (core /
-  cli / web) and writes the assembled bundle file. The bundle is
-  `import`ed by that package's `scripts-templates.ts` to build `TYPES_TEMPLATE`,
+  artifact, committed. In this mirror, run `corepack yarn generate:script-types`
+  at the repo root. The mirrored writer in
+  `packages/script-authoring/scripts/generate-script-types-bundle.ts` uses
+  `render-script-types-bundle.ts` to call the core/web package generators,
+  wrap their declarations, and render the banner and complete bundle layout.
+  NX's broader `yarn generate:types` orchestrator must import that same helper.
+  The bundle is imported by `scripts-templates.ts` to build `TYPES_TEMPLATE`,
   which `scripts-store.ts:ensureScriptsDir` writes to
-  `~/.tealstreet/scripts/types.d.ts` on every launch. Drift safety:
-  `packages/script-authoring/src/script-types-bundle.test.ts` re-runs the orchestrator in-memory
-  and compares against the on-disk file — CI fails if the two
-  diverge, forcing `yarn generate:types` + commit. **Never
-  hand-edit `script-types-bundle.ts`** — fix the generators or the
-  source packages and regenerate. The core generator uses a
+  `~/.tealstreet/scripts/types.d.ts` on every launch. The drift test compares
+  the entire committed file against the shared generator's in-memory result.
+  Regenerate and commit alongside any input change. **Never hand-edit
+  `script-types-bundle.ts`** — fix the generators or the source packages.
+  The core generator uses a
   dedicated `packages/script-api-core/scripts/bundle.tsconfig.json`
   that carries the workspace `paths` + DOM lib inline so
   `dts-bundle-generator` can resolve `@tealstreet/*` and safe-cex's
@@ -637,20 +712,13 @@ name}` footer segment auto-runs the named script ~1×/sec
   JSDoc comments are allowed — they aren't load-bearing). When
   adding a new host symbol to `index.ts`, add it to
   `HOST_ONLY_SYMBOLS` in the same PR.
-- **Drift block skips in the OSS mirror — don't "fix" the glob import.**
-  `packages/script-authoring/src/script-types-bundle.test.ts`'s drift block re-runs
-  `scripts/generate-script-types-bundle.ts`, a monorepo-root script that
-  is **not** in the `tealstreet-sdk` mirror slice. The block loads the
-  generator via a Vite partial-dynamic specifier
-  (``import(`../../../scripts/${generatorName}.ts`)``): the glob matches
-  in the monorepo (gate runs, 0 skipped) and matches nothing in the mirror,
-  where the dir is absent (import rejects → `describe.skipIf` skips). The
-  template specifier also stops tsc binding the missing module, keeping the
-  mirror's typecheck clean. Do not convert it back to a static/literal
-  import — that breaks mirror typecheck (`TS2307`). The host-symbol leak
-  guard in the same file reads the committed in-slice bundle and runs in
-  both. (Authoritative drift gate stays in the monorepo on sync-back —
-  `docs/safe-cex-cli-mirror-plan.md` §9.)
+- **Script-types drift runs in the OSS mirror and never skips missing tooling.**
+  `corepack yarn check:script-types` imports the mirrored shared renderer and
+  core/web generators directly. CI invokes it outside Turbo caching before
+  general checks. It compares the complete bundle, including banner and layout,
+  without writing output. Fix drift with `corepack yarn generate:script-types`
+  and commit the generated bundle in the same PR; NX's excluded root
+  orchestrator is not needed. The host-symbol leak guard also runs in both.
 - **Script `runCommand` intentionally fails unhandled commands.**
   `src/script-adapter.ts:createStandaloneCoreAdapter().runCommand`
   calls `cli-core.executeCommand` directly, not `processCommand` /

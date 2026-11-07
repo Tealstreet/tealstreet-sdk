@@ -14,6 +14,7 @@ export type OneShotCode =
   | 'NOT_LOGGED_IN'
   | 'AUTH_EXPIRED'
   | 'KEY_REJECTED'
+  | 'CHASE_ABANDONED'
   | 'CONNECTION_TIMEOUT'
   | 'CONNECTION_FAILED'
   | 'UNCONFIRMED'
@@ -47,6 +48,7 @@ const KEY_REJECTION = new RegExp(
     'invalid (ok-access-key|sign)', // okx
     'invalid signature',
     'signature (mismatch|invalid|for this request is not valid)', // binance
+    'credentials were rejected', // Rust engine venues
   ].join('|'),
   'i',
 );

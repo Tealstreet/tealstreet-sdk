@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"profile":"aster-onOpen-turn","immediateSends":1,"firstTurnSends":2,"firstTurnReady":false,"scope":"actual onOpen and subscribe; native single-poll sequence inspected only"}]}

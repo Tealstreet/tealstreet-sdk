@@ -8,6 +8,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    exclude: process.env.SAFE_CEX_WASM_TESTS ? [] : ['**/*.wasm.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

@@ -104,6 +104,7 @@ fn shared_string_union_accepted_set_matches_typescript() {
         ExchangeAccountConfigHealthStatus,
         ExchangeOptionsBybitSiteId,
         ExchangeOptionsExtraAsterdexApiVersion,
+        ExchangeOptionsExtraHyrotraderMode,
         ExchangeOptionsExtraLighterBuilderFeeMode,
         ExchangeOptionsExternalPublicDataVariant0Type,
         ExchangeOptionsExternalPublicDataVariant1Type

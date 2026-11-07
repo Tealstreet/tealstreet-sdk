@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { replacementClientOrderIdOf } from '../../exchanges/clientOrderId';
 import { mintHyperliquidCloid, placementRecordFromWire } from '../../exchanges/hyperliquid/hyperliquid.cloid';
-import { getCrossCache, PLACEMENT_RECORD_TTL_MS } from '../../exchanges/hyperliquid/hyperliquid.cross-cache';
-import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
-import { HyperliquidSpotExchange } from '../../exchanges/hyperliquid/hyperliquidspot.exchange';
+import { getCrossCache, PLACEMENT_RECORD_TTL_MS } from '../reference/hyperliquid/hyperliquid.cross-cache';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
+import { HyperliquidSpotExchange } from '../reference/hyperliquid/hyperliquidspot.exchange';
 import { DefaultStore } from '../../store/store.base';
 import {
   MarginType,

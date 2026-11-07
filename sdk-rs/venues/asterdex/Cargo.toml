@@ -1,0 +1,18 @@
+[package]
+name = "safe-cex-venue-asterdex"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+safe-cex-engine = { workspace = true, features = ["order-locks", "condition-waits", "managed-sockets", "address-nonce"] }
+safe-cex-crypto = { workspace = true, features = ["secp256k1", "address-nonce"] }
+safe-cex-venue-binance.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }

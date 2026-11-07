@@ -1,30 +1,12 @@
-import { ChaserOrderInstance } from '../chaserOrder/ChaserOrderInstance';
-import { chaserOrderManagerInstance } from '../chaserOrder/ChaserOrderManager';
-import { ChaserOrderOptions } from '../chaserOrder/ChaserOrderOptions';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
+const CHASER_OPS = new Set<StoreWorkerPayload['op']>(['chaser:start', 'chaser:terminate', 'chaser:terminateAll']);
+
+/** Chases run in the account engine's Rust algos; `chaser:terminateAll` is a hosted
+ * session parked for a resume, whose abandoned chases must not fill unguarded later. */
 export class ChaserOrderHandler extends BaseHandler {
   handle(payload: StoreWorkerPayload): void {
-    switch (payload.op) {
-      case 'chaser:start':
-        const options = payload.data as ChaserOrderOptions;
-        // Ensure accountName is set for filtering in dispose logic
-        const optionsWithAccount = {
-          ...options,
-          accountName: options.accountName || this._accountName,
-        };
-        chaserOrderManagerInstance.add(new ChaserOrderInstance(this._exchange, optionsWithAccount));
-        break;
-      case 'chaser:terminate':
-        const id = payload.data;
-        chaserOrderManagerInstance.remove(id);
-        break;
-      // A hosted session parked for a resume: the client has already abandoned
-      // these chases' pending TP/SL, so they must not fill unguarded later.
-      case 'chaser:terminateAll':
-        chaserOrderManagerInstance.cleanupExchange(this._exchange, 'Client disconnected while chase was active');
-        break;
-    }
+    if (CHASER_OPS.has(payload.op)) this.runInRustAlgos(payload);
   }
 }

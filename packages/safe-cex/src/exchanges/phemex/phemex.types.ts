@@ -1,5 +1,7 @@
 import { OrderSide, OrderStatus, OrderTimeInForce, OrderType, PositionSide } from '../../types';
 
+export const BROKER_ID = 'Tealstreet';
+
 export type PhemexApiResponse<T extends Record<string, any>> = T & {
   code: number;
   msg: string;

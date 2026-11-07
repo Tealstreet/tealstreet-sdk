@@ -24,7 +24,7 @@ strings through the union's serde boundary before calling the cache.
 Backend interface methods return owned futures; optional read/clear methods use
 `Option<Future>` to preserve method absence and fallback behavior. In-memory
 chunks preserve first-timestamp deduplication and hydration/read-through merge
-precedence. JSON payloads cross the existing typed Candle boundary; invalid
+precedence. Persistent null OHLC/volume values decode to NaN at the backend codec; invalid
 object-shaped matching candles are skipped individually, so valid cached siblings survive
 and fetch fills only the missing gap. Adapter I/O errors still propagate in
 read-through mode. Consult the manifest note for unchecked-TS representation
@@ -124,12 +124,11 @@ TS wire name through serde. External names must decode through that union;
 separate optional account flag. Compile-fail tests independently pin both the
 exchange and interval guards; canonical live/testnet byte strings remain tested.
 
-Round-3 decision: `clean_candles` retains first-timestamp deduplication, including
-NaN and signed-zero equivalence, then uses a total numeric order with NaN last.
-This deliberately corrects TS `cleanCandles`' non-transitive subtraction
-comparator, whose actual permutation depends on the engine's sorting algorithm.
-The manifest marks the correction divergent; exact and 2000 seeded permutation
-fixtures assert the returned finite subsequence and the retained first NaN.
+`clean_candles` retains first-timestamp deduplication and delegates the source
+subtraction comparator to safe-cex-num's canonical V8 TimSort. The former
+NaN-last correction is removed. Actual maintained source profiles compare exact
+result permutations, including NaN, infinities, signed zero and first duplicates,
+through the public helper and constructed cache fetch path.
 
 The 27-interval fixture pins labels as well as durations: each decoded union
 must emit its authored literal name, and public keys must preserve exact live
@@ -237,7 +236,14 @@ existing shared Candle/OrderSide eligibility; see
 539 native bit comparisons across seven fields, eleven source number spellings
 and seven ingress routes. Shape refusals remain separately pinned.
 
-The private owner request boundary is clean for already-parsed integer -0 in fromMs, toMs, limit and nowMs. Its four-field bit regression distinguishes this direct derived-record decoder from the lossy map-only cache record decoder.
+The private owner Request decoder requires an object at its own Deserialize boundary,
+using the shared shape guard and private remote schema. This preserves direct decimal
+and integer -0 decoding in fromMs, toMs, limit and nowMs, and both optional fields'
+missing/null behavior. The parent JSON-lines command check remains in place.
+The binary tests assert native fields and reject a complete seven-field array through
+raw, owned, borrowed and qualified decoding. Run `scripts/request-object-control.py`
+to remove only the guard, require the named array-admission failure, and restore the
+exact source before the passing rerun.
 
 Cursor write failures abort the active transaction inside the error callback, before the recovered error wakes records(). This applies to clear and eviction; readonly cursor failures still retain the successfully read prefix. Abort failure is attached to the existing reported diagnostic rather than discarded. The cursor_rollback_probe seeds two real chunks, fails the second continuation after deletes have begun, and requires both original chunks plus one report. Its execution coverage is OPEN: it builds and lints but has never run, because the browser environment remains blocked. This does not change the separately declared cancellation/abort-only completion behavior.
 
@@ -246,3 +252,32 @@ The field-identity supplement asserts all seven decoded chunk/Candle numeric fie
 The narrowed monthly chart operations now use the same Date/TimeClip semantics
 as the millisecond helpers. `tests/monthly_behavior.rs` independently covers all
 four operations, including original-year remapping before close-month rollover.
+
+The final decision retains typed f64 Candle. KV keeps its JSON null encoding for
+nonfinite OHLC/volume; the read codec restores null to native NaN as a cache hit.
+IndexedDB writes/reads native numeric fields directly, preserving NaN through
+structured clone and accepting previously persisted null numerics as NaN. Timestamp
+null, missing required fields and wrong kinds remain structural misses. The revised
+38-case structural miss/refetch regression and its compiled error control retain
+that policy; null-numeric slots instead have positive real persistence tests.
+
+`tests/runtime_backends.rs` persists NaN in every OHLC/volume field through actual
+filesystem/KV storage and reopens it under both read modes, asserting zero venue
+fetches and native field values. The compiled Wasm `nan_codec_probe` runs against
+real Chrome IndexedDB with 26 profiles (NaN writes, preexisting null numerics,
+structural misses, both read modes). Its separate runner executes the maintained
+TS backends too; browser availability for this probe does not imply the older
+fault/rollback probes were rerun. See GATE_EVIDENCE.md for commands and RED/GREEN.
+
+The eight-row non-UTF-8 FIX audit is recorded in
+`../parity/CANDLE_CACHE_FIX_AUDIT.md`. The real cache/KV source/native replay
+covers all 27 intervals under both read modes, and the browser probe includes
+cancelled persistence ownership. Pre-epoch Euclidean persistence is accepted
+because exchanges have no pre-1970 candles; this is not a general source-bug
+correction policy. Extreme key rounding and namespace violations remain explicit
+and do not arise from real candle dates or prefix-respecting storage.
+
+The remaining specific-claims cohort is recorded in
+`../parity/CANDLE_CACHE_SPECIFIC_CLAIMS.md`. Hydration's accepted extra output is
+**diagnostic log only**: report the typed backend cause, preserve caller success,
+network results, measured settlement order and slot release.

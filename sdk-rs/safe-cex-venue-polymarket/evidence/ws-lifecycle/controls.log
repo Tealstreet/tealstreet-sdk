@@ -1,8 +1,0 @@
-public.onOpen: baseline0 / mutation101 (native socket trace:public.onOpen) / restored0
-public.onClose: baseline0 / mutation101 (native socket trace:public.onClose) / restored0
-public.ping: baseline0 / mutation101 (native socket trace:public.ping) / restored0
-public.sendSubscription: baseline0 / mutation101 (native custom feature:public.sendSubscription) / restored0
-private.onOpen: baseline0 / mutation101 (native socket trace:private.onOpen) / restored0
-private.onClose: baseline0 / mutation101 (native socket trace:private.onClose) / restored0
-private.ping: baseline0 / mutation101 (native socket trace:private.ping) / restored0
-private.authenticate: baseline0 / mutation101 (native subscription channel:private.authenticate) / restored0

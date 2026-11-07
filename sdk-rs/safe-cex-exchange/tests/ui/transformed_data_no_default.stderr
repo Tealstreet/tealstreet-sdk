@@ -1,5 +1,0 @@
-error[E0277]: the trait bound `TransformedData: std::default::Default` is not satisfied
- --> tests/ui/transformed_data_no_default.rs:3:30
-  |
-3 |     let _: TransformedData = Default::default();
-  |                              ^^^^^^^^^^^^^^^^^^ the trait `std::default::Default` is not implemented for `TransformedData`

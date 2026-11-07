@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CoinbaseStarbaseProtocolError } from '../../exchanges/coinbase/coinbase.starbase';
+import { CoinbaseStarbaseProtocolError } from '../reference/coinbase/coinbase.starbase';
 import {
   assessCoinbaseStarbaseMarketParity,
   buildCoinbaseStarbaseBookChannel,
@@ -22,7 +22,7 @@ import {
   normalizeCoinbaseStarbaseTickerPayload,
   toCoinbaseLegacyIntxSymbol,
   toCoinbaseStarbaseInstrumentName,
-} from '../../exchanges/coinbase/coinbase.starbase-public';
+} from '../reference/coinbase/coinbase.starbase-public';
 import {
   STARBASE_BOOK_CHANGE_PAYLOAD,
   STARBASE_BOOK_SNAPSHOT_PAYLOAD,
