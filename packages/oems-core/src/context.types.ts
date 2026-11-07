@@ -122,7 +122,8 @@ export interface OemsPositionRef extends OemsPositionAddress {
    *  inverse contract. */
   readonly notional: number;
   readonly unrealizedPnl: number;
-  readonly liquidationPrice: number;
+  /** Null when the venue has no usable liquidation threshold. */
+  readonly liquidationPrice: number | null;
   readonly leverage: number;
   /**
    * Load-bearing for anything that sizes a close. In `hedged` mode the two
