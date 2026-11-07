@@ -84,13 +84,23 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
         error = error.outcome(
             if matches!(
                 kind,
-                ErrorKind::Network | ErrorKind::Internal | ErrorKind::VenueUnavailable
+                ErrorKind::Network
+                    | ErrorKind::Internal
+                    | ErrorKind::VenueUnavailable
+                    | ErrorKind::RateLimited
             ) {
                 Outcome::Unknown
             } else {
                 Outcome::Rejected
             },
         );
+        // A released native rate response cannot prove that the write was refused.
+        // Keep this text in the classified fact as well as the terminal fallback.
+        if kind == ErrorKind::RateLimited {
+            error
+                .message
+                .push_str(". The outcome is unknown. Check Open Orders");
+        }
     }
     error
 }
@@ -233,6 +243,11 @@ mod tests {
                             error.message,
                             format!("verbatim. {}", safe_cex_engine::error::IP_WHITELIST_HINT)
                         );
+                    } else if write && kind == ErrorKind::RateLimited {
+                        assert_eq!(
+                            error.message,
+                            "verbatim. The outcome is unknown. Check Open Orders"
+                        );
                     } else {
                         assert_eq!(error.message, "verbatim");
                     }
@@ -241,7 +256,7 @@ mod tests {
                         error.outcome,
                         if !write {
                             None
-                        } else if code == 10001 {
+                        } else if matches!(code, 10001 | 10005 | 10006) {
                             Some(Outcome::Unknown)
                         } else {
                             Some(Outcome::Rejected)
