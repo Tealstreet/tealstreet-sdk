@@ -432,6 +432,7 @@ impl Coinbase {
                             .drb
                             .ticker_time
                             .insert(t.symbol.clone(), timestamp);
+                        cx.store.ensure_ticker(&t.symbol);
                         cx.store.update_ticker(&t.symbol.clone(), |old| *old = t);
                     }
                 }
@@ -676,6 +677,7 @@ impl Coinbase {
                     .drb
                     .ticker_time
                     .insert(t.symbol.clone(), timestamp);
+                cx.store.ensure_ticker(&t.symbol);
                 cx.store.update_ticker(&t.symbol.clone(), |old| *old = t);
             } else {
                 return;
@@ -988,7 +990,7 @@ impl Coinbase {
                     );
                     return None;
                 }
-                let end = to_ms.unwrap_or(cx.now).min(cx.now);
+                let end = to_ms.unwrap_or(cx.now).min(cx.now).floor();
                 let start = from_ms
                     .unwrap_or(end - interval.ms() * f64::from(limit.unwrap_or(300).clamp(1, 1000)))
                     .max(0.);
