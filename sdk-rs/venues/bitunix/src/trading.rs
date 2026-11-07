@@ -2416,11 +2416,18 @@ impl BitunixFutures {
         if malformed {
             items.push(BatchItem::Accepted(""));
         }
-        let message = if messages.is_empty() {
+        let mut message = if messages.is_empty() {
             "Bitunix batch response has incomplete order acknowledgements".to_owned()
         } else {
             messages.join_with("; ")
         };
+        let rate_limited = failures.iter().any(|f| {
+            f.error_code
+                .is_some_and(|code| matches!(code.0, 10005 | 10006))
+        });
+        if rate_limited {
+            message.push_str(". The outcome is unknown. Check Open Orders");
+        }
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.job.ids.extend(ids.iter().cloned());
         }
@@ -2441,7 +2448,11 @@ impl BitunixFutures {
                 }
                 Ok(())
             }
-            Ok(WriteResult::PartialUnknown(error) | WriteResult::Failed(error)) => Err(Some(error)),
+            Ok(WriteResult::PartialUnknown(mut error) | WriteResult::Failed(mut error)) => {
+                // A later uncertain chunk supersedes an earlier chunk's refusal text.
+                error.presents = rate_limited;
+                Err(Some(error))
+            }
             Err(_) => Err(None),
         }
     }

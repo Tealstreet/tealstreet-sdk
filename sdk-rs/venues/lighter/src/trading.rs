@@ -1484,13 +1484,15 @@ impl Lighter {
                         message.push_str("; ");
                         message.push_str(RATE_MESSAGE);
                     }
-                    if matches!(code, Some(23000 | 23100)) {
+                    let present_unknown = matches!(code, Some(23000 | 23100))
+                        || (unknown && self.trading.active.as_ref().unwrap().retried_nonce);
+                    if present_unknown {
                         message.push_str(". The outcome is unknown. Check Open Orders");
                     }
                     let mut error = VenueError::new(message);
-                    // Native rate uncertainty must supersede an earlier nonce
+                    // Uncertainty must supersede an earlier nonce
                     // refusal's words; the journal still owns outcome and effects.
-                    error.presents = matches!(code, Some(23000 | 23100));
+                    error.presents = present_unknown;
                     if matches!(submission.effect, Effect::Modify) {
                         error.message = if unknown {
                             format!(

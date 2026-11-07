@@ -332,6 +332,14 @@ fn stale_refusal_after_nonce_retry_23100_is_replaced_by_unknown_guidance() {
     nonce_retry_stale_refusal(200, 23100, true);
 }
 #[test]
+fn stale_refusal_after_nonce_retry_internal_error_is_replaced_by_unknown_guidance() {
+    nonce_retry_stale_refusal(200, 29500, true);
+}
+#[test]
+fn stale_refusal_after_nonce_retry_duplicate_index_is_replaced_by_unknown_guidance() {
+    nonce_retry_stale_refusal(200, 21728, true);
+}
+#[test]
 fn stale_refusal_after_nonce_retry_http_429_already_has_unknown_guidance() {
     nonce_retry_stale_refusal(429, 23000, true);
 }

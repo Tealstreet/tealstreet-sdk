@@ -300,3 +300,138 @@ fn stale_refusal_before_replacement_http_429_already_has_unknown_guidance() {
 fn stale_refusal_definitive_replacement_response_stays_known_partial() {
     replacement_stale_refusal(200, 20003, false);
 }
+
+fn batch_rate_rows(code: i64, refused_prefix: bool) {
+    let (mut e, _) = startup();
+    let mut cmd = command("create");
+    if let Command::PlaceOrders { orders, .. } = &mut cmd {
+        orders.resize(if refused_prefix { 7 } else { 2 }, orders[0].clone());
+    }
+    e.handle(100.0, Event::Command(cmd));
+    let mut writes = requests(&mut e);
+    assert_eq!(writes.len(), 1);
+    let mut now = 110.0;
+    if refused_prefix {
+        let body = serde_json::json!({"code": 0, "data": {
+            "successList": [],
+            "failureList": vec![serde_json::json!({
+                "errorCode": 20003, "errorMsg": "earlier refused chunk",
+            }); 5],
+        }})
+        .to_string();
+        e.handle(
+            now,
+            Event::HttpResponse {
+                request: writes[0].id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+        let (timer, at) = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .expect("next chunk cooldown");
+        e.handle(at, Event::TimerFired { timer });
+        writes = requests(&mut e);
+        writes.retain(|r| r.method != Method::Get);
+        assert_eq!(writes.len(), 1, "one later chunk");
+        now = at + 1.0;
+    }
+    let write = &writes[0];
+    assert!(write.url.ends_with("batch_order"));
+    assert_ne!(write.method, Method::Get);
+    let body = serde_json::json!({"code": 0, "data": {
+        "successList": [],
+        "failureList": [
+            {"errorCode": code, "errorMsg": "throttled"},
+            {"errorCode": code, "errorMsg": "throttled"},
+        ],
+    }})
+    .to_string();
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: write.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: &body,
+            },
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "{actions:?}");
+    let error = failures[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+    if !refused_prefix {
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+        assert_eq!(error.venue_code, Some(code.to_string()));
+        assert_eq!(error.venue_message.as_deref(), Some("throttled"));
+    }
+    let text = error.legacy_text().to_ascii_lowercase();
+    assert!(
+        text.contains("unknown") && text.contains("check open orders"),
+        "{error:?}"
+    );
+    assert!(
+        !text.contains("refused") && !text.contains("no stop"),
+        "{error:?}"
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+    );
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    let mut later = actions;
+    for (timer, at) in timers {
+        e.handle(at, Event::TimerFired { timer });
+        later.extend(safe_cex_engine::test_support::prepared_actions(&mut e, at));
+    }
+    assert!(
+        !later
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+        "no resend or put-back: {later:?}"
+    );
+}
+
+#[test]
+fn native_10005_batch_rows_present_unknown_guidance() {
+    batch_rate_rows(10005, false);
+}
+
+#[test]
+fn native_10006_batch_rows_present_unknown_guidance() {
+    batch_rate_rows(10006, false);
+}
+
+#[test]
+fn native_10005_batch_rows_replace_an_earlier_chunks_refusal() {
+    batch_rate_rows(10005, true);
+}
+
+#[test]
+fn native_10006_batch_rows_replace_an_earlier_chunks_refusal() {
+    batch_rate_rows(10006, true);
+}
