@@ -223,6 +223,137 @@ describe('CancelCommand', () => {
     });
   });
 
+  describe('cancel scope cannot widen', () => {
+    it.each(['buys', '1234', '1234,5678'])('accepts a complete trailing market alias after %s', async (selector) => {
+      const orders = [
+        createMockOrder('native-1234', 'BTC-PERP', OrderSide.Buy, OrderType.Limit),
+        createMockOrder('native-5678', 'BTC-PERP', OrderSide.Sell, OrderType.StopLoss),
+        createMockOrder('other-1234', 'BTCUSDT', OrderSide.Buy, OrderType.Limit),
+      ];
+      const exchange = createMockExchange(orders, { name: 'hyperliquid' });
+      const store = exchange.store as unknown as { markets: unknown[]; tickers: unknown[] };
+      store.markets.push({ symbol: 'BTC-PERP', base: 'BTC', quote: 'USDC', precision: { amount: 0.001, price: 1 } });
+      store.tickers.push({ symbol: 'BTC-PERP', last: 50000 });
+
+      const result = await command.execute(createMockContext(['cancel', selector, 'btcusdc'], exchange, 'ETHUSDT'));
+
+      expect(result.success).toBe(true);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      expect(exchange.cancelOrders).toHaveBeenCalledExactlyOnceWith(
+        selector.includes(',') ? [orders[0], orders[1]] : [orders[0]],
+      );
+    });
+
+    it.each(['symbol', 'filtered'])('preserves an unknown %s cancellation error without another write', async (kind) => {
+      const failure = Object.assign(new Error('Check Open Orders'), { outcome: 'unknown' });
+      const exchange = createMockExchange([
+        createMockOrder('buy-1234', 'BTCUSDT', OrderSide.Buy, OrderType.Limit),
+      ]);
+      const operation = kind === 'symbol' ? exchange.cancelSymbolOrders! : exchange.cancelOrders!;
+      vi.mocked(operation).mockRejectedValueOnce(failure);
+
+      await expect(command.execute(createMockContext(
+        kind === 'symbol' ? ['cancel', 'BTCUSDT'] : ['cancel', 'buys', 'BTCUSDT'], exchange,
+      ))).rejects.toBe(failure);
+
+      expect(operation).toHaveBeenCalledTimes(1);
+      const otherOperation = kind === 'symbol' ? exchange.cancelOrders : exchange.cancelSymbolOrders;
+      expect(otherOperation).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['BTCUSDT', 'buys'],
+      ['BTCUSDT', 'stops'],
+      ['BTCUSDT', 'top', '1'],
+      ['BTCUSDT', '1234'],
+      ['BTCUSDT', 'ETHUSDT'],
+    ])('refuses a market followed by extra arguments: %j', async (...tokens) => {
+      const exchange = createMockExchange([
+        createMockOrder('buy-1234', 'BTCUSDT', OrderSide.Buy, OrderType.Limit),
+        createMockOrder('sell-5678', 'BTCUSDT', OrderSide.Sell, OrderType.Limit),
+        createMockOrder('stop-9999', 'BTCUSDT', OrderSide.Sell, OrderType.StopLoss),
+      ]);
+      const result = await command.execute(createMockContext(['cancel', ...tokens], exchange));
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/argument|usage|filter/i);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      expect(exchange.cancelOrders).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['buys'], ['sells'], ['stops'], ['limits'], ['buy', 'stops'], ['sell', 'stops'],
+      ['ro'], ['xro'], ['top', '1'], ['bottom', '1'], ['first', '1'], ['last', '1'],
+      ['from', '49000', 'to', '51000'],
+    ])('refuses a trailing market prefix after %j', async (...filter) => {
+      const exchange = createMockExchange([
+        createMockOrder('focus-buy', 'BTCUSDT', OrderSide.Buy, OrderType.Limit),
+        createMockOrder('other-buy', 'SUSDT', OrderSide.Buy, OrderType.Limit),
+        createMockOrder('other-sell', 'SUSDT', OrderSide.Sell, OrderType.Limit),
+        createMockOrder('other-stop', 'SUSDT', OrderSide.Sell, OrderType.StopLoss),
+      ], { name: 'blofin' });
+      const store = exchange.store as unknown as { markets: unknown[]; tickers: unknown[] };
+      store.markets.push({ symbol: 'SUSDT', base: 'S', quote: 'USDT', precision: { amount: 1, price: 0.0001 } });
+      store.tickers.push({ symbol: 'SUSDT', last: 1 });
+
+      const result = await command.execute(createMockContext(['cancel', ...filter, 'sx9'], exchange));
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/market|symbol/i);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      expect(exchange.cancelOrders).not.toHaveBeenCalled();
+    });
+
+    it.each(['1234', '1234,5678'])('scopes ID suffixes %s to the explicit market', async (ids) => {
+      const orders = [
+        createMockOrder('btc-1234', 'BTCUSDT', OrderSide.Buy, OrderType.Limit),
+        createMockOrder('eth-1234', 'ETHUSDT', OrderSide.Sell, OrderType.Limit),
+        createMockOrder('btc-5678', 'BTCUSDT', OrderSide.Sell, OrderType.Limit),
+        createMockOrder('eth-5678', 'ETHUSDT', OrderSide.Buy, OrderType.StopLoss),
+      ];
+      const exchange = createMockExchange(orders);
+
+      const result = await command.execute(createMockContext(['cancel', ids, 'ETHUSDT'], exchange));
+
+      expect(result.success).toBe(true);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      expect(exchange.cancelOrders).toHaveBeenCalledExactlyOnceWith(
+        ids.includes(',') ? [orders[1], orders[3]] : [orders[1]],
+      );
+    });
+
+    it('does not fall back to another market when a scoped ID has no match', async () => {
+      const exchange = createMockExchange([
+        createMockOrder('btc-1234', 'BTCUSDT', OrderSide.Buy, OrderType.Limit),
+      ]);
+
+      const result = await command.execute(createMockContext(['cancel', '1234', 'ETHUSDT'], exchange));
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Order not found');
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      expect(exchange.cancelOrders).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['buys', 'stops'], ['limits', 'ro'], ['stops', 'buys'], ['ro', 'buys'],
+      ['buys', 'ETHUSDT', 'stops'], ['1234', 'ETHUSDT', 'buys'],
+      ['top', '2buys'], ['top', '1.5'], ['from', '49000oops', 'to', '51000'],
+    ])('refuses unconsumed or malformed filters: %j', async (...tokens) => {
+      const exchange = createMockExchange([
+        createMockOrder('buy-1234', 'BTCUSDT', OrderSide.Buy, OrderType.Limit),
+        createMockOrder('sell-5678', 'ETHUSDT', OrderSide.Sell, OrderType.Limit),
+      ]);
+
+      const result = await command.execute(createMockContext(['cancel', ...tokens], exchange));
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/argument|usage|market|symbol|filter/i);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      expect(exchange.cancelOrders).not.toHaveBeenCalled();
+    });
+  });
+
   describe('cancel buy orders', () => {
     it('cancels only buy limit orders', async () => {
       const orders = [

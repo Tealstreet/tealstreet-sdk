@@ -173,11 +173,18 @@ Global variants (`longs`, `shorts`, `all`, `allpos`) honor the
 
 ### `cancel` &nbsp; _(alias `x`)_
 
-Filters compose: side × kind × reduce-only × position-selector × range × id.
+Use the filter forms below, optionally followed by one market name
+(`cancel buys BTCUSDT`). Filters must come before the market. Unsupported
+combinations, leftover arguments, and incomplete market names return an error
+without cancelling orders; `cancel BTCUSDT buys` is refused.
 
 An unfiltered market token must be its full symbol, a supported bare base, or a
 complete base+quote alias (`cancel BTCUSDC` selects `BTC-PERP` on Hyperliquid).
 Filter keywords and arbitrary market prefixes never select cancel-all.
+
+ID suffixes and comma-separated IDs honor an explicit market:
+`cancel 1234 ETHUSDT` only matches ETHUSDT orders. Without a market, ID matches
+search all open orders on the account.
 
 | Form                          | Result                                          |
 | ----------------------------- | ----------------------------------------------- |
@@ -190,7 +197,7 @@ Filter keywords and arbitrary market prefixes never select cancel-all.
 | `cancel top 3` / `bottom 5`   | Sorted by price (top = highest)                 |
 | `cancel first 2` / `last 1`   | Sorted by last update                           |
 | `cancel from 49000 to 50000`  | Price-range, limits only                        |
-| `cancel <id>` / `<id-prefix>` | Specific order (prefix ≥ 3 chars)               |
+| `cancel <id>` / `<id-suffix>` | Matching open orders (suffix ≥ 3 chars)         |
 | `cancel <id1>,<id2>,…`        | Comma list — what `cancel @capturedVar` becomes |
 
 Source: `CancelCommand.ts`.

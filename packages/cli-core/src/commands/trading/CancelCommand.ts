@@ -2,6 +2,7 @@ import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { OrderSide, OrderStatus, OrderType, type Order } from '@tealstreet/safe-cex/src/types';
 import { ID_SUFFIX_RE } from '../../preprocess/parserUtils';
+import type { ExchangeLike } from '../../types';
 
 const FILTER_KEYWORDS = [
   'buys', 'sells', 'stops', 'limits', 'buy', 'sell',
@@ -28,8 +29,8 @@ function isStop(o: Order): boolean {
  *   - range:    from <p1> to <p2> (price-range; limits only)
  *   - id:       a trailing ID match (3+ chars of [A-Za-z0-9_-])
  *
- * Symbol scope is taken from the trailing arg if it resolves; otherwise
- * the focused symbol. Filter keywords are skipped during that lookup.
+ * An optional trailing market must be a complete name. Unsupported argument
+ * order and leftover tokens refuse before cancellation.
  */
 export class CancelCommand extends TradingBaseCommand {
   readonly name = 'cancel';
@@ -66,17 +67,40 @@ export class CancelCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
-    const targetSymbol = this.getTargetSymbol(ctx, FILTER_KEYWORDS);
     const orders = exchange.store?.orders ?? [];
     const head = (args[1] ?? '').toLowerCase();
+    const sub = (args[2] ?? '').toLowerCase();
+    const namedMarket = this.resolveCancelMarket(exchange, args[1] ?? '');
+    if (namedMarket && args.length > 2) {
+      return this.error('Invalid cancel arguments: put filters before the market, e.g. cancel buys BTCUSDT');
+    }
+
+    // Consume each supported selector before interpreting an optional market.
+    let filterEnd = 2;
+    if (['top', 'bottom', 'first', 'last'].includes(head)) filterEnd = 3;
+    else if (head === 'from') filterEnd = 5;
+    else if (
+      (['buys', 'sells'].includes(head) && ['ro', 'xro'].includes(sub)) ||
+      (['buy', 'sell'].includes(head) && sub === 'stops')
+    ) filterEnd = 3;
+
+    const trailing = args.slice(filterEnd);
+    if (trailing.length > 1) {
+      return this.error('Invalid cancel arguments: only one trailing market is supported; no filters may be ignored');
+    }
+    const explicitMarket = trailing.length ? this.resolveCancelMarket(exchange, trailing[0]) : undefined;
+    if (trailing.length && !explicitMarket) {
+      return this.error(`Invalid cancel market "${trailing[0]}": use a full symbol, supported base, or base+quote alias`);
+    }
+    const targetSymbol = namedMarket ?? explicitMarket ?? ctx.symbol;
 
     // Top/bottom/first/last <n> — selectors over open limit orders
     if (['top', 'bottom', 'first', 'last'].includes(head)) {
       if (!exchange.cancelOrders) {
         return this.error('Exchange does not support canceling specific orders');
       }
-      const n = parseInt(args[2], 10);
-      if (!Number.isFinite(n) || n <= 0) {
+      const n = Number(args[2]);
+      if (!Number.isSafeInteger(n) || n <= 0) {
         return this.error(`Usage: cancel ${head} <n> [SYMBOL]`);
       }
       const limitOrders = orders.filter(
@@ -117,9 +141,9 @@ export class CancelCommand extends TradingBaseCommand {
       if (!exchange.cancelOrders) {
         return this.error('Exchange does not support canceling specific orders');
       }
-      const p1 = parseFloat(args[2]);
+      const p1 = args[2]?.trim() ? Number(args[2]) : NaN;
       const toKw = (args[3] ?? '').toLowerCase();
-      const p2 = parseFloat(args[4]);
+      const p2 = args[4]?.trim() ? Number(args[4]) : NaN;
       if (!Number.isFinite(p1) || toKw !== 'to' || !Number.isFinite(p2)) {
         return this.error('Usage: cancel from <p1> to <p2> [SYMBOL]');
       }
@@ -177,18 +201,7 @@ export class CancelCommand extends TradingBaseCommand {
       return this.success();
     }
 
-    // Prefix matches can turn filter keywords or IDs into markets (buys -> BUSDT).
-    // Cancel-all accepts only a symbol, bare base, or complete base+quote alias.
-    const token = (args[1] ?? '').trim().toUpperCase();
-    const resolved = token ? this.transformSymbol(exchange, token) : '';
-    const resolvedMarket = exchange.store?.markets?.find((m) => m.symbol === resolved);
-    const namesMarket =
-      !FILTER_KEYWORDS.includes(head) &&
-      this.validateSymbol(exchange, resolved) &&
-      (resolved.toUpperCase() === token ||
-        resolvedMarket?.base.toUpperCase() === token ||
-        (resolvedMarket !== undefined && `${resolvedMarket.base}${resolvedMarket.quote}`.toUpperCase() === token));
-    if (!args[1] || namesMarket) {
+    if (!args[1] || namedMarket) {
       if (exchange.cancelSymbolOrders) {
         await exchange.cancelSymbolOrders(targetSymbol);
       } else if (exchange.cancelOrders) {
@@ -210,7 +223,6 @@ export class CancelCommand extends TradingBaseCommand {
       case 'buys':
       case 'sells': {
         const wantSide = head === 'buys' ? OrderSide.Buy : OrderSide.Sell;
-        const sub = (args[2] ?? '').toLowerCase();
         const candidates = orders.filter(
           (o) =>
             o.symbol === targetSymbol &&
@@ -241,7 +253,7 @@ export class CancelCommand extends TradingBaseCommand {
       }
       case 'buy':
       case 'sell': {
-        if ((args[2] ?? '').toLowerCase() === 'stops') {
+        if (sub === 'stops') {
           const wantSide = head === 'buy' ? OrderSide.Buy : OrderSide.Sell;
           const sideStops = orders.filter(
             (o) => o.symbol === targetSymbol && o.side === wantSide && isStop(o),
@@ -254,21 +266,14 @@ export class CancelCommand extends TradingBaseCommand {
         return this.error('Not implemented');
       }
       default: {
-        // Trailing-ID match — `cancel <suffix>` where suffix is 3+
-        // [A-Za-z0-9_-] chars and isn't a recognised keyword. We fall
-        // through to here, so the symbol-as-args[1] case above has
-        // already been ruled out.
-        //
-        // Also handles comma-separated lists — `cancel <id1>,<id2>,…`
-        // — which is what `cancel @<var>` becomes after substitution
-        // when the var was populated via `@<var> = buy …` capture
-        // (commit 3). Each piece must independently match
-        // ID_SUFFIX_RE; otherwise we fall through to "Not implemented".
+        // Captured comma-lists and suffixes share the same optional market scope.
+        // An explicit scope never falls back to matching orders in another market.
         const pieces = args[1].split(',').map((p) => p.trim()).filter((p) => p);
         if (pieces.length > 0 && pieces.every((p) => ID_SUFFIX_RE.test(p))) {
           const matches = orders.filter(
             (o) =>
               o.status === OrderStatus.Open &&
+              (explicitMarket === undefined || o.symbol === explicitMarket) &&
               pieces.some((p) => o.id === p || o.id.endsWith(p)),
           );
           if (matches.length === 0) {
@@ -291,5 +296,16 @@ export class CancelCommand extends TradingBaseCommand {
         return this.error('Not implemented');
       }
     }
+  }
+
+  private resolveCancelMarket(exchange: ExchangeLike, input: string): string | undefined {
+    const token = input.trim().toUpperCase();
+    if (!token || FILTER_KEYWORDS.includes(token.toLowerCase())) return undefined;
+    const resolved = this.transformSymbol(exchange, token);
+    const market = exchange.store?.markets?.find((m) => m.symbol === resolved);
+    // Prefix matches can turn filter keywords or IDs into markets (sx9 -> SUSDT).
+    const complete = resolved.toUpperCase() === token || market?.base.toUpperCase() === token ||
+      (market !== undefined && `${market.base}${market.quote}`.toUpperCase() === token);
+    return complete && this.validateSymbol(exchange, resolved) ? resolved : undefined;
   }
 }
