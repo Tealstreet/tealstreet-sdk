@@ -636,7 +636,7 @@ All prices and amounts are rounded using `adjust()` from `safe-math.ts`:
 base units (e.g. XBTUSDTM `multiplier = 0.001` → 1 contract = 0.001 BTC). The
 rest of the app (web `getPositionNativeSize` = `contracts / contractSize`,
 direct-USD `notional`, base-size columns) expects **position/order sizes in
-BASE units and `notional` in quote (USD)** — the OKX/BitMEX/BloFin convention.
+BASE units and `notional` in quote (USD)** — the OKX/BloFin convention.
 
 So everything that **reads** a size from KuCoin and writes it into the store
 must convert native→base via `contractSizeFor(internalSymbol)`:

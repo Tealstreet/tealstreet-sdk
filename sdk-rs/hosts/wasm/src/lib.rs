@@ -657,13 +657,16 @@ pub fn wasm_memory_bytes() -> f64 {
 
 /// Resolve construction choices without constructing an engine or performing I/O.
 #[wasm_bindgen(js_name = resolveConstruction)]
-pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, JsError> {
+pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, js_sys::Error> {
     if !safe_cex_venues::supported(venue) {
-        return Err(JsError::new(&format!("unsupported venue: {venue}")));
+        return Err(construction_error(safe_cex_venues::unsupported_venue(
+            venue,
+        )));
     }
-    let options: safe_cex_venues::EngineOptions =
-        serde_json::from_str(options_json).map_err(|_| JsError::new("Invalid engine options"))?;
-    Ok(serde_json::to_string(&options.construction(venue))?)
+    let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
+        .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
+    serde_json::to_string(&options.construction(venue))
+        .map_err(|error| js_sys::Error::new(&error.to_string()))
 }
 
 fn entropy_configuration_error() -> safe_cex_engine::VenueError {
