@@ -8,10 +8,15 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, and
+Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
+GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
+KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
-policy, with no separate beta override. Robinhood is admitted through the existing Lighter
-family and remote-signing policy; its preview/production visibility flags are unchanged.
+policy, with no separate beta override. Refused `remoteSigner` accounts are told to
+turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
+accounts receive neutral delegated-signing wording. Both use the venue display
+name and retain `unsupported` / `notSent` before I/O.
+Robinhood is admitted through the existing Lighter family and remote-signing policy; its preview/production visibility flags are unchanged.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
 
@@ -270,6 +275,12 @@ field mismatch still fails. Testnet accounts ignore the venue-keyed source and r
 their own feed. Websocket gateways still reject.
 A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
+Shared ticker `observedAt` carries source engine receipt times for last/mark/index,
+including unchanged observations. SCXF's optional TICKER_OBSERVATIONS section and
+an opt-in shared-feed handshake preserve those times across frame/port/in-process
+hops; polling, snapshots and local REST restoration never date them as now.
+Older producers retain changed-value-only dating; older native consumers receive
+only the legacy JSON shape. Only genuinely observed fields gain freshness.
 Matching shared ticker seeds wake startup even when identical REST data means
 the native engine emits no changed frame.
 Book/candle listeners registered before startup retain current demand and replay

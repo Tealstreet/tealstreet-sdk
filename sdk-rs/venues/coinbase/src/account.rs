@@ -2627,3 +2627,7 @@ fn review_startup_prerequisite_has_a_section() {
 #[cfg(test)]
 #[path = "../tests/support/legacy_account.rs"]
 mod legacy_protocol_tests;
+
+#[cfg(test)]
+#[path = "../tests/support/legacy_intx_moved.rs"]
+mod legacy_intx_moved_tests;

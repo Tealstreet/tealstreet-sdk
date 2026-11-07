@@ -1,7 +1,11 @@
 import type { HistoricalOrder } from '../../../types';
 
-import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../../types';
 import { ORDER_SIDE, ORDER_STATUS, ORDER_TYPE } from '../../../exchanges/bybit/bybit.types';
+import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../../types';
+
+// Bybit Tech Bot API announcement, effective 2026-11-12: these statuses
+// disappear from unfiltered history but remain available with an explicit filter.
+export const BYBIT_TERMINAL_ORDER_STATUSES = ['Cancelled', 'Rejected', 'Deactivated'] as const;
 
 /**
  * Bybit `/v5/order/history` row -> `HistoricalOrder`.

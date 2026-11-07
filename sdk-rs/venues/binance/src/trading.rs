@@ -308,6 +308,11 @@ fn tif_text(tif: TimeInForce) -> &'static str {
     }
 }
 
+/// A row read or streamed from the venue's algo endpoints, carried on the row itself.
+fn native_algo(order: &Order) -> bool {
+    order.extra.as_ref().is_some_and(|extra| extra.native_algo)
+}
+
 fn is_algo(kind: OrderType) -> bool {
     matches!(
         kind,
@@ -435,6 +440,7 @@ impl BinanceFutures {
                     .iter()
                     .filter(|o| o.symbol == symbol)
                     .partition(|o| self.order_uses_strategy(o));
+                let algo_rows: Vec<Order> = algo.iter().map(|order| (*order).clone()).collect();
                 let ids = |orders: Vec<&Order>| orders.iter().map(|o| o.id.clone()).collect();
                 let mut step = vec![
                     Planned {
@@ -490,6 +496,7 @@ impl BinanceFutures {
                                     .orders()
                                     .iter()
                                     .filter(|order| order.symbol == symbol)
+                                    .filter(|order| !self.order_uses_strategy(order))
                                     .map(|order| self.cancel_target(order))
                                     .collect(),
                             )
@@ -499,9 +506,14 @@ impl BinanceFutures {
                             .orders()
                             .iter()
                             .filter(|o| o.symbol == symbol)
+                            .filter(|o| !self.order_uses_strategy(o))
                             .map(|o| o.id.clone())
                             .collect();
                     }
+                }
+                // COIN-M has no cancel-all for algo orders: each goes by its algoId.
+                if self.is_inverse() {
+                    step.extend(self.algo_cancels(&algo_rows));
                 }
                 let job = Job {
                     steps: VecDeque::from([step]),
@@ -851,7 +863,7 @@ impl BinanceFutures {
                     evidence.order_id(&id.to_string());
                 }
             }
-            Call::PlaceAlgo { client_id: None } if futures && !self.is_inverse() => {
+            Call::PlaceAlgo { client_id: None } if futures => {
                 if let Some(id) = positive(row.algo_id) {
                     evidence.order_id(&id.to_string());
                 }
@@ -927,12 +939,14 @@ impl BinanceFutures {
         let mut reports = Vec::new();
         let mut batch_reports = false;
         let mut continue_after_item_refusal = false;
-        // The shared engine filters unproven envelopes before this reducer.
-        // Native malformed/mixed replies still supply their native facts here.
-        let mut unproven = false;
+        // A rate response cannot prove the write was refused, even when its
+        // body carries a normally definitive signature error.
+        let mut unproven = response
+            .as_ref()
+            .is_ok_and(|response| response.status == 429);
         let outcome = match response {
             Ok(response) => match venue_error(&response) {
-                Some(error) => Err(error),
+                Some((code, message)) => Err((code, algo_only_refusal(code, message))),
                 None => Ok(response.body),
             },
             Err(error) => Err((0, error.to_owned())),
@@ -1027,10 +1041,13 @@ impl BinanceFutures {
                                     unproven |= item_unknown(code);
                                     rejection.get_or_insert((
                                         code,
-                                        item.msg
-                                            .as_deref()
-                                            .unwrap_or("Binance batch order rejected")
-                                            .to_owned(),
+                                        algo_only_refusal(
+                                            code,
+                                            item.msg
+                                                .as_deref()
+                                                .unwrap_or("Binance batch order rejected")
+                                                .to_owned(),
+                                        ),
                                     ));
                                     if code != POST_ONLY_REJECTED {
                                         let msg =
@@ -1167,6 +1184,7 @@ impl BinanceFutures {
                 else {
                     return;
                 };
+                unproven |= verdict.kind() == Some(ErrorKind::RateLimited);
                 // A signature refusal is as proven as any; once the cancel landed it is not resent.
                 let refused =
                     !unproven && matches!(verdict, Verdict::Refused(_) | Verdict::RefusedResend(_));
@@ -1502,7 +1520,7 @@ impl BinanceFutures {
             } else if self.is_spot() {
                 (self.format_spot(cx, opts)?, Vec::new())
             } else if self.is_inverse() {
-                (self.format_inverse(cx, opts)?, Vec::new())
+                self.format_inverse(cx, opts)?
             } else {
                 self.format_order(cx, opts)?
             };
@@ -1602,6 +1620,10 @@ impl BinanceFutures {
         {
             return matches!(source, PmOrderSource::Strategy(_));
         }
+        // COIN-M stops placed before the algo migration still live on the order endpoint.
+        if self.is_inverse() {
+            return native_algo(order);
+        }
         is_algo(order.kind)
     }
 
@@ -1680,10 +1702,7 @@ impl BinanceFutures {
             return job;
         }
         let mut by_symbol: Vec<(String, Vec<String>)> = Vec::new();
-        for order in orders
-            .iter()
-            .filter(|o| self.is_inverse() || !is_algo(o.kind))
-        {
+        for order in orders.iter().filter(|o| !self.order_uses_strategy(o)) {
             match by_symbol
                 .iter_mut()
                 .find(|(symbol, _)| *symbol == order.symbol)
@@ -1741,11 +1760,21 @@ impl BinanceFutures {
                 }]);
             }
         }
-        for order in orders
+        let algo: Vec<Order> = orders
             .iter()
-            .filter(|o| !self.is_inverse() && is_algo(o.kind))
-        {
-            job.steps.push_back(vec![Planned {
+            .filter(|o| self.order_uses_strategy(o))
+            .cloned()
+            .collect();
+        for cancel in self.algo_cancels(&algo) {
+            job.steps.push_back(vec![cancel]);
+        }
+        job
+    }
+
+    fn algo_cancels(&self, orders: &[Order]) -> Vec<Planned> {
+        orders
+            .iter()
+            .map(|order| Planned {
                 receipts: Vec::new(),
                 method: Method::Delete,
                 path: self.paths.conditional_order,
@@ -1754,9 +1783,8 @@ impl BinanceFutures {
                     ids: vec![order.id.clone()],
                     proof: Some(CancelProof::Algo(self.cancel_target(order))),
                 },
-            }]);
-        }
-        job
+            })
+            .collect()
     }
 
     fn format_option(
@@ -1922,11 +1950,13 @@ impl BinanceFutures {
         Ok(out)
     }
 
+    /// Regular payloads, and stop-type payloads for the algo endpoint: since the CM-UM
+    /// integration /dapi/v1/order refuses stop types with -4120.
     fn format_inverse(
         &self,
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
-    ) -> Result<Vec<Params>, String> {
+    ) -> Result<(Vec<Params>, Vec<Params>), String> {
         if opts.kind == OrderType::Conditional {
             return Err("Binance COIN-M conditional orders require a supported stop type".into());
         }
@@ -2028,6 +2058,11 @@ impl BinanceFutures {
         for p in &mut out {
             p.set("newClientOrderId", self.generated_id(cx)?);
         }
+        let (mut regular, mut algo) = if stop || opts.kind == OrderType::TrailingStopLoss {
+            (Vec::new(), out.into_iter().map(coin_algo_params).collect())
+        } else {
+            (out, Vec::new())
+        };
         for (kind, trigger) in [
             (OrderType::StopLoss, opts.stop_loss),
             (OrderType::TakeProfit, opts.take_profit),
@@ -2046,10 +2081,12 @@ impl BinanceFutures {
                 bracket.take_profit = None;
                 bracket.reduce_only = Some(true);
                 bracket.close = Some(false);
-                out.extend(self.format_inverse(cx, &bracket)?);
+                let (r, a) = self.format_inverse(cx, &bracket)?;
+                regular.extend(r);
+                algo.extend(a);
             }
         }
-        Ok(out)
+        Ok((regular, algo))
     }
 
     /// Binance has no amend for these orders: cancel, then place the replacement.
@@ -2520,6 +2557,19 @@ impl BinanceFutures {
     }
 }
 
+/// Since the CM-UM integration the order endpoints refuse stop types: "Order type not
+/// supported for this endpoint. Please use the Algo Order API endpoints instead."
+const ALGO_ONLY_TYPE: i64 = -4120;
+
+fn algo_only_refusal(code: i64, message: String) -> String {
+    if code != ALGO_ONLY_TYPE {
+        return message;
+    }
+    format!(
+        "Binance no longer accepts this stop type on its regular order endpoint, so nothing was placed: {message}"
+    )
+}
+
 /// A trailing distance as Binance's callbackRate must sit in its documented range
 /// (USD-M 0.1-20, COIN-M 0.1-10, portfolio margin conservatively 0.1-10): never clamped, which would
 /// trail at a distance the user did not choose.
@@ -2634,6 +2684,11 @@ pub(crate) const BINANCE: CodeTable = CodeTable {
             only: None,
         },
         Row {
+            key: Key::Int(ALGO_ONLY_TYPE),
+            verdict: Verdict::Refused(ErrorKind::Unsupported),
+            only: None,
+        },
+        Row {
             key: Key::Range(-4999, -4000),
             verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
@@ -2662,7 +2717,10 @@ fn item_unknown(code: i64) -> bool {
         code: NativeCode::Int(code),
         message: "",
     };
-    code == 0 || matches!(BINANCE.verdict(&native, Intent::Place), Verdict::Unknown(_))
+    let verdict = BINANCE.verdict(&native, Intent::Place);
+    code == 0
+        || matches!(verdict, Verdict::Unknown(_))
+        || verdict.kind() == Some(ErrorKind::RateLimited)
 }
 
 #[cfg(test)]
@@ -2748,6 +2806,21 @@ fn positive_price(value: Option<f64>, precision: f64) -> Result<f64, String> {
         return Err("Binance price/trigger must be finite and positive after rounding".into());
     }
     Ok(price)
+}
+
+/// A COIN-M stop as the algo endpoint names its fields.
+fn coin_algo_params(params: Params) -> Params {
+    let mut out = Params::default();
+    out.set("algoType", "CONDITIONAL");
+    for (name, value) in params.0 {
+        match name {
+            "stopPrice" => out.set("triggerPrice", value),
+            "activationPrice" => out.set("activatePrice", value),
+            "newClientOrderId" => out.set("clientAlgoId", value),
+            _ => out.set(name, value),
+        }
+    }
+    out
 }
 
 fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Vec<Params>, String> {
@@ -2920,7 +2993,7 @@ impl BinanceFutures {
             if let Some(order) = cx.store.order(id) {
                 let symbol = order.symbol.clone();
                 let filled = order.filled;
-                let native_regular = self.is_inverse() || !self.order_uses_strategy(order);
+                let native_regular = !self.order_uses_strategy(order);
                 let closed = order.status == OrderStatus::Closed;
                 if !native_regular {
                     self.observe_strategy_terminal(cx, &symbol, id);
@@ -2977,7 +3050,12 @@ impl BinanceFutures {
             && current == target.native
             && !self.client_order_row_is_foreign(cx, &target.symbol, &target.id)
             && cx.store.order(&target.id).is_none_or(|order| {
-                (!(self.is_spot() || self.is_inverse()) && is_algo(order.kind)) == strategy
+                let algo = if self.is_inverse() {
+                    native_algo(order)
+                } else {
+                    !self.is_spot() && is_algo(order.kind)
+                };
+                algo == strategy
             })
     }
 

@@ -35,7 +35,7 @@ fn summary_maps_equity_and_available_margin_in_usdc() {
 #[test]
 fn short_position_uses_base_size_and_mark_notional() {
     let p = position(position_row()).unwrap();
-    assert_eq!(p.symbol, "BTC-PERP-INTX");
+    assert_eq!(p.symbol, "BTC_USDC-PERPETUAL");
     assert_eq!(p.side, PositionSide::Short);
     assert_eq!(
         (p.contracts, p.notional, p.entry_price, p.unrealized_pnl),
@@ -46,7 +46,7 @@ fn short_position_uses_base_size_and_mark_notional() {
 #[test]
 fn orders_use_linear_base_units_and_preserve_linked_trigger_identity() {
     let o = order(order_row()).unwrap();
-    assert_eq!(o.symbol, "BTC-PERP-INTX");
+    assert_eq!(o.symbol, "BTC_USDC-PERPETUAL");
     assert!((o.remaining - 0.075).abs() < 1e-12);
     assert_eq!((o.amount, o.filled), (0.1, 0.025));
     assert_eq!(o.time_in_force, Some(TimeInForce::PostOnly));
@@ -179,6 +179,19 @@ fn intx_startup_exchanges_cdp_key_on_drb_before_private_reads() {
     assert!(!request.url.contains("token"));
 }
 
+#[test]
+fn authenticated_intx_startup_uses_s1_catalogue_without_legacy_reads() {
+    let mut r = Rig::new(false);
+    r.select_intx();
+    let auth = r.request();
+    r.rpc(auth, json!({"access_token":"fixture-http-token","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
+    let catalogue = r.request();
+    assert_eq!(
+        catalogue.url,
+        format!("{}/public/get_instruments", crate::drb::HTTP_URL)
+    );
+}
+
 fn trade_row(id: &str, seq: u64) -> Value {
     json!({"trade_id":id,"trade_seq":seq,"order_id":"USDC-123",
         "instrument_name":"BTC_USDC-PERPETUAL","timestamp":1700000001000u64,
@@ -191,8 +204,16 @@ impl Rig {
         r.select_intx();
         let auth = r.request();
         r.rpc(auth,json!({"access_token":"fixture-http-token","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
-        let products = r.request();
-        r.reply(products,json!({"products":[{"product_id":"BTC-PERP-INTX","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USDC","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"60000","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"PERPETUAL","contract_root_unit":"BTC","contract_size":"1"}}]}));
+        let instruments = r.request();
+        assert!(instruments.url.ends_with("/public/get_instruments"));
+        r.rpc(instruments, json!([{"instrument_name":"BTC_USDC-PERPETUAL","kind":"future","instrument_type":"linear","settlement_period":"perpetual","settlement_currency":"USDC","base_currency":"BTC","quote_currency":"USDC","is_active":true,"tick_size":0.01,"contract_size":0.001,"min_trade_amount":0.001,"max_leverage":50.}]));
+        let summaries = r.request();
+        assert!(
+            summaries
+                .url
+                .ends_with("/public/get_book_summary_by_currency")
+        );
+        r.rpc(summaries, json!([{"instrument_name":"BTC_USDC-PERPETUAL","funding_8h":0.0001,"mark_price":60000.,"last":60000.}]));
         for _ in 0..3 {
             let request = r.request();
             assert!(
@@ -226,7 +247,12 @@ impl Rig {
         self.actions
             .iter()
             .find_map(|a| match a {
-                Action::WsConnect { socket, url, .. } if url == crate::drb::WS_URL => Some(*socket),
+                Action::WsConnect {
+                    socket,
+                    url,
+                    channel: Some(safe_cex_engine::SocketChannel::Private),
+                    ..
+                } if url == crate::drb::WS_URL => Some(*socket),
                 _ => None,
             })
             .expect("drb private socket")
@@ -327,7 +353,7 @@ fn fills_query_retains_bounds_symbol_order_identity_and_seconds_output() {
         Event::Command(safe_cex_engine::Command::Query {
             command: 77,
             query: safe_cex_engine::Query::Fills {
-                symbol: Some("BTC-PERP-INTX".into()),
+                symbol: Some("BTC_USDC-PERPETUAL".into()),
                 order_id: Some("USDC-123".into()),
                 from_ms: Some(1700000000000.),
                 to_ms: Some(1700000003000.),
@@ -359,7 +385,7 @@ fn fills_query_retains_bounds_symbol_order_identity_and_seconds_output() {
     assert_eq!(result[0]["timestamp"], 1700000001.);
     assert_eq!(result[0]["qty"], 0.025);
     assert_eq!(result[0]["orderId"], "USDC-123");
-    assert_eq!(result[0]["symbol"], "BTC-PERP-INTX");
+    assert_eq!(result[0]["symbol"], "BTC_USDC-PERPETUAL");
 }
 
 impl Rig {
@@ -485,7 +511,7 @@ fn malformed_stream_event_commits_no_component_and_closes_socket() {
 fn fills_pages_follow_native_sequence_and_deduplicate_archive_overlap() {
     let mut r = Rig::ready();
     r.query(safe_cex_engine::Query::Fills {
-        symbol: Some("BTC-PERP-INTX".into()),
+        symbol: Some("BTC_USDC-PERPETUAL".into()),
         order_id: None,
         from_ms: Some(1700000000000.),
         to_ms: Some(1700000003000.),
@@ -698,7 +724,7 @@ fn isolated_positions_keep_distinct_subaccount_identity_and_margin_mode() {
     a["isolated"] = json!(true);
     a["user_id"] = json!(1234);
     let p = position(a).unwrap();
-    assert_eq!(p.id, "BTC-PERP-INTX:1234");
+    assert_eq!(p.id, "BTC_USDC-PERPETUAL:1234");
     assert_eq!(p.margin_type, Some(MarginType::Isolated));
 }
 #[test]

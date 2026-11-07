@@ -90,6 +90,10 @@ impl Paradex {
 }
 
 impl Venue for Paradex {
+    fn http_plans() -> bool {
+        false
+    }
+
     fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
         match pending {
             Pending::Account(

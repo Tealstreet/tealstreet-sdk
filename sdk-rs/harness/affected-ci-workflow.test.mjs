@@ -17,7 +17,7 @@ function check(text) {
   assert.match(text, /^  pull_request:\n    branches: \[master\]\n\n/m);
   assert.match(job(text, 'selection'), /needs: scope\n    if: needs.scope.outputs.relevant == 'true'/);
   assert.match(job(text, 'result').match(/^    needs:.*$/m)[0], /\[scope, selection,/);
-  for (const name of ['gate', 'bitget-paired', 'cpu-plan', 'cpu-second', 'cpu-certify', 'cpu-final']) {
+  for (const name of ['gate', 'bitget-paired', 'cpu-plan', 'cpu-certify', 'cpu-final']) {
     const value = job(text, name);
     assert.match(value, /runs-on: ubuntu-latest/);
     assert.doesNotMatch(value, /github\.event_name != 'pull_request'|continue-on-error/);

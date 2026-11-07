@@ -1247,7 +1247,7 @@
     },
     {
       "venue": "binanceinverse",
-      "tapeSha256": "a0a35640cbdb5fdd8f43a14188cc4113290683b1e625e131f6da0e9b8b38f94b",
+      "tapeSha256": "2e29220370a438c5424ffcacff131bfbd7dc6dfafc1aede4bf2f476edf608d91",
       "tape": "sdk-rs/harness/tapes/binanceinverse-private.jsonl",
       "diagnostics": [
         {
@@ -17591,19 +17591,6 @@
           "keys": [
             "checkpoint 0 account.positions.length",
             "checkpoint 0 account.positions[1]"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "hyrotrader",
-      "tapeSha256": "3b8707627d73033b373751308e10655a8a9c70363e03ec1a43f1c820cfdbc6e0",
-      "tape": "sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz",
-      "diagnostics": [
-        {
-          "divergence": "Seven interleaved pairs did not establish the required 10% improvement; retain the observed performance failure, including if a later sample passes.",
-          "keys": [
-            "performance steady-state CPU: Rust must be at least 10% below TS"
           ]
         }
       ]

@@ -7,7 +7,7 @@ use safe_cex_engine::{
 };
 use serde_json::{Value, json};
 
-const SYMBOL: &str = "BTC-PERP-INTX";
+const SYMBOL: &str = "BTC_USDC-PERPETUAL";
 fn fixtures() -> Value {
     serde_json::from_str(include_str!("../fixtures/drb-trading.json")).unwrap()
 }
@@ -382,6 +382,52 @@ fn unknown_outcome_reads_back_by_label_without_replaying_write() {
     assert!(reads.iter().all(|r| packet(r)["method"] != "private/buy"));
     reply(&mut e, r, json!([fixtures()["partial"]["order"]]));
     assert_eq!(e.store().order("USDC-94166").unwrap().filled, 0.004);
+}
+
+#[test]
+fn dispatched_http_failures_are_unknown_and_never_put_the_write_back() {
+    for status in [408, 429, 500, 502, 503, 504] {
+        let mut e = engine();
+        let r = place(&mut e, opts());
+        // Even a native refusal body cannot establish a transport-level refusal.
+        let body =
+            json!({"jsonrpc":"2.0","id":packet(&r)["id"],"error":fixtures()["reject"]}).to_string();
+        e.handle(
+            1001.,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "Retry-After: 1",
+                    body: &body,
+                },
+            },
+        );
+        let actions = prepared_now(&mut e);
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(Outcome::Unknown))), "status {status}: {actions:?}");
+        assert!(!done(&actions));
+        assert!(e.store().orders().is_empty());
+        assert!(
+            requests(&actions)
+                .iter()
+                .all(|r| packet(r)["method"] != "private/buy")
+        );
+        let mut fresh = opts();
+        fresh.client_order_id = Some(format!("fresh-{status}"));
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 2,
+                orders: vec![fresh],
+            },
+        );
+        assert!(
+            requests(&actions)
+                .iter()
+                .all(|r| packet(r)["method"] != "private/buy"),
+            "an uncertain dispatched write must fence new placements"
+        );
+    }
 }
 #[test]
 fn reused_label_and_unsupported_controls_are_refused_without_io() {

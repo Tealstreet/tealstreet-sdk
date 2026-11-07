@@ -4,7 +4,7 @@
 mod history;
 #[path = "private_drb_wire.rs"]
 mod wire;
-use crate::{Coinbase, Pending, ProductKind, drb, drb_auth};
+use crate::{Coinbase, Pending, drb, drb_auth};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{
@@ -337,7 +337,7 @@ impl Coinbase {
         cx.store.set_hedged(false);
         cx.store.retain_position_ids();
         self.drb_poll(cx);
-        self.drb_connect(cx);
+        self.drb_private_connect(cx);
     }
     pub(crate) fn drb_poll(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.private_drb.ready || self.private_drb.http.needs_refresh(cx.now) {
@@ -413,7 +413,7 @@ impl Coinbase {
                         self.private_drb.failures = 0;
                         if !self.private_drb.active {
                             self.private_drb.active = true;
-                            self.private_ready(ProductKind::Intx, cx);
+                            self.drb_start(cx);
                         }
                         self.drb_after_markets(cx);
                         self.drb_trading_ready(cx);
@@ -587,7 +587,7 @@ impl Coinbase {
             }
         }
     }
-    fn drb_connect(&mut self, cx: &mut Cx<'_, Pending>) {
+    fn drb_private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.private_drb.socket.is_some() || cx.now < self.private_drb.reconnect_at {
             return;
         }
@@ -884,7 +884,7 @@ impl Coinbase {
             self.drb_ensure_http(cx);
         } else {
             self.drb_after_markets(cx);
-            self.drb_connect(cx);
+            self.drb_private_connect(cx);
             if cx.now >= self.private_drb.next_poll {
                 self.drb_poll(cx);
             }

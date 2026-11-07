@@ -501,12 +501,12 @@ impl Cryptocom {
                 }
                 let mut candles = Vec::new();
                 json::each::<CandleRow>(message.data.get(), |row| candles.push(row.candle()))?;
-                safe_cex_engine::model::sort_candles_by_time(&mut candles);
-                // A subscription's first answer carries history: only its newest row is live.
+                // The first answer is history, including its newest row. Only subsequent
+                // pushes belong on the live path; REST supplies requested history.
                 if self.candles_live.insert(message.subscription.to_owned()) {
-                    let newest = candles.pop();
-                    candles = newest.into_iter().collect();
+                    return Ok(());
                 }
+                safe_cex_engine::model::sort_candles_by_time(&mut candles);
                 for candle in candles {
                     cx.candle(symbol, timeframe, candle);
                 }

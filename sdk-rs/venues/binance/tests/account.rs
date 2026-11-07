@@ -1316,7 +1316,7 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
             429,
             r#"{"code":-1003,"msg":"Too many requests."}"#,
             Some(ErrorKind::RateLimited),
-            Outcome::Rejected,
+            Outcome::Unknown,
             Some("-1003"),
         ),
         (

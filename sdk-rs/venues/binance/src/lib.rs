@@ -614,9 +614,20 @@ impl BinanceFutures {
                 if self.is_spot() {
                     topics.extend(self.kline_topics());
                 } else {
-                    // Bid and ask are public: a guest account without this
-                    // stream would keep the startup REST quote forever.
-                    topics.push("!bookTicker".to_owned());
+                    if self.options.portfolio_margin {
+                        // USD-M's all-market book ticker is sampled every 5s.
+                        // PM needs real-time best quotes, even without a book
+                        // subscription or private account stream.
+                        topics.extend(
+                            cx.store.markets().iter().map(|market| {
+                                format!("{}@bookTicker", market.symbol.to_lowercase())
+                            }),
+                        );
+                    } else {
+                        // Bid and ask are public: a guest account without this
+                        // stream would keep the startup REST quote forever.
+                        topics.push("!bookTicker".to_owned());
+                    }
                     if self.shared_public_socket() {
                         topics.push("!ticker@arr".to_owned());
                         topics.push("!markPrice@arr@1s".to_owned());
@@ -749,6 +760,8 @@ impl BinanceFutures {
                 for shard in previous_len / 1_024..self.spot_tickers.len() {
                     self.sync_interests(cx, Channel::SpotTicker(shard));
                 }
+            } else if self.options.portfolio_margin && previous_len < cx.store.markets().len() {
+                self.sync_interests(cx, Channel::Public);
             }
         }
         if !was_loaded && self.credentials.has_primary() && !self.is_spot() {
@@ -1349,6 +1362,9 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn http_plans() -> bool {
+        false
+    }
     fn managed_sockets() -> bool {
         true
     }

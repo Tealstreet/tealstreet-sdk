@@ -100,7 +100,7 @@ pub(super) fn position(v: Value) -> Result<Position, String> {
     if text(&v, "kind")? != "future" {
         return Err("drb unsupported position kind".into());
     }
-    let symbol = drb::from_instrument(text(&v, "instrument_name")?)?;
+    let symbol = instrument_symbol(text(&v, "instrument_name")?)?;
     let base = number(&v, "size_currency")?;
     let size = number(&v, "size")?;
     let direction = text(&v, "direction")?;
@@ -161,7 +161,7 @@ pub(super) fn position(v: Value) -> Result<Position, String> {
 }
 pub(super) fn order(v: Value) -> Result<Order, String> {
     let id = identity(&v, "order_id")?;
-    let symbol = drb::from_instrument(text(&v, "instrument_name")?)?;
+    let symbol = instrument_symbol(text(&v, "instrument_name")?)?;
     let side = side(&v)?;
     let status = match text(&v, "order_state")? {
         "open" | "untriggered" | "triggered" => OrderStatus::Open,
@@ -261,7 +261,7 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
 pub(super) fn trade(v: &Value) -> Result<Value, String> {
     let id = identity(v, "trade_id")?;
     let order_id = identity(v, "order_id")?;
-    let symbol = drb::from_instrument(text(v, "instrument_name")?)?;
+    let symbol = instrument_symbol(text(v, "instrument_name")?)?;
     let price = unsigned(v, "price")?;
     let qty = unsigned(v, "amount")?;
     if price <= 0. || qty <= 0. {
@@ -284,4 +284,10 @@ pub(super) fn trade(v: &Value) -> Result<Value, String> {
         });
     }
     Ok(result)
+}
+
+// S1 publishes native drb names as canonical SDK symbols.
+fn instrument_symbol(instrument: &str) -> Result<String, String> {
+    drb::from_instrument(instrument)?;
+    Ok(instrument.to_owned())
 }
