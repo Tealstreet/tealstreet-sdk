@@ -16,7 +16,9 @@ it('admits Backpack RemoteSigner while undeclared venues still refuse before cal
   expect(() => assertBetaAccount('backpack', { remoteSigner })).not.toThrow();
   expect(deriveRemoteSigningPolicy('backpack')?.enabled).toBe(true);
   for (const name of ['cryptocom', 'krakenspot'] as const) {
-    expect(() => assertBetaAccount(name, { remoteSigner })).toThrow('delegated signing is unsupported in this build');
+    let refusal: unknown;
+    try { assertBetaAccount(name, { remoteSigner }); } catch (error) { refusal = error; }
+    expect(refusal).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
