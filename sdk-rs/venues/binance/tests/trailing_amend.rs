@@ -314,3 +314,95 @@ fn a_new_trailing_stop_reduces_by_default_and_honours_an_explicit_false() {
         );
     }
 }
+
+#[test]
+fn engine_ambiguity_ordinary_429_is_unknown() {
+    let mut h = ready();
+    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":90.0})).unwrap();
+    place(&mut h, 901, order);
+    let sent = h.take("/fapi/v1/order");
+    h.reply(
+        sent.id,
+        429,
+        "",
+        r#"{"code":-1003,"msg":"Too many requests"}"#,
+    );
+    let error = h
+        .failures
+        .iter()
+        .find(|(id, _)| *id == 901)
+        .expect("terminal failure");
+    assert_eq!(
+        error.1.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "{:?}",
+        error
+    );
+}
+
+#[test]
+fn engine_ambiguity_429_replacement_cannot_put_back() {
+    let mut h = ready();
+    amend(&mut h, 902, "5550", 97.0);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        replacement.id,
+        429,
+        "",
+        r#"{"code":-1003,"msg":"Too many requests"}"#,
+    );
+    assert!(
+        no_writes(&h),
+        "ambiguous replacement caused another write: {:?}",
+        h.paths()
+    );
+}
+
+#[test]
+fn engine_ambiguity_429_signature_body_cannot_resend() {
+    let mut h = ready();
+    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":90.0})).unwrap();
+    place(&mut h, 903, order);
+    let sent = h.take("/fapi/v1/order");
+    h.reply(
+        sent.id,
+        429,
+        "",
+        r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#,
+    );
+    assert!(
+        no_writes(&h),
+        "429 authorized physical resend: {:?}",
+        h.paths()
+    );
+}
+
+#[test]
+fn engine_ambiguity_408_503_replacement_controls_do_not_put_back() {
+    for status in [408, 503] {
+        let mut h = ready();
+        amend(&mut h, 904, "5550", 97.0);
+        let cancel = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            cancel.id,
+            200,
+            "",
+            r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+        );
+        let replacement = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            replacement.id,
+            status,
+            "",
+            r#"{"code":-1003,"msg":"Too many requests"}"#,
+        );
+        assert!(no_writes(&h), "{status}: {:?}", h.paths());
+    }
+}

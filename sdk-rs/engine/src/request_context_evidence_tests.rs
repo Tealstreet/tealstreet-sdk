@@ -1179,3 +1179,31 @@ fn subset_authority_distinguishes_own_overflow_from_sibling_overflow_and_evidenc
         assert!(error.message.contains("truncated IDs"));
     }
 }
+
+#[test]
+fn released_ambiguity_projection_never_demotes_a_recorded_unknown() {
+    for known_partial in [false, true] {
+        let mut writes = CommandWrites::new(3).unwrap();
+        released(&mut writes, 1);
+        writes
+            .result(RequestId(1), accepted(vec!["original-cancel".into()]))
+            .unwrap();
+        released(&mut writes, 2);
+        let error = VenueError::new("native outcome is unknown")
+            .outcome(Outcome::Unknown)
+            .kind(crate::ErrorKind::RateLimited);
+        let result = if known_partial {
+            WriteResult::KnownPartial(error)
+        } else {
+            WriteResult::Rejected(error)
+        };
+        writes.result(RequestId(2), result).unwrap();
+        let projected = writes.project_failure(VenueError::new("fallback")).unwrap();
+        assert_eq!(projected.outcome, Some(Outcome::Unknown));
+        assert_eq!(
+            projected.partial.as_ref().unwrap().order_ids,
+            ["original-cancel"]
+        );
+        assert_eq!(writes.fail(VenueError::new("fallback")).unwrap(), projected);
+    }
+}

@@ -1488,3 +1488,53 @@ fn an_off_step_amend_is_rounded_or_refused_before_the_cancel() {
         );
     }
 }
+
+#[test]
+fn engine_ambiguity_guarded_429_stays_unknown_in_journal() {
+    let mut h = Harness::new();
+    h.native_stop();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(9200.04),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+    let place = h.take(Method::Post);
+    h.reply_status(place, 429, r#"{"code":-1003,"msg":"Too many requests"}"#);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains("/order?")),
+        "{:?}",
+        h.requests
+    );
+    let error = &h.failures.last().expect("terminal").1;
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn engine_ambiguity_429_timestamp_cannot_resend() {
+    for status in [429, 503] {
+        let mut h = Harness::new();
+        h.place(limit());
+        let request = h.take(Method::Post);
+        h.reply_status(
+            request,
+            status,
+            r#"{"code":-1021,"msg":"Timestamp for this request outside window"}"#,
+        );
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.method == Method::Post && r.url.contains("/order?")),
+            "{status}: {:?}",
+            h.requests
+        );
+    }
+}

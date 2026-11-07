@@ -1490,3 +1490,21 @@ fn refused_inspect_resign_does_not_invent_an_unknown_write() {
     assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
     assert_eq!(h.engine.store().orders(), [order]);
 }
+
+#[test]
+fn engine_ambiguity_429_signature_cannot_resend_setting() {
+    let mut h = fixture(options());
+    let first = setting(&mut h);
+    h.engine
+        .store_mut()
+        .update_setting(SYMBOL, |setting| setting.leverage = 5.);
+    let count = provider_setting_posts(&h);
+    let result = response(
+        &mut h,
+        NOW + 10.,
+        &first,
+        429,
+        r#"{"code":"-1022","msg":"Invalid signature"}"#,
+    );
+    assert_unknown_setting_failure(&h, &result, count);
+}

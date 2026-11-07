@@ -1076,3 +1076,114 @@ const PHRASED_OVER_CODES: CodeTable = CodeTable {
     unlisted: Verdict::Refused(ErrorKind::Rejected),
     status: &[],
 };
+
+#[test]
+fn released_ambiguity_status_overrules_every_native_write_verdict() {
+    for intent in [
+        Intent::Place,
+        Intent::Cancel,
+        Intent::Amend,
+        Intent::Setting,
+    ] {
+        for status in [408, 429, 500, 503] {
+            for code in [-1021, -1022, -2011, -1003] {
+                let fact = fact(
+                    &TABLE,
+                    intent,
+                    Released::Response(&response(status)),
+                    Some(&int(code)),
+                    "native diagnostic",
+                );
+                assert!(
+                    matches!(fact.verdict(), Verdict::Unknown(_)),
+                    "{intent:?}/{status}/{code}: {fact:?}"
+                );
+                assert_eq!(fact.error().outcome, Some(Outcome::Unknown));
+                assert_eq!(
+                    fact.error().venue_code.as_deref(),
+                    Some(code.to_string().as_str())
+                );
+                assert!(
+                    !WriteFact::Failed {
+                        fact,
+                        known_effects: false
+                    }
+                    .resendable()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn released_ambiguity_native_rate_verdict_never_authorizes_a_write() {
+    for intent in [
+        Intent::Place,
+        Intent::Cancel,
+        Intent::Amend,
+        Intent::Setting,
+    ] {
+        let response = Response {
+            status: 200,
+            headers: "Retry-After: 3\r\n",
+            body: "",
+        };
+        let fact = fact(
+            &TABLE,
+            intent,
+            Released::Response(&response),
+            Some(&int(-1003)),
+            "too many requests",
+        );
+        assert_eq!(
+            fact.verdict(),
+            Verdict::Unknown(Some(ErrorKind::RateLimited))
+        );
+        assert_eq!(fact.error().outcome, Some(Outcome::Unknown));
+        assert_eq!(fact.error().retry_after_ms, Some(3000.));
+        assert!(
+            !WriteFact::Failed {
+                fact,
+                known_effects: false
+            }
+            .resendable()
+        );
+    }
+}
+
+#[test]
+fn released_ambiguity_reads_keep_native_retry_and_rate_classification() {
+    assert_eq!(
+        classify(429, Some(&int(-1021)), Intent::Read),
+        Verdict::RefusedResend(ErrorKind::AuthInvalid)
+    );
+    assert_eq!(
+        classify(429, None, Intent::Read),
+        Verdict::Refused(ErrorKind::RateLimited)
+    );
+    assert_eq!(
+        classify(200, Some(&int(-1003)), Intent::Read),
+        Verdict::Refused(ErrorKind::RateLimited)
+    );
+}
+
+#[test]
+fn released_ambiguity_batch_rate_row_keeps_accepted_prefix_unknown() {
+    let response = response(200);
+    let result = batch(
+        &TABLE,
+        Intent::Place,
+        &response,
+        2,
+        &[BatchItem::Accepted("native"), BatchItem::Native(int(-1003))],
+        "rate",
+    )
+    .unwrap();
+    assert!(
+        matches!(&result, crate::request_context::WriteResult::PartialUnknown(error) if error.outcome == Some(Outcome::Unknown))
+    );
+    let crate::request_context::WriteResult::PartialUnknown(error) = result else {
+        panic!("unknown partial")
+    };
+    assert_eq!(error.partial.unwrap().order_ids, ["native"]);
+}

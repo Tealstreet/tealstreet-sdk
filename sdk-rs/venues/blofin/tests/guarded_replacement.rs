@@ -402,3 +402,13 @@ fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         assert!(writes(&h).is_empty(), "{status}: never resent");
     }
 }
+
+#[test]
+fn engine_ambiguity_bare_429_replacement_stays_unknown_in_journal() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond_status(replacement, 429, "{}");
+    assert_unknown_stop(&h);
+}
