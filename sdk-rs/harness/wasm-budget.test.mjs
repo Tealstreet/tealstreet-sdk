@@ -609,14 +609,14 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
   assert.equal(wasmBudgetError(16_830_742, 'combined'), undefined);
 });
 
-test('#3150 merged-tree caps retain the approved exact boundaries', () => {
+test('approved merged-tree caps retain exact boundaries, including #3219 Coinbase drb', () => {
   for (const [venue, cap] of [
     ['apexomni', 2_024_448],
     ['backpack', 1_948_672],
     ['bingx', 2_085_888],
     ['bitrue', 1_851_392],
     ['blofin', 2_001_920],
-    ['coinbase', 1_838_080],
+    ['coinbase', 1_908_736],
     ['okx', 1_986_560],
     ['weex', 1_948_672],
   ]) {

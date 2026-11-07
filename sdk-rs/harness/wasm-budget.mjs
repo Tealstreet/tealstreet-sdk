@@ -199,6 +199,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB rounded up to KiB; BitgetUSDC shares the family cap.
 // #3202 on #3207 (merge 62c3b59c872), run 42305638406, job 128195021443 measured Bitget
 // 2,409,448 B. CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
+// #3219 drb public data, source 4e661ccfe: CI run 42326181218, job 128262552376
+// measured web/node Coinbase at 1,897,542 B. Approved CI + 10 KiB, rounded up.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
@@ -212,7 +214,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   blofin: 2_001_920,
   breakoutprop: 1_565_696,
   bybit: 2_270_208,
-  coinbase: 1_838_080,
+  coinbase: 1_908_736,
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
