@@ -2,14 +2,11 @@ import type { Market } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BlofinExchange } from '../../exchanges/blofin/blofin.exchange';
-import { BASE_URL, BASE_WS_URL, ENDPOINTS } from '../../exchanges/blofin/blofin.types';
-import {
-  BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES,
-  buildBlofinSubscribeFrames,
-} from '../../exchanges/blofin/blofin.ws-public';
-import { DefaultStore } from '../../store/store.base';
 import { getExchangeMetadata } from '../../exchangeMetadata';
+import { BlofinExchange } from '../reference/blofin/blofin.exchange';
+import { BASE_URL, BASE_WS_URL, ENDPOINTS } from '../../exchanges/blofin/blofin.types';
+import { BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES, buildBlofinSubscribeFrames } from '../reference/blofin/blofin.ws-public';
+import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode } from '../../types';
 
 const MARKET: Market = {
@@ -40,7 +37,7 @@ describe('BloFin remaining audit regressions', () => {
     expect(BASE_WS_URL.private.testnet).toBe('wss://demo-trading-openapi.blofin.com/ws/private');
   });
 
-  it('chunks all-market subscriptions below BloFin\'s documented 4096-byte limit', () => {
+  it("chunks all-market subscriptions below BloFin's documented 4096-byte limit", () => {
     const topics = Array.from({ length: 500 }, (_, index) => ({
       channel: index % 2 === 0 ? 'tickers' : 'funding-rate',
       instId: `MARKET-${String(index).padStart(4, '0')}-USDT`,
@@ -81,6 +78,63 @@ describe('BloFin remaining audit regressions', () => {
       { op: 'unsubscribe', args: [{ channel: 'books', instId: MARKET.id }] },
       { op: 'subscribe', args: [{ channel: 'books', instId: MARKET.id }] },
     ]);
+  });
+
+  it('keeps books sorted when a top-five snapshot moves through old levels', () => {
+    const exchange = createExchange();
+    const websocket = exchange.publicWebsocket;
+    websocket.ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket;
+    const callback = vi.fn();
+    const dispose = websocket.listenOrderBook(MARKET.symbol, callback);
+    const full = websocket.messageHandlers[`books.${MARKET.id}`][0];
+    const top = websocket.messageHandlers[`books5.${MARKET.id}`][0];
+    full({
+      action: 'snapshot',
+      data: {
+        bids: [
+          ['99', '1'],
+          ['98', '2'],
+          ['97', '3'],
+          ['96', '4'],
+        ],
+        asks: [
+          ['101', '1'],
+          ['102', '2'],
+          ['103', '3'],
+          ['104', '4'],
+        ],
+        seqId: '1',
+      },
+    });
+    top({
+      data: {
+        bids: [
+          ['98', '5'],
+          ['97', '6'],
+        ],
+        asks: [
+          ['102', '5'],
+          ['103', '6'],
+        ],
+      },
+    });
+    const book = callback.mock.calls.at(-1)![0];
+    expect(book.bids.map(({ price, amount }: { price: number; amount: number }) => [price, amount])).toEqual([
+      [98, 5],
+      [97, 6],
+    ]);
+    full({
+      action: 'update',
+      data: {
+        bids: [['97', '0']],
+        asks: [['103', '8']],
+        prevSeqId: '1',
+        seqId: '2',
+      },
+    });
+    expect(book.bids.map(({ price }: { price: number }) => price)).toEqual([98]);
+    expect(book.asks.map(({ price }: { price: number }) => price)).toEqual([102, 103]);
+    dispose();
   });
 
   it('fetches and maps externally placed opening triggers as conditionals', async () => {
@@ -161,9 +215,7 @@ describe('BloFin remaining audit regressions', () => {
 
       await expect(pending).resolves.toEqual([existingOrder]);
       expect(get).toHaveBeenCalledTimes(9);
-      expect(
-        get.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.UNFILLED_TRIGGER_ORDERS),
-      ).toHaveLength(3);
+      expect(get.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.UNFILLED_TRIGGER_ORDERS)).toHaveLength(3);
       expect(emitAndLogError).toHaveBeenCalledOnce();
       expect(emitAndLogError).toHaveBeenCalledWith('trigger snapshot unavailable');
     } finally {
@@ -319,10 +371,7 @@ describe('BloFin remaining audit regressions', () => {
       vi.useRealTimers();
     }
 
-    expect(post.mock.calls[0]).toEqual([
-      ENDPOINTS.CANCEL_TRIGGER_ORDER,
-      { instId: MARKET.id, algoId: 'algo-2101' },
-    ]);
+    expect(post.mock.calls[0]).toEqual([ENDPOINTS.CANCEL_TRIGGER_ORDER, { instId: MARKET.id, algoId: 'algo-2101' }]);
     expect(post.mock.calls[1][0]).toBe(ENDPOINTS.PLACE_TRIGGER_ORDER);
     expect(post.mock.calls[1][1]).toEqual(
       expect.objectContaining({
@@ -363,4 +412,36 @@ describe('BloFin remaining audit regressions', () => {
     expect(refetchMarginType).not.toHaveBeenCalled();
     expect(fetchPositions).not.toHaveBeenCalled();
   });
+});
+
+it('keeps native remaining quantity monotonic on stale cumulative order frames', () => {
+  const exchange = createExchange();
+  const event = (filledSize: string, state = 'partially_filled') => ({
+    data: [
+      {
+        instId: MARKET.id,
+        orderId: '42',
+        orderCategory: 'normal',
+        orderType: 'limit',
+        side: 'buy',
+        positionSide: 'net',
+        marginMode: 'cross',
+        size: '10',
+        price: '60000',
+        averagePrice: '60000',
+        filledSize,
+        state,
+      },
+    ],
+  });
+  try {
+    exchange.privateWebsocket.handleOrderTopic(event('4'));
+    exchange.privateWebsocket.handleOrderTopic(event('2'));
+    expect(exchange.store.orders[0]).toMatchObject({ filled: 0.004, remaining: 0.006 });
+    exchange.privateWebsocket.handleOrderTopic(event('10', 'filled'));
+    exchange.privateWebsocket.handleOrderTopic(event('4'));
+    expect(exchange.store.orders[0].status).toBe(OrderStatus.Closed);
+  } finally {
+    exchange.dispose();
+  }
 });

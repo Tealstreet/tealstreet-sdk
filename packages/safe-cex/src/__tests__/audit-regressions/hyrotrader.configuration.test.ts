@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// Transform the real constructor graph during setup; load() still re-evaluates
+// it after each environment change rather than timing cold imports in a test.
+import '../reference/bybit/hyrotrader.exchange';
+import { DefaultStore } from '../../store/store.base';
+
+// The account-options mapper never constructs an exchange. Avoid importing
+// every venue through its unused factory dependency, and fail if it is called.
+vi.mock('../../index', () => ({
+  createExchange: () => {
+    throw new Error('accountToExchangeOptions must not create an exchange');
+  },
+}));
+
 const load = async (rest = '', publicWs = '', privateWs = '', prodRest = '', prodPublicWs = '', prodPrivateWs = '') => {
   vi.stubEnv('NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL', rest);
   vi.stubEnv('NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL', publicWs);
@@ -54,8 +67,7 @@ describe('HyroTrader build-time configuration', () => {
 
   it('fails visibly without any Hyro origin instead of falling through to Bybit', async () => {
     await load();
-    const { HyrotraderExchange } = await import('../../exchanges/bybit/hyrotrader.exchange');
-    const { DefaultStore } = await import('../../store/store.base');
+    const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
     expect(() => new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore())).toThrow(
       'HyroTrader production REST URL is not configured. Set NEXT_PUBLIC_HYROTRADER_PROD_REST_URL, or NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL while v1 is simulator-backed.',
     );
@@ -63,8 +75,7 @@ describe('HyroTrader build-time configuration', () => {
 
   it('marks bundled demo accounts as demo while using simulator config', async () => {
     await load('https://simulator.test');
-    const { HyrotraderExchange } = await import('../../exchanges/bybit/hyrotrader.exchange');
-    const { DefaultStore } = await import('../../store/store.base');
+    const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
     const exchange = new HyrotraderExchange(
       'hyrotrader',
       { key: '', secret: '', extra: { hyrotraderMode: 'demo' } },
@@ -80,8 +91,7 @@ describe('HyroTrader build-time configuration', () => {
 
   it('uses simulator config for ordinary v1 accounts when production origins are not live yet', async () => {
     await load('https://simulator.test');
-    const { HyrotraderExchange } = await import('../../exchanges/bybit/hyrotrader.exchange');
-    const { DefaultStore } = await import('../../store/store.base');
+    const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
     const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
     try {
       expect(exchange.isDemo).toBe(false);
@@ -95,14 +105,36 @@ describe('HyroTrader build-time configuration', () => {
 
   it('marks unflagged accounts as production', async () => {
     await load('', '', '', 'https://prod.test');
-    const { HyrotraderExchange } = await import('../../exchanges/bybit/hyrotrader.exchange');
-    const { DefaultStore } = await import('../../store/store.base');
+    const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
     const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
     try {
       expect(exchange.isDemo).toBe(false);
       expect(exchange.getBybitRestBaseUrl('livenet')).toBe('https://prod.test');
     } finally {
       exchange.dispose();
+    }
+  });
+
+  it('reloads real constructors with fresh origins while existing instances retain their captured config', async () => {
+    await load('https://first.test');
+    const firstModule = await import('../reference/bybit/hyrotrader.exchange');
+    const first = new firstModule.HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
+    try {
+      await load('', '', '', 'https://second.test');
+      const secondModule = await import('../reference/bybit/hyrotrader.exchange');
+      const second = new secondModule.HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
+      try {
+        expect(first.getBybitRestBaseUrl('livenet')).toBe('https://first.test');
+        expect(first.getBybitPublicWsUrl('linear', 'livenet')).toBe('wss://first.test/v5/public/linear');
+        expect(first.getBybitPrivateWsUrl('livenet')).toBe('wss://first.test/v5/private');
+        expect(second.getBybitRestBaseUrl('livenet')).toBe('https://second.test');
+        expect(second.getBybitPublicWsUrl('linear', 'livenet')).toBe('wss://second.test/v5/public/linear');
+        expect(second.getBybitPrivateWsUrl('livenet')).toBe('wss://second.test/v5/private');
+      } finally {
+        second.dispose();
+      }
+    } finally {
+      first.dispose();
     }
   });
 
@@ -148,8 +180,7 @@ describe('HyroTrader build-time configuration', () => {
     // probe entry demonstrating mainnet-grade private-WS delivery is a
     // regression gate.
     await load('https://simulator.test', '', '', 'https://prod.test');
-    const { HyrotraderExchange } = await import('../../exchanges/bybit/hyrotrader.exchange');
-    const { DefaultStore } = await import('../../store/store.base');
+    const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
 
     const demo = new HyrotraderExchange(
       'hyrotrader',

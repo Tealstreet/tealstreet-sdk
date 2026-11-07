@@ -1,6 +1,0 @@
-BASE SHA: ec163d264d0a22e1e71002cd350497c24870b2b9
-COMMAND: ["/opt/homebrew/opt/rustup/bin/cargo", "check", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-cryptocom", "--all-targets", "--jobs", "2", "--locked"]
-    Blocking waiting for file lock on package cache
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.51s
-
-MEASURED EXIT: 0

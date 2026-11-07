@@ -1,0 +1,22 @@
+[package]
+name = "safe-cex-venue-kucoin"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+spot = []
+private-adoption-originals = []
+
+[dependencies]
+safe-cex-engine = { workspace = true, features = ["order-locks", "serial-plans"] }
+safe-cex-crypto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+safe-cex-venues = { path = "../../registry", default-features = false, features = ["kucoin"] }
+safe-cex-engine = { workspace = true, features = ["test-support"] }

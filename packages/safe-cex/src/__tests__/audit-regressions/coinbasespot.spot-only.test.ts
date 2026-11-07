@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CoinbaseSpotExchange } from '../../exchanges/coinbase/coinbasespot.exchange';
-import { ENDPOINTS } from '../../exchanges/coinbase/coinbase.types';
+import { CoinbaseSpotExchange } from '../reference/coinbase/coinbasespot.exchange';
+import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
 import { DefaultStore } from '../../store/store.base';
 
 const makeExchange = () =>

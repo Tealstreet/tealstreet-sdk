@@ -1,8 +1,0 @@
-[
-  {
-    "type": "coverage",
-    "mutation": "token-length65-survivor",
-    "call_site": "utilities::parse_gamma_market_tokens",
-    "reason": "Generated positive JSON arrays stop at32; length65 fault survives."
-  }
-]

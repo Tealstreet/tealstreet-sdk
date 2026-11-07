@@ -1,3 +1,0 @@
-// TypeScript-only hyperliquid.types.ts declarations with no production Rust consumer.
-// Generators skip them so no native model, corpus root or binding arm is emitted.
-module.exports = new Set(['AssetCtx', 'BuilderFeeCheckResult', 'CandleSnapshot', 'FrontendOpenOrders', 'Hip3MarketInfo', 'Meta', 'MetaAndAssetCtxs', 'ModifyRequest', 'ModifyWire', 'OidOrCloid', 'OrderRequest', 'OrderResponse', 'OrderResponseStatus', 'OrderWire', 'PerpDex', 'PerpDexs', 'ScheduleCancelAction', 'SpotAssetCtx', 'SpotClearinghouseBalance', 'SpotClearinghouseState', 'SpotMarket', 'SpotMeta', 'SpotMetaAndAssetCtxs', 'SpotToken', 'UserFunding', 'UserFundingDelta', 'UserFundingEntry', 'UserNonFundingLedgerDelta', 'UserNonFundingLedgerEntry', 'UserNonFundingLedgerUpdates']);

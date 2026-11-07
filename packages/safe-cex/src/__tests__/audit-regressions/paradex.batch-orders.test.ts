@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const { uuidMock } = vi.hoisted(() => ({ uuidMock: vi.fn() }));
 vi.mock('../../utils/uuid', () => ({ uuid: uuidMock }));
 
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
-import { ENDPOINTS } from '../../exchanges/paradex/paradex.types';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
+import { ENDPOINTS } from '../reference/paradex/paradex.types';
 import { DefaultStore } from '../../store/store.base';
 import type { PlaceOrderOpts } from '../../types';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';

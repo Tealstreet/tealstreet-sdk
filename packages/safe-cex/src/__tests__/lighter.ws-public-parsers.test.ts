@@ -5,7 +5,7 @@ import {
   parseLighterWsBookSidePrice,
   parseLighterWsNumber,
   shouldDispatchLighterPublicMessage,
-} from '../exchanges/lighter/lighter.ws-public-parsers';
+} from './reference/lighter/lighter.ws-public-parsers';
 
 describe('lighter.ws-public-parsers helpers', () => {
   it('parses numeric values from mixed candidates', () => {

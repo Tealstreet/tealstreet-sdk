@@ -136,6 +136,52 @@ describe('CrossTradeManager._safePlaceOrder', () => {
     expect(placeOrderMock).toHaveBeenCalledTimes(2);
   });
 
+  // Bravulasco: an uncertain refusal was retried every 3 s loop. It is a hold, not a failure.
+  it('holds a symbol refused as uncertain for 15 s, doubling to 5 min, until a placement lands', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const market = makeMarket();
+    const uncertain = new Error('Placement outcome is uncertain; reconcile before placing or amending');
+    placeOrderMock.mockReset();
+    placeOrderMock.mockRejectedValue(uncertain);
+    const attempt = () => manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
+    const attemptsAfter = async (ms: number) => {
+      placeOrderMock.mockClear();
+      vi.advanceTimersByTime(ms);
+      await attempt();
+      return placeOrderMock.mock.calls.length;
+    };
+    await attempt();
+    expect(placeOrderMock).toHaveBeenCalledOnce();
+    // Every 3 s loop inside the hold sends nothing.
+    expect(await attemptsAfter(3_000)).toBe(0);
+    expect(await attemptsAfter(11_999)).toBe(0);
+    expect(await attemptsAfter(1)).toBe(1); // 15 s
+    expect(await attemptsAfter(29_999)).toBe(0);
+    expect(await attemptsAfter(1)).toBe(1); // 30 s
+    expect(await attemptsAfter(60_000)).toBe(1); // 60 s
+    expect(await attemptsAfter(120_000)).toBe(1); // 120 s
+    expect(await attemptsAfter(240_000)).toBe(1); // 240 s
+    expect(await attemptsAfter(299_999)).toBe(0); // capped at 5 min
+    expect(await attemptsAfter(1)).toBe(1);
+    // A placement that lands ends the hold.
+    placeOrderMock.mockResolvedValue({ id: 'order-1' });
+    expect(await attemptsAfter(300_000)).toBe(1);
+    expect(await attemptsAfter(3_000)).toBe(1);
+  });
+
+  it('logs each placement attempt as Cross Trade, with venue and symbol but no account name', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const market = makeMarket();
+    await manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);
+    expect(info).toHaveBeenCalledWith(
+      '[CrossTrade] placing',
+      expect.objectContaining({ source: 'cross-trade', symbol: 'BTCUSDT', side: OrderSide.Buy, reduceOnly: false }),
+    );
+    expect(JSON.stringify(info.mock.calls)).not.toContain('copier1');
+    info.mockRestore();
+  });
+
   it('mute expires after 30s', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));

@@ -1,7 +1,0 @@
-BASE SHA: 3148de9e29d84b2530761637fb09761c78b7e15d
-VARIANT: clean tracked tree
-COMMAND: ["/opt/homebrew/opt/rustup/bin/cargo", "check", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-bitrue", "--all-targets", "--jobs", "2", "--locked"]
-    Checking safe-cex-venue-bitrue v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-venue-bitrue)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.09s
-
-MEASURED EXIT: 0

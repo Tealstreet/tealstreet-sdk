@@ -3,8 +3,8 @@ import type { Axios } from 'axios';
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
-import { ENDPOINTS } from '../../exchanges/orderly/orderly.types';
+import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
+import { ENDPOINTS } from '../reference/orderly/orderly.types';
 import { DefaultStore } from '../../store/store.base';
 import {
   MarginType,
@@ -58,7 +58,7 @@ const createExchange = () => {
   return { exchange, store };
 };
 
-const orderlyFamily = ['woofi', 'kodiakfi', 'mode', 'salsadex', 'what', 'tealstreet-dex'] as const;
+const orderlyFamily = ['woofi', 'kodiakfi', 'mode', 'what'] as const;
 
 describe('audit regression: Orderly isolated-margin support', () => {
   it('maps documented REST margin, leverage, and allocated-margin fields', () => {

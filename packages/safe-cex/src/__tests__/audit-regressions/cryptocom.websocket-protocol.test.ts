@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
-import { CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS } from '../../exchanges/cryptocom/cryptocom.types';
+import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
+import { CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS } from '../reference/cryptocom/cryptocom.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';

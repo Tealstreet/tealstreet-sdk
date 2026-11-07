@@ -1,5 +1,9 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
+import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeErrorKind } from './commandOutcome';
+import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
 import type { TwapInstance } from './webworker/twap/TwapInstance';
@@ -14,6 +18,7 @@ export type ExchangeName =
   | 'backpack'
   | 'binance'
   | 'binanceinverse'
+  | 'binanceoptions'
   | 'binancespot'
   | 'binancepm'
   | 'bingx'
@@ -23,7 +28,6 @@ export type ExchangeName =
   | 'bitrue'
   | 'bitunix'
   | 'blofin'
-  | 'breakoutprop'
   | 'bybit'
   | 'bybitdemo'
   | 'bybitinverse'
@@ -47,8 +51,6 @@ export type ExchangeName =
   | 'polymarket'
   | 'kodiakfi'
   | 'mode'
-  | 'salsadex'
-  | 'tealstreet-dex'
   | 'txflow'
   | 'what'
   | 'weex'
@@ -63,6 +65,9 @@ export type ExchangeOptions = {
   readonly key: string;
   readonly secret: string;
   readonly passphrase?: string;
+  /** Rust local-provider setup only; consumed before generic options are retained.
+   * Stable IDs are caller-assigned, never derived from credential material. */
+  readonly localSigner?: LocalSignerMetadata;
 
   readonly secondary_key?: string;
   readonly secondary_secret?: string;
@@ -88,6 +93,20 @@ export type ExchangeOptions = {
   readonly grvtSignerAddress?: string;
   readonly grvtTradingAccountId?: string;
 
+  /** Polymarket CLOB V2; `key` is the local signing wallet's private key. */
+  readonly polymarket?: {
+    /** Discover only these Gamma market slugs; omitted means the full universe. */
+    readonly marketSlugs?: string[];
+    /** Supply all three L2 credentials together, or derive them with L1 auth. */
+    readonly apiKey?: string;
+    readonly apiSecret?: string;
+    readonly apiPassphrase?: string;
+    /** EOA, proxy, Safe, or ERC-1271 deposit wallet signing. Defaults to EOA. */
+    readonly signerType?: 0 | 1 | 2 | 3;
+    /** Deposit wallet/maker address; required for non-EOA signature types. */
+    readonly funderAddress?: string;
+  };
+
   readonly starkPrivateKey?: string;
   readonly vault?: string;
   readonly applicationId?: string;
@@ -109,6 +128,8 @@ export type ExchangeOptions = {
     readonly address: string;
     readonly feeTenthsBps: number;
   };
+  /** Extra fast HL perp depth topic per book. Default off; budget all sockets against the per-IP cap. */
+  readonly hyperliquidFastBook?: boolean;
   readonly testnet?: boolean;
   /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
   readonly enableSpotMarkets?: boolean;
@@ -119,7 +140,18 @@ export type ExchangeOptions = {
   /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
   readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
+  /** The host names a refused placement itself, so the exchange does not also report it. */
+  readonly callerReportsPlacementFailures?: boolean;
+  /**
+   * A main-thread instance paired with a worker that owns the account. Its reads
+   * and trading go to the worker, waiting for the bridge; it never runs an engine.
+   */
+  readonly workerMirror?: boolean;
+  /** Retained input compatibility; this build always uses Rust for beta venues. */
+  readonly engine?: 'rust';
   readonly privateOnly?: boolean;
+  /** Rust live public-feed ownership. Shared ports must be explicitly transferred to workers. */
+  readonly publicFeed?: RustPublicFeedPolicy;
   readonly tealstreetProxy?: boolean;
   // tunnel (http over websocket)
   readonly tealstreetTunnel?: boolean;
@@ -139,6 +171,8 @@ export type ExchangeOptions = {
   readonly extra?: {
     /** `Infinity` turns periodic REST polling off, for callers that fetch on demand. */
     tickInterval?: number;
+    /** Rust command waiting deadline in ms (default 120000); expiry never retries or cancels a write. */
+    rustCommandTimeoutMs?: number;
     recvWindow?: number;
     // Optional AsterDEX REST API version override.
     asterdexApiVersion?: 'v1' | 'v3';
@@ -254,9 +288,19 @@ export type ExchangeOptions = {
 // the validation call fetched in the same request (read `.total` for the USD value),
 // so callers get key-validity AND balance from one round-trip. Undefined for venues
 // whose validation doesn't fetch balance.
+/** What a nuke stopped before cancelling and closing: chaser and TWAP ids. */
+export interface NukeResult {
+  stoppedChasers: string[];
+  stoppedTwaps: string[];
+  /** Set where the venue's cancels can miss orders placed seconds ago: the user should check. */
+  warning?: string;
+}
+
 export interface ValidateAccountResult {
   error: string;
   balance?: Balance;
+  /** Typed reason when the engine classified the failure (Rust venues), e.g. 'authInvalid'. */
+  kind?: ExchangeErrorKind;
 }
 
 export interface ExchangeAccountConfig {
@@ -500,7 +544,11 @@ export type Market = {
   readonly makerFee?: number;
 };
 
+/** Source engine receipt times for last, mark and index; null is unobserved. */
+export type TickerObservedAt = [number | null, number | null, number | null];
+
 export type Ticker = {
+  readonly observedAt?: TickerObservedAt;
   readonly id: string;
   readonly symbol: string;
   readonly bid: number;
@@ -919,6 +967,8 @@ export type ActiveChaser = {
   stopReason: string;
   currentOrderIds?: string[];
   origin?: ChaserOrigin;
+  /** Set on a TWAP's slice chase: the TWAP it belongs to. */
+  twapId?: string;
 };
 
 export type OrderRiskProfile = {
@@ -1083,7 +1133,7 @@ export type DisplayedMargin = {
 };
 
 export type StoreData = {
-  readonly latency: number;
+  readonly latency: number | null;
   readonly balance: Balance;
   readonly markets: Market[];
   readonly tickers: Ticker[];
@@ -1152,6 +1202,7 @@ export type StoreData = {
      * clock-free, which matters because hosted exchange-server stamps these
      * on the server's clock.
      */
+    reconnectDiagnostics?: AccountReconnectDiagnostics;
     publicCloseCode?: number;
     privateCloseCode?: number;
     publicCloseCountTotal?: number;
@@ -1186,7 +1237,7 @@ export type Writable<T> =
             : T; // is primitive or literal value
 
 export type WritableStoreData = {
-  latency: number;
+  latency: number | null;
   balance: Writable<Balance>;
   markets: Array<Writable<Market>>;
   tickers: Array<Writable<Ticker>>;
@@ -1287,6 +1338,21 @@ export interface RemoteSignerRequest {
       | 'kraken-challenge'
       | 'apexomni-base64'
       | 'bitunix-double-sha256'
+      | 'backpack-ed25519'
+      | 'kucoin-batch'
+      // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
+      // the digest from; `hyperliquid-address` binds the agent address.
+      | 'grvt-order'
+      | 'grvt-address'
+      | 'hyperliquid-l1'
+      | 'hyperliquid-address'
+      // Lighter: `toSign` is a transaction or auth statement the device re-derives
+      // the signed words from; the reply concatenates the 80-byte signatures.
+      | 'lighter-tx'
+      // Paradex: `toSign` is a closed `paradex/1` descriptor the device rebuilds
+      // the Stark digests from; `paradex-public` binds the Stark public key.
+      | 'paradex-stark'
+      | 'paradex-public'
       | 'coinbase-jwt';
     extraData?: unknown;
   };

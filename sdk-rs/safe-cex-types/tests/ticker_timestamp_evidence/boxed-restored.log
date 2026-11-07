@@ -1,9 +1,0 @@
-
-running 1 test
-test boxed_ticker_keeps_native_fields_and_untagged_wire_shapes ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-   Compiling safe-cex-types v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-types)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.71s
-     Running tests/boxed_ticker.rs (sdk-rs/target/debug/deps/boxed_ticker-7153d1f4e848b481)

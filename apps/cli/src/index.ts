@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 // Shim WebSocket for tealstreet.io proxy connections (must be first import)
 import './ws-shim';
+import { G } from './console-glyphs';
+import './rust-engine';
 import '@tealstreet/safe-cex/src/transport/registerTealstreetTransport';
 import { Command, Option } from 'commander';
 import chalk from 'chalk';
@@ -559,7 +561,7 @@ recordCmd
       if (replaced) {
         console.log(chalk.yellow(`Replaced existing ${dataType}:${exchange}:${options.symbol} recorder`));
       }
-      console.log(chalk.green('✓ Recorder started successfully'));
+      console.log(chalk.green(`${G.ok} Recorder started successfully`));
       console.log(chalk.gray('  Press Ctrl+C to stop recording\n'));
 
       // Keep running until interrupted
@@ -567,7 +569,7 @@ recordCmd
         const shutdown = async () => {
           console.log(chalk.yellow('\nStopping recorder...'));
           await recorder.stop();
-          console.log(chalk.green('✓ Recorder stopped'));
+          console.log(chalk.green(`${G.ok} Recorder stopped`));
           resolve();
         };
 
@@ -575,7 +577,7 @@ recordCmd
         process.on('SIGTERM', shutdown);
       });
     } catch (error) {
-      console.error(chalk.red(`\n✗ Failed to start recorder: ${(error as Error).message}`));
+      console.error(chalk.red(`\n${G.error} Failed to start recorder: ${(error as Error).message}`));
       process.exit(1);
     }
   });
@@ -613,7 +615,7 @@ recordCmd
       const status = recorder.getStatus();
       console.log(
         formatRow([
-          '🟢 Running',
+          `${G.running} Running`,
           status.dataType,
           status.exchange,
           status.symbol,
@@ -636,7 +638,7 @@ recordCmd
       if (!isRunning) {
         console.log(
           formatRow([
-            config.active ? '⏸️  Paused' : '⭕ Inactive',
+            config.active ? `${G.paused}  Paused` : `${G.inactive} Inactive`,
             config.dataType,
             config.exchange,
             config.symbol,
@@ -667,7 +669,7 @@ recordCmd
     );
 
     if (stopped) {
-      console.log(chalk.green(`✓ Stopped recording ${options.type}:${exchange}:${options.symbol}`));
+      console.log(chalk.green(`${G.ok} Stopped recording ${options.type}:${exchange}:${options.symbol}`));
     } else {
       console.log(chalk.yellow(`No active recorder found for ${options.type}:${exchange}:${options.symbol}`));
     }
@@ -753,14 +755,14 @@ recordCmd
       if (replaced) {
         console.log(chalk.yellow(`Replaced existing ${dataType}:${exchange}:${options.symbol} recorder`));
       }
-      console.log(chalk.green('✓ Recorder started successfully'));
+      console.log(chalk.green(`${G.ok} Recorder started successfully`));
       console.log(chalk.gray('  Press Ctrl+C to stop recording\n'));
 
       await new Promise<void>((resolve) => {
         const shutdown = async () => {
           console.log(chalk.yellow('\nStopping recorder...'));
           await recorder.stop();
-          console.log(chalk.green('✓ Recorder stopped'));
+          console.log(chalk.green(`${G.ok} Recorder stopped`));
           resolve();
         };
 
@@ -768,7 +770,7 @@ recordCmd
         process.on('SIGTERM', shutdown);
       });
     } catch (error) {
-      console.error(chalk.red(`\n✗ Failed to start recorder: ${(error as Error).message}`));
+      console.error(chalk.red(`\n${G.error} Failed to start recorder: ${(error as Error).message}`));
       process.exit(1);
     }
   });

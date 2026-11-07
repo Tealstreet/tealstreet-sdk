@@ -2,6 +2,7 @@
 
 End-to-end tests for the Tealstreet trading platform — exercises real exchange connections, order placement, position management, and audit flows.
 
+- **Hosted account isolation:** the spec names accounts `e2e-<exchange>` because the hosted server keys ownership by login user plus account name. Parallel venue jobs must not reuse one name with different credentials or venues. The workflow serializes all runs across branches/targets without canceling active cleanup; its setup runs the dependency-free `scripts/account-isolation.test.js` guard before credentials or browser work.
 - **Layout**: `e2e/`, `support/`, `fixtures/`, `config/`
 - **Exchange credentials**: `cypress.env.json` and `cypress/config/exchanges.js` (local-only, never committed)
 - **`apps/web/.gitignore` ignores `cypress.env.json*`, not just the exact name.** A `cypress.env.json.bak` was committed on 2026-08-09 and untracked later; history was deliberately not rewritten, so it remains in old commits. Keep backups and variants of the credentials file out of git — the widened pattern exists for that.
@@ -18,6 +19,22 @@ End-to-end tests for the Tealstreet trading platform — exercises real exchange
 - **Note**: tests hit live testnets where available; treat any test that touches mainnet as needing extra review
 - **Local fast iteration and CI both use exchange-server mode, but not the same endpoint.** The Mac mini loop intentionally keeps `apps/web/.env.local` pointed at `NEXT_PUBLIC_EXCHANGE_SERVER_URL=ws://localhost:23456` and runs `yarn workspace @tealstreet/exchange-server dev` locally. GitHub e2e sets `CYPRESS_useExchangeServer=true` and relies on the deployed app's hosted default, `wss://connect.tealstreet.io/account`; do not change the mini env to hosted just to mirror CI unless explicitly validating the hosted path.
 - **Failures**: Cypress writes screenshots and videos to `cypress/screenshots/` and `cypress/videos/` (gitignored)
+
+## Hosted test account identity
+
+Hosted accounts are shared by authenticated user and account name, not exchange.
+The parallel matrix shares one test login. The primary account stays
+`e2e-<exchange>`; `config/accountNames.js` assigns stable credential variants
+(`e2e-okx-badkey`, `e2e-okx-goodkey`, `e2e-okx-form-badkey`). Do not restore
+the global `test`, `e2e-good-key` or `e2e-bad-key` names: another job's different venue/key then
+hits the server's multi-client refusal before private data can load.
+
+Keep names stable across runs and attempts to reuse hosted accounts/journals.
+The bad-key probe and the form's additional corrupted fields use different
+names; the form's saved-account lookup, activation and cleanup use
+those same names. Server protection, keys, routing and financial assertions stay
+unchanged. Hermetic identity regressions run through the existing mirror CI
+Node-test step: `node --test .github/tests/e2e-account-names.test.cjs`.
 
 ## Order-form invariant: price before size
 

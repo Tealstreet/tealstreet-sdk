@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PolymarketExchange } from '../../exchanges/polymarket/polymarket.exchange';
+import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../types';
 

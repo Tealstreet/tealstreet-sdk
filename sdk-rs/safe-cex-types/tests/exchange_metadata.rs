@@ -3,17 +3,31 @@ mod identity;
 use safe_cex_types::{ExchangeName, exchange_metadata::*};
 
 #[test]
+fn the_current_roster_accepts_options_and_refuses_retired_brokers() {
+    let options: ExchangeName = serde_json::from_str("\"binanceoptions\"").unwrap();
+    assert_eq!(serde_json::to_value(options).unwrap(), "binanceoptions");
+    for retired in ["salsadex", "tealstreet-dex"] {
+        assert!(serde_json::from_value::<ExchangeName>(serde_json::json!(retired)).is_err());
+    }
+}
+
+#[test]
 fn full_metadata_native_fields_unified_mobile_and_domains() {
     let table = exchange_metadata();
-    assert_eq!(table.len(), 49); // independently counted source object entries, stopped at record 49.
+    let roster: Vec<String> =
+        serde_json::from_str(include_str!("fixtures/exchange-metadata-roster.json")).unwrap();
+    assert_eq!(roster.len(), 47);
+    let mut native_names = table.keys().cloned().collect::<Vec<_>>();
+    native_names.sort();
+    assert_eq!(native_names, roster);
     let inverse = get_exchange_metadata("binanceinverse", false).unwrap();
     assert_eq!(inverse.exchange_name, ExchangeName::Binanceinverse);
     assert_eq!(inverse.pretty_name, "Binance Inverse");
     assert_eq!(inverse.default_quote, "USD");
     assert_eq!(inverse.latency_domain.as_deref(), Some("dapi.binance.com"));
-    assert!(!inverse.enabled);
+    assert!(inverse.enabled);
     assert!(inverse.enabled_in_dev);
-    assert!(!inverse.supported_on_mobile);
+    assert!(inverse.supported_on_mobile);
     assert!(!inverse.supports_testnet);
     assert_eq!(inverse.requires_tickers_for_markets_loaded, Some(true));
     let grvt = get_exchange_metadata("grvt", false).unwrap();

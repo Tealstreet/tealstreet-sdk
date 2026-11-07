@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinancePublicWebsocket } from '../../exchanges/binance/binance.ws-public';
-import { BinancePMPublicWebsocket } from '../../exchanges/binance/binancepm.ws-public';
-import { BinancePublicWebsocket as BinanceSpotPublicWebsocket } from '../../exchanges/binance/binancespot.ws-public';
+import { BinancePublicWebsocket } from '../reference/binance/binance.ws-public';
+import { BinancePMPublicWebsocket } from '../reference/binance/binancepm.ws-public';
+import { BinancePublicWebsocket as BinanceSpotPublicWebsocket } from '../reference/binance/binancespot.ws-public';
 
 const subjects = [
   ['futures', BinancePublicWebsocket],

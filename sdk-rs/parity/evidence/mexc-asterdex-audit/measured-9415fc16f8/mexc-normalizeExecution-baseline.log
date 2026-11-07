@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"profile":"mexc-normalizeExecution","units":[55296],"scope":"actual returned native JS field before serialization, no Rust decode run"}]}

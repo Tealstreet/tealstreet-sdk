@@ -1,5 +1,0 @@
-exit_code=0
-    Checking safe-cex-transport v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/safe-cex-transport)
-    Checking safe-cex-exchange v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/safe-cex-exchange)
-    Checking safe-cex-venue-mexc v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/safe-cex-venue-mexc)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.71s

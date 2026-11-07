@@ -1,9 +1,0 @@
-{
-  "base_sha": "0b4a32422659e26f7054b5e50b25cea6a6974e33",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n@@ -214,7 +214,7 @@\n             let send = host.prepare_send_with_log()?;\n             let stringify = host.prepare_stringify()?;\n             let text = host.stringify(stringify, SyncFrame::PrivateSubscription(channel))?;\n-            host.send_with_log(send, text)?;\n+            let _ = (send, text);\n             Ok(())\n         },\n     )?;\n",
-  "expected_named_assertion": "BITRUE-SYNC-NATIVE-IMMEDIATE-EFFECTS subscribe:normal",
-  "runtime_proof": true,
-  "stop_case_name": "subscribe:normal",
-  "stop_case_index": 128
-}

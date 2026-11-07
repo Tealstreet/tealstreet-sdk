@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 describe('audit regression: Bitget V2 account information', () => {

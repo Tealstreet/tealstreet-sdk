@@ -1,7 +1,0 @@
-{
-  "safe-cex-venue-blofin/src/api.rs::LOCAL_FUNCTION:append": {
-    "category": "non-decoder",
-    "reason": "Inside query: recursively renders outgoing JSON request parameters into bracketed query pairs, preserving JS own-key order and null empty values. It serializes an existing request tree and admits no inbound schema. Reviewed retained-body cutover: body signing reads canonical retained text/truthiness and uses the shared retained JSON writer; this nested outbound query helper is unchanged.",
-    "sourceSha256": "754b0256c3ffcac88213f85ade2795face5545e96af7654acd7cbb14336bc496"
-  }
-}

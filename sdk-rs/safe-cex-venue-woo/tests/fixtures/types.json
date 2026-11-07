@@ -1,3458 +1,0 @@
-[
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "valid declaration",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": true
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "applicationId.null",
-    "input": {
-      "applicationId": null,
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "applicationId.missing",
-    "input": {
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "account.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": null,
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "account.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "alias.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": null,
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "alias.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "accountMode.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": null,
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "accountMode.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "positionMode.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": null,
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "positionMode.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "leverage.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": null,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "leverage.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "takerFeeRate.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": null,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "takerFeeRate.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "makerFeeRate.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": null,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "makerFeeRate.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "interestRate.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": null,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "interestRate.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "futuresTakerFeeRate.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": null,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "futuresTakerFeeRate.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "futuresMakerFeeRate.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": null,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "futuresMakerFeeRate.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "otpauth.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": null,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "otpauth.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "marginRatio.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": null,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "marginRatio.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "openMarginRatio.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": null,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "openMarginRatio.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "initialMarginRatio.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": null,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "initialMarginRatio.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "maintenanceMarginRatio.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": null,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "maintenanceMarginRatio.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalCollateral.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": null,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalCollateral.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "freeCollateral.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": null,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "freeCollateral.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalAccountValue.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": null,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalAccountValue.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalVaultValue.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": null,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalVaultValue.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalStakingValue.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": null,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalStakingValue.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "referrerID.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": null,
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "referrerID.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "accountType.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": null,
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "accountType.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalLaunchpadVaultValue.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": null,
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalLaunchpadVaultValue.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalEarnValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalEarnValue.null",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25,
-      "totalEarnValue": null
-    },
-    "accepted": false
-  },
-  {
-    "name": "ACCOUNT_RESPONSE",
-    "label": "totalEarnValue.missing",
-    "input": {
-      "applicationId": "field-﻿-",
-      "account": "field-﻿-",
-      "alias": "field-﻿-",
-      "accountMode": "field-﻿-",
-      "positionMode": "field-﻿-",
-      "leverage": 123.25,
-      "takerFeeRate": 123.25,
-      "makerFeeRate": 123.25,
-      "interestRate": 123.25,
-      "futuresTakerFeeRate": 123.25,
-      "futuresMakerFeeRate": 123.25,
-      "otpauth": true,
-      "marginRatio": 123.25,
-      "openMarginRatio": 123.25,
-      "initialMarginRatio": 123.25,
-      "maintenanceMarginRatio": 123.25,
-      "totalCollateral": 123.25,
-      "freeCollateral": 123.25,
-      "totalAccountValue": 123.25,
-      "totalVaultValue": 123.25,
-      "totalStakingValue": 123.25,
-      "referrerID": "field-﻿-",
-      "accountType": "field-﻿-",
-      "totalLaunchpadVaultValue": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "valid declaration",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": true
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "success.null",
-    "input": {
-      "success": null,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "success.missing",
-    "input": {
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "timestamp.null",
-    "input": {
-      "success": true,
-      "timestamp": null,
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "timestamp.missing",
-    "input": {
-      "success": true,
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_id.null",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": null,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_id.missing",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_type.null",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": null,
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_type.missing",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_price.null",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": null,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_price.missing",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_quantity.null",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": null,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_quantity.missing",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_amount.null",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": null,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "order_amount.missing",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "client_order_id": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "client_order_id.null",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25,
-      "client_order_id": null
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ORDER_RESPONSE",
-    "label": "client_order_id.missing",
-    "input": {
-      "success": true,
-      "timestamp": "field-﻿-",
-      "order_id": 123.25,
-      "order_type": "field-﻿-",
-      "order_price": 123.25,
-      "order_quantity": 123.25,
-      "order_amount": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "valid declaration",
-    "input": {
-      "success": true,
-      "timestamp": 123.25,
-      "data": {
-        "rows": [
-          {
-            "orderId": 123.25
-          }
-        ]
-      }
-    },
-    "accepted": true
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "success.null",
-    "input": {
-      "success": null,
-      "timestamp": 123.25,
-      "data": {
-        "rows": [
-          {
-            "orderId": 123.25
-          }
-        ]
-      }
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "success.missing",
-    "input": {
-      "timestamp": 123.25,
-      "data": {
-        "rows": [
-          {
-            "orderId": 123.25
-          }
-        ]
-      }
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "timestamp.null",
-    "input": {
-      "success": true,
-      "timestamp": null,
-      "data": {
-        "rows": [
-          {
-            "orderId": 123.25
-          }
-        ]
-      }
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "timestamp.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "orderId": 123.25
-          }
-        ]
-      }
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "data.null",
-    "input": {
-      "success": true,
-      "timestamp": 123.25,
-      "data": null
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "data.missing",
-    "input": {
-      "success": true,
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "data.rows.null",
-    "input": {
-      "success": true,
-      "timestamp": 123.25,
-      "data": {
-        "rows": null
-      }
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "data.rows.missing",
-    "input": {
-      "success": true,
-      "timestamp": 123.25,
-      "data": {}
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "data.rows.0.orderId.null",
-    "input": {
-      "success": true,
-      "timestamp": 123.25,
-      "data": {
-        "rows": [
-          {
-            "orderId": null
-          }
-        ]
-      }
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "data.rows.0.orderId.missing",
-    "input": {
-      "success": true,
-      "timestamp": 123.25,
-      "data": {
-        "rows": [
-          {}
-        ]
-      }
-    },
-    "accepted": false
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "data.rows.0.orderId.union number",
-    "input": {
-      "success": true,
-      "timestamp": 123.25,
-      "data": {
-        "rows": [
-          {
-            "orderId": 123.25
-          }
-        ]
-      }
-    },
-    "accepted": true
-  },
-  {
-    "name": "PLACE_ALGO_ORDER_RESPONSE",
-    "label": "data.rows.0.orderId.union string",
-    "input": {
-      "success": true,
-      "timestamp": 123.25,
-      "data": {
-        "rows": [
-          {
-            "orderId": "field-﻿-"
-          }
-        ]
-      }
-    },
-    "accepted": true
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "valid declaration",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": true
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "success.null",
-    "input": {
-      "success": null,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "success.missing",
-    "input": {
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.null",
-    "input": {
-      "success": true,
-      "data": null,
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.missing",
-    "input": {
-      "success": true,
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.symbol.null",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": null,
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.symbol.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.margin_mode.null",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": null,
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.margin_mode.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.default_margin_mode.null",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ],
-        "default_margin_mode": null
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.default_margin_mode.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": true
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.default_margin_mode.present",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ],
-        "default_margin_mode": "field-﻿-"
-      },
-      "timestamp": 123.25
-    },
-    "accepted": true
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.position_mode.null",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": null,
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.position_mode.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.details.null",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": null
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.details.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-"
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.details.0.position_side.null",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": null,
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.details.0.position_side.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.details.0.leverage.null",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": null
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "data.details.0.leverage.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "timestamp.null",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      },
-      "timestamp": null
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_FUTURES_LEVERAGE_RESPONSE",
-    "label": "timestamp.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "symbol": "field-﻿-",
-        "margin_mode": "field-﻿-",
-        "position_mode": "field-﻿-",
-        "details": [
-          {
-            "position_side": "field-﻿-",
-            "leverage": "field-﻿-"
-          }
-        ]
-      }
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "valid declaration",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": true
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "success.null",
-    "input": {
-      "success": null,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "success.missing",
-    "input": {
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.null",
-    "input": {
-      "success": true,
-      "data": null,
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.missing",
-    "input": {
-      "success": true,
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": null,
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.open.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": null,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.open.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.close.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": null,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.close.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.low.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": null,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.low.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.high.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": null,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.high.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.volume.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": null,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.volume.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.amount.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": null,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.amount.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.symbol.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": null,
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.symbol.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.type.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": null,
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.type.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.start_timestamp.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": null,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.start_timestamp.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.end_timestamp.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": null
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.rows.0.end_timestamp.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.meta.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": null
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.meta.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ]
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.meta.total.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": null,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.meta.total.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.meta.records_per_page.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": null,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.meta.records_per_page.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.meta.current_page.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": null
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "data.meta.current_page.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25
-        }
-      },
-      "timestamp": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "timestamp.null",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      },
-      "timestamp": null
-    },
-    "accepted": false
-  },
-  {
-    "name": "GET_KLINE_RESPONSE",
-    "label": "timestamp.missing",
-    "input": {
-      "success": true,
-      "data": {
-        "rows": [
-          {
-            "open": 123.25,
-            "close": 123.25,
-            "low": 123.25,
-            "high": 123.25,
-            "volume": 123.25,
-            "amount": 123.25,
-            "symbol": "field-﻿-",
-            "type": "field-﻿-",
-            "start_timestamp": 123.25,
-            "end_timestamp": 123.25
-          }
-        ],
-        "meta": {
-          "total": 123.25,
-          "records_per_page": 123.25,
-          "current_page": 123.25
-        }
-      }
-    },
-    "accepted": false
-  }
-]

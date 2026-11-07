@@ -1,9 +1,0 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
-     Running tests/class_cost_venue.rs (sdk-rs/target/debug/deps/class_cost_venue-0b2a81c10903fcd5)
-
-running 1 test
-markets: 512 generated native outcomes; NaN-class (not payload-bit) comparisons: 0; stop iteration511
-test class_cost_markets_native ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 1.18s
-

@@ -41,11 +41,17 @@ That fetches `tealstreet-windows-x64.exe` and puts a `tealstreet` command on
 your PATH. For a direct download, grab the `.exe` from the releases page and
 put it somewhere on your PATH yourself.
 
-Two things to know:
+Three things to know:
 
 - **Run it from Windows Terminal or PowerShell 7.** The REPL draws a pinned
   top bar and bottom footer using ANSI escape sequences. Legacy `cmd.exe`
   does not render those correctly.
+- **The legacy console gets ASCII markers.** Outside Windows Terminal, or on a
+  non-UTF-8 code page, the CLI prints `[x] [!] [ok] [i]` instead of
+  `✗ ⚠ ✓ ℹ`, and plain `- | +` for table borders, because the legacy console
+  font shows those glyphs as `?`. Set `TEALSTREET_ASCII=1` to force ASCII
+  in any terminal, or `TEALSTREET_ASCII=0` to keep Unicode. `--json` and
+  piped output are never changed.
 - **`tealstreet update` works either way.** An npm install upgrades through
   `npm update -g`. A directly-downloaded `.exe` is replaced by renaming the
   running binary aside and moving the new one into place — Windows will not

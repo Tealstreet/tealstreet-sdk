@@ -1,8 +1,0 @@
-{
-  "safe_cex_venue_breakoutprop::host::ProductionHost": {
-    "traits": [
-      "core::clone::Clone"
-    ],
-    "reason": "Reviewed host.rs::ProductionHost and its derived Clone: deps contains reusable Rc runtime/HTTP/provider/transport/date capabilities and parent is an Rc<RefCell<Weak<BreakoutpropExchange>>> account slot. Clone retains these same handles; it creates no validation token or one-use order authority. runtime_host clones this holder for every production native read/write context, and create_api checks the shared parent before accepting another live account. The maintained tests/binding.rs production-host constructor and native login/read/order E2Es execute those cloned runtime contexts (14/14 at integrated binding head a93a7fd5be); field/API raw-input contracts remain separately gated. This is the exact owner Clone review, not a package exemption. The native cloned_production_host_retains_its_live_account_attachment witness also rejects second-account construction with zero requests and then logs in through the original credentials. Replacing only Clone with a detached parent slot compiled and failed that named assertion; restoring exact host source passed."
-  }
-}

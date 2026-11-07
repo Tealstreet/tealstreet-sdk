@@ -11,8 +11,9 @@ import type {
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameApplier } from '../store/frameApplier';
+import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
-import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { ExchangeWorker } from './ExchangeWorker';
 
 const createMarket = (overrides?: Partial<Market>): Market =>
@@ -169,19 +170,6 @@ describe('ExchangeWorker store payloads', () => {
     // payload harmless: the next one carries current values.
     expect(payload.tickers).toHaveLength(1);
     expect(payload.tickers[0].last).toBe(51000);
-  });
-
-  it('cleans up exchange-owned chasers before disposing the exchange', () => {
-    const { worker } = createWorker();
-    const exchange = { dispose: vi.fn() } as any;
-    (worker as any)._exchange = exchange;
-    const cleanupSpy = vi.spyOn(chaserOrderManagerInstance, 'cleanupExchange');
-
-    worker.dispose();
-
-    expect(cleanupSpy).toHaveBeenCalledWith(exchange);
-    expect(cleanupSpy.mock.invocationCallOrder[0]).toBeLessThan(exchange.dispose.mock.invocationCallOrder[0]);
-    cleanupSpy.mockRestore();
   });
 
   it('clears handler timers and runtime pipelines on dispose', () => {
@@ -473,4 +461,49 @@ describe('ExchangeWorker store payloads', () => {
     expect(omitPayload.updateIds.orders).toBe(omitOrdersUpdateId);
     expect(worker.store.updateIds.orders).toBeGreaterThan(omitOrdersUpdateId);
   });
+});
+
+it('forwards midpoint changes and clearing through the object worker delta bridge', () => {
+  const { worker, messages } = createWorker();
+  const main = new DefaultStore();
+  worker.store.update({ tickers: [createTicker({ midPrice: 100 })] });
+  emitStoreUpdate(worker);
+  main.update(messages.at(-1).data, true);
+  expect(main.tickers[0].midPrice).toBe(100);
+  worker.store.updateTicker({ id: 'BTCUSDT' }, { midPrice: 101 });
+  emitStoreUpdate(worker);
+  expect(messages.at(-1).data.tickerDeltas).toEqual([[0, 1 << 11, 101]]);
+  main.update(messages.at(-1).data, true);
+  expect(main.tickers[0].midPrice).toBe(101);
+  worker.store.updateTicker({ id: 'BTCUSDT' }, { midPrice: undefined });
+  emitStoreUpdate(worker);
+  expect(messages.at(-1).data.tickerDeltas).toEqual([[0, 1 << 11, NaN]]);
+  main.update(messages.at(-1).data, true);
+  expect('midPrice' in main.tickers[0]).toBe(false);
+});
+
+
+it('forwards query-only leverage in frame mode, including late-client snapshots and authoritative clearing', () => {
+  const { worker, messages } = createWorker();
+  (worker as any)._forwardsFrames = true;
+  const applier = new FrameApplier(worker.store);
+  const main = new DefaultStore();
+  const send = () => (worker as any)._storeUpdate({
+    ...worker.store.serialize(), fetchedLeverage: worker.store.fetchedLeverage,
+  });
+  const rails = { buyLeverage: 7, sellLeverage: 9 };
+  applier.applyLeverage('BTCUSDT', rails);
+  send();
+  main.update(messages.at(-1).data, true);
+  expect(main.fetchedLeverage.BTCUSDT).toEqual(rails);
+  expect(messages.at(-1).data).not.toHaveProperty('orders');
+  expect(messages.at(-1).data).not.toHaveProperty('tickers');
+  send();
+  expect(messages.at(-1).data).not.toHaveProperty('fetchedLeverage');
+  worker.sendSnapshot();
+  expect(messages.at(-1).data.fetchedLeverage.BTCUSDT).toEqual(rails);
+  worker.store.update({ fetchedLeverage: {} });
+  send();
+  main.update(messages.at(-1).data, true);
+  expect(main.fetchedLeverage).toEqual({});
 });

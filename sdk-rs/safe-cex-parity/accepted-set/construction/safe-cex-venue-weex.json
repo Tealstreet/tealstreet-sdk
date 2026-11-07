@@ -1,8 +1,0 @@
-{
-  "safe_cex_venue_weex::utils::WeexUtilityInput": {
-    "traits": [
-      "core::clone::Clone"
-    ],
-    "reason": "Reviewed derived Clone copies the canonical owned RetainedJsonInput directly, preserving number bits, own Undefined and UTF-16 units. as_value borrows that tree; pick_retained snapshots a selected field. Clone performs neither parsing nor validation and grants no consumed validation authority. Real binding and source/snapshot observations remain separate contracts."
-  }
-}

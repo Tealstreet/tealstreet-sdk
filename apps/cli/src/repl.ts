@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
 import type { CLISession, PromptConfig } from '../../../packages/cli-core/src/index';
+import { accountsToStart } from './accountsToStart';
+import { watchOneShotChases } from './chaseAbandoned';
 import type { CommandContext } from '../../../packages/cli-core/src/commands/Command';
 import {
   executeCommand as cliExecuteCommand,
@@ -17,6 +19,7 @@ import {
   resolveDeferredCaptures,
 } from '../../../packages/cli-core/src/index';
 import { FilePreprocessStore } from './preprocess-store';
+import { commandResultError, runCommandWithRetries } from './command-outcome';
 import {
   isAuditEnabled,
   setAuditEnabled,
@@ -74,6 +77,7 @@ import {
 } from '../../../packages/safe-cex/src/types';
 import type { Exchange } from '../../../packages/safe-cex/src/exchanges/base';
 import { loadConfig, saveConfig, getAccount } from './config';
+import { G, U } from './console-glyphs';
 // TWAP support for taskAction handling
 import { commandRegistry } from '../../../packages/cli-core/src/commands/CommandRegistry';
 import { ensureCommandsRegistered } from '../../../packages/cli-core/src/commands/CommandExecutor';
@@ -118,7 +122,7 @@ import {
   type FooterState,
 } from './footer-segments';
 import { enableStatusLine } from './status-line';
-import { classifyForCLI, criticalErrorKey } from './error-classifier';
+import { classifyForCLI, criticalErrorKey, errorEventClassification } from './error-classifier';
 import { startListener, stopListener } from './listener';
 import { webhookBodyRefusal, webhookChainRefusal, webhookRefusal } from '@tealstreet/cli-core';
 import { restartWebhookRelay, startWebhookRelay, stopWebhookRelay } from './listener/webhook-relay';
@@ -248,7 +252,8 @@ function formatWatchMessages(): string {
   let output = '\n' + DIM + '─── Recent Messages ───' + RESET + '\n';
   for (const msg of messages) {
     const color = msg.type === 'error' ? RED : msg.type === 'warning' ? YELLOW : msg.type === 'fill' ? GREEN : CYAN;
-    const prefix = msg.type === 'error' ? '✗' : msg.type === 'warning' ? '⚠' : msg.type === 'fill' ? '✓' : 'ℹ';
+    const prefix =
+      msg.type === 'error' ? G.error : msg.type === 'warning' ? G.warn : msg.type === 'fill' ? G.ok : G.info;
     output += `${color}${prefix}${RESET} ${msg.message}\n`;
   }
   return output;
@@ -950,7 +955,7 @@ function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): v
     if (isMonitorMode) {
       addWatchMessage('fill', fillMsg);
     } else {
-      adapter.printSuccess(`✓ Fill: ${fillMsg}`);
+      adapter.printSuccess(`${U.ok} Fill: ${fillMsg}`);
     }
   });
 
@@ -959,7 +964,7 @@ function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): v
     const error = args[0] as string;
     const acctName = accountName || session.currentAccountName || 'unknown';
     const monitor = exchangeManager.getHealthMonitor(acctName);
-    const category = monitor ? monitor.processMessage(error, true) : null;
+    const category = monitor ? monitor.processMessage(error, true, errorEventClassification(args[1])) : null;
     const action = classifyForCLI(category, 'error', error);
 
     switch (action.action) {
@@ -1803,9 +1808,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
     // waits see it (cli-core/CLAUDE.md, "Runner failure contract"). Carry
     // whether the executor already showed it to the user, or reportStepError
     // prints the same sentence a second time under a different prefix.
-    const err = new Error(result.error ?? 'Command failed') as Error & { alreadyReported?: boolean };
-    if (result.errorReported) err.alreadyReported = true;
-    throw err;
+    throw commandResultError(result);
   }
 
   // `<var> = <body>` capture (preprocess sets step.captureTo; runner
@@ -2171,17 +2174,10 @@ async function runStep(step: import('@tealstreet/cli-core').PreprocessedStep): P
   // `retry N <body>` — await + retry up to N times. The first attempt
   // is "try 0", so retry: 3 means up to 4 total attempts.
   if (step.retry !== undefined) {
-    let lastErr: Error | undefined;
-    for (let attempt = 0; attempt <= step.retry; attempt++) {
-      try {
-        await fire();
-        return;
-      } catch (e) {
-        lastErr = e as Error;
-      }
-    }
-    if (lastErr) {
-      reportStepError(step, new Error(`(after ${step.retry} retries) ${lastErr.message}`));
+    try {
+      await runCommandWithRetries(fire, step.retry);
+    } catch (error) {
+      reportStepError(step, error as Error);
     }
     return;
   }
@@ -2453,21 +2449,13 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
 
     // Start all accounts (including primary) in the background without blocking the CLI prompt
     const activeAccounts = adapter.getActiveAccounts();
-    // Build list of accounts to enable - include primary account even if not in active list
     const primaryAccount = session.currentAccountName ? getAccount(session.currentAccountName) : null;
-    const accountsToEnable: ExchangeAccountConfig[] = [];
-
-    // Add primary account first if it exists and is active
-    if (primaryAccount && primaryAccount.active && !exchangeManager.isConnected(primaryAccount.name)) {
-      accountsToEnable.push(primaryAccount);
-    }
-
-    // Add other active accounts (skip primary since it's already added)
-    for (const acc of activeAccounts) {
-      if (acc.name === session.currentAccountName) continue;
-      if (exchangeManager.isConnected(acc.name)) continue;
-      accountsToEnable.push(acc);
-    }
+    const accountsToEnable = accountsToStart(
+      primaryAccount,
+      Boolean(accountName),
+      activeAccounts,
+      (name) => exchangeManager.isConnected(name),
+    );
 
     if (accountsToEnable.length > 0) {
       // Fire off all enables in parallel, don't block
@@ -2554,19 +2542,19 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
       onWarning: (msg) => {
         if (isMonitorMode || !rlInstance) return;
         process.stdout.write(CLEAR_LINE);
-        console.log(chalk.yellow(`⚠️  ${msg}`));
+        console.log(chalk.yellow(`${G.warnEmoji}  ${msg}`));
         rlInstance.prompt(true);
       },
       onError: (msg) => {
         if (isMonitorMode || !rlInstance) return;
         process.stdout.write(CLEAR_LINE);
-        console.log(chalk.red(`❌ ${msg}`));
+        console.log(chalk.red(`${G.errorEmoji} ${msg}`));
         rlInstance.prompt(true);
       },
       onRecovered: (msg) => {
         if (isMonitorMode || !rlInstance) return;
         process.stdout.write(CLEAR_LINE);
-        console.log(chalk.green(`✅ ${msg}`));
+        console.log(chalk.green(`${G.okEmoji} ${msg}`));
         rlInstance.prompt(true);
       },
       onTick: () => {
@@ -2592,13 +2580,13 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     onOffline: (msg) => {
       if (isMonitorMode || !rlInstance) return;
       process.stdout.write(CLEAR_LINE);
-      console.log(chalk.yellow(`🌐 ${msg}`));
+      console.log(chalk.yellow(`${G.online} ${msg}`));
       rlInstance.prompt(true);
     },
     onOnline: (msg) => {
       if (isMonitorMode || !rlInstance) return;
       process.stdout.write(CLEAR_LINE);
-      console.log(chalk.green(`🌐 ${msg}`));
+      console.log(chalk.green(`${G.online} ${msg}`));
       rlInstance.prompt(true);
     },
   });
@@ -2835,9 +2823,12 @@ export async function runSingleCommand(
   }
 
   const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
+  const settleChases = watchOneShotChases(session.currentExchange);
   await processCommand(commandString, { drainFinalInFlight: true });
   await waitForTwapsStartedByCommand(twapsBeforeCommand);
-  await teardownOneShot(session.currentExchange);
+  const chaseProblem = await settleChases();
+  if (chaseProblem) adapter.printError(chaseProblem.error);
+  await teardownOneShot(session.currentExchange, chaseProblem ? 1 : 0);
 }
 
 /**
@@ -2910,17 +2901,22 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
         const commandStart = output.length;
         const exchangeStart = exchangeLines.length;
         const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
+        const settleChases = watchOneShotChases(session.currentExchange);
+        let chaseProblem: Awaited<ReturnType<typeof settleChases>>;
         try {
           await processCommand(commandString, { drainFinalInFlight: true });
           await waitForTwapsStartedByCommand(twapsBeforeCommand);
+          chaseProblem = await settleChases();
         } catch (error) {
           threw = error;
         }
         const exchangeDuring = exchangeLines.slice(exchangeStart);
         const lateRejection = needsKey ? findKeyRejection(exchangeDuring.map((line) => line.text)) : undefined;
-        const summary = lateRejection
-          ? { ok: false, code: 'KEY_REJECTED' as const, error: lateRejection }
-          : summarizeOneShot(output.slice(commandStart), threw, exchangeDuring);
+        const summary = chaseProblem
+          ? { ok: false, ...chaseProblem }
+          : lateRejection
+            ? { ok: false, code: 'KEY_REJECTED' as const, error: lateRejection }
+            : summarizeOneShot(output.slice(commandStart), threw, exchangeDuring);
         output.push(...exchangeDuring);
         await emitJson(result(summary.ok, summary.code, summary.error));
         await teardownOneShot(session.currentExchange, summary.ok ? 0 : 1);

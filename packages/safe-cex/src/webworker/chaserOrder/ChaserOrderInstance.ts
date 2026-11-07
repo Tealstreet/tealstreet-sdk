@@ -42,6 +42,7 @@ export class ChaserOrderInstance {
   exchange: Exchange;
 
   constructor(exchange: Exchange, options: ChaserOrderOptions) {
+    exchange.syncAccountState?.();
     this.exchange = exchange;
     this._options = options;
     this._id = nanoid();

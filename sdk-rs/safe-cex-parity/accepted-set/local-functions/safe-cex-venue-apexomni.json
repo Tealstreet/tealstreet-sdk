@@ -1,7 +1,0 @@
-{
-  "safe-cex-venue-apexomni/src/exchange_utils.rs::LOCAL_FUNCTION:parts": {
-    "category": "non-decoder",
-    "reason": "Inside decimal_multiply: splits an f64's JS number spelling into BigInt mantissa and decimal exponent for exact multiplication. Typed numeric arithmetic on already decoded values; no raw input. Reviewed source changes through ce51a1ec7e: additions are cfg(test) scalar-helper witnesses and their actual d8 source check; decimal_multiply and parts are unchanged.",
-    "sourceSha256": "1682a0777f5875a21dd3e8e52677f448f76a2c46c8613dc168bc935667bab902"
-  }
-}

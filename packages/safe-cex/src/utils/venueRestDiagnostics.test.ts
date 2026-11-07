@@ -37,7 +37,7 @@ describe('venueRestDiagnostics', () => {
   // arrives in Sentry as `[Filtered]`. This field is the only thing that can
   // settle it.
   it('records that the request carried proxy auth', () => {
-    const config: Record<string, unknown> = markRestProxyHeader({ url: '/api/v5/account/config' }, 'present');
+    const config: Record<string, unknown> = markRestProxyHeader({ url: '/api/v5/account/config' });
     config.headers = { Authorization: 'Bearer a-real-looking-token' };
     noteRestFailure('okx', { config, response: { status: 401, headers: {}, data: 'x' } } as never);
 
@@ -48,21 +48,14 @@ describe('venueRestDiagnostics', () => {
   // intent, the merge downstream dropped the header, and the sample reported
   // the intent. It must report the wire.
   it('reports absent when the stamp says we intended to send one but nothing survived', () => {
-    const config = markRestProxyHeader({ url: '/api/v5/account/config' }, 'present');
-    noteRestFailure('okx', { config, response: { status: 401, headers: {}, data: 'x' } } as never);
-
-    expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('absent');
-  });
-
-  it('records absent when the interceptor had no token to attach', () => {
-    const config = markRestProxyHeader({ url: '/api/v5/account/config' }, 'empty');
+    const config = markRestProxyHeader({ url: '/api/v5/account/config' });
     noteRestFailure('okx', { config, response: { status: 401, headers: {}, data: 'x' } } as never);
 
     expect(drainVenueRestFailureSamples()[0].restProxyHeaderSent).toBe('absent');
   });
 
   it('flags a credential that is present but not a bearer', () => {
-    const config: Record<string, unknown> = markRestProxyHeader({ url: '/api/v5/account/config' }, 'present');
+    const config: Record<string, unknown> = markRestProxyHeader({ url: '/api/v5/account/config' });
     config.headers = { Authorization: 'notabearer' };
     noteRestFailure('okx', { config, response: { status: 401, headers: {}, data: 'x' } } as never);
 

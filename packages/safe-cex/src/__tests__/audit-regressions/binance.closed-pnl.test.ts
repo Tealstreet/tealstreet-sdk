@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveBinanceClosedPositions } from '../../exchanges/binance/binance.closed-pnl';
+import { deriveBinanceClosedPositions } from '../reference/binance/binance.closed-pnl';
 import { PositionSide } from '../../types';
 
 /** Row shape captured live from `/fapi/v1/userTrades` (sheet row 2). */

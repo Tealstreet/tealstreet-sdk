@@ -1,0 +1,151 @@
+{
+  "requests": [
+    {
+      "kind": "writerRequest",
+      "id": "w-1",
+      "account": "acct",
+      "command": {
+        "op": "placeOrders",
+        "orders": [
+          {
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "buy",
+            "amount": 0.001,
+            "price": 50000,
+            "timeInForce": "PostOnly"
+          }
+        ]
+      },
+      "context": {
+        "positions": [{ "symbol": "BTCUSDT", "side": "long", "contracts": 0.002 }],
+        "settings": { "BTCUSDT": { "hedged": true, "marginMode": "cross" } }
+      },
+      "marks": { "called": 1700000000000.5 }
+    },
+    {
+      "kind": "writerRequest",
+      "id": "w-2",
+      "account": "acct",
+      "command": { "op": "amendOrder", "id": "o-1", "price": 50100 },
+      "context": {
+        "orders": [
+          {
+            "id": "o-1",
+            "symbol": "BTCUSDT",
+            "side": "buy",
+            "type": "limit",
+            "price": 50000,
+            "amount": 0.001,
+            "remaining": 0.001,
+            "reduceOnly": false,
+            "clientOrderId": "c-1"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "writerRequest",
+      "id": "w-3",
+      "account": "acct",
+      "command": {
+        "op": "cancelOrders",
+        "ids": ["o-1"],
+        "orders": [{ "id": "o-1", "symbol": "BTCUSDT", "type": "limit" }]
+      },
+      "context": {
+        "orders": [
+          {
+            "id": "o-1",
+            "symbol": "BTCUSDT",
+            "side": "buy",
+            "type": "limit",
+            "price": 50000,
+            "amount": 0.001,
+            "remaining": 0.001,
+            "reduceOnly": false
+          }
+        ]
+      }
+    },
+    {
+      "kind": "writerRequest",
+      "id": "w-4",
+      "account": "acct",
+      "command": { "op": "cancelSymbolOrders", "symbol": "BTCUSDT" },
+      "context": {}
+    },
+    {
+      "kind": "writerRequest",
+      "id": "w-5",
+      "account": "acct",
+      "command": { "op": "setLeverage", "symbol": "BTCUSDT", "leverage": 10, "side": "long" },
+      "context": { "settings": { "BTCUSDT": { "hedged": true, "positionIdx": 1 } } }
+    },
+    {
+      "kind": "writerRequest",
+      "id": "w-6",
+      "account": "acct",
+      "command": { "op": "setMarginType", "symbol": "BTCUSDT", "isolated": true },
+      "context": {}
+    },
+    {
+      "kind": "writerRequest",
+      "id": "w-7",
+      "account": "acct",
+      "command": { "op": "setPositionMode", "hedged": false, "symbol": "BTCUSDT" },
+      "context": {}
+    },
+    {
+      "kind": "writerRequest",
+      "id": "w-8",
+      "account": "acct",
+      "command": { "op": "refreshMarkets" },
+      "context": {}
+    }
+  ],
+  "replies": [
+    {
+      "kind": "writerReply",
+      "id": "w-1",
+      "ok": true,
+      "result": ["o-9"],
+      "marks": { "received": 1700000000001, "reply": 1700000000090 }
+    },
+    { "kind": "writerReply", "id": "w-2", "ok": true, "result": { "orderIds": ["o-1"], "clientOrderId": "c-2" } },
+    { "kind": "writerReply", "id": "w-4", "ok": true, "result": null },
+    {
+      "kind": "writerReply",
+      "id": "w-3",
+      "ok": false,
+      "error": {
+        "message": "order not found",
+        "name": "ExchangeError",
+        "kind": "rejected",
+        "outcome": "rejected",
+        "venueCode": "110001"
+      }
+    }
+  ],
+  "invalid": [
+    { "kind": "writerRequest", "id": "x-1", "account": "acct", "command": { "op": "placeOrders", "orders": [] } },
+    { "kind": "writerRequest", "id": "x-2", "account": "acct", "command": { "op": "fetchOrders" }, "context": {} },
+    {
+      "kind": "writerRequest",
+      "id": "x-3",
+      "account": "acct",
+      "command": { "op": "cancelSymbolOrders", "symbol": "BTCUSDT", "context": {} },
+      "context": {}
+    },
+    { "kind": "writerRequest", "id": "", "account": "acct", "command": { "op": "refreshMarkets" }, "context": {} },
+    {
+      "kind": "writerRequest",
+      "id": "x-5",
+      "account": "acct",
+      "command": { "op": "refreshMarkets" },
+      "context": { "balance": 1 }
+    },
+    { "kind": "writerReply", "id": "x-6", "ok": false, "result": null },
+    { "kind": "writerReply", "id": "x-7", "ok": true }
+  ]
+}
