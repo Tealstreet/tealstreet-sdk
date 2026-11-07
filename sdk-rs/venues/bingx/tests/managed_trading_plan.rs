@@ -321,6 +321,59 @@ fn timeout_status_100001_does_not_grant_a_write_resend() {
     );
 }
 #[test]
+fn ambiguous_http_timestamp_refusal_never_resends_a_released_create() {
+    for status in [429, 408, 503] {
+        let mut engine = engine();
+        place(&mut engine, 1);
+        let sent = collect(&mut engine, START);
+        let first = packet(&sent);
+        assert_eq!(
+            sent.iter()
+                .filter(|action| matches!(action, Action::Http(request) if request.method != Method::Get))
+                .count(),
+            1,
+            "one physically released create"
+        );
+        let mut after = respond(
+            &mut engine,
+            &first,
+            START + 1.,
+            status,
+            r#"{"code":109400,"msg":"timestamp is invalid","data":{}}"#,
+        );
+        // Drive any armed attempt/pacing timer so a parked resend becomes a
+        // physical HTTP action before checking that the write was sent once.
+        let timers: Vec<_> = after
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        for (timer, at_ms) in timers {
+            engine.handle(at_ms, Event::TimerFired { timer });
+            after.extend(collect(&mut engine, at_ms));
+        }
+        assert!(
+            !after.iter().any(|action| matches!(action,
+                Action::Http(request) if request.method != Method::Get
+            )),
+            "HTTP {status}/109400 must not release a resend or another write: {after:?}"
+        );
+        let errors = failures(&after);
+        assert_eq!(errors.len(), 1, "HTTP {status}: one terminal failure");
+        assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
+        assert!(!after.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone {
+                command: COMMAND,
+                ..
+            })
+        )));
+    }
+}
+
+#[test]
 fn signature_text_without_a_refusal_code_does_not_grant_a_write_resend() {
     assert_uncertain_response_never_resends(
         200,
