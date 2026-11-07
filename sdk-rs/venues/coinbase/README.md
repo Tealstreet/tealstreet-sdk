@@ -119,7 +119,11 @@ continuation tokens or documented offsets. Exhausted page bounds are reported
 through the engine's incomplete-history mechanism.
 
 All requests use S0's closed Read method table; this module introduces no
-mutation methods or mutation authority. Trading migration belongs to S3.
+mutation methods or mutation authority. Trading migration belongs to S3;
+`drb_http_session()` exposes only the opaque engine binding while valid, and
+`drb_ensure_http(cx)` starts/refreshes authentication without consuming a
+trading command's retained root. Trading integrations resume their own waiters
+after the HTTP auth success branch and drain them on definitive auth refusal.
 The old account/trading integration fixtures now run as internal unit fixtures
 with an explicit test-only legacy selector, preserving their shared Spot/CFM
 regression oracles. This selector is absent from production and public Options;

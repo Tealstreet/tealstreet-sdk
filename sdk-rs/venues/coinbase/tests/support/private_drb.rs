@@ -720,3 +720,27 @@ fn otoco_child_and_market_trigger_prices_remain_visible_as_independent_orders() 
     assert_eq!(o.trigger_type, Some(StopTriggerType::IndexPrice));
     assert_eq!(r.e.store().orders().len(), 2);
 }
+
+#[test]
+fn shared_http_session_keeps_its_engine_identity_across_fresh_cdp_refresh() {
+    let mut r = Rig::ready();
+    let owner =
+        r.e.venue()
+            .drb_http_session()
+            .expect("authenticated HTTP session")
+            .owner();
+    let revision = r.e.venue().private_drb.bearer_revision;
+    let timer = r.e.venue().private_drb.timer.unwrap();
+    r.now += 875000.;
+    r.e.handle(r.now, Event::TimerFired { timer });
+    r.collect();
+    assert!(
+        r.e.venue().drb_http_session().is_none(),
+        "expired token cannot bind a trading request"
+    );
+    let req = r.request();
+    assert!(req.url.ends_with("public/auth"));
+    r.rpc(req,json!({"access_token":"refreshed-fixture","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
+    assert_eq!(r.e.venue().drb_http_session().unwrap().owner(), owner);
+    assert!(r.e.venue().private_drb.bearer_revision > revision);
+}
