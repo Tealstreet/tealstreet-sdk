@@ -199,6 +199,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB rounded up to KiB; BitgetUSDC shares the family cap.
 // #3202 on #3207 (merge 62c3b59c872), run 42305638406, job 128195021443 measured Bitget
 // 2,409,448 B. CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
+// #3219 drb public on master, source 58c9e8eb9: CI run 42352093025, job 128342498489
+// measured web Coinbase at 1,924,268 B. CI + 10 KiB rounded up; Coinbase Spot shares the family cap.
 // #3220 KuCoin hosted signing: run 42324881707, job 128258225940 measured 1,827,119 B.
 // CI size plus 10 KiB rounded up to KiB; KuCoin Spot retains its existing cap.
 // #3210 run 42320236420, job 128244910061 measured Bitget 2,422,853 B at 191de16bd7d.
@@ -224,11 +226,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   blofin: 2_001_920,
   breakoutprop: 1_580_032,
   bybit: 2_270_208,
-  // #3193 at 90750c898c2, CI job 128343606114: 1,841,539 B + 10 KiB, rounded up to KiB.
-  coinbase: 1_852_416,
+  coinbase: 1_935_360,
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
-  grvt: 1_830_912,
+  // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
+  // CI size plus 10 KiB, rounded up to the KiB.
+  grvt: 1_954_816,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured

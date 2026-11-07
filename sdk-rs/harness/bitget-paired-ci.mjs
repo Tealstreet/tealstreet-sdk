@@ -35,7 +35,8 @@ export async function selectCpuComparison({ reader, runId, root, jobName, gitRea
     `missing/duplicate paired physical producer; candidates ${physicalCandidateRows(candidates)}`);
   const checkoutSha = gitRead('rev-parse', 'HEAD'), checkoutTree = gitRead('rev-parse', 'HEAD^{tree}');
   let pull, landing, mergeTree;
-  if (run.event === 'push' && run.head_branch === 'master') {
+  // A dispatched master run (the nightly certification) measures the landed tip like a push.
+  if ((run.event === 'push' || run.event === 'workflow_dispatch') && run.head_branch === 'master') {
     landing = await reader.getCommit(run.head_sha); mergeTree = checkoutTree;
   } else {
     const associated = await reader.listCommitPulls(run.head_sha);

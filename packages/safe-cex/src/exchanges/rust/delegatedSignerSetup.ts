@@ -53,6 +53,10 @@ export class DelegatedSignerSetup {
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
     this.usesPayloadSigner = selectDelegatedSigningMode(options) === 'payload';
+    if (name === 'grvt' && this.usesPayloadSigner) {
+      const message = 'GRVT PayloadSigner is unsupported';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     const kucoin = name === 'kucoin';
     if (kucoin && this.usesPayloadSigner) invalid('KuCoin requires RemoteSigner batch custody');
     const remoteSigner = options.remoteSigner;

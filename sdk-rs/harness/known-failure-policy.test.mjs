@@ -133,8 +133,9 @@ test('invalid baselines or incomplete workloads cannot become known exceptions',
 test('independent verification detects an omitted process CPU failure', () => {
   const value = report();
   value.private = false; value.runs = 7; value.requiredImprovement = 0.10;
-  value.samples = { ts: Array.from({ length: 7 }, () => metric('performance', 10)), rust: Array.from({ length: 7 }, () => metric('performance', 10)) };
-  assert.match(assessGateReport(value, manifest()).errors.join('\n'), /omitted performance process CPU/);
+  value.samples = { ts: Array.from({ length: 7 }, () => metric('performance', 10)),
+    rust: Array.from({ length: 7 }, () => metric('performance', 10.5)) };
+  assert.match(assessGateReport(value, manifest()).errors.join('\n'), /omitted performance process CPU: Rust is slower than TS/);
 });
 
 test('own-audit performance snapshot and duplicate diagnostics cannot be exempted', () => {

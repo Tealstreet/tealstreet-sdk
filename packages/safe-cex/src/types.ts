@@ -1343,6 +1343,8 @@ export interface RemoteSignerRequest {
       | 'kucoin-batch'
       // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
       // the digest from; `hyperliquid-address` binds the agent address.
+      | 'grvt-order'
+      | 'grvt-address'
       | 'hyperliquid-l1'
       | 'hyperliquid-address'
       // Lighter: `toSign` is a transaction or auth statement the device re-derives
