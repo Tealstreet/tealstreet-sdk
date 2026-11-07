@@ -106,10 +106,15 @@ function cpuOnlyErrors(value, requireMiss, paired, cap = true) {
   return errors;
 }
 
-/** A valid strict report whose only failures are computed CPU misses, at any ratio.
- * The CPU gate judges it; it is not a correctness failure. */
-export function isCpuOnlyMiss(value, paired) {
-  return cpuOnlyErrors(value, true, paired, false).length === 0;
+/** Split assessment errors of a valid CPU-only strict miss: only the exact computed
+ * CPU failures are deferred to the CPU gate; every other error is kept. */
+export function splitCpuErrors(value, errors, paired) {
+  if (cpuOnlyErrors(value, true, paired, false).length) return { kept: errors, deferred: [] };
+  const report = value.report;
+  const cpu = new Set(performanceFailures(report.samples.ts, report.samples.rust)
+    .filter((failure) => objectives(report).some(({ label }) => failure.startsWith(`performance ${label}:`)))
+    .map((failure) => `${report.venue}: unexpected ${failure}`));
+  return { kept: errors.filter((error) => !cpu.has(error)), deferred: errors.filter((error) => cpu.has(error)) };
 }
 
 export function assessEligibility(first, paired) {
