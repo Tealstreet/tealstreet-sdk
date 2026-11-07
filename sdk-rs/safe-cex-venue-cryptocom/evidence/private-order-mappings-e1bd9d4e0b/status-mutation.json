@@ -1,7 +1,0 @@
-{
-  "base_sha": "e1bd9d4e0b44e932727758acdb1a140f04294fcd",
-  "patch": "diff --git a/sdk-rs/safe-cex-venue-cryptocom/src/private_order_mappings.rs b/sdk-rs/safe-cex-venue-cryptocom/src/private_order_mappings.rs\nindex 3cce9a9aa4..f376bd9497 100644\n--- a/sdk-rs/safe-cex-venue-cryptocom/src/private_order_mappings.rs\n+++ b/sdk-rs/safe-cex-venue-cryptocom/src/private_order_mappings.rs\n@@ -28,7 +28,7 @@ pub fn map_order_status(status: Option<&[u16]>) -> OrderStatus {\n         return OrderStatus::Open;\n     }\n     if equals(status, \"FILLED\") {\n-        return OrderStatus::Closed;\n+        return OrderStatus::Canceled;\n     }\n     if equals(status, \"CANCELED\") || equals(status, \"EXPIRED\") || equals(status, \"REJECTED\") {\n         return OrderStatus::Canceled;\n",
-  "named_assertion": "CRYPTOCOM-PRIVATE-MAPPING-NATIVE mapOrderStatus case2",
-  "stop_method": "mapOrderStatus",
-  "stop_case_index": 2
-}

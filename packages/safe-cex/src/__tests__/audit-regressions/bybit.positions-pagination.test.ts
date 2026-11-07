@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
-import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, PositionMode, PositionSide } from '../../types';

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
 import {
   decodeWooV3AccountInfo,
   decodeWooV3AssetBalances,
@@ -17,7 +17,7 @@ import {
   mapWooV3PendingAlgoOrders,
   mapWooV3PendingOrders,
   mapWooV3Transactions,
-} from '../../exchanges/woo/woo.v3.private';
+} from '../reference/woo/woo.v3.private';
 import {
   OrderSide,
   OrderStatus,
@@ -492,7 +492,7 @@ describe('WooX namespaced V3 authenticated read foundation', () => {
   it('remains disconnected from live transport and keeps every migration gate hard false', () => {
     expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false, false]);
 
-    const wooDirectory = join(__dirname, '../../exchanges/woo');
+    const wooDirectory = join(__dirname, '../reference/woo');
     for (const runtimeFile of ['woo.exchange.ts', 'woo.api.ts', 'woo.ws-public.ts', 'woo.ws-private.ts']) {
       expect(readFileSync(join(wooDirectory, runtimeFile), 'utf8')).not.toContain('woo.v3.private');
     }

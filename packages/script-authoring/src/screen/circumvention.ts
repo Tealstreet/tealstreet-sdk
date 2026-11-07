@@ -26,16 +26,14 @@ import ts from 'typescript';
  * feature, it stops an author saving their own work.
  *
  * But refusing everything real users do is its own failure, and superusers who
- * know what they are doing should not be neutered. Hence `local-only`: reaching
+ * know what they are doing should not be neutered. Hence `standard`: reaching
  * the network or loading foreign code is allowed, in a frame with relaxed
- * network rules, on the condition that the module NEVER SYNCS.
+ * network rules, and the module syncs and publishes like a strict one.
  *
- * That condition is what makes it safe rather than a concession. The entire
- * threat is code arriving from the database into a browser that executes it; a
- * module that is never stored server-side cannot be delivered by an attacker
- * holding a stolen session. Advanced mode also keeps the opaque origin, so the
- * exchange API keys stay unreachable — it is strictly safer than today's
- * same-origin `eval`, not a relaxation of it.
+ * What makes that safe is the opaque origin, which both tiers keep: the
+ * exchange API keys never enter the frame, and they are the only asset the
+ * threat model protects. Data leaving over the network, and third-party scripts
+ * changing after screening, are accepted risks (owner decision, 2026-10-22).
  *
  * So `block` is reserved for evidence of intent: zero observed use, no
  * legitimate purpose, and mostly inert anyway.
@@ -62,7 +60,7 @@ interface Rule {
 }
 
 /**
- * Evidence of intent. Refused in EVERY tier, including advanced.
+ * Evidence of intent. Refused in EVERY tier, including standard.
  *
  * Zero observed corpus usage, no legitimate reason for a trading panel, and
  * mostly inert anyway under an opaque origin — which is the point: a module
@@ -87,34 +85,32 @@ const BLOCKED_PATHS: Record<string, Rule> = {
 /**
  * Reaches the network, or loads code from somewhere else.
  *
- * Perfectly legitimate for someone who knows what they are doing — and the
- * reason there is an advanced tier at all rather than a wall. But a module
- * doing any of this must never SYNC, because syncing is precisely what makes
- * it deliverable by someone holding a stolen session. It runs where it was
- * written and nowhere else.
+ * Perfectly legitimate — and the reason there is a `standard` tier at all
+ * rather than a wall. A module doing any of this mounts in the frame that
+ * allows the network; it still syncs, commits and publishes.
  *
  * Counts are from the production corpus scan (2026-08-07).
  */
-const LOCAL_ONLY_PATHS: Record<string, Rule> = {
+const STANDARD_PATHS: Record<string, Rule> = {
   // 12 of 70 modules.
-  fetch: { rule: 'network-fetch', severity: 'local-only', detail: 'Makes a network request.' },
+  fetch: { rule: 'network-fetch', severity: 'standard', detail: 'Makes a network request.' },
   // 7 of 70.
-  WebSocket: { rule: 'network-socket', severity: 'local-only', detail: 'Opens a WebSocket.' },
-  EventSource: { rule: 'network-sse', severity: 'local-only', detail: 'Opens a server-sent event stream.' },
-  XMLHttpRequest: { rule: 'xhr', severity: 'local-only', detail: 'Opens an XMLHttpRequest.' },
+  WebSocket: { rule: 'network-socket', severity: 'standard', detail: 'Opens a WebSocket.' },
+  EventSource: { rule: 'network-sse', severity: 'standard', detail: 'Opens a server-sent event stream.' },
+  XMLHttpRequest: { rule: 'xhr', severity: 'standard', detail: 'Opens an XMLHttpRequest.' },
   'navigator.sendBeacon': {
     rule: 'send-beacon',
-    severity: 'local-only',
+    severity: 'standard',
     detail: 'Sends a beacon, which transmits data without needing a response.',
   },
-  importScripts: { rule: 'import-scripts', severity: 'local-only', detail: 'Loads and executes an external script.' },
+  importScripts: { rule: 'import-scripts', severity: 'standard', detail: 'Loads and executes an external script.' },
 };
 
 /**
  * Recorded as evidence, never a gate on its own.
  *
  * Everything here either works fine inside the frame or is already dead by
- * virtue of the opaque origin. Note that advanced mode does NOT bring the
+ * virtue of the opaque origin. Note that the standard tier does NOT bring the
  * storage entries back to life — it relaxes the network, not the origin — so
  * those modules need `api.createStorageAtom` regardless of tier.
  */
@@ -277,7 +273,7 @@ const ownRule = (table: Record<string, Rule>, key: string): Rule | undefined =>
   Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
 
 const lookupRule = (path: string): Rule | undefined =>
-  ownRule(BLOCKED_PATHS, path) ?? ownRule(LOCAL_ONLY_PATHS, path) ?? ownRule(FLAGGED_PATHS, path);
+  ownRule(BLOCKED_PATHS, path) ?? ownRule(STANDARD_PATHS, path) ?? ownRule(FLAGGED_PATHS, path);
 
 const snippetOf = (node: ts.Node, source: ts.SourceFile): string => {
   const text = node.getText(source).replace(/\s+/g, ' ').trim();
@@ -307,10 +303,10 @@ export const scanCircumvention = (code: string): CircumventionFinding[] => {
 
   const visit = (node: ts.Node): void => {
     // Dynamic import() loads and runs code from elsewhere — the same category
-    // as pulling a script off a CDN, so it earns advanced mode rather than a
+    // as pulling a script off a CDN, so it earns the standard tier rather than a
     // refusal. Zero corpus usage either way, so this is a consistency call.
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-      push({ rule: 'dynamic-import', severity: 'local-only', detail: 'Loads another module at runtime.' }, node);
+      push({ rule: 'dynamic-import', severity: 'standard', detail: 'Loads another module at runtime.' }, node);
     }
 
     // `new Function(...)` builds executable code from strings.
@@ -339,14 +335,12 @@ export const scanCircumvention = (code: string): CircumventionFinding[] => {
         const [first] = node.arguments;
         if (first && ts.isStringLiteralLike(first) && EXECUTABLE_ELEMENTS.has(first.text.toLowerCase())) {
           // Measured: 3 of 70 production modules do this (embedding a widget or
-          // pulling a charting library). Loading foreign code means the code
-          // that runs is not the code that was screened, so it must never sync
-          // — but it is legitimate on your own machine, which is exactly what
-          // the advanced tier is for.
+          // pulling a charting library). The code that runs is then not the
+          // code that was screened — an accepted risk the standard tier carries.
           push(
             {
               rule: 'create-executable-element',
-              severity: 'local-only',
+              severity: 'standard',
               detail: `Creates a <${first.text.toLowerCase()}> element, which executes or embeds external content.`,
             },
             node,
@@ -402,12 +396,12 @@ export const hasBlockingFinding = (findings: CircumventionFinding[]): boolean =>
 /**
  * The most restrictive tier the findings demand.
  *
- * `blocked` wins over `local-only` wins over `strict`. Note this is what the
+ * `blocked` wins over `standard` wins over `strict`. Note this is what the
  * STATIC scan alone requires — the model can raise it further but never lower
  * it, which is the ordering invariant enforced in `screenModule`.
  */
 export const requiredTier = (findings: CircumventionFinding[]): ScreenTier => {
   if (findings.some((f) => f.severity === 'block')) return 'blocked';
-  if (findings.some((f) => f.severity === 'local-only')) return 'local-only';
+  if (findings.some((f) => f.severity === 'standard')) return 'standard';
   return 'strict';
 };

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
-import { BybitDemoExchange } from '../exchanges/bybit/bybitdemo.exchange';
 import { DefaultStore } from '../store/store.base';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
 import { OrderSide, OrderType } from '../types';
+import { BybitExchange } from './reference/bybit/bybit.exchange';
+import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
+import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
 
 const marketRow = (symbol: string, quoteCoin: string, settleCoin: string, qtyStep: string) => ({
   symbol,
@@ -24,7 +25,7 @@ const inverseRow = marketRow('BTCUSD', 'USD', 'BTC', '1');
 
 const ok = (list: unknown[]) => ({ data: { retCode: 0, retMsg: 'OK', result: { list } } });
 
-const live: BybitExchange[] = [];
+const live: Array<BybitExchange | BybitInverseExchange> = [];
 afterEach(() => live.splice(0).forEach((e) => e.dispose()));
 
 const create = (enableInverseMarkets: boolean, Exchange: typeof BybitExchange = BybitExchange) => {
@@ -39,7 +40,7 @@ const create = (enableInverseMarkets: boolean, Exchange: typeof BybitExchange = 
   return { exchange, store };
 };
 
-const routeGets = (exchange: BybitExchange, rows: Record<string, unknown[]>) => {
+const routeGets = (exchange: BybitExchange | BybitInverseExchange, rows: Record<string, unknown[]>) => {
   const get = vi.fn((url: string, config?: any) => {
     if (config?.params?.status === 'PreLaunch') return Promise.resolve(ok([]));
     return Promise.resolve(ok(rows[`${url}:${config?.params?.category}`] ?? []));
@@ -65,6 +66,47 @@ const inversePosition = {
 };
 
 describe('Bybit inverse contracts on the bybit connection', () => {
+  it.each(['40', '2000000', '0', '-1', '', 'invalid', undefined])(
+    'dedicated inverse reference publishes a conservative maximum with native market cap %s',
+    async (marketCap) => {
+      const exchange = new BybitInverseExchange(
+        'bybitinverse',
+        { key: 'k', secret: 's', tuning: { consoleLogging: false } },
+        new DefaultStore(),
+      );
+      live.push(exchange);
+      vi.spyOn(exchange as any, 'fetchFees').mockResolvedValue([]);
+      routeGets(exchange, {
+        [`${ENDPOINTS.MARKETS}:inverse`]: [
+          {
+            ...inverseRow,
+            lotSizeFilter: { ...inverseRow.lotSizeFilter, maxMktOrderQty: marketCap },
+          },
+        ],
+      });
+      const [market] = await exchange.fetchMarkets();
+      expect(market.isInverse).toBe(true);
+      expect(market.limits.amount.max).toBe(marketCap === '40' ? 40 : 1000000);
+    },
+  );
+
+  it.each(['40', '2000000', '0', '-1', undefined])(
+    'publishes a conservative maximum with native market cap %s',
+    async (marketCap) => {
+      const { exchange } = create(false);
+      routeGets(exchange, {
+        [`${ENDPOINTS.MARKETS}:linear`]: [
+          {
+            ...linearRow,
+            lotSizeFilter: { ...linearRow.lotSizeFilter, maxMktOrderQty: marketCap },
+          },
+        ],
+      });
+      const [market] = await exchange.fetchMarkets();
+      expect(market.limits.amount.max).toBe(marketCap === '40' ? 40 : 1000000);
+    },
+  );
+
   it('routes inverse symbols to the inverse category whether or not the account opted in', () => {
     const { exchange } = create(false);
     expect(exchange.getCategoryForSymbol('BTCUSD')).toBe('inverse');
@@ -300,7 +342,10 @@ describe('Bybit inverse contracts on the bybit connection', () => {
 
     await exchange.fetchHistoricalOrders();
     await exchange.fetchIncomeHistory();
-    expect(categoriesAsked(get, ENDPOINTS.USER_ORDERS)).toEqual(['linear', 'inverse']);
+    expect(categoriesAsked(get, ENDPOINTS.USER_ORDERS)).toEqual([
+      ...Array(4).fill('linear'),
+      ...Array(4).fill('inverse'),
+    ]);
     expect(categoriesAsked(get, ENDPOINTS.TRANSACTION_LOG)).toEqual(['linear', 'inverse']);
   });
 
@@ -416,7 +461,7 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     vi.stubEnv('NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL', 'https://simulator.test');
     vi.resetModules();
     try {
-      const { HyrotraderExchange } = await import('../exchanges/bybit/hyrotrader.exchange');
+      const { HyrotraderExchange } = await import('./reference/bybit/hyrotrader.exchange');
       const { DefaultStore: Store } = await import('../store/store.base');
       const exchange = new HyrotraderExchange(
         'hyrotrader',

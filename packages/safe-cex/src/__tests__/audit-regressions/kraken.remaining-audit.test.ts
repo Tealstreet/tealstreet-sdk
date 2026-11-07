@@ -2,12 +2,12 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { KrakenExchange } from '../../exchanges/kraken/kraken.exchange';
-import { createAPI as createKrakenAPI } from '../../exchanges/kraken/kraken.api';
-import { ENDPOINTS } from '../../exchanges/kraken/kraken.types';
-import { KrakenSpotExchange } from '../../exchanges/kraken/krakenspot.exchange';
-import { ENDPOINTS as SPOT_ENDPOINTS, INTERVAL } from '../../exchanges/kraken/krakenspot.types';
-import { KrakenSpotPrivateWebsocket } from '../../exchanges/kraken/krakenspot.ws-private';
+import { KrakenExchange } from '../reference/kraken/kraken.exchange';
+import { createAPI as createKrakenAPI } from '../reference/kraken/kraken.api';
+import { ENDPOINTS } from '../reference/kraken/kraken.types';
+import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
+import { ENDPOINTS as SPOT_ENDPOINTS, INTERVAL } from '../reference/kraken/krakenspot.types';
+import { KrakenSpotPrivateWebsocket } from '../reference/kraken/krakenspot.ws-private';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { DefaultStore } from '../../store/store.base';
 import {

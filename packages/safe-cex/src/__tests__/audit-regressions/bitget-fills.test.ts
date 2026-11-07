@@ -5,7 +5,7 @@ import {
   mapBitgetFills,
   mapBitgetUtaFill,
   mapBitgetUtaFills,
-} from '../../exchanges/bitget/bitget.fills';
+} from '../reference/bitget/bitget.fills';
 import { OrderSide, PositionSide } from '../../types';
 
 /** The exact shape measured live on sheet row 36. */

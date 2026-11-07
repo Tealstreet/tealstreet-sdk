@@ -1,5 +1,0 @@
-{
-  "exit": 101,
-  "kind": "Dirty development run, not a SHA-bound gate",
-  "reason": "Compiled29-case API expectation crossed a source corpus edit to30 cases; independent floor assertion failed. Final gates use frozen committed inputs."
-}

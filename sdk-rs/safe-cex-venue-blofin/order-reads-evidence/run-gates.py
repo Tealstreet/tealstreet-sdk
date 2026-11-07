@@ -1,8 +1,0 @@
-import pathlib,subprocess,json,os,time
-out=pathlib.Path('/tmp/blofin-order-reads-gates');out.mkdir(exist_ok=True);sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip();env=dict(os.environ,SAFE_CEX_TYPESCRIPT_PATH='/Users/sam/cs/tealstreet-next/node_modules/typescript');scope=['--manifest-path','sdk-rs/Cargo.toml','-p','safe-cex-venue-blofin','--all-targets','--jobs','2']
-(out/'runner.json').write_text(json.dumps(dict(pid=os.getpid(),sha=sha))+'\n')
-commands=[('check',['cargo','check']+scope),('host-clippy-with-dependencies',['cargo','clippy']+scope+['--','-D','warnings']),('host-clippy-crate-only',['cargo','clippy']+scope+['--no-deps','--','-D','warnings']),('tests',['cargo','test','--manifest-path','sdk-rs/Cargo.toml','-p','safe-cex-venue-blofin','--test','order_reads','--jobs','2','--','--nocapture']),('fmt',['rustfmt','--edition','2024','--check','sdk-rs/safe-cex-venue-blofin/src/order_reads.rs','sdk-rs/safe-cex-venue-blofin/tests/order_reads.rs'])]
-results=[]
-for name,cmd in commands:
- assert sha==subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip();start=time.monotonic();p=subprocess.run(cmd,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT);(out/(name+'.log')).write_text(p.stdout);row=dict(name=name,sha=sha,command=cmd,exit=p.returncode,seconds=round(time.monotonic()-start,2));results.append(row);(out/'cargo-gates.json').write_text(json.dumps(dict(sha=sha,results=results),indent=2)+'\n');print(json.dumps(row),flush=True)
- if p.returncode and name!='host-clippy-with-dependencies':raise SystemExit(p.returncode)

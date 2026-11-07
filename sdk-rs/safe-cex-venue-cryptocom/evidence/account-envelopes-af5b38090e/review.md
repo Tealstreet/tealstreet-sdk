@@ -1,7 +1,0 @@
-Read-only native sub-agent /root/review_auth_witness receipt at code SHA af5b38090e039e6fcf9cd3c3f4e5046ae7a066bf, fresh integration parent ff33a3d2b187e596e1c58511c3bf35b6306d4d7b.
-
-No remaining material blocker reported. Eight rows own54 actual distinct qualified targets, zero missing/nonexistent in this scoped enumeration. Source response-body correction, exact native pointer probes, independent schema guards for inheritance/readonly/generic constraints/defaults are committed. Fields/literals/optionality match seven static source interfaces; formatter getter/coercion order matches complete source arrow body. Static projection/dependency boundary supports ported/adapted; runtime binding/class/JSON/codecs/ownkeys remain pending. Generic<T> remains caller projector boundary, with T=V identity specialization in witnesses, not every projector/error case.
-
-Native checks precede schema/census. Type floor235 stops234 CryptocomAccountSummary:account-undefined-account_id. Formatter floor59 stops58 status-coercion-throws. Reviewer found an earlier fresh-response fixture selected same body and attempted redefinition of non-configurable getter; fixed before this SHA with distinct OLD/NEW response carriers and configurable getters. Provisional witness compilation exits were fixed before this SHA and are not runtime mutation evidence.
-
-Reviewer ran no Cargo, oracle, mutations, live API, human review or CI. This receipt is static only.

@@ -1,5 +1,0 @@
-error[E0599]: no method named `clone` found for struct `ValidatedOrder<V>` in the current scope
- --> tests/ui/order_not_clone.rs:9:77
-  |
-9 | fn duplicate(token: ValidatedOrder<Venue>) -> ValidatedOrder<Venue> { token.clone() }
-  |                                                                             ^^^^^ method not found in `ValidatedOrder<Venue>`

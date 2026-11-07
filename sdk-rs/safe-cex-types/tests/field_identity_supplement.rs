@@ -69,7 +69,7 @@ fn decoded_balance_and_ticker_numeric_fields_have_native_identity() {
         ("ask", ticker.ask, 23.0),
         ("last", ticker.last, 37.0),
         ("mark", ticker.mark, 41.0),
-        ("index", ticker.index, 53.0),
+        ("index", ticker.index.unwrap(), 53.0),
         ("percentage", ticker.percentage, 67.0),
         ("openInterest", ticker.open_interest, 79.0),
         ("fundingRate", ticker.funding_rate, 83.0),
@@ -108,7 +108,7 @@ fn decoded_loaded_flags_are_one_hot_and_orders_read_native_fields() {
     assert_eq!(order.id, "order-id", "FIELD-IDENTITY Order.id");
     assert_eq!(order.symbol, "order-symbol", "FIELD-IDENTITY Order.symbol");
     for (field, actual, expected) in [
-        ("price", order.price, 11.0_f64),
+        ("price", order.price.to_number(), 11.0_f64),
         ("amount", order.amount, 23.0),
         ("filled", order.filled, 5.0),
         ("remaining", order.remaining, 18.0),
@@ -184,7 +184,7 @@ fn decoded_nested_and_history_models_pin_native_field_identity() {
     );
     assert_eq!(
         (market.limits.amount.min, market.limits.amount.max),
-        (37.0, 41.0),
+        (37.0, safe_cex_types::NumericValue::Number(41.0)),
         "FIELD-IDENTITY nested amount limits"
     );
     assert_eq!(
@@ -246,8 +246,9 @@ fn decoded_nested_and_history_models_pin_native_field_identity() {
 #[test]
 fn decoded_task_snapshots_use_distinct_dimensions_and_one_hot_flags() {
     use safe_cex_types::{ActiveChaser, ActiveTWAP, DisplayedMargin};
+    // Preserve the original task seeds locally after the old Store was deleted.
     let original: serde_json::Value =
-        serde_json::from_str(include_str!("../../safe-cex-store/src/store_stub.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/task_snapshots.json")).unwrap();
     let mut chaser = original["activeChasers"][0].clone();
     for (field, value) in [
         ("id", json!("chaser-id")),

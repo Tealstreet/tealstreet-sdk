@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"id":"getOrderBooks","callCount":1,"returnedUnit":[55296],"scope":"source prefix and returned value; native async body inspected only"}]}

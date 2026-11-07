@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
+import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 describe('audit regression: Orderly market leverage limits', () => {

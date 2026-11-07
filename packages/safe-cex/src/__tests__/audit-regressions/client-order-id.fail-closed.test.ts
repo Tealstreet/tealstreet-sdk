@@ -1,44 +1,52 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { Market, PlaceOrderOpts } from '../../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
-import { AsterDEXExchange } from '../../exchanges/asterdex/asterdex.exchange';
-import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
+import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 import { BaseExchange } from '../../exchanges/base';
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
-import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
-import { BinanceSpotExchange } from '../../exchanges/binance/binancespot.exchange';
-import { BingxExchange } from '../../exchanges/bingx/bingx.exchange';
-import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
-import { BitrueExchange } from '../../exchanges/bitrue/bitrue.exchange';
-import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
-import { BlofinExchange } from '../../exchanges/blofin/blofin.exchange';
-import { BreakoutpropExchange } from '../../exchanges/breakoutprop/breakoutprop.exchange';
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
-import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
-import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
-import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
-import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
-import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
-import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
-import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
-import { HyperliquidSpotExchange } from '../../exchanges/hyperliquid/hyperliquidspot.exchange';
-import { KrakenExchange } from '../../exchanges/kraken/kraken.exchange';
-import { KrakenSpotExchange } from '../../exchanges/kraken/krakenspot.exchange';
-import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
-import { KucoinSpotExchange } from '../../exchanges/kucoin/kucoinspot.exchange';
-import { LighterExchange } from '../../exchanges/lighter/lighter.exchange';
-import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
-import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
-import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
-import { PolymarketExchange } from '../../exchanges/polymarket/polymarket.exchange';
-import { WeexExchange } from '../../exchanges/weex/weex.exchange';
-import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
+import { BinanceOptionsExchange } from '../reference/binance/binanceoptions.exchange';
+import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
+import { BingxExchange } from '../reference/bingx/bingx.exchange';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
+import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
+import { BlofinExchange } from '../reference/blofin/blofin.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
+import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
+import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
+import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
+import { TxFlowExchange } from '../reference/txflow/txflow.exchange';
+import { HyperliquidSpotExchange } from '../reference/hyperliquid/hyperliquidspot.exchange';
+import { KrakenExchange } from '../reference/kraken/kraken.exchange';
+import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
+import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
+import { KucoinSpotExchange } from '../reference/kucoin/kucoinspot.exchange';
+import { LighterExchange } from '../reference/lighter/lighter.exchange';
+import { MexcExchange } from '../reference/mexc/mexc.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
+import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
+import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
+import { WeexExchange } from '../reference/weex/weex.exchange';
+import { WOOXExchange } from '../reference/woo/woo.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
+import { OrderSide, OrderStatus, OrderType } from '../../types';
 
 // Contract: a caller clientOrderId is sent verbatim on one native order, or the
 // call rejects — emitting first — before ANY transport is touched.
@@ -57,13 +65,18 @@ const MARKET: Market = {
 type ExchangeCtor = new (name: any, options: any, store: DefaultStore) => BaseExchange;
 
 const HONORING: Array<[string, ExchangeCtor]> = [
+  ['txflow', TxFlowExchange],
+  ['txflow', RustEngineExchange],
   ['apexomni', ApexOmniExchange],
   ['backpack', BackpackExchange],
   ['binance', BinanceExchange],
+  ['binanceoptions', BinanceOptionsExchange],
   ['binancepm', BinancePMExchange],
   ['binancespot', BinanceSpotExchange],
   ['bingx', BingxExchange],
   ['bitget', BitgetExchange],
+  ['bitget', RustEngineExchange],
+  ['bitgetusdc', RustEngineExchange],
   ['bitrue', BitrueExchange],
   ['bitunix', BitunixExchange],
   ['blofin', BlofinExchange],
@@ -72,14 +85,15 @@ const HONORING: Array<[string, ExchangeCtor]> = [
   ['bybitspot', BybitSpotExchange],
   ['coinbase', CoinbaseExchange],
   ['cryptocom', CryptocomExchange],
+  ['cryptocom', RustEngineExchange],
   ['grvt', GrvtExchange],
   ['kucoin', KucoinExchange],
   ['kucoinspot', KucoinSpotExchange],
   ['okx', OKXExchange],
-  ['salsadex', OrderlyExchange],
   ['paradex', ParadexExchange],
   ['phemex', PhemexExchange],
   ['weex', WeexExchange],
+  ['weex', RustEngineExchange],
   ['woo', WOOXExchange],
 ];
 
@@ -88,6 +102,7 @@ const HONORING: Array<[string, ExchangeCtor]> = [
 // gets its own minted ID. So the shape-refusal cases above do not apply.
 const HONORING_EVERY_SHAPE: Array<[string, ExchangeCtor]> = [
   ['hyperliquid', HyperliquidExchange],
+  ['hyperliquid', RustEngineExchange],
   ['hyperliquidspot', HyperliquidSpotExchange],
 ];
 
@@ -95,13 +110,13 @@ const HYPERLIQUID_CLOID = '0x0123456789abcdef0123456789abcdef';
 
 const NOT_HONORING: Array<[string, ExchangeCtor]> = [
   ['asterdex', AsterDEXExchange],
-  ['breakoutprop', BreakoutpropExchange],
   // hyperliquid and hyperliquidspot moved to HONORING_EVERY_SHAPE when every
   // placement started carrying a cloid (feat(hyperliquid): cloid on every order).
   ['hyrotrader', HyrotraderExchange],
   ['kraken', KrakenExchange],
   ['krakenspot', KrakenSpotExchange],
   ['lighter', LighterExchange],
+  ['lighter', RustEngineExchange],
   ['mexc', MexcExchange],
   ['polymarket', PolymarketExchange],
 ];
@@ -129,6 +144,8 @@ const setup = (name: string, Ctor: ExchangeCtor) => {
     { key: 'key', secret: 'secret', passphrase: 'passphrase', tealstreetTunnel: false },
     store,
   );
+  // A Rust venue answers from its engine's record, as it would once started.
+  if (exchange instanceof RustEngineExchange) adoptEngineCapabilities(exchange);
   const transportCalls = vi.fn();
   for (const key of Object.keys(exchange)) {
     if (!isTransport((exchange as any)[key])) continue;
@@ -146,6 +163,43 @@ const setup = (name: string, Ctor: ExchangeCtor) => {
 };
 
 describe('clientOrderId fails closed before any write', () => {
+  it.each(['bitget', 'bitgetusdc'])('%s Rust wrapper honors caller IDs and finds their live orders', async (name) => {
+    const store = new DefaultStore();
+    store.update({ markets: [MARKET] });
+    const exchange = new RustEngineExchange(
+      name as any,
+      { key: 'key', secret: 'secret', passphrase: 'passphrase' },
+      store,
+    );
+    adoptEngineCapabilities(exchange);
+    const opts = order({ clientOrderId: 'caller.id:/A_-' });
+    const place = vi.spyOn(exchange, 'placeOrders').mockResolvedValue(['order-1']);
+    await expect(
+      exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: opts.clientOrderId! }),
+    ).resolves.toEqual({
+      orderIds: ['order-1'],
+      clientOrderId: opts.clientOrderId,
+    });
+    expect(place).toHaveBeenCalledWith([opts]);
+    expect(exchange.mintClientOrderId(order())).toMatch(/^[.A-Z:/a-z0-9_-]{1,32}$/);
+    const live = {
+      ...opts,
+      id: 'order-1',
+      price: 50_000,
+      status: OrderStatus.Open,
+      filled: 0,
+      remaining: 1,
+      reduceOnly: false,
+      lastUpdate: 1,
+    };
+    exchange.store.update({ orders: [live] });
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, opts.clientOrderId!)).resolves.toEqual({
+      found: true,
+      order: live,
+    });
+    exchange.dispose();
+  });
+
   beforeEach(() => {
     // HyroTrader's REST origin is fixed at build time; any origin lets it construct.
     vi.spyOn(HyrotraderExchange.prototype, 'getBybitRestBaseUrl').mockReturnValue('https://simulator.test');
@@ -230,30 +284,38 @@ describe('clientOrderId fails closed before any write', () => {
 });
 
 describe('clientOrderId on venues that honor every shape', () => {
-  it.each(HONORING_EVERY_SHAPE)('%s rejects a caller ID that breaks the venue charset before any transport', async (name, Ctor) => {
-    const { exchange, transportCalls, emitted } = setup(name, Ctor);
+  it.each(HONORING_EVERY_SHAPE)(
+    '%s rejects a caller ID that breaks the venue charset before any transport',
+    async (name, Ctor) => {
+      const { exchange, transportCalls, emitted } = setup(name, Ctor);
 
-    await expect(exchange.placeOrder(order({ clientOrderId: '12345' }))).rejects.toThrow(/clientOrderId must /);
-    await expect(exchange.placeOrder(order({ clientOrderId: '0x0123456789ABCDEF0123456789ABCDEF' }))).rejects.toThrow(
-      /clientOrderId must /,
-    );
-    expect(emitted).toHaveLength(2);
-    expect(transportCalls).not.toHaveBeenCalled();
-  });
+      await expect(exchange.placeOrder(order({ clientOrderId: '12345' }))).rejects.toThrow(/clientOrderId must /);
+      await expect(exchange.placeOrder(order({ clientOrderId: '0x0123456789ABCDEF0123456789ABCDEF' }))).rejects.toThrow(
+        /clientOrderId must /,
+      );
+      expect(emitted).toHaveLength(2);
+      expect(transportCalls).not.toHaveBeenCalled();
+    },
+  );
 
-  it.each(HONORING_EVERY_SHAPE)('%s rejects a caller ID on an order above the max size for one order', async (name, Ctor) => {
-    const { exchange, transportCalls } = setup(name, Ctor);
+  it.each(HONORING_EVERY_SHAPE)(
+    '%s rejects a caller ID on an order above the max size for one order',
+    async (name, Ctor) => {
+      const { exchange, transportCalls } = setup(name, Ctor);
 
-    await expect(exchange.placeOrder(order({ amount: 25, clientOrderId: HYPERLIQUID_CLOID }))).rejects.toThrow(
-      /exceeds the market's max size for one order/,
-    );
-    expect(transportCalls).not.toHaveBeenCalled();
-  });
+      await expect(exchange.placeOrder(order({ amount: 25, clientOrderId: HYPERLIQUID_CLOID }))).rejects.toThrow(
+        /exceeds the market's max size for one order/,
+      );
+      expect(transportCalls).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(HONORING_EVERY_SHAPE)('%s rejects a whole batch with one bad or repeated caller ID', async (name, Ctor) => {
     const { exchange, transportCalls } = setup(name, Ctor);
 
-    await expect(exchange.placeOrders([order(), order({ clientOrderId: 'nope' })])).rejects.toThrow(/clientOrderId must /);
+    await expect(exchange.placeOrders([order(), order({ clientOrderId: 'nope' })])).rejects.toThrow(
+      /clientOrderId must /,
+    );
     await expect(
       exchange.placeOrders([order({ clientOrderId: HYPERLIQUID_CLOID }), order({ clientOrderId: HYPERLIQUID_CLOID })]),
     ).rejects.toThrow(/duplicated in one batch/);
@@ -267,18 +329,21 @@ describe('clientOrderId on venues that honor every shape', () => {
     expect(transportCalls).not.toHaveBeenCalled();
   });
 
-  it.each(HONORING_EVERY_SHAPE)('%s mints a cloid for every shape it places, and none it would refuse', (name, Ctor) => {
-    const { exchange, emitted } = setup(name, Ctor);
-    const cloid = /^0x[0-9a-f]{32}$/;
+  it.each(HONORING_EVERY_SHAPE)(
+    '%s mints a cloid for every shape it places, and none it would refuse',
+    (name, Ctor) => {
+      const { exchange, emitted } = setup(name, Ctor);
+      const cloid = /^0x[0-9a-f]{32}$/;
 
-    expect(exchange.mintClientOrderId(order())).toMatch(cloid);
-    expect(exchange.mintClientOrderId(order({ stopLoss: 49_000, takeProfit: 51_000 }))).toMatch(cloid);
-    expect(exchange.mintClientOrderId(order({ type: OrderType.StopLoss, triggerPrice: 49_000 }))).toMatch(cloid);
-    expect(exchange.mintClientOrderId(order({ type: OrderType.TrailingStopLoss }))).toBeUndefined();
-    expect(exchange.mintClientOrderId(order({ amount: 11 }))).toBeUndefined();
-    expect(exchange.mintClientOrderId(order({ symbol: 'UNKNOWN' }))).toBeUndefined();
-    expect(emitted).toEqual([]);
-  });
+      expect(exchange.mintClientOrderId(order())).toMatch(cloid);
+      expect(exchange.mintClientOrderId(order({ stopLoss: 49_000, takeProfit: 51_000 }))).toMatch(cloid);
+      expect(exchange.mintClientOrderId(order({ type: OrderType.StopLoss, triggerPrice: 49_000 }))).toMatch(cloid);
+      expect(exchange.mintClientOrderId(order({ type: OrderType.TrailingStopLoss }))).toBeUndefined();
+      expect(exchange.mintClientOrderId(order({ amount: 11 }))).toBeUndefined();
+      expect(exchange.mintClientOrderId(order({ symbol: 'UNKNOWN' }))).toBeUndefined();
+      expect(emitted).toEqual([]);
+    },
+  );
 });
 
 describe('placeOrderWithClientOrderId', () => {
@@ -350,6 +415,40 @@ describe('mintClientOrderId', () => {
     expect(exchange.mintClientOrderId(order({ amount: 11 }))).toBeUndefined();
     expect(exchange.mintClientOrderId(order({ symbol: 'UNKNOWN' }))).toBeUndefined();
     expect(emitted).toEqual([]);
+  });
+});
+
+describe('findOrderByClientOrderId answered from open orders', () => {
+  // Bitunix writes a Creating row with the caller's ID while its send is in flight.
+  it('never reads a Creating row as placed, from the store or a fetch', async () => {
+    const store = new DefaultStore();
+    store.update({ markets: [MARKET] });
+    const exchange = new RustEngineExchange('bitunix' as any, { key: 'key', secret: 'secret' }, store);
+    adoptEngineCapabilities(exchange);
+    const opts = order({ clientOrderId: 'caller-1' });
+    const row = {
+      ...opts,
+      id: 'creating:7:0',
+      price: 50_000,
+      status: OrderStatus.Creating,
+      filled: 0,
+      remaining: 1,
+      reduceOnly: false,
+      lastUpdate: 1,
+    };
+    exchange.store.update({ orders: [row] });
+    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([row]);
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, 'caller-1')).resolves.toEqual({
+      found: false,
+      definitive: false,
+    });
+    const acknowledged = { ...row, id: 'venue-9', status: OrderStatus.Open };
+    exchange.store.update({ orders: [acknowledged] });
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, 'caller-1')).resolves.toEqual({
+      found: true,
+      order: acknowledged,
+    });
+    exchange.dispose();
   });
 });
 

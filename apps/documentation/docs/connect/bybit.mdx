@@ -7,6 +7,8 @@ draft: false
 hide_table_of_contents: false
 ---
 
+import ProxyFleetIps from '@site/src/components/ProxyFleetIps';
+
 ---
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
@@ -17,7 +19,6 @@ import BybitPermissions2 from '/img/connect/bybit/bybit-permissions-2-mar2024.pn
 import BybitPermissionsUM from '/img/connect/bybit/bybit-perms-um-mar13.png';
 import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
 import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
-import ApiWhitelist from '/img/connect/bybit/v3/apiwhitelist.png';
 import ApiTealstreet from '/img/connect/bybit/v3/api-teal.png';
 import DocumentSign from '/img/connect/bybit/v3/document-sign.png';
 import ApiDropdown from '/img/connect/bybit/apidropdown.png';
@@ -141,7 +142,9 @@ Read more about Tealstreet's password encryption system **[here](/docs/connect/a
 <!-- * Consider supporting Tealstreet by using the referral [link](https://teal.link/bybit1). -->
 
 - Enable **Use Tealstreet Network** unless you intend to route your orders from some other location.
-  - Adjust your whitelisted IP's accordingly.
+  - For a manually created key with an IP restriction, add the nine current fleet IPs first, then the selected legacy SG/JA AWS addresses below. The union keeps the key usable for rollback and whitelabel on the legacy app.
+
+<ProxyFleetIps exchange="bybit" />
 
 <!-- * Choose the region you would prefer. Currently this is Singapore (SG) or Japan (JA). -->
 
@@ -173,7 +176,7 @@ Unified Margin support has recently been introduced and there are a few things t
     <img src={InverseDerivs} alt="Inverse Derivatives account" style={{ width: 550 }} />
 </div>
 
-- Unified Margin does not support inverse futures, you will need to make sure you have funded your Inverse Derivatives account to trade Inverse on a Unified-Margin (UTA) account.
+- Inverse contracts use the separate Inverse Derivatives wallet and are available through the Bybit Inverse setup mode in Tealstreet. Make sure that wallet is funded before trading inverse markets.
 
 - Users will be unable to switch to isolated margin if they have a negative USDT balance.
 
@@ -227,7 +230,7 @@ You can find more [info here](https://announcements.bybit.com/article/introducin
 
 ### I'm getting an error about illegal category why is that?
 
-- Tealstreet V3 does not currently support inverse perps as of this writing. You will need to use v2.
+- Double-check that the account mode you connected matches the market you are trading. For inverse perps, use the Bybit Inverse setup mode and fund the Inverse Derivatives wallet.
 
 ### Does Tealstreet support Bybit Demo mode?
 

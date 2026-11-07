@@ -1,4 +1,4 @@
-//! V8 13.6.233 fdlibm arithmetic, including measured arm64 fused operations.
+//! V8 13.6.233 fdlibm arithmetic with measured native contraction profiles.
 //! Source: https://github.com/v8/v8/blob/13.6.233/src/base/ieee754.cc
 // Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
 // Developed at SunSoft, a Sun Microsystems, Inc. business.
@@ -15,7 +15,8 @@ fn with_high(x: f64, hi: i32) -> f64 {
     f64::from_bits((x.to_bits() & 0xffff_ffff) | (u64::from(hi as u32) << 32))
 }
 
-fn v8_log(mut x: f64) -> f64 {
+fn v8_log<const FUSED: bool>(mut x: f64) -> f64 {
+    let madd = multiply_add::<FUSED>;
     const LN2_HI: f64 = 6.93147180369123816490e-01;
     const LN2_LO: f64 = 1.90821492927058770002e-10;
     const LG1: f64 = 6.666666666666735130e-01;
@@ -54,14 +55,14 @@ fn v8_log(mut x: f64) -> f64 {
             return if k == 0 {
                 0.0
             } else {
-                dk.mul_add(LN2_HI, dk * LN2_LO)
+                madd(dk, LN2_HI, dk * LN2_LO)
             };
         }
-        let r = f * f * ((-0.33333333333333333_f64).mul_add(f, 0.5));
+        let r = f * f * (madd(-0.33333333333333333_f64, f, 0.5));
         return if k == 0 {
             f - r
         } else {
-            dk.mul_add(LN2_HI, -(dk.mul_add(-LN2_LO, r) - f))
+            madd(dk, LN2_HI, -(madd(dk, -LN2_LO, r) - f))
         };
     }
     let s = f / (2.0 + f);
@@ -69,27 +70,37 @@ fn v8_log(mut x: f64) -> f64 {
     i = hx - 0x6147a;
     let w = z * z;
     let j = 0x6b851 - hx;
-    let t1 = w * w.mul_add(w.mul_add(LG6, LG4), LG2);
-    let t2 = z * w.mul_add(w.mul_add(w.mul_add(LG7, LG5), LG3), LG1);
+    let t1 = w * madd(w, madd(w, LG6, LG4), LG2);
+    let t2 = z * madd(w, madd(w, madd(w, LG7, LG5), LG3), LG1);
     i |= j;
     let r = t2 + t1;
     if i > 0 {
         let hfsq = 0.5 * f * f;
         if k == 0 {
-            f - (-s).mul_add(hfsq + r, hfsq)
+            f - madd(-s, hfsq + r, hfsq)
         } else {
-            dk.mul_add(LN2_HI, -((hfsq - s.mul_add(hfsq + r, dk * LN2_LO)) - f))
+            madd(dk, LN2_HI, -((hfsq - madd(s, hfsq + r, dk * LN2_LO)) - f))
         }
     } else if k == 0 {
-        (-s).mul_add(f - r, f)
+        madd(-s, f - r, f)
     } else {
-        dk.mul_add(LN2_HI, -(s.mul_add(f - r, -(dk * LN2_LO)) - f))
+        madd(dk, LN2_HI, -(madd(s, f - r, -(dk * LN2_LO)) - f))
     }
 }
 
-/// JavaScript Math.log10 matching measured Node/V8 darwin arm64 contraction.
-/// Other V8 compiler/architecture configurations may differ in their last bits.
-pub fn math_log10(mut x: f64) -> f64 {
+/// JavaScript Math.log10 matching Node/V8's native contraction profile.
+/// Darwin arm64 contracts multiply/add; Linux x64 retains separate operations.
+pub fn math_log10(x: f64) -> f64 {
+    math_log10_profile::<{ cfg!(all(target_arch = "aarch64", target_os = "macos")) }>(x)
+}
+
+#[inline]
+fn multiply_add<const FUSED: bool>(a: f64, b: f64, c: f64) -> f64 {
+    if FUSED { a.mul_add(b, c) } else { a * b + c }
+}
+
+fn math_log10_profile<const FUSED: bool>(mut x: f64) -> f64 {
+    let madd = multiply_add::<FUSED>;
     const IVLN10: f64 = 4.34294481903251816668e-01;
     const LOG10_2HI: f64 = 3.01029995663611771306e-01;
     const LOG10_2LO: f64 = 3.69423907715893078616e-13;
@@ -119,6 +130,25 @@ pub fn math_log10(mut x: f64) -> f64 {
     hx = (hx & 0x000fffff) | ((0x3ff - i) << 20);
     let y = f64::from(k + i);
     x = with_high(x, hx);
-    let z = y.mul_add(LOG10_2LO, IVLN10 * v8_log(x));
-    y.mul_add(LOG10_2HI, z)
+    let z = madd(y, LOG10_2LO, IVLN10 * v8_log::<FUSED>(x));
+    madd(y, LOG10_2HI, z)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::math_log10_profile;
+    #[test]
+    fn linux_x64_log10_keeps_uncontracted_rounding_at_decimal_boundary() {
+        // Node24.20.0/V8 13.6.233.17 Linux x64 CI witness. The arm64
+        // contraction result is one ULP lower at this exact input.
+        let input = f64::from_bits(0x0d45_d989_3228_0e41);
+        assert_eq!(
+            math_log10_profile::<false>(input).to_bits(),
+            (-244.0_f64).to_bits()
+        );
+        assert_eq!(
+            math_log10_profile::<true>(input).to_bits(),
+            (-244.00000000000003_f64).to_bits()
+        );
+    }
 }

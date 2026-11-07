@@ -15,12 +15,12 @@ exports[`transport adapter selection per exchange > apexomni 1`] = `
     "xhr": "how https://omni.apex.exchange/api",
   },
   "private proxy-JA": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
   },
   "private proxy-SG": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
   },
   "private tunnel-only": {
     "unlimitedXHR": "how https://omni.apex.exchange/api",
@@ -39,12 +39,12 @@ exports[`transport adapter selection per exchange > apexomni 1`] = `
     "xhr": "how https://omni.apex.exchange/api",
   },
   "public proxy-JA": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
   },
   "public proxy-SG": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://omni.apex.exchange/api",
   },
   "public tunnel-only": {
     "unlimitedXHR": "how https://omni.apex.exchange/api",
@@ -74,16 +74,16 @@ exports[`transport adapter selection per exchange > asterdex 1`] = `
     "unlimitedAPI": "how https://fapi.asterdex.com",
   },
   "private proxy-JA": {
-    "primaryAPI": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "publicAPI": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "secondaryAPI": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "unlimitedAPI": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "primaryAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "publicAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "secondaryAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "unlimitedAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
   },
   "private proxy-SG": {
-    "primaryAPI": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "publicAPI": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "secondaryAPI": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "unlimitedAPI": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "primaryAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "publicAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "secondaryAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "unlimitedAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
   },
   "private tunnel-only": {
     "primaryAPI": "how https://fapi.asterdex.com",
@@ -110,16 +110,16 @@ exports[`transport adapter selection per exchange > asterdex 1`] = `
     "unlimitedAPI": "how https://fapi.asterdex.com",
   },
   "public proxy-JA": {
-    "primaryAPI": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "publicAPI": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "secondaryAPI": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "unlimitedAPI": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "primaryAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "publicAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "secondaryAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "unlimitedAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
   },
   "public proxy-SG": {
-    "primaryAPI": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "publicAPI": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "secondaryAPI": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
-    "unlimitedAPI": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "primaryAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "publicAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "secondaryAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
+    "unlimitedAPI": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.asterdex.com",
   },
   "public tunnel-only": {
     "primaryAPI": "how https://fapi.asterdex.com",
@@ -142,10 +142,10 @@ exports[`transport adapter selection per exchange > backpack 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.backpack.exchange",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.backpack.exchange",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.backpack.exchange",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.backpack.exchange",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.backpack.exchange",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.backpack.exchange",
@@ -160,10 +160,10 @@ exports[`transport adapter selection per exchange > backpack 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.backpack.exchange",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.backpack.exchange",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.backpack.exchange",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.backpack.exchange",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.backpack.exchange",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.backpack.exchange",
@@ -189,14 +189,14 @@ exports[`transport adapter selection per exchange > binance 1`] = `
     "unlimitedXHR": "how:bigInt https://fapi.binance.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://fapi.binance.com",
@@ -204,9 +204,9 @@ exports[`transport adapter selection per exchange > binance 1`] = `
     "unlimitedXHR": "how:bigInt https://fapi.binance.com",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
   },
   "public proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://fapi.binance.com",
@@ -219,19 +219,125 @@ exports[`transport adapter selection per exchange > binance 1`] = `
     "unlimitedXHR": "how:bigInt https://fapi.binance.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://fapi.binance.com",
     "publicXhr": "how:bigInt https://fapi.binance.com",
     "unlimitedXHR": "how:bigInt https://fapi.binance.com",
+  },
+}
+`;
+
+exports[`transport adapter selection per exchange > binanceinverse 1`] = `
+{
+  "private direct": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://dapi.binance.com",
+  },
+  "private proxy+tunnel-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "private proxy+tunnel-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "private proxy-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+  },
+  "private proxy-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+  },
+  "private tunnel-only": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "public direct": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
+  },
+  "public proxy+tunnel-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "public proxy+tunnel-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "public proxy-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
+  },
+  "public proxy-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
+  },
+  "public tunnel-only": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+}
+`;
+
+exports[`transport adapter selection per exchange > binanceoptions 1`] = `
+{
+  "private direct": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
+  },
+  "private proxy+tunnel-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
+  },
+  "private proxy+tunnel-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
+  },
+  "private proxy-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eapi.binance.com",
+  },
+  "private proxy-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eapi.binance.com",
+  },
+  "private tunnel-only": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
+  },
+  "public direct": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://eapi.binance.com",
+  },
+  "public proxy+tunnel-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
+  },
+  "public proxy+tunnel-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
+  },
+  "public proxy-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://eapi.binance.com",
+  },
+  "public proxy-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://eapi.binance.com",
+  },
+  "public tunnel-only": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
   },
 }
 `;
@@ -257,16 +363,16 @@ exports[`transport adapter selection per exchange > binancepm 1`] = `
     "unlimitedXHR": "how https://papi.binance.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
-    "fapiXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "fapiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
-    "fapiXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "fapiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = papiXhr": "how https://papi.binance.com",
@@ -275,10 +381,10 @@ exports[`transport adapter selection per exchange > binancepm 1`] = `
     "unlimitedXHR": "how https://papi.binance.com",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = papiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
-    "fapiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
+    "fapiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
   },
   "public proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = papiXhr": "how https://papi.binance.com",
@@ -293,16 +399,16 @@ exports[`transport adapter selection per exchange > binancepm 1`] = `
     "unlimitedXHR": "how https://papi.binance.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = papiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
-    "fapiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
+    "fapiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = papiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
-    "fapiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
+    "fapiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = papiXhr": "how https://papi.binance.com",
@@ -328,20 +434,20 @@ exports[`transport adapter selection per exchange > binancespot 1`] = `
     "unlimitedXHR": "default https://api.binance.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.binance.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.binance.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.binance.com",
     "unlimitedXHR": "default https://api.binance.com",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
   },
   "public proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.binance.com",
@@ -352,12 +458,12 @@ exports[`transport adapter selection per exchange > binancespot 1`] = `
     "unlimitedXHR": "default https://api.binance.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.binance.com",
@@ -381,12 +487,12 @@ exports[`transport adapter selection per exchange > bingx 1`] = `
     "unlimitedXHR": "how https://open-api.bingx.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
-    "unlimitedXHR": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
-    "unlimitedXHR": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://open-api.bingx.com",
@@ -405,12 +511,12 @@ exports[`transport adapter selection per exchange > bingx 1`] = `
     "unlimitedXHR": "default https://open-api.bingx.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://open-api.bingx.com",
@@ -434,12 +540,12 @@ exports[`transport adapter selection per exchange > bitget 1`] = `
     "unlimitedXHR": "how https://api.bitget.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.bitget.com",
@@ -458,12 +564,12 @@ exports[`transport adapter selection per exchange > bitget 1`] = `
     "unlimitedXHR": "how https://api.bitget.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.bitget.com",
@@ -487,12 +593,12 @@ exports[`transport adapter selection per exchange > bitgetinverse 1`] = `
     "unlimitedXHR": "how https://api.bitget.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.bitget.com",
@@ -511,12 +617,12 @@ exports[`transport adapter selection per exchange > bitgetinverse 1`] = `
     "unlimitedXHR": "how https://api.bitget.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.bitget.com",
@@ -540,12 +646,12 @@ exports[`transport adapter selection per exchange > bitgetusdc 1`] = `
     "unlimitedXHR": "how https://api.bitget.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.bitget.com",
@@ -564,12 +670,12 @@ exports[`transport adapter selection per exchange > bitgetusdc 1`] = `
     "unlimitedXHR": "how https://api.bitget.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bitget.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.bitget.com",
@@ -593,12 +699,12 @@ exports[`transport adapter selection per exchange > bitrue 1`] = `
     "unlimitedXHR": "how:bigInt https://fapi.bitrue.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://fapi.bitrue.com",
@@ -617,12 +723,12 @@ exports[`transport adapter selection per exchange > bitrue 1`] = `
     "unlimitedXHR": "how:bigInt https://fapi.bitrue.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitrue.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://fapi.bitrue.com",
@@ -646,12 +752,12 @@ exports[`transport adapter selection per exchange > bitunix 1`] = `
     "unlimitedXHR": "how https://fapi.bitunix.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
-    "unlimitedXHR": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
-    "unlimitedXHR": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://fapi.bitunix.com",
@@ -670,12 +776,12 @@ exports[`transport adapter selection per exchange > bitunix 1`] = `
     "unlimitedXHR": "default https://fapi.bitunix.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.bitunix.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://fapi.bitunix.com",
@@ -690,90 +796,37 @@ exports[`transport adapter selection per exchange > blofin 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "default https://openapi.blofin.com",
   },
   "private proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
   "private proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
   "private tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
   "public direct": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://openapi.blofin.com",
   },
   "public proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
   "public proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
   "public tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
-  },
-}
-`;
-
-exports[`transport adapter selection per exchange > breakoutprop 1`] = `
-{
-  "private direct": {
-    "unlimitedXHR": "default https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private proxy+tunnel-JA": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private proxy+tunnel-SG": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private proxy-JA": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private proxy-SG": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private tunnel-only": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public direct": {
-    "unlimitedXHR": "default https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public proxy+tunnel-JA": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public proxy+tunnel-SG": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public proxy-JA": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public proxy-SG": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public tunnel-only": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
   },
 }
 `;
@@ -793,12 +846,12 @@ exports[`transport adapter selection per exchange > bybit 1`] = `
     "unlimitedXHR": "how:SG https://api.bybit.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://api.bybit.com",
@@ -817,12 +870,12 @@ exports[`transport adapter selection per exchange > bybit 1`] = `
     "unlimitedXHR": "how:SG https://api.bybit.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://api.bybit.com",
@@ -846,12 +899,12 @@ exports[`transport adapter selection per exchange > bybitdemo 1`] = `
     "unlimitedXHR": "how:SG https://api-demo.bybit.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://api-demo.bybit.com",
@@ -870,12 +923,12 @@ exports[`transport adapter selection per exchange > bybitdemo 1`] = `
     "unlimitedXHR": "how:SG https://api-demo.bybit.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-demo.bybit.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://api-demo.bybit.com",
@@ -899,12 +952,12 @@ exports[`transport adapter selection per exchange > bybitinverse 1`] = `
     "unlimitedXHR": "how:SG https://api.bybit.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://api.bybit.com",
@@ -923,12 +976,12 @@ exports[`transport adapter selection per exchange > bybitinverse 1`] = `
     "unlimitedXHR": "how:SG https://api.bybit.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://api.bybit.com",
@@ -952,12 +1005,12 @@ exports[`transport adapter selection per exchange > bybitspot 1`] = `
     "unlimitedXHR": "how:SG https://api.bybit.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://api.bybit.com",
@@ -976,12 +1029,12 @@ exports[`transport adapter selection per exchange > bybitspot 1`] = `
     "unlimitedXHR": "how:SG https://api.bybit.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://api.bybit.com",
@@ -992,107 +1045,35 @@ exports[`transport adapter selection per exchange > bybitspot 1`] = `
 
 exports[`transport adapter selection per exchange > coinbase 1`] = `
 {
-  "private direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://api.coinbase.com",
-    "unlimitedXHR": "default https://api.coinbase.com",
-  },
-  "private proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "private proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "private tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://api.coinbase.com",
-    "unlimitedXHR": "default https://api.coinbase.com",
-  },
-  "public proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "public tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
 exports[`transport adapter selection per exchange > coinbasespot 1`] = `
 {
-  "private direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://api.coinbase.com",
-    "unlimitedXHR": "default https://api.coinbase.com",
-  },
-  "private proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "private proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "private tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://api.coinbase.com",
-    "unlimitedXHR": "default https://api.coinbase.com",
-  },
-  "public proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "public tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
@@ -1108,10 +1089,10 @@ exports[`transport adapter selection per exchange > cryptocom 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.crypto.com/exchange/v1",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.crypto.com/exchange/v1",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.crypto.com/exchange/v1",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.crypto.com/exchange/v1",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.crypto.com/exchange/v1",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.crypto.com/exchange/v1",
@@ -1126,10 +1107,10 @@ exports[`transport adapter selection per exchange > cryptocom 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.crypto.com/exchange/v1",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.crypto.com/exchange/v1",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.crypto.com/exchange/v1",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.crypto.com/exchange/v1",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.crypto.com/exchange/v1",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.crypto.com/exchange/v1",
@@ -1145,29 +1126,29 @@ exports[`transport adapter selection per exchange > grvt 1`] = `
     "xhr": "default https://market-data.grvt.io",
   },
   "private proxy+tunnel-JA": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
   "private proxy+tunnel-SG": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
   "private proxy-JA": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
   "private proxy-SG": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
   "private tunnel-only": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
   "public direct": {
     "edgeXhr": "default https://edge.grvt.io",
@@ -1175,29 +1156,29 @@ exports[`transport adapter selection per exchange > grvt 1`] = `
     "xhr": "default https://market-data.grvt.io",
   },
   "public proxy+tunnel-JA": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
   "public proxy+tunnel-SG": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
   "public proxy-JA": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
   "public proxy-SG": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
   "public tunnel-only": {
-    "edgeXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
-    "tradingXhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
-    "xhr": "default https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
+    "edgeXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io",
+    "tradingXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://market-data.grvt.io",
   },
 }
 `;
@@ -1220,14 +1201,14 @@ exports[`transport adapter selection per exchange > hyperliquid 1`] = `
     "xhr": "how https://api.hyperliquid.xyz",
   },
   "private proxy-JA": {
-    "infoXhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "unlimitedXHR": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "infoXhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
   },
   "private proxy-SG": {
-    "infoXhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "unlimitedXHR": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "infoXhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
   },
   "private tunnel-only": {
     "infoXhr": "how https://api.hyperliquid.xyz",
@@ -1250,14 +1231,14 @@ exports[`transport adapter selection per exchange > hyperliquid 1`] = `
     "xhr": "default https://api.hyperliquid.xyz",
   },
   "public proxy-JA": {
-    "infoXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "infoXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
   },
   "public proxy-SG": {
-    "infoXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "infoXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
   },
   "public tunnel-only": {
     "infoXhr": "default https://api.hyperliquid.xyz",
@@ -1282,12 +1263,12 @@ exports[`transport adapter selection per exchange > hyperliquidspot 1`] = `
     "xhr": "how https://api.hyperliquid.xyz",
   },
   "private proxy-JA": {
-    "unlimitedXHR": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
   },
   "private proxy-SG": {
-    "unlimitedXHR": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
   },
   "private tunnel-only": {
     "unlimitedXHR": "how https://api.hyperliquid.xyz",
@@ -1306,12 +1287,12 @@ exports[`transport adapter selection per exchange > hyperliquidspot 1`] = `
     "xhr": "default https://api.hyperliquid.xyz",
   },
   "public proxy-JA": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
   },
   "public proxy-SG": {
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz",
   },
   "public tunnel-only": {
     "unlimitedXHR": "default https://api.hyperliquid.xyz",
@@ -1323,94 +1304,70 @@ exports[`transport adapter selection per exchange > hyperliquidspot 1`] = `
 exports[`transport adapter selection per exchange > hyrotrader 1`] = `
 {
   "private direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://hyrotrader-prod.test",
   },
   "private proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:JA https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:JA https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:JA https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:JA https://hyrotrader-prod.test",
   },
   "private proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:SG https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:SG https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:SG https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:SG https://hyrotrader-prod.test",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
   },
   "private tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:byBaseURL https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:byBaseURL https://hyrotrader-prod.test",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://hyrotrader-prod.test",
   },
   "public proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:JA https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:JA https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:JA https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:JA https://hyrotrader-prod.test",
   },
   "public proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:SG https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:SG https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:SG https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:SG https://hyrotrader-prod.test",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
   },
   "public tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:byBaseURL https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:byBaseURL https://hyrotrader-prod.test",
   },
 }
 `;
 
 exports[`transport adapter selection per exchange > kodiakfi 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
@@ -1432,14 +1389,14 @@ exports[`transport adapter selection per exchange > kraken 1`] = `
     "unlimitedXHR": "how https://futures.kraken.com/derivatives/api",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
-    "historyXhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/api",
-    "unlimitedXHR": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
+    "historyXhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/api",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
-    "historyXhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/api",
-    "unlimitedXHR": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
+    "historyXhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/api",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://futures.kraken.com/derivatives/api",
@@ -1462,14 +1419,14 @@ exports[`transport adapter selection per exchange > kraken 1`] = `
     "unlimitedXHR": "default https://futures.kraken.com/derivatives/api",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
-    "historyXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/api",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
+    "historyXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/api",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
-    "historyXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/api",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
+    "historyXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/api",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://futures.kraken.com/derivatives/api",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://futures.kraken.com/derivatives/api",
@@ -1494,12 +1451,12 @@ exports[`transport adapter selection per exchange > krakenspot 1`] = `
     "unlimitedXHR": "default https://api.kraken.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.kraken.com",
@@ -1518,12 +1475,12 @@ exports[`transport adapter selection per exchange > krakenspot 1`] = `
     "unlimitedXHR": "default https://api.kraken.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kraken.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.kraken.com",
@@ -1547,12 +1504,12 @@ exports[`transport adapter selection per exchange > kucoin 1`] = `
     "unlimitedXHR": "how https://api-futures.kucoin.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
-    "unlimitedXHR": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
-    "unlimitedXHR": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api-futures.kucoin.com",
@@ -1571,12 +1528,12 @@ exports[`transport adapter selection per exchange > kucoin 1`] = `
     "unlimitedXHR": "default https://api-futures.kucoin.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-futures.kucoin.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api-futures.kucoin.com",
@@ -1600,12 +1557,12 @@ exports[`transport adapter selection per exchange > kucoinspot 1`] = `
     "unlimitedXHR": "how https://api.kucoin.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
-    "unlimitedXHR": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
-    "unlimitedXHR": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
+    "unlimitedXHR": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.kucoin.com",
@@ -1624,12 +1581,12 @@ exports[`transport adapter selection per exchange > kucoinspot 1`] = `
     "unlimitedXHR": "default https://api.kucoin.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.kucoin.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.kucoin.com",
@@ -1641,40 +1598,40 @@ exports[`transport adapter selection per exchange > kucoinspot 1`] = `
 exports[`transport adapter selection per exchange > lighter 1`] = `
 {
   "private direct": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private proxy+tunnel-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private proxy+tunnel-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private proxy-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private proxy-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private tunnel-only": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public direct": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public proxy+tunnel-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public proxy+tunnel-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public proxy-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public proxy-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public tunnel-only": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
 }
 `;
@@ -1682,40 +1639,40 @@ exports[`transport adapter selection per exchange > lighter 1`] = `
 exports[`transport adapter selection per exchange > lighter-robinhood 1`] = `
 {
   "private direct": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private proxy+tunnel-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private proxy+tunnel-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private proxy-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private proxy-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private tunnel-only": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public direct": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public proxy+tunnel-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public proxy+tunnel-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public proxy-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public proxy-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public tunnel-only": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
 }
 `;
@@ -1732,10 +1689,10 @@ exports[`transport adapter selection per exchange > mexc 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.mexc.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.mexc.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.mexc.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.mexc.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.mexc.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.mexc.com",
@@ -1750,10 +1707,10 @@ exports[`transport adapter selection per exchange > mexc 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.mexc.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.mexc.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.mexc.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.mexc.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.mexc.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.mexc.com",
@@ -1763,42 +1720,18 @@ exports[`transport adapter selection per exchange > mexc 1`] = `
 
 exports[`transport adapter selection per exchange > mode 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
@@ -1814,10 +1747,10 @@ exports[`transport adapter selection per exchange > okx 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://www.okx.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://www.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://www.okx.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://www.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://www.okx.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://www.okx.com",
@@ -1832,10 +1765,10 @@ exports[`transport adapter selection per exchange > okx 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://www.okx.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://www.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://www.okx.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://www.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://www.okx.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://www.okx.com",
@@ -1855,10 +1788,10 @@ exports[`transport adapter selection per exchange > okxdemo 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://openapi.okx.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://openapi.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.okx.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://openapi.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.okx.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://openapi.okx.com",
@@ -1873,10 +1806,10 @@ exports[`transport adapter selection per exchange > okxdemo 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://openapi.okx.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://openapi.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.okx.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://openapi.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.okx.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://openapi.okx.com",
@@ -1896,10 +1829,10 @@ exports[`transport adapter selection per exchange > okxeu 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://eea.okx.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://eea.okx.com",
@@ -1914,10 +1847,10 @@ exports[`transport adapter selection per exchange > okxeu 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://eea.okx.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://eea.okx.com",
@@ -1937,10 +1870,10 @@ exports[`transport adapter selection per exchange > okxeudemo 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://eea.okx.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://eea.okx.com",
@@ -1955,10 +1888,10 @@ exports[`transport adapter selection per exchange > okxeudemo 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://eea.okx.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://eea.okx.com",
@@ -1978,10 +1911,10 @@ exports[`transport adapter selection per exchange > paradex 1`] = `
     "xhr": "how https://api.prod.paradex.trade/v1",
   },
   "private proxy-JA": {
-    "xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.prod.paradex.trade/v1",
+    "xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.prod.paradex.trade/v1",
   },
   "private proxy-SG": {
-    "xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.prod.paradex.trade/v1",
+    "xhr": "how https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.prod.paradex.trade/v1",
   },
   "private tunnel-only": {
     "xhr": "how https://api.prod.paradex.trade/v1",
@@ -1996,10 +1929,10 @@ exports[`transport adapter selection per exchange > paradex 1`] = `
     "xhr": "default https://api.prod.paradex.trade/v1",
   },
   "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.prod.paradex.trade/v1",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.prod.paradex.trade/v1",
   },
   "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.prod.paradex.trade/v1",
+    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.prod.paradex.trade/v1",
   },
   "public tunnel-only": {
     "xhr": "default https://api.prod.paradex.trade/v1",
@@ -2022,12 +1955,12 @@ exports[`transport adapter selection per exchange > phemex 1`] = `
     "unlimitedXHR": "how https://api.phemex.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.phemex.com",
@@ -2046,12 +1979,12 @@ exports[`transport adapter selection per exchange > phemex 1`] = `
     "unlimitedXHR": "how https://api.phemex.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.phemex.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.phemex.com",
@@ -2078,14 +2011,14 @@ exports[`transport adapter selection per exchange > polymarket 1`] = `
     "api.xhr": "default https://clob.polymarket.com",
   },
   "private proxy-JA": {
-    "api.dataXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://data-api.polymarket.com",
-    "api.gammaXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://gamma-api.polymarket.com",
-    "api.xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://clob.polymarket.com",
+    "api.dataXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://data-api.polymarket.com",
+    "api.gammaXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://gamma-api.polymarket.com",
+    "api.xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://clob.polymarket.com",
   },
   "private proxy-SG": {
-    "api.dataXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://data-api.polymarket.com",
-    "api.gammaXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://gamma-api.polymarket.com",
-    "api.xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://clob.polymarket.com",
+    "api.dataXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://data-api.polymarket.com",
+    "api.gammaXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://gamma-api.polymarket.com",
+    "api.xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://clob.polymarket.com",
   },
   "private tunnel-only": {
     "api.dataXhr": "default https://data-api.polymarket.com",
@@ -2108,143 +2041,37 @@ exports[`transport adapter selection per exchange > polymarket 1`] = `
     "api.xhr": "default https://clob.polymarket.com",
   },
   "public proxy-JA": {
-    "api.dataXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://data-api.polymarket.com",
-    "api.gammaXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://gamma-api.polymarket.com",
-    "api.xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://clob.polymarket.com",
+    "api.dataXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://data-api.polymarket.com",
+    "api.gammaXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://gamma-api.polymarket.com",
+    "api.xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://clob.polymarket.com",
   },
   "public proxy-SG": {
-    "api.dataXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://data-api.polymarket.com",
-    "api.gammaXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://gamma-api.polymarket.com",
-    "api.xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://clob.polymarket.com",
+    "api.dataXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://data-api.polymarket.com",
+    "api.gammaXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://gamma-api.polymarket.com",
+    "api.xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://clob.polymarket.com",
   },
   "public tunnel-only": {
     "api.dataXhr": "default https://data-api.polymarket.com",
     "api.gammaXhr": "default https://gamma-api.polymarket.com",
     "api.xhr": "default https://clob.polymarket.com",
-  },
-}
-`;
-
-exports[`transport adapter selection per exchange > salsadex 1`] = `
-{
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-}
-`;
-
-exports[`transport adapter selection per exchange > tealstreet-dex 1`] = `
-{
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
   },
 }
 `;
 
 exports[`transport adapter selection per exchange > txflow 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://rpc.txflow.com",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "default https://rpc.txflow.com",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "default https://rpc.txflow.com",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
-  },
-  "private tunnel-only": {
-    "xhr": "default https://rpc.txflow.com",
-  },
-  "public direct": {
-    "xhr": "default https://rpc.txflow.com",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "default https://rpc.txflow.com",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "default https://rpc.txflow.com",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
-  },
-  "public tunnel-only": {
-    "xhr": "default https://rpc.txflow.com",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
@@ -2260,10 +2087,10 @@ exports[`transport adapter selection per exchange > weex 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "default https://api-contract.weex.com",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api-contract.weex.com",
@@ -2278,10 +2105,10 @@ exports[`transport adapter selection per exchange > weex 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "default https://api-contract.weex.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api-contract.weex.com",
@@ -2291,42 +2118,18 @@ exports[`transport adapter selection per exchange > weex 1`] = `
 
 exports[`transport adapter selection per exchange > what 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
@@ -2334,7 +2137,7 @@ exports[`transport adapter selection per exchange > woo 1`] = `
 {
   "private direct": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.woox.io",
-    "_proxyEnforcedXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_proxyEnforcedXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
   },
   "private proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.woox.io",
@@ -2345,12 +2148,12 @@ exports[`transport adapter selection per exchange > woo 1`] = `
     "_proxyEnforcedXhr": "how https://api.woox.io",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.woox.io",
-    "_proxyEnforcedXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_proxyEnforcedXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.woox.io",
-    "_proxyEnforcedXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_proxyEnforcedXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
   },
   "private tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.woox.io",
@@ -2358,7 +2161,7 @@ exports[`transport adapter selection per exchange > woo 1`] = `
   },
   "public direct": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.woox.io",
-    "_proxyEnforcedXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_proxyEnforcedXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
   },
   "public proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.woox.io",
@@ -2369,12 +2172,12 @@ exports[`transport adapter selection per exchange > woo 1`] = `
     "_proxyEnforcedXhr": "how https://api.woox.io",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.woox.io",
-    "_proxyEnforcedXhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_proxyEnforcedXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.woox.io",
-    "_proxyEnforcedXhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
+    "_proxyEnforcedXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.woox.io",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how https://api.woox.io",
@@ -2385,41 +2188,17 @@ exports[`transport adapter selection per exchange > woo 1`] = `
 
 exports[`transport adapter selection per exchange > woofi 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { ENDPOINTS } from '../../exchanges/grvt/grvt.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
@@ -28,6 +28,27 @@ const makeExchange = () =>
   );
 
 describe('GRVT instrument metadata cache audit regression', () => {
+  // Official all_instruments defaults omitted/empty k to PERPETUAL. These
+  // injected rows prove latent mapper acceptance, not listed product support.
+  it.each([
+    ['FUTURE', 'BTC_USDT_Fut_20Oct23'],
+    ['CALL', 'BTC_USDT_Call_20Oct23_2800'],
+    ['PUT', 'BTC_USDT_Put_20Oct23_2800'],
+  ])('does not request %s even though its generic mapper accepts injected rows', async (kind, id) => {
+    const exchange = makeExchange();
+    const post = vi.fn().mockResolvedValue({ data: { r: [instrument({
+      i: id, k: kind, e: '1697788800000000000', sp: '2800000000000', sp1: 'DAILY',
+    })] } });
+    exchange.xhr = { post } as any;
+
+    const markets = await exchange.fetchMarkets();
+
+    expect(post).toHaveBeenCalledExactlyOnceWith(ENDPOINTS.INSTRUMENTS, {});
+    expect(markets).toHaveLength(1);
+    expect(markets[0]).toMatchObject({ id, symbol: id.toUpperCase(), isSpot: false, isPerpetual: false });
+    expect(markets[0].info).toEqual({ ih: '0x030501', bd: 3, qd: 6 });
+  });
+
   it('stores only order-signing metadata from all_instruments on each market', async () => {
     const exchange = makeExchange();
     const post = vi.fn().mockResolvedValue({ data: { r: [instrument({ ignored: 'not-cached' })] } });

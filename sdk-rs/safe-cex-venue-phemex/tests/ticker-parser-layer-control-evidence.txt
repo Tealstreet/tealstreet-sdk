@@ -1,8 +1,0 @@
-COMPILED FAIL101: guard bypass tickers.clear();: PHEMEX-PARSER fixed native output coverage
-PASS restored: guard bypass tickers.clear();
-COMPILED FAIL101: guard bypass tickers.truncate(1);: PHEMEX-PARSER fixed native output coverage
-PASS restored: guard bypass tickers.truncate(1);
-COMPILED FAIL101: guard bypass splice(0): PHEMEX-PARSER expected/native output count
-PASS restored: guard bypass splice(0)
-COMPILED FAIL101: guard bypass splice(1): PHEMEX-PARSER expected/native output count
-PASS restored: guard bypass splice(1)

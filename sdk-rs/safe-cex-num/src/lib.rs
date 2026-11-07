@@ -45,6 +45,14 @@ pub fn js_number_string(value: f64) -> String {
     safe_cex_types::js_coercion::js_number_string(value)
 }
 
+/// Number(value) at arithmetic consumers of a retained numeric runtime property.
+pub fn numeric_value_to_number(value: &safe_cex_types::NumericValue) -> f64 {
+    match value {
+        safe_cex_types::NumericValue::Number(value) => *value,
+        safe_cex_types::NumericValue::Text(value) => number_from_string(value),
+    }
+}
+
 pub fn js_to_fixed(value: f64, digits: f64) -> Result<String, &'static str> {
     use num_bigint::BigUint;
     let digits = if digits.is_nan() { 0.0 } else { digits.trunc() };
@@ -83,6 +91,111 @@ pub fn js_to_fixed(value: f64, digits: f64) -> Result<String, &'static str> {
     }
     if value < 0.0 {
         text.insert(0, '-');
+    }
+    Ok(text)
+}
+
+/// ECMAScript Number.prototype.toPrecision over the exact binary value: the
+/// nearest `precision` significant digits, ties to the larger magnitude.
+pub fn js_to_precision(value: f64, precision: f64) -> Result<String, &'static str> {
+    use num_bigint::BigUint;
+    if !value.is_finite() {
+        return Ok(js_number_string(value));
+    }
+    let precision = if precision.is_nan() {
+        0.0
+    } else {
+        precision.trunc()
+    };
+    if !(1.0..=100.0).contains(&precision) {
+        return Err("toPrecision() argument must be between 1 and 100");
+    }
+    let p = precision as i64;
+    if value == 0.0 {
+        let mut text = "0".to_owned();
+        if p > 1 {
+            text.push('.');
+            text.extend(std::iter::repeat_n('0', (p - 1) as usize));
+        }
+        return Ok(text);
+    }
+    let bits = value.abs().to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let mantissa = (bits & ((1_u64 << 52) - 1)) | if exponent == 0 { 0 } else { 1_u64 << 52 };
+    let power = if exponent == 0 {
+        -1074
+    } else {
+        exponent - 1075
+    };
+    // |value| = num / den exactly.
+    let (num, den) = if power >= 0 {
+        (
+            BigUint::from(mantissa) << power as usize,
+            BigUint::from(1_u32),
+        )
+    } else {
+        (
+            BigUint::from(mantissa),
+            BigUint::from(1_u32) << (-power) as usize,
+        )
+    };
+    let ten = BigUint::from(10_u32);
+    let pow10 = |n: i64| ten.pow(n.unsigned_abs() as u32);
+    // 10^e <= |value| < 10^(e+1), starting from the f64 estimate.
+    let at_least = |e: i64| {
+        if e >= 0 {
+            num >= &den * pow10(e)
+        } else {
+            &num * pow10(e) >= den
+        }
+    };
+    let mut e = value.abs().log10().floor() as i64;
+    while !at_least(e) {
+        e -= 1;
+    }
+    while at_least(e + 1) {
+        e += 1;
+    }
+    // n = round(|value| / 10^(e-p+1)), ties to the larger n.
+    let shift = e - p + 1;
+    let (scaled_num, scaled_den) = if shift >= 0 {
+        (num, den * pow10(shift))
+    } else {
+        (num * pow10(shift), den)
+    };
+    let mut n = &scaled_num / &scaled_den;
+    if (&scaled_num % &scaled_den) * 2_u32 >= scaled_den {
+        n += 1_u32;
+    }
+    if n == pow10(p) {
+        n = pow10(p - 1);
+        e += 1;
+    }
+    let digits = n.to_string();
+    let mut text = if value < 0.0 {
+        "-".to_owned()
+    } else {
+        String::new()
+    };
+    if e < -6 || e >= p {
+        text.push_str(&digits[..1]);
+        if p > 1 {
+            text.push('.');
+            text.push_str(&digits[1..]);
+        }
+        text.push('e');
+        text.push(if e >= 0 { '+' } else { '-' });
+        text.push_str(&e.unsigned_abs().to_string());
+    } else if e == p - 1 {
+        text.push_str(&digits);
+    } else if e >= 0 {
+        text.push_str(&digits[..(e + 1) as usize]);
+        text.push('.');
+        text.push_str(&digits[(e + 1) as usize..]);
+    } else {
+        text.push_str("0.");
+        text.extend(std::iter::repeat_n('0', (-(e + 1)) as usize));
+        text.push_str(&digits);
     }
     Ok(text)
 }
@@ -563,7 +676,8 @@ pub mod order_policy;
 pub mod sizing;
 pub use coercion::{
     JsCoercionError, JsNumberObject, JsPrimitive, js_number, js_number_object, js_number_primitive,
-    js_string, js_to_number, js_to_number_object, js_truthy, parse_float, parse_int,
+    js_retained_number, js_retained_parse_float, js_retained_string, js_string, js_to_number,
+    js_to_number_object, js_truthy, parse_float, parse_int,
 };
 
 /// Compatibility alias for display_round, not JavaScript Math.round.
@@ -576,7 +690,9 @@ pub use own_keys::{
 };
 
 mod json_stringify;
-pub use json_stringify::{JsJsonValue, js_json_stringify};
+pub use json_stringify::{
+    JsJsonValue, js_json_stringify, js_retained_json_stringify, js_retained_truthy,
+};
 
 mod v8_math;
 pub use v8_math::math_log10;
@@ -596,7 +712,7 @@ mod math_extrema;
 pub use math_extrema::{math_max, math_min};
 
 mod date;
-pub use date::{js_date_parse, js_date_parse_utf16, js_time_clip};
+pub use date::{js_date_parse, js_date_parse_utf16, js_date_to_iso_string, js_time_clip};
 
 mod lodash_case;
 pub use lodash_case::{lodash_camel_case, lodash_snake_case};
@@ -616,4 +732,9 @@ pub mod get_key;
 pub mod numeric_ingress;
 
 pub mod prototype_realm;
-pub use prototype_realm::*;
+pub use prototype_realm::{
+    BuiltinIdentity, BuiltinReference, FunctionMethod, PrototypeRealm, PrototypeRealmBinding,
+    PrototypeRealmFuture, PrototypeScalar, PrototypeValue,
+};
+
+pub mod sorting;

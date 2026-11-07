@@ -2,7 +2,7 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binance.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { serializeWeexParams, signWeexMessage } from '../exchanges/weex/weex.api';
+import { serializeWeexParams, signWeexMessage } from './reference/weex/weex.api';
 
 describe('WEEX API helpers', () => {
   it('serializes query parameters in the same order used for signing', () => {

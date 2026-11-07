@@ -1,6 +1,16 @@
 # JavaScript numeric and language semantics
 
+The individually reviewed accepted contracts and their native/default evidence
+are described in [ACCEPTED_CONTRACTS.md](ACCEPTED_CONTRACTS.md). Keep decoder
+observations separate from body-specific non-decoder classifications. The
+numeric_output_invariant target checks native changed-bit refusals and nested
+paths; its compiling comparison fault must fail before exact restoration passes.
+
 This crate hosts shared ECMAScript compatibility helpers below services and venues.
+BuiltinReference::prototype selects the actual native parent identity in the
+same retained realm. It reads metadata rather than the shadowable `__proto__`
+property and never allocates a second intrinsic heap. The complete accepted
+BuiltinReference contract observes all five parent roles plus existing get/set.
 Use `js_trim` when porting JavaScript String.prototype.trim. Its exact set is:
 U+0009–000D, U+0020, U+00A0, U+1680, U+2000–200A, U+2028, U+2029,
 U+202F, U+205F, U+3000, U+FEFF. It preserves internal whitespace.
@@ -56,11 +66,13 @@ undefined object fields are omitted, array entries become null, and top-level
 undefined returns None. This prepared-data serializer excludes executable
 callbacks/replacers/cycles; BigInt returns the shared TypeError.
 
-`math_log10` ports V8 fdlibm including the fused multiply-add operations measured
-in Node's darwin arm64 build. Literal C++ expression order without contraction
-still differs; preserve explicit mul_add. The reference is this measured runtime,
-not every platform's libm or every V8 build configuration. The live oracle prints
-Node/V8 versions and probes ±256 ULP around every decimal power plus random bits.
+`math_log10` ports V8 fdlibm with native arithmetic profiles: Node's darwin
+arm64 build contracts multiply/add while Linux x64 keeps separate operations.
+Preserve that distinction: forcing either profile globally changes boundary
+results by one ULP. The private profile regression pins the CI decimal-boundary
+witness in both modes; the live oracle prints Node/V8 versions and probes ±256
+ULP around every decimal power plus random bits. Other V8/compiler profiles
+remain outside these measured profiles.
 
 `math_pow` follows V8's DEFAULT `use_std_math_pow` path, not legacy fdlibm.
 The wrapper must retain JS NaN/infinity rules and direct square/square-root
@@ -168,6 +180,14 @@ buffers and generic JSON payloads use `JsNumberInput`: e.g.
 `ApiResponse<JsNumberInput>`, then `data.decode::<Typed>()`. Raw Value decoding
 itself is not declared lossy; the typed adapter must emit real numeric events
 for Serde Content, whose downstream Value visitor cannot retain infinity.
+
+Typed String/keys use the same std UTF-16 well-formed projection as the lower
+native typed adapter: isolated units become U+FFFD under the coordinator's
+2026-10-18 ingress ruling. Capture and retained info remain lossless. The numeric
+eligibility, Value-buffer refusal and native output checks still apply unchanged;
+text normalization must not weaken any of them. Exchange's js_json_parse target
+checks the actual Vec<Market> numeric wire entry alongside the real HTTP/Store
+binding over seven source profiles, retaining all rows and exact info units.
 
 Register ALL output fields with `js_number_output!`. The recursive eligibility
 contract includes skipped and asymmetrically renamed Serialize fields. Exhaustive
@@ -306,7 +326,9 @@ Keep the original numeric-edge corpus and its field-identity fixtures unchanged.
 
 Shared Ticker output eligibility includes timestamp in the exhaustive ordinary
 numeric inventory. Its runtime clock value is not an info passthrough and cannot
-bypass the output check. The ticker_timestamp target observes native field bits.
+bypass the output check. The ticker_timestamp target observes native field bits
+against the retained Paradex reference. Its source inventory scans both the
+production exchange tree and the test-only reference tree.
 
 Source-corpus cardinality checks use exact totals and completed assertion counts;
 thresholds are not completeness checks. The test-only source_cardinality walker
@@ -328,3 +350,43 @@ wire assertions, and pin independent feeder/compared counts. The scripts use
 `SAFE_CEX_TYPESCRIPT_PATH` with the existing source loader. Deliberate compiled
 regressions are restored by `scripts/order-policy-controls.py`; failures must
 include the named native assertion, never only a compiler diagnostic.
+
+get_balance_slice returns a borrowed BalanceSlice containing the source account or exact currency row. An available/locked row remains that shape; get_total_balance_from_balance sees its absent total and applies the source zero default. Do not fall back to the account total merely because a present currency row has a different runtime shape.
+
+Externally tagged numeric enum objects enter through MapAccessDeserializer, whose
+EnumAccess bridge invokes the enum visitor. MapDeserializer's ordinary enum hint
+forwards to visit_map and cannot decode these variants. Require exactly one tag
+before dispatch; the bridge alone need not consume extra keys. Raw/owned/borrowed
+regressions inspect unit/newtype/tuple/record variants and numeric bits, while
+shared string-union front guards still reject tagged maps.
+
+
+`js_date_to_iso_string` applies the existing TimeClip boundary and returns the
+native RangeError name/message for invalid dates. It renders UTC milliseconds,
+including year zero and signed six-digit extended years, without a local timezone
+adapter. The formatter is shared with websocket diagnostics; no venue-local calendar
+copy is introduced. `tests/date_iso.rs`
+compares 1,044 independently counted native bit inputs with actual JavaScript
+Date construction/toISOString, including fractional, nonfinite and clip-edge
+values. It does not implement object-to-primitive Date constructor coercion.
+
+The retained JSON writer traverses the canonical UTF-16 carrier directly. It
+shares the lower quotation helper and numeric/key-order primitives with prepared
+JSON rendering. Undefined and nonfinite numbers remain native until the final
+wire projection; typed Rust Strings normalize isolated units only at their typed
+view, while explicit strict Value projection remains a separate boundary.
+The retained_json_writer target compares every UTF-16 unit and a native object
+containing duplicate/index/lone-unit keys, undefined, infinities and signed zero
+with Node JSON.stringify. It also observes the retained input after rendering.
+`python3 scripts/retained-json-controls.py` runs exclusively, injecting the former
+string refusal, former key replacement, writer text replacement and a truncated
+writer array. Each compiled fault must fail its named production boundary or
+Node comparison and pass again after exact source restoration.
+`node ../safe-cex-parity/scripts/retained-json-contracts.mjs --package=safe-cex-num`
+checks the six compiler-owned writer APIs: one native prepared-value conversion
+and five specific outbound classifications. Those classifications are separate
+from the executed Node comparisons and corruption controls above.
+
+`sorting::stable_sort` owns the single V8 13.6 TimSort implementation, moved
+from Exchange. Generic comparator errors remain original values; infallible
+callers use Infallible. Store and native JS callers share the same algorithm.

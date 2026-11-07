@@ -5,6 +5,8 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'no
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { rustLicenseEntries } from './rust-licenses.mjs';
+
 const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = path.resolve(SCRIPTS_DIR, '..');
 const REPO_ROOT = path.resolve(PACKAGE_DIR, '../..');
@@ -41,9 +43,8 @@ const UNLICENSED_ALLOWED = {
 const CANONICAL_TEXT = {
   'Apache-2.0': () => readFileSync(path.join(SCRIPTS_DIR, 'licenses/Apache-2.0.txt'), 'utf8').trim(),
   MIT: (author) =>
-    readFileSync(path.join(SCRIPTS_DIR, 'licenses/MIT.txt'), 'utf8')
-      .replace('{{author}}', author)
-      .trim(),
+    readFileSync(path.join(SCRIPTS_DIR, 'licenses/MIT.txt'), 'utf8').replace('{{author}}', author).trim(),
+  'CC0-1.0': () => readFileSync(path.join(SCRIPTS_DIR, 'licenses/CC0-1.0.txt'), 'utf8').trim(),
 };
 
 /** `node_modules/@a/b/x.js` → `node_modules/@a/b`; `thirdparty/x/src/y.ts` → `thirdparty/x`. */
@@ -118,8 +119,7 @@ const noticeSection = (root) => {
     .trim();
 };
 
-const authorOf = ({ author, name }) =>
-  (typeof author === 'string' ? author : author?.name) || `the ${name} authors`;
+const authorOf = ({ author, name }) => (typeof author === 'string' ? author : author?.name) || `the ${name} authors`;
 
 const fallbackText = (manifest) => {
   const ids = new Set(manifest.license.match(/[A-Za-z0-9.-]+/g));
@@ -179,12 +179,13 @@ if (refused.length) {
   process.exit(1);
 }
 
-const sections = [...packages.values()]
+const rust = rustLicenseEntries(REPO_ROOT, fallbackText);
+const sections = [...packages.values(), ...rust]
   .sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
   .map(({ name, version, license, text }) => `## ${name}@${version} (${license})\n\n${text}`);
 writeFileSync(
   OUTPUT,
-  `# Third-party licences\n\n\`dist/index.js\` bundles the packages below.\n\n${sections.join('\n\n')}\n`,
+  `# Third-party licences\n\n\`dist/index.js\` and its owned WASM assets bundle the packages below. Rust entries conservatively include the pinned engine's non-dev Cargo dependency graph, including build tools.\n\n${sections.join('\n\n')}\n`,
 );
 rmSync(METAFILE);
-console.log(`THIRD_PARTY_LICENSES.md: ${packages.size} entries`);
+console.log(`THIRD_PARTY_LICENSES.md: ${packages.size} JS entries, ${rust.length} Rust notices`);

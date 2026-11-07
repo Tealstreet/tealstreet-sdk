@@ -1231,6 +1231,33 @@ describe('BuyCommand', () => {
   // TSBUG-106: opt-in aggregate notional budget caps cumulative
   // exposure-increasing order notional this session.
   describe('aggregate budget', () => {
+    // A linear contract venue sizes in contracts: BloFin TRX is 1000 TRX each. $1000 at $0.25
+    // is 4 contracts, and its notional must be counted back as $1000, not 4 × $0.25.
+    it('counts a contract venue order at its real notional', async () => {
+      const exchange = createMockExchange({
+        name: 'blofin',
+        store: {
+          markets: [
+            {
+              symbol: 'TRXUSDT',
+              base: 'TRX',
+              quote: 'USDT',
+              contractSize: 1000,
+              precision: { amount: 1, price: 0.00001 },
+            },
+          ],
+          tickers: [{ symbol: 'TRXUSDT', last: 0.25 }],
+          orders: [],
+          positions: [],
+        },
+      } as unknown as Partial<ExchangeLike>);
+      const store = new MemoryPreprocessStore();
+      store.setBudget(5000);
+      const r = await command.execute(createMockContext(['buy', '$1000'], exchange, 'TRXUSDT', store));
+      expect(r.success).toBe(true);
+      expect(store.getBudgetSpent()).toBeCloseTo(1000);
+    });
+
     it('is off by default (no budget set → no gating)', async () => {
       const exchange = createMockExchange();
       const store = new MemoryPreprocessStore();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getBybitResponseMeta } from '../exchanges/bybit/bybit.response';
+import { getBybitResponseMeta } from './reference/bybit/bybit.response';
 
 describe('getBybitResponseMeta', () => {
   it('treats native Bybit success payloads as successful', () => {

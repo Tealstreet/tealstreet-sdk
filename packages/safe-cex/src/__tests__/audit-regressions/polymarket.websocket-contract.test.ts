@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DefaultStore } from '../../store/store.base';
-import { PolymarketExchange } from '../../exchanges/polymarket/polymarket.exchange';
-import { PolymarketPrivateWebSocket } from '../../exchanges/polymarket/polymarket.ws-private';
-import { POLYMARKET_CONFIG } from '../../exchanges/polymarket/polymarket.constants';
+import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
+import { PolymarketPrivateWebSocket } from '../reference/polymarket/polymarket.ws-private';
+import { POLYMARKET_CONFIG } from '../reference/polymarket/polymarket.constants';
 
 const credentials = {
   apiKey: 'api-key',

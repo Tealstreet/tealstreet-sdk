@@ -1,0 +1,47 @@
+// Documented raw CLOB V2/Gamma/Data shapes, synthetic account and public test key.
+// Never connects a private API or submits a live order.
+import { mkdirSync,writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { parseArgs } from 'node:util';
+import { createRequire } from 'node:module';
+import { POLYMARKET_REPLAY } from './polymarket.mjs';
+const require=createRequire(new URL('../../packages/safe-cex/package.json',import.meta.url));
+const {ethers}=require('ethers');
+const {values}=parseArgs({options:{out:{type:'string',default:'sdk-rs/harness/tapes/polymarket-private.jsonl'}}});
+const EPOCH=1792464000000, REST='https://clob.polymarket.com', DATA='https://data-api.polymarket.com', GAMMA='https://gamma-api.polymarket.com', WS='wss://ws-subscriptions-clob.polymarket.com/ws/user';
+const wallet=new ethers.Wallet(POLYMARKET_REPLAY.key);
+const records=[{t:0,type:'meta',epoch:EPOCH,private:true},{t:0,type:'config',private:true,options:POLYMARKET_REPLAY}];
+const http=(method,url,body,requestBody,extra={})=>records.push({t:0,type:'http',method,url,status:200,body:JSON.stringify(body),...(requestBody===undefined?{}:{requestBody:JSON.stringify(requestBody)}),...extra});
+const gamma=(slug,ids,negRisk)=>({conditionId:negRisk?'0x456':'0x123',slug,question:'Documented synthetic prediction',description:'Raw V2 contract fixture; not live private traffic',endDate:'2026-12-31',clobTokenIds:JSON.stringify(ids),outcomes:'["Yes","No"]',active:true,closed:false,orderPriceMinTickSize:0.01,orderMinSize:1,negRisk,enableOrderBook:true,acceptingOrders:true});
+http('GET',`${GAMMA}/markets/keyset?active=true&closed=false&limit=100`,{markets:[gamma('fixture',['1','2'],false),gamma('negative',['3','4'],true)]});
+http('POST',`${REST}/midpoints`,{'1':'0.5','2':'0.5','3':'0.6','4':'0.4'},['1','2','3','4'].map(token_id=>({token_id})));
+http('GET',`${REST}/balance-allowance?asset_type=COLLATERAL&signature_type=0`,{balance:'100000000',allowances:{}});
+http('GET',`${REST}/data/orders?next_cursor=MA%3D%3D`,{data:[],next_cursor:'LTE='});
+const holding=(size)=>({asset:'1',conditionId:'0x123',size,avgPrice:0.5,curPrice:0.6,cashPnl:size*0.1,redeemable:false,mergeable:true});
+http('GET',`${DATA}/positions?user=${wallet.address}&limit=500&offset=0&sizeThreshold=0`,[holding(10)]);
+http('GET',`${DATA}/positions?user=${wallet.address}&limit=500&offset=0&sizeThreshold=0`,[holding(12)],undefined,{availableAt:1500});
+const ws=(t,body)=>records.push({t,type:'ws',url:WS,text:JSON.stringify(body)});
+records.push({t:100,type:'ws',url:WS,text:'PONG'},{t:10100,type:'ws',url:WS,text:'PONG'});
+const command=(t,body)=>records.push({t,type:'command',...body});
+const order=(id,asset_id='1',extra={})=>({id,asset_id,market:'0x123',side:'BUY',original_size:'10',size_matched:'0',price:'0.5',status:'LIVE',order_type:'GTC',created_at:EPOCH/1000,...extra});
+ws(800,{event_type:'order',type:'PLACEMENT',...order('external')});
+const trade={event_type:'trade',id:'exec-1',taker_order_id:'external',asset_id:'1',market:'0x123',side:'BUY',size:'2',price:'0.5',status:'MATCHED',owner:POLYMARKET_REPLAY.polymarket.apiKey,trade_owner:POLYMARKET_REPLAY.polymarket.apiKey,trader_side:'TAKER',match_time:String(EPOCH/1000+1),maker_orders:[]};
+ws(1500,trade);ws(1900,{...trade,status:'MINED'});ws(2300,{...trade,status:'CONFIRMED'});
+ws(2700,{event_type:'order',type:'CANCELLATION',...order('external','1',{size_matched:'2',status:'CANCELED',timestamp:String(EPOCH+2700)})});
+const zero=`0x${'00'.repeat(32)}`;
+const signed=(token,side,maker,taker)=>({salt:1,maker:wallet.address,signer:wallet.address,tokenId:token,makerAmount:maker,takerAmount:taker,side,signatureType:0,timestamp:String(EPOCH),expiration:'0',metadata:zero,builder:zero,signature:'0x'});
+const post=(wire,id)=>http('POST',`${REST}/order`,{success:true,orderID:id,status:'live'},{deferExec:false,postOnly:false,order:wire,owner:POLYMARKET_REPLAY.polymarket.apiKey,orderType:'GTC'});
+command(3200,{op:'placeOrders',orders:[{symbol:'fixture-Yes',type:'limit',side:'buy',amount:5,price:0.5}]});post(signed('1','BUY','2500000','5000000'),'placed-1');
+ws(4200,{event_type:'order',type:'PLACEMENT',...order('placed-1','1',{original_size:'5'})});
+command(4800,{op:'cancelOrders',ids:['placed-1']});http('DELETE',`${REST}/orders`,{canceled:['placed-1'],not_canceled:{}},['placed-1']);
+ws(5500,{event_type:'order',type:'CANCELLATION',...order('placed-1','1',{original_size:'5',status:'CANCELED'})});
+command(6200,{op:'placeOrders',orders:[{symbol:'negative-Yes',type:'limit',side:'sell',amount:5,price:0.6}]});post(signed('3','SELL','5000000','3000000'),'placed-2');
+ws(7200,{event_type:'order',type:'PLACEMENT',...order('placed-2','3',{original_size:'5',side:'SELL',price:'0.6'})});
+command(7800,{op:'cancelOrders',ids:['placed-2']});http('DELETE',`${REST}/orders`,{canceled:['placed-2'],not_canceled:{}},['placed-2']);
+ws(8500,{event_type:'order',type:'CANCELLATION',...order('placed-2','3',{original_size:'5',side:'SELL',price:'0.6',status:'CANCELED'})});
+command(9100,{op:'setLeverage',symbol:'fixture-Yes',leverage:20});command(9500,{op:'setMarginType',symbol:'fixture-Yes',isolated:true});command(9900,{op:'setPositionMode',hedged:true});
+command(10050,{op:'cancelSymbolOrders',symbol:''});http('DELETE',`${REST}/cancel-all`,{canceled:['server-only'],not_canceled:{}});
+// Last harmless frame lets periodic authoritative state settle after commands.
+ws(12000,{event_type:'order',type:'CANCELLATION',...order('external','1',{size_matched:'2',status:'CANCELED',timestamp:String(EPOCH+12000)})});
+records.sort((a,b)=>a.t-b.t);mkdirSync(dirname(values.out),{recursive:true});writeFileSync(values.out,records.map(r=>JSON.stringify(r)).join('\n')+'\n');
+console.log(JSON.stringify({out:values.out,records:records.length,frames:records.filter(r=>r.type==='ws').length,commands:records.filter(r=>r.type==='command').length}));

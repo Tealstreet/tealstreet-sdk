@@ -1,9 +1,0 @@
-{
-  "base_sha": "0b4a32422659e26f7054b5e50b25cea6a6974e33",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n@@ -271,6 +271,6 @@\n         host.clear_timeout(clear, host.timeout()?)?;\n         host.assign_timeout(host.undefined_timeout())?;\n     }\n-    host.base_dispose()?;\n-    Ok(())\n-}\n+    // mutation omits superclass disposal\n+    Ok(())\n+}\n",
-  "expected_named_assertion": "BITRUE-SYNC-NATIVE-IMMEDIATE-EFFECTS dispose:0",
-  "runtime_proof": true,
-  "stop_case_name": "dispose:0",
-  "stop_case_index": 145
-}

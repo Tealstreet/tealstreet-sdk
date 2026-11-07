@@ -1,9 +1,0 @@
-{
-  "target_binaries": 66,
-  "passed": 242,
-  "failed": 0,
-  "ignored": 0,
-  "gate_sha": "183d894f2712e718d6d5d3d31de76ed90a1a3119",
-  "expectation": "binance-test-expectation.json",
-  "method": "Completed Cargo test result lines compared against independent source enumeration."
-}

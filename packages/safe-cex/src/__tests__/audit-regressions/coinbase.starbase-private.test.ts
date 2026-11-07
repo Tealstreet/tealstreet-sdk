@@ -9,7 +9,7 @@ import {
   OrderTimeInForce,
   OrderType,
 } from '../../types';
-import { CoinbaseStarbaseProtocolError } from '../../exchanges/coinbase/coinbase.starbase';
+import { CoinbaseStarbaseProtocolError } from '../reference/coinbase/coinbase.starbase';
 import {
   assessCoinbaseStarbaseBalanceParity,
   assessCoinbaseStarbasePositionParity,
@@ -33,7 +33,7 @@ import {
   decodeCoinbaseStarbaseTradePage,
   normalizeCoinbaseStarbaseOrder,
   normalizeCoinbaseStarbaseTrade,
-} from '../../exchanges/coinbase/coinbase.starbase-private';
+} from '../reference/coinbase/coinbase.starbase-private';
 import {
   STARBASE_ACCOUNT_SUMMARY_FIXTURE,
   STARBASE_ETH_HISTORY_ORDER_FIXTURE,
@@ -422,13 +422,13 @@ describe('Coinbase Starbase inert read-only private state', () => {
   it('remains absent from active Coinbase runtime, routing, and metadata imports', () => {
     const coinbaseDirectory = resolve(process.cwd(), 'src/exchanges/coinbase');
     const activeFiles = [
-      'coinbase.api.ts',
-      'coinbase.exchange.ts',
-      'coinbase.types.ts',
-      'coinbase.utils.ts',
-      'coinbase.ws-private.ts',
-      'coinbase.ws-public.ts',
-      'coinbasespot.exchange.ts',
+      '../../__tests__/reference/coinbase/coinbase.api.ts',
+      '../../__tests__/reference/coinbase/coinbase.exchange.ts',
+      '../../__tests__/reference/coinbase/coinbase.types.ts',
+      '../../__tests__/reference/coinbase/coinbase.utils.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-private.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-public.ts',
+      '../../__tests__/reference/coinbase/coinbasespot.exchange.ts',
     ];
     for (const file of activeFiles) {
       const source = readFileSync(resolve(coinbaseDirectory, file), 'utf8');

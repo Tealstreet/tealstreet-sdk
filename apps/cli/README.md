@@ -28,6 +28,7 @@ yarn workspace; `@tealstreet/*` deps resolve from there).
 
 ```bash
 yarn install                 # from the monorepo root
+corepack yarn -s rust:build-wasm # build the Rust engine asset before source runs/builds
 
 cd apps/cli
 yarn dev                     # run the REPL from source (= bun run src/index.ts)
@@ -46,6 +47,10 @@ one for your machine:
 yarn build
 ./dist/tealstreet-darwin-arm64        # or -darwin-x64 / -linux-x64 / -linux-arm64
 ```
+
+The same tree also builds the Disrupt-branded CLI (`src/brand.ts`): `yarn build
+disrupt` emits `dist/disrupt-<platform>`, logging in through `app.disrupt.trade` and
+storing under `~/.disrupt/`.
 
 ### npm package
 
@@ -203,6 +208,13 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
   noisy prefixes there, not in `logger.ts`.
 - **Everything else prints _above_ the prompt** via `writeAbovePrompt`
   (readline-aware), so async output never corrupts what the user is typing.
+- **Glyphs go through `src/console-glyphs.ts`.** On a legacy Windows console
+  TTY, terminal renderers print ASCII markers (`[x] [!] [ok] [i]`) and terminal
+  sinks transliterate tables; JSON, pipes and capture/listener output stay
+  Unicode. `TEALSTREET_ASCII=1`/`0` overrides. A test rejects raw glyphs.
+- **Error lines always name the cause.** `src/error-cause.ts` turns every
+  non-string `console.error/warn` argument into its message, code or a bounded
+  serialization, so a prefix like `bybitdemo error` never prints alone.
   `console.warn` / `console.error` (and any line `log-classify.ts` rates
   `critical`) are additionally mirrored on the **top status bar**
   (`src/status-line.ts`). ("critical" is a severity classification, not a
@@ -210,6 +222,10 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
 - **`print()` / `originalConsoleLog()` bypass all of the above** — use them for
   primary command output, prompts, progress, and anything the user explicitly
   asked for.
+- **Clock skew.** Bybit timestamp refusals use per-account Rust clock correction
+  and one bounded re-signed retry. The CLI prints one warning per session with
+  the measured fast/slow offset and Windows time-sync steps.
+
 - **Verbose transport diagnostics share `cli.log`.** When the CLI runs with
   `DEBUG=1` or `DEBUG=true`, tunneled HoW/tradetunnel REST requests emit
   sanitized `[TradeTunnel]` request/response summaries through the existing

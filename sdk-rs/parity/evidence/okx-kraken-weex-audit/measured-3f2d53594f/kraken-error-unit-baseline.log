@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","controlled":false,"observations":[{"id":"kraken-error-unit","units":[55296],"consumer":"returned Error.message inspected by caller; no human-only assumption"}]}

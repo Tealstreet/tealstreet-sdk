@@ -1,8 +1,0 @@
-BASE SHA: 46d08011f1c214801efde108c82bd168da0291f2
-VARIANT: clean tracked tree
-COMMAND: ["/opt/homebrew/opt/rustup/bin/cargo", "check", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-cryptocom", "--all-targets", "--jobs", "2", "--locked"]
-    Checking safe-cex-exchange v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-exchange)
-    Checking safe-cex-venue-cryptocom v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-venue-cryptocom)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.05s
-
-MEASURED EXIT: 0

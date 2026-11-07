@@ -113,6 +113,10 @@ proxyRegion?: string,
 /**
  * @ts-mutable
  */
+hyrotraderDemo?: boolean, 
+/**
+ * @ts-mutable
+ */
 useExtensionDirect?: boolean, 
 /**
  * @ts-mutable

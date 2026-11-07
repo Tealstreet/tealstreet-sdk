@@ -1,5 +1,0 @@
-HEAD SHA: 6cc1419ae9921b47373219dba281d68a70af9113
-CODE SHA: 06c0dba6741006d7f47a307d9bd786a7e72f055f
-COMMAND: ["git", "diff", "--exit-code", "06c0dba6741006d7f47a307d9bd786a7e72f055f", "HEAD", "--", "sdk-rs/rust-toolchain.toml", ".cargo", "sdk-rs/.cargo"]
-
-MEASURED EXIT: 0

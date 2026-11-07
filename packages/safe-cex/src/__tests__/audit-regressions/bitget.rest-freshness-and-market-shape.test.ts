@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
@@ -66,7 +66,13 @@ const rawAlgoOrder = (overrides: Record<string, any> = {}) => ({
 });
 
 describe('audit regression: Bitget REST freshness and market shape', () => {
-  it('uses current contract max quantity fields before legacy maxTradeNum', async () => {
+  it.each([
+    { cap: '45', expected: 45 },
+    { cap: '200', expected: 123 },
+    { cap: '0', expected: 123 },
+    { cap: '-1', expected: 123 },
+    { cap: undefined, expected: 123 },
+  ])('publishes the conservative maximum with native market cap $cap', async ({ cap, expected }) => {
     const exchange = createExchange();
     (exchange.xhr.get as any).mockResolvedValue({
       data: {
@@ -81,7 +87,7 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
             priceEndStep: '5',
             minTradeNum: '0.001',
             maxOrderQty: '123',
-            maxMarketOrderQty: '45',
+            maxMarketOrderQty: cap,
             maxTradeNum: '999',
             minLever: '1',
             maxLever: '125',
@@ -95,7 +101,7 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     expect(exchange.xhr.get).toHaveBeenCalledWith(ENDPOINTS.MARKETS, {
       params: { productType: 'usdt-futures' },
     });
-    expect(market.limits.amount.max).toBe(123);
+    expect(market.limits.amount.max).toBe(expected);
   });
 
   it('sends startTime whenever an OHLCV from timestamp is requested', async () => {
@@ -251,6 +257,9 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     vi.useFakeTimers();
     try {
       const exchange = createExchange();
+      // Only a started instance arms the watchdog; the never-started web mirror
+      // no longer does (private-ws-login-and-mirror fix). This is the started one.
+      (exchange as any).privateStreamStarted = true;
       const warning = vi.spyOn(exchange.emitter, 'emit');
       const privateWebsocket = exchange.privateWebsocket as any;
       const reconnect = vi.spyOn(privateWebsocket, 'reconnect').mockImplementation(() => {});
@@ -290,7 +299,8 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
         expect.stringContaining('Bitget private WS is not receiving live order/position updates'),
         { forceToast: true },
       );
-      expect(privateWebsocket.useFallbackUrl).toBe(true);
+      // The watchdog no longer flips a fallback route (removed with useFallbackUrl in the
+      // bitget egress change); route changes now follow 40018 / closes before login.
       expect(reconnect).toHaveBeenCalled();
       expect(fetchOrders).toHaveBeenCalled();
       expect(exchange.store.orders).toEqual([expect.objectContaining({ id: 'tp-1', status: OrderStatus.Open })]);
@@ -304,6 +314,9 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     vi.useFakeTimers();
     try {
       const exchange = createExchange();
+      // Only a started instance arms the watchdog; the never-started web mirror
+      // no longer does (private-ws-login-and-mirror fix). This is the started one.
+      (exchange as any).privateStreamStarted = true;
       const warning = vi.spyOn(exchange.emitter, 'emit');
       exchange.unlimitedXHR = {
         post: vi.fn().mockResolvedValue({ data: { code: '00000', data: { orderId: 'tp-1' } } }),

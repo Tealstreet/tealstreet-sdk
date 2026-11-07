@@ -1,0 +1,20 @@
+[package]
+name = "safe-cex-remote-signer"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Native Signer that forwards sign work to the client's device over the hosted ws-auth wire"
+
+[dependencies]
+safe-cex-engine.workspace = true
+base64.workspace = true
+getrandom.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { version = "1.53.3", features = ["sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true

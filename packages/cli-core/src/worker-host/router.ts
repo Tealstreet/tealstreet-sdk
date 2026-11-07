@@ -77,7 +77,7 @@ export const routeCommands = async (exchange: Exchange, symbol: string, commands
     } else {
       // Sequential execution - wait for completion
       lastResult = await commandRouter(exchange, symbol, command, reqId);
-      if (reqId === undefined && lastResult.handled && lastResult.success === false) {
+      if (reqId === undefined && lastResult.handled && lastResult.success === false && !lastResult.errorReported) {
         exchange.emitter.emit('exec-log', {
           message: lastResult.error ?? 'Command failed',
         });
@@ -96,6 +96,8 @@ export const routeCommands = async (exchange: Exchange, symbol: string, commands
       handled: boolean;
       success?: boolean;
       error?: string;
+      errorReported?: boolean;
+      errorDetails?: ExecuteResult['errorDetails'];
       data?: ExecuteResult['data'];
     } = {
       reqId,
@@ -103,6 +105,8 @@ export const routeCommands = async (exchange: Exchange, symbol: string, commands
     };
     if (lastResult?.success !== undefined) payload.success = lastResult.success;
     if (lastResult?.error !== undefined) payload.error = lastResult.error;
+    if (lastResult?.errorDetails !== undefined) payload.errorDetails = lastResult.errorDetails;
+    if (lastResult?.errorReported !== undefined) payload.errorReported = lastResult.errorReported;
     if (lastResult?.data !== undefined) payload.data = lastResult.data;
     exchange.emitter.emit('exec-result', payload);
   }

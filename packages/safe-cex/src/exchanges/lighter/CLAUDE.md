@@ -209,6 +209,7 @@ Topics are tracked per channel and re-subscribed on reconnect.
 **Orderbook fallback behavior**:
 
 - On subscribe, primes orderbook immediately through `OrderApi.getOrderBookOrders()` (before waiting for first WS snapshot). The SDK maps the current official `/api/v1/orderBookOrders` route and normalizes its `{ bids, asks, remaining_base_amount }` response.
+- On public WS reconnects, active orderbook topics are primed through the same REST route, and public close events keep active books on REST fallback until live WS book frames resume. Do not make reconnect recovery wait only on the long stale-orderbook timer; DOM/depth/orderbook panels need a near-term book after account reloads or route changes.
 - That endpoint returns raw orders, so the public socket coalesces equal-price orders per side before sorting and calculating cumulative depth totals.
 - If initial WS snapshot does not arrive quickly, enables periodic REST orderbook fallback.
 - If WS orderbook goes stale, attempts recovery with re-subscribe first, then reconnect on repeated failure.
@@ -326,7 +327,7 @@ Private data can arrive as:
 
 ### Order ID Generation
 
-Client-side IDs: `(BigInt(Date.now()) * 100n + random 0..99) % maxClientOrderIndex`. Lot orders increment the base ID by `BigInt(i)` and stay within int48 client-order bounds.
+Client-side IDs use one instance allocator: the timestamp/random candidate seeds a positive 48-bit index, and each reservation is greater than the previous reservation even when time moves backward. Every actual lot or sibling reserves independently before its send; interleaved orders can occupy intervening indices. Failed sends do not release indices, and exhaustion rejects instead of wrapping.
 
 ### Order Placement
 
@@ -341,7 +342,7 @@ Client-side IDs: `(BigInt(Date.now()) * 100n + random 0..99) % maxClientOrderInd
 9. If amount exceeds the market max amount, split into lots:
    - Calculate lot count: `Math.ceil(amount / maxSize)`
    - Calculate remainder: `amount % maxSize`
-   - Each lot gets sequential orderId (`orderId + BigInt(i)`)
+   - Each lot reserves its own orderId from the shared instance allocator
    - 100ms delay between lot submissions
    - Remainder submitted as final lot if non-zero
 10. Each lot: `signerAdapter.createOrder(...)`
@@ -535,7 +536,7 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 - `candleApiCountLimit`: `500`
 - `disconnectWarningThreshold`: `60000` ms
 - `recvWindow`: `20000` ms
-- `TP/SL trigger types`: `LastPrice`, `MarkPrice`
+- `TP/SL trigger types`: `MarkPrice`
 - `supportsTrailingStopLoss`: `false`
 
 ## Testnet / Demo
@@ -556,9 +557,10 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 - **Direct Private (Livenet)**: `wss://mainnet.zklighter.elliot.ai/stream`
 - **Direct Private (Testnet)**: `wss://testnet.zklighter.elliot.ai/stream`
 - **Direct Private (Robinhood)**: `wss://api.rh.lighter.xyz/stream`
-- **Proxy Public**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true`
-- **Proxy Private**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream`
-- **Proxy Public/Private (Robinhood)**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter-rh/stream` (`tealstreet-ws-lighter-rh` deployment, Tokyo EKS)
+- **Proxy Public**: `wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream?readonly=true`
+- **Proxy Private**: `wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream`
+- **Proxy Public/Private (Robinhood)**: `wss://fsjnpy143pbz-tyo.tealstreet.io/lighter-rh/stream`
+- These are containers on the Vultr tunnel hosts (AWS_EXIT step 5b); the hosted exchange server dials the same paths.
 
 When `tealstreetWsRoute` is enabled, both public and private Lighter WebSockets start on the Tealstreet proxy route. Public ticker/orderbook priming must not wait for direct-route failure promotion, because the order form and ticks chart depend on those public streams even when private connectivity is proxied. Keep rare fallbacks available for proxy-infra development: public ticker REST fallback should run while proxy WS is slow/down, and direct public WS should only be probed after repeated proxy-route failures before returning to proxy if that probe also fails.
 
@@ -589,7 +591,7 @@ When `tealstreetWsRoute` is enabled, both public and private Lighter WebSockets 
 
 6. **Both CANCELLED and CANCELED spellings**: The code handles both `CANCELLED` and `CANCELED` status strings and both `USER_CANCELLED` and `USER_CANCELED` cancel reasons.
 
-7. **Market and stop-order slippage**: Market orders are executed as slippage-bounded orders. Use a positive live reference price before applying 2% slippage; `mark` may lag initial ticker/orderbook data after startup, so fall back to side BBO, last, index, midpoint, or opposite-side BBO rather than signing price `0`. Lighter stop-loss/take-profit orders also require a `price` guard: official docs state that this price is the allowed slippage/worst acceptable execution price after the trigger. The web Margin module exposes `lighterStopSlippagePct` (default 1%, max 50%) and `lighter.exchange.ts` converts it into the conditional order `price`.
+7. **Market and stop-order slippage**: Market orders are executed as slippage-bounded orders. Use a positive live reference price before applying 2% slippage; `mark` may lag initial ticker/orderbook data after startup, so fall back to side BBO, last, index, midpoint, or opposite-side BBO rather than signing price `0`. Lighter stop-loss/take-profit orders trigger against mark price; the signed create-order payload has no trigger-source field. Lighter stop-loss/take-profit orders also require a `price` guard: official docs state that this price is the allowed slippage/worst acceptable execution price after the trigger. The web Margin module exposes `lighterStopSlippagePct` (default 1%, max 50%) and `lighter.exchange.ts` converts it into the conditional order `price`.
 
 8. **CORS forbidden**: The exchange metadata sets `forbidCors: true` and all REST traffic is routed through the Tealstreet exchange proxy.
 
@@ -597,7 +599,7 @@ When `tealstreetWsRoute` is enabled, both public and private Lighter WebSockets 
 
 10. **OHLCV timestamp normalization + fallback**: Candle timestamps are normalized to internal seconds, and `listenOHLCV()` uses REST fallback polling + de-dup emission whenever WS candles go stale.
 
-11. **SDK client order IDs**: `generateLighterClientId()` in `lighter.utils.ts` generates IDs but is not used in the main order flow — the exchange uses BigInt timestamp-based IDs instead.
+11. **SDK client order IDs**: `generateLighterClientId()` in `lighter.utils.ts` is not used in the main order flow. One synchronous instance allocator reserves positive 48-bit numeric indices for every single, split, bracket and batched leg. Frozen/backward time and overlapping sends cannot reuse an index within that instance; failed or unknown sends keep their reservations. Exhaustion rejects before the next send instead of wrapping. This is not a cross-device, cross-instance or restart uniqueness guarantee, and generated IDs are not retry authorization. Caller-supplied IDs remain unsupported.
 
 12. **Ticker mark/index fallback**: If `markPrice` is not provided but `indexPrice` is, mark is set to index price. `market_stats` may identify markets by `market_id` without `symbol`; keep id-based ticker matching and do not overwrite existing prices with `0` when optional fields are omitted.
 
@@ -703,7 +705,7 @@ This section supersedes older notes that reference direct `transactionClient` us
   - globally via constants in `lighter.builder-fee.ts`, or
   - per-account via `options.extra.lighterIntegratorAccountIndex`.
 - Integrator account index must be a numeric `accountIndex` value (not API key or API key index).
-- `lighter-robinhood` intentionally has no default Tealstreet integrator index yet. Do not reuse the zkLighter mainnet index; only attach attribution when a Robinhood-specific index is explicitly configured.
+- `lighter-robinhood` uses the Robinhood-specific Tealstreet integrator account index `47296`. Do not reuse the ordinary zkLighter mainnet index (`158385`) for Robinhood.
 - `ApproveIntegrator` flow now has local SDK signing + transport support (`tx_type = 45`).
 - Existing/legacy saved Lighter accounts may predate Tealstreet's builder-fee approval flow. Do not assume an account is approved just because it can trade or has an API key.
 - Lighter rejects attributed create-order transactions with `21149 integrator is not approved` when `L2TxAttributes` are present but the account has no valid approval for the configured integrator/fee caps.
@@ -790,3 +792,94 @@ Use a small funded account and minimum-safe size.
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+## Rust engine
+
+`engine: 'rust'` selects `sdk-rs/venues/lighter` for both `lighter` and
+`lighter-robinhood` perpetuals, with deployment-local hosts, quote currency and
+signing chain. The Rust host forwards Application ID, API key index, integrator
+index (as exact decimal text), `remoteSigner`, `extra.lighterSignerProvider`,
+and `extra.lighterStopSlippagePct`. Missing API key index, or neither a local
+secret nor `remoteSigner`, starts public-only data. A remote signer without a
+local secret enables unsigned account snapshots and polling; it does not
+provide transaction signing or a private socket. Remote-only native writes fail
+when the signer is unavailable. Caller client order IDs are refused on every
+shape and across the entire batch before any engine command/write.
+
+Both sockets use engine timers for handshake, idle and reconnect watchdogs.
+Private fills come exclusively from execution records, deduplicated by native
+trade ID; a filled-order cumulative amount is never another execution. Live
+executions during the first five seconds after connecting are retained, while
+subscription history is suppressed. Settings use per-market confirmation clocks
+and uncertain writes block dependent settings updates until fresh confirmation.
+
+Rust history reads actual executions from `trades`, inactive orders from
+`accountInactiveOrders`, and funding from `positionFunding`. It preserves exact
+IDs, signed rebates and actual account-side realized PnL, converts native fee
+rate ticks using `FeeTick = 1_000_000`, and fails incomplete cursor walks rather
+than returning a successful empty/partial history. Execution results retain SDK
+seconds; engine range inputs use integer milliseconds.
+
+The signer supports current market IDs `0..32767` except reserved `255`; API key
+indices remain `0..254`. Independent TS/Go-WASM vectors cover serialization,
+preimages, builder fp5 aggregation, auth and the new high market IDs. Unused
+first-port grouped-order/approval signer surfaces and their unused 32-byte hash
+helpers are removed; the exchange places bracket siblings sequentially as TS
+currently does. Deliberate TS fixes are listed in the port plan and replay gate.
+
+## Rust position leverage and partial amendments
+
+Position `initial_margin_fraction` is a percent string (`"20.00"` = 20% = 5x;
+`"1.00"` = 100x, clamped to the market max); strings above 100 and integers are
+1/10,000 ticks, floats are percents.
+After a private reconnect, fills made during the outage are backfilled once from
+`/api/v1/trades`; fills stamped ahead of the host clock are kept.
+Public market risk fractions keep their separate tick-based interpretation.
+Margin-mode writes preserve the parsed position leverage. Invalid market
+bounds fail without panicking or replacing a known account snapshot.
+Price-only cancel/recreate amendments use the observed remaining quantity;
+explicit replacement amounts keep the caller's requested quantity. This fixes
+the TS default that re-places the original amount after a partial execution.
+
+## Rust shared public feeds
+
+Shared public-feed snapshots revalue loaded native positions with the current
+positive normalized mark, then last price, using the direct ticker handler's
+PnL formula. The ticker mapper copies index into mark when mark is absent;
+an explicit zero mark falls through to last. These are cumulative ticker
+snapshots, so the fallback uses current native fields rather than which
+optional fields appeared in a venue delta.
+Public quotes do not mark private datasets loaded and do not change balance;
+the next authenticated account snapshot calculates balance from native reported
+PnL (or retained prior same-side PnL when omitted), preserving native equity/free.
+Shared prices can still revalue displayed positions after that snapshot. Later
+native REST ticker seeds cannot replace provider quotes and reapply position
+valuations after restoration.
+
+A partial Rust catalogue must not turn unknown owned exposure into an empty
+successful account. A REST snapshot with an unmappable nonzero position, or
+an open-order scope with an unmappable working order, warns and retains its
+previous scope. Zero unknown positions and terminal unknown orders remain
+ignorable. This bounded whole-scope guard precedes separate row-isolation work.
+
+Rust private account valuation uses the native `positions[].unrealized_pnl` and
+`position_value` when supplied (official model:
+https://github.com/elliottech/lighter-python/blob/main/docs/AccountPosition.md).
+Missing native PnL retains the prior finite valuation for the same market and
+position side; a new unvalued exposure remains visible with zero unavailable PnL
+and a warning. Realized PnL is never substituted. Aggregate balance sums the
+preserved position PnL instead of calculating a fictitious entry loss from a
+zero/missing ticker. Native account equity/free remain authoritative; a genuine
+later public quote can update position PnL, which a subsequent private snapshot
+without PnL retains. Explicit native PnL overrides conflicting public quotes.
+
+## Rust reduce-only confirmation and rate errors
+
+When a reduce-only limit lacks matching exposure, Rust waits for the account
+read to complete with target size/absence evidence, with a10s deadline. The wait
+belongs to one command and read serial. Settings-only retained positions cannot
+confirm it, and a timed-out read cannot release the next queued order. Failed
+confirmation sends no nonce/signature; prior accepted legs keep aggregate outcome
+safety. HTTP405/429 retain native diagnostics and add neutral guidance without
+replaying placement. An explicit21613 placement refusal refreshes account/orders
+without guessing the opposite margin mode.

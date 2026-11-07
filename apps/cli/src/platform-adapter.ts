@@ -1,4 +1,6 @@
+import { warnAboutClockSkew } from './clock-skew-warning';
 import chalk from 'chalk';
+import { terminalText } from './console-glyphs';
 import type { CLIPlatformAdapter, ExchangeLike, ExchangeAccountConfig } from '@tealstreet/cli-core';
 import {
   getAccount as getAccountFromConfig,
@@ -28,8 +30,10 @@ import { logAccountRoute } from './account-log';
 // Static import for token management - must match what safe-cex uses internally
 import { setProxyToken, setTokenRefreshFunction } from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
+import { assertBetaVenue } from '@tealstreet/safe-cex/src/exchanges/rust/betaVenues';
 import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
 import { defaultProxyRegion, resolveAccountTransport } from '@tealstreet/safe-cex/src/transport/tealstreet/transportResolution';
+import { BRAND } from './brand';
 
 // Default timeout for exchange operations (30 seconds)
 const EXCHANGE_OPERATION_TIMEOUT = 30000;
@@ -73,7 +77,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
   let isInMonitorRef: (() => boolean) | null = null;
 
   // Wire the proxy-token refresh function once, regardless of account flags.
-  // Many exchanges (BitMEX, Bitget, etc.) force the HOW tunnel via metadata
+  // Many exchanges (Bitget, KuCoin, etc.) force the HOW tunnel via metadata
   // even when the user hasn't set tealstreetTunnel on their account, and the
   // HOW adapter polls getProxyToken() globally. Setting this once here means
   // HOW always sees the freshest token from config; login() also primes the
@@ -93,7 +97,9 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
       captureBuffer.push(text);
     } else {
       // Under --json, stdout holds only the result document.
-      writeAbovePrompt(() => (isStdoutReservedForJson() ? originalConsoleError : originalConsoleLog)(text));
+      writeAbovePrompt(() =>
+        (isStdoutReservedForJson() ? originalConsoleError : originalConsoleLog)(terminalText(text)),
+      );
     }
   };
 
@@ -101,7 +107,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     if (captureBuffer !== null) {
       captureBuffer.push(text);
     } else {
-      writeAbovePrompt(() => originalConsoleError(text));
+      writeAbovePrompt(() => originalConsoleError(terminalText(text)));
     }
   };
 
@@ -109,7 +115,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     if (captureBuffer !== null) {
       captureBuffer.push(text);
     } else {
-      writeAbovePrompt(() => originalConsoleWarn(text));
+      writeAbovePrompt(() => originalConsoleWarn(terminalText(text)));
     }
   };
 
@@ -201,6 +207,9 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
     // Exchange management
     async createExchange(account: ExchangeAccountConfig): Promise<ExchangeLike> {
+      // Removed or unsupported venues (saved bitmex, breakoutprop) refuse typed
+      // before any transport or login work, so only that account fails.
+      assertBetaVenue(account.exchange);
       // Use safe-cex's single source of truth for transport resolution instead of
       // re-deriving it: tunnel/proxy may be forced on by metadata (enforceWsTunnel /
       // requiresCors) even when the user didn't enable it on the account.
@@ -223,7 +232,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
       if (requiresAuth) {
         if (!isLoggedIn()) {
-          throw new Error('Tealstreet proxy/tunnel requires authentication. Run "login" first.');
+          throw new Error(`${BRAND.displayName} proxy/tunnel requires authentication. Run "login" first.`);
         }
         await checkAndRefreshToken();
 
@@ -239,6 +248,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
       // including tealstreetProxy, tealstreetTunnel, proxyRegion, etc.
       const createExchangeFromAccount = await getCreateExchangeFromAccount();
       const exchange = await createExchangeFromAccount(account);
+      exchange.on('clock-advice', warnAboutClockSkew);
       return exchange as ExchangeLike;
     },
 

@@ -12,6 +12,7 @@ const walkFiles = (directory: string): string[] =>
   });
 
 describe('exchange runtime-tree boundary', () => {
+  // Walks the source tree; under CI load this outruns vitest's 5s default.
   it('contains no tests, manual utilities, or credential-reading executables', () => {
     const exchangesDirectory = resolve(process.cwd(), 'src/exchanges');
     const files = walkFiles(exchangesDirectory);
@@ -41,5 +42,5 @@ describe('exchange runtime-tree boundary', () => {
 
     expect(forbiddenPaths).toEqual([]);
     expect(forbiddenSources).toEqual([]);
-  });
+  }, 30_000);
 });

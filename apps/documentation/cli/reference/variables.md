@@ -145,6 +145,13 @@ chase buy $100 to $bid +0.1%
 stop at $entry -2%
 ```
 
+The anchor reads the **focused symbol**. With a symbol override, pass an absolute
+price. A bare negative offset with no anchor is
+[refused](./sizing-and-prices.md#negative-offsets).
+
+With `sets`, write the source as **one token** (`sets @x $entry*0.99`).
+`sets @x $entry -1%` is refused and nothing is stored. `set @x $entry -1%` works.
+
 Anchors that accept inline offsets:
 
 ```text
@@ -171,7 +178,7 @@ spaces only between operands and operators) get evaluated as expressions.
 
 ```text
 sets @half $size/2
-sets @stop $entry -3*$ticksize
+sets @stop $entry-3*$ticksize
 buy $100*$random
 ```
 
@@ -185,7 +192,7 @@ Source: `packages/cli-core/src/preprocess/math.ts`.
 cleanly with math:
 
 ```text
-sets @stopgap $entry -1%       # reactive — re-reads $entry each time
+sets @stopgap $entry*0.99      # reactive — re-reads $entry each time
 set  @epoch   $last            # snapshot — frozen at the moment you ran set
 echo @stopgap                  # live
 echo @epoch                    # frozen
@@ -214,5 +221,5 @@ INLINE OFFSET (any price anchor except $mid)
   $entry +1%   $liq -5%   $bid +100   $ask -0.05%
 
 MATH (within a single token, no parens)
-  $entry -3*$ticksize    $size/2    $100*$random
+  $entry-3*$ticksize    $size/2    $100*$random
 ```

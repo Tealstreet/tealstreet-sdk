@@ -12,10 +12,11 @@ import type {
 export type PackedTickerDelta = [index: number, mask: number, ...values: number[]];
 export type StoreUpdate = Partial<StoreData> & {
   tickerDeltas?: PackedTickerDelta[];
+  tickerObservations?: Array<[number, NonNullable<Ticker['observedAt']>]>;
 };
 
 export interface Store {
-  update: (changes: StoreUpdate, fromWorker?: boolean) => void;
+  update: (changes: StoreUpdate, fromWorker?: boolean, source?: 'account-read') => void;
   reset: () => void;
   subscribe: (cb: (data: StoreData, fromWorker?: boolean) => void) => () => void;
 

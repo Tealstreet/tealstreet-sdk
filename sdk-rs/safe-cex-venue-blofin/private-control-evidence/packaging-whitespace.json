@@ -1,5 +1,0 @@
-{
-  "full_staged_exit": 2,
-  "non_log_exit": 0,
-  "note": "Raw logs retained byte-for-byte, including terminal trailing blank lines; non-log changes pass whitespace check."
-}

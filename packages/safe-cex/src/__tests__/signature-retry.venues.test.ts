@@ -8,18 +8,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createAPI as createAsterdexAPI } from '../exchanges/asterdex/asterdex.api';
 import { asterDEXVirtualClock } from '../exchanges/asterdex/asterdex.virtualClock';
-import { createAPI as createBinanceAPI } from '../exchanges/binance/binance.api';
-import { createBinanceAPI as createBinancePmAPI } from '../exchanges/binance/binancepm.api';
-import { createAPI as createBinanceSpotAPI } from '../exchanges/binance/binancespot.api';
-import { createAPI as createBingxAPI } from '../exchanges/bingx/bingx.api';
-import { createAPI as createBitgetAPI } from '../exchanges/bitget/bitget.api';
-import { createAPI as createBitunixAPI } from '../exchanges/bitunix/bitunix.api';
-import { createAPI as createCryptocomAPI } from '../exchanges/cryptocom/cryptocom.api';
-import { createAPI as createKucoinAPI } from '../exchanges/kucoin/kucoin.api';
-import { createKucoinSpotAPI } from '../exchanges/kucoin/kucoinspot.api';
-import { createAPI as createKrakenSpotAPI } from '../exchanges/kraken/krakenspot.api';
-import { createAPI as createMexcAPI } from '../exchanges/mexc/mexc.api';
-import { createAPI as createOkxAPI } from '../exchanges/okx/okx.api';
+import { createAPI as createBinanceAPI } from './reference/binance/binance.api';
+import { createBinanceAPI as createBinancePmAPI } from './reference/binance/binancepm.api';
+import { createAPI as createBinanceSpotAPI } from './reference/binance/binancespot.api';
+import { createAPI as createBingxAPI } from './reference/bingx/bingx.api';
+import { createAPI as createBitgetAPI } from './reference/bitget/bitget.api';
+import { createAPI as createBitunixAPI } from './reference/bitunix/bitunix.api';
+import { createAPI as createCryptocomAPI } from './reference/cryptocom/cryptocom.api';
+import { createAPI as createKucoinAPI } from './reference/kucoin/kucoin.api';
+import { createKucoinSpotAPI } from './reference/kucoin/kucoinspot.api';
+import { createAPI as createKrakenSpotAPI } from './reference/kraken/krakenspot.api';
+import { createAPI as createMexcAPI } from './reference/mexc/mexc.api';
+import { createAPI as createOkxAPI } from './reference/okx/okx.api';
 import { virtualClock } from '../utils/virtualClock';
 
 // A signature rejection executed nothing, so each venue re-signs and resends once —

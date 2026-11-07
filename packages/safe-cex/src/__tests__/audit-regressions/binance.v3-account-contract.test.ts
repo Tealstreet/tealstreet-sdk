@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BASE_URL, BASE_WS_URL, ENDPOINTS } from '../../exchanges/binance/binance.types';
 import { BASE_FAPI_URL, BASE_PAPI_URL, BASE_WS_URL as PM_BASE_WS_URL } from '../../exchanges/binance/binancepm.types';
 import { DefaultStore } from '../../store/store.base';

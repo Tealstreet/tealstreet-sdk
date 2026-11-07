@@ -1,6 +1,0 @@
-{
-  "gate_sha": "3fa1fd892dbbbc99c8d56b0305e1f3a02f0c5711",
-  "cargo_exit": null,
-  "orchestrator_exit": 130,
-  "reason": "Compiler sampled in FileSearch/readdir on the historical target/debug/deps directory. Switched subsequent gates to a fresh worktree-local target directory; did not remove the old cache. Also strengthens reviewed test assertions before restored run."
-}
