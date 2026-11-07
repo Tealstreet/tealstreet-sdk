@@ -15,3 +15,5 @@ missing the 10%-faster target is a warning; nightly certification files cpu-regr
   "Rust / CPU gate (<suite>)" (plan, certify, status). "Rust / required coverage" depends on no CPU job.
 - Nightly: `.github/workflows/rust-cpu-nightly.yml` and `cpu-nightly.mjs` dispatch rust.yml on master, then file
   or update one `cpu-regression` issue for suites whose CPU gate failed on two adjacent UTC nights (the last run each night).
+  Run discovery paginates until two eligible nights are found or history is exhausted; manual dispatches and
+  multiple runs on one night must not hide the previous night.

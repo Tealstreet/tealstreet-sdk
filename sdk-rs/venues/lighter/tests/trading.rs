@@ -1128,10 +1128,10 @@ fn released_http_throttles_are_unknown_and_never_replay() {
             );
             assert_eq!(error.venue_code, None);
         } else {
-            assert_eq!(error.kind, Some(ErrorKind::Rejected));
-            assert_eq!(error.outcome, Some(Outcome::Rejected));
+            assert_eq!(error.kind, Some(ErrorKind::Internal));
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
             assert!(error.message.contains("native throttle"));
-            assert_eq!(error.venue_code.as_deref(), Some("23000"));
+            assert!(error.message.contains("Check Open Orders"));
         }
         assert!(!out.iter().any(
             |a| matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))
@@ -1473,9 +1473,9 @@ fn documented_codes_in_a_200_refuse_a_placement_and_leave_no_fence() {
 }
 
 #[test]
-fn an_unlisted_code_in_a_200_stays_unknown_and_clears_on_the_next_read() {
+fn unproven_codes_in_a_200_stay_unknown_and_clear_on_the_next_read() {
     // 21728 is documented, but a duplicate says the first send may be live.
-    for code in [29500, 21728, 99999] {
+    for code in [29500, 21728, 99999, 23000, 23100] {
         let (mut e, _) = ready_unattributed();
         let r = begin(&mut e, vec![limit()]);
         let body = format!(r#"{{"code":{code},"message":"native"}}"#);
