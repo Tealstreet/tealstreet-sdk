@@ -49,3 +49,9 @@ Chart history uses the documented GET URL and query parameters. Both POST
 `/api/v2/public/get_tradingview_chart_data` and POST `/api/v2` returned HTTP 400
 with `-32601` during capture, while the GET response succeeded and omitted `id`.
 The transport allows a missing ID only for that engine-correlated HTTP read.
+
+The TypeScript Coinbase public-only and real-worker consumer tests reuse this
+capture through `packages/safe-cex/src/__tests__/support/coinbaseDrb.ts`. Startup
+replays the instruments and ticker-summary results with strict request matching;
+the worker receives captured subscription notifications on the streams host.
+These fixtures never fall back to the retired INTX public endpoint.
