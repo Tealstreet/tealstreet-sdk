@@ -400,10 +400,10 @@ export class EngineHost {
   }
 
   /** Update protocol UTC only. Scheduling always uses transport.now(). */
-  syncHostTime(utc) {
+  syncHostTime(utc, now = this.transport.now()) {
     if (typeof this.engine.syncHostTime !== 'function')
       throw new Error('Engine does not support separate protocol time');
-    if (!this.invoke(this.engine.syncHostTime, this.transport.now(), utc))
+    if (!this.invoke(this.engine.syncHostTime, now, utc))
       throw new Error('Engine refused host protocol time');
   }
 

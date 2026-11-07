@@ -954,3 +954,19 @@ test('host UTC synchronization uses scheduling time without changing it or allow
   assert.throws(() => old.syncHostTime(1800000000000), /does not support separate protocol time/);
   old.dispose();
 });
+
+
+test('an already sampled host UTC correction does not resample or reenter the transport clock', () => {
+  const calls = [];
+  const host = new EngineHost({ syncHostTime: (raw, utc) => { calls.push([raw, utc]); return true; } }, {
+    now: () => { throw new Error('clock must not be sampled recursively'); },
+  });
+  host.syncHostTime(1800007200000, 1000);
+  assert.deepEqual(calls, [[1000, 1800007200000]]);
+  // A correction cannot bypass the physical HTTP group handoff's reentry fence.
+  host.managedHttp.groupHandoff = {};
+  assert.throws(() => host.syncHostTime(1800014400000, 1000), /HTTP group handoff/);
+  assert.equal(calls.length, 1);
+  host.managedHttp.groupHandoff = false;
+  host.dispose();
+});

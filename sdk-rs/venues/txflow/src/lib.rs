@@ -610,7 +610,7 @@ impl TxFlow {
             );
             return;
         }
-        let end = to_ms.unwrap_or(cx.now);
+        let end = to_ms.unwrap_or(cx.protocol_now());
         let start = from_ms
             .unwrap_or(end - interval.ms() * f64::from(limit.unwrap_or(500).min(1500)))
             .max(0.0);

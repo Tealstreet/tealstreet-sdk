@@ -249,7 +249,7 @@ impl KrakenSpot {
                 .filter(|k| !k.is_empty())
                 .ok_or("Kraken Spot credentials required")?;
             let signer = self.signer.as_mut().ok_or("Kraken Spot invalid secret")?;
-            let nonce = signer.nonce(cx.now)?;
+            let nonce = signer.nonce(cx.protocol_now())?;
             let mut params = request.params.clone();
             params.push(("nonce", nonce.clone()));
             let body = form(&params);

@@ -1863,7 +1863,7 @@ impl Venue for KucoinSpot {
                     );
                     return;
                 };
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let start = match (limit, from_ms) {
                     (None, Some(from)) => from,
                     _ => {

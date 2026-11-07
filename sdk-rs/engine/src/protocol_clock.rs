@@ -6,6 +6,7 @@ pub(crate) struct ProtocolClock {
     offset_ms: f64,
     revision: u64,
     venue_calibrated: bool,
+    host_offset_ms: Option<f64>,
 }
 
 impl ProtocolClock {
@@ -27,15 +28,29 @@ impl ProtocolClock {
         true
     }
 
-    /// Host wall-time synchronization is only the fallback. A venue's own
-    /// observation remains authoritative on the stable scheduling clock.
+    /// Small host corrections preserve venue calibration. A discontinuity
+    /// (including suspend with a stopped monotonic clock) invalidates that
+    /// calibration's old time basis before the next signing attempt.
     pub fn observe_host(&mut self, host_ms: f64, server_ms: f64) -> bool {
-        if self.venue_calibrated {
-            return host_ms.is_finite()
-                && server_ms.is_finite()
-                && (server_ms - host_ms).is_finite();
+        let offset = server_ms - host_ms;
+        if !host_ms.is_finite()
+            || !server_ms.is_finite()
+            || !offset.is_finite()
+            || !(host_ms + offset).is_finite()
+        {
+            return false;
         }
-        self.replace(host_ms, server_ms)
+        let discontinuity = self
+            .host_offset_ms
+            .is_some_and(|previous| (offset - previous).abs() > 1_000.0);
+        if !self.venue_calibrated || discontinuity {
+            if !self.replace(host_ms, server_ms) {
+                return false;
+            }
+            self.venue_calibrated = false;
+        }
+        self.host_offset_ms = Some(offset);
+        true
     }
 
     fn replace(&mut self, host_ms: f64, server_ms: f64) -> bool {
@@ -88,7 +103,7 @@ mod tests {
         assert_eq!(clock.revision(), revision);
         assert!(clock.observe(13_000.0, 1_800_000_011_900.0));
         let venue_revision = clock.revision();
-        for utc in [1_786_003_200_000.0, 1_813_996_800_000.0] {
+        for utc in [1_800_000_012_100.0, 1_800_000_011_900.0] {
             assert!(clock.observe_host(13_000.0, utc));
             assert_eq!(clock.at(13_000.0), 1_800_000_011_900.0);
             assert_eq!(clock.revision(), venue_revision);
@@ -96,6 +111,22 @@ mod tests {
         assert!(!clock.observe_host(f64::NAN, 1.0));
         assert!(!clock.observe_host(1.0, f64::INFINITY));
         assert_eq!(clock.at(13_000.0), 1_800_000_011_900.0);
+    }
+
+    #[test]
+    fn a_host_clock_discontinuity_invalidates_pre_suspend_venue_calibration() {
+        let mut clock = ProtocolClock::default();
+        assert!(clock.observe_host(1_000.0, 1_800_000_000_000.0));
+        assert!(clock.observe(1_000.0, 1_800_000_000_100.0));
+        let before = clock.revision();
+        let awake = 1_800_000_000_000.0 + 2.0 * 3_600_000.0;
+        assert!(clock.observe_host(1_000.0, awake));
+        assert_eq!(clock.at(1_000.0), awake);
+        assert_eq!(clock.revision(), before + 1);
+        assert!(!clock.venue_calibrated);
+        assert!(clock.observe(1_000.0, awake + 100.0));
+        assert!(clock.venue_calibrated);
+        assert_eq!(clock.at(1_000.0), awake + 100.0);
     }
 
     #[test]
@@ -121,6 +152,7 @@ mod tests {
             offset_ms: 500.,
             revision: u64::MAX,
             venue_calibrated: false,
+            host_offset_ms: None,
         };
         assert!(!clock.observe(1000., 1600.));
         assert_eq!((clock.at(1000.), clock.revision()), (1500., u64::MAX));

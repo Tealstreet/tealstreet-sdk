@@ -289,12 +289,28 @@ export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngin
   loadWasmEngine = loader;
 };
 
-const synchronizedEngineTransport = (): Transport => {
-  // Keep epoch-shaped data/fence times, but never let later wall-clock sync
-  // move live request, socket or startup deadlines.
+const synchronizedEngineTransport = (syncAfterSuspend: (now: number, utc: number) => void): Transport => {
+  // Keep scheduling stable across clock corrections and clocks that stop in
+  // suspend. Repair protocol UTC before the first post-wake engine operation.
   const origin = virtualClock.getCurrentTimeMs();
   const started = performance.now();
-  return { ...nativeTransport(), now: () => origin + (performance.now() - started) };
+  let sampledMonotonic = started;
+  let sampledWall = Date.now();
+  return {
+    ...nativeTransport(),
+    now: () => {
+      const monotonic = performance.now();
+      const wall = Date.now();
+      const now = origin + (monotonic - started);
+      if (Number.isFinite(monotonic) && Number.isFinite(wall)) {
+        const divergence = (wall - sampledWall) - (monotonic - sampledMonotonic);
+        if (Math.abs(divergence) > 1_000) syncAfterSuspend(now, virtualClock.getCurrentTimeMs());
+        sampledMonotonic = monotonic;
+        sampledWall = wall;
+      }
+      return now;
+    },
+  };
 };
 let engineTransport: (() => Transport) | undefined;
 /** Explicit hosts own their clock; omit the factory to restore the synchronized SDK default. */
@@ -1573,10 +1589,13 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = options;
     const publicDataOnly = this.isPublicDataOnly;
+    let clockHost: EngineHostType | undefined;
     const routedTransport = createEngineTransport(
       this.name,
       options,
-      (transportFactory ?? synchronizedEngineTransport)(),
+      transportFactory ? transportFactory() : synchronizedEngineTransport((now, utc) => {
+        if (!this.isDisposed) clockHost?.syncHostTime(utc, now);
+      }),
       this.signerSetup,
       (message) => this.emitAndLogError(message),
       (notice) => {
@@ -1737,6 +1756,7 @@ export class RustEngineExchange extends BaseExchange {
       const capabilities = host.capabilities();
       this.adoptEngineCapabilities(capabilities);
       if (!transportFactory) {
+        clockHost = host;
         host.syncHostTime(virtualClock.getCurrentTimeMs());
         this.stopTimeSync = virtualClock.subscribeToTimeSync((utc) => host.syncHostTime(utc));
       }

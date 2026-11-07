@@ -94,7 +94,7 @@ impl Coinbase {
             credentials
                 .ok_or_else(|| "Coinbase credentials unavailable".to_owned())
                 .and_then(|credentials| {
-                    credentials.headers(request.method, &request.path, cx.now, |bytes| {
+                    credentials.headers(request.method, &request.path, cx.protocol_now(), |bytes| {
                         cx.fill_signing_entropy(bytes)
                     })
                 })

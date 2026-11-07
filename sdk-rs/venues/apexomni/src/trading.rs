@@ -584,8 +584,8 @@ impl ApexOmni {
         if !positive(price) {
             return Err("ApeX Omni execution price rounds to zero".into());
         }
-        let expiration =
-            (((cx.now + 30.0 * 86_400_000.0) / 3_600_000.0).ceil() + 168.0) * 3_600_000.0;
+        let expiration = (((cx.protocol_now() + 30.0 * 86_400_000.0) / 3_600_000.0).ceil() + 168.0)
+            * 3_600_000.0;
         let taker_fee = self
             .account
             .taker_fee

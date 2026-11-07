@@ -1398,7 +1398,7 @@ impl Venue for Orderly {
                 if from_ms.is_some() || to_ms.is_some() {
                     let limit = limit.unwrap_or(500).min(1000) as usize;
                     let from = from_ms.unwrap_or(0.0);
-                    let to = to_ms.unwrap_or(cx.now);
+                    let to = to_ms.unwrap_or(cx.protocol_now());
                     if from > to {
                         complete_local_read(cx, Ok("[]".into()));
                         return;

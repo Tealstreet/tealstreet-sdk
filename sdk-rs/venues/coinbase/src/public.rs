@@ -469,7 +469,7 @@ impl Coinbase {
             .iter()
             .filter_map(|(symbol, state)| state.refresh.then_some(symbol.clone()))
             .collect();
-        let day = (cx.now / 86400000.).floor() * 86400.;
+        let day = (cx.protocol_now() / 86400000.).floor() * 86400.;
         for symbol in refresh {
             let state = self.public.daily.get_mut(&symbol).unwrap();
             state.refresh = false;
@@ -521,7 +521,7 @@ impl Coinbase {
             return;
         };
         let generation = state.generation;
-        let end = (cx.now / 1000.).min(day + 86400.).max(day + 1.);
+        let end = (cx.protocol_now() / 1000.).min(day + 86400.).max(day + 1.);
         let path = format!(
             "/api/v3/brokerage/market/products/{}/candles?granularity=FIVE_MINUTE&start={day:.0}&end={end:.0}&limit=300",
             ws_symbol(symbol)
@@ -1603,7 +1603,7 @@ impl Coinbase {
                     .0 += 1;
                 if daily && !self.public.daily.contains_key(&symbol) {
                     self.public.daily_generation = self.public.daily_generation.wrapping_add(1);
-                    let day = (cx.now / 86400000.).floor() * 86400.;
+                    let day = (cx.protocol_now() / 86400000.).floor() * 86400.;
                     self.public.daily.insert(
                         symbol.clone(),
                         Daily {
@@ -1663,7 +1663,7 @@ impl Coinbase {
                     cx.fail(command, "Unknown Coinbase market");
                     return None;
                 }
-                let end = (to_ms.unwrap_or(cx.now).min(cx.now) / 1000.)
+                let end = (to_ms.unwrap_or(cx.protocol_now()).min(cx.protocol_now()) / 1000.)
                     .round()
                     .max(0.);
                 let start = from_ms

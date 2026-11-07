@@ -323,7 +323,7 @@ impl Cryptocom {
                     self.message_id,
                     quoted(method),
                     serde_json::to_string(chunk).unwrap(),
-                    cx.now as u64
+                    cx.protocol_now() as u64
                 ),
             );
         }

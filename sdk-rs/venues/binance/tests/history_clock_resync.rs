@@ -477,3 +477,61 @@ fn host_time_jumps_do_not_expire_live_reads_or_startup_and_sign_with_synced_utc(
         assert!(notice.fields.contains(&("deadlineMs", 60_000.0.into())));
     }
 }
+
+#[test]
+fn the_first_post_sleep_signature_uses_utc_with_or_without_venue_calibration() {
+    for calibrated in [false, true] {
+        let mut h = harness(Variant::UsdM, false, false);
+        let utc = 1_800_000_000_000.0;
+        assert!(h.engine.sync_host_time(h.now, utc));
+        if calibrated {
+            let first = fills(&mut h, 910, 120_000);
+            h.reply(first.id, 400, "", SKEW);
+            let time = h.take("/time");
+            h.reply(time.id, 200, "", &format!(r#"{{"serverTime":{utc}}}"#));
+            let resent = h.take("/userTrades");
+            assert_read_signature(&resent, utc as u64);
+            h.reply(resent.id, 200, "", "[]");
+        }
+        let awake_utc = utc + 2.0 * 3_600_000.0;
+        // Scheduling does not advance during a suspended monotonic clock.
+        assert!(h.engine.sync_host_time(h.now, awake_utc));
+        let next = fills(&mut h, 911, 120_000);
+        assert_read_signature(&next, awake_utc as u64);
+    }
+}
+
+#[test]
+fn history_defaults_end_at_synchronized_utc_after_a_host_clock_jump() {
+    let mut h = harness(Variant::UsdM, false, false);
+    let utc = 1_800_000_000_000.0;
+    assert!(h.engine.sync_host_time(h.now, utc));
+    h.engine
+        .handle_command(
+            h.now,
+            Command::Query {
+                command: 920,
+                query: Query::Fills {
+                    symbol: Some("BTCUSDT".into()),
+                    order_id: None,
+                    from_ms: Some(utc - 60_000.0),
+                    to_ms: None,
+                    limit: Some(100),
+                },
+            },
+            Some(20_000),
+        )
+        .unwrap();
+    h.collect();
+    assert!(
+        h.has_request("/userTrades"),
+        "a UTC range must not become empty against the scheduling clock"
+    );
+    let request = h.take("/userTrades");
+    assert!(
+        request.url.contains("endTime=1800000000000"),
+        "{}",
+        request.url
+    );
+    assert_read_signature(&request, utc as u64);
+}

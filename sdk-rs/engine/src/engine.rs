@@ -5083,8 +5083,9 @@ impl<V: Venue> Engine<V> {
         )
     }
 
-    /// Synchronize outbound protocol UTC without moving scheduling time or
-    /// overriding a venue's own calibration. Host deadlines stay on `host_now`.
+    /// Synchronize protocol UTC without moving scheduling time. Small host updates
+    /// preserve venue calibration; a >1 s host discontinuity invalidates its old
+    /// baseline (e.g. suspend). Host deadlines stay on `host_now`.
     pub fn sync_host_time(&mut self, host_now: f64, utc_now: f64) -> bool {
         self.assert_live();
         self.io.core.protocol_clock.observe_host(host_now, utc_now)

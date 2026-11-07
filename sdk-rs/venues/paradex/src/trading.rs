@@ -1078,7 +1078,7 @@ impl Trading {
             "/orders-history?market={}&status=CLOSED&page_size=100&start_at={}&end_at={}",
             encode(&raw.market),
             start_at,
-            num::format((cx.now + CANCEL_PROOF_WINDOW_MARGIN_MS as f64).floor())
+            num::format((cx.protocol_now() + CANCEL_PROOF_WINDOW_MARGIN_MS as f64).floor())
         );
         if !raw.client_id.is_empty() {
             path.push_str(&format!("&client_id={}", encode(&raw.client_id)));

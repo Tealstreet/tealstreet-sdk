@@ -543,7 +543,7 @@ export class EngineHost {
   /** Apply one data-source frame to a `frameFed` engine; a snapshot resets its account state first. */
   applyFrame(frame: ArrayBuffer | Uint8Array, snapshot: boolean): void;
   /** A `frameFed` engine's data-source clock minus this host's, in ms. */
-  syncHostTime(utc: number): void;
+  syncHostTime(utc: number, observedNow?: number): void;
   setSourceClockOffset(offsetMs: number | undefined): void;
   snapshot(): ArrayBuffer;
   accountSnapshot(): ArrayBuffer;
