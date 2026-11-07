@@ -154,6 +154,71 @@ fn new_live_fill_survives_protocol_clock_corrections_in_both_directions() {
     }
 }
 #[test]
+fn temporary_clock_rollback_cannot_replay_an_unseen_historical_fill() {
+    const START: f64 = 1_800_000_000_000.;
+    for rollback in [false, true] {
+        let mut h = Harness::new_at(START);
+        h.open_private();
+        h.seed();
+        h.e.take_frame(START);
+        assert!(h.e.sync_host_time(START, START));
+        if rollback {
+            let raw = START + 100.;
+            assert!(h.e.sync_host_time(raw, raw - 7_200_000.));
+            // Deliver a row older than either boundary while the temporary
+            // calibration is active, exercising the lazy execution-clock path.
+            let quiet = startup_execution(
+                "older-than-rollback",
+                1,
+                60000,
+                START - 10_800_000.,
+                START - 10_799_000.,
+                "filled",
+            );
+            h.handle(
+                raw,
+                Event::WsMessage {
+                    socket: h.private,
+                    text: &quiet,
+                },
+            );
+            h.collect();
+            assert!(
+                h.e.take_frame(raw)
+                    .map(executions)
+                    .unwrap_or_default()
+                    .is_empty()
+            );
+        }
+        let raw = START + 200.;
+        assert!(h.e.sync_host_time(raw, raw));
+        let delayed = startup_execution(
+            "unseen-before-session",
+            1,
+            60000,
+            START - 3_600_000.,
+            START - 3_599_000.,
+            "filled",
+        );
+        h.handle(
+            raw,
+            Event::WsMessage {
+                socket: h.private,
+                text: &delayed,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(raw)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty(),
+            "temporary rollback {rollback} must not emit historical cumulative fills"
+        );
+    }
+}
+
+#[test]
 fn stale_rest_cannot_reopen_a_filled_order() {
     let mut h = Harness::new();
     h.open_private();

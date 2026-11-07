@@ -155,18 +155,16 @@ pub(crate) enum StartupRead {
     Mode,
 }
 impl Account {
-    fn reanchor_execution_clock(&mut self, now: f64, utc: f64) {
-        // Project the capture times through the current UTC calibration when
-        // it moves these lower bounds backwards. Never advance the fences:
-        // scheduling may have stopped during sleep while live fills accumulated.
-        self.session_started = self
-            .session_started
-            .min(utc - (now - self.session_started_at));
-        if self.orders_seeded {
-            self.reporting_started = self
-                .reporting_started
-                .min(utc - (now - self.reporting_started_at));
-        }
+    fn execution_marks(&self, now: f64, utc: f64) -> (f64, f64) {
+        // Derive boundaries from immutable captures: a temporary rollback must
+        // not persist after UTC recovers. Cap at the captured UTC so a suspended
+        // scheduling clock cannot advance the fences past accumulated live fills.
+        (
+            self.session_started
+                .min(utc - (now - self.session_started_at)),
+            self.reporting_started
+                .min(utc - (now - self.reporting_started_at)),
+        )
     }
     fn execution_progress(&mut self, id: &str, qty: f64, value: Option<f64>) {
         if !matches!(
@@ -2203,8 +2201,8 @@ impl Blofin {
         updated: f64,
         created: f64,
     ) {
-        self.account
-            .reanchor_execution_clock(cx.now, cx.protocol_now());
+        let (session_started, reporting_started) =
+            self.account.execution_marks(cx.now, cx.protocol_now());
         let id = if row.order_id.is_empty() {
             &row.ord_id
         } else {
@@ -2213,7 +2211,7 @@ impl Blofin {
         let qty = row.filled_size.0;
         let value = qty * row.average_price.0;
         if qty > 0.0 && (row.average_price.0 <= 0.0 || !value.is_finite() || value <= 0.0) {
-            if updated > 0.0 && updated < self.account.session_started {
+            if updated > 0.0 && updated < session_started {
                 self.account.historical_execution_floor(id, qty);
             } else {
                 cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {id}: invalid cumulative quote value; retained proven execution baseline"));
@@ -2240,19 +2238,19 @@ impl Blofin {
             updated,
         };
         let session_order = created > 0.0
-            && created >= self.account.session_started
+            && created >= session_started
             && created <= cx.protocol_now()
             && (updated == 0.0 || created <= updated);
         let known_prefix = self.account.fills.contains_key(id.as_ref());
         if !session_order
             && (!self.account.orders_seeded || !known_prefix)
-            && !(updated > 0.0 && updated < self.account.session_started)
+            && !(updated > 0.0 && updated < session_started)
         {
             if self.account.orders_seeded {
                 // A delayed terminal row absent from the startup open-order census
                 // cannot distinguish old fills from its unobserved startup suffix.
                 self.seed_execution_prefix(cx, id, qty, Some(execution.value));
-                cx.notice(if updated == 0.0 || updated >= self.account.reporting_started {
+                cx.notice(if updated == 0.0 || updated >= reporting_started {
                         Level::Error
                     } else {
                         Level::Warn
@@ -2313,8 +2311,6 @@ impl Blofin {
         rows: &[Order],
         sources: &HashMap<String, Source>,
     ) {
-        self.account
-            .reanchor_execution_clock(cx.now, cx.protocol_now());
         for order in rows {
             if matches!(order.kind, OrderType::Limit | OrderType::Market)
                 && let Some(source) = sources.get(&order.id)
@@ -2387,7 +2383,8 @@ impl Blofin {
             }
             return;
         }
-        let historical = updated > 0.0 && updated < self.account.session_started;
+        let (session_started, _) = self.account.execution_marks(cx.now, cx.protocol_now());
+        let historical = updated > 0.0 && updated < session_started;
         // Missing historical quote value cannot prove the suffix price. This
         // observation supplies the quote baseline for subsequent live executions.
         let Some(previous_value) = previous.1 else {
