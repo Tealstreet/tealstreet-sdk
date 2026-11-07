@@ -29,6 +29,42 @@ fn seed_order(h: &mut Harness, id: &str, extra: &str) {
 }
 
 #[test]
+fn unknown_placement_rows_present_uncertainty_instead_of_rejection() {
+    for (code, message) in [
+        ("103013", "internal failure"),
+        ("150003", "clientId already exist"),
+        ("987654", "unlisted failure"),
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        place(
+            &mut h,
+            r#"[{"symbol":"BTCUSDT","type":"market","side":"buy","amount":1}]"#,
+        );
+        let request = h.take("batch-orders");
+        let response = serde_json::json!({
+            "code": "0", "data": [{"orderId": "0", "code": code, "msg": message}],
+        });
+        h.respond(request, &response.to_string());
+        let [error] = h.failures.as_slice() else {
+            panic!("{code}: expected one terminal failure");
+        };
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let text = error.legacy_text();
+        assert!(text.contains("unknown"), "{code}: {text}");
+        assert!(text.contains("Check Open Orders"), "{code}: {text}");
+        assert!(!text.contains("rejected"), "{code}: {text}");
+        assert_eq!(error.venue_code.as_deref(), Some(code));
+        assert_eq!(error.venue_message.as_deref(), Some(message));
+        assert!(
+            h.pending
+                .iter()
+                .all(|r| r.method == safe_cex_engine::Method::Get)
+        );
+    }
+}
+
+#[test]
 fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
     for (status, response) in [
         (429, "{}"),

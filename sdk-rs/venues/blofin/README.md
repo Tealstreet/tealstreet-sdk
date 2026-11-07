@@ -21,3 +21,8 @@ HTTP 200 is also unknown, including a row with order ID `0` under an
 authorize a protective put-back. Native rate failures direct the caller to
 Check Open Orders and retain the venue code/message as diagnostic evidence.
 Reads and documented definitive refusal codes on other statuses are unchanged.
+
+Unknown native placement codes, including internal errors and duplicate client
+IDs, also remain unknown under an `All operations failed` envelope with order
+ID `0`. They cannot authorize a protective put-back. Uncertain placement rows
+direct the caller to Check Open Orders; native diagnostics remain available.

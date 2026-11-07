@@ -24,7 +24,7 @@ const CALL_MS: u32 = 20_000;
 /// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
 /// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
 const NONE_PLACED: &str = "none-placed";
-const UNKNOWN_RATE: &str = "BloFin write outcome is unknown. Check Open Orders";
+const UNKNOWN_WRITE: &str = "BloFin write outcome is unknown. Check Open Orders";
 const CODES: CodeTable = CodeTable {
     rows: &[
         Row {
@@ -2679,12 +2679,12 @@ impl Blofin {
                     let gone = matches!(&*row.code, "1000" | "102068");
                     let odd = row.code.is_empty()
                         && !matches!(text.as_str(), "" | "success" | "order placed");
-                    // Order ID 0 under this envelope names no order, but a rate
-                    // code still cannot prove that nothing was placed.
+                    // Order ID 0 under this envelope names no order, but an unknown
+                    // native code still cannot prove that nothing was placed.
                     let none_placed = id == "0"
                         && reply.code != "0"
                         && reply.msg.eq_ignore_ascii_case("All operations failed");
-                    if none_placed && row.code != "429" {
+                    if none_placed && !outcome_unknown(&row.code, &row.msg) {
                         items.push(BatchItem::Native(Native {
                             code: NativeCode::Text(NONE_PLACED),
                             message: &row.msg,
@@ -2719,8 +2719,8 @@ impl Blofin {
                 if multi_position {
                     error = Some(MULTI_POSITION_MESSAGE.to_owned());
                 }
-                if rows.iter().any(|row| row.code == "429") {
-                    error = Some(UNKNOWN_RATE.to_owned());
+                if unproven || maybe_live {
+                    error = Some(UNKNOWN_WRITE.to_owned());
                 }
                 if unproven {
                     let message = error.clone().unwrap_or_else(|| message.clone());
@@ -2855,7 +2855,7 @@ impl Blofin {
                     }
                 }
                 if rows.iter().any(|row| row.code == "429") {
-                    error = Some(UNKNOWN_RATE.to_owned());
+                    error = Some(UNKNOWN_WRITE.to_owned());
                 }
                 if unproven {
                     let message = error.clone().unwrap_or_default();
@@ -3156,7 +3156,7 @@ fn record_failed(
         .as_ref()
         .is_some_and(|n| n.code == NativeCode::Int(429))
     {
-        UNKNOWN_RATE
+        UNKNOWN_WRITE
     } else {
         message
     };
