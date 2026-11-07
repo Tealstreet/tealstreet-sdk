@@ -1490,7 +1490,7 @@ pub fn build_with_signer<T: Visit>(
                 return Err(invalid("GRVT requires its primary signing provider"));
             }
             let signer_address = if let Some(id) =
-                identity.as_ref().filter(|id| id.signing_opt().is_some())
+                identity.as_ref().filter(|id| id.signing_ref().is_ok())
             {
                 if let Some(provider) = signer.as_ref().filter(|provider| provider.immediate()) {
                     let values = fetch_public(
