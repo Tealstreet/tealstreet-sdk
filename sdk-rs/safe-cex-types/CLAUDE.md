@@ -65,11 +65,17 @@ while the 128-level serde recursion limit remains a separate CHOSEN budget.
 MANIFEST-SPEC §19 defines the observability discriminator; diagnostic-only text
 must not be assumed when a caller can read the retained unit programmatically.
 
-Gates: `cargo test -p safe-cex-types`, which drives the Node oracles in
-`tests/`, plus strict clippy on the host **and** the wasm target. Generated
-bindings come from root `yarn types:generate`; `tests/generate.test.cjs` is their
-freshness check — regenerating is not a substitute for running it. The oracles
-are the reason a field rename here is cheap and a shape change is not.
+Gates: `cargo test --locked -p safe-cex-types --tests`, which drives the Node
+oracles in `tests/`, plus strict clippy on the host.
+Rust CI runs these tests in the isolated candle-cache lane with locked root Yarn
+dependencies and `SAFE_CEX_TYPESCRIPT_PATH` pointing at `node_modules/typescript`.
+Keep this package out of workspace-wide feature unification: its serde_json
+number/map features belong to the restored candle-cache stack, not the engine.
+From `sdk-rs`, generate bindings with
+`cargo run --locked -p safe-cex-types --example generate`, then
+`node safe-cex-types/generate.cjs`. `tests/generate.test.cjs` checks the generation
+rules; run it as well. The oracles are the reason a field rename here is cheap
+and a shape change is not.
 
 Exchange metadata has a dedicated `Rust / native metadata` CI check: run
 `node --test safe-cex-types/tests/metadata-freshness.test.cjs` and
@@ -296,3 +302,5 @@ StoreData.socketHealth uses RetainedJsonInput so own undefined diagnostic fields
 StoreData and WritableStoreData latency are required nullable numbers. Null means
 unmeasured, not zero; absent/non-numeric values still refuse. Native STATUS uses
 an explicit presence flag, with legacy positive samples retained.
+Their canonical fields retain the required-nullable deserialize metadata used by
+the private companions, so the strict metadata inventory remains exact.

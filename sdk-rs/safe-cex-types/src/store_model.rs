@@ -178,6 +178,7 @@ pub struct ActiveTWAP {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoreData {
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
     pub latency: Option<f64>,
     pub balance: Balance,
     pub markets: Vec<Market>,
