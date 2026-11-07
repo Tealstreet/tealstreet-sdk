@@ -4,6 +4,9 @@ use crate::sign::Query;
 use safe_cex_engine::{ErrorKind, Outcome, Response, Store, VenueError};
 use serde::Deserialize;
 
+const CREATION_WINDOW_MS: u64 = 5_000;
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Axis {
     Target,
@@ -129,7 +132,8 @@ fn standalone_provenance(
     else {
         return false;
     };
-    let created_ms = created.parse::<f64>().unwrap_or(f64::NAN);
+    let created_time = created.parse::<u64>().unwrap();
+    let created_ms = created_time as f64;
     if !created_ms.is_finite() || created_ms > now || now - created_ms > 86_400_000.0 {
         return false;
     }
@@ -154,7 +158,14 @@ fn standalone_provenance(
                         .is_some_and(|time| time.parse::<u64>().is_ok_and(|n| n > 0))
                     && peer.order_link_id.as_deref() != Some(link)
                     && peer.parent_order_link_id.as_deref() != Some(link)
-                    && !(peer.created_time.as_deref() == Some(created) && peer.side == target.side))
+                    && !(peer.side == target.side
+                        && (peer.created_time.as_deref() == Some(created)
+                            || (peer.tpsl_mode.as_deref() == Some("Partial")
+                                && peer.created_time.as_deref().is_some_and(|time| {
+                                    time.parse::<u64>().is_ok_and(|time| {
+                                        time.abs_diff(created_time) <= CREATION_WINDOW_MS
+                                    })
+                                })))))
         })
 }
 
@@ -166,6 +177,7 @@ pub(super) struct Flow {
     history_done: bool,
     observed_at: f64,
     target_reads: u8,
+    history_window: Option<(u64, u64)>,
 }
 
 pub(super) enum Observation {
@@ -174,6 +186,39 @@ pub(super) enum Observation {
 }
 
 impl Flow {
+    pub(super) fn history_proof(&mut self) -> Option<Planned> {
+        let created = self
+            .terminal
+            .as_ref()?
+            .created_time
+            .as_ref()?
+            .parse::<u64>()
+            .ok()?;
+        if created == 0
+            || created > MAX_SAFE_INTEGER - CREATION_WINDOW_MS
+            || created as f64 > self.observed_at
+        {
+            return None;
+        }
+        let start = created.saturating_sub(CREATION_WINDOW_MS).max(1);
+        let end = created + CREATION_WINDOW_MS;
+        let mut planned = self.proof(Axis::History);
+        planned
+            .body
+            .push_str(&format!("&startTime={start}&endTime={end}"));
+        self.history_window = Some((start, end));
+        Some(planned)
+    }
+
+    pub(super) fn skip_history(&mut self) {
+        self.history_done = true;
+        self.complete = false;
+    }
+
+    pub(super) fn history_done(&self) -> bool {
+        self.history_done
+    }
+
     pub(super) fn proof(&self, axis: Axis) -> Planned {
         proof(&self.guard.category, &self.guard.original, axis)
     }
@@ -189,6 +234,7 @@ impl Flow {
             history_done: false,
             observed_at: 0.0,
             target_reads: 0,
+            history_window: None,
         }
     }
 
@@ -249,6 +295,16 @@ impl Flow {
                 return Err(failed());
             }
             self.complete &= page.next_page_cursor.is_empty();
+            if axis == Axis::History {
+                self.complete &= self.history_window.is_some_and(|(start, end)| {
+                    page.list.iter().all(|row| {
+                        row.created_time
+                            .as_deref()
+                            .and_then(|time| time.parse::<u64>().ok())
+                            .is_some_and(|time| start <= time && time <= end)
+                    })
+                });
+            }
             self.peers.extend(page.list);
             self.history_done |= axis == Axis::History;
         }

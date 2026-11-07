@@ -184,6 +184,11 @@ export type ExchangeMetadata = {
   privateProxyRegions: { [key: string]: string[] };
   /** Whether to automatically reduce order size if it exceeds position size */
   autoDownSizeReduceOrders: boolean;
+  /**
+   * Whether resting close orders (reduce-only limits, sized TP/SL and trigger closes) lock position
+   * size, so only the free part can be closed. Position-level TP/SL (size 0) lock nothing.
+   */
+  reduceOrdersLockPositionSize: boolean;
   /** Whether the exchange supports chaser orders (orders that follow price) */
   supportsChaser: boolean;
   /** Whether the exchange exposes a per-position margin amount (Position.marginSize) */
@@ -314,6 +319,7 @@ const defaultMetaData: Omit<ExchangeMetadata, 'exchangeName' | 'features'> = {
   marketOrderDelayInSeconds: 2,
   privateProxyRegions: {},
   autoDownSizeReduceOrders: false,
+  reduceOrdersLockPositionSize: false,
   // Safe default. Most exchanges override (BitMEX = 20_000, kraken = 500, etc.).
   tickInterval: 2_000,
   supportsChaser: false,
@@ -902,6 +908,8 @@ const BitgetMetadata: ExchangeMetadata = {
   tvMaxGetBarFetches: 5,
   hasIndependentHedgedLeverageInIsolatedMargin: true,
   autoDownSizeReduceOrders: true,
+  // Sized close plans and reduce-only limits hold position size: "Not enough position is available".
+  reduceOrdersLockPositionSize: true,
   supportsChaser: true,
   supportsPositionMargin: true,
   supportsTunnel: true,
@@ -946,6 +954,9 @@ const BitgetInverseMetadata: ExchangeMetadata = {
   // Hidden from the picker and not certified on mobile; the Bitget spread
   // above would otherwise inherit `true`.
   supportedOnMobile: false,
+  // Inverse order amounts are native contracts while position.contracts is the coin size, so the
+  // downsizer cannot net one against the other here; off until that conversion exists.
+  reduceOrdersLockPositionSize: false,
   logo: '/static/exchanges/logos/BITGET/logo.svg',
   lightLogo: '/static/exchanges/logos/BITGET/light.png',
   darkLogo: '/static/exchanges/logos/BITGET/dark.png',
@@ -2056,6 +2067,7 @@ const ParadexMetadata: ExchangeMetadata = {
   marketOrderDelayInSeconds: 0,
   privateProxyRegions: {},
   autoDownSizeReduceOrders: false,
+  reduceOrdersLockPositionSize: false,
   supportsChaser: true,
   supportsPositionMargin: false,
   supportsClosedPnLEndpoint: false,

@@ -2957,3 +2957,16 @@ fn snapshot_read_error(response: &Response<'_>, ok: bool) -> VenueError {
         error
     }
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Limits { .. } => S::ACCOUNT,
+            Self::Lookup { .. } => S::ACCOUNT,
+            Self::Snapshot { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}

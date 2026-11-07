@@ -15,7 +15,7 @@ use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
-    Response, SignStep, VenueError,
+    Response, SignStep, TimerId, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -120,6 +120,7 @@ enum Kind {
     Cancel(Vec<String>),
     /// An amend's cancel of a live stop, re-checked at the final send (`StopGuard`).
     GuardedCancel(Box<StopGuard>),
+    CancelProof,
     Empty,
     Quotes(String),
     Leverage {
@@ -242,6 +243,16 @@ pub struct Trading {
     /// Stops put back under a new id after a refused replacement: (original id,
     /// new id, symbol). A later cancel of the original or its market removes them.
     restored: VecDeque<(String, String, String)>,
+    cancel_proofs: HashMap<u64, CancelProof>,
+}
+const CANCEL_PROOF_MS: f64 = 5_000.;
+const CANCEL_PROOF_POLLS: u8 = 3;
+struct CancelProof {
+    guard: Box<StopGuard>,
+    deadline: f64,
+    expires: TimerId,
+    retry: Option<TimerId>,
+    polls: u8,
 }
 /// How many put-back stops are remembered for a later cancel to follow.
 const RESTORED_KEPT: usize = 64;
@@ -652,7 +663,14 @@ impl Trading {
             _ => (Vec::new(), None),
         };
         for (id, job) in &self.replacing {
-            let symbol = account.native_order(id).map(|raw| raw.market.as_str());
+            let symbol = account
+                .native_order(id)
+                .map(|raw| raw.market.as_str())
+                .or_else(|| {
+                    self.cancel_proofs
+                        .get(job)
+                        .map(|proof| proof.guard.symbol.as_str())
+                });
             if (cancelled_ids.contains(id)
                 || (cancelled_symbol.is_some() && symbol == cancelled_symbol.as_deref()))
                 && let Some(state) = self.jobs.get_mut(job)
@@ -950,6 +968,14 @@ impl Trading {
         let Some(state) = self.jobs.get_mut(&job) else {
             return;
         };
+        if self.cancel_proofs.contains_key(&job)
+            && !state
+                .operations
+                .front()
+                .is_some_and(|operation| matches!(operation.kind, Kind::CancelProof))
+        {
+            return;
+        }
         if let Some(operation) = state.operations.pop_front() {
             if let Kind::Amend { id, target } = &operation.kind {
                 if let Err(error) = account.begin_amend(id, (**target).clone()) {
@@ -960,8 +986,10 @@ impl Trading {
                 }
                 self.amend_locks.insert(id.clone());
             }
-            account.bump_orders(cx);
-            account.bump_positions();
+            if !matches!(operation.kind, Kind::CancelProof) {
+                account.bump_orders(cx);
+                account.bump_positions();
+            }
             account.request(
                 cx,
                 operation.method,
@@ -1010,6 +1038,158 @@ impl Trading {
             }
         }
     }
+    fn begin_cancel_proof(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        account: &mut Account,
+        job: u64,
+        guard: Box<StopGuard>,
+    ) {
+        let expires = cx.set_timer(CANCEL_PROOF_MS);
+        self.cancel_proofs.insert(
+            job,
+            CancelProof {
+                guard,
+                deadline: cx.now + CANCEL_PROOF_MS,
+                expires,
+                retry: None,
+                polls: 0,
+            },
+        );
+        self.poll_cancel_proof(cx, account, job);
+    }
+    fn poll_cancel_proof(&mut self, cx: &mut Cx<'_, Pending>, account: &mut Account, job: u64) {
+        let Some(proof) = self.cancel_proofs.get_mut(&job) else {
+            return;
+        };
+        if !cx.now.is_finite() || cx.now >= proof.deadline || proof.polls >= CANCEL_PROOF_POLLS {
+            self.fail_cancel_proof(cx, account, job, "target cancellation was not confirmed");
+            return;
+        }
+        proof.polls += 1;
+        let raw = &proof.guard.raw;
+        let mut path = format!(
+            "/orders-history?market={}&status=CLOSED&page_size=100",
+            encode(&raw.market)
+        );
+        if !raw.client_id.is_empty() {
+            path.push_str(&format!("&client_id={}", encode(&raw.client_id)));
+        }
+        let Some(state) = self.jobs.get_mut(&job) else {
+            return;
+        };
+        state.operations.push_front(Operation {
+            receipts: Vec::new(),
+            hash: None,
+            method: Method::Get,
+            path,
+            body: None,
+            kind: Kind::CancelProof,
+        });
+        self.advance(cx, account, job);
+    }
+    fn clear_cancel_proof(&mut self, cx: &mut Cx<'_, Pending>, job: u64) {
+        if let Some(proof) = self.cancel_proofs.remove(&job) {
+            cx.clear_timer(proof.expires);
+            if let Some(timer) = proof.retry {
+                cx.clear_timer(timer);
+            }
+        }
+    }
+    fn fail_cancel_proof(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        account: &mut Account,
+        job: u64,
+        cause: &str,
+    ) {
+        let Some(proof) = self.cancel_proofs.get(&job) else {
+            return;
+        };
+        let symbol = &proof.guard.symbol;
+        let mut error = unproven(format!(
+            "The outcome of your {symbol} protection update is unknown. Check Open Orders and your position before replacing protection: {cause}"
+        ));
+        error.presents = true;
+        self.clear_cancel_proof(cx, job);
+        if let Some(state) = self.jobs.get_mut(&job) {
+            state.operations.clear();
+            state.restore = None;
+            state.errors.push(error);
+            self.advance(cx, account, job);
+        }
+    }
+    fn cancel_proof_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        account: &mut Account,
+        job: u64,
+        response: Response<'_>,
+    ) {
+        let Some(proof) = self.cancel_proofs.get(&job) else {
+            return;
+        };
+        if !cx.now.is_finite() || cx.now >= proof.deadline {
+            self.fail_cancel_proof(cx, account, job, "target cancellation proof expired");
+            return;
+        }
+        if crate::success(response).is_err() {
+            self.fail_cancel_proof(cx, account, job, "target cancellation read failed");
+            return;
+        }
+        if cancel_proven(response.body, &proof.guard.raw)
+            && proof.guard.prices_safe(cx.store, cx.now).is_ok()
+            && account.native_order(&proof.guard.raw.id).is_none_or(|row| {
+                row.size == proof.guard.raw.size
+                    && row.remaining_size == proof.guard.raw.remaining_size
+                    && row.trigger_price == proof.guard.raw.trigger_price
+                    && row.price == proof.guard.raw.price
+            })
+            && cx.store.order(&proof.guard.raw.id).is_none_or(|row| {
+                row.filled == 0. && row.status != safe_cex_engine::model::OrderStatus::Closed
+            })
+            && self
+                .jobs
+                .get(&job)
+                .is_some_and(|state| state.restore.is_some())
+        {
+            self.clear_cancel_proof(cx, job);
+            self.advance(cx, account, job);
+            return;
+        }
+        if proof.polls >= CANCEL_PROOF_POLLS {
+            self.fail_cancel_proof(
+                cx,
+                account,
+                job,
+                "target cancellation was not confirmed unfilled",
+            );
+            return;
+        }
+        let timer = cx.set_timer(1_000.);
+        self.cancel_proofs.get_mut(&job).unwrap().retry = Some(timer);
+    }
+    pub(crate) fn on_timer(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        account: &mut Account,
+        timer: TimerId,
+    ) -> bool {
+        let Some((&job, proof)) = self
+            .cancel_proofs
+            .iter()
+            .find(|(_, proof)| proof.expires == timer || proof.retry == Some(timer))
+        else {
+            return false;
+        };
+        if proof.expires == timer {
+            self.fail_cancel_proof(cx, account, job, "target cancellation proof timed out");
+        } else {
+            self.cancel_proofs.get_mut(&job).unwrap().retry = None;
+            self.poll_cancel_proof(cx, account, job);
+        }
+        true
+    }
     pub fn on_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1017,6 +1197,17 @@ impl Trading {
         request: Request,
         response: Response<'_>,
     ) {
+        if matches!(request.kind, Kind::CancelProof) {
+            self.cancel_proof_response(cx, account, request.job, response);
+            return;
+        }
+        if let Kind::GuardedCancel(guard) = &request.kind
+            && ((200..300).contains(&response.status) && crate::success(response).is_ok()
+                || response.status == 400 && response.body.contains("ORDER_ID_NOT_FOUND"))
+        {
+            self.begin_cancel_proof(cx, account, request.job, guard.clone());
+            return;
+        }
         if let Kind::Quotes(symbol) = &request.kind {
             let result = crate::success(response).and_then(|()| decode_quote(response.body));
             match result {
@@ -1066,10 +1257,9 @@ impl Trading {
             self.complete(cx, account, request, result, false);
             return;
         }
-        // A stop the venue already removed: what the cancel asked for is true.
+        // Plain cancel idempotency grants no replacement authority.
         let kind = &request.kind;
-        let already_gone = (matches!(kind, Kind::Cancel(ids) if ids.len() == 1)
-            || matches!(kind, Kind::GuardedCancel(_)))
+        let already_gone = matches!(kind, Kind::Cancel(ids) if ids.len() == 1)
             && response.status == 400
             && response.body.contains("ORDER_ID_NOT_FOUND");
         let result = crate::success(response).and_then(|()| match &request.kind {
@@ -1095,13 +1285,6 @@ impl Trading {
             }
             _ => Ok(Vec::new()),
         });
-        // A stop the venue no longer holds may have triggered: never put it back.
-        if already_gone
-            && matches!(kind, Kind::GuardedCancel(_))
-            && let Some(job) = self.jobs.get_mut(&request.job)
-        {
-            job.restore = None;
-        }
         let result = if already_gone {
             Ok(Vec::new())
         } else {
@@ -1125,6 +1308,10 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
+        if matches!(request.kind, Kind::CancelProof) {
+            self.fail_cancel_proof(cx, account, request.job, "target cancellation read failed");
+            return;
+        }
         let error = VenueError::new(error).kind(ErrorKind::Network);
         let error = match request.kind {
             // Reads: the quote read precedes the placement, which was never sent.
@@ -1142,6 +1329,10 @@ impl Trading {
         request: Request,
         error: VenueError,
     ) {
+        if matches!(request.kind, Kind::CancelProof) {
+            self.fail_cancel_proof(cx, account, request.job, "target cancellation read failed");
+            return;
+        }
         self.complete(
             cx,
             account,
@@ -1157,6 +1348,10 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
+        if matches!(request.kind, Kind::CancelProof) {
+            self.fail_cancel_proof(cx, account, request.job, "target cancellation read failed");
+            return;
+        }
         self.complete(cx, account, request, Err(not_sent(error)), true);
     }
     fn complete(
@@ -1725,6 +1920,67 @@ fn restore_operation(
         },
     })
 }
+fn cancel_proven(body: &str, original: &NativeOrder) -> bool {
+    #[derive(Deserialize)]
+    struct Page {
+        results: Vec<NativeOrder>,
+    }
+    let Ok(page) = serde_json::from_str::<Page>(body) else {
+        return false;
+    };
+    let mut targets = page.results.iter().filter(|row| row.id == original.id);
+    let Some(row) = targets.next() else {
+        return false;
+    };
+    fn positive_decimal(text: &str) -> Option<(&str, &str)> {
+        let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+        if whole.is_empty()
+            || !whole
+                .bytes()
+                .chain(fraction.bytes())
+                .all(|b| b.is_ascii_digit())
+        {
+            return None;
+        }
+        let value = (
+            whole.trim_start_matches('0'),
+            fraction.trim_end_matches('0'),
+        );
+        (!value.0.is_empty() || !value.1.is_empty()).then_some(value)
+    }
+    let same_quantity = |a: &str, b: &str| {
+        positive_decimal(a)
+            .zip(positive_decimal(b))
+            .is_some_and(|(a, b)| a == b)
+    };
+    targets.next().is_none()
+        && row.market == original.market
+        && row.side == original.side
+        && row.kind == original.kind
+        && row.status == "CLOSED"
+        && row.cancel_reason == "USER_CANCELED"
+        && same_quantity(&row.size, &original.size)
+        && same_quantity(&row.remaining_size, &original.size)
+        && row.trigger_price == original.trigger_price
+        && row.client_id == original.client_id
+        && row.created_at == original.created_at
+        && row
+            .last_updated_at
+            .parse::<u64>()
+            .ok()
+            .is_some_and(|updated| {
+                original
+                    .created_at
+                    .parse::<u64>()
+                    .ok()
+                    .is_some_and(|created| updated >= created)
+                    && updated >= original.last_updated_at.parse::<u64>().unwrap_or(0)
+            })
+        && row.flags == original.flags
+        && row.reduce_only == original.reduce_only
+        && row.instruction == original.instruction
+        && (!row.kind.ends_with("_LIMIT") || row.price == original.price)
+}
 /// The amended stop's original, re-checked when its cancel is finally sent.
 #[derive(Clone)]
 pub(crate) struct StopGuard {
@@ -1744,8 +2000,7 @@ impl StopGuard {
         store: &safe_cex_engine::Store,
         now: f64,
     ) -> Result<(), VenueError> {
-        use safe_cex_engine::model::StopTriggerType;
-        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        use safe_cex_engine::protective_amend::refused;
         let unchanged = || format!("Your {} stop was not changed", self.symbol);
         let current = account.native_order(&self.raw.id);
         if current.is_none_or(|row| {
@@ -1761,6 +2016,12 @@ impl StopGuard {
                 unchanged()
             ))));
         }
+        self.prices_safe(store, now)
+    }
+    fn prices_safe(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        use safe_cex_engine::model::StopTriggerType;
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        let unchanged = || format!("Your {} stop was not changed", self.symbol);
         // A stop entry (Conditional) fires like a stop loss: a buy above the
         // market, a sell below it; a take profit fires the other way.
         let stops = matches!(self.kind, OrderType::StopLoss | OrderType::Conditional);

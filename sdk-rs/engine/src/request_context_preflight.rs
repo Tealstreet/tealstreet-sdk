@@ -75,6 +75,7 @@ impl ContextRegistry {
         self.commands.insert(
             command,
             CommandOwner {
+                request_class: self.dispatch_request_class(command),
                 generation,
                 phase: CommandPhase::Preflight(State::new(policy)),
                 last_deadline: now,

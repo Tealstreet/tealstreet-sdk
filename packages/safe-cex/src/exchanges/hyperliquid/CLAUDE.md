@@ -46,6 +46,9 @@ only when their markets and order/client identities are disjoint from every
 older job. Same-market work and account-wide schedule controls remain barriers.
 The active owner is never preempted; nonce custody and 334 ms release pacing are
 unchanged. Expiry is a typed Timeout/NotSent for an entirely unsent command.
+Retirement has no I/O authority: retired intent timer IDs are cleared at the next
+trading or timer callback, without clearing a surviving owner's timer. Missing
+command receipts use the shared unstamped-command refusal.
 
 ## Rust amendments
 

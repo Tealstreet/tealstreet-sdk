@@ -2470,11 +2470,17 @@ impl Hyperliquid {
             .positions()
             .iter()
             .map(|p| {
+                // The mid, as when `last` was always the mid; a trade print moves neither.
                 cx.store
                     .ticker(&p.symbol)
-                    .filter(|t| t.last > 0.0 && p.entry_price > 0.0)
-                    .map_or(p.unrealized_pnl, |t| {
-                        (t.last - p.entry_price)
+                    .and_then(|t| {
+                        [t.mid_price.unwrap_or(0.0), t.last]
+                            .into_iter()
+                            .find(|price| price.is_finite() && *price > 0.0)
+                    })
+                    .filter(|_| p.entry_price > 0.0)
+                    .map_or(p.unrealized_pnl, |price| {
+                        (price - p.entry_price)
                             * p.contracts
                             * if p.side == PositionSide::Long {
                                 1.0
@@ -3422,6 +3428,20 @@ fn every_dex_clean(names: &[String], clean: &HashMap<String, u64>) -> Option<u64
     names.iter().try_fold(*main, |oldest, name| {
         clean.get(name).map(|epoch| oldest.min(*epoch))
     })
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Role => S::ACCOUNT,
+            Self::Mode => S::ACCOUNT,
+            Self::State { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            Self::Spot { .. } => S::BALANCE,
+            _ => S::NONE,
+        }
+    }
 }
 
 #[cfg(test)]

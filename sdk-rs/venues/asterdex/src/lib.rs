@@ -980,6 +980,17 @@ impl Venue for AsterDex {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Signed(request) => Self::startup_reads(&request.pending),
+            Pending::ExchangeInfo { .. } => S::MARKETS,
+            Pending::Daily { .. } | Pending::OpenInterest { initial: true, .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             stp_controls: self.version == Version::V3,

@@ -2532,3 +2532,28 @@ fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError 
     }
     error
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Positions { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            Self::Margin { .. } | Self::Mode { .. } => S::ACCOUNT,
+        }
+    }
+}
+
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    for read in [
+        Request::Margin { revision: 0 },
+        Request::Mode { revision: 0 },
+    ] {
+        assert_eq!(
+            read.startup_sections(),
+            safe_cex_engine::startup::Sections::ACCOUNT
+        );
+    }
+}
