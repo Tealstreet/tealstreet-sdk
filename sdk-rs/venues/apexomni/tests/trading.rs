@@ -1088,12 +1088,7 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     prove_cancel(&mut e);
     let replacement = requests(&mut e).remove(0);
-    response(
-        &mut e,
-        &replacement,
-        NOW + 16.0,
-        r#"{"code":429,"msg":"too many requests"}"#,
-    );
+    response(&mut e, &replacement, NOW + 16.0, REFUSED);
     let error = e
         .drain_actions()
         .find_map(|a| match a {
@@ -1127,12 +1122,7 @@ fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
         response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         prove_cancel(&mut e);
         let replacement = requests(&mut e).remove(0);
-        response(
-            &mut e,
-            &replacement,
-            NOW + 16.0,
-            r#"{"code":429,"msg":"too many requests"}"#,
-        );
+        response(&mut e, &replacement, NOW + 16.0, REFUSED);
         let error = e
             .drain_actions()
             .find_map(|a| match a {
@@ -1166,7 +1156,7 @@ fn write_failures_use_shared_classification_and_preserve_network_text() {
             429,
             r#"{"code":429,"msg":"too many requests"}"#,
             Some(ErrorKind::RateLimited),
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some("429"),
         ),
         (
@@ -1577,7 +1567,12 @@ fn quoted_refusal_codes_share_the_integer_code_table_and_message() {
                 _ => None,
             })
             .unwrap();
-        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+        let outcome = if code == "429" {
+            safe_cex_engine::Outcome::Unknown
+        } else {
+            safe_cex_engine::Outcome::Rejected
+        };
+        assert_eq!(error.outcome, Some(outcome));
         assert_eq!(error.venue_code.as_deref(), Some(code));
         assert_eq!(error.venue_message.as_deref(), Some("native refusal"));
         assert_eq!(
@@ -2365,7 +2360,8 @@ fn placements(requests: &[HttpRequest]) -> Vec<&HttpRequest> {
         .filter(|r| r.url.ends_with("/v3/order") || r.url.ends_with("/v3/delete-order"))
         .collect()
 }
-const REFUSED: &str = r#"{"code":429,"msg":"too many requests"}"#;
+// A definite non-rate refusal; rate limits never authorize a put-back.
+const REFUSED: &str = r#"{"code":10002,"msg":"Requires Login: Your API key is wrong"}"#;
 /// Amends the resting stop to 56000 and lands its cancel; its replacement is next.
 fn to_stop_replacement(e: &mut TestEngine) -> HttpRequest {
     let cancel = amend_to(e, "stop", 56000.0).remove(0);
@@ -2821,4 +2817,194 @@ fn a_stop_edit_and_its_put_back_keep_the_native_order_type() {
         assert_eq!(form(&restore)["type"], kind, "the put-back");
         assert_eq!(form(&restore)["triggerPrice"], "55000");
     }
+}
+
+#[test]
+fn ambiguous_rate_code_cannot_restore_protection() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(
+        &mut e,
+        &replacement,
+        NOW + 200.0,
+        r#"{"code":429,"msg":"too many requests"}"#,
+    );
+    let out = actions(&mut e);
+    assert!(
+        placements(&http(out.clone())).is_empty(),
+        "native rate code issued another place: {:?}",
+        out
+    );
+    let error = failure_of(&out);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.protection, None);
+}
+
+#[test]
+fn ambiguous_signature_code_cannot_resend() {
+    let mut e = ready();
+    e.handle(NOW + 10., Event::Command(hmac_cancel()));
+    let first = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 11.,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature refused"}"#,
+            },
+        },
+    );
+    let out = actions(&mut e);
+    assert!(
+        http(out.clone())
+            .iter()
+            .all(|r| r.method == safe_cex_engine::Method::Get),
+        "ambiguous status resends: {:?}",
+        out
+    );
+    let error = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 43, error }) => Some(error),
+            _ => None,
+        })
+        .expect("terminal failure");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+#[test]
+fn unproven_signature_control() {
+    let mut e = ready();
+    e.handle(NOW + 10., Event::Command(hmac_cancel()));
+    let first = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 11.,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature refused"}"#,
+            },
+        },
+    );
+    let out = requests(&mut e);
+    assert!(
+        out.iter().all(|r| r.method == safe_cex_engine::Method::Get),
+        "ambiguous status resends: {:?}",
+        out
+    );
+}
+
+#[test]
+fn ambiguous_protective_cancel_cannot_resend_or_create() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let cancel = amend_to(&mut e, "stop", 56000.0).remove(0);
+    e.handle(
+        NOW + 15.0,
+        Event::HttpResponse {
+            request: cancel.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature expired"}"#,
+            },
+        },
+    );
+    let out = actions(&mut e);
+    assert!(
+        placements(&http(out.clone())).is_empty(),
+        "ambiguous cancel sent another write: {out:?}"
+    );
+    let error = failure_of(&out);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.protection, None);
+    assert!(e.store().order("stop").is_some());
+}
+
+#[test]
+fn ambiguous_put_back_cannot_claim_unprotected_or_resend() {
+    for (status, code) in [(200, 429), (429, 20016)] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop(&mut e, socket, 0.0);
+        let replacement = to_stop_replacement(&mut e);
+        response(
+            &mut e,
+            &replacement,
+            NOW + 200.0,
+            r#"{"code":10002,"msg":"Requires Login: Your API key is wrong"}"#,
+        );
+        let restore = requests(&mut e).remove(0);
+        let body = format!(r#"{{"code":{code},"msg":"uncertain write"}}"#);
+        e.handle(
+            NOW + 201.0,
+            Event::HttpResponse {
+                request: restore.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        let out = actions(&mut e);
+        assert!(
+            placements(&http(out.clone())).is_empty(),
+            "{status}/{code}: {out:?}"
+        );
+        let error = failure_of(&out);
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}/{code}: {error:?}"
+        );
+        assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
+        assert!(error.message.contains("Check Open Orders"), "{error:?}");
+    }
+}
+
+#[test]
+fn engine_ambiguity_rate_code_cannot_restore_protection() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(
+        &mut e,
+        &replacement,
+        NOW + 200.0,
+        r#"{"code":429,"msg":"too many requests"}"#,
+    );
+    let out = requests(&mut e);
+    assert!(
+        placements(&out).is_empty(),
+        "native rate code issued another place: {:?}",
+        out
+    );
+}
+
+#[test]
+fn engine_ambiguity_429_signature_code_cannot_resend() {
+    let mut e = ready();
+    e.handle(NOW + 10., Event::Command(hmac_cancel()));
+    let first = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 11.,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature refused"}"#,
+            },
+        },
+    );
+    let out = requests(&mut e);
+    assert!(
+        out.iter().all(|r| r.method == safe_cex_engine::Method::Get),
+        "ambiguous status resends: {:?}",
+        out
+    );
 }

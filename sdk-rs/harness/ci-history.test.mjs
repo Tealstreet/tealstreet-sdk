@@ -8,7 +8,7 @@ import test from 'node:test';
 
 const script = resolve('.github/actions/fetch-rust-history/fetch-history.py');
 const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-const historyJobs = ['scope', 'selection', 'harness', 'bans', 'gate', 'bitget-paired', 'cpu-plan', 'cpu-second', 'cpu-certify'];
+const historyJobs = ['scope', 'selection', 'harness', 'bans', 'gate', 'bitget-paired', 'cpu-plan', 'cpu-certify'];
 const body = (text, name) => {
   const value = new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:\\n|$(?![\\s\\S]))`, 'm').exec(text);
   assert(value, name); return value[1];

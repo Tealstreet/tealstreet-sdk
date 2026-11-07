@@ -128,6 +128,7 @@ it('applies the configured deadline to the live SDK host while preserving caller
   const requests: Array<{ op: string }> = [];
   const idle = () => '[]';
   const native: WasmEngineLike = {
+    syncHostTime: () => true,
     capabilities: () => engineCapabilities('bybit'),
     start: idle, wsOpen: idle, wsMessage: idle, wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle, httpChunk: idle, httpEnd: idle, httpFailed: idle, timer: idle,

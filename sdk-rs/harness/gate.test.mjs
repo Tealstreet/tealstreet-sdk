@@ -311,6 +311,22 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
       if (rust && args.includes('--performance')) {
         if (defect === 'process-cpu') output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = 3;
         if (defect === 'marginal-cpu') output.metrics.cpuMs = output.metrics.runtimeCpuMs = 3.001; // TS 2 ms: just past the sub-10 ms 1 ms allowance
+        // Process CPU vs TS 2 ms: 0.95x warns; slower only in the first measured set clears on re-measure.
+        if (defect === 'warn-cpu') output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = 1.9;
+        if (defect === 'remeasure-clears') {
+          globalThis.rustPerformanceRuns = (globalThis.rustPerformanceRuns ?? 0) + 1;
+          output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = globalThis.rustPerformanceRuns <= ${PUBLIC_REPLAY_PAIRS} ? 3 : 1;
+        }
+        // #3248 review: a slow first set that also breaks a non-CPU check, then a clean re-measure.
+        if (defect?.startsWith('first-set-')) {
+          globalThis.firstSetRuns = (globalThis.firstSetRuns ?? 0) + 1;
+          if (globalThis.firstSetRuns <= ${PUBLIC_REPLAY_PAIRS}) {
+            if (!defect.includes('no-cpu')) output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = 3;
+            if (defect.includes('ticker')) output.tickers[0].last = 999;
+            if (defect.includes('transport')) output.transportReceipt = { changed: true };
+            if (defect.includes('memory')) output.metrics.heapBeforeBytes--;
+          }
+        }
         if (defect === 'late-invalid-cpu' && out.endsWith('-${PUBLIC_REPLAY_PAIRS - 1}.json')) output.metrics.cpuMs = null;
         if (defect === 'incomplete-perf' && out.endsWith('-${PUBLIC_REPLAY_PAIRS - 1}.json')) output.frames = 0;
         if (defect === 'dropped-perf-output' && out.endsWith('-${PUBLIC_REPLAY_PAIRS - 1}.json')) output.tickers[0].last = 0;
@@ -351,17 +367,20 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
     if (correctnessOnly) assert.deepEqual(calls, [['correctness', 'ts'], ['correctness', 'rust']]);
     else if (!isPrivate) {
       assert.deepEqual(calls.slice(0, 2), [['correctness', 'ts'], ['correctness', 'rust']]);
-      // Timing outcomes cannot extend or shorten the fixed balanced budget.
-      assert.equal(calls.length, 2 + 2 * PUBLIC_REPLAY_PAIRS);
+      // Timing outcomes cannot extend the fixed balanced budget beyond the one re-measure.
       const report = JSON.parse(readFileSync(${JSON.stringify(reportPath)}, 'utf8'));
+      const sets = report.remeasure ? 2 : 1;
+      assert.equal(calls.length, 2 + 2 * PUBLIC_REPLAY_PAIRS * sets);
       assert.equal(report.measurement.sampleOrder.length, 2 * PUBLIC_REPLAY_PAIRS);
       assert.ok(report.measurement.cpu.logicalCpus > 0);
       const retained = JSON.parse(readFileSync(report.artifacts[0].path.replace(/[^/]+$/, 'measurement.json'), 'utf8'));
       assert.deepEqual(retained, report.measurement);
       assert.deepEqual(report.measurement.sampleOrder.map(({ impl, pair }) => [impl, pair]),
         Array.from({ length: PUBLIC_REPLAY_PAIRS }, (_, pair) => (pair % 2 ? ['rust', 'ts'] : ['ts', 'rust']).map((impl) => [impl, pair])).flat());
-      for (let run = 0; run < PUBLIC_REPLAY_PAIRS; run++)
-        assert.deepEqual(calls.slice(2 + run * 2, 4 + run * 2), (run % 2 ? ['rust', 'ts'] : ['ts', 'rust']).map((impl) => ['performance', impl]));
+      for (let set = 0; set < sets; set++) for (let run = 0; run < PUBLIC_REPLAY_PAIRS; run++) {
+        const at = 2 + (set * PUBLIC_REPLAY_PAIRS + run) * 2;
+        assert.deepEqual(calls.slice(at, at + 2), (run % 2 ? ['rust', 'ts'] : ['ts', 'rust']).map((impl) => ['performance', impl]));
+      }
     } else assert.equal(calls.length, 4);
   `;
   try {
@@ -427,7 +446,7 @@ test('PR correctness mode executes exactly one audited pair and retains all outp
 test('gate CLI orders complete failures deterministically before report and console truncation', () => {
   const expected = [
     ...Array.from({ length: 43 }, (_, index) => `book FAIL${String(index).padStart(2, '0')}.bids[0][1]: ts=1 rust=2`),
-    'performance process CPU: Rust must be at least 10% below TS (ts=2, rust=3)',
+    'performance process CPU: Rust is slower than TS (ts=2, rust=3, 1.500x)',
     'rust: duplicate evidence',
     'rust: duplicate evidence',
   ];
@@ -487,6 +506,43 @@ test('gate CLI independently enforces process CPU, ten percent margin and every 
     const result = gate('bybitinverse', false, defect);
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stdout, message);
+  }
+});
+
+test('gate CLI re-measures once in the job: a near miss and a cleared miss warn, a persisted miss fails', () => {
+  const near = gate('bybitinverse', false, 'warn-cpu');
+  assert.equal(near.status, 0, near.stderr);
+  assert.equal(near.report.status, 'PASS');
+  assert.equal(near.report.remeasure, undefined, 'a near miss is not re-measured');
+  assert.match(near.report.warnings.join('\n'), /process CPU: missed the 10%-faster target \(ts=2, rust=1\.9, 0\.950x\)/);
+  assert.match(near.stdout, /::warning title=CPU bybitinverse::/);
+  const cleared = gate('bybitinverse', false, 'remeasure-clears');
+  assert.equal(cleared.status, 0, cleared.stderr);
+  assert.equal(cleared.report.status, 'PASS');
+  assert.match(cleared.report.remeasure.first.join('\n'), /process CPU: Rust is slower than TS \(ts=2, rust=3, 1\.500x\)/);
+  assert.match(cleared.report.warnings.join('\n'), /cleared on the one re-measure/);
+  assert.equal(cleared.report.artifacts.length, 2 + 2 * PUBLIC_REPLAY_PAIRS, 'only the re-measured set is retained');
+  assert.ok(cleared.report.samples.rust.every((sample) => sample.processCpuMs === 1), 'the reported samples are the re-measured set');
+  const persisted = gate('bybitinverse', false, 'process-cpu');
+  assert.equal(persisted.status, 1);
+  assert.equal(persisted.report.remeasure.first.length, 1);
+  assert.match(persisted.report.failures.join('\n'), /process CPU: Rust is slower than TS/);
+  assert.match(persisted.stdout, /::error title=CPU bybitinverse::.*persisted after the one re-measure/);
+});
+
+test('a re-measure decides only CPU: the discarded first set keeps its non-CPU failures', () => {
+  const control = gate('bybitinverse', false, 'first-set-no-cpu-ticker');
+  assert.equal(control.status, 1, control.stderr);
+  assert.equal(control.report.remeasure, undefined, 'no CPU miss, no re-measure');
+  assert.ok(control.report.failures.some((line) => line.includes('rust performance run') && line.includes('tickers')));
+  for (const [defect, pattern] of [['ticker', /rust performance run \d+ tickers/], ['transport', /rust performance run \d+: transport workload differs/],
+    ['memory', /rust performance run \d+: .*heap/]]) {
+    const result = gate('bybitinverse', false, `first-set-${defect}`);
+    assert.equal(result.status, 1, `${defect}: ${result.stderr}`);
+    assert.equal(result.report.status, 'FAIL');
+    assert.ok(result.report.remeasure, `${defect}: the CPU miss was re-measured`);
+    assert.ok(!result.report.failures.some((line) => line.includes('Rust is slower than TS')), `${defect}: the CPU verdict cleared`);
+    assert.match(result.report.failures.join('\n'), pattern, `${defect}: the first set's failure is retained`);
   }
 });
 

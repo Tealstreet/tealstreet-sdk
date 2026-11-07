@@ -918,19 +918,20 @@ fn a_non_json_throttle_on_a_write_is_rate_limited() {
         let sent = command(&mut e, place());
         let order = write(&sent, Method::Post, "/order").clone();
         let failed = answer(&mut e, &order, status, "Too Many Requests");
-        assert!(failed.requests.is_empty());
+        assert!(
+            failed
+                .requests
+                .iter()
+                .all(|request| request.method == Method::Get)
+        );
         let error = terminal(&failed).expect("one terminal").unwrap_err();
         assert_eq!(
             error.kind,
             Some(ErrorKind::RateLimited),
             "{status}: {error:?}"
         );
-        // A documented throttle refused the write; it is not an unknown outcome.
-        assert_eq!(
-            error.outcome,
-            Some(Outcome::Rejected),
-            "{status}: {error:?}"
-        );
+        // A released throttle cannot prove that the write was not accepted.
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{status}: {error:?}");
     }
 }
 

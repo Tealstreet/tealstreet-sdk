@@ -2315,7 +2315,7 @@ impl BybitLinear {
                 Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
             )
         {
-            let pause = venue_rate_limit_pause_ms(response, cx.now);
+            let pause = venue_rate_limit_pause_ms(response, cx.protocol_now());
             // One window per streak: a repeat refusal while it runs does not extend it.
             if pause > 0.0 && cx.now >= self.discovery_paused_until {
                 self.discovery_paused_until = cx.now + pause;

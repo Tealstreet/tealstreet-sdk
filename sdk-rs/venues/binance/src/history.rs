@@ -498,7 +498,7 @@ impl BinanceFutures {
                 // A start alone reads only its first 7 days; an old one answers empty.
                 let windows = match (from_ms, to_ms) {
                     (Some(from), Some(to)) => split(from, to),
-                    (Some(from), None) if order_id.is_none() => split(from, cx.now),
+                    (Some(from), None) if order_id.is_none() => split(from, cx.protocol_now()),
                     _ => VecDeque::from([(from_ms, to_ms)]),
                 };
                 if self.begin(cx, command, signed, |completion| InFlight::Fills {
@@ -543,7 +543,7 @@ impl BinanceFutures {
                 limit,
             } => {
                 // A start alone with no limit walks up to now, not one page from the start.
-                let open_end = limit.is_none().then(|| cx.now.floor());
+                let open_end = limit.is_none().then(|| cx.protocol_now().floor());
                 let walk = match (
                     from_ms,
                     to_ms.or(open_end.filter(|end| from_ms.is_some_and(|from| *end > from))),

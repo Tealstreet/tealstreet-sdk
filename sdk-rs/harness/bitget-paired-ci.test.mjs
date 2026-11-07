@@ -176,6 +176,17 @@ test('landing push uses the authenticated actual first parent and exact landing 
   assert.equal(result.baseline, A); assert.equal(result.candidate, H);
 });
 
+test('a dispatched master run (nightly certification) uses the landed tip like a push', async () => {
+  const x = fixture(); x.run.event = 'workflow_dispatch'; x.run.head_branch = 'master';
+  x.context.gitRead = (...args) => args[1] === 'HEAD' ? H : TREE;
+  x.context.reader.listCommitPulls = async () => { throw new Error('a master dispatch must not select a PR baseline'); };
+  const result = await selectBitgetPair(x.context);
+  assert.equal(result.baseline, A); assert.equal(result.candidate, H);
+  const branch = fixture(); branch.run.event = 'workflow_dispatch'; branch.run.head_branch = 'feat/other';
+  branch.context.reader.listCommitPulls = async () => [];
+  await assert.rejects(selectBitgetPair(branch.context), /PR/);
+});
+
 test('non-landing branch pushes cannot obtain a Rust paired certificate', async () => {
   const x = fixture(); x.run.event = 'push'; x.run.head_branch = 'feat/other';
   await assert.rejects(selectBitgetPair(x.context), /Rust landing branch/);

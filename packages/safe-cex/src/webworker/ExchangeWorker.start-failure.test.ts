@@ -120,7 +120,7 @@ const reportedStartFailure = (messages: Array<{ op: string; data: any }>) =>
 
 beforeEach(() => {
   setTwapLockManager(null);
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   loads = false;
   built.length = 0;
   telegram.started.length = 0;
@@ -412,4 +412,17 @@ it('preserves bounded native startup facts on the actual 120s worker timeout', a
     startup_native_sample_age_ms: '60000',
   });
   expect(JSON.stringify(report?.data[1].sentryData.tags)).not.toContain('never-in-tags');
+});
+
+it('measures the worker startup timeout monotonically across a 162-day wall-clock correction', async () => {
+  const { messages, send } = context();
+  void send(init);
+  await vi.advanceTimersByTimeAsync(1_000);
+  vi.setSystemTime(Date.now() + 162 * 86_400_000);
+  await vi.advanceTimersByTimeAsync(119_100);
+  const report = messages.find(
+    (message) => message.op === 'error' && message.data?.[0]?.includes('Exchange start timed out after 120s'),
+  );
+  expect(report).toBeDefined();
+  expect(report!.data[1].sentryData.tags.startup_elapsed_ms).toBe('120000');
 });

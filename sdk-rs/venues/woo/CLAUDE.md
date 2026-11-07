@@ -23,3 +23,18 @@ the wrong runtime fix.
 The proposal in `docs/plans/RUST_WOO_ENDPOINT_MIGRATION.md` inventories the active
 native REST/socket contracts and next-cut RED gates. It changes no runtime route;
 legacy availability is not proved by an unauthenticated response.
+
+# Dispatched write rate limits
+
+HTTP 429 or WOO code `-1003` after a dispatched write is `RateLimited` with an
+`Unknown` outcome, never proof of refusal or permission to resend. HTTP 429 takes
+precedence over body codes; read retries and pre-send `NotSent` remain separate.
+Native `-1003` retains `RateLimited` even on HTTP 408/5xx.
+
+A mode setter can finish after a successful read verifies FUTURES and the exact
+requested mode. Until then, an ambiguous write retains its original error through
+read retries; failed verification remains `Unknown`, and the write is never resent.
+
+Cancel-all retains structured leg failures and both path-prefixed messages. A
+rate-limit leg supplies the aggregate kind/code; any unknown leg keeps the whole
+command `Unknown`, even if its peer succeeds or is definitively refused.

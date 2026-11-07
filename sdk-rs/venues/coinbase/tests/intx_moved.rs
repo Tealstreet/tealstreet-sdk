@@ -17,7 +17,7 @@ struct Rig {
 }
 impl Rig {
     fn actions(&mut self) -> Vec<Action> {
-        let actions = self.engine.drain_actions().collect::<Vec<_>>();
+        let actions = support::actions(&mut self.engine);
         for action in &actions {
             match action {
                 Action::SetTimer { timer, at_ms } => {
@@ -143,7 +143,7 @@ fn assert_not_moved(actions: &[Action]) {
 }
 
 #[test]
-fn unavailable_intx_discovery_reports_migration_instead_of_http_or_incomplete() {
+fn unavailable_drb_discovery_retries_without_the_legacy_migration_message() {
     for status in [404, 410, 500, 502, 503, 504] {
         for body in [
             "<html>Bad Gateway</html>",
@@ -151,22 +151,26 @@ fn unavailable_intx_discovery_reports_migration_instead_of_http_or_incomplete() 
             r#"{"error":"Bad Gateway"}"#,
         ] {
             let (mut engine, request) = start(false, false);
-            assert!(request.url.contains("api.international.coinbase.com"));
+            assert!(request.url.starts_with("https://drb.coinbase.com/api/v2/"));
             engine.reply(&request, status, body);
-            assert_moved(&engine.actions());
+            let actions = engine.actions();
+            assert_not_moved(&actions);
+            assert!(actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
         }
     }
 }
 
 #[test]
-fn unreachable_intx_discovery_reports_migration() {
+fn unreachable_drb_discovery_retries_without_the_legacy_migration_message() {
     let (mut engine, request) = start(false, false);
     engine.fail(&request);
-    assert_moved(&engine.actions());
+    let actions = engine.actions();
+    assert_not_moved(&actions);
+    assert!(actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
 }
 
 #[test]
-fn malformed_successful_intx_response_keeps_retrying() {
+fn malformed_successful_drb_response_keeps_retrying() {
     let (mut engine, request) = start(false, false);
     engine.reply(&request, 200, "<html>invalid</html>");
     let actions = engine.actions();
@@ -175,7 +179,7 @@ fn malformed_successful_intx_response_keeps_retrying() {
 }
 
 #[test]
-fn intx_auth_and_rate_limit_responses_keep_their_existing_handling() {
+fn drb_auth_and_rate_limit_responses_keep_their_existing_handling() {
     for status in [401, 403, 429] {
         let (mut engine, request) = start(false, false);
         engine.reply(&request, status, "{}");
@@ -269,18 +273,22 @@ fn cfm_catalogue_failure_keeps_its_existing_handling() {
 }
 
 #[test]
-fn running_intx_public_feed_failure_keeps_retrying() {
+fn running_drb_public_feed_failure_keeps_retrying() {
     let (mut engine, request) = start(false, false);
-    engine.reply(&request, 200, support::INSTRUMENTS);
+    let body = support::drb_response("public/get_instruments", &request);
+    engine.reply(&request, 200, &body);
+    let request = engine.request();
+    let body = support::drb_response("public/get_book_summary_by_currency", &request);
+    engine.reply(&request, 200, &body);
     let actions = engine.actions();
     let timer = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 2000. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == 6000. => Some(*timer),
             _ => None,
         })
-        .expect("public instruments poll");
-    engine.now = 2000.;
+        .expect("public drb summary poll");
+    engine.now = 6000.;
     engine
         .engine
         .handle(engine.now, Event::TimerFired { timer });

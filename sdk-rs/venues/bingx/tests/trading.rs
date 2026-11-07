@@ -1565,7 +1565,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             r#"{"code":100410,"msg":"rate limited"}"#,
             Some(ErrorKind::RateLimited),
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
         ),
         (
             r#"{"code":80012,"msg":"service unavailable"}"#,
