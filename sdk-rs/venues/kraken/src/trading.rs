@@ -960,7 +960,24 @@ impl Kraken {
                     if error.outcome == Some(Outcome::Rejected) {
                         cx.placement_resolved(job.command);
                     }
+                    let unknown = error.outcome == Some(Outcome::Unknown);
                     cx.fail(job.command, error);
+                    if unknown {
+                        // Admission preceded this uncertainty; never pump those
+                        // placements or edits. Cancels, settings and reads remain.
+                        self.trading.queue.retain(|queued| {
+                            if !queued.steps.iter().any(|step| {
+                                matches!(step, Step::Place(_) | Step::Edit { .. })
+                            }) {
+                                return true;
+                            }
+                            cx.fail(
+                                queued.command,
+                                not_sent("Kraken Futures queued write was not sent: earlier write outcome is uncertain. Check Open Orders before retrying"),
+                            );
+                            false
+                        });
+                    }
                 }
             }
         }

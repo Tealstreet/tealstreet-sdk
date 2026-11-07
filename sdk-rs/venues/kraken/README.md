@@ -18,3 +18,8 @@ responses unknown, including a bracket leg after an accepted entry. Their user
 text says the outcome is unknown and directs the caller to Check Open Orders.
 These failures never resend or place a replacement stop. Definitive refusals and
 private reads retain their existing behavior.
+
+As on Spot, an unknown Futures result refuses already-queued placements and
+edits as `NotSent`, including after partial acceptance. Queued cancellations,
+account settings and leverage reads remain available; refused writes never
+resume automatically after reconciliation.
