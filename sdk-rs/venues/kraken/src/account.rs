@@ -18,6 +18,8 @@ use std::{
 };
 
 const FEEDS: [&str; 3] = ["fills", "open_orders", "open_positions"];
+const PRIVATE_FEED_QUIET_MS: f64 = 300_000.;
+const PRIVATE_PROBE_TIMEOUT_MS: f64 = 30_000.;
 /// Kraken alerts on any frame it dislikes; only these words refuse the private feeds.
 fn refuses_private_feed(msg: &Ws<'_>) -> bool {
     match msg.event.as_ref() {
@@ -163,6 +165,7 @@ pub struct Account {
     heal: Option<TimerId>,
     seen_fills: RecentIds<8192>,
     payloads: HashMap<String, f64>,
+    feed_probes: HashMap<String, f64>,
     snapshot_orders_revision: u64,
     snapshot_settings_revision: u64,
     snapshot_positions_seen: bool,
@@ -172,6 +175,12 @@ pub struct Account {
     skip_logged: RowReports<String>,
 }
 impl Account {
+    fn received_payload(&mut self, feed: &str, now: f64, snapshot: bool) {
+        self.payloads.insert(feed.into(), now);
+        if snapshot {
+            self.feed_probes.remove(feed);
+        }
+    }
     /// Logs a skipped row once per key, allowing one Error upgrade if its kept copy is lost.
     fn log_skip(&mut self, cx: &mut Cx<'_, Pending>, key: String, level: Level, message: String) {
         self.skip_logged.report(cx, key, level, message);
@@ -760,7 +769,7 @@ impl Kraken {
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return Control::Other;
         };
-        if msg.event == "pong" {
+        if msg.event == "pong" || msg.feed == "heartbeat" {
             return Control::Pong;
         }
         if refuses_private_feed(&msg) {
@@ -802,6 +811,7 @@ impl Kraken {
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.payloads.clear();
+        self.account.feed_probes.clear();
         self.account.payload_complete = false;
         cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
         cx.send(
@@ -825,6 +835,7 @@ impl Kraken {
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.payloads.clear();
+        self.account.feed_probes.clear();
         self.account.payload_complete = false;
         self.account.waiting_challenge = false;
         true
@@ -855,6 +866,66 @@ impl Kraken {
         }
         false
     }
+    pub(super) fn watch_private_feeds(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        if !self.account.open
+            || !self.account.payload_complete
+            || !self
+                .account
+                .feed
+                .is_some_and(|feed| cx.socket_authenticated(feed))
+        {
+            return false;
+        }
+        if self
+            .account
+            .feed_probes
+            .values()
+            .any(|deadline| cx.now >= *deadline)
+        {
+            if let Some(feed) = self.account.feed {
+                cx.retire_socket(
+                    feed,
+                    safe_cex_engine::socket_lifecycle::RetireReason::Timeout(
+                        safe_cex_engine::socket::Timeout::Silent,
+                    ),
+                );
+                return true;
+            }
+        }
+        let (Some(socket), Some(challenge), Some(signature)) = (
+            self.account.socket,
+            self.account.challenge.as_ref(),
+            self.account.signed_challenge.as_ref(),
+        ) else {
+            return false;
+        };
+        for feed in FEEDS {
+            if self.account.feed_probes.contains_key(feed)
+                || !self
+                    .account
+                    .payloads
+                    .get(feed)
+                    .is_some_and(|received| cx.now >= received + PRIVATE_FEED_QUIET_MS)
+            {
+                continue;
+            }
+            // Event feeds can be legitimately quiet. Request a fresh snapshot
+            // before treating silence as failure; only that feed can satisfy it.
+            self.account
+                .feed_probes
+                .insert(feed.into(), cx.now + PRIVATE_PROBE_TIMEOUT_MS);
+            if feed == "open_orders" {
+                self.account.snapshot_orders_revision = self.account.orders_revision;
+            } else if feed == "open_positions" {
+                self.account.snapshot_settings_revision = self.account.settings_write_revision;
+                self.account.snapshot_positions_seen = false;
+            }
+            for event in ["unsubscribe", "subscribe"] {
+                cx.send(socket, serde_json::json!({"event":event,"feed":feed,"api_key":self.options.key,"original_challenge":challenge,"signed_challenge":signature}).to_string());
+            }
+        }
+        false
+    }
     pub(crate) fn account_ws_message(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -865,6 +936,9 @@ impl Kraken {
             return false;
         }
         if !self.account.open {
+            return true;
+        }
+        if self.watch_private_feeds(cx) {
             return true;
         }
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
@@ -910,7 +984,11 @@ impl Kraken {
                     let mut executions = Vec::new();
                     let decoded = json::each::<Execution<'_>>(raw.get(), |e| executions.push(e));
                     if decoded.is_ok() {
-                        self.account.payloads.insert("fills".into(), cx.now);
+                        self.account.received_payload(
+                            "fills",
+                            cx.now,
+                            msg.feed == "fills_snapshot",
+                        );
                         for e in executions {
                             if e.fill_id.is_empty()
                                 || e.order_id.is_empty()
@@ -971,7 +1049,7 @@ impl Kraken {
             "open_orders" | "open_orders_snapshot" => {
                 if msg.is_cancel && !msg.order_id.is_empty() {
                     self.account_ws_remove(cx, &msg.order_id, &msg.reason);
-                    self.account.payloads.insert("open_orders".into(), cx.now);
+                    self.account.received_payload("open_orders", cx.now, false);
                     self.account_schedule_heal(cx);
                 } else if let Some(raw) = msg.orders {
                     let mut request = Request::new(Scope::Orders, 0, 0);
@@ -979,7 +1057,11 @@ impl Kraken {
                         self.account_order_item(cx, &mut request, item.get())
                     });
                     if result.is_ok() && request.valid {
-                        self.account.payloads.insert("open_orders".into(), cx.now);
+                        self.account.received_payload(
+                            "open_orders",
+                            cx.now,
+                            msg.feed == "open_orders_snapshot",
+                        );
                         let builder = request.orders;
                         if msg.feed == "open_orders_snapshot"
                             && self.account.orders_revision != self.account.snapshot_orders_revision
@@ -1016,7 +1098,7 @@ impl Kraken {
                     {
                         return true;
                     }
-                    self.account.payloads.insert("open_orders".into(), cx.now);
+                    self.account.received_payload("open_orders", cx.now, false);
                     if msg.is_cancel {
                         self.account_ws_remove(cx, &order.id, &msg.reason);
                     } else {
@@ -1034,8 +1116,7 @@ impl Kraken {
                     if result.is_ok() && request.valid {
                         self.account.positions_revision += 1;
                         self.account
-                            .payloads
-                            .insert("open_positions".into(), cx.now);
+                            .received_payload("open_positions", cx.now, true);
                         let builder = request.positions;
                         let mapped = recovered(&builder, |p| (&p.id, &p.symbol));
                         self.account

@@ -365,7 +365,7 @@ fn futures_subscribe_to_heartbeat_on_every_open_before_private_auth() {
 }
 
 #[test]
-fn futures_heartbeat_keeps_quiet_public_and_private_sockets_alive() {
+fn futures_heartbeat_and_expected_payloads_keep_public_and_private_sockets_alive() {
     for public in [true, false] {
         let mut h = futures(public, PublicFeedPolicy::Direct);
         let socket = h.open();
@@ -375,6 +375,10 @@ fn futures_heartbeat_keeps_quiet_public_and_private_sockets_alive() {
         for _ in 0..12 {
             h.wait(10_000.);
             h.message(socket, r#"{"feed":"heartbeat","time":1700000000000}"#);
+            if public {
+                ticker(&mut h, socket, "PF_XBTUSD");
+                ticker(&mut h, socket, "PF_ETHUSD");
+            }
         }
         assert!(!h.closed.contains(&socket));
         assert_eq!(h.pings(socket), 0, "Futures rejects JSON event:ping");
@@ -396,6 +400,249 @@ fn initial_private_payloads(h: &mut H<Kraken>, socket: SocketId) {
     ] {
         h.message(socket, text);
     }
+}
+
+fn ticker(h: &mut H<Kraken>, socket: SocketId, symbol: &str) {
+    h.message(
+        socket,
+        &format!(r#"{{"feed":"ticker","product_id":"{symbol}","last":125}}"#),
+    );
+}
+
+fn heartbeat(h: &mut H<Kraken>, socket: SocketId) {
+    h.message(socket, r#"{"feed":"heartbeat","time":1700000000000}"#);
+}
+
+#[test]
+fn futures_stalled_ticker_recovers_despite_heartbeat_and_another_live_symbol() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    ticker(&mut h, socket, "PF_XBTUSD");
+    ticker(&mut h, socket, "PF_ETHUSD");
+    for _ in 0..3 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        ticker(&mut h, socket, "PF_ETHUSD");
+    }
+    assert!(
+        h.closed.contains(&socket),
+        "a busy sibling and heartbeat cannot mask XBT ticker silence"
+    );
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(replacement, socket);
+    assert!(h.sent.iter().any(|(s, text)| *s == replacement
+        && text.contains(r#""feed":"ticker""#)
+        && text.contains("PF_XBTUSD")));
+    ticker(&mut h, replacement, "PF_XBTUSD");
+}
+
+#[test]
+fn futures_only_live_subscribed_tickers_refresh_their_deadlines() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    h.event(Event::Command(Command::SetTickerSymbols {
+        symbols: vec!["PF_XBTUSD".into()],
+    }));
+    for _ in 0..18 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        ticker(&mut h, socket, "PF_XBTUSD");
+    }
+    assert!(
+        !h.closed.contains(&socket),
+        "unsubscribed ETH cannot expire active XBT"
+    );
+    h.event(Event::Command(Command::SetTickerSymbols {
+        symbols: vec!["PF_XBTUSD".into(), "PF_ETHUSD".into()],
+    }));
+    for _ in 0..2 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        ticker(&mut h, socket, "PF_XBTUSD");
+    }
+    assert!(
+        !h.closed.contains(&socket),
+        "new ETH interest gets its own first-payload window"
+    );
+    h.wait(10_000.);
+    heartbeat(&mut h, socket);
+    assert!(
+        h.closed.contains(&socket),
+        "a subscribed ticker that never starts must expire"
+    );
+}
+
+#[test]
+fn futures_empty_ticker_envelopes_do_not_prove_data_progress() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    h.event(Event::Command(Command::SetTickerSymbols {
+        symbols: vec!["PF_XBTUSD".into()],
+    }));
+    ticker(&mut h, socket, "PF_XBTUSD");
+    for _ in 0..3 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        h.message(socket, r#"{"feed":"ticker","product_id":"PF_XBTUSD"}"#);
+    }
+    assert!(h.closed.contains(&socket));
+}
+
+#[test]
+fn futures_book_silence_repairs_while_tickers_and_heartbeat_are_live() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "PF_XBTUSD".into(),
+    }));
+    h.message(socket, r#"{"feed":"book_snapshot","product_id":"PF_XBTUSD","seq":1,"bids":[{"price":99,"qty":2}],"asks":[]}"#);
+    let before = h.sent.len();
+    for _ in 0..13 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        ticker(&mut h, socket, "PF_XBTUSD");
+        ticker(&mut h, socket, "PF_ETHUSD");
+    }
+    assert!(!h.closed.contains(&socket));
+    for event in ["unsubscribe", "subscribe"] {
+        assert!(h.sent[before..].iter().any(|(s, text)| *s == socket
+            && text.contains(&format!(r#""event":"{event}""#))
+            && text.contains(r#""feed":"book""#)));
+    }
+}
+
+fn private_payload(h: &mut H<Kraken>, socket: SocketId, feed: &str) {
+    let field = match feed {
+        "fills" => "fills",
+        "open_orders" => "orders",
+        "open_positions" => "positions",
+        _ => unreachable!(),
+    };
+    h.message(
+        socket,
+        &format!(r#"{{"feed":"{feed}_snapshot","{field}":[]}}"#),
+    );
+}
+
+#[test]
+fn futures_each_quiet_private_feed_is_probed_and_missing_snapshot_reconnects() {
+    for stalled in ["fills", "open_orders", "open_positions"] {
+        let mut h = futures(false, PublicFeedPolicy::Direct);
+        let socket = ready_socket(&mut h, authenticate);
+        initial_private_payloads(&mut h, socket);
+        let before = h.sent.len();
+        for _ in 0..30 {
+            h.wait(10_000.);
+            heartbeat(&mut h, socket);
+            for feed in ["fills", "open_orders", "open_positions"] {
+                if feed != stalled {
+                    private_payload(&mut h, socket, feed);
+                }
+            }
+        }
+        assert!(
+            !h.closed.contains(&socket),
+            "quiet event feeds are probed before retiring: {stalled}"
+        );
+        for event in ["unsubscribe", "subscribe"] {
+            assert!(
+                h.sent[before..].iter().any(|(s, text)| *s == socket
+                    && text.contains(&format!(r#""event":"{event}""#))
+                    && text.contains(&format!(r#""feed":"{stalled}""#))),
+                "missing probe: {stalled}/{event}"
+            );
+        }
+        for _ in 0..3 {
+            h.wait(10_000.);
+            heartbeat(&mut h, socket);
+            for feed in ["fills", "open_orders", "open_positions"] {
+                if feed != stalled {
+                    private_payload(&mut h, socket, feed);
+                }
+            }
+        }
+        assert!(
+            h.closed.contains(&socket),
+            "other payloads and heartbeat cannot fulfill {stalled}'s probe"
+        );
+    }
+}
+
+#[test]
+fn futures_empty_private_probe_snapshots_keep_a_quiet_account_connected() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, socket);
+    for _ in 0..2 {
+        let before = h.sent.len();
+        for _ in 0..30 {
+            h.wait(10_000.);
+            heartbeat(&mut h, socket);
+        }
+        assert_eq!(
+            h.sent[before..]
+                .iter()
+                .filter(|(s, text)| *s == socket && text.contains(r#""event":"subscribe""#))
+                .count(),
+            3
+        );
+        initial_private_payloads(&mut h, socket);
+    }
+    assert!(!h.closed.contains(&socket));
+}
+
+#[test]
+fn futures_private_probe_needs_a_snapshot_not_an_ack_or_incremental_payload() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, socket);
+    for _ in 0..30 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+    }
+    private_payload(&mut h, socket, "open_orders");
+    private_payload(&mut h, socket, "open_positions");
+    for _ in 0..3 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        h.message(socket, r#"{"event":"subscribed","feed":"fills"}"#);
+        h.message(socket, r#"{"feed":"fills","fills":[]}"#);
+    }
+    assert!(
+        h.closed.contains(&socket),
+        "incremental fills and acks do not fulfill the fresh snapshot probe"
+    );
+}
+
+#[test]
+fn futures_late_data_after_a_timer_jump_cannot_rescue_expired_feeds() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    for _ in 0..2 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+    }
+    h.now += 10_000.;
+    ticker(&mut h, socket, "PF_XBTUSD");
+    assert!(
+        h.closed.contains(&socket),
+        "a late ticker must not reset the expired data clock before its callback"
+    );
+
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, socket);
+    for _ in 0..32 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+    }
+    h.now += 10_000.;
+    initial_private_payloads(&mut h, socket);
+    assert!(
+        h.closed.contains(&socket),
+        "a late snapshot must not rescue an expired probe"
+    );
 }
 
 fn wake_recovery(public: bool, sleep_ms: f64) -> Recovery {
@@ -533,7 +780,15 @@ fn never_opened_sockets_expire_at_their_connect_deadline() {
 
 #[test]
 fn stable_traffic_resets_backoff_on_every_socket() {
-    stable_traffic_resets_backoff(futures(true, PublicFeedPolicy::Direct), noop, FUTURES_PONG);
+    let mut public = futures(true, PublicFeedPolicy::Direct);
+    public.event(Event::Command(Command::SetTickerSymbols {
+        symbols: vec!["PF_XBTUSD".into()],
+    }));
+    stable_traffic_resets_backoff(
+        public,
+        noop,
+        r#"{"feed":"ticker","product_id":"PF_XBTUSD","last":125}"#,
+    );
     stable_traffic_resets_backoff(
         futures(false, PublicFeedPolicy::Direct),
         authenticate,
