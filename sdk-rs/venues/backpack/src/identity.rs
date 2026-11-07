@@ -169,11 +169,7 @@ impl Backpack {
                 return;
             }
         };
-        let window = self
-            .account
-            .credentials
-            .as_ref()
-            .map_or(60000, |primary| primary.window);
+        let window = self.signing_window();
         let declaration = crate::sign::Request {
             method: Method::Get,
             path: "/api/v1/account".into(),

@@ -347,9 +347,9 @@ impl Backpack {
             }
             let primary = self
                 .account
-                .credentials
-                .as_ref()
-                .and(self.options.identity.clone());
+                .active
+                .then(|| self.options.identity.clone())
+                .flatten();
             let slots = Slots::new(
                 primary,
                 self.options.read_identity.clone(),
@@ -498,11 +498,7 @@ impl Backpack {
                     path: path.into(),
                     rows: vec![params],
                     body: None,
-                    window: self
-                        .account
-                        .credentials
-                        .as_ref()
-                        .map_or(60000, |primary| primary.window),
+                    window: self.signing_window(),
                 };
                 leg.queue(
                     cx,
