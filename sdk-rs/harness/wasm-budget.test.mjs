@@ -669,13 +669,27 @@ test('approved merged-tree caps retain exact boundaries, including #3219 Coinbas
     ['bingx', 2_085_888],
     ['bitrue', 1_851_392],
     ['blofin', 2_001_920],
-    ['coinbase', 1_908_736],
+    ['coinbase', 1_935_360],
     ['okx', 1_986_560],
     ['weex', 1_948_672],
   ]) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3219 drb public consumers (run 42352093025) retain CI headroom for Coinbase and Spot', () => {
+  const measured = 1_924_268;
+  const cap = 1_935_360;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
 
