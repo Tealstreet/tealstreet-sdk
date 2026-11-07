@@ -843,6 +843,10 @@ mod input_parse_tests {
         }
         for (format, input) in [
             (
+                "kucoin-batch",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"kucoin-batch"}"#,
+            ),
+            (
                 "hex",
                 r#"{"kind":"wsAuth","toSign":"x","outputFormat":"hex"}"#,
             ),
@@ -871,6 +875,7 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    OutputFormat::KucoinBatch => "kucoin-batch",
                     OutputFormat::Hex => "hex",
                     OutputFormat::Base64 => "base64",
                     OutputFormat::Base64Hex => "hex-base64",
