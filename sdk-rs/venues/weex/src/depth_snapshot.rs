@@ -127,7 +127,7 @@ impl WeexFutures {
         if response.status == 429 {
             self.paused_until = self
                 .paused_until
-                .max(cx.now + rate::delay(response, cx.now));
+                .max(cx.now + rate::delay(response, cx.protocol_now()));
         }
         if response.status >= 400 {
             self.depth_failed(

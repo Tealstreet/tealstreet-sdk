@@ -256,6 +256,9 @@ impl Grvt {
         wire.m.co = client.clone().into();
         let encoded = serde_json::to_string(&body).map_err(|_| "GRVT restore encoding failed")?;
         step.body = encoded;
+        if let Some(frozen) = &mut step.signing {
+            std::sync::Arc::make_mut(frozen).restore_client(client.clone());
+        }
         if let Effect::Place(order) = &mut step.effect {
             order.id = client.clone();
             order.client_order_id = Some(client);

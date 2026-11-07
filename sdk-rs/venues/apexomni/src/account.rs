@@ -1478,7 +1478,7 @@ impl ApexOmni {
                 .map(|args| args.get())
                 .filter(|args| args.starts_with('[') && *args != "[]")
                 .map(str::to_owned)
-                .unwrap_or_else(|| format!(r#"["{}"]"#, cx.now as u64));
+                .unwrap_or_else(|| format!(r#"["{}"]"#, cx.protocol_now() as u64));
             cx.send(socket, format!(r#"{{"op":"pong","args":{args}}}"#));
         }
         if message.op == "pong" || message.ret_msg == "pong" || message.pong.is_some() {

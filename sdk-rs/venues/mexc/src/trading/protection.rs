@@ -622,12 +622,12 @@ impl MexcFutures {
             let start = if edit.observed.last_update >= 1e12 {
                 edit.observed.last_update - 89. * 86400000.
             } else {
-                cx.now - 89. * 86400000.
+                cx.protocol_now() - 89. * 86400000.
             };
             crate::sign::query(vec![
                 ("symbol", market.id.clone()),
                 ("start_time", num::format(start.max(0.))),
-                ("end_time", num::format(cx.now)),
+                ("end_time", num::format(cx.protocol_now())),
                 ("page_num", page.to_string()),
                 ("page_size", "100".into()),
                 (

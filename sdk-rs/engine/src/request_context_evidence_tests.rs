@@ -401,7 +401,7 @@ fn unproven_capture_refuses_proven_unreleased_duplicate_and_sealed_attempts_firs
     );
     assert!(!captured);
     writes.released(RequestId(1)).unwrap();
-    for status in [0, 99, 200, 400, 429, 499] {
+    for status in [0, 99, 200, 400, 499] {
         assert_eq!(
             writes.unproven_result(RequestId(1), status, |_| captured = true),
             Err(Error::Invalid)
@@ -1177,5 +1177,78 @@ fn subset_authority_distinguishes_own_overflow_from_sibling_overflow_and_evidenc
         assert_eq!(error.outcome, Some(Outcome::Unknown));
         assert_eq!(error.partial.unwrap().order_ids, ["exact"]);
         assert!(error.message.contains("truncated IDs"));
+    }
+}
+
+#[test]
+fn released_ambiguity_projection_never_demotes_a_recorded_unknown() {
+    for known_partial in [false, true] {
+        let mut writes = CommandWrites::new(3).unwrap();
+        released(&mut writes, 1);
+        writes
+            .result(RequestId(1), accepted(vec!["original-cancel".into()]))
+            .unwrap();
+        released(&mut writes, 2);
+        let error = VenueError::new("native outcome is unknown")
+            .outcome(Outcome::Unknown)
+            .kind(crate::ErrorKind::RateLimited);
+        let result = if known_partial {
+            WriteResult::KnownPartial(error)
+        } else {
+            WriteResult::Rejected(error)
+        };
+        writes.result(RequestId(2), result).unwrap();
+        let projected = writes.project_failure(VenueError::new("fallback")).unwrap();
+        assert_eq!(projected.outcome, Some(Outcome::Unknown));
+        assert_eq!(
+            projected.partial.as_ref().unwrap().order_ids,
+            ["original-cancel"]
+        );
+        assert_eq!(writes.fail(VenueError::new("fallback")).unwrap(), projected);
+    }
+}
+
+#[test]
+fn later_unproven_write_replaces_known_partial_refusal_words() {
+    const REFUSED: &str = "The original stop was canceled and its replacement refused";
+    for known_partial in [false, true] {
+        for status in [408, 429, 500, 503] {
+            let mut writes = CommandWrites::new(3).unwrap();
+            released(&mut writes, 1);
+            writes
+                .result(RequestId(1), accepted(vec!["original-cancel".into()]))
+                .unwrap();
+            released(&mut writes, 2);
+            let refusal = VenueError::new(REFUSED).outcome(Outcome::Rejected);
+            writes
+                .result(
+                    RequestId(2),
+                    if known_partial {
+                        WriteResult::KnownPartial(refusal)
+                    } else {
+                        WriteResult::Rejected(refusal)
+                    },
+                )
+                .unwrap();
+            let before = writes.project_failure(VenueError::new("fallback")).unwrap();
+            assert_eq!(before.message, REFUSED);
+            assert_eq!(before.outcome, None);
+            released(&mut writes, 3);
+            writes
+                .unproven_result(RequestId(3), status, |_| {})
+                .unwrap();
+            let error = writes.project_failure(VenueError::new("fallback")).unwrap();
+            assert_eq!(
+                error.message, UNKNOWN_AFTER_REFUSAL,
+                "{known_partial}/{status}"
+            );
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_eq!(error.protection, None);
+            assert_eq!(
+                error.partial.as_ref().unwrap().order_ids,
+                ["original-cancel"]
+            );
+            assert_eq!(writes.fail(VenueError::new("fallback")).unwrap(), error);
+        }
     }
 }

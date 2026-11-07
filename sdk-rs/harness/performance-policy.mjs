@@ -1,20 +1,16 @@
 // The replay gate's timing policy, in one place.
 //
-// Public tapes run a fixed even budget of interleaved TS/Rust pairs, alternating which
-// side runs first, and compare per-metric medians. Rust must be at least 10%
-// below TS on main-thread, steady-state and process CPU and on retained memory.
+// Sam, 2026-11-07: Rust must not be slower than TS. A CPU objective (main-thread,
+// steady-state, process) fails only when the Rust median exceeds 1.00x the TS median
+// after one in-job re-measure; missing the 10%-faster target is a warning.
 //
-// Small windows: main-thread and steady CPU objectives whose TS median is under
-// 100 ms are tens of ms of mostly shared replay work, where tied runs of the
-// same code move several percent between CI runners (docs/plans/
-// RUST_GATE_TIMING.md: Hyperliquid Spot steady 0.73-1.08 Rust/TS across runs
-// of unchanged code). They pass when Rust is at most
-// max(1 ms, 5%) above TS; this subsumes #1380's sub-10 ms 1 ms allowance.
-// Process CPU and memory keep the 10% rule at every size. A per-message
-// slowdown on Bybit and Hyperliquid still fails these rules (PR #1461).
-// Overseer decision (2026-10-21): the small-window floor replaces the 10% rule
-// for those objectives; it cannot catch a regression that keeps Rust within 5%
-// of TS on a small window. Revisit if one slips through.
+// Public tapes run a fixed even budget of interleaved TS/Rust pairs, alternating which
+// side runs first, and compare per-metric medians. The 10%-faster target below is
+// still computed for CPU (as a warning) and still binds retained memory.
+//
+// Small windows (main-thread/steady CPU with a TS median under 100 ms) keep their
+// max(1 ms, 5%) limit only for the remeasure objectives and draw no 10%-target
+// warning; like every CPU objective they fail above 1.00x after the re-measure.
 
 export const PUBLIC_REPLAY_PAIRS = 16;
 export const REQUIRED_IMPROVEMENT = 0.10;
@@ -67,16 +63,38 @@ export function performanceObjectives(ts, rust) {
   });
 }
 
-export function performanceFailures(ts, rust) {
-  const errors = [];
-  for (const { label, reference, candidate, category, limit } of performanceObjectives(ts, rust)) {
+/** Rust/TS above this, on the same runner's paired medians, is a CPU failure. */
+export const CPU_FAIL_RATIO = 1.00;
+export const CPU_SLOWER = 'Rust is slower than TS';
+const ratioText = (reference, candidate) => `${(candidate / reference).toFixed(3)}x`;
+
+/** Blocking failures and non-blocking CPU warnings for one measured sample set. */
+export function performanceVerdict(ts, rust) {
+  const failures = [], warnings = [];
+  for (const { field, label, reference, candidate, category, limit } of performanceObjectives(ts, rust)) {
     if (!Number.isFinite(reference) || reference <= 0 || !Number.isFinite(candidate))
-      errors.push(`performance ${label}: no valid positive TS baseline`);
-    else if (category === 'small') {
+      failures.push(`performance ${label}: no valid positive TS baseline`);
+    else if (!CPU_FIELDS.includes(field)) {
       if (!(candidate <= limit))
-        errors.push(`performance ${label}: Rust must be within max(1 ms, 5%) of a sub-${SMALL_WINDOW_MS} ms TS objective (ts=${reference}, rust=${candidate})`);
-    } else if (!(candidate <= limit))
-      errors.push(`performance ${label}: Rust must be at least 10% below TS (ts=${reference}, rust=${candidate})`);
+        failures.push(`performance ${label}: Rust must be at least 10% below TS (ts=${reference}, rust=${candidate})`);
+    } else if (!(candidate <= reference * CPU_FAIL_RATIO))
+      failures.push(`performance ${label}: ${CPU_SLOWER} (ts=${reference}, rust=${candidate}, ${ratioText(reference, candidate)})`);
+    else if (category === 'relative' && !(candidate <= limit))
+      warnings.push(`performance ${label}: missed the 10%-faster target (ts=${reference}, rust=${candidate}, ${ratioText(reference, candidate)})`);
   }
-  return errors;
+  return { failures, warnings };
+}
+
+export const performanceFailures = (ts, rust) => performanceVerdict(ts, rust).failures;
+
+const isSlower = (failure) => failure.includes(`: ${CPU_SLOWER} (`);
+/** True when a CPU objective is over the 1.00x line, the one case that is re-measured. */
+export const cpuSlower = (failures) => failures.some(isSlower);
+
+/** The reported verdict after at most one in-job re-measure: the re-measured set decides,
+ * and a first miss that cleared on it is kept as a warning. */
+export function remeasuredVerdict(first, remeasured) {
+  if (!remeasured) return first;
+  const cleared = cpuSlower(remeasured.failures) ? [] : first.failures.filter(isSlower).map((failure) => `${failure}; cleared on the one re-measure`);
+  return { failures: remeasured.failures, warnings: [...remeasured.warnings, ...cleared].sort() };
 }

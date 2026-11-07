@@ -2118,10 +2118,13 @@ impl CommandWrites {
         let any_released = self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
-                && (matches!(
-                    a.result,
-                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_))
-                ) || self.attempts[index + 1..]
+                && (match &a.result {
+                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_)) => true,
+                    Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
+                        error.outcome == Some(Outcome::Unknown)
+                    }
+                    Some(WriteResult::Accepted { .. }) => false,
+                } || self.attempts[index + 1..]
                     .iter()
                     .any(|later| later.leg == a.leg && !later.released))
         }) || self.legs.iter().any(|leg| {
@@ -2179,7 +2182,11 @@ impl CommandWrites {
         // The text a settled refusal gave: stale once a later write is unknown.
         let refusal_text = retained.is_some()
             || self.attempts.iter().any(|attempt| {
-                self.terminal(attempt) && matches!(attempt.result, Some(WriteResult::Rejected(_)))
+                self.terminal(attempt)
+                    && matches!(
+                        attempt.result,
+                        Some(WriteResult::Rejected(_) | WriteResult::KnownPartial(_))
+                    )
             });
         let selected = retained.or_else(|| select(true)).or_else(|| select(false));
         let mut overflow = self.attempts.iter().any(|attempt| attempt.id_overflow);
@@ -2279,6 +2286,9 @@ impl CommandWrites {
             error.message = message.clone();
         } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
             error.message = UNKNOWN_AFTER_REFUSAL.into();
+            if overflow {
+                evidence::mark_id_overflow(&mut error);
+            }
         }
         #[cfg(feature = "http-plans")]
         if let Some(note) = note {

@@ -117,6 +117,18 @@ pub struct PhemexPerpetuals {
     income: income::State,
 }
 impl PhemexPerpetuals {
+    fn observe_rate_limit(&mut self, now: f64, r: &Response<'_>) {
+        if r.status == 429 {
+            let pause = r
+                .header("x-ratelimit-retry-after-contract")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(60.)
+                .max(1.)
+                * 1000.;
+            self.paused_until = self.paused_until.max(now + pause);
+        }
+    }
+
     /// Report each rejected frame, including its wire type when JSON is readable.
     fn public_unreadable(cx: &mut Cx<'_, Pending>, error: &serde_json::Error, text: &str) {
         #[derive(serde::Deserialize)]
@@ -448,6 +460,10 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn observe_unproven_http_response(&mut self, now: f64, _: &Pending, response: Response<'_>) {
+        self.observe_rate_limit(now, &response);
+    }
+
     fn managed_sockets() -> bool {
         true
     }
@@ -834,16 +850,7 @@ impl Venue for PhemexPerpetuals {
             self.on_http_failed(cx, p, error.read_venue_error());
             return;
         }
-        if r.status == 429 {
-            self.paused_until = self.paused_until.max(
-                cx.now
-                    + r.header("x-ratelimit-retry-after-contract")
-                        .and_then(|v| v.parse::<f64>().ok())
-                        .unwrap_or(60.)
-                        .max(1.)
-                        * 1000.,
-            );
-        }
+        self.observe_rate_limit(cx.now, &r);
         if let Some(context) = p.public_read_context()
             && cx.validate_background_read_http_delivery(context).is_err()
         {

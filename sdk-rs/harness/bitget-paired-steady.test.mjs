@@ -4,9 +4,8 @@ import test from 'node:test';
 import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_TOLERANCE, BITGET_PAIRED_PROTOCOL_SHA256,
   assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
   BITGET_CUMULATIVE_ANCHOR, BITGET_MEASUREMENT_FILES, combineBitgetPairedCertificates,
-  assessBitgetUnchangedBytes, readBitgetSteadyCertificate, hasPairedBitgetSteady } from './bitget-paired-steady.mjs';
+  assessBitgetUnchangedBytes, readBitgetSteadyCertificate, hasPairedBitgetSteady, bitgetSteadyWarning } from './bitget-paired-steady.mjs';
 import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './performance-policy.mjs';
-import { assessEligibility, decideRemeasurement } from './cpu-remeasure.mjs';
 import { classifyInitialCase, pairedCertificateForRuntime } from './cpu-ci.mjs';
 import { readBitgetOracleRefusal } from './bitget-oracle-refusal.mjs';
 import { BitgetOracleChanged } from './bitget-paired-oracle.mjs';
@@ -68,6 +67,23 @@ function fixture(q = 1, rA = .85, candidate = B) {
     order: [...BITGET_COHORT_ORDER], cpuModel: 'fixture EPYC', imageOS: 'ubuntu24', imageVersion: 'fixture-image',
     nodeSha256: sha('node'), protocolSha256: BITGET_PAIRED_PROTOCOL_SHA256, archives, cohorts } };
 }
+
+/** One strict cohort report with Rust's metrics patched and its failures recomputed. */
+function patchedRust(evidence, patch) {
+  const value = structuredClone(evidence);
+  for (const slot of value.raw) {
+    const output = JSON.parse(slot.bytes);
+    if (slot.impl === 'rust') Object.assign(output.metrics, patch);
+    slot.bytes = JSON.stringify(output); slot.sha256 = sha(slot.bytes);
+    if (slot.mode === 'performance') value.report.samples[slot.impl][slot.run] = output.metrics;
+  }
+  value.report.failures = performanceFailures(value.report.samples.ts, value.report.samples.rust).sort();
+  value.report.status = value.report.failures.length ? 'FAIL' : 'PASS'; value.reportBytes = JSON.stringify(value.report);
+  value.execution = { measuredCheckoutSha: B };
+  return value;
+}
+// Rust steady 205 ms vs TS 200 ms: a strict steady miss for the paired certificate to decide.
+const steadyMiss = (evidence, patch = {}) => patchedRust(evidence, { steadyCpuMs: 205, ...patch });
 
 function anchorFixture(data, mutate = () => {}) {
   const evidence = structuredClone(data.evidence), authority = bitgetAnchorAuthority(data.authority);
@@ -161,7 +177,7 @@ test('other objectives retain their original failures and are never granted a st
   for (const cohort of data.evidence.cohorts) {
     for (const slot of cohort.evidence.raw) {
       const output = JSON.parse(slot.bytes);
-      if (slot.impl === 'rust') { output.metrics.cpuMs = 190; output.metrics.runtimeCpuMs = 189; }
+      if (slot.impl === 'rust') { output.metrics.cpuMs = 210; output.metrics.runtimeCpuMs = 209; }
       slot.bytes = JSON.stringify(output); slot.sha256 = sha(slot.bytes);
       if (slot.mode === 'performance') cohort.evidence.report.samples[slot.impl][slot.run] = output.metrics;
     }
@@ -178,11 +194,10 @@ test('other objectives retain their original failures and are never granted a st
 
 test('certifier consumes an immutable issued certificate; a copied/edited receipt grants nothing', () => {
   const data = fixture(1, .92), certificate = certificateFor(data);
-  const first = data.evidence.cohorts[1].evidence;
+  const first = steadyMiss(data.evidence.cohorts[1].evidence);
   delete first.report.ciWasm;
   first.reportBytes = JSON.stringify(first.report);
-  first.execution = { measuredCheckoutSha: B };
-  assert.equal(classifyInitialCase(first, manifest).decision, 'second');
+  assert.equal(classifyInitialCase(first, manifest).decision, 'cpu-refused');
   assert.equal(classifyInitialCase(first, manifest, certificate).decision, 'first');
   assert.throws(() => classifyInitialCase(first, manifest, { ...certificate }));
   assert.throws(() => { certificate.steadyAccepted = false; });
@@ -195,33 +210,28 @@ test('certifier consumes an immutable issued certificate; a copied/edited receip
   assert.throws(() => classifyInitialCase(first, manifest, certificate));
 });
 
-test('other CPU objectives still require their original two-run mean after steady replacement', () => {
+test('the steady certificate never waives another CPU objective', () => {
   const data = fixture(1, 1), certificate = certificateFor(data);
-  const make = (cpu, second) => {
-    const value = structuredClone(data.evidence.cohorts[1].evidence);
-    for (const slot of value.raw) {
-      const output = JSON.parse(slot.bytes);
-      if (slot.impl === 'rust') { output.metrics.cpuMs = cpu; output.metrics.runtimeCpuMs = cpu - 1; }
-      slot.bytes = JSON.stringify(output); slot.sha256 = sha(slot.bytes);
-      if (slot.mode === 'performance') value.report.samples[slot.impl][slot.run] = output.metrics;
-    }
-    value.report.failures = performanceFailures(value.report.samples.ts, value.report.samples.rust).sort();
-    value.report.status = value.report.failures.length ? 'FAIL' : 'PASS'; value.reportBytes = JSON.stringify(value.report);
-    value.execution = { measuredCheckoutSha: B, runId: '10', attempt: 1, jobId: second ? '52' : '51', runnerId: second ? '62' : '61',
-      imageOS: 'ubuntu', imageVersion: 'fixture', architecture: 'x64', nodeVersion: 'v22.23.3',
-      ...Object.fromEntries(['nodeSha256', 'inputsSha256', 'policySha256', 'runtimeSha256', 'initialCacheSha256', 'finalCacheSha256']
-        .map(key => [key, sha(key)])), startedAt: `2026-10-26T00:0${second ? 3 : 1}:00Z`,
-      completedAt: `2026-10-26T00:0${second ? 4 : 2}:00Z` };
-    return value;
-  };
-  const first = make(185, false);
-  assert.equal(assessEligibility(first).eligible, false, 'steady miss exceeds old eligibility cap');
-  assert.equal(assessEligibility(first, certificate).eligible, true);
-  assert.equal(classifyInitialCase(first, manifest, certificate).decision, 'second');
-  const accepted = decideRemeasurement(first, make(173, true), certificate);
-  assert.deepEqual(accepted.errors, []);
-  assert.deepEqual(accepted.receipt.objectives.map(row => row.field), ['cpuMs', 'processCpuMs']);
-  assert.equal(decideRemeasurement(first, make(185, true), certificate).accepted, false);
+  assert.equal(classifyInitialCase(steadyMiss(data.evidence.cohorts[1].evidence, { cpuMs: 190, runtimeCpuMs: 189 }), manifest, certificate).decision, 'first',
+    'a main-thread CPU warning (0.95x) beside a certified steady miss certifies');
+  assert.equal(classifyInitialCase(steadyMiss(data.evidence.cohorts[1].evidence, { cpuMs: 202, runtimeCpuMs: 201 }), manifest, certificate).decision, 'cpu-refused',
+    'main-thread CPU over 1.00x still refuses the CPU gate');
+});
+
+test('Sam 2026-11-07: Bitget paired steady fails when Rust is slower than TS; creep only adds rejections', () => {
+  const warn = assessBitgetPairedSteady(fixture(1, .95)).certificate;
+  assert.equal(warn.steadyAccepted, true, '0.95x with q in tolerance is accepted');
+  assert.equal(warn.readiness.ready, false);
+  const combined = certificateFor(fixture(1, .95));
+  assert.match(bitgetSteadyWarning(combined), /missed the 10%-faster target \(rust\/ts=0\.950x, target 0\.90x\)/);
+  const slower = assessBitgetPairedSteady(fixture(1, 1.01)).certificate;
+  assert.equal(slower.notSlowerThanTs, false);
+  assert.equal(slower.steadyAccepted, false, '1.01x fails');
+  assert.equal(bitgetSteadyWarning(slower), null, 'a failure is not downgraded to a warning');
+  const creep = assessBitgetPairedSteady(fixture(1.05, .89 / 1.05)).certificate;
+  assert.equal(creep.notSlowerThanTs, true, '0.89x is faster than TS');
+  assert.equal(creep.steadyAccepted, false, 'but q over the frozen creep tolerance still fails');
+  assert.equal(bitgetSteadyWarning(certificateFor(fixture(1, .85))), null, '0.85x meets the target cleanly');
 });
 
 test('measured and unchanged family certificates cannot authorize a different module or combined build', () => {
@@ -243,7 +253,7 @@ test('both independent comparisons are mandatory and cumulative creep blocks a p
     assert.equal(combineBitgetPairedCertificates(tip, anchor).steadyAccepted, expected);
   }
   const data = fixture(1, .92), tip = assessBitgetPairedSteady(data).certificate;
-  const first = data.evidence.cohorts[1].evidence;
+  const first = steadyMiss(data.evidence.cohorts[1].evidence);
   assert.throws(() => classifyInitialCase(first, manifest, tip), 'single witness cannot displace steady');
   const anchor = assessBitgetPairedSteady(anchorFixture(data)).certificate;
   for (const absent of [null, tip, { ...anchor }]) assert.throws(() => combineBitgetPairedCertificates(tip, absent));

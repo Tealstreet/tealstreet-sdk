@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { familyComparisonAuthority, readFamilyIdentity } from './cpu-family-identity.mjs';
 import { classifyInitialCase } from './cpu-ci.mjs';
-import { decideRemeasurement } from './cpu-remeasure.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './performance-policy.mjs';
@@ -70,12 +69,9 @@ function changeMetadata(data, arm, change) {
   change(metadata); data.entries.set(name, Buffer.from(JSON.stringify(metadata)));
 }
 
-test('original txflow steady CPU values fail the frozen bound but identical sealed bytes need no remeasurement', async () => {
-  const data = await fixture(), first = evidence(data.metadata), second = evidence(data.metadata, true);
-  assert.equal(classifyInitialCase(first, declarations).decision, 'second');
-  const measured = decideRemeasurement(first, second);
-  assert.equal(measured.accepted, false);
-  assert.ok(measured.errors.some(error => error.includes('two-run mean exceeds existing bound')));
+test('original txflow steady CPU (Rust 1.061x TS) is a CPU refusal unless identical sealed bytes need no measurement', async () => {
+  const data = await fixture(), first = evidence(data.metadata);
+  assert.equal(classifyInitialCase(first, declarations).decision, 'cpu-refused');
   const certificate = readFamilyIdentity(data);
   assert.equal(certificate.disposition, 'unchanged bytes, not measured');
   assert.equal(certificate.measured, false);
@@ -84,21 +80,21 @@ test('original txflow steady CPU values fail the frozen bound but identical seal
   assert.equal(first.report.status, 'FAIL', 'strict diagnostic remains unchanged');
 });
 
-test('master 41618845764 OKX inverse miss skips remeasurement only with authenticated identical bytes', async () => {
-  const data = await fixture('okx'), first = evidence(data.metadata), second = evidence(data.metadata, true);
+test('master 41618845764 OKX inverse steady at 0.930x TS is a warning now, not a miss', async () => {
+  const data = await fixture('okx'), first = evidence(data.metadata);
   assert.equal(data.authority.baseline, A, 'master compares to its actual first parent');
-  assert.equal(second.report.status, 'PASS', 'the second measurement alone passed in the original run');
-  const result = decideRemeasurement(first, second);
-  assert.equal(result.accepted, false);
-  assert.deepEqual(result.errors, ['steadyCpuMs: two-run mean exceeds existing bound']);
-  assert.equal(classifyInitialCase(first, declarations).decision, 'second');
+  assert.equal(first.report.status, 'PASS', 'missing the 10%-faster target no longer fails');
+  assert.equal(classifyInitialCase(first, declarations).decision, 'first');
   assert.equal(classifyInitialCase(first, declarations, undefined, readFamilyIdentity(data)).decision, 'first');
 });
 
 test('txflow first measurement 17.924/20.579 bypasses CPU eligibility only on identical sealed bytes', async () => {
   const data = await fixture(), first = evidence(data.metadata, false, { ts: 17.924, rust: 20.579 });
   const before = JSON.stringify(first);
-  assert.throws(() => classifyInitialCase(first, declarations), /strictly below 1.05/);
+  // Beyond remeasurement the miss refuses only the CPU gate; it is not a correctness error.
+  assert.equal(classifyInitialCase(first, declarations).decision, 'cpu-refused');
+  const mixed = structuredClone(first); mixed.report.failures = [...mixed.report.failures, 'private snapshot mismatch'].sort();
+  assert.throws(() => classifyInitialCase(mixed, declarations), 'a correctness failure is never routed to the CPU gate');
   const certificate = readFamilyIdentity(data);
   assert.equal(classifyInitialCase(first, declarations, undefined, certificate).decision, 'first');
   assert.equal(JSON.stringify(first), before);
@@ -106,7 +102,7 @@ test('txflow first measurement 17.924/20.579 bypasses CPU eligibility only on id
     const changed = await fixture();
     changed.entries.set(`cpu-family/baseline/${name}`, Buffer.from('changed bytes'));
     changeMetadata(changed, 'baseline', metadata => { metadata.hashes[name] = sha('changed bytes'); });
-    assert.throws(() => classifyInitialCase(first, declarations, undefined, readFamilyIdentity(changed)), /strictly below 1.05/);
+    assert.equal(classifyInitialCase(first, declarations, undefined, readFamilyIdentity(changed)).decision, 'cpu-refused');
   }
 });
 
@@ -117,7 +113,12 @@ test('first replay collection accepts a sealed CPU-only miss with complete publi
       [impl, [{ ...first.report.samples[impl][0], measuredMode: 'correctness' }]])) };
   const entries = [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }];
   const options = { suite: 'txflow', entries, manifest: declarations, mode: 'collect', sourceHead: data.state.sourceHead };
-  assert.ok(verifyGateSuite(options).errors.length, 'old first collection rejects the large CPU miss');
+  const old = verifyGateSuite(options);
+  assert.deepEqual(old.errors, [], 'a large CPU-only miss is not a measurement (correctness) error');
+  assert.equal(old.cpuMisses.length, 1, 'it is left to the CPU gate');
+  assert.equal(old.rows[0].label, 'CPU MISS (judged by the CPU gate)');
+  const mixed = structuredClone(entries); mixed[0].report.failures = [...mixed[0].report.failures, 'private snapshot mismatch'].sort();
+  assert.ok(verifyGateSuite({ ...options, entries: mixed }).errors.length, 'a correctness failure still fails the measurement');
   const family = readFamilyIdentity(data), accepted = verifyGateSuite({ ...options, family });
   assert.deepEqual(accepted.errors, []);
   assert.deepEqual(accepted.pending, []);
@@ -135,7 +136,8 @@ test('first replay collection accepts a sealed CPU-only miss with complete publi
 
 test('sealed-runtime reports without ciWasm metadata use the issued runtime proof and authenticated source', async () => {
   for (const suite of ['bybit', 'okx', 'txflow']) {
-    const data = await fixture(suite), first = evidence(data.metadata);
+    // OKX's fixture is otherwise faster than TS; make its steady CPU slower so identity has a miss to waive.
+    const data = await fixture(suite), first = evidence(data.metadata, false, suite === 'okx' ? { ts: 312.985, rust: 336.515 } : undefined);
     delete first.report.ciWasm;
     const before = JSON.stringify(first), certificate = readFamilyIdentity(data);
     assert.equal(classifyInitialCase(first, declarations, undefined, certificate).decision, 'first');
@@ -153,8 +155,7 @@ test('sealed-runtime reports without ciWasm metadata use the issued runtime proo
       changeMetadata(changed, 'baseline', metadata => { metadata.hashes[name] = sha('changed base bytes'); });
       const proof = readFamilyIdentity(changed);
       assert.equal(proof, undefined);
-      assert.equal(classifyInitialCase(first, declarations, undefined, proof).decision, 'second');
-      assert.equal(decideRemeasurement(first, evidence(data.metadata, true)).accepted, false);
+      assert.equal(classifyInitialCase(first, declarations, undefined, proof).decision, 'cpu-refused');
     }
   }
 });
@@ -181,21 +182,21 @@ test('first collection binds metadata-free sealed reports to the authenticated c
     const measured = evidence(data.metadata); delete measured.report.ciWasm;
     const family = readFamilyIdentity(changed); assert.equal(family, undefined);
     const normal = verifyGateSuite({ ...options, family, entries: [{ ...measured, exitCode: 1 }, entries[1]] });
-    assert.deepEqual(normal.errors, []); assert.equal(normal.pending.length, 1);
-    assert.equal(normal.rows[0].label, 'UNRESOLVED CPU MISS (not certification)');
-    assert.ok(verifyGateSuite({ ...options, family }).errors.length, 'changed bytes retain the large-miss eligibility refusal');
+    assert.deepEqual(normal.errors, []); assert.equal(normal.pending.length, 0); assert.equal(normal.cpuMisses.length, 1);
+    assert.equal(normal.rows[0].label, 'CPU MISS (judged by the CPU gate)');
+    const large = verifyGateSuite({ ...options, family });
+    assert.deepEqual(large.errors, []); assert.equal(large.cpuMisses.length, 1, 'changed bytes leave the large miss to the CPU gate');
   }
 });
 
-test('changed WASM or glue keeps the existing second runner and numeric bound', async () => {
+test('changed WASM or glue leaves a CPU miss to the CPU gate', async () => {
   for (const name of ['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js']) {
     const data = await fixture();
     data.entries.set(`cpu-family/baseline/${name}`, Buffer.from('different bytes'));
     changeMetadata(data, 'baseline', metadata => { metadata.hashes[name] = sha('different bytes'); });
     assert.equal(readFamilyIdentity(data), undefined);
     const first = evidence(data.metadata);
-    assert.equal(classifyInitialCase(first, declarations, undefined, readFamilyIdentity(data)).decision, 'second');
-    assert.equal(decideRemeasurement(first, evidence(data.metadata, true)).accepted, false);
+    assert.equal(classifyInitialCase(first, declarations, undefined, readFamilyIdentity(data)).decision, 'cpu-refused');
   }
 });
 
@@ -316,4 +317,34 @@ writeFileSync(out+'/build.json',JSON.stringify({sourceHead:execFileSync('git',['
     if (!fail) assert.equal(fs.readFileSync(resolve(proof, 'baseline/safe_cex_wasm_bg.wasm'), 'utf8'), 'baseline wasm');
     fs.rmSync(proof, { recursive: true });
   }
+});
+
+// #3246 review: only the exact computed CPU failures are deferred to the CPU gate.
+async function cpuOnlyCollection() {
+  const data = await fixture(), first = evidence(data.metadata, false, { ts: 17.924, rust: 20.579 });
+  const privateReport = { ...first.report, ...expectedGateCases('txflow')[1], tapeSha256: sha('private tape'), private: true,
+    status: 'PASS', failures: [], runs: 0, samples: Object.fromEntries(['ts', 'rust'].map(impl =>
+      [impl, [{ ...first.report.samples[impl][0], measuredMode: 'correctness' }]])) };
+  return { suite: 'txflow', entries: [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }], manifest: declarations,
+    mode: 'collect', sourceHead: data.state.sourceHead };
+}
+test('a valid CPU-only miss beyond remeasurement is collection success', async () => {
+  const result = verifyGateSuite(await cpuOnlyCollection());
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.cpuMisses.length, 1);
+});
+test('a correctness-only report with a CPU miss still fails the measurement', async () => {
+  const options = await cpuOnlyCollection();
+  options.entries[0].report.correctnessOnly = true;
+  const result = verifyGateSuite(options);
+  assert.ok(result.errors.some(error => error.includes('correctness-only reports cannot substitute')), JSON.stringify(result.errors));
+  assert.ok(!result.errors.some(error => error.includes('performance ')), 'the CPU failure itself is still deferred');
+});
+test('a stale accepted difference with a CPU miss still fails the measurement', async () => {
+  const options = await cpuOnlyCollection(), report = options.entries[0].report;
+  options.accepted = { schema: 1, differences: [{ venue: report.venue, tape: report.tape, tapeSha256: report.tapeSha256, diagnostics: [{
+    failures: ['checkpoint 0 markets[0].limits.amount.min: ts=1 rust=2'], category: 'rust-better',
+    rationale: 'Previously accepted market limit difference', evidence: 'Pinned old limits' }] }] };
+  const result = verifyGateSuite(options);
+  assert.ok(result.errors.some(error => error.includes('stale accepted difference')), JSON.stringify(result.errors));
 });

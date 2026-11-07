@@ -5253,3 +5253,34 @@ fn ambiguous_http_clock_refusals_never_resend_spot_creates() {
         }
     }
 }
+
+#[test]
+fn engine_ambiguity_429_clock_code_cannot_replay() {
+    for (status, body) in [
+        (
+            429,
+            r#"{"retCode":10002,"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10016,"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, 602, vec![order("BTCUSDT", 0.1)]);
+        let first = h.take("/v5/order/create");
+        h.reply(first.id, status, body);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "ambiguous answer cannot grant a resend"
+        );
+        assert!(h.unknown.contains(&602));
+        assert!(!h.notices.iter().any(
+            |n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == "bybit.clock.corrected")
+        ));
+    }
+}
