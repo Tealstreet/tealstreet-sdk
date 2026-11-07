@@ -326,7 +326,9 @@ Keep the original numeric-edge corpus and its field-identity fixtures unchanged.
 
 Shared Ticker output eligibility includes timestamp in the exhaustive ordinary
 numeric inventory. Its runtime clock value is not an info passthrough and cannot
-bypass the output check. The ticker_timestamp target observes native field bits.
+bypass the output check. The ticker_timestamp target observes native field bits
+against the retained Paradex reference. Its source inventory scans both the
+production exchange tree and the test-only reference tree.
 
 Source-corpus cardinality checks use exact totals and completed assertion counts;
 thresholds are not completeness checks. The test-only source_cardinality walker
