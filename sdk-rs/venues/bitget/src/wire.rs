@@ -357,6 +357,8 @@ pub struct PositionRow<'a> {
     pub open_total_pos: Number,
     #[serde(default, rename = "available")]
     pub available: Number,
+    #[serde(default, rename = "locked")]
+    pub locked: Number,
     #[serde(default, rename = "openPriceAvg")]
     pub open_price_avg: Number,
     #[serde(default, rename = "openAvgPrice")]
