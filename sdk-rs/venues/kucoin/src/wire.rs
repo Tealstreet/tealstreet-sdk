@@ -292,7 +292,18 @@ pub(crate) fn dispatched_write_failure(
     native_rate_codes: &[&str],
 ) -> safe_cex_engine::VenueError {
     use safe_cex_engine::{ErrorKind, Outcome};
-    let mut error = write_failure(status, body, message);
+    // Futures HTTP 404 alone cannot prove the first cancel was refused. Explicit
+    // native not-found replies can authorize the other order-family DELETE.
+    let classification_status = if status == 404
+        && native_rate_codes == FUTURES_RATE_CODES
+        && !serde_json::from_str::<Envelope<'_>>(body)
+            .is_ok_and(|row| matches!(row.code, "404" | "404000"))
+    {
+        200
+    } else {
+        status
+    };
+    let mut error = write_failure(classification_status, body, message);
     let kind = match status {
         408 => Some(ErrorKind::Timeout),
         429 => Some(ErrorKind::RateLimited),
@@ -304,11 +315,17 @@ pub(crate) fn dispatched_write_failure(
         {
             Some(ErrorKind::RateLimited)
         }
-        _ => return error,
+        _ => None,
     };
-    error.kind = kind;
-    error.outcome = Some(Outcome::Unknown);
-    error.message = "KuCoin write outcome is unknown. Check Open Orders".into();
+    if let Some(kind) = kind {
+        error.kind = Some(kind);
+        error.outcome = Some(Outcome::Unknown);
+    } else if error.outcome.is_none() && classification_status != status {
+        error.outcome = Some(Outcome::Unknown);
+    }
+    if error.outcome == Some(Outcome::Unknown) {
+        error.message = "KuCoin write outcome is unknown. Check Open Orders".into();
+    }
     error
 }
 

@@ -373,7 +373,7 @@ impl KrakenSpot {
                 error.outcome = Some(Outcome::Unknown);
             }
             let unknown = error.outcome == Some(Outcome::Unknown);
-            cx.fail(job.command, error);
+            fail_job(cx, &job, error);
             if unknown {
                 // Queued mutations were admitted before this uncertainty.
                 // Refuse them without replay; cancellation can still proceed.
@@ -381,8 +381,9 @@ impl KrakenSpot {
                     if queued.cancel {
                         return true;
                     }
-                    cx.fail(
-                        queued.command,
+                    fail_job(
+                        cx,
+                        queued,
                         not_sent("Kraken Spot queued write was not sent: earlier write outcome is uncertain. Check Open Orders before retrying"),
                     );
                     false
@@ -519,6 +520,10 @@ impl KrakenSpot {
         }
         true
     }
+}
+
+fn fail_job(cx: &mut Cx<'_, Pending>, job: &Job, error: VenueError) {
+    cx.fail(job.command, error);
 }
 
 /// Refused before any request was sent.

@@ -54,6 +54,10 @@ family_args() {
   elif [[ $family == woo ]]; then
     # Keep WOO ticker decoding throughput within the fixed CPU and size gates.
     build_args+=(--config 'profile.release.package.safe-cex-venue-woo.opt-level=3')
+  elif [[ $family == txflow ]]; then
+    # Only the public-stream decode crate takes throughput defaults: the TxFlow
+    # CPU gate measures that path; the venue crate keeps its size profile.
+    build_args+=(--config 'profile.release.package.safe-cex-txflow-public-wire.opt-level=3')
   elif [[ $family == bitget ]]; then
     # Engine at s: steady CPU clears the 1.10x gate with margin; z measured 1.07-1.21x.
     build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level="s"')

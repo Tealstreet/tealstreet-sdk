@@ -24,6 +24,7 @@ export const inverseUnitsFrameBytes = ({
   markets = true,
   contractSize = NaN,
   positionPnl = 0.002,
+  positionLiquidationPrice = 40000,
   units = 0,
   orderMarket = 0,
 } = {}) => {
@@ -78,7 +79,7 @@ export const inverseUnitsFrameBytes = ({
     table(
       8,
       [1, 0, (2 << 8) | (2 << 16)],
-      [49000, 1000, 10, positionPnl, 0.001, 0.02, 40000, 100, 1234].map((n) => [n]),
+      [49000, 1000, 10, positionPnl, 0.001, 0.02, positionLiquidationPrice, 100, 1234].map((n) => [n]),
     );
   const encoded = strings.map((s) => new TextEncoder().encode(s));
   const bytes = new Uint8Array(align8(4 + (strings.length + 1) * 4 + encoded.reduce((n, s) => n + s.length, 0)));

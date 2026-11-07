@@ -218,8 +218,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
   binance: 2_236_416,
   bingx: 2_085_888,
-  bitget: 2_434_048,
-  bitgetusdc: 2_434_048,
+  // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
+  // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
+  bitget: 2_457_600,
+  bitgetusdc: 2_457_600,
   bitrue: 1_851_392,
   bitunix: 1_863_680,
   blofin: 2_001_920,
@@ -254,7 +256,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
   phemex: 2_091_008,
   polymarket: 1_611_776,
-  txflow: 1_852_416,
+  // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
+  txflow: 1_907_712,
   weex: 1_948_672,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.

@@ -902,13 +902,13 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             200,
             r#"{"result":"error","error":"Unavailable"}"#.to_owned(),
             unknown,
-            "Unavailable",
+            "Kraken write outcome is unknown. Check Open Orders: Unavailable",
         ),
         (
             200,
             r#"{"result":"error","error":"somethingNew"}"#.to_owned(),
             unknown,
-            "somethingNew",
+            "Kraken write outcome is unknown. Check Open Orders: somethingNew",
         ),
         (
             200,
@@ -920,13 +920,13 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             200,
             send("partiallyFilled"),
             unknown,
-            "Kraken placement rejected or incomplete: partiallyFilled",
+            "Kraken write outcome is unknown. Check Open Orders: Kraken placement rejected or incomplete: partiallyFilled",
         ),
         (
             200,
             r#"{"result":"success"}"#.to_owned(),
             unknown,
-            "Kraken placement missing sendStatus",
+            "Kraken write outcome is unknown. Check Open Orders: Kraken placement missing sendStatus",
         ),
     ] {
         let (mut e, _) = ready();
@@ -981,7 +981,7 @@ fn a_refusal_after_an_accepted_placement_is_never_rejected() {
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(
         error.legacy_text(),
-        r#"{"message":"insufficientFunds","partialOrderIds":["accepted"],"partialOrderCount":1}"#
+        r#"{"message":"Kraken write outcome is unknown. Check Open Orders: insufficientFunds","partialOrderIds":["accepted"],"partialOrderCount":1}"#
     );
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
 }
@@ -1038,7 +1038,7 @@ fn edit_and_cancel_statuses_never_claim_a_refusal_after_an_effect() {
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(
         error.legacy_text(),
-        "Kraken cancellation rejected or identity mismatch: marketSuspended"
+        "Kraken write outcome is unknown. Check Open Orders: Kraken cancellation rejected or identity mismatch: cancelled"
     );
 }
 
@@ -2253,4 +2253,102 @@ fn futures_unknown_or_partial_result_keeps_queued_cancels_and_settings() {
         assert!(!after_setting.iter().any(|a| matches!(a, Action::Http(r)
             if r.url.ends_with("sendorder") || r.url.ends_with("editorder"))));
     }
+}
+
+fn postmerge_cancel_failure(body: &str, batch: bool) -> safe_cex_engine::VenueError {
+    let (mut e, _) = ready();
+    if batch {
+        inject(&mut e, "a", OrderType::Limit, None);
+        inject(&mut e, "b", OrderType::Limit, None);
+    }
+    command(
+        &mut e,
+        if batch {
+            Command::CancelOrders {
+                command: 81,
+                ids: vec!["a".into(), "b".into()],
+            }
+        } else {
+            Command::CancelSymbolOrders {
+                command: 81,
+                symbol: "PF_XBTUSD".into(),
+            }
+        },
+    );
+    let request = http(
+        &mut e,
+        if batch {
+            "batchorder"
+        } else {
+            "cancelallorders"
+        },
+    );
+    reply(&mut e, &request, 200, body);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+    );
+    out.into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("one failure")
+}
+#[test]
+fn postmerge_native_batch_rate_failure_is_actionable() {
+    let error = postmerge_cancel_failure(
+        r#"{"result":"success","batchStatus":[{"status":"apiLimitExceeded","order_id":"a"},{"status":"invalidSize","order_id":"b"}]}"#,
+        true,
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.venue_code.as_deref(), Some("apiLimitExceeded"));
+    assert!(error.message.contains("apiLimitExceeded"), "{error:?}");
+    assert!(!error.message.contains("invalidSize"), "{error:?}");
+    assert!(
+        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        "{error:?}"
+    );
+}
+#[test]
+fn postmerge_cancel_all_rate_status_is_actionable() {
+    let error = postmerge_cancel_failure(
+        r#"{"result":"success","cancelStatus":{"status":"apiLimitExceeded"}}"#,
+        false,
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        "{error:?}"
+    );
+}
+#[test]
+fn postmerge_envelope_rate_control_is_actionable() {
+    for batch in [false, true] {
+        let error =
+            postmerge_cancel_failure(r#"{"result":"error","error":"apiLimitExceeded"}"#, batch);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(
+            error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn postmerge_documented_server_error_is_actionable_in_batch_and_cancel_all() {
+    let mut errors = Vec::new();
+    for batch in [false, true] {
+        let error = postmerge_cancel_failure(r#"{"result":"error","error":"Server Error"}"#, batch);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        errors.push((batch, error));
+    }
+    assert!(
+        errors
+            .iter()
+            .all(|(_, error)| error.message.contains("unknown")
+                && error.message.contains("Check Open Orders")),
+        "{errors:?}"
+    );
 }

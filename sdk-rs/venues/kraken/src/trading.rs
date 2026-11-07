@@ -841,14 +841,9 @@ impl Kraken {
                         } else {
                             unproven(message)
                         };
-                        // The last failure's text, but an Unknown entry is never overwritten.
+                        // Keep an unknown leg's text and native diagnostics together.
                         error = match error {
-                            Some(first) if first.outcome == Some(Outcome::Unknown) => {
-                                Some(VenueError {
-                                    message: failure.message,
-                                    ..first
-                                })
-                            }
+                            Some(first) if first.outcome == Some(Outcome::Unknown) => Some(first),
                             _ => Some(failure),
                         };
                     }
@@ -950,18 +945,27 @@ impl Kraken {
                 Err(mut error) => {
                     let ids: Vec<_> = job
                         .canceled_ids
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .chain(job.ids.iter().cloned())
                         .collect();
                     error = error.partial_ids(&ids);
                     if job.effective || !job.ids.is_empty() {
                         error.outcome = Some(Outcome::Unknown);
                     }
+                    if error.outcome == Some(Outcome::Unknown)
+                        && !error.message.contains("Check Open Orders")
+                    {
+                        error.message = format!(
+                            "Kraken write outcome is unknown. Check Open Orders: {}",
+                            error.message
+                        );
+                    }
                     if error.outcome == Some(Outcome::Rejected) {
                         cx.placement_resolved(job.command);
                     }
                     let unknown = error.outcome == Some(Outcome::Unknown);
-                    cx.fail(job.command, error);
+                    fail_job(cx, &job, error);
                     if unknown {
                         // Admission preceded this uncertainty; never pump those
                         // placements or edits. Cancels, settings and reads remain.
@@ -971,8 +975,9 @@ impl Kraken {
                             }) {
                                 return true;
                             }
-                            cx.fail(
-                                queued.command,
+                            fail_job(
+                                cx,
+                                queued,
                                 not_sent("Kraken Futures queued write was not sent: earlier write outcome is uncertain. Check Open Orders before retrying"),
                             );
                             false
@@ -1000,6 +1005,10 @@ impl Kraken {
         self.trading_finish(cx, Err(error));
         self.trading_pump(cx);
     }
+}
+
+fn fail_job(cx: &mut Cx<'_, Pending>, job: &Job, error: VenueError) {
+    cx.fail(job.command, error);
 }
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
