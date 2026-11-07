@@ -300,6 +300,58 @@ it.each([
   expect(f.seen.filter(([event]) => event === 'command').at(-1)).toEqual(['command', EPOCH + monotonic]);
 });
 
+it.each([
+  { jump: 600_000, worker: false },
+  { jump: -600_000, worker: false },
+  { jump: 600_000, worker: true },
+  { jump: -600_000, worker: true },
+])('recovers a second $jump ms wall step at the cooldown boundary (worker=$worker)', async ({ jump, worker }) => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  vi.setSystemTime(EPOCH - 600_000);
+  const source = vi.fn(async () => EPOCH + monotonic);
+  virtualClock.setServerTimeSource(source);
+  setRustEngineTransport();
+  const f = fixture('binance', () => EPOCH);
+  let protocolRaw = EPOCH;
+  let protocolUtc = EPOCH;
+  f.engine.syncHostTime = (now, utc) => { protocolRaw = now; protocolUtc = utc; return true; };
+  const signingTimes: number[] = [];
+  const command = f.engine.command;
+  f.engine.command = (json, now) => {
+    if (JSON.parse(json).command !== undefined) signingTimes.push(protocolUtc + now - protocolRaw);
+    return command(json, now);
+  };
+  await f.exchange.start();
+  const transport: Transport = (f.exchange as any).host.transport;
+  if (worker) vi.stubGlobal('window', undefined);
+
+  vi.setSystemTime(EPOCH);
+  transport.now();
+  await Promise.resolve();
+  await virtualClock.syncClientServerTime({ afterClockStep: true });
+  expect(source).toHaveBeenCalledTimes(2);
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH);
+
+  monotonic = 1_000;
+  await vi.advanceTimersByTimeAsync(1_000);
+  vi.setSystemTime(EPOCH + monotonic + jump);
+  expect(transport.now()).toBe(EPOCH + monotonic);
+  await f.exchange.setLeverage('BTCUSDT', 2);
+  expect(source).toHaveBeenCalledTimes(2);
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH + monotonic + jump);
+
+  monotonic = 14_999;
+  await vi.advanceTimersByTimeAsync(13_999);
+  expect(source).toHaveBeenCalledTimes(2);
+  monotonic = 15_000;
+  await vi.advanceTimersByTimeAsync(1);
+  expect(source).toHaveBeenCalledTimes(3);
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH + monotonic);
+  await f.exchange.setLeverage('BTCUSDT', 2);
+  expect(signingTimes.at(-1)).toBe(EPOCH + monotonic);
+  expect(transport.now()).toBe(EPOCH + monotonic);
+});
+
 it('shares a completed wall-step resync across two default transports', async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(EPOCH - 600_000);

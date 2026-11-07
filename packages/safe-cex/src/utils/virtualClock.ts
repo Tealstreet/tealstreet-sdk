@@ -37,6 +37,7 @@ class VirtualClock {
   private receivedTimeSync = false;
   private syncInFlight: Promise<void> | null = null;
   private lastAfterClockStepSync: number | null = null;
+  private afterClockStepTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private serverTimeSource: ServerTimeSource | undefined;
   private readonly syncListeners = new Set<TimeSyncListener>();
 
@@ -66,6 +67,10 @@ class VirtualClock {
   };
 
   stop = () => {
+    if (this.afterClockStepTimeoutId !== null) {
+      clearTimeout(this.afterClockStepTimeoutId);
+      this.afterClockStepTimeoutId = null;
+    }
     if (this.timeoutId) {
       clearTimeout(this.timeoutId);
       this.timeoutId = null;
@@ -179,9 +184,24 @@ class VirtualClock {
 
     // All transports share this realm's floor, including synchronous Node
     // notifications. Wall-clock steps must not shorten the cooldown itself.
-    if (afterClockStep && this.lastAfterClockStepSync !== null &&
-      performance.now() - this.lastAfterClockStepSync < CLOCK_STEP_SYNC_INTERVAL_MS) {
-      return Promise.resolve();
+    if (afterClockStep && this.lastAfterClockStepSync !== null) {
+      const remaining = CLOCK_STEP_SYNC_INTERVAL_MS - (performance.now() - this.lastAfterClockStepSync);
+      if (remaining > 0) {
+        if (this.afterClockStepTimeoutId === null) {
+          this.afterClockStepTimeoutId = setTimeout(() => {
+            this.afterClockStepTimeoutId = null;
+            void this.syncClientServerTime({ afterClockStep: true }).catch(() => {
+              // Best effort; scheduled synchronization can retry.
+            });
+          }, remaining);
+          (this.afterClockStepTimeoutId as { unref?: () => void } | undefined)?.unref?.();
+        }
+        return Promise.resolve();
+      }
+    }
+    if (afterClockStep && this.afterClockStepTimeoutId !== null) {
+      clearTimeout(this.afterClockStepTimeoutId);
+      this.afterClockStepTimeoutId = null;
     }
 
     this.syncInFlight = this.syncClientServerTimeInner(afterClockStep).finally(() => {

@@ -226,6 +226,8 @@ Completed clock-step attempts also share a realm-wide 15 s cooldown measured by
 another transport nor a further wall step bypasses it. If both registered and
 venue sources fail in this mode, the prior offset and subscribers stay unchanged;
 ordinary synchronization retains its local-UTC fallback and five-minute cadence.
+Steps inside the cooldown share one deferred resync at its boundary. The timer
+rechecks monotonic elapsed time before fetching, and `stop()` cancels it.
 
 ## Files
 

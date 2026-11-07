@@ -97,6 +97,50 @@ describe('virtualClock', () => {
   });
 
   describe('syncClientServerTime', () => {
+    it('coalesces suppressed clock steps and cancels their deferred resync on stop', async () => {
+      const originalWindow = global.window;
+      (global as any).window = {};
+      let elapsed = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+      const source = vi.fn(async () => Date.now());
+      virtualClock.setServerTimeSource(source);
+      try {
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        elapsed = 1_000;
+        for (let i = 0; i < 3; i++) await virtualClock.syncClientServerTime({ afterClockStep: true });
+        expect(vi.getTimerCount()).toBe(1);
+        expect(source).toHaveBeenCalledOnce();
+        virtualClock.stop();
+        elapsed = 15_000;
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(source).toHaveBeenCalledOnce();
+      } finally {
+        (global as any).window = originalWindow;
+      }
+    });
+
+    it('rechecks the monotonic cooldown when a deferred timer fires early', async () => {
+      const originalWindow = global.window;
+      (global as any).window = {};
+      let elapsed = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+      const source = vi.fn(async () => Date.now());
+      virtualClock.setServerTimeSource(source);
+      try {
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        elapsed = 1_000;
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        await vi.advanceTimersByTimeAsync(14_000);
+        expect(source).toHaveBeenCalledOnce();
+        elapsed = 15_000;
+        await vi.advanceTimersByTimeAsync(14_000);
+        expect(source).toHaveBeenCalledTimes(2);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        (global as any).window = originalWindow;
+      }
+    });
+
     it('rate limits completed clock-step syncs using monotonic elapsed time only', async () => {
       const originalWindow = global.window;
       (global as any).window = {};
