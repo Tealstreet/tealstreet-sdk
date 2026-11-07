@@ -126,7 +126,7 @@ impl Cryptocom {
         symbol: String,
         limit: Option<u32>,
     ) {
-        let to = cx.now;
+        let to = cx.protocol_now();
         let from = to - 86_400_000.0;
         let invalid = if !from.is_finite() || !to.is_finite() || from < 0.0 || to < from {
             Some("Invalid history time range")

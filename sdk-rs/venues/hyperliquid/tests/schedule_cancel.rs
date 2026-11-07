@@ -378,3 +378,19 @@ fn network_and_vault_payloads_use_shared_monotonic_signer_nonce() {
         }
     }
 }
+
+#[test]
+fn engine_ambiguity_429_schedule_refusal_stays_unknown() {
+    for status in [429, 503] {
+        let mut e = engine();
+        let r = write(command(&mut e, 7, "", NOW));
+        let actions = reply(
+            &mut e,
+            &r,
+            status,
+            r#"{"status":"err","response":"Cannot set scheduled cancel time until enough volume traded"}"#,
+            NOW + 1.,
+        );
+        failed(&actions, 7, Outcome::Unknown);
+    }
+}

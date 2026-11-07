@@ -40,7 +40,7 @@ test('CPU and certification remain visible but never block the correctness aggre
   for (const pullRequest of [true, false]) {
     const full = { full: true, nativeFull: true, combinedRequired: true, replayRequired: true, sizeRequired: true };
     const complete = { ...jobs, wasm: { result: 'success' }, combined: { result: 'success' } };
-    for (const name of ['gate', 'bitget-paired', 'cpu-plan', 'cpu-second', 'cpu-certify', 'cpu-final']) {
+    for (const name of ['gate', 'bitget-paired', 'cpu-plan', 'cpu-certify', 'cpu-final']) {
       const result = assessCiResult({ pullRequest, selection: full, jobs: { ...complete, [name]: { result: 'failure' } } });
       assert.equal(result.accepted, true, name);
       assert(!result.required.includes(name));

@@ -25,6 +25,7 @@ impl ResponseProof {
     pub(crate) fn from_status(status: u16) -> Self {
         match status {
             408 => Self::Unproven(ErrorKind::Timeout),
+            429 => Self::Unproven(ErrorKind::RateLimited),
             500.. => Self::Unproven(ErrorKind::VenueUnavailable),
             _ => Self::NativeCodec,
         }
@@ -34,7 +35,7 @@ impl ResponseProof {
         match self {
             Self::NativeCodec => None,
             Self::Unproven(kind) => Some(
-                VenueError::new("HTTP response does not prove the write outcome")
+                VenueError::new("HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders")
                     .kind(kind)
                     .outcome(Outcome::Unknown),
             ),
@@ -109,6 +110,10 @@ impl UnprovenEvidence {
         if self.error.venue_message.is_none() {
             self.error.venue_message = Some(self.budget.text(message));
         }
+    }
+
+    pub(crate) fn retry_after_ms(&mut self, delay: Option<f64>) {
+        self.error.retry_after_ms = delay;
     }
 
     pub(super) fn finish(mut self) -> (EvidenceBudget, VenueError, bool) {

@@ -123,6 +123,7 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
       quantityUnitsCode(name),
     );
   const native: WasmEngineLike = {
+    syncHostTime: () => true,
     capabilities: () => engineCapabilities(name),
     start: vi.fn(idle),
     wsOpen: idle,

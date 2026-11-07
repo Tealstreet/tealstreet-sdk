@@ -2,7 +2,7 @@
 
 `spotOnly` selects Coinbase Spot; the default private account discovers its
 portfolio type and can select INTX, CFM or Spot. Public-only non-spot accounts
-read the legacy International instruments endpoint.
+read the drb USDC perpetual catalogue and public stream.
 
 ## INTX startup migration message
 
@@ -20,7 +20,9 @@ errors, rate limits, malformed successful responses, Spot/CFM and refreshes
 after startup keep their existing handling. A complete, usable International
 instrument array remains accepted even with an error HTTP status. Deferred
 catalogue commands still settle through the existing read-failure path. The
-migration message does not deactivate credentials.
+migration message does not deactivate credentials. Public drb discovery and
+refresh failures retain their bounded retry handling and never emit this legacy
+INTX migration message.
 
 Deterministic coverage: `tests/intx_moved.rs` and `tests/startup_resilience.rs`.
 No live credentials or private requests are needed.

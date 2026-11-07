@@ -101,22 +101,22 @@ fn pace(h: &mut Harness) {
     }
 }
 
-// rest-common-api-reference "Response and Reason Codes" lists these HTTP statuses.
+// Native refusal evidence remains authoritative at non-ambiguous HTTP statuses.
 #[test]
-fn documented_refusals_are_refused_with_their_reason() {
+fn nonambiguous_native_refusals_keep_their_reason_and_release_the_fence() {
     for (status, body, reason) in [
         (
-            500,
+            200,
             r#"{"code":306,"message":"INSUFFICIENT_AVAILABLE_BALANCE"}"#,
             "INSUFFICIENT_AVAILABLE_BALANCE",
         ),
         (
-            500,
+            200,
             r#"{"code":415,"message":"BELOW_MIN_ORDER_SIZE"}"#,
             "BELOW_MIN_ORDER_SIZE",
         ),
         (
-            500,
+            200,
             r#"{"code":43005,"message":"POST_ONLY_REJ"}"#,
             "POST_ONLY_REJ",
         ),

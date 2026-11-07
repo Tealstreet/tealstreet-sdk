@@ -43,7 +43,7 @@ default = [
     "okx",
     "orderly"
 ]
-grvt = ["dep:safe-cex-venue-grvt"]
+grvt = ["dep:safe-cex-venue-grvt", "dispatch-signing", "hosted-wallet", "safe-cex-crypto/secp256k1", "dep:serde_json"]
 polymarket = ["dep:safe-cex-venue-polymarket"]
 coinbase = ["dep:safe-cex-venue-coinbase"]
 breakoutprop = ["dep:safe-cex-venue-breakoutprop"]

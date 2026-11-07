@@ -529,7 +529,7 @@ impl BinanceFutures {
     }
 
     /// Note request weight; near the limit, or on a 418/429, pause background reads.
-    fn observe_weight(&mut self, cx: &mut Cx<'_, Pending>, response: &Response<'_>) {
+    fn observe_weight(&mut self, now: f64, response: &Response<'_>) {
         let pause = if matches!(response.status, 418 | 429) {
             Some(
                 response
@@ -548,7 +548,7 @@ impl BinanceFutures {
                 .map(|_| WEIGHT_PAUSE_MS)
         };
         if let Some(pause) = pause {
-            self.background_paused_until = self.background_paused_until.max(cx.now + pause);
+            self.background_paused_until = self.background_paused_until.max(now + pause);
         }
     }
 
@@ -1362,6 +1362,21 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn observe_unproven_http_response(
+        &mut self,
+        now: f64,
+        pending: &Pending,
+        response: Response<'_>,
+    ) {
+        let mut pending = pending;
+        while let Pending::Background(_, inner) = pending {
+            pending = inner;
+        }
+        if !matches!(pending, Pending::Options(_) | Pending::OptionsProduct(_)) {
+            self.observe_weight(now, &response);
+        }
+    }
+
     fn http_plans() -> bool {
         false
     }
@@ -1737,7 +1752,7 @@ impl Venue for BinanceFutures {
             self.options_product_response(cx, *request, response);
             return;
         }
-        self.observe_weight(cx, &response);
+        self.observe_weight(cx.now, &response);
         if let Pending::Identity(context) = pending {
             self.identity_response(cx, context, response);
             return;
@@ -2091,7 +2106,14 @@ impl Venue for BinanceFutures {
                     cx.refuse_command(Operation::Read, error);
                     return;
                 }
-                let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
+                let query = match candles::query(
+                    &symbol,
+                    interval,
+                    limit,
+                    from_ms,
+                    to_ms,
+                    cx.protocol_now(),
+                ) {
                     Ok(query) => query,
                     Err(error) => {
                         let error = safe_cex_engine::VenueError::new(error)
