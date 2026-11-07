@@ -271,7 +271,11 @@ jobs:
           retention-days: 14
 
   txflow-steady-profile:
-    name: Rust / temporary TxFlow x86 profile
+    name: Rust / temporary TxFlow x86 profile (${{ matrix.slot }})
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: [a, b]
     if: github.event_name == 'workflow_dispatch' && inputs.txflow_steady_profile
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -328,9 +332,9 @@ jobs:
           const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
           const baseline='69a8f8259969614f442647ed064dcaeec67a877f';
           run('git',['fetch','--no-tags','--depth=1','origin',baseline]);
-          const path='sdk-rs/harness/build.sh',head=readFileSync(path),base=run('git',['show',`${baseline}:${path}`]);
-          const engine=base.replace('elif [[ $family == bitget ]]; then','elif [[ $family == bitget || $family == txflow ]]; then');
-          assert.notEqual(engine,base);
+          const paths=['sdk-rs/venues/txflow/src/lib.rs','sdk-rs/venues/txflow/src/wire.rs'];
+          const head=new Map(paths.map(path=>[path,readFileSync(path)]));
+          const base=new Map(paths.map(path=>[path,Buffer.from(run('git',['show',`${baseline}:${path}`]))]));
           const results=[];
           const gate=(arm,privateTape)=>{
            const directory='sdk-rs/harness/out/ci';mkdirSync(directory,{recursive:true});const before=new Set(readdirSync(directory));
@@ -341,23 +345,23 @@ jobs:
           };
           run('corepack',['yarn','rust:private-tape-txflow'],'private-input.log');
           try{
-           for(const [arm,policy] of [['baseline',Buffer.from(base)],['venue-s',head],['engine-s',Buffer.from(engine)]]){
-            writeFileSync(path,policy);writeFileSync(resolve(out,`${arm}-build.sh`),policy);
+           for(const [arm,sources] of [['baseline',base],['compact',head]]){
+            for(const [path,bytes] of sources)writeFileSync(path,bytes);
             run('corepack',['yarn','rust:build-wasm','--venue','txflow'],`${arm}-build.log`);
             const report=gate(arm,false),privateReport=gate(arm,true);
             const module=readFileSync('sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm');
             cpSync('sdk-rs/hosts/wasm/pkg/node',resolve(out,`${arm}-node`),{recursive:true});
-            results.push({arm,policySha256:hash(policy),moduleSha256:hash(module),moduleBytes:module.length,capBytes:1852416,withinCap:module.length<=1852416,summary:report.summary,ratio:report.summary.rust.steadyCpuMs/report.summary.ts.steadyCpuMs,failures:report.failures,privateFailures:privateReport.failures});
+            results.push({arm,sourceSha256:Object.fromEntries([...sources].map(([path,bytes])=>[path,hash(bytes)])),moduleSha256:hash(module),moduleBytes:module.length,capBytes:1852416,withinCap:module.length<=1852416,summary:report.summary,ratio:report.summary.rust.steadyCpuMs/report.summary.ts.steadyCpuMs,failures:report.failures,privateFailures:privateReport.failures});
             if(results.length>1){assert.deepEqual(report.failures.filter(x=>!x.startsWith('performance ')),results[0].failures.filter(x=>!x.startsWith('performance ')));assert.deepEqual(privateReport.failures,results[0].privateFailures);}
             writeFileSync(resolve(out,'comparison.json'),JSON.stringify({diagnosticOnly:true,baseline,head:run('git',['rev-parse','HEAD']).trim(),cpu:os.cpus()[0].model,node:process.version,results},null,2));
            }
            assert.equal(results[0].privateFailures.length,3);
-          }finally{writeFileSync(path,head);}
+          }finally{for(const [path,bytes] of head)writeFileSync(path,bytes);}
           TXFLOW_PROFILE
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: txflow-steady-profile
+          name: txflow-steady-profile-${{ matrix.slot }}
           path: |
             ${{ runner.temp }}/txflow-steady-profile/
             sdk-rs/harness/out/ci/gate-*.json
