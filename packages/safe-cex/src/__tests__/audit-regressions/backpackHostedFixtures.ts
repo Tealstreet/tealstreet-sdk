@@ -2,12 +2,14 @@ import { createPrivateKey, sign } from 'node:crypto';
 
 export const STAMP = 1_700_000_000_123;
 // Public deterministic seed; OpenSSL is independent of Rust's Ed25519 provider.
-const key = createPrivateKey({
-  key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.alloc(32, 7)]),
-  format: 'der',
-  type: 'pkcs8',
-});
-export const signature = (payload: string) => sign(null, Buffer.from(payload), key).toString('base64');
+export const signature = (payload: string, seed = 7) => {
+  const key = createPrivateKey({
+    key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.alloc(32, seed)]),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  return sign(null, Buffer.from(payload), key).toString('base64');
+};
 
 // Every signed method/path in native sign::instruction; ordinary, protective,
 // batch and cancel/proof/replacement amend shapes retain their own wire control.

@@ -122,7 +122,7 @@ it('actual WASM local/device and keyless remote/origin sign every native endpoin
 });
 
 it('actual WASM preserves WS/secondary signatures and refuses unknown device formats', async () => {
-  const browser = fixture({ secondary_key: 'read-key', secondary_secret: Buffer.alloc(32, 7).toString('base64') });
+  const browser = fixture({ secondary_key: 'read-key', secondary_secret: Buffer.alloc(32, 9).toString('base64') });
   const sign = vi.fn((request: RemoteSignerRequest) => browser.exchange.signWsAuth(request));
   const remoteSigner: RemoteSigner = { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
   const server = fixture({ secret: '', remoteSigner, secondary_key: 'read-key', secondary_secret: '' });
@@ -140,7 +140,7 @@ it('actual WASM preserves WS/secondary signatures and refuses unknown device for
     expect(remote).toEqual(local);
     expect(JSON.parse(remote.wsAuthSignature!)).toEqual({
       credential: slot === 'primary' ? 'fixture-key' : 'read-key',
-      signature: signature(payload),
+      signature: signature(payload, slot === 'primary' ? 7 : 9),
     });
   }
   for (const wsAuth of [
