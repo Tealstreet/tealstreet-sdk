@@ -642,7 +642,21 @@ test('#3207 telemetry (run 42279265759) uses CI plus 10 KiB and keeps Bitget sib
 
 test('#3202 on #3207 (run 42305638406) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
   const measured = 2_409_448;
-  const cap = 2_419_712;
+  const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(measuredCap, 2_419_712);
+  const cap = WASM_VENUE_OVERRIDES.bitget;
+  assert.ok(cap >= measuredCap);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3210 admitted close split (run 42320236420) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
+  const measured = 2_422_853;
+  const cap = 2_434_048;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
