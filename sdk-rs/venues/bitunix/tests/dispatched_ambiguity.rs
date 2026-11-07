@@ -366,7 +366,11 @@ fn batch_rate_rows(code: i64, refused_prefix: bool) {
             },
         },
     );
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+    assert_batch_unknown(&mut e, now, code, !refused_prefix);
+}
+
+fn assert_batch_unknown(e: &mut TestEngine, now: f64, code: i64, check_native: bool) {
+    let actions = safe_cex_engine::test_support::prepared_actions(e, now);
     let failures: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
@@ -377,7 +381,7 @@ fn batch_rate_rows(code: i64, refused_prefix: bool) {
     assert_eq!(failures.len(), 1, "{actions:?}");
     let error = failures[0];
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
-    if !refused_prefix {
+    if check_native {
         assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
         assert_eq!(error.venue_code, Some(code.to_string()));
         assert_eq!(error.venue_message.as_deref(), Some("throttled"));
@@ -406,7 +410,7 @@ fn batch_rate_rows(code: i64, refused_prefix: bool) {
     let mut later = actions;
     for (timer, at) in timers {
         e.handle(at, Event::TimerFired { timer });
-        later.extend(safe_cex_engine::test_support::prepared_actions(&mut e, at));
+        later.extend(safe_cex_engine::test_support::prepared_actions(e, at));
     }
     assert!(
         !later
@@ -434,4 +438,41 @@ fn native_10005_batch_rows_replace_an_earlier_chunks_refusal() {
 #[test]
 fn native_10006_batch_rows_replace_an_earlier_chunks_refusal() {
     batch_rate_rows(10006, true);
+}
+
+fn cancel_batch_rate_rows(code: i64) {
+    let (mut e, _) = startup();
+    e.handle(100.0, Event::Command(command("cancel")));
+    let writes = requests(&mut e);
+    assert_eq!(writes.len(), 1);
+    let write = &writes[0];
+    assert!(write.url.ends_with("cancel_orders"));
+    assert_ne!(write.method, Method::Get);
+    let body = serde_json::json!({"code": 0, "data": {
+        "successList": [],
+        "failureList": [{"orderId": "one", "errorCode": code, "errorMsg": "throttled"}],
+    }})
+    .to_string();
+    e.handle(
+        110.0,
+        Event::HttpResponse {
+            request: write.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: &body,
+            },
+        },
+    );
+    assert_batch_unknown(&mut e, 110.0, code, false);
+}
+
+#[test]
+fn native_10005_cancel_rows_present_unknown_guidance() {
+    cancel_batch_rate_rows(10005);
+}
+
+#[test]
+fn native_10006_cancel_rows_present_unknown_guidance() {
+    cancel_batch_rate_rows(10006);
 }

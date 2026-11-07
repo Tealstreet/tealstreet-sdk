@@ -252,6 +252,21 @@ fn text<T: Serialize>(v: &T) -> String {
 fn empty_list() -> &'static serde_json::value::RawValue {
     serde_json::from_str("[]").expect("literal empty array")
 }
+fn explain_batch_rate(items: &[BatchItem<'_>], message: &mut String) -> bool {
+    let rate_limited = items.iter().any(|item| {
+        matches!(
+            item,
+            BatchItem::Native(Native {
+                code: NativeCode::Int(10005 | 10006),
+                ..
+            })
+        )
+    });
+    if rate_limited {
+        message.push_str(". The outcome is unknown. Check Open Orders");
+    }
+    rate_limited
+}
 fn ack_rows(
     raw: &serde_json::value::RawValue,
 ) -> Result<Vec<&serde_json::value::RawValue>, String> {
@@ -2421,13 +2436,7 @@ impl BitunixFutures {
         } else {
             messages.join_with("; ")
         };
-        let rate_limited = failures.iter().any(|f| {
-            f.error_code
-                .is_some_and(|code| matches!(code.0, 10005 | 10006))
-        });
-        if rate_limited {
-            message.push_str(". The outcome is unknown. Check Open Orders");
-        }
+        let rate_limited = explain_batch_rate(&items, &mut message);
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.job.ids.extend(ids.iter().cloned());
         }
@@ -2572,7 +2581,7 @@ impl BitunixFutures {
                 }
             })
             .collect::<Vec<_>>();
-        let message = if require_ack && canceled.len() != ids.len() {
+        let mut message = if require_ack && canceled.len() != ids.len() {
             "Bitunix cancellation not acknowledged for every order; replacement was not placed"
                 .to_owned()
         } else if message.is_empty() {
@@ -2580,6 +2589,7 @@ impl BitunixFutures {
         } else {
             message.join_with("; ")
         };
+        let rate_limited = explain_batch_rate(&items, &mut message);
         match cx.http_write_batch(
             &request.context,
             &codes::BITUNIX,
@@ -2590,11 +2600,14 @@ impl BitunixFutures {
         ) {
             Ok(WriteResult::Accepted { .. }) => Ok(()),
             Ok(
-                WriteResult::Rejected(error)
-                | WriteResult::KnownPartial(error)
-                | WriteResult::PartialUnknown(error)
-                | WriteResult::Failed(error),
-            ) => Err(Some(error)),
+                WriteResult::Rejected(mut error)
+                | WriteResult::KnownPartial(mut error)
+                | WriteResult::PartialUnknown(mut error)
+                | WriteResult::Failed(mut error),
+            ) => {
+                error.presents = rate_limited;
+                Err(Some(error))
+            }
             Err(_) => Err(None),
         }
     }

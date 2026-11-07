@@ -1404,12 +1404,13 @@ impl Lighter {
                     Err(_) => {
                         let _ = cx.http_write_unproven(&context, UNCERTAIN_RESULT);
                         self.submission_uncertain(cx, &submission.effect);
-                        let error = if matches!(response.status, 405 | 429) {
+                        let mut error = if matches!(response.status, 405 | 429) {
                             uncertain(format!("{UNCERTAIN_RESULT}; {RATE_MESSAGE}"))
                                 .kind(ErrorKind::RateLimited)
                         } else {
                             uncertain(UNCERTAIN_RESULT)
                         };
+                        error.presents = true;
                         self.trade_finish(cx, error);
                         return;
                     }
