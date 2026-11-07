@@ -10512,3 +10512,42 @@ retain their wire and outcomes, including plain-cancel not-found idempotency.
 Their full signed-request digest is pinned against master. Existing exact put-back
 controls now supply terminal cancellation proof before exercising replacement
 refusal; their original payload and protection-result assertions remain.
+
+
+## Released HTTP ambiguity and native rate limits
+
+Physically dispatched writes answered with HTTP 408, 429 or 5xx are Unknown.
+The managed boundary captures bounded native diagnostics without invoking the
+venue reducer or granting resend, restore or authentication authority. The
+status-exemption hook and Crypto.com's orphan exemption codec are removed.
+Retry-After remains attached to the Unknown fact for the existing read deferral.
+WEEX connects its existing account refresh to `reconcile_uncertain`, preserving
+the post-cooldown read when the engine seals before the native reducer.
+
+Outside those statuses, native RateLimited verdicts are Unknown for Place,
+Cancel, Amend and Setting, including batch rows and accepted prefixes. Reads
+keep their native signature retry, rate-limit delay and outcome-free contract.
+Journal projection cannot demote a recorded Unknown after an accepted sibling
+or when an older result wrapper calls it Rejected or KnownPartial.
+An engine-sealed ambiguous put-back replaces earlier definitive refusal words,
+including KnownPartial, with Unknown and Check Open Orders. It grants no
+protection claim or additional write.
+Batch rows retain their codec-selected table's code-less refusal verdict;
+the write ambiguity guard still dominates native rate limits and HTTP 408/429/5xx.
+Engine-sealed HTTP ambiguity says Unknown and Check Open Orders directly;
+it does not invoke a venue formatter that could authorize another write.
+Before sealing, a no-Cx observer preserves Phemex's pause, WEEX's shared pause
+and Binance's background weight budget. It grants no send, Store or completion
+authority and introduces no universal write pause; native-code/read paths stay native.
+
+The real-engine audit cases are centrally blocked for Binance, ApeX Omni,
+AsterDEX, Bybit, BingX, Bitrue, OKX and Crypto.com. This does not convert raw
+venue requests into managed writes. MEXC's batch-to-single fallback and Kraken
+Spot's shared private signature retry bypass the engine; GRVT's legacy auth
+replay is also venue-owned. Local classification-only ladders remain in
+BreakoutProp, Coinbase Advanced/INTX, ordinary KuCoin, MEXC, Orderly, Paradex,
+Polymarket and WOO. Paradex's legacy unset 429 outcome has no CommandWrites
+journal and needs its own venue fix. Lighter's HTTP-200 23000/23100 path labels
+all codes Rejected rather than RateLimited; the engine cannot infer that native
+meaning. A codec that hides a later rate row behind an earlier different refusal
+also needs a venue fix; the engine batch API checks every supplied BatchItem.

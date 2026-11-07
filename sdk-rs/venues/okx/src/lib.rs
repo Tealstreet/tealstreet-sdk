@@ -1898,7 +1898,7 @@ impl Venue for Okx {
                 }
                 let explicit_limit = limit.filter(|n| *n > 0);
                 let limit = explicit_limit.unwrap_or(300).min(300);
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let Some(default_start) = subtract_bars(end, interval, limit) else {
                     let _ = cx.fail_context(&root, interval.unsupported("OKX"));
                     return;
@@ -1920,7 +1920,8 @@ impl Venue for Okx {
                     after: end,
                     historical: false,
                     force_history: to_ms.is_some_and(|to| {
-                        subtract_bars(cx.now, interval, 1440).is_some_and(|oldest| to < oldest)
+                        subtract_bars(cx.protocol_now(), interval, 1440)
+                            .is_some_and(|oldest| to < oldest)
                     }),
                 };
                 self.send_candles(cx, root.clone(), root, read);

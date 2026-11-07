@@ -352,7 +352,7 @@ impl Kucoin {
             );
             return;
         }
-        let end = to.unwrap_or_else(|| cx.now.floor());
+        let end = to.unwrap_or_else(|| cx.protocol_now().floor());
         let start = from.unwrap_or((end - DAY as f64).max(0.0));
         let (Some(start), Some(end)) = (millis(start), millis(end)) else {
             let Ok(context) = cx.admit_http_command(local_read_policy()) else {

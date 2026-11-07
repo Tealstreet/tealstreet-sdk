@@ -14,5 +14,5 @@ serde_json.workspace = true
 workspace = true
 
 [dev-dependencies]
-# The shipped build unifies these on; the status-exempt refusal hook needs them.
+# Exercise the shipped engine feature union in private HTTP response controls.
 safe-cex-engine = { workspace = true, features = ["test-support", "serial-plans", "session-bearer"] }

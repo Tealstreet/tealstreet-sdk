@@ -447,8 +447,8 @@ impl History {
                 read.order_id = order_id;
                 read.limit = limit.unwrap_or(100).clamp(1, 1000);
                 // This endpoint requires both timestamps, unlike other rare reads.
-                read.to = Some(to_ms.unwrap_or(cx.now));
-                read.from = Some(from_ms.unwrap_or(read.to.unwrap_or(cx.now) - WEEK));
+                read.to = Some(to_ms.unwrap_or(cx.protocol_now()));
+                read.from = Some(from_ms.unwrap_or(read.to.unwrap_or(cx.protocol_now()) - WEEK));
             }
             Query::OrderHistory {
                 symbol,
@@ -483,7 +483,7 @@ impl History {
         }
         if !matches!(read.kind, Kind::Trades) {
             if read.from.is_some() && read.to.is_none() {
-                read.to = Some(cx.now);
+                read.to = Some(cx.protocol_now());
             }
             if read.to.is_some() && read.from.is_none() {
                 read.from = read.to.map(|to| to - WEEK);
@@ -850,7 +850,7 @@ impl History {
         if let Ok(request) = self.resign(cx, request, response) {
             let error = response_failure(
                 &response,
-                cx.now,
+                cx.protocol_now(),
                 crate::success(response).err().unwrap_or_else(|| {
                     format!(
                         "response did not contain the expected list: {}",
@@ -937,7 +937,7 @@ impl History {
         if !(200..300).contains(&response.status) {
             let error = response_failure(
                 &response,
-                cx.now,
+                cx.protocol_now(),
                 format!("history HTTP {}: {}", response.status, response.body),
             );
             self.on_http_failed(cx, request, error);
@@ -946,7 +946,11 @@ impl History {
         if let Ok(body) = serde_json::from_str::<wire::Rejection<'_>>(response.body)
             && let Some(code) = body.code.filter(|code| *code != 0)
         {
-            let error = response_failure(&response, cx.now, format!("{code}: {}", body.msg));
+            let error = response_failure(
+                &response,
+                cx.protocol_now(),
+                format!("{code}: {}", body.msg),
+            );
             self.on_http_failed(cx, request, error);
             return;
         }

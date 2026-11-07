@@ -272,30 +272,38 @@ fn support_fill_count(frame: &[u8]) -> u32 {
 }
 #[test]
 fn balance_read_signature_rejection_resigns_once() {
-    let (mut e, _, private) = ready(false);
-    message(
-        &mut e,
-        private.unwrap(),
-        r#"{"channel":"balances","type":"update","data":[]}"#,
-    );
-    let first = requests(&mut e).pop().unwrap();
-    reply(
-        &mut e,
-        &first,
-        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
-    );
-    let second = requests(&mut e).pop().unwrap();
-    assert_ne!(first.body, second.body);
-    assert_ne!(first.headers, second.headers);
-    reply(
-        &mut e,
-        &second,
-        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
-    );
-    assert!(
-        requests(&mut e).is_empty(),
-        "a signature rejection resigns once"
-    );
+    for status in [200, 429] {
+        let (mut e, _, private) = ready(false);
+        message(
+            &mut e,
+            private.unwrap(),
+            r#"{"channel":"balances","type":"update","data":[]}"#,
+        );
+        let first = requests(&mut e).pop().unwrap();
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: first.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body: r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+                },
+            },
+        );
+        let second = requests(&mut e).pop().expect("reads still re-sign once");
+        assert_ne!(first.body, second.body);
+        assert_ne!(first.headers, second.headers);
+        reply(
+            &mut e,
+            &second,
+            r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+        );
+        assert!(
+            requests(&mut e).is_empty(),
+            "a signature rejection resigns once"
+        );
+    }
 }
 
 #[test]
@@ -1160,4 +1168,27 @@ fn a_refusal_ends_the_start_however_it_arrives() {
             "{status} {body}"
         );
     }
+}
+
+#[test]
+fn missing_execution_timestamps_use_protocol_utc_after_a_host_correction() {
+    let (mut e, _, private) = ready(false);
+    let utc = NOW + 162. * 86_400_000.;
+    assert!(e.sync_host_time(NOW, utc));
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","exec_type":"trade","cum_qty":1.5,"order_qty":2,"last_qty":1,"avg_price":99}]}"#,
+    );
+    let order = e.store().order("O-100").unwrap();
+    assert_eq!(order.filled, 1.5);
+    assert_eq!(order.last_update, utc);
+    let kept_price = order.price;
+    // A later explicit UTC row must be compared to the same UTC fallback fence.
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","exec_type":"new","order_type":"limit","side":"buy","order_qty":2,"cum_qty":1.5,"limit_price":90,"timestamp":"2023-11-14T22:13:21Z"}]}"#,
+    );
+    assert_eq!(e.store().order("O-100").unwrap().price, kept_price);
 }

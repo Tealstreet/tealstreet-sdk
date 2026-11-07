@@ -756,15 +756,32 @@ fn a_refused_restore_is_visibly_unprotected_and_never_retried() {
     assert_eq!(order_posts(&h), 0, "one restore, never a retry");
 }
 
-/// A 429 may have placed the order, so it is unknown: never "refused" or Unprotected.
+/// The ambiguous leg may have placed protection; an earlier refusal remains true.
 fn assert_unknown_stop(h: &Harness, command: u32) {
     let error = h.result(command).unwrap_err();
     assert!(
         error.contains("outcome is unknown. Check Open Orders"),
         "{error}"
     );
-    assert!(!error.contains("refused"), "{error}");
+    let words = error.to_ascii_lowercase();
+    assert!(!words.contains("unprotected"), "{error}");
     assert_eq!(h.failures.last().unwrap().protection, None);
+}
+
+fn assert_unknown_replacement(h: &Harness, command: u32) {
+    assert_unknown_stop(h, command);
+    let error = h.result(command).unwrap_err();
+    assert!(!error.contains("refused"), "{error}");
+}
+
+fn assert_unknown_put_back(h: &Harness, command: u32) {
+    assert_unknown_stop(h, command);
+    let error = h.result(command).unwrap_err();
+    let words = error.to_ascii_lowercase();
+    assert!(
+        !words.contains("no stop") || words.contains("may have no stop"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -782,7 +799,7 @@ fn a_rate_limited_restore_is_unknown_not_unprotected() {
         429,
         r#"{"error":"RATE_LIMIT","message":"slow down"}"#,
     );
-    assert_unknown_stop(&h, 13);
+    assert_unknown_put_back(&h, 13);
     assert_eq!(order_posts(&h), 0, "one restore, never a retry");
 }
 
@@ -804,7 +821,7 @@ fn a_rate_limited_replacement_is_unknown_and_never_put_back() {
         0,
         "a maybe-placed replacement is never doubled"
     );
-    assert_unknown_stop(&h, 13);
+    assert_unknown_replacement(&h, 13);
 }
 
 #[test]

@@ -440,7 +440,7 @@ impl Lighter {
             let mut native = edit.original.native.clone();
             let mut order = edit.original.observed.clone();
             let expiry = native.order_expiry.unwrap_or(0);
-            if expiry > cx.now as u64
+            if expiry > cx.protocol_now() as u64
                 && !self.trading.active.as_ref().unwrap().amend_filled
                 && let Ok(id) = self.mint_id(cx)
             {
