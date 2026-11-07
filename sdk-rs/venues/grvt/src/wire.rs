@@ -195,13 +195,13 @@ pub fn check(response: &safe_cex_engine::Response<'_>) -> Result<(), String> {
     }
     Ok(())
 }
-/// True only when GRVT answered a non-5xx status with its own error code, so a write was
-/// definitively not applied. Server/gateway failures and unparseable bodies stay unknown.
+/// Native refusal proof excludes rate limits and the engine's unproven statuses.
+/// Timeout/server envelopes and unparseable bodies cannot authorize a write replay.
 pub fn venue_rejected(response: &safe_cex_engine::Response<'_>) -> bool {
     let code = code(response);
-    response.status < 500 && !code.is_empty() && code != "0"
+    !matches!(response.status, 408 | 429 | 500..) && !code.is_empty() && code != "0"
 }
-/// A failed write is rejected only when GRVT answered below 5xx with an error code.
+/// A failed write is rejected only with native refusal proof on an eligible status.
 pub fn write_outcome(response: &safe_cex_engine::Response<'_>) -> safe_cex_engine::Outcome {
     if venue_rejected(response) {
         safe_cex_engine::Outcome::Rejected

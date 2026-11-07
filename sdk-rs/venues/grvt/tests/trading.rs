@@ -3040,3 +3040,49 @@ fn ambiguous_read_auth_errors_keep_the_existing_session_retry() {
         }
     }
 }
+
+#[test]
+fn ambiguous_cancel_and_setting_errors_never_refresh_or_replay() {
+    for session_proxy in [false, true] {
+        for status in [429, 408, 503] {
+            for native_code in [1000, 1001] {
+                for path in ["cancel_order", "set_initial_leverage"] {
+                    let (mut engine, _, _, _) = boot_capturing_public_session(
+                        CATALOG,
+                        Some(AUTHORIZED),
+                        OPEN_ORDERS,
+                        session_proxy,
+                    );
+                    let request = if path == "cancel_order" {
+                        Command::CancelOrders {
+                            command: 904,
+                            ids: vec!["42".into()],
+                        }
+                    } else {
+                        Command::SetLeverage {
+                            command: 904,
+                            symbol: "BTC_USDT_PERP".into(),
+                            leverage: 20.,
+                            side: None,
+                        }
+                    };
+                    let write = http(command(&mut engine, request), path);
+                    let actions = reply(
+                        &mut engine,
+                        &write,
+                        status,
+                        &format!(r#"{{"c":{native_code},"m":"unproven write"}}"#),
+                    );
+                    assert_eq!(
+                        failure(&actions).outcome,
+                        Some(safe_cex_engine::Outcome::Unknown),
+                        "{path} proxy={session_proxy} HTTP {status} code={native_code}"
+                    );
+                    assert!(!actions.iter().any(|action| matches!(action,
+                        Action::Http(request) if request.url.ends_with(path) || request.url.ends_with("auth/api_key/login")
+                    )));
+                }
+            }
+        }
+    }
+}

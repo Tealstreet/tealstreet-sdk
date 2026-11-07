@@ -1048,15 +1048,18 @@ impl Venue for Grvt {
         }
         if let Err(error) = wire::check(&response) {
             let code = wire::code(&response);
-            let (restoring, protective) = if let Job::Trade(request) = &pending.job {
-                (request.is_restore(), request.is_protective())
+            let (restoring, needs_rejection_proof) = if let Job::Trade(request) = &pending.job {
+                (
+                    request.is_restore(),
+                    request.is_protective() || !request.is_read(),
+                )
             } else {
                 (false, false)
             };
             if code == "1000"
                 && !pending.auth_resent
                 && !restoring
-                && (!protective || (response.status != 429 && wire::venue_rejected(&response)))
+                && (!needs_rejection_proof || wire::venue_rejected(&response))
                 && !matches!(pending.job, Job::Account(account::Request::Login))
                 && !matches!(pending.job, Job::Markets { .. } | Job::Candles(_))
                 && !matches!(&pending.job,Job::History(request) if request.is_public())
