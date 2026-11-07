@@ -9,7 +9,7 @@ use support::*;
 
 const HELD: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","holdSide":"long","total":"0.749","available":"0.197","locked":"0.552","openPriceAvg":"90","markPrice":"100","leverage":"20","marginMode":"crossed","posMode":"one_way_mode","uTime":"100"}]}"#;
 const REFUSAL: &str = "Not enough position is available";
-const ONE_WAY: &str = "part of your BTCUSDT long position is held by open close orders; cancel them first (Not enough position is available)";
+const ONE_WAY: &str = "only 0.197 of your 0.749 BTCUSDT long position is free to close; 0.552 is held by open close orders; cancel them first (Not enough position is available)";
 
 fn held() -> Harness {
     let mut h = Harness::private_started();
@@ -197,7 +197,7 @@ fn each_failure_names_its_own_close_in_a_mixed_hedge_batch() {
     h.reply(id, 200, &json!({"code":"00000","data":{"successList":[{"orderId":"long-ok","clientOid":"long-close"}],"failureList":[{"clientOid":"short-close","errorCode":"40757","errorMsg":REFUSAL}]}}).to_string());
     assert_eq!(
         h.failures.last().unwrap().message,
-        "Bitget batch failure after ids [\"long-ok\"]: part of your BTCUSDT short position is held by open close orders; cancel them first (Not enough position is available)"
+        "Bitget batch failure after ids [\"long-ok\"]: only 0 of your 0.5 BTCUSDT short position is free to close; 0.5 is held by open close orders; cancel them first (Not enough position is available)"
     );
 }
 

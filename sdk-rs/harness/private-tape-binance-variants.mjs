@@ -70,6 +70,8 @@ else http('GET','/papi/v1/balance',null,[
 const order = (extra = {}) => ({ symbol:symbols[0],orderId:1001,clientOrderId:'resting',price:'90000',origQty:inverse?'7':'0.01',executedQty:inverse?'2':'0.002',
   status:'PARTIALLY_FILLED',timeInForce:'GTC',type:'LIMIT',side:'BUY',positionSide:'BOTH',stopPrice:'0',reduceOnly:false,closePosition:false,workingType:'CONTRACT_PRICE',...extra });
 http('GET', `${prefix}/openOrders`, null, [order()]);
+// The COIN-M algo census is separate; this tape has no conditional orders.
+if (inverse) http('GET', `${prefix}/openAlgoOrders`, {algoType:'CONDITIONAL'}, [], {impl:'rust'});
 if (!spot && !inverse) {
   // The retained TS oracle uses the retired route; Rust uses its algo replacement.
   http('GET', `${prefix}/conditional/openOrders`, null, [], {impl:'ts'});

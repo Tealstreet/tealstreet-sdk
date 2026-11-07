@@ -97,4 +97,8 @@ if ! python3 scripts/check-credential-only.test.py || ! python3 scripts/check-cr
   status=1
 fi
 
+if ! python3 scripts/check-plan-declarations.test.py || ! python3 scripts/check-plan-declarations.py; then
+  status=1
+fi
+
 exit $status

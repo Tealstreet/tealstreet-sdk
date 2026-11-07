@@ -43,6 +43,10 @@ export const MARKET_COLUMNS = [
   'precisionAmount', 'precisionPrice', 'minAmount', 'maxAmount', 'minLeverage',
   'maxLeverage', 'minPrice', 'contractSize', 'takerFee', 'makerFee',
 ];
+// ORDERS' per-row trigger word (crate::model::order_trigger_word): bits 0-7 take-profit
+// trigger, 8-15 stop-loss trigger, 16 the Rust-only native_algo routing flag. Each field
+// is masked, so a bit this decoder does not know is ignored.
+export const ORDER_TRIGGER_WORD = { TP_SHIFT: 0, SL_SHIFT: 8, TRIGGER_MASK: 0xff, NATIVE_ALGO: 1 << 16 };
 export const MARKET_FLAG = { ACTIVE: 1, INVERSE: 2, SPOT: 4, PERPETUAL: 8, EXPIRING: 16, READ_ONLY: 32 };
 // Bits 8..12 of a market's flags: how its order and position quantities are expressed.
 export const QUANTITY_UNITS = ['base', 'nativePlacement', 'inverseNative', 'contractCount', 'inverseContractSized'];
@@ -483,8 +487,10 @@ export class Frame {
       ...(revised && {
         remainingNotional: new Float64Array(buffer, native + count * 16, count),
         conditionalOrderPrice: new Float64Array(buffer, native + count * 24, count),
-        tpTriggerType: (i) => TRIGGER_TYPE[brackets[i] & 0xff],
-        slTriggerType: (i) => TRIGGER_TYPE[(brackets[i] >>> 8) & 0xff],
+        tpTriggerType: (i) =>
+          TRIGGER_TYPE[(brackets[i] >>> ORDER_TRIGGER_WORD.TP_SHIFT) & ORDER_TRIGGER_WORD.TRIGGER_MASK],
+        slTriggerType: (i) =>
+          TRIGGER_TYPE[(brackets[i] >>> ORDER_TRIGGER_WORD.SL_SHIFT) & ORDER_TRIGGER_WORD.TRIGGER_MASK],
         symbol: (i) => requiredString(frame, symbols[i]),
       }),
       ...(count && native + count * 8 <= section.offset + section.length

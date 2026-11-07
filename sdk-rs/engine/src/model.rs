@@ -491,6 +491,29 @@ pub struct OrderExtra {
     pub conditional_order_price: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reject_reason: Option<RejectReason>,
+    /// Routed through the venue's algo endpoints rather than its order endpoint, as a
+    /// Binance COIN-M algo row beside stops placed before the migration. ORDERS carries
+    /// it as bit 16 of the trigger word, which older decoders mask away.
+    #[serde(skip)]
+    pub native_algo: bool,
+}
+
+/// ORDERS' per-row trigger word: bits 0-7 the take-profit trigger and 8-15 the
+/// stop-loss trigger (0 none, else the type + 1), bit 16 `OrderExtra::native_algo`.
+/// Decoders mask each field, so a bit an older build does not know is ignored.
+pub mod order_trigger_word {
+    pub const TP_SHIFT: u32 = 0;
+    pub const SL_SHIFT: u32 = 8;
+    pub const TRIGGER_MASK: u32 = 0xff;
+    pub const NATIVE_ALGO: u32 = 1 << 16;
+
+    /// The word for one order's extra fields.
+    pub fn encode(extra: &super::OrderExtra) -> u32 {
+        let trigger = |t: Option<super::StopTriggerType>| t.map_or(0, |t| t as u32 + 1);
+        (trigger(extra.tp_trigger_type) << TP_SHIFT)
+            | (trigger(extra.sl_trigger_type) << SL_SHIFT)
+            | if extra.native_algo { NATIVE_ALGO } else { 0 }
+    }
 }
 
 /// Order identity supplied by the caller when cancellation precedes reconciliation.

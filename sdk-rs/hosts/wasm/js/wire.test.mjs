@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState, marketQuantityUnits, orderEnums, positionEnums } from './wire.mjs';
+import { Frame, NONE, ORDER_COLUMNS, ORDER_TRIGGER_WORD, SECTION, TICKER_FIELDS, TickerState, marketQuantityUnits, orderEnums, positionEnums } from './wire.mjs';
 
 test('account read markers survive transfer and do not change legacy frames', () => {
   const buffer = new ArrayBuffer(24);
@@ -700,6 +700,21 @@ test('revision one preserves pretty symbols, independent order fields and orphan
   assert.equal(orders.slTriggerType(1), undefined);
   for (const table of [orders, frame.positions(), frame.settings(), frame.fills()]) assert.equal(table.symbol(1), 'ETH-USD');
   assert.equal(frame.positions().id(1), 'ETH-USD');
+});
+
+test('the Rust-only native_algo bit in the ORDERS trigger word leaves both triggers as decoded', () => {
+  const frame = withStrings(numericFrame([revisedTable(SECTION.ORDERS)]));
+  const triggers = () => [0, 1].map((i) => [frame.orders().tpTriggerType(i), frame.orders().slTriggerType(i)]);
+  const before = triggers();
+  const count = 2;
+  const data = Math.ceil((frame.first(SECTION.ORDERS).offset + 4 + count * 20) / 8) * 8;
+  const words = data + count * ORDER_COLUMNS.length * 8 + count * 32;
+  const view = new DataView(frame.buffer);
+  for (const i of [0, 1]) {
+    view.setUint32(words + i * 4, view.getUint32(words + i * 4, true) | ORDER_TRIGGER_WORD.NATIVE_ALGO, true);
+  }
+  assert.deepEqual(triggers(), before);
+  assert.deepEqual(before[0], ['mark_price', 'index_price']);
 });
 
 test('revised table extensions cannot borrow bytes from a later section', () => {
