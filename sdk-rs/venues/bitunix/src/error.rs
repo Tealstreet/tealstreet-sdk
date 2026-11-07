@@ -94,16 +94,6 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
                 Outcome::Rejected
             },
         );
-        // A released native rate response cannot prove that the write was refused.
-        // Keep this text in the classified fact as well as the terminal fallback.
-        if kind == ErrorKind::RateLimited {
-            error
-                .message
-                .push_str(". The outcome is unknown. Check Open Orders");
-            // A replacement can follow a refused native amend. Present the
-            // uncertainty instead of that stale refusal, without changing facts.
-            error.presents = true;
-        }
     }
     error
 }
@@ -245,11 +235,6 @@ mod tests {
                         assert_eq!(
                             error.message,
                             format!("verbatim. {}", safe_cex_engine::error::IP_WHITELIST_HINT)
-                        );
-                    } else if write && kind == ErrorKind::RateLimited {
-                        assert_eq!(
-                            error.message,
-                            "verbatim. The outcome is unknown. Check Open Orders"
                         );
                     } else {
                         assert_eq!(error.message, "verbatim");

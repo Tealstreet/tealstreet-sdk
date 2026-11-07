@@ -1906,6 +1906,7 @@ impl OrdersRefresh {
 }
 
 struct IoCore {
+    command_failure_message: fn(&VenueError) -> Option<String>,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2208,6 +2209,7 @@ impl Default for IoCore {
     #[inline]
     fn default() -> Self {
         Self {
+            command_failure_message: |_| None,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,
@@ -3868,7 +3870,8 @@ impl crate::engine::CoreCx<'_> {
         seal: request_context_registry::Seal,
     ) -> Result<(), crate::request_context::Error> {
         let mut write_sealed = false;
-        let result = match seal {
+        let mut reports = Vec::new();
+        let mut result = match seal {
             request_context_registry::Seal::Stale => {
                 return Err(crate::request_context::Error::Revoked);
             }
@@ -3880,12 +3883,23 @@ impl crate::engine::CoreCx<'_> {
             }
             request_context_registry::Seal::Failure(error, rejections) => {
                 write_sealed = true;
-                for message in rejections {
-                    self.command_error(command, message);
-                }
+                reports = rejections;
                 Err(error)
             }
         };
+        // Presentation sees the final journal outcome, including engine-owned
+        // failures; it cannot change evidence, partial IDs or reconciliation.
+        if let Err(error) = &mut result
+            && let Some(message) = (self.io.core.command_failure_message)(error)
+        {
+            error.message = message;
+            for report in &mut reports {
+                report.clone_from(&error.message);
+            }
+        }
+        for message in reports {
+            self.command_error(command, message);
+        }
         // A credential-free route's auth-kind refusal is no credential evidence.
         let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
         #[cfg(feature = "order-locks")]
@@ -4065,6 +4079,12 @@ impl PublicFeedWatch {
 }
 
 pub trait Venue {
+    /// Optional terminal words after outcome projection, shared by the command
+    /// failure and its warnings. Native evidence and execution facts are read-only.
+    fn command_failure_message(_error: &VenueError) -> Option<String> {
+        None
+    }
+
     fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
         None
     }
@@ -4905,7 +4925,7 @@ fn new_core(
 impl<V: Venue> Engine<V> {
     pub fn new(venue: V, entropy: Option<crate::entropy::Entropy>) -> Result<Self, VenueError> {
         let http_release = V::http_release();
-        let (store, core) = new_core(
+        let (store, mut core) = new_core(
             entropy,
             CoreSpec {
                 quantity_units: venue.capabilities().quantity_units,
@@ -4928,6 +4948,7 @@ impl<V: Venue> Engine<V> {
                 socket_capabilities: V::socket_capabilities(),
             },
         )?;
+        core.command_failure_message = V::command_failure_message;
         Ok(Self {
             venue,
             http_release,

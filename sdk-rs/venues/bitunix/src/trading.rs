@@ -252,15 +252,6 @@ fn text<T: Serialize>(v: &T) -> String {
 fn empty_list() -> &'static serde_json::value::RawValue {
     serde_json::from_str("[]").expect("literal empty array")
 }
-fn explain_batch_unknown(error: &mut VenueError) {
-    if error.outcome == Some(Outcome::Unknown) {
-        error
-            .message
-            .push_str(". The outcome is unknown. Check Open Orders");
-        // A later uncertain chunk supersedes an earlier chunk's refusal text.
-        error.presents = true;
-    }
-}
 fn ack_rows(
     raw: &serde_json::value::RawValue,
 ) -> Result<Vec<&serde_json::value::RawValue>, String> {
@@ -2450,10 +2441,7 @@ impl BitunixFutures {
                 }
                 Ok(())
             }
-            Ok(WriteResult::PartialUnknown(mut error) | WriteResult::Failed(mut error)) => {
-                explain_batch_unknown(&mut error);
-                Err(Some(error))
-            }
+            Ok(WriteResult::PartialUnknown(error) | WriteResult::Failed(error)) => Err(Some(error)),
             Err(_) => Err(None),
         }
     }
@@ -2591,14 +2579,11 @@ impl BitunixFutures {
         ) {
             Ok(WriteResult::Accepted { .. }) => Ok(()),
             Ok(
-                WriteResult::Rejected(mut error)
-                | WriteResult::KnownPartial(mut error)
-                | WriteResult::PartialUnknown(mut error)
-                | WriteResult::Failed(mut error),
-            ) => {
-                explain_batch_unknown(&mut error);
-                Err(Some(error))
-            }
+                WriteResult::Rejected(error)
+                | WriteResult::KnownPartial(error)
+                | WriteResult::PartialUnknown(error)
+                | WriteResult::Failed(error),
+            ) => Err(Some(error)),
             Err(_) => Err(None),
         }
     }

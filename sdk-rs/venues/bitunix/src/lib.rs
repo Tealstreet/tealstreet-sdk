@@ -560,6 +560,21 @@ fn candle(k: &Kline, rest: bool) -> Candle {
     }
 }
 impl Venue for BitunixFutures {
+    fn command_failure_message(error: &VenueError) -> Option<String> {
+        if error.outcome != Some(safe_cex_engine::Outcome::Unknown) {
+            return None;
+        }
+        // Earlier refusal words cannot explain an uncertain terminal. Preserve
+        // explicit uncertainty, including any protective-edit detail it carries.
+        Some(
+            if error.message.contains("unknown") && error.message.contains("Check Open Orders") {
+                error.message.clone()
+            } else {
+                "The outcome of this Bitunix write is unknown. Check Open Orders".to_owned()
+            },
+        )
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }
