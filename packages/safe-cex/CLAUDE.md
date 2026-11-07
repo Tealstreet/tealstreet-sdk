@@ -11,7 +11,7 @@ Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
-KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
+KuCoin futures and Spot (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md` and `docs/plans/callers/kucoinspot-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override. Refused `remoteSigner` accounts are told to
 turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
@@ -83,7 +83,9 @@ read-identity presence; managed routing uses explicit credential intent before
 credentials are materialised, while legacy requests retain header-based routing.
 KuCoin Futures/Spot also install their passphrase and optional configured broker
 key only in this capsule. One receipt binds Present plus the request, passphrase,
-and optional broker MACs; Hosted admission remains disabled for both names.
+and optional broker MACs. Both names admit RemoteSigner through device-owned
+`kucoin-batch` custody, including the secondary read slot; PayloadSigner remains
+refused because a request MAC cannot supply the separate passphrase/broker MACs.
 Lighter's trusted native/JSON mapping uses a typed API-index principal when a
 private Schnorr signing ref exists and the original key is not Nonblank.
 Original SetupFacts stay unchanged; the principal is never presentable. Validated

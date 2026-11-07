@@ -57,8 +57,11 @@ export class DelegatedSignerSetup {
       const message = 'GRVT PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    const kucoin = name === 'kucoin';
-    if (kucoin && this.usesPayloadSigner) invalid('KuCoin requires RemoteSigner batch custody');
+    const kucoin = name === 'kucoin' || name === 'kucoinspot';
+    if (kucoin && this.usesPayloadSigner) {
+      const message = 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     const remoteSigner = options.remoteSigner;
     const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');
