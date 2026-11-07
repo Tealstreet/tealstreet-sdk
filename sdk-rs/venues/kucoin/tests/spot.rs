@@ -2675,3 +2675,93 @@ fn dispatched_write_ambiguity_matrix() {
         }
     }
 }
+
+#[test]
+fn review_3259_spot_warning_is_normalized_before_the_terminal() {
+    for operation in ["create", "amend", "cancel"] {
+        let mut h = H::new(true);
+        let (command, path) = match operation {
+            "amend" => (
+                Command::AmendOrder {
+                    command: 1,
+                    id: "order-1".into(),
+                    price: Some(91.0),
+                    amount: None,
+                },
+                "/orders/alter",
+            ),
+            "cancel" => (
+                Command::CancelOrders {
+                    command: 1,
+                    ids: vec!["order-1".into()],
+                },
+                "/hf/orders/",
+            ),
+            _ => (
+                Command::PlaceOrders {
+                    command: 1,
+                    orders: vec![place(None)],
+                },
+                "/hf/orders",
+            ),
+        };
+        h.command(command);
+        let request = h.http(path);
+        h.actions.clear();
+        let sent = h.requests.len();
+        h.respond(
+            &request,
+            429,
+            r#"{"code":"400005","msg":"signature refused"}"#,
+        );
+        let warnings: Vec<_> = h
+            .actions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, action)| match action {
+                Action::Notice(Notice::CommandError {
+                    command: 1,
+                    message,
+                }) => Some((index, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1, "{operation}: {:?}", h.actions);
+        let (warning_at, message) = warnings[0];
+        assert!(
+            message.contains("unknown") && message.contains("Check Open Orders"),
+            "{operation}: {message}"
+        );
+        assert!(!message.contains("refused"), "{operation}: {message}");
+        let terminal_at = h
+            .actions
+            .iter()
+            .position(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+            .unwrap();
+        assert!(warning_at < terminal_at);
+        assert_eq!(message, &h.failures.last().unwrap().message);
+        assert_eq!(h.requests.len(), sent, "no resend");
+    }
+}
+
+#[test]
+fn review_3259_spot_business_code_does_not_inherit_futures_rate_semantics() {
+    let mut h = H::new(true);
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["order-1".into()],
+    });
+    let request = h.http("/hf/orders/");
+    let sent = h.requests.len();
+    h.respond(
+        &request,
+        404,
+        r#"{"code":"200002","msg":"Order cancel for this pair suspended"}"#,
+    );
+    let error = h.failures.last().unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert_eq!(error.venue_code.as_deref(), Some("200002"));
+    assert!(error.message.contains("suspended"));
+    assert_eq!(h.requests.len(), sent);
+}

@@ -1,6 +1,8 @@
 //! Preflighted write plans; a lost response never resends a mutation.
 pub(crate) mod protective;
-use crate::wire::{Envelope, Number, dispatched_write_failure, not_sent, write_failure};
+use crate::wire::{
+    Envelope, FUTURES_RATE_CODES, Number, dispatched_write_failure, not_sent, write_failure,
+};
 use crate::{Kucoin, Pending, api_symbol, encode};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
@@ -165,13 +167,14 @@ struct Job {
     effective: bool,
 }
 impl Job {
-    /// Keeps the first failure's text. An Unknown leg makes the whole command
-    /// Unknown with its details; legs that disagree otherwise leave it unset.
+    /// Keeps the first failure unless an Unknown leg supplies its own text and
+    /// details. Legs that disagree otherwise leave the outcome unset.
     fn record(&mut self, error: VenueError) {
         match &mut self.error {
             None => self.error = Some(error),
             Some(first) if first.outcome == Some(Outcome::Unknown) => {}
             Some(first) if error.outcome == Some(Outcome::Unknown) => {
+                first.message = error.message;
                 first.outcome = error.outcome;
                 first.kind = error.kind;
                 first.venue_code = error.venue_code;
@@ -1135,7 +1138,9 @@ impl Kucoin {
             return;
         }
         if status == 404
-            && !envelope.as_ref().is_ok_and(|row| row.code == "429000")
+            && !envelope
+                .as_ref()
+                .is_ok_and(|row| FUTURES_RATE_CODES.contains(&row.code))
             && let Call::Cancel {
                 id,
                 fallback: false,
@@ -1367,11 +1372,13 @@ impl Kucoin {
                 self.trading.timer = Some(cx.set_timer(100.0));
                 return;
             }
-            cx.command_error(request.command, &error);
+            if read {
+                cx.command_error(request.command, &error);
+            }
             let mut error = if read {
                 write_failure(status, body, error)
             } else {
-                dispatched_write_failure(status, body, error)
+                dispatched_write_failure(status, body, error, FUTURES_RATE_CODES)
             };
             if confirming {
                 // The cancel was accepted; only its outcome is unproven. Whether
@@ -1407,6 +1414,9 @@ impl Kucoin {
                 } else {
                     format!("{gone}: {}", error.message)
                 };
+            }
+            if !read {
+                cx.command_error(request.command, &error.message);
             }
             job.record(error);
             if !job.keep_going {

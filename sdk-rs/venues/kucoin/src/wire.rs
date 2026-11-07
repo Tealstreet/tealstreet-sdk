@@ -277,12 +277,19 @@ pub(crate) fn not_sent(message: impl Into<String>) -> safe_cex_engine::VenueErro
     safe_cex_engine::VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
 }
 
+// 200002 is a business-layer rate limit for Futures; Spot uses it for suspended cancellation.
+// https://www.kucoin.com/docs-new/error-code/futures
+pub(crate) const FUTURES_RATE_CODES: &[&str] = &["200002", "429000"];
+#[cfg(feature = "spot")]
+pub(crate) const SPOT_RATE_CODES: &[&str] = &["429000"];
+
 /// Legacy ordinary writes must weaken ambiguous evidence before job settlement.
 /// Reads keep the native refusal classification used by startup and recovery.
 pub(crate) fn dispatched_write_failure(
     status: u16,
     body: &str,
     message: String,
+    native_rate_codes: &[&str],
 ) -> safe_cex_engine::VenueError {
     use safe_cex_engine::{ErrorKind, Outcome};
     let mut error = write_failure(status, body, message);
@@ -290,7 +297,13 @@ pub(crate) fn dispatched_write_failure(
         408 => Some(ErrorKind::Timeout),
         429 => Some(ErrorKind::RateLimited),
         500.. => Some(ErrorKind::VenueUnavailable),
-        _ if error.venue_code.as_deref() == Some("429000") => Some(ErrorKind::RateLimited),
+        _ if error
+            .venue_code
+            .as_deref()
+            .is_some_and(|code| native_rate_codes.contains(&code)) =>
+        {
+            Some(ErrorKind::RateLimited)
+        }
         _ => return error,
     };
     error.kind = kind;

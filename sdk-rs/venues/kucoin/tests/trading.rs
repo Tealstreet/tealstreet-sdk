@@ -1422,7 +1422,11 @@ fn cancel_legs_combine_outcomes_without_overclaiming() {
         h.pace();
         assert_eq!(
             h.done(1).as_ref().unwrap_err(),
-            "KuCoin API Error 100001: Unknown order (HTTP 400)"
+            if outcome.1 == Some(Outcome::Unknown) {
+                "Invalid KuCoin response (HTTP 0)"
+            } else {
+                "KuCoin API Error 100001: Unknown order (HTTP 400)"
+            }
         );
         let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
         assert_eq!((error.kind, error.outcome), outcome);
@@ -3086,6 +3090,8 @@ fn dispatched_write_ambiguity_matrix() {
         (599, r#"{"code":"400005","msg":"signature refused"}"#),
         (400, r#"{"code":"429000","msg":"Too Many Requests"}"#),
         (404, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+        (200, BUSINESS_RATE_LIMITED),
+        (404, BUSINESS_RATE_LIMITED),
     ] {
         for operation in [
             "create",
@@ -3193,5 +3199,149 @@ fn dispatched_write_ambiguity_matrix() {
             assert_eq!(error.protection, None, "{case}");
             assert!(writes(&h).is_empty(), "resend/put-back: {case}");
         }
+    }
+}
+
+const BUSINESS_RATE_LIMITED: &str =
+    r#"{"code":"200002","msg":"Too many requests in a short period of time"}"#;
+
+#[test]
+fn review_3259_futures_business_rate_create_is_unknown() {
+    let mut h = Harness::new();
+    place(&mut h, vec![order()]);
+    h.metadata(false, "CROSS");
+    let request = h.take("/api/v1/orders");
+    h.response(&request, 200, BUSINESS_RATE_LIMITED);
+    h.pace();
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert_eq!(error.venue_code.as_deref(), Some("200002"));
+    assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+    assert!(writes(&h).is_empty());
+}
+
+#[test]
+fn review_3259_futures_business_rate_cancel_never_falls_back() {
+    let mut h = Harness::new();
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["a".into()],
+    });
+    let request = h.take("/api/v1/orders/a");
+    h.response(&request, 404, BUSINESS_RATE_LIMITED);
+    assert!(
+        writes(&h).is_empty(),
+        "rate response released another cancel: {:?}",
+        writes(&h)
+    );
+    h.pace();
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+    assert!(writes(&h).is_empty());
+}
+
+#[test]
+fn review_3259_cancel_job_keeps_the_unknown_legs_text() {
+    for unknown_first in [false, true] {
+        let mut h = Harness::new();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["a".into(), "b".into()],
+        });
+        for (index, id) in ["a", "b"].into_iter().enumerate() {
+            let request = h.take(&format!("/api/v1/orders/{id}"));
+            if (index == 0) == unknown_first {
+                h.response(&request, 200, RATE_LIMITED);
+            } else {
+                h.response(
+                    &request,
+                    400,
+                    r#"{"code":"400100","msg":"cancellation refused"}"#,
+                );
+            }
+            h.pace();
+        }
+        let error = failure(&h);
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+        assert_eq!(error.venue_code.as_deref(), Some("429000"));
+        assert!(
+            error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+            "{error:?}"
+        );
+        assert!(!error.message.contains("refused"), "{error:?}");
+        assert!(writes(&h).is_empty());
+    }
+}
+
+#[test]
+fn review_3259_futures_warning_is_normalized_before_the_terminal() {
+    for operation in ["create", "amend", "cancel", "setting"] {
+        let mut h = Harness::new();
+        let request = match operation {
+            "create" => {
+                place(&mut h, vec![order()]);
+                h.metadata(false, "CROSS");
+                h.take("/api/v1/orders")
+            }
+            "amend" => {
+                h.set_order("old", OrderType::Limit, 6.0);
+                amend_stop(&mut h, "old", 120.0);
+                to_replacement(&mut h, "old", 4.0)
+            }
+            "cancel" => {
+                h.command(Command::CancelOrders {
+                    command: 1,
+                    ids: vec!["old".into()],
+                });
+                h.take("/api/v1/orders/old")
+            }
+            _ => {
+                h.command(Command::SetLeverage {
+                    command: 1,
+                    symbol: "BTCUSDT".into(),
+                    leverage: 10.0,
+                    side: None,
+                });
+                h.metadata(false, "CROSS");
+                h.take("changeCrossUserLeverage")
+            }
+        };
+        h.actions.clear();
+        h.response(
+            &request,
+            429,
+            r#"{"code":"400005","msg":"signature refused"}"#,
+        );
+        h.pace();
+        let warnings: Vec<_> = h
+            .actions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, action)| match action {
+                Action::Notice(Notice::CommandError {
+                    command: 1,
+                    message,
+                }) => Some((index, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1, "{operation}: {:?}", h.actions);
+        let (warning_at, message) = warnings[0];
+        assert!(
+            message.contains("unknown") && message.contains("Check Open Orders"),
+            "{operation}: {message}"
+        );
+        assert!(!message.contains("refused"), "{operation}: {message}");
+        let terminal_at = h
+            .actions
+            .iter()
+            .position(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+            .unwrap();
+        assert!(warning_at < terminal_at);
+        assert_eq!(message, &failure(&h).message);
+        assert!(writes(&h).is_empty());
     }
 }
