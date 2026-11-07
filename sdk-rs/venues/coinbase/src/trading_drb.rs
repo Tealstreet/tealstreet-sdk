@@ -3,7 +3,7 @@
 use crate::{Coinbase, Pending, drb};
 use safe_cex_engine::{
     Command, Cx, ErrorKind, Outcome, Response, TimerId, VenueError,
-    classify::{Native, NativeCode, Verdict, WriteFact},
+    classify::{self, Native, NativeCode, Verdict, WriteFact},
     model::*,
     request_context::{Context, Operation, Owner, Policy, ReconciliationData, RetryPolicy, Scope},
 };
@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 const MAX_JOBS: usize = 64;
 const MAX_LABELS: usize = 4096;
 
-/// Closed command vocabulary. Authority is declared independently of wire names.
+/// Closed command vocabulary; each wire name is classified by S0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Method {
     Buy,
@@ -39,16 +39,12 @@ impl Method {
             Self::GetLeverage => "private/get_leverage",
         }
     }
+    /// Authority comes only from S0's closed classifier. An unclassified name
+    /// stays Mutation here and is refused by the transport before release.
     fn operation(self) -> Operation {
-        match self {
-            Self::GetLeverage => Operation::Read,
-            Self::Buy
-            | Self::Sell
-            | Self::Edit
-            | Self::Cancel
-            | Self::CancelInstrument
-            | Self::CancelAll
-            | Self::SetLeverage => Operation::Mutation,
+        match drb::method_intent(self.name()) {
+            Ok(classify::Intent::Read) => Operation::Read,
+            _ => Operation::Mutation,
         }
     }
 }

@@ -163,8 +163,8 @@ ordinary limits and conditional stop/take/trailing types keep their own type.
 instrument name (or S0's legacy INTX alias mapping). Spot and CFM retain their
 existing trading codecs. All gateway writes use genuine command-owned Mutation
 contexts with `RetryPolicy::Never`; authentication and reconciliation use Read
-contexts. Supported trading methods already belong to S0's closed authority
-table. HTTP bearer tokens are exchanged with the primary CDP key, refreshed
+contexts. Each trading method takes its Read/Mutation authority from S0's
+closed classifier rather than a second local table. HTTP bearer tokens are exchanged with the primary CDP key, refreshed
 before expiry, and attached only by the engine's session callbacks.
 
 Market and limit entry support IOC/FOK; limits also support GTC and post-only
@@ -207,7 +207,9 @@ invalidate older order-snapshot tokens.
 An unchanged open-order read does not resolve a lost edit or cancellation;
 recovery keeps polling until it sees the edited values or a terminal order.
 Dispatched HTTP 408, 429 and 5xx responses also finish as Unknown, even if their
-bodies look like a native refusal. The engine cannot put those writes back.
+bodies look like a native refusal, as does a gateway rate-limit error (10028) on
+a released write. This covers place, OTOCO, amend, cancel, bulk cancel and
+leverage. The engine cannot resend or put those writes back.
 
 Offline fixtures in `tests/fixtures/drb-trading.json` are adapted from the
 [Coinbase OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json)

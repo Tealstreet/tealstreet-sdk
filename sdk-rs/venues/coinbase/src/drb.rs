@@ -493,7 +493,7 @@ impl Transport {
 // Closed semantic contract, independent of rate pools. New methods must be
 // classified here and pinned in the foundation authority table before use.
 // Authentication/heartbeat/subscription control is Read; account and trading writes are not.
-fn method_intent(method: &str) -> Result<Intent, String> {
+pub(crate) fn method_intent(method: &str) -> Result<Intent, String> {
     Ok(match method {
         "private/buy" | "private/sell" | "private/close_position" => Intent::Place,
         "private/cancel"

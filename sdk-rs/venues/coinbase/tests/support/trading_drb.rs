@@ -898,3 +898,186 @@ fn an_unchanged_read_does_not_resolve_an_uncertain_edit_or_cancel() {
         );
     }
 }
+
+#[test]
+fn every_trading_method_takes_its_authority_from_the_s0_classifier() {
+    use super::Method;
+    use safe_cex_engine::{classify::Intent, request_context::Operation};
+    let methods = [
+        Method::Buy,
+        Method::Sell,
+        Method::Edit,
+        Method::Cancel,
+        Method::CancelInstrument,
+        Method::CancelAll,
+        Method::SetLeverage,
+        Method::GetLeverage,
+    ];
+    for method in methods {
+        // Exhaustive: a new trading method must be listed and classified here.
+        let read = match method {
+            Method::GetLeverage => true,
+            Method::Buy
+            | Method::Sell
+            | Method::Edit
+            | Method::Cancel
+            | Method::CancelInstrument
+            | Method::CancelAll
+            | Method::SetLeverage => false,
+        };
+        let intent = crate::drb::method_intent(method.name())
+            .unwrap_or_else(|e| panic!("{} is unclassified: {e}", method.name()));
+        assert_eq!(intent == Intent::Read, read, "{}", method.name());
+        let expected = if read {
+            Operation::Read
+        } else {
+            Operation::Mutation
+        };
+        assert_eq!(method.operation(), expected, "{}", method.name());
+    }
+}
+
+/// Every dispatched drb write (place, OTOCO, amend, cancel, bulk cancel and
+/// leverage) that meets 429/408/5xx or a gateway rate limit resolves Unknown.
+/// The write is neither resent nor put back; only read-back may follow.
+#[test]
+fn every_dispatched_drb_write_rejected_by_transport_status_is_unknown_without_resend() {
+    let sell = || {
+        let mut o = opts();
+        o.side = OrderSide::Sell;
+        o
+    };
+    let otoco = || {
+        let mut o = opts();
+        o.stop_loss = Some(60000.);
+        o.take_profit = Some(70000.);
+        o
+    };
+    let place_cmd = |o: PlaceOrderOpts| Command::PlaceOrders {
+        command: 2,
+        orders: vec![o],
+    };
+    type Case = (&'static str, bool, Box<dyn Fn() -> Command>);
+    let cases: Vec<Case> = vec![
+        ("private/buy", false, Box::new(move || place_cmd(opts()))),
+        ("private/sell", false, Box::new(move || place_cmd(sell()))),
+        ("private/buy", false, Box::new(move || place_cmd(otoco()))),
+        (
+            "private/edit",
+            true,
+            Box::new(|| Command::AmendOrder {
+                command: 2,
+                id: "USDC-94166".into(),
+                price: Some(66000.),
+                amount: Some(0.02),
+            }),
+        ),
+        (
+            "private/cancel",
+            true,
+            Box::new(|| Command::CancelOrders {
+                command: 2,
+                ids: vec!["USDC-94166".into()],
+            }),
+        ),
+        (
+            "private/cancel_all_by_instrument",
+            true,
+            Box::new(|| Command::CancelSymbolOrders {
+                command: 2,
+                symbol: SYMBOL.into(),
+            }),
+        ),
+        (
+            "private/cancel_all",
+            true,
+            Box::new(|| Command::Venue {
+                command: 2,
+                action: VenueAction::CancelAccountOrders,
+            }),
+        ),
+        (
+            "private/set_leverage",
+            true,
+            Box::new(|| Command::SetLeverage {
+                command: 2,
+                symbol: SYMBOL.into(),
+                leverage: 5.,
+                side: None,
+            }),
+        ),
+    ];
+    // HTTP 200 with drb 10028 is the gateway's own rate limit on a released write.
+    for status in [408, 429, 500, 502, 503, 504, 200] {
+        for (method, resting, make) in &cases {
+            let case = format!("{method} status {status}");
+            let mut e = engine();
+            if *resting {
+                let first = place(&mut e, opts());
+                assert!(done(&reply(&mut e, &first, fixtures()["partial"].clone())));
+            }
+            let before = e.store().orders().to_vec();
+            let a = command(&mut e, make());
+            let writes: Vec<_> = requests(&a)
+                .into_iter()
+                .filter(|r| packet(r)["method"] == *method)
+                .collect();
+            assert_eq!(writes.len(), 1, "{case}: {a:?}");
+            let r = &writes[0];
+            let error = if status == 200 {
+                json!({"code":10028,"message":"too_many_requests"})
+            } else {
+                // A native refusal body cannot override the transport status.
+                fixtures()["insufficient_margin"].clone()
+            };
+            let body = json!({"jsonrpc":"2.0","id":packet(r)["id"],"error":error}).to_string();
+            e.handle(
+                1001.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: Response {
+                        status,
+                        headers: "Retry-After: 1",
+                        body: &body,
+                    },
+                },
+            );
+            let after = prepared_now(&mut e);
+            assert!(
+                after.iter().any(
+                    |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error })
+                    if error.outcome == Some(Outcome::Unknown))
+                ),
+                "{case}: {after:?}"
+            );
+            assert!(!done(&after), "{case}");
+            assert!(
+                requests(&after)
+                    .iter()
+                    .all(|r| packet(r)["method"] != *method),
+                "{case}: the write was resent"
+            );
+            assert_eq!(
+                e.store().orders(),
+                &before[..],
+                "{case}: state was put back"
+            );
+            let mut fresh = opts();
+            fresh.client_order_id = Some("after-unknown".into());
+            let a = command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 3,
+                    orders: vec![fresh],
+                },
+            );
+            assert!(
+                requests(&a).iter().all(|r| !matches!(
+                    packet(r)["method"].as_str(),
+                    Some("private/buy" | "private/sell")
+                )),
+                "{case}: the uncertainty was dropped before read-back"
+            );
+        }
+    }
+}
