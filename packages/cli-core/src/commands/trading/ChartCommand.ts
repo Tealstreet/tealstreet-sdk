@@ -3,7 +3,7 @@ import { Candle, Order, OrderType, Position, PositionSide, Timeframe, type Marke
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { GREEN, RED, RESET, DIM, CYAN } from './colors';
-import { formatBaseSize } from '../../utils/formatBaseSize';
+import { formatBaseSize, formatOrderBaseSize } from '../../utils/formatBaseSize';
 
 /**
  * Chart line for position or order overlay
@@ -42,7 +42,7 @@ export function formatPositionLine(position: Position, market?: Market): ChartLi
  */
 export function formatOrderLine(order: Order, market?: Market): ChartLine | null {
   const side = order.side === 'buy' ? 'buy' : 'sell';
-  const sizeStr = formatBaseSize(order.remaining, market);
+  const sizeStr = formatOrderBaseSize(order, market);
 
   let type: ChartLine['type'] = 'limit';
   let label = `Limit ${sizeStr}`;

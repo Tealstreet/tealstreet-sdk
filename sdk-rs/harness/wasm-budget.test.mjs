@@ -960,6 +960,20 @@ test('#3210 admitted close split (run 42320236420) uses CI plus 10 KiB and keeps
   }
 });
 
+test('#3157 protective edit guards (run 42399005414) retain measured Bitget headroom and equal siblings', () => {
+  const measured = 2_447_105;
+  const minimumCap = 2_457_600;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bitget;
+  assert.ok(cap >= minimumCap);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('#3191 run 42249705679 retains measured Paradex headroom', () => {
   const measured = 2_249_779;
   const minimumCap = 2_260_992;
@@ -1069,4 +1083,15 @@ test('#3270 (run 42404311752 at 46e5a6918ec) retains measured wasm headroom', ()
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+});
+
+test('#3277 TxFlow public decode (run 42407352871, job 128508214838) retains CI headroom', () => {
+  const measured = 1_896_742;
+  const minimumCap = 1_907_712;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const current = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(current >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(current, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(current + 1, 'venue', 'txflow'), /exceeds/);
 });

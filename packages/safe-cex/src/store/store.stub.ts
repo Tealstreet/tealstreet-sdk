@@ -83,7 +83,7 @@ const stubPosition: Position = {
   leverage: 0,
   unrealizedPnl: 0,
   contracts: 0,
-  liquidationPrice: 0,
+  liquidationPrice: null,
 };
 
 const stubDisplayedPosition: DisplayedPosition = {

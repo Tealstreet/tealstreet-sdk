@@ -2,7 +2,7 @@ import { formatPrice } from '@tealstreet/utils/src/formatting/formatPrice';
 import { OrderStatus, OrderType, PositionSide, type Position, type Order } from '@tealstreet/safe-cex/src/types';
 import { calculatePositionAccountLeverage } from '@tealstreet/safe-cex/src/utils/leverage';
 import type { ExchangeLike } from '../../types';
-import { formatBaseSize } from '../../utils/formatBaseSize';
+import { formatBaseSize, formatOrderBaseSize } from '../../utils/formatBaseSize';
 import { RESET, DIM, CLEAR_SCREEN } from './colors';
 import {
   type TableData,
@@ -145,7 +145,7 @@ export function formatOrdersTable(exchange: ExchangeLike): string {
         cell(order.symbol),
         cell(side, sideStyle),
         cell(type),
-        cell(formatBaseSize(order.remaining, market)),
+        cell(formatOrderBaseSize(order, market)),
         cell(order.price ? formatPrice(order.price, pricePrecision) : 'Market', 'cyan'),
         cell(trigger),
       ],
@@ -394,7 +394,7 @@ export function formatMultiAccountOrdersTable(accounts: AccountExchange[]): stri
         cell(order.symbol),
         cell(side, sideStyle),
         cell(type),
-        cell(formatBaseSize(order.remaining, market)),
+        cell(formatOrderBaseSize(order, market)),
         cell(order.price ? formatPrice(order.price, pricePrecision) : 'Market', 'cyan'),
         cell(trigger),
       ],
