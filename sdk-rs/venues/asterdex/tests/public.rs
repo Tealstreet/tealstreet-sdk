@@ -338,6 +338,151 @@ fn aggregate_and_raw_events_preserve_partial_fields_and_funding_zero() {
 }
 
 #[test]
+fn market_price_parsing_preserves_values_and_repeat_observations() {
+    use safe_cex_engine::model::StopTriggerType;
+    for (stream, field, reference) in [
+        ("!ticker@arr", "c", StopTriggerType::LastPrice),
+        ("!markPrice@arr@1s", "p", StopTriggerType::MarkPrice),
+    ] {
+        for (input, expected, observed) in [
+            (None, 100.0_f64, false),
+            (Some("null"), 100.0, false),
+            (Some(r#""""#), 100.0, false),
+            (Some(r#""   ""#), 0.0, false),
+            (Some(r#""broken""#), 0.0, false),
+            (Some(r#""NaN""#), 0.0, false),
+            (Some(r#""Infinity""#), 0.0, false),
+            (Some(r#""1e999""#), 0.0, false),
+            (Some(r#""-0""#), -0.0, false),
+            (Some(r#""-2""#), -2.0, false),
+            (Some(r#""100""#), 100.0, true),
+            (Some(r#"" 1e2 ""#), 100.0, true),
+        ] {
+            let mut h = Harness::ready();
+            h.now += 1.0;
+            h.message(&format!(
+                r#"{{"stream":"{stream}","data":[{{"s":"BTCUSDT","{field}":"100"}}]}}"#
+            ));
+            let seed_at = h.now;
+            let value = input.map_or(String::new(), |input| format!(r#", "{field}":{input}"#));
+            let message = format!(r#"{{"stream":"{stream}","data":[{{"s":"BTCUSDT"{value}}}]}}"#);
+            h.now += 1.0;
+            h.message(&message);
+            let first_at = h.now;
+            h.now += 1.0;
+            h.message(&message);
+            let ticker = h.engine.store().ticker("BTCUSDT").unwrap();
+            let actual = match reference {
+                StopTriggerType::LastPrice => ticker.last,
+                StopTriggerType::MarkPrice => ticker.mark,
+                StopTriggerType::IndexPrice => unreachable!(),
+            };
+            assert_eq!(actual.to_bits(), expected.to_bits(), "{stream} {input:?}");
+            let expected_at = if observed {
+                h.now
+            } else if expected.to_bits() != 100.0_f64.to_bits() {
+                first_at
+            } else {
+                seed_at
+            };
+            assert_eq!(
+                h.engine.store().reference_seen_at("BTCUSDT", reference),
+                Some(expected_at),
+                "{stream} {input:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn aggregate_decoder_preserves_reordered_escaped_and_typed_error_frames() {
+    let cases = [
+        (
+            r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}]}"#,
+            101.0,
+        ),
+        (
+            r#"{"data":[{"s":"BTCUSDT","c":"101"}],"stream":"!ticker@arr"}"#,
+            101.0,
+        ),
+        (
+            r#"{"str\u0065am":"\u0021ticker@arr","data":[{"s":"BTC\u0055SDT","c":"101"}]}"#,
+            101.0,
+        ),
+        (
+            r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"},{"s":"BTCUSDT","c":102},{"s":"BTCUSDT","c":"103"}]}"#,
+            101.0,
+        ),
+        (
+            r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"},{"s":"BTCUSDT","c":null}]}"#,
+            101.0,
+        ),
+        (
+            r#"[{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}]},{"e":"24hrTicker","s":"BTCUSDT","c":"102"}]"#,
+            102.0,
+        ),
+    ];
+    for (text, expected) in cases {
+        let mut h = Harness::ready();
+        h.message(text);
+        assert_eq!(
+            h.engine.store().ticker("BTCUSDT").unwrap().last,
+            expected,
+            "{text}"
+        );
+    }
+    for stream in ["!markPrice@arr", "!markPrice@arr@1s"] {
+        for data_first in [false, true] {
+            let mut h = Harness::ready();
+            let data = r#"[{"s":"BTCUSDT","p":"100","i":"99","r":"0","T":1700000100000},{"s":"BTCUSDT","p":101}]"#;
+            let text = if data_first {
+                format!(r#"{{"data":{data},"stream":"{stream}"}}"#)
+            } else {
+                format!(r#"{{"stream":"{stream}","data":{data}}}"#)
+            };
+            h.message(&text);
+            let ticker = h.engine.store().ticker("BTCUSDT").unwrap();
+            assert_eq!(
+                (
+                    ticker.mark,
+                    ticker.index,
+                    ticker.funding_rate,
+                    ticker.funding_time
+                ),
+                (100.0, 99.0, 0.0, 1700000100000.0)
+            );
+        }
+    }
+}
+
+#[test]
+fn aggregate_decoder_validates_whole_envelope_before_publishing_rows() {
+    let cases = [
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"id":1}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"e":4}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"id":"1"}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"stream":"!ticker@arr"}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"data":[]}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"e":null,"e":null}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"id":null,"id":null}"#,
+        r#"{"stream":null,"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}]}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"},]}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"other":[}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}]} garbage"#,
+    ];
+    for text in cases {
+        let mut h = Harness::ready();
+        let before = h.engine.store().ticker("BTCUSDT").unwrap().clone();
+        h.message(text);
+        assert_eq!(
+            h.engine.store().ticker("BTCUSDT").unwrap(),
+            &before,
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn single_and_wrapped_interest_payloads_and_failure_retain_values() {
     let mut h = Harness::ready();
     h.advance(15_000.0);
@@ -526,6 +671,52 @@ fn one_off_rest_depth_sorts_levels_and_preserves_quote_totals() {
         serde_json::json!({"bids":[{"price":101.0,"amount":1.0,"total":101.0},{"price":100.0,"amount":2.0,"total":301.0}],"asks":[{"price":102.0,"amount":1.0,"total":102.0},{"price":103.0,"amount":2.0,"total":308.0}]})
     );
 }
+#[test]
+fn public_limits_are_sent_only_as_values_aster_accepts() {
+    // Live Aster: klines takes 1..=1500; depth only 5/10/20/50/100/500/1000.
+    let cases = [
+        (0, 1, 5),
+        (25, 25, 50),
+        (1501, 1500, 1000),
+        (5000, 1500, 1000),
+    ];
+    for (index, (requested, klines, depth)) in cases.into_iter().enumerate() {
+        let mut h = Harness::ready();
+        let command = 60 + index as u32 * 2;
+        h.command(Command::FetchCandles {
+            command,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: Some(requested),
+            from_ms: None,
+            to_ms: None,
+        });
+        h.command(Command::FetchOrderBook {
+            command: command + 1,
+            symbol: "BTCUSDT".into(),
+            limit: Some(requested),
+        });
+        let sent = |path: &str| {
+            h.requests
+                .iter()
+                .find(|request| request.url.contains(path))
+                .unwrap_or_else(|| panic!("no {path} request for limit {requested}"))
+                .url
+                .clone()
+        };
+        assert!(
+            sent("/klines?").ends_with(&format!("&limit={klines}")),
+            "klines limit {requested}: {}",
+            sent("/klines?")
+        );
+        assert!(
+            sent("/depth?").ends_with(&format!("limit={depth}")),
+            "depth limit {requested}: {}",
+            sent("/depth?")
+        );
+    }
+}
+
 #[test]
 fn ticker_seed_retains_native_rows_without_active_market_metadata() {
     let mut h = Harness::start(Options {

@@ -178,7 +178,8 @@ pub struct ActiveTWAP {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoreData {
-    pub latency: f64,
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    pub latency: Option<f64>,
     pub balance: Balance,
     pub markets: Vec<Market>,
     pub tickers: Vec<Ticker>,
@@ -806,7 +807,8 @@ mod strict_codecs {
     #[serde(remote = "super::StoreData")]
     #[serde(rename_all = "camelCase")]
     struct WireStoreData {
-        latency: f64,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        latency: Option<f64>,
         balance: Balance,
         markets: Vec<Market>,
         tickers: Vec<Ticker>,

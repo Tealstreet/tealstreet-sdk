@@ -9,7 +9,7 @@ use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Rejection, Report};
 use safe_cex_engine::fence::StaleGuard;
-use safe_cex_engine::history::{Completion, HistoryRows};
+use safe_cex_engine::history::{ReadCompletion, ReadHistoryRows as HistoryRows};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -17,6 +17,7 @@ use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, 
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, Method, PublicFeedPolicy, Query, Response, SocketChannel,
     SocketId, SubscriptionTopic, TimerId, Venue, VenueError,
@@ -58,8 +59,15 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
-    Fills(Box<HistoryRows<String>>),
-    Account(CommandId),
+    Fills {
+        owner: Box<HistoryRows<String>>,
+        leg: Option<Context>,
+    },
+    Account {
+        command: CommandId,
+        root: Context,
+    },
+    Read(Box<crate::clock::Request<Pending>>),
 }
 impl Pending {
     fn discovery_context(&self) -> Option<&Context> {
@@ -78,6 +86,7 @@ pub struct ReadOrders {
     /// Raw validated REST prefixes, never cached display replacements.
     seeds: Vec<(String, Cursor)>,
     lookup: Option<(CommandId, String)>,
+    root: Option<Box<Context>>,
 }
 struct Socket {
     socket: Option<SocketId>,
@@ -178,7 +187,13 @@ impl KucoinSpot {
         }
     }
     fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        let context = match cx.http_context(
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -238,14 +253,49 @@ impl KucoinSpot {
     fn fail_account_identity(
         &self,
         cx: &mut Cx<'_, Pending>,
+        root: &Context,
         command: CommandId,
         error: VenueError,
     ) {
         cx.command_error(command, &error.message);
-        cx.fail(command, error);
+        let _ = cx.fail_context(root, error);
+    }
+    fn send_read(&mut self, cx: &mut Cx<'_, Pending>, root: Context, path: &str, pending: Pending) {
+        let slots = Slots::new(
+            self.credentials.clone(),
+            self.options.read_credentials.clone(),
+            SlotPolicy {
+                secondary_requires_primary: true,
+            },
+        );
+        let Ok((selection, identity)) = slots.select(crate::Kucoin::legacy_role(Method::Get))
+        else {
+            self.on_sign_error(
+                cx,
+                pending,
+                VenueError::new("KuCoin Spot private read requires credentials"),
+            );
+            return;
+        };
+        if let Err((pending, error)) = crate::clock::send(
+            cx,
+            root,
+            Some((selection, identity.clone())),
+            REST,
+            path.into(),
+            self.options
+                .broker
+                .as_ref()
+                .map(sign::BrokerOptions::descriptor),
+            pending,
+            None,
+            Pending::Read,
+        ) {
+            self.on_sign_error(cx, pending, error);
+        }
     }
     fn request(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
@@ -282,6 +332,51 @@ impl KucoinSpot {
                 )
             })
             .flatten();
+        if method == Method::Get
+            && let Some((selection, _)) = selected.as_ref()
+        {
+            let root = match &pending {
+                Pending::Account { root, .. } => Some(root.clone()),
+                Pending::Fills { owner, .. } => Some(owner.root().clone()),
+                Pending::Orders(read) if read.root.is_some() => read.root.as_deref().cloned(),
+                Pending::Balance(_) | Pending::Symbols { .. } | Pending::Orders(_) => {
+                    match cx.http_context(Scope::Background, crate::local_read_command_policy()) {
+                        Ok(root) => Some(root),
+                        Err(error) => {
+                            self.on_sign_error(cx, pending, error.venue_error());
+                            return;
+                        }
+                    }
+                }
+                _ => None,
+            };
+            if let Some(root) = root {
+                if let Err((pending, error)) = crate::clock::send(
+                    cx,
+                    root,
+                    Some((
+                        *selection,
+                        slots
+                            .select(crate::Kucoin::legacy_role(method))
+                            .unwrap()
+                            .1
+                            .clone(),
+                    )),
+                    REST,
+                    path.into(),
+                    self.options
+                        .broker
+                        .as_ref()
+                        .map(sign::BrokerOptions::descriptor),
+                    pending,
+                    None,
+                    Pending::Read,
+                ) {
+                    self.on_sign_error(cx, pending, error);
+                }
+                return;
+            }
+        }
         let headers = sign::public_headers();
         let request = cx.request(
             method,
@@ -489,7 +584,7 @@ impl KucoinSpot {
             },
         );
     }
-    fn page(&self, cx: &mut Cx<'_, Pending>, r: ReadOrders) {
+    fn page(&mut self, cx: &mut Cx<'_, Pending>, r: ReadOrders) {
         self.request(
             cx,
             Method::Get,
@@ -853,7 +948,7 @@ impl KucoinSpot {
             if let Some(b) = self.books.get_mut(symbol).filter(|b| b.subscribers > 0)
                 && let Ok(d) = serde_json::from_str::<Depth>(data.get())
             {
-                let time = d.timestamp.map_or(cx.now, |n| n.0);
+                let time = d.timestamp.map_or(cx.protocol_now(), |n| n.0);
                 if time < b.last {
                     return;
                 }
@@ -971,7 +1066,22 @@ fn candle(text: &str) -> Result<Candle, String> {
 }
 
 impl Venue for KucoinSpot {
+    fn http_plans() -> bool {
+        false
+    }
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Read(read) => Self::startup_reads(&read.pending),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Balance(_) => S::BALANCE,
+            Pending::Orders(read) if read.lookup.is_none() && read.root.is_none() => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1025,7 +1135,8 @@ impl Venue for KucoinSpot {
         // Decode high-volume ticker envelopes and prices together, without a raw-data rescan.
         if channel == 0
             && self.sockets[channel].ready
-            && let Ok(m) = serde_json::from_str::<PriceMessage>(text)
+            && let Some(m) =
+                wire::scan_price(text).or_else(|| serde_json::from_str::<PriceMessage>(text).ok())
             && m.kind == "message"
             && m.topic.starts_with("/market/ticker")
         {
@@ -1109,6 +1220,33 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Read(read) = pending {
+            match crate::clock::respond(cx, read, &response, Pending::Read) {
+                crate::clock::Delivery::Page {
+                    mut pending,
+                    leg,
+                    root,
+                    retried: _,
+                } => {
+                    if let Pending::Fills { leg: target, .. } = &mut pending {
+                        *target = Some(leg.clone());
+                    }
+                    self.on_response(cx, pending, response);
+                    let _ = cx.finish_http_context(&leg);
+                    if matches!(
+                        root.owner(),
+                        safe_cex_engine::request_context::Owner::Background { .. }
+                    ) {
+                        let _ = cx.finish_http_context(&root);
+                    }
+                }
+                crate::clock::Delivery::Failed(pending, error) => {
+                    self.on_sign_error(cx, pending, error)
+                }
+                crate::clock::Delivery::Waiting => {}
+            }
+            return;
+        }
         if let Pending::Candles { context, .. } = &pending
             && cx.validate_read_http_delivery(context, context).is_err()
         {
@@ -1153,6 +1291,7 @@ impl Venue for KucoinSpot {
             }
         };
         match pending {
+            Pending::Read(_) => unreachable!(),
             Pending::Markets { rows, invalid, .. } => {
                 if invalid || rows.is_empty() {
                     self.discovery.failed(cx, false);
@@ -1275,6 +1414,7 @@ impl Venue for KucoinSpot {
                     rows: SnapshotBuilder::default(),
                     seeds: vec![],
                     lookup: None,
+                    root: None,
                 };
                 if let Some(symbol) = r.symbols.pop_front() {
                     r.symbol = symbol;
@@ -1383,8 +1523,11 @@ impl Venue for KucoinSpot {
                     let rows = r
                         .rows
                         .commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
-                    if let Some((command, id)) = r.lookup {
-                        cx.done(command, lookup_output(&r.symbol, &id, &rows));
+                    if let Some((_command, id)) = r.lookup {
+                        let _ = cx.done_context(
+                            r.root.as_ref().unwrap(),
+                            lookup_output(&r.symbol, &id, &rows),
+                        );
                     } else {
                         self.orders_loading = false;
                         if r.revision == self.revision {
@@ -1411,11 +1554,11 @@ impl Venue for KucoinSpot {
                     let _ =
                         cx.fail_context(&context, VenueError::new("invalid KuCoin Spot candles"));
                 } else {
-                    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                    safe_cex_engine::model::sort_candles_by_time(&mut rows);
                     let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
                 }
             }
-            Pending::Account(command) => {
+            Pending::Account { command: _, root } => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Summary<'a> {
@@ -1445,11 +1588,15 @@ impl Venue for KucoinSpot {
                     })
                     .map_err(|e| e.to_string());
                 match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(data) => {
+                        let _ = cx.done_context(&root, data);
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_context(&root, error);
+                    }
                 };
             }
-            Pending::Fills(mut owner) => {
+            Pending::Fills { mut owner, leg } => {
                 let open_window = self.open_fill_windows.remove(&owner.command());
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
@@ -1488,11 +1635,14 @@ impl Venue for KucoinSpot {
                     Ok(rows) => {
                         let full = open_window && rows.len() >= FILLS_PAGE;
                         for row in rows {
-                            owner.stage(row);
+                            owner.admit(cx, leg.as_ref().unwrap()).unwrap().stage(row);
                         }
-                        owner.accept_page();
+                        owner
+                            .admit(cx, leg.as_ref().unwrap())
+                            .unwrap()
+                            .accept_page();
                         // Accepted rows plus an error finish as rows with one incomplete marker.
-                        owner.finish(
+                        let _ = owner.finish(
                             cx,
                             if full {
                                 Err(VenueError::new("KuCoin Spot fills read one full page"))
@@ -1501,17 +1651,26 @@ impl Venue for KucoinSpot {
                             },
                         );
                     }
-                    Err(error) => owner.finish(cx, Err(VenueError::new(error))),
+                    Err(error) => {
+                        let _ = owner.finish(cx, Err(VenueError::new(error)));
+                    }
                 }
             }
         }
     }
+
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
+            Pending::Read(read) => {
+                let (pending, error) = crate::clock::failed(cx, *read, error);
+                self.on_sign_error(cx, pending, error);
+            }
             Pending::Write(job) => self.write_failed(cx, job, error),
-            Pending::Account(command) => self.fail_account_identity(cx, command, error),
+            Pending::Account { command, root } => {
+                self.fail_account_identity(cx, &root, command, error)
+            }
             other => self.on_http_failed(cx, other, error),
-        }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
@@ -1524,6 +1683,11 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Read(read) = pending {
+            let (pending, error) = crate::clock::failed(cx, *read, VenueError::new(error));
+            self.on_sign_error(cx, pending, error);
+            return;
+        }
         if let Some(context) = pending.discovery_context() {
             // Engine-admitted failures may retire after the original deadline.
             let _ = cx.finish_http_context(context);
@@ -1547,7 +1711,7 @@ impl Venue for KucoinSpot {
                 if let Some((command, id)) = r.lookup {
                     cx.command_error(command, error);
                     let out = lookup_output(&r.symbol, &id, cx.store.orders());
-                    cx.done(command, out);
+                    let _ = cx.done_context(r.root.as_ref().unwrap(), out);
                     return;
                 } else {
                     self.orders_loading = false;
@@ -1558,20 +1722,21 @@ impl Venue for KucoinSpot {
                 self.write_failed(cx, j, crate::wire::write_failure(0, "", error.into()));
                 return;
             }
-            Pending::Fills(owner) => {
+            Pending::Fills { owner, .. } => {
                 self.open_fill_windows.remove(&owner.command());
                 cx.command_error(owner.command(), error);
-                owner.finish(cx, Err(VenueError::new(error)));
+                let _ = owner.finish(cx, Err(VenueError::new(error)));
                 return;
             }
             pending @ Pending::Candles { .. } => {
                 self.on_http_failed(cx, pending, VenueError::new(error));
                 return;
             }
-            Pending::Account(command) => {
-                self.fail_account_identity(cx, command, error.into());
+            Pending::Account { command, root } => {
+                self.fail_account_identity(cx, &root, command, error.into());
                 return;
             }
+            Pending::Read(_) => unreachable!(),
             Pending::Markets { .. } => self.discovery.failed(cx, false),
             Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
@@ -1698,7 +1863,7 @@ impl Venue for KucoinSpot {
                     );
                     return;
                 };
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let start = match (limit, from_ms) {
                     (None, Some(from)) => from,
                     _ => {
@@ -1797,17 +1962,18 @@ impl KucoinSpot {
                 if let Some(n) = to_ms {
                     path.push_str(&format!("&endAt={}", n as u64));
                 }
-                self.request(
-                    cx,
-                    Method::Get,
-                    &path,
-                    None,
-                    true,
-                    Pending::Fills(Box::new(HistoryRows::new(
-                        Completion::new(command),
-                        |rows| Ok(format!("[{}]", rows.join(","))),
-                    ))),
-                );
+                let Ok(root) = cx.admit_caller_read_root(None, None) else {
+                    return;
+                };
+                let pending = Pending::Fills {
+                    leg: None,
+                    owner: Box::new(HistoryRows::new(
+                        ReadCompletion::from_context(cx, command, root.clone())
+                            .expect("fresh KuCoin Spot read root"),
+                        |rows| Ok(format!("[{}]", rows.join_with(","))),
+                    )),
+                };
+                self.send_read(cx, root, &path, pending);
             }
             Query::OrderByClientId {
                 symbol,
@@ -1840,6 +2006,9 @@ impl KucoinSpot {
                     }
                     let _ = cx.done_context(&context, result);
                 } else {
+                    let Ok(root) = cx.admit_caller_read_root(None, None) else {
+                        return;
+                    };
                     self.page(
                         cx,
                         ReadOrders {
@@ -1850,6 +2019,7 @@ impl KucoinSpot {
                             rows: SnapshotBuilder::default(),
                             seeds: vec![],
                             lookup: Some((command, client_order_id)),
+                            root: Some(Box::new(root)),
                         },
                     );
                 }
@@ -1941,4 +2111,22 @@ mod execution_retention {
         // Retention and dedupe remain independent native history domains.
         assert!(venue.fills.is_empty() && venue.terminal.is_empty());
     }
+}
+
+#[test]
+fn review_caller_lookup_is_not_a_startup_read() {
+    let pending = Pending::Orders(ReadOrders {
+        revision: 0,
+        symbols: VecDeque::new(),
+        symbol: "BTC-USDT".into(),
+        page: 1,
+        rows: SnapshotBuilder::default(),
+        seeds: vec![],
+        lookup: Some((1, "caller-link".into())),
+        root: None,
+    });
+    assert_eq!(
+        KucoinSpot::startup_reads(&pending),
+        safe_cex_engine::startup::Sections::NONE
+    );
 }

@@ -111,35 +111,43 @@ pub struct PhemexPerpetuals {
     /// The last product read skipped a malformed row, so an unknown symbol may be listed.
     catalogue_partial: bool,
     paused_until: f64,
-    /// When an unreadable public message was last logged; at most one per minute.
-    public_parse_logged_at: Option<f64>,
     account: account::State,
     trading: trading::State,
     history: history::State,
     income: income::State,
 }
-const PUBLIC_PARSE_LOG_MS: f64 = 60_000.0;
-
 impl PhemexPerpetuals {
-    /// A public message that would not parse, logged at most once a minute.
-    fn public_unreadable(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        error: &serde_json::Error,
-        text: &str,
-    ) {
-        if self
-            .public_parse_logged_at
-            .is_some_and(|at| cx.now - at < PUBLIC_PARSE_LOG_MS)
-        {
-            return;
+    fn observe_rate_limit(&mut self, now: f64, r: &Response<'_>) {
+        if r.status == 429 {
+            let pause = r
+                .header("x-ratelimit-retry-after-contract")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(60.)
+                .max(1.)
+                * 1000.;
+            self.paused_until = self.paused_until.max(now + pause);
         }
-        self.public_parse_logged_at = Some(cx.now);
-        let head: String = text.chars().take(200).collect();
+    }
+
+    /// Report each rejected frame, including its wire type when JSON is readable.
+    fn public_unreadable(cx: &mut Cx<'_, Pending>, error: &serde_json::Error, text: &str) {
+        #[derive(serde::Deserialize)]
+        struct Header<'a> {
+            #[serde(rename = "type", borrow)]
+            kind: Option<&'a serde_json::value::RawValue>,
+        }
+        let header = serde_json::from_str::<Header<'_>>(text).ok();
+        let kind = header
+            .as_ref()
+            .and_then(|header| header.kind)
+            .map_or("unknown", |kind| kind.get());
         cx.notice(
             Level::Warn,
             code::STREAM_MALFORMED,
-            format!("Phemex public message unreadable ({error}): {head}"),
+            format!(
+                "Phemex public message unreadable: bytes={}, type={kind}, error={error}",
+                text.len()
+            ),
         );
     }
 
@@ -166,7 +174,6 @@ impl PhemexPerpetuals {
             discovery: Default::default(),
             catalogue_partial: false,
             paused_until: 0.,
-            public_parse_logged_at: None,
             account: account::State::new(),
             trading: trading::State::default(),
             history: history::State::default(),
@@ -174,7 +181,7 @@ impl PhemexPerpetuals {
         }
     }
     fn discovery_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, true) {
             Ok(read) => read,
             Err(_) => {
                 self.discovery.failed(cx, true);
@@ -332,7 +339,7 @@ impl PhemexPerpetuals {
         b.fetching = true;
         b.deadline = Some(cx.set_timer(20_000.));
         let generation = b.generation;
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, true) {
             Ok(read) => read,
             Err(_) => {
                 self.book_failed(cx, symbol);
@@ -453,8 +460,20 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn observe_unproven_http_response(&mut self, now: f64, _: &Pending, response: Response<'_>) {
+        self.observe_rate_limit(now, &response);
+    }
+
     fn managed_sockets() -> bool {
         true
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.stop_release_veto(store, pending, release)
     }
 
     fn fence_uncertain_placements(&self) -> bool {
@@ -464,8 +483,16 @@ impl Venue for PhemexPerpetuals {
         true
     }
 
-    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.reconcile_uncertain_orders(cx);
+        if let Some(symbols) = symbols {
+            self.owe_order_reads(cx, symbols);
+        }
+    }
+
+    // Each owed read commits its symbol's cover (`commit_orders_read`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
 
     fn guard_pending_placements(&self) -> bool {
@@ -482,6 +509,17 @@ impl Venue for PhemexPerpetuals {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets(..) => S::MARKETS,
+            Pending::Tickers(..) => S::TICKERS,
+            Pending::Account(_) => S::BALANCE.union(S::POSITIONS),
+            Pending::Orders(_) => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
@@ -491,6 +529,7 @@ impl Venue for PhemexPerpetuals {
             fresh_positions: true,
             nuke_account_cancel: true,
             symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -507,7 +546,7 @@ impl Venue for PhemexPerpetuals {
             return;
         }
         self.catalogue_partial = false;
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, false) {
             Ok(read) => read,
             Err(_) => {
                 self.discovery.failed(cx, false);
@@ -606,6 +645,7 @@ impl Venue for PhemexPerpetuals {
     }
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
         self.cancel_landed_from_frames(cx);
+        self.wake_replacements(cx);
         let client_ids = cx
             .store
             .orders()
@@ -613,7 +653,7 @@ impl Venue for PhemexPerpetuals {
             .filter_map(|order| order.client_order_id.clone())
             .collect();
         self.account.frame_ingested(
-            cx.source_orders_cover().is_some(),
+            cx.source_orders_covers().is_some(),
             cx.store.loaded().orders,
             &client_ids,
         );
@@ -632,8 +672,9 @@ impl Venue for PhemexPerpetuals {
         {
             return;
         }
-        let Ok(e) = serde_json::from_str::<Envelope<'_>>(text) else {
-            return;
+        let e = match serde_json::from_str::<Envelope<'_>>(text) {
+            Ok(e) => e,
+            Err(error) => return Self::public_unreadable(cx, &error, text),
         };
         if e.method == "perp_market24h_pack_p.update" {
             #[derive(serde::Deserialize)]
@@ -641,7 +682,9 @@ impl Venue for PhemexPerpetuals {
                 #[serde(borrow)]
                 data: Vec<Packed<'a>>,
             }
-            if let Ok(p) = serde_json::from_str::<Pack<'_>>(text) {
+            if let Ok(p) = serde_json::from_str::<Pack<'_>>(text)
+                .inspect_err(|error| Self::public_unreadable(cx, error, text))
+            {
                 let mut added = Vec::new();
                 for r in p.data {
                     let symbol = r.0.to_ascii_uppercase();
@@ -689,7 +732,9 @@ impl Venue for PhemexPerpetuals {
                 }
             }
         } else if e.orderbook_p.is_some() {
-            if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text) {
+            if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text)
+                .inspect_err(|error| Self::public_unreadable(cx, error, text))
+            {
                 if r.kind == "snapshot"
                     && !e.orderbook_p.is_some_and(|raw| snapshot_sides(raw.get()))
                 {
@@ -709,14 +754,14 @@ impl Venue for PhemexPerpetuals {
             }
             let mut k = match serde_json::from_str::<K>(text) {
                 Ok(k) => k,
-                Err(error) => return self.public_unreadable(cx, &error, text),
+                Err(error) => return Self::public_unreadable(cx, &error, text),
             };
-            k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
-            // A subscribe answers with history as a snapshot: only its newest row is live.
-            if k.kind == "snapshot" {
-                let newest = k.kline_p.pop();
-                k.kline_p = newest.into_iter().collect();
+            // Subscribe snapshots are history, including their newest row. Only
+            // explicitly incremental frames may enter the live candle path.
+            if k.kind != "incremental" {
+                return;
             }
+            k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
             for r in k.kline_p {
                 for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
                     s == &e.symbol.to_ascii_uppercase()
@@ -805,16 +850,7 @@ impl Venue for PhemexPerpetuals {
             self.on_http_failed(cx, p, error.read_venue_error());
             return;
         }
-        if r.status == 429 {
-            self.paused_until = self.paused_until.max(
-                cx.now
-                    + r.header("x-ratelimit-retry-after-contract")
-                        .and_then(|v| v.parse::<f64>().ok())
-                        .unwrap_or(60.)
-                        .max(1.)
-                        * 1000.,
-            );
-        }
+        self.observe_rate_limit(cx.now, &r);
         if let Some(context) = p.public_read_context()
             && cx.validate_background_read_http_delivery(context).is_err()
         {
@@ -949,13 +985,13 @@ impl Venue for PhemexPerpetuals {
                 cx.book_changed(&symbol);
             }
             Pending::Candles { root, mut rows, .. } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(root.context(), serde_json::to_string(&rows).unwrap());
             }
             Pending::PublicCandles {
                 context, mut rows, ..
             } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
             Pending::Account(p) => self.account_read_response(cx, p, r),
@@ -989,22 +1025,25 @@ impl Venue for PhemexPerpetuals {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        self.settle_retired_trading(cx);
-        match pending {
-            Pending::Identity(command) => self.identity_failed(cx, command, error),
-            Pending::Candles { root, .. } => {
-                let _ = cx.fail_context(root.context(), error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.settle_retired_trading(cx);
+            match pending {
+                Pending::Identity(command) => self.identity_failed(cx, command, error),
+                Pending::Candles { root, .. } => {
+                    let _ = cx.fail_context(root.context(), error);
+                }
+                Pending::Repair(request) => self.repair_failed(cx, request, error),
+                Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
+                Pending::History(read) => self.history_failed(cx, read, error),
+                Pending::Income(read) => self.income_failed(cx, read, error),
+                Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
+                Pending::PublicCandles { context, .. } => {
+                    let _ =
+                        cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+                }
+                pending => self.on_request_failed(cx, pending, &error.message),
             }
-            Pending::Repair(request) => self.repair_failed(cx, request, error),
-            Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
-            Pending::History(read) => self.history_failed(cx, read, error),
-            Pending::Income(read) => self.income_failed(cx, read, error),
-            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
-            Pending::PublicCandles { context, .. } => {
-                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
-            }
-            pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

@@ -15,6 +15,7 @@ use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::selected_read::{
     LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, CommandWait, Cx, ErrorKind, Method, Query, Response, VenueError};
 use serde::Serialize;
 
@@ -346,9 +347,9 @@ impl Backpack {
             }
             let primary = self
                 .account
-                .credentials
-                .as_ref()
-                .and(self.options.identity.clone());
+                .active
+                .then(|| self.options.identity.clone())
+                .flatten();
             let slots = Slots::new(
                 primary,
                 self.options.read_identity.clone(),
@@ -497,11 +498,7 @@ impl Backpack {
                     path: path.into(),
                     rows: vec![params],
                     body: None,
-                    window: self
-                        .account
-                        .credentials
-                        .as_ref()
-                        .map_or(60000, |primary| primary.window),
+                    window: self.signing_window(),
                 };
                 leg.queue(
                     cx,
@@ -792,7 +789,7 @@ impl Backpack {
                 format!(
                     "Skipped {} malformed Backpack fill rows: {}",
                     r.skipped_fills.len(),
-                    r.skipped_fills.join(", ")
+                    r.skipped_fills.join_with(", ")
                 ),
             );
         }

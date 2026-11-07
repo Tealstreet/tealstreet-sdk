@@ -1,6 +1,7 @@
 // Same-workflow physical evidence only. No lifetime history scan or retry API.
 import { createHash } from 'node:crypto';
-export const CPU_COHORT_STEPS = Object.freeze({ first: 'Retain CPU runtime capsule', second: 'Retain CPU remeasurement results', plan: 'Retain CPU remeasurement plan', final: 'Retain CPU certificate', strict: 'Retain strict gate reports and artifact budgets', runtime: 'Retain the eligible original runtime bytes' });
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
+export const CPU_COHORT_STEPS = Object.freeze({ first: 'Retain CPU runtime capsule', plan: 'Retain CPU remeasurement plan', final: 'Retain CPU certificate', strict: 'Retain strict gate reports and artifact budgets' });
 const CPU_WORKFLOW_ID = 386369161;
 const WORKFLOW_PATH = '.github/workflows/rust.yml';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -52,7 +53,7 @@ function caseIdentity(value) {
   check(value && !Array.isArray(value) && typeof value === 'object', 'invalid public case');
   const keys = ['venue', 'tape', 'tapeSha256', 'books', 'private', 'correctnessRuns', 'runs'];
   check(Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)), 'incomplete/extra case fields');
-  check(typeof value.venue === 'string' && /^[a-z0-9-]+$/.test(value.venue) && safePath(value.tape) && hash(value.tapeSha256) && typeof value.books === 'string' && value.private === false && value.correctnessRuns === 1 && value.runs === 9, 'invalid public case identity');
+  check(typeof value.venue === 'string' && /^[a-z0-9-]+$/.test(value.venue) && safePath(value.tape) && hash(value.tapeSha256) && typeof value.books === 'string' && value.private === false && value.correctnessRuns === 1 && value.runs === PUBLIC_REPLAY_PAIRS, 'invalid public case identity');
   return Object.fromEntries(keys.map((key) => [key, value[key]]));
 }
 
@@ -165,15 +166,13 @@ export function authenticateArtifactMetadata({ artifact, run, job, logBytes, ste
   } else if (jobName === 'Rust / CPU certification audit') {
     throw new Error('CPU cohort: no all-suite audit in this rollout');
   } else {
-    const match = /^Rust \/ (replay measurement|CPU remeasurement|replay gate) \(([a-z0-9-]+)\)$/.exec(jobName);
+    const match = /^Rust \/ (replay measurement|CPU gate) \(([a-z0-9-]+)\)$/.exec(jobName);
     check(match, 'unknown artifact authority job name');
-    const kind = match[1] === 'replay measurement' ? 'first' : match[1] === 'CPU remeasurement' ? 'second' : 'final';
-    expectedArtifact = `${kind === 'first' ? 'cpu-cohort' : kind === 'second' ? 'cpu-second' : 'cpu-cert'}-${match[2]}`;
+    const kind = match[1] === 'replay measurement' ? 'first' : 'final';
+    expectedArtifact = `${kind === 'first' ? 'cpu-cohort' : 'cpu-cert'}-${match[2]}`;
     expectedStep = CPU_COHORT_STEPS[kind];
     if (kind === 'first' && artifact?.name === `strict-replay-${match[2]}`) {
       expectedArtifact = artifact.name; expectedStep = CPU_COHORT_STEPS.strict;
-    } else if (kind === 'first' && artifact?.name === `cpu-runtime-${match[2]}`) {
-      expectedArtifact = artifact.name; expectedStep = CPU_COHORT_STEPS.runtime;
     }
   }
   check(stepName === expectedStep, 'unknown artifact authority upload step');
@@ -185,12 +184,39 @@ export function authenticateArtifactMetadata({ artifact, run, job, logBytes, ste
   return { schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id, attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha, logSha256: sha(bytes(logBytes)) };
 }
 
-/** Downloaded bundles additionally require the exact archive bytes. Metadata-only
- * runtime refs are useful after a successful second producer verified restoration. */
+/** Downloaded bundles additionally require the exact archive bytes. */
 export function authenticateArtifactExecution(input) {
   const receipt = authenticateArtifactMetadata(input), raw = bytes(input.artifactBytes);
   check(raw.length === input.artifact.size_in_bytes && `sha256:${sha(raw)}` === input.artifact.digest, 'artifact ZIP digest/length mismatch');
   return receipt;
+}
+
+/** This failure-only upload proves an oracle refusal, never a CPU certificate. */
+export function authenticateBitgetOracleRefusalArtifact({ artifact, artifactBytes, run, job, logBytes, expectedCheckoutSha }) {
+  const name = 'Rust / Bitget counterbalanced steady CPU';
+  const stepName = 'Retain counterbalanced Bitget steady evidence';
+  validateRun(run, CPU_WORKFLOW_ID);
+  validateJob(job, run, name);
+  check(run.run_attempt === 1 && job.run_attempt === 1 && job.conclusion === 'failure', 'oracle refusal requires failed original Bitget job');
+  artifactIdentity(artifact, run, 'bitget-paired-steady');
+  uploaded(artifact, job, logBytes, stepName);
+  const failed = job.steps?.filter(step => step.conclusion === 'failure');
+  const measured = job.steps?.filter(step => step.name === 'Public counterbalanced Bitget steady CPU');
+  check(failed?.length === 1 && measured?.length === 1 && failed[0] === measured[0] &&
+    job.steps.every(step => step.status === 'completed' && ['success', 'failure', 'skipped'].includes(step.conclusion)),
+  'oracle refusal must be the only failed terminal step');
+  const start = instant(failed[0].started_at), end = instant(failed[0].completed_at) + 1000;
+  check(instant(job.started_at) <= start && start < end && end <= instant(job.completed_at) + 1000, 'refusal step outside physical job');
+  const message = 'NOT-CERTIFIED: Bitget TS oracle output changed between baseline and candidate; arm-matched correctness is not available';
+  const lines = logLines(logBytes).filter(line => line.text === message);
+  check(lines.length === 1 && lines[0].at !== null && lines[0].at >= start && lines[0].at < end, 'missing exact refusal inside failed step');
+  const checkout = loggedCheckout(job, logBytes);
+  check(gitId(expectedCheckoutSha) && checkout === expectedCheckoutSha &&
+    (run.event === 'pull_request' || checkout === run.head_sha), 'oracle refusal checkout differs');
+  const raw = bytes(artifactBytes);
+  check(raw.length === artifact.size_in_bytes && `sha256:${sha(raw)}` === artifact.digest, 'oracle refusal ZIP digest/length mismatch');
+  return { schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id,
+    attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha: checkout, logSha256: sha(bytes(logBytes)) };
 }
 
 export function formatMeasurementMarker(kind, key, at) {
@@ -223,8 +249,8 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
 }
 
 export function requireGithubResponseSize(length, kind = 'metadata') {
-  check(['metadata', 'log', 'artifact', 'runtime-artifact'].includes(kind), 'invalid GitHub response kind');
-  const limit = kind === 'runtime-artifact' ? 4 * 1024 ** 3 : 512 * 1024 ** 2;
+  check(['metadata', 'log', 'artifact'].includes(kind), 'invalid GitHub response kind');
+  const limit = 512 * 1024 ** 2;
   check(integer(length) && length <= limit, 'empty/oversized GitHub response');
 }
 
@@ -268,7 +294,7 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
         } else {
           check(response.status === 200, `GitHub evidence unavailable (${response.status})`);
           raw = Buffer.from(await response.arrayBuffer());
-          if (!raw.length && immutable && ['artifact', 'runtime-artifact'].includes(kind) && attempt === 0) {
+          if (!raw.length && immutable && kind === 'artifact' && attempt === 0) {
             retryReason = 'empty immutable artifact HTTP 200';
           } else {
             requireGithubResponseSize(raw.length, kind);

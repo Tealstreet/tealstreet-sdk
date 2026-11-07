@@ -8,6 +8,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Before anything can panic or fail; held until exit so pending events flush.
+    let _sentry = safe_cex_exchange_server::telemetry::init_from_env();
     let config = Config::from_env()?;
     // A malformed proxy or tunnel override refuses here, not on the first account.
     let bases = safe_cex_native::resolve::route_bases()?;
@@ -16,11 +18,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
     runtime.block_on(async move {
         let threads = EngineThreads::start(config.engine_threads)?;
-        let registry = Arc::new(Registry::new(
-            threads,
-            config.account_flush,
-            config.resume_grace,
-        ));
+        let registry = Arc::new(
+            Registry::new(threads, config.account_flush, config.resume_grace)
+                .with_router_lease(config.router_lease.clone()),
+        );
         let app = Arc::new(App {
             registry,
             metrics: Arc::new(Metrics::default()),
@@ -33,6 +34,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
         Log::info(&format!("route bases: {bases}"));
         Log::info(&format!("listening on {}", config.port));
+        let public_topics_log =
+            tokio::spawn(safe_cex_exchange_server::public_topics::log_periodically(
+                app.registry.public_topics.clone(),
+                app.closing.subscribe(),
+            ));
         let draining = app.clone();
         axum::serve(
             listener,
@@ -50,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             drain(&draining).await;
         })
         .await?;
+        public_topics_log.abort();
         Ok(())
     })
 }

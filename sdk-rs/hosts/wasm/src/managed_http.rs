@@ -54,6 +54,9 @@ pub(super) struct GroupMemberOut<'a> {
 #[serde(tag = "phase", rename_all = "camelCase")]
 pub(super) enum HttpPhaseOut<'a> {
     Prepare {
+        #[cfg(target_arch = "wasm32")]
+        #[serde(rename = "requestClass")]
+        request_class: u8,
         preparation: String,
         intent: &'static str,
         packet: HttpPacket<'a>,
@@ -78,10 +81,14 @@ impl<'a> From<&'a HttpAction> for HttpPhaseOut<'a> {
     fn from(action: &'a HttpAction) -> Self {
         match action {
             HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class,
                 preparation,
                 intent,
                 request,
             } => Self::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class: *request_class,
                 preparation: preparation.to_wire(),
                 intent: match intent {
                     RoutingIntent::Public => "public",
@@ -152,6 +159,13 @@ impl WasmEngine {
         Ok(self.inner.sign_meta(RequestId(attempt)).map(|meta| {
             serde_json::to_string(&sign_meta::Out::from(meta)).expect("scalars serialize")
         }))
+    }
+
+    #[cfg(feature = "hyperliquid")]
+    #[wasm_bindgen(js_name = httpReadClass)]
+    pub fn http_read_class(&self, request: f64) -> Result<u8, js_sys::Error> {
+        let request = host_resource_id(request)?;
+        Ok(self.inner.http_read_class(RequestId(request)) as u8)
     }
 
     #[wasm_bindgen(js_name = httpPreparationPending)]
@@ -275,6 +289,8 @@ mod tests {
         let permit_text = "r1:7:18446744073709551615:18446744073709551615:18446744073709551615";
         let actions = [
             HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class: 3,
                 preparation,
                 intent: RoutingIntent::Secondary,
                 request: request.clone(),
@@ -293,6 +309,8 @@ mod tests {
         let rows: serde_json::Value = serde_json::from_str(&encode(&actions)).unwrap();
         assert_eq!(rows[0]["op"], "managedHttp");
         assert_eq!(rows[0]["intent"], "secondary");
+        #[cfg(target_arch = "wasm32")]
+        assert_eq!(rows[0]["requestClass"], 3);
         assert_eq!(rows[0]["preparation"], text);
         assert_eq!(rows[1]["permit"], permit_text);
         assert_eq!(rows[1]["packet"]["request"], 7);

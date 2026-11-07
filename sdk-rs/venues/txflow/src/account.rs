@@ -11,6 +11,7 @@ use safe_cex_engine::request_context::{
     Context as HttpContext, Egress, Operation, Policy, RetryPolicy, Scope,
 };
 use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, Fill, Response, TimerId, Venue, json};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
@@ -356,7 +357,7 @@ impl TxFlow {
             return;
         }
         self.account.started = true;
-        self.account.startup_at = cx.now.floor().max(0.0);
+        self.account.startup_at = cx.protocol_now().floor().max(0.0);
         cx.store.set_hedged(false);
         self.account_refresh(cx);
         self.account.refresh_timer = Some(cx.set_poll_timer(5000.0));
@@ -788,9 +789,9 @@ impl TxFlow {
                         log_skip(
                             cx,
                             &mut self.account.skip_logged,
-                            keys.join(", "),
+                            keys.join_with(", "),
                             skip_level(stored || !owned),
-                            format!("TxFlow skipped malformed position {}", keys.join(", ")),
+                            format!("TxFlow skipped malformed position {}", keys.join_with(", ")),
                         );
                         for key in keys {
                             positions.reject(Some(key));
@@ -1355,6 +1356,17 @@ impl TxFlow {
         }
         self.account.inflight.remove(key);
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::State { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }
 

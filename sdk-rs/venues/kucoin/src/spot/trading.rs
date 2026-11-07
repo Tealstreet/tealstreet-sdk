@@ -148,7 +148,7 @@ impl KucoinSpot {
             kind: WriteKind::Place,
         })
     }
-    fn next_write(&self, cx: &mut Cx<'_, Pending>, mut job: Job) {
+    fn next_write(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job) {
         if let Some(w) = job.requests.pop_front() {
             if let Some(receipt) = w.receipt {
                 cx.command_progress(job.command, vec![receipt]);
@@ -427,13 +427,14 @@ impl KucoinSpot {
                         not_sent("KuCoin Spot requires credentials").kind(ErrorKind::InvalidInput),
                     );
                 } else {
-                    self.request(
+                    let Ok(root) = cx.admit_caller_read_root(None, None) else {
+                        return;
+                    };
+                    self.send_read(
                         cx,
-                        Method::Get,
+                        root.clone(),
                         "/api/v2/user-info",
-                        None,
-                        true,
-                        Pending::Account(command),
+                        Pending::Account { command, root },
                     );
                 }
                 return;

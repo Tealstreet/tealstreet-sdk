@@ -869,6 +869,8 @@ test('socket health tracks open, first frame and every close path per channel wi
   assert.equal(changes, 2, 'open and first frame notify; later frames do not');
   assert.equal(host.socketHealth().private.open, 1);
   assert.equal(host.socketHealth().private.initialized, 1);
+  assert.equal(host.socketHealth().public.initialized, 0, 'a separate private socket does not initialize public');
+  assert.equal(host.socketHealth().public.open, 0);
   assert.ok(host.socketHealth().private.lastReceived > 0);
 
   // A connect still in flight is left alone, as in TS.
@@ -900,4 +902,71 @@ test('socket health tracks open, first frame and every close path per channel wi
   assert.equal(host.socketHealth().business.closes, 0);
   host.dispose();
   assert.equal(host.reconnectSockets(), 0);
+});
+
+for (const channel of ['private', 'public']) {
+  test(`multiplexed ${channel} socket carries public health without changing routing`, () => {
+    let callbacks;
+    let closes = 0;
+    let changes = 0;
+    const host = new EngineHost({
+      start: () => JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://shared', channel, publicTopics: true }]),
+      wsOpen: () => '', wsMessage: () => '', wsClose: () => { closes++; return ''; },
+    }, { now: () => 1, connect: (_url, handlers) => {
+      callbacks = handlers;
+      return { close() {} };
+    } }, { onSocketChange: () => changes++ });
+    host.start();
+    assert.equal(callbacks.channel, channel, 'routing/authentication role is unchanged');
+    assert.equal(callbacks.publicTopics, true);
+    assert.equal(host.socketHealth().public.initialized, 0);
+    callbacks.onOpen();
+    callbacks.onMessage('snapshot');
+    callbacks.onMessage('next');
+    assert.equal(host.socketHealth().public.open, 1);
+    assert.equal(host.socketHealth().public.initialized, 1);
+    assert.equal(host.socketHealth().private.initialized, channel === 'private' ? 1 : 0);
+    assert.equal(changes, 2, 'one notification per transition, not per declared channel');
+    assert.equal(host.reconnectSockets('public'), 1, 'public reconnect finds the shared physical socket');
+    callbacks.onClose(1000);
+    callbacks.onMessage('late');
+    assert.equal(closes, 1);
+    assert.equal(host.socketHealth().public.initialized, 0);
+    assert.equal(host.socketHealth().public.closes, 1);
+    assert.equal(host.socketHealth().private.closes, channel === 'private' ? 1 : 0);
+    host.dispose();
+  });
+}
+
+
+test('host UTC synchronization uses scheduling time without changing it or allowing missing support', () => {
+  const calls = [];
+  let now = 1000;
+  const host = new EngineHost({ syncHostTime: (raw, utc) => { calls.push([raw, utc]); return Number.isFinite(utc); } }, { now: () => now });
+  host.syncHostTime(1800000000000);
+  now += 12000;
+  host.syncHostTime(1800000000000 - 162 * 86400000);
+  assert.deepEqual(calls, [[1000, 1800000000000], [13000, 1800000000000 - 162 * 86400000]]);
+  assert.equal(host.transport.now(), 13000);
+  assert.throws(() => host.syncHostTime(NaN), /refused host protocol time/);
+  host.dispose();
+  const old = new EngineHost({}, { now: () => 1000 });
+  assert.throws(() => old.syncHostTime(1800000000000), /does not support separate protocol time/);
+  old.dispose();
+});
+
+
+test('an already sampled host UTC correction does not resample or reenter the transport clock', () => {
+  const calls = [];
+  const host = new EngineHost({ syncHostTime: (raw, utc) => { calls.push([raw, utc]); return true; } }, {
+    now: () => { throw new Error('clock must not be sampled recursively'); },
+  });
+  host.syncHostTime(1800007200000, 1000);
+  assert.deepEqual(calls, [[1000, 1800007200000]]);
+  // A correction cannot bypass the physical HTTP group handoff's reentry fence.
+  host.managedHttp.groupHandoff = {};
+  assert.throws(() => host.syncHostTime(1800014400000, 1000), /HTTP group handoff/);
+  assert.equal(calls.length, 1);
+  host.managedHttp.groupHandoff = false;
+  host.dispose();
 });

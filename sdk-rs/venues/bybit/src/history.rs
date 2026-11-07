@@ -8,7 +8,8 @@ use crate::{BybitLinear, Category, Pending, Rest, Then};
 use safe_cex_engine::history::{CursorAdmission, CursorHistory, ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, Stall, WindowOrder};
-use safe_cex_engine::request_context::{Context, Owner};
+use safe_cex_engine::request_context::{Context, Owner, Pacing};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Query as Read, Response, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -19,6 +20,12 @@ const MAX_WINDOW_MS: f64 = 7.0 * 24.0 * 3_600_000.0 - 1.0;
 const MAX_WINDOWS: usize = 10_000;
 const FILLS_PAGE_LIMIT: u32 = 100;
 const ORDERS_PAGE_LIMIT: u32 = 50;
+/// History has its own physical budget, independent of startup/account reads.
+pub(crate) const ORDER_HISTORY_PACING: Pacing = Pacing {
+    group: 1,
+    minimum_gap_ms: 250.0,
+};
+const TERMINAL_ORDER_STATUSES: [&str; 3] = ["Cancelled", "Rejected", "Deactivated"];
 const INCOME_PAGE_LIMIT: u32 = 50;
 const TRADES_LIMIT: u32 = 1000;
 const MAX_PAGES_PER_WINDOW: u32 = 100;
@@ -239,18 +246,19 @@ struct Walk {
     window: (Option<f64>, Option<f64>),
     stage_started: bool,
     cap: usize,
-    category_rows_start: usize,
+    axis_rows_start: usize,
     kind: RowKind,
     history: ReadCursorHistory<Row>,
     inverse: bool,
     categories: VecDeque<Category>,
+    order_statuses: VecDeque<&'static str>,
     original_windows: VecDeque<(Option<f64>, Option<f64>)>,
 }
 
 impl Walk {
     fn full(&self) -> bool {
         self.cap > 0
-            && self.history.accepted_len() + self.history.staged_len() - self.category_rows_start
+            && self.history.accepted_len() + self.history.staged_len() - self.axis_rows_start
                 >= self.cap
     }
 
@@ -358,13 +366,13 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
     .into_iter()
     .filter(|part| !part.is_empty())
     .collect();
-    let base = base.join("-");
+    let base = base.join_with("-");
     let source = [
         present(&row.id).unwrap_or_default(),
         present(&row.side).unwrap_or_default(),
         present(&row.size).unwrap_or_default(),
     ]
-    .join("|");
+    .join_with("|");
     let mut push = |income: f64, category: &'static str, suffix: &str| {
         out.push(Income {
             symbol: symbol.to_owned(),
@@ -442,7 +450,7 @@ impl BybitLinear {
             );
             return;
         }
-        let now = cx.now;
+        let now = cx.protocol_now();
         let mut walk = match read {
             Read::OrderByClientId { .. } => {
                 let _ = cx.fail_context(
@@ -474,8 +482,9 @@ impl BybitLinear {
                 Walk {
                     inverse: self.category == Category::Inverse,
                     categories: VecDeque::new(),
+                    order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
-                    category_rows_start: 0,
+                    axis_rows_start: 0,
                     path: "/v5/execution/list",
                     signed: true,
                     params,
@@ -506,8 +515,9 @@ impl BybitLinear {
                 Walk {
                     inverse: self.category == Category::Inverse,
                     categories: VecDeque::new(),
+                    order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
-                    category_rows_start: 0,
+                    axis_rows_start: 0,
                     path: "/v5/order/history",
                     signed: true,
                     params,
@@ -555,8 +565,9 @@ impl BybitLinear {
                 Walk {
                     inverse: self.category == Category::Inverse,
                     categories: VecDeque::new(),
+                    order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
-                    category_rows_start: 0,
+                    axis_rows_start: 0,
                     path: "/v5/account/transaction-log",
                     signed: true,
                     params,
@@ -576,8 +587,9 @@ impl BybitLinear {
             Read::PublicTrades { symbol, limit } => Walk {
                 inverse: self.category == Category::Inverse,
                 categories: VecDeque::new(),
+                order_statuses: VecDeque::new(),
                 original_windows: VecDeque::new(),
-                category_rows_start: 0,
+                axis_rows_start: 0,
                 path: "/v5/market/recent-trade",
                 signed: false,
                 params: vec![
@@ -600,6 +612,9 @@ impl BybitLinear {
                 history: RowKind::Trades.owner(completion),
             },
         };
+        if matches!(walk.kind, RowKind::Orders) {
+            walk.order_statuses = TERMINAL_ORDER_STATUSES.into();
+        }
         walk.original_windows = walk.windows.clone();
         walk.categories = categories
             .into_iter()
@@ -629,14 +644,26 @@ impl BybitLinear {
                 self.request_page(cx, command);
             }
             None => {
+                if let Some(status) = walk.order_statuses.pop_front() {
+                    walk.params.retain(|(key, _)| *key != "orderStatus");
+                    walk.params.push(("orderStatus", status.into()));
+                    walk.axis_rows_start = walk.history.accepted_len();
+                    walk.windows = walk.original_windows.clone();
+                    self.next_window(cx, command);
+                    return;
+                }
                 if let Some(category) = walk.categories.pop_front() {
+                    if matches!(walk.kind, RowKind::Orders) {
+                        walk.params.retain(|(key, _)| *key != "orderStatus");
+                        walk.order_statuses = TERMINAL_ORDER_STATUSES.into();
+                    }
                     if let Some((_, value)) =
                         walk.params.iter_mut().find(|(key, _)| *key == "category")
                     {
                         *value = category.as_str().into();
                     }
                     walk.inverse = category == Category::Inverse;
-                    walk.category_rows_start = walk.history.accepted_len();
+                    walk.axis_rows_start = walk.history.accepted_len();
                     walk.windows = walk.original_windows.clone();
                     self.select_category(category);
                     self.next_window(cx, command);
@@ -655,7 +682,8 @@ impl BybitLinear {
         let Some(walk) = self.history.reads.get(&command) else {
             return;
         };
-        let leg = match self.page_leg(cx, walk.history.root(), walk.signed) {
+        let pacing = matches!(walk.kind, RowKind::Orders).then_some(ORDER_HISTORY_PACING);
+        let leg = match self.page_leg_paced(cx, walk.history.root(), walk.signed, pacing) {
             Ok(leg) => leg,
             Err(error) => {
                 if let Some(walk) = self.history.reads.remove(&command) {

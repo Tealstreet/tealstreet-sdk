@@ -4,6 +4,7 @@ import type { ExchangeMetadataWorkerType } from '../webworker/ExchangeMetadataWo
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { getExchangeMetadata } from '../exchangeMetadata';
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { aggregateBybitClosedPnl } from '../journal/bybit.position-adapter';
 import { FrameApplier } from '../store/frameApplier';
@@ -198,7 +199,31 @@ describe('main-thread Rust trading routing', () => {
     expect(loader).not.toHaveBeenCalled();
   });
 
-  it('forwards main-thread candle and journal reads to the worker', async () => {
+  // Candles now follow fetchOHLCVInWorker; flag-false routing has a real-WASM public-source control.
+  it('forwards main-thread candle reads only for a worker-opted-in venue', async () => {
+    const loader = vi.fn(() => new Promise<never>(() => {}));
+    setWasmEngineLoader(loader);
+    main = new RustEngineExchange(
+      'lighter',
+      { key: '', secret: '', workerMirror: true, publicDataOnly: true },
+      new DefaultStore(),
+    );
+    expect(getExchangeMetadata(main.name).fetchOHLCVInWorker).toBe(true);
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      queueMicrotask(() =>
+        main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: [] }),
+      );
+    });
+    const candleOptions = { symbol: 'BTCUSDT', interval: '1m' as const, from: 1, to: 2 };
+    await expect(main.fetchOHLCV(candleOptions)).resolves.toEqual([]);
+    expect(calls).toEqual([{ method: 'fetchOHLCV', args: [candleOptions] }]);
+    expect(loader).not.toHaveBeenCalled();
+    expect(main.hasStarted).toBe(false);
+  });
+
+  it('forwards main-thread journal reads to the worker', async () => {
     main = new RustEngineExchange('kraken', { key: 'k', secret: 's' }, new DefaultStore());
     const calls: Array<{ method: string; args: unknown[] }> = [];
     main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
@@ -208,13 +233,11 @@ describe('main-thread Rust trading routing', () => {
       );
     });
     const window = { from: 1, to: 2 };
-    await main.fetchOHLCV({ symbol: 'PF_XBTUSD', interval: '1m', from: 1, to: 2 });
     await main.fetchHistoricalFills(window);
     await main.fetchHistoricalOrders(window);
     await main.fetchIncomeHistory({ startTime: 1, endTime: 2 });
     await main.fetchIncomeHistoryRange(1, 2);
     expect(calls.map(({ method }) => method)).toEqual([
-      'fetchOHLCV',
       'fetchHistoricalFills',
       'fetchHistoricalOrders',
       'fetchIncomeHistory',

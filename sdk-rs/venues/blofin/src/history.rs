@@ -7,6 +7,7 @@ use safe_cex_engine::request_context::{CommandEntryError, Error as RequestError,
 use safe_cex_engine::selected_read::{
     CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{ErrorKind, Outcome, VenueError};
 use safe_cex_engine::{
@@ -533,7 +534,7 @@ impl Blofin {
         if let Some(cursor) = request.history.cursor() {
             params.push(format!("after={}", encode(cursor)));
         }
-        let path = format!("{endpoint}?{}", params.join("&"));
+        let path = format!("{endpoint}?{}", params.join_with("&"));
         let url = format!("{}{path}", self.host());
         let testnet = self.options.testnet;
         if let Err((Pending::History(request), reason)) = leg.queue(

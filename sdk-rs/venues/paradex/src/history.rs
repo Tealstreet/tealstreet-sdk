@@ -6,6 +6,7 @@ use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     CommandId, Cx, ErrorKind, Method, Outcome, Query, Response, VenueError, json::ArrayAt,
@@ -495,7 +496,7 @@ impl History {
                 to_ms,
                 ..
             } => {
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 (
                     "/fills",
                     symbol.as_deref(),
@@ -552,7 +553,7 @@ impl History {
         if let Some(cursor) = request.history.cursor() {
             params.push(format!("cursor={}", encode(cursor)));
         }
-        let path = format!("{path}?{}", params.join("&"));
+        let path = format!("{path}?{}", params.join_with("&"));
         let leg = match cx.http_leg_context(request.history.root(), read_policy()) {
             Ok(leg) => leg,
             Err(error) => {

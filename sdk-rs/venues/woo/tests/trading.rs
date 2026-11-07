@@ -666,6 +666,131 @@ fn leverage_commits_only_after_matching_authoritative_readback() {
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
 }
 #[test]
+fn leverage_readback_without_margin_mode_confirms_only_leverage() {
+    for margin_type in [None, Some(MarginType::Cross), Some(MarginType::Isolated)] {
+        let mut e = engine();
+        e.store_mut().update_setting("BTCUSDT", |s| {
+            s.leverage = 10.0;
+            s.margin_type = margin_type;
+        });
+        e.handle(
+            1000.0,
+            Event::Command(Command::SetLeverage {
+                command: 1,
+                symbol: "BTCUSDT".into(),
+                leverage: 20.0,
+                side: None,
+            }),
+        );
+        let a = e.drain_actions().collect::<Vec<_>>();
+        let write = req(&a, Method::Post, "/v1/client/futures_leverage");
+        let a = reply(&mut e, &write, 1010.0, r#"{"success":true}"#);
+        let read = req(&a, Method::Get, "/v1/client/futures_leverage");
+        let a = reply(
+            &mut e,
+            &read,
+            1020.0,
+            r#"{"success":true,"data":{"symbol":"PERP_BTC_USDT","position_mode":"ONE_WAY","details":[{"position_side":"BOTH","leverage":"20"}]}}"#,
+        );
+        assert!(
+            a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1, .. }))),
+            "{a:?}"
+        );
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+        );
+        let setting = e.store().setting("BTCUSDT").unwrap();
+        assert_eq!(setting.leverage, 20.0);
+        assert_eq!(setting.buy_leverage, Some(20.0));
+        assert_eq!(setting.sell_leverage, Some(20.0));
+        assert_eq!(
+            setting.margin_type, margin_type,
+            "missing mode is not confirmation"
+        );
+    }
+}
+
+#[test]
+fn absent_margin_mode_does_not_relax_leverage_readback_scope_or_value() {
+    let valid = r#"{"success":true,"data":{"symbol":"PERP_BTC_USDT","position_mode":"ONE_WAY","details":[{"position_side":"BOTH","leverage":"20"}]}}"#;
+    for body in [
+        valid.replace("PERP_BTC_USDT", "PERP_ETH_USDT"),
+        valid.replace(
+            "\"position_mode\"",
+            "\"margin_mode\":\"ISOLATED\",\"position_mode\"",
+        ),
+        valid.replace("ONE_WAY", "HEDGE_MODE"),
+        valid.replace("BOTH", "LONG"),
+        valid.replace("\"20\"", "\"10\""),
+        valid.replace("\"20\"", "\"0\""),
+        valid.replace("\"leverage\":\"20\"", "\"other\":\"20\""),
+        valid.replace("\"position_mode\":\"ONE_WAY\",", ""),
+        valid.replace(r#"{"position_side":"BOTH","leverage":"20"}"#, ""),
+    ] {
+        let mut e = engine();
+        e.store_mut()
+            .update_setting("BTCUSDT", |s| s.leverage = 10.0);
+        e.handle(
+            1000.0,
+            Event::Command(Command::SetLeverage {
+                command: 1,
+                symbol: "BTCUSDT".into(),
+                leverage: 20.0,
+                side: None,
+            }),
+        );
+        let a = e.drain_actions().collect::<Vec<_>>();
+        let write = req(&a, Method::Post, "/v1/client/futures_leverage");
+        let mut a = reply(&mut e, &write, 1010.0, r#"{"success":true}"#);
+        for attempt in 0..3 {
+            let read = req(&a, Method::Get, "/v1/client/futures_leverage");
+            a = reply(&mut e, &read, 1020.0 + attempt as f64 * 300.0, &body);
+            if attempt < 2 {
+                a = tick(&mut e, &a);
+            }
+            assert!(
+                !a.iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+            );
+        }
+        let error = failure(&a);
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{body}"
+        );
+        assert!(
+            error.message.contains("readback remains unconfirmed"),
+            "{error:?}"
+        );
+        assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+    }
+}
+
+#[test]
+fn margin_mode_mutation_is_not_confirmed_by_a_leverage_only_reply() {
+    let mut e = engine();
+    e.handle(
+        1000.0,
+        Event::Command(Command::SetMarginType {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        }),
+    );
+    let a = e.drain_actions().collect::<Vec<_>>();
+    assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert!(
+        failure(&a)
+            .message
+            .contains("isolated margin mutation is not implemented")
+    );
+}
+
+#[test]
 fn mode_readback_retries_reads_only_and_never_invents_confirmation() {
     let mut e = engine();
     e.handle(
@@ -913,6 +1038,533 @@ fn trailing_amend_refreshes_full_position_quantity_after_cancel_ack() {
 }
 
 #[test]
+fn ordinary_write_rate_limits_are_unknown_without_resigning_or_resending() {
+    assert_write_rate_limits_are_unknown(false);
+}
+
+#[test]
+fn protective_write_rate_limits_are_unknown_without_resigning_or_resending() {
+    assert_write_rate_limits_are_unknown(true);
+}
+
+fn assert_write_rate_limits_are_unknown(protective: bool) {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (status, body, code) in [
+        (
+            429,
+            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+            Some("-1003"),
+        ),
+        (
+            200,
+            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+            Some("-1003"),
+        ),
+        (
+            401,
+            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+            Some("-1003"),
+        ),
+        (429, r#"{"success":false,"message":"too many"}"#, None),
+        (429, "<html>too many</html>", None),
+        (
+            429,
+            r#"{"success":false,"code":-1001,"message":"too many"}"#,
+            Some("-1001"),
+        ),
+    ] {
+        let mut e = engine();
+        let mut o = opts();
+        let path = if protective {
+            o.kind = OrderType::StopLoss;
+            o.side = OrderSide::Sell;
+            o.reduce_only = Some(true);
+            "/v3/algo/order"
+        } else {
+            "/v1/order"
+        };
+        let mut actions = placed(&mut e, vec![o]);
+        let write = req(&actions, Method::Post, path);
+        e.handle(
+            1010.0,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let response_actions: Vec<_> = e.drain_actions().collect();
+        let error = failure(&response_actions).clone();
+        assert_eq!(
+            error.message,
+            if body.starts_with('<') {
+                "WOO response: expected value at line 1 column 1"
+            } else {
+                "WOO request failed: too many"
+            }
+        );
+        assert_eq!(error.venue_code.as_deref(), code);
+        assert_eq!(result(&response_actions), Err(error.legacy_text()));
+        actions.extend(response_actions);
+
+        // Exercise any queued work and a late duplicate answer, not just the immediate reply.
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        for (timer, at) in timers {
+            e.handle(at.max(1011.0), Event::TimerFired { timer });
+            actions.extend(e.drain_actions());
+        }
+        e.handle(
+            60_000.0,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        actions.extend(e.drain_actions());
+        let physical: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(physical.len(), 1, "no second physical request: {actions:?}");
+        assert_eq!(
+            physical
+                .iter()
+                .flat_map(|r| &r.headers)
+                .filter(|(name, value)| *name == "x-api-signature" && !value.is_empty())
+                .count(),
+            1,
+            "exactly one signed packet"
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+                .count(),
+            1
+        );
+        assert_eq!(
+            (error.kind, error.outcome),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
+            "{status} {body}"
+        );
+    }
+}
+
+#[test]
+fn rate_limited_confirmation_reads_still_retry_without_repeating_the_write() {
+    let mut e = engine();
+    e.store_mut()
+        .update_setting("BTCUSDT", |s| s.leverage = 10.0);
+    e.handle(
+        1000.0,
+        Event::Command(Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+            side: None,
+        }),
+    );
+    let a = e.drain_actions().collect::<Vec<_>>();
+    let write = req(&a, Method::Post, "/v1/client/futures_leverage");
+    let a = reply(&mut e, &write, 1010.0, r#"{"success":true}"#);
+    let read = req(&a, Method::Get, "/v1/client/futures_leverage");
+    e.handle(
+        1020.0,
+        Event::HttpResponse {
+            request: read.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"success":false,"code":-1003,"message":"too many"}"#,
+            },
+        },
+    );
+    let a = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
+    let a = tick(&mut e, &a);
+    req(&a, Method::Get, "/v1/client/futures_leverage");
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+    );
+}
+
+#[test]
+fn invalid_orders_remain_not_sent_before_any_signed_request() {
+    for protective in [false, true] {
+        let mut e = engine();
+        let mut o = opts();
+        o.amount = -1.0;
+        if protective {
+            o.kind = OrderType::StopLoss;
+            o.side = OrderSide::Sell;
+        }
+        let a = placed(&mut e, vec![o]);
+        assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+
+#[test]
+fn unconfirmed_rate_limited_mode_write_keeps_unknown_kind_and_code() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for status in [200, 429, 408, 503] {
+        for readback in [
+            "mismatch",
+            "wrong_account",
+            "transport",
+            "rejected",
+            "malformed",
+        ] {
+            let mut e = engine();
+            e.handle(
+                1000.0,
+                Event::Command(Command::SetPositionMode {
+                    command: 1,
+                    hedged: true,
+                    symbol: None,
+                }),
+            );
+            let mut actions = e.drain_actions().collect::<Vec<_>>();
+            let write = req(&actions, Method::Post, "/v1/client/position_mode");
+            e.handle(1010.0, Event::HttpResponse {
+                request: write.id,
+                response: Response { status, headers: "", body: r#"{"success":false,"code":-1003,"message":"position mode remains unchanged"}"# },
+            });
+            let mut answer = e.drain_actions().collect::<Vec<_>>();
+            actions.extend(answer.iter().cloned());
+            for attempt in 0..3 {
+                let read = req(&answer, Method::Get, "/v3/accountinfo");
+                let now = 1020.0 + attempt as f64 * 300.0;
+                if readback == "transport" {
+                    e.handle(
+                        now,
+                        Event::HttpFailed {
+                            request: read.id,
+                            error: "connection lost",
+                        },
+                    );
+                } else {
+                    let (status, body) = match readback {
+                        "mismatch" => (
+                            200,
+                            r#"{"success":true,"data":{"accountMode":"FUTURES","positionMode":"ONE_WAY"}}"#,
+                        ),
+                        "wrong_account" => (
+                            200,
+                            r#"{"success":true,"data":{"accountMode":"SPOT","positionMode":"HEDGE_MODE"}}"#,
+                        ),
+                        "rejected" => (
+                            429,
+                            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+                        ),
+                        _ => (200, "<html>"),
+                    };
+                    e.handle(
+                        now,
+                        Event::HttpResponse {
+                            request: read.id,
+                            response: Response {
+                                status,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                answer = e.drain_actions().collect();
+                actions.extend(answer.iter().cloned());
+                if attempt < 2 {
+                    answer = tick(&mut e, &answer);
+                    actions.extend(answer.iter().cloned());
+                }
+            }
+            // A mode setter may complete on verified end state, never on unconfirmed text.
+            let error = failure(&answer);
+            assert_eq!(
+                (error.kind, error.outcome, error.venue_code.as_deref()),
+                (
+                    Some(ErrorKind::RateLimited),
+                    Some(Outcome::Unknown),
+                    Some("-1003")
+                ),
+                "{status} {readback}"
+            );
+            assert!(error.message.contains("position mode remains unchanged"));
+            assert!(error.message.contains("readback remains unconfirmed"));
+            assert!(!e.store().hedged());
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Get))
+                    .count(),
+                3
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+                    .count(),
+                1
+            );
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+            );
+        }
+    }
+}
+
+#[test]
+fn verified_mode_end_state_can_complete_even_after_rate_limit() {
+    for (status, response) in [
+        (200, "accepted"),
+        (200, "unchanged"),
+        (200, "rate_limited"),
+        (429, "rate_limited"),
+        (408, "rate_limited"),
+        (503, "rate_limited"),
+    ] {
+        let mut e = engine();
+        e.handle(
+            1000.0,
+            Event::Command(Command::SetPositionMode {
+                command: 1,
+                hedged: true,
+                symbol: None,
+            }),
+        );
+        let a = e.drain_actions().collect::<Vec<_>>();
+        let write = req(&a, Method::Post, "/v1/client/position_mode");
+        let body = match response {
+            "accepted" => r#"{"success":true}"#,
+            "unchanged" => {
+                r#"{"success":false,"code":-1005,"message":"position mode remains unchanged"}"#
+            }
+            _ => r#"{"success":false,"code":-1003,"message":"position mode remains unchanged"}"#,
+        };
+        e.handle(
+            1010.0,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let a = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+        );
+        let read = req(&a, Method::Get, "/v3/accountinfo");
+        // SetPositionMode's end state is verified by a successful, exact mode read.
+        let a = reply(
+            &mut e,
+            &read,
+            1020.0,
+            r#"{"success":true,"data":{"accountMode":"FUTURES","positionMode":"HEDGE_MODE"}}"#,
+        );
+        assert!(result(&a).is_ok());
+        assert!(e.store().hedged());
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+        );
+    }
+}
+
+#[test]
+fn cancel_all_preserves_rate_limit_kind_code_and_unknown_across_both_legs() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for rate_on_regular in [false, true] {
+        for peer in ["accepted", "rejected", "unknown", "rate_limited"] {
+            let mut e = engine();
+            e.handle(
+                1000.0,
+                Event::Command(Command::CancelSymbolOrders {
+                    command: 1,
+                    symbol: String::new(),
+                }),
+            );
+            let mut actions = e.drain_actions().collect::<Vec<_>>();
+            let regular = req(&actions, Method::Delete, "/v3/orders/pending");
+            let mut answer = Vec::new();
+            let mut request = regular;
+            for index in 0..2 {
+                if index == 1 {
+                    let next = tick(&mut e, &answer);
+                    request = req(&next, Method::Delete, "/v3/algo/orders/pending");
+                    actions.extend(next);
+                }
+                let is_rate = (index == 0) == rate_on_regular || peer == "rate_limited";
+                if !is_rate && peer == "unknown" {
+                    e.handle(
+                        1010.0 + index as f64 * 110.0,
+                        Event::HttpFailed {
+                            request: request.id,
+                            error: "connection lost",
+                        },
+                    );
+                } else {
+                    let (status, body) = if is_rate {
+                        (
+                            429,
+                            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+                        )
+                    } else if peer == "rejected" {
+                        (
+                            400,
+                            r#"{"success":false,"code":-1005,"message":"invalid params"}"#,
+                        )
+                    } else {
+                        (200, r#"{"success":true}"#)
+                    };
+                    e.handle(
+                        1010.0 + index as f64 * 110.0,
+                        Event::HttpResponse {
+                            request: request.id,
+                            response: Response {
+                                status,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                answer = e.drain_actions().collect();
+                if index == 0 {
+                    assert!(
+                        !answer
+                            .iter()
+                            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+                    );
+                }
+                actions.extend(answer.iter().cloned());
+            }
+            let error = failure(&answer);
+            assert_eq!(
+                (error.kind, error.outcome, error.venue_code.as_deref()),
+                (
+                    Some(ErrorKind::RateLimited),
+                    Some(Outcome::Unknown),
+                    Some("-1003")
+                ),
+                "{rate_on_regular} {peer}"
+            );
+            let path = if rate_on_regular {
+                "/v3/orders/pending"
+            } else {
+                "/v3/algo/orders/pending"
+            };
+            assert!(
+                error
+                    .message
+                    .contains(&format!("{path}: WOO request failed: too many"))
+            );
+            if peer != "accepted" {
+                assert!(error.message.contains("/v3/orders/pending:"));
+                assert!(error.message.contains("/v3/algo/orders/pending:"));
+            }
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Delete))
+                    .count(),
+                2
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(
+                        a,
+                        Action::Notice(Notice::CommandFailed { command: 1, .. })
+                    ))
+                    .count(),
+                1
+            );
+            assert!(!answer.iter().any(|a| matches!(a, Action::Http(_))));
+        }
+    }
+}
+
+#[test]
+fn ambiguous_http_status_keeps_native_rate_limit_kind_without_resending() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for protective in [false, true] {
+        for status in [408, 503] {
+            let mut e = engine();
+            let mut o = opts();
+            if protective {
+                o.kind = OrderType::StopLoss;
+                o.side = OrderSide::Sell;
+            }
+            let a = placed(&mut e, vec![o]);
+            let path = if protective {
+                "/v3/algo/order"
+            } else {
+                "/v1/order"
+            };
+            let write = req(&a, Method::Post, path);
+            e.handle(
+                1010.0,
+                Event::HttpResponse {
+                    request: write.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body: r#"{"success":false,"code":-1003,"message":"too many"}"#,
+                    },
+                },
+            );
+            let a = e.drain_actions().collect::<Vec<_>>();
+            let error = failure(&a);
+            assert_eq!(
+                (error.kind, error.outcome, error.venue_code.as_deref()),
+                (
+                    Some(ErrorKind::RateLimited),
+                    Some(Outcome::Unknown),
+                    Some("-1003")
+                )
+            );
+            assert!(
+                !a.iter()
+                    .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+            );
+        }
+    }
+}
+
+#[test]
 fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let unknown = (None, Some(Outcome::Unknown));
@@ -930,7 +1582,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             r#"{"success":false,"code":-1003,"message":"too many"}"#,
-            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
         ),
         (
             200,

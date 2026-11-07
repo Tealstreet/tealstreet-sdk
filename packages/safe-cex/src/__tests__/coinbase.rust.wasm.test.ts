@@ -14,6 +14,8 @@ import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderType, OrderTimeInForce } from '../types';
+import { coinbaseDrbPublicResponse } from './support/coinbaseDrb';
+import { prepareRecordedHttp } from './support/managedHttp';
 
 const names: ExchangeName[] = ['coinbase', 'coinbasespot'];
 const keyName = 'organizations/documented/apiKeys/sdk-fixture';
@@ -45,6 +47,7 @@ const transport = (profile: 'spot' | 'cfm' = 'spot') => {
   const response = (body: unknown, status = 200) => ({ status, body: new TextEncoder().encode(JSON.stringify(body)) });
   const native: Transport = {
     now: Date.now,
+    prepareHttp: prepareRecordedHttp,
     connect(url, handlers) {
       setTimeout(handlers.onOpen, 0);
       return { send(text) { subscriptions.push({ url, message: JSON.parse(text) }); }, close() {} };
@@ -53,6 +56,7 @@ const transport = (profile: 'spot' | 'cfm' = 'spot') => {
       requests.push(request);
       const parsed = new URL(request.url);
       const path = parsed.pathname;
+      if (parsed.hostname === 'drb.coinbase.com') return coinbaseDrbPublicResponse(request);
       if (request.method === 'POST' && path.endsWith('/orders'))
         return response({ success: true, success_response: { order_id: '9007199254740995' } });
       if (request.method === 'POST' && path.endsWith('/batch_cancel')) {
@@ -378,7 +382,8 @@ describe('retained Coinbase Rust family oracle', () => {
     expect(tape.requests.length).toBeGreaterThan(0);
     expect(tape.requests.every((r) => name === 'coinbasespot'
       ? new URL(r.url).pathname.startsWith('/api/v3/brokerage/market/')
-      : new URL(r.url).hostname === 'api.international.coinbase.com')).toBe(true);
+      : new URL(r.url).origin === 'https://drb.coinbase.com'
+        && ['/api/v2/public/get_instruments', '/api/v2/public/get_book_summary_by_currency'].includes(new URL(r.url).pathname))).toBe(true);
     expect(tape.requests.every((r) => r.headers.Authorization === undefined)).toBe(true);
     expect(tape.subscriptions.every((s) => !s.url.includes('-ws-user.') && s.message.jwt === undefined)).toBe(true);
     await expect(exchange.getAccount()).rejects.toThrow(/private portfolio ID is unavailable/);

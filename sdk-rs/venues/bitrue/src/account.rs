@@ -2305,3 +2305,14 @@ impl Bitrue {
 fn private_diagnostic(message: &str, code: Option<i64>) -> String {
     code.map_or_else(|| message.into(), |code| format!("{message} (code {code})"))
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Snapshot { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { lookup: None, .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}

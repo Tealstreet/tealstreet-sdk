@@ -671,7 +671,7 @@ fn venue_headers(name: &str, o: &RoutingInputs) -> BTreeMap<String, String> {
 }
 
 fn proxy_authorization_header(name: &str) -> &'static str {
-    if matches!(name, "grvt" | "mexc" | "paradex" | "breakoutprop") {
+    if matches!(name, "grvt" | "mexc" | "paradex") {
         "Tealstreet-Authorization"
     } else {
         "Authorization"
@@ -897,6 +897,7 @@ pub fn resolve_routing_plan(
         public_http: if binance { Some(http(true)?) } else { None },
         read_http: None,
         read_public_http: None,
+        public_read_http: None,
         read_header: None,
         read_public: false,
         public_cors_http,

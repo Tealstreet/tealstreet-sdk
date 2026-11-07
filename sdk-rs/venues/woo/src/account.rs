@@ -12,6 +12,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Fill, Method, OrderSnapshotToken, Response, SocketId,
     TimerId, VenueError, num,
@@ -103,7 +104,7 @@ impl Skipped {
             format!(
                 "WOO {kind}: skipped {} unmappable row(s) [{}]",
                 rows.count(),
-                rows.ids().join(", ")
+                rows.ids().join_with(", ")
             )
         })
     }
@@ -323,7 +324,7 @@ struct Leverage<'a> {
     #[serde(borrow)]
     symbol: Str<'a>,
     #[serde(borrow)]
-    margin_mode: Str<'a>,
+    margin_mode: Option<Str<'a>>,
     #[serde(borrow)]
     position_mode: Str<'a>,
     #[serde(borrow)]
@@ -521,6 +522,7 @@ impl Woo {
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
         leverage: f64,
+        margin_type: Option<MarginType>,
         revision: u64,
     ) {
         if self.account_revision(symbol) > revision {
@@ -531,7 +533,10 @@ impl Woo {
         self.account.metadata_at.insert(symbol.into(), cx.now);
         cx.store.update_setting(symbol, |s| {
             s.leverage = leverage;
-            s.margin_type = Some(MarginType::Cross);
+            // A leverage-only response cannot confirm a margin-mode change.
+            if let Some(margin_type) = margin_type {
+                s.margin_type = Some(margin_type);
+            }
             s.buy_leverage = Some(leverage);
             s.sell_leverage = Some(leverage);
         });
@@ -745,7 +750,15 @@ impl Woo {
         let c = &mut self.account.connection;
         c.open = true;
         c.ping_at = cx.now;
-        let Some(text) = crate::sign::websocket_auth(&self.options, cx.now) else {
+        if let Some(identity) = &self.options.credentials {
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(crate::sign::dispatch::WsAuth::new(identity.clone(), socket)),
+            );
+            return true;
+        }
+        let Some(text) = crate::sign::websocket_auth(&self.options, cx.protocol_now()) else {
             return true;
         };
         cx.send(socket, text);
@@ -1534,7 +1547,10 @@ impl Woo {
                 let result = match parsed {
                     Ok(data) => {
                         let scoped = data.symbol == native(cx.store.market(&symbol).unwrap())
-                            && data.margin_mode == "CROSS"
+                            && data
+                                .margin_mode
+                                .as_deref()
+                                .is_none_or(|mode| mode == "CROSS")
                             && data.position_mode == "ONE_WAY"
                             && data.details.len() == 1;
                         let selected = scoped
@@ -1546,12 +1562,17 @@ impl Woo {
                                     cx,
                                     &symbol,
                                     detail.leverage,
+                                    data.margin_mode.as_ref().map(|_| MarginType::Cross),
                                     revision,
                                 );
                             }
                             let setting = cx.store.setting(&symbol).unwrap_or_default();
+                            let margin = data
+                                .margin_mode
+                                .as_ref()
+                                .map_or("", |_| r#","marginType":"cross""#);
                             Ok(format!(
-                                r#"{{"buyLeverage":{},"sellLeverage":{},"marginType":"cross"}}"#,
+                                r#"{{"buyLeverage":{},"sellLeverage":{}{margin}}}"#,
                                 num::format(setting.buy_leverage.unwrap_or(setting.leverage)),
                                 num::format(setting.sell_leverage.unwrap_or(setting.leverage))
                             ))
@@ -1978,5 +1999,17 @@ impl Woo {
             return true;
         }
         false
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Info { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }

@@ -1,3 +1,4 @@
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
@@ -53,7 +54,7 @@ export function readBitgetPairedEvidence(directory) {
   const cohorts = BITGET_COHORT_ORDER.map((arm, index) => {
     const prefix = `${String(index + 1).padStart(2, '0')}-${arm}`;
     const reportBytes = jsonText(`${prefix}/gate.json`), report = parseCohortJson(reportBytes);
-    insist(Array.isArray(report.artifacts) && report.artifacts.length === 20, 'incomplete replay inventory');
+    insist(Array.isArray(report.artifacts) && report.artifacts.length === 2 + 2 * PUBLIC_REPLAY_PAIRS, 'incomplete replay inventory');
     const names = new Set();
     const raw = report.artifacts.map(({ impl, mode, run, path }) => {
       insist(typeof path === 'string' && path && !path.includes('\\') && !path.includes('\0'), 'invalid raw path');

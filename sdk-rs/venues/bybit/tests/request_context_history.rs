@@ -245,3 +245,83 @@ fn a_walk_longer_than_the_context_capacity_keeps_paging() {
     assert!(pages > 256, "{pages} pages");
     assert_eq!(h.result(69), Some(&Ok("[]".to_owned())));
 }
+
+#[test]
+fn terminal_order_status_reads_share_the_original_caller_deadline() {
+    let mut h = ready(true);
+    h.command_waiting(
+        Command::Query {
+            command: 70,
+            query: Query::OrderHistory {
+                symbol: Some("BTCUSDT".into()),
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        },
+        5_000,
+    );
+    let default = h.take("/v5/order/history");
+    h.advance(2_000.0);
+    h.reply(default.id, 200, EMPTY);
+    let cancelled = h.take("orderStatus=Cancelled");
+    assert_eq!(cancelled.timeout_ms, Some(3_000));
+    assert_eq!(
+        Harness::header(&cancelled, "X-BAPI-API-KEY").as_deref(),
+        Some("read-key")
+    );
+    h.advance(2_000.0);
+    h.reply(cancelled.id, 200, EMPTY);
+    let rejected = h.take("orderStatus=Rejected");
+    assert_eq!(rejected.timeout_ms, Some(1_000));
+    h.advance(1_000.0);
+    h.reply(rejected.id, 200, EMPTY);
+    assert_eq!(failure(&h, 70).kind, Some(ErrorKind::Timeout));
+    assert!(!h.has_request("/v5/order/history"));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 70).count(), 1);
+}
+
+#[test]
+fn order_history_pacing_is_shared_across_commands_without_delaying_account_reads() {
+    let mut h = ready(false);
+    for command in [71, 72] {
+        h.command(Command::Query {
+            command,
+            query: Query::OrderHistory {
+                symbol: Some("BTCUSDT".into()),
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        });
+    }
+    let first = h.take("/v5/order/history");
+    assert!(
+        !h.has_request("/v5/order/history"),
+        "only one physical release in the first slot"
+    );
+    h.command(Command::Venue {
+        command: 73,
+        action: VenueAction::FetchClosedPositions {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+        },
+    });
+    assert!(
+        h.has_request("/v5/position/closed-pnl"),
+        "independent account reads do not share the history clock"
+    );
+    h.advance(249.0);
+    assert!(!h.has_request("/v5/order/history"));
+    h.advance(1.0);
+    let second = h.take("/v5/order/history");
+    h.reply(first.id, 200, EMPTY);
+    assert!(
+        !h.has_request("orderStatus=Cancelled"),
+        "the next status uses the same physical budget"
+    );
+    h.advance(250.0);
+    assert!(h.has_request("orderStatus=Cancelled"));
+    assert_ne!(first.id, second.id);
+}

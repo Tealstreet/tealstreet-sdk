@@ -33,6 +33,14 @@ fn ready_with(options: Options) -> Harness {
 }
 
 fn ready_listing(options: Options, open_orders: &str) -> Harness {
+    ready_listing_with_instruments(options, open_orders, None)
+}
+
+fn ready_listing_with_instruments(
+    options: Options,
+    open_orders: &str,
+    instruments_override: Option<String>,
+) -> Harness {
     let variant = options.variant;
     let mut h = Harness::started(options);
     if h.has_request("/v5/account/info") {
@@ -55,7 +63,11 @@ fn ready_listing(options: Options, open_orders: &str) -> Harness {
     } else {
         support::INSTRUMENTS.to_owned()
     };
-    h.respond("/v5/market/instruments-info", 200, &instruments);
+    h.respond(
+        "/v5/market/instruments-info",
+        200,
+        &instruments_override.unwrap_or(instruments),
+    );
     let tickers = if variant.is_inverse() {
         support::TICKERS
             .replace("BTCUSDT", "BTCUSD")
@@ -158,6 +170,112 @@ fn place(h: &mut Harness, command: u32, orders: Vec<PlaceOrderOpts>) {
 }
 fn body(request: &HttpRequest) -> &str {
     request.body.as_deref().unwrap()
+}
+
+#[test]
+fn managed_split_market_close_accepts_server_echoes_without_caller_ids() {
+    // Preserve two and three children under the 500-unit market cap.
+    for (amount, count) in [(900.0, 2), (1400.0, 3)] {
+        let mut h = ready(Variant::Demo);
+        let mut opts = order("BTCUSDT", amount);
+        opts.kind = OrderType::Market;
+        opts.reduce_only = Some(true);
+        place(&mut h, 130, vec![opts]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let children = sent["request"].as_array().unwrap();
+        assert_eq!(children.len(), count);
+        assert!(
+            children
+                .iter()
+                .all(|child| child["reduceOnly"] == true && child.get("orderLinkId").is_none())
+        );
+        let ids: Vec<String> = (0..count).map(|index| format!("native-{index}")).collect();
+        let results: Vec<_> = ids
+            .iter()
+            .map(|id| serde_json::json!({"orderId":id,"orderLinkId":format!("server-{id}")}))
+            .collect();
+        let statuses: Vec<_> = ids
+            .iter()
+            .map(|_| serde_json::json!({"code":0,"msg":"OK"}))
+            .collect();
+        h.reply(request.id, 200, &serde_json::json!({"retCode":0,"result":{"list":results},"retExtInfo":{"list":statuses}}).to_string());
+        assert_eq!(
+            h.result(130),
+            Some(&Ok(serde_json::to_string(&ids).unwrap()))
+        );
+        assert!(!h.unknown.contains(&130));
+        assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+#[test]
+fn managed_create_batch_conflicting_echoes_remain_unknown_without_publication_or_resend() {
+    for (first_echo, second_echo, requested) in [
+        ("caller-b", "caller-b", Some("caller-b")),
+        ("caller-b", "", Some("caller-b")),
+        ("same", "same", None),
+    ] {
+        let mut h = ready(Variant::Demo);
+        let mut second = order("BTCUSDT", 0.02);
+        second.client_order_id = requested.map(str::to_owned);
+        place(&mut h, 132, vec![order("BTCUSDT", 0.01), second]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        h.reply(request.id, 200, &serde_json::json!({"retCode":0,"result":{"list":[
+            {"orderId":"first","orderLinkId":first_echo},{"orderId":"second","orderLinkId":second_echo}
+        ]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}).to_string());
+        assert!(h.result(132).unwrap().is_err());
+        assert!(h.unknown.contains(&132));
+        assert!(h.engine.store().order("first").is_none());
+        assert!(h.engine.store().order("second").is_none());
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(!h.has_request("/v5/order/create-batch"));
+    }
+}
+
+#[test]
+fn managed_unproven_create_batch_reports_redacted_child_shape_without_values() {
+    let mut h = ready(Variant::Demo);
+    place(
+        &mut h,
+        131,
+        vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
+    );
+    resolve_mode(&mut h, "BTCUSDT");
+    let request = h.take("/v5/order/create-batch");
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"PRIVATE_NATIVE","orderLinkId":"PRIVATE_LINK"},{"orderId":"SECOND_NATIVE"}]},"retExtInfo":{"list":[{"code":0,"msg":"PRIVATE_MESSAGE"},{"code":10001,"msg":"PRIVATE_REASON"}]}}"#);
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 131,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["PRIVATE_NATIVE", "SECOND_NATIVE"]
+    );
+    let error = &error.message;
+    assert!(error.contains("result.list=array/2"), "{error}");
+    assert!(error.contains("retExtInfo.list=array/2"), "{error}");
+    assert!(error.contains("code=10001"), "{error}");
+    for secret in [
+        "PRIVATE_NATIVE",
+        "PRIVATE_LINK",
+        "SECOND_NATIVE",
+        "PRIVATE_MESSAGE",
+        "PRIVATE_REASON",
+    ] {
+        assert!(!error.contains(secret), "{error}");
+    }
+    assert!(h.unknown.contains(&131));
+    assert!(!h.has_request("/v5/order/create"));
 }
 /// D2: an absent-order answer is no Cancelled transition; the engine's one
 /// reconcile order read decides. Answer it (empty: the rows are gone).
@@ -2420,11 +2538,11 @@ fn managed_create_batch_native_shapes_are_validated_before_any_local_publication
     ];
     for (case, reply) in replies.into_iter().enumerate() {
         let mut h = ready(Variant::Demo);
-        place(
-            &mut h,
-            96,
-            vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
-        );
+        let mut first = order("BTCUSDT", 0.01);
+        if case == 4 {
+            first.client_order_id = Some("requested-echo".into());
+        }
+        place(&mut h, 96, vec![first, order("BTCUSDT", 0.02)]);
         resolve_mode(&mut h, "BTCUSDT");
         let create = h.take("/v5/order/create-batch");
         h.reply(create.id, 200, &reply);
@@ -4022,4 +4140,1147 @@ fn a_spot_read_shows_rows_that_carry_no_category_of_their_own() {
         r#"{"retCode":0,"retMsg":"OK","result":{"category":"spot","nextPageCursor":"","list":[{"symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderId":"s1","orderStatus":"New","price":"100","qty":"1","leavesQty":"1","cumExecQty":"0","createdTime":"1671999000000"}]}}"#,
     );
     assert!(h.engine.store().order("s1").is_some());
+}
+
+fn managed_cancel_pair(reply: &str) -> Harness {
+    let mut h = ready(Variant::Demo);
+    let row = r#"{"symbol":"BTCUSDT","orderId":"one","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}"#;
+    h.message(
+        "/v5/private",
+        &format!(
+            r#"{{"topic":"order","data":[{},{}]}}"#,
+            row,
+            row.replace("one", "two")
+        ),
+    );
+    h.command(Command::CancelOrders {
+        command: 120,
+        ids: vec!["one".into(), "two".into()],
+    });
+    let request = h.take("/v5/order/cancel-batch");
+    h.reply(request.id, 200, reply);
+    h
+}
+
+#[test]
+fn managed_cancel_batch_reordered_echoes_resolve_without_a_false_unknown() {
+    let h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"two","orderLinkId":""},{"orderId":"one","orderLinkId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":0,"msg":"OK"}]}}"#,
+    );
+    assert_eq!(h.result(120), Some(&Ok("[]".into())));
+    for id in ["one", "two"] {
+        assert!(h.engine.store().order(id).is_none());
+    }
+    assert!(!h.unknown.contains(&120));
+    assert!(!h.has_request("/v5/order/cancel-batch"));
+}
+
+#[test]
+fn managed_cancel_batch_reordered_partial_success_only_retires_the_accepted_order() {
+    let h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"two"},{"orderId":"one"}]},"retExtInfo":{"list":[{"code":10005,"msg":"permission denied"},{"code":0,"msg":"OK"}]}}"#,
+    );
+    assert!(h.result(120).unwrap().is_err());
+    assert!(h.engine.store().order("one").is_none());
+    assert_eq!(
+        h.engine.store().order("two").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    assert!(
+        !h.unknown.contains(&120),
+        "a proven refusal stays a refusal"
+    );
+    assert!(!h.has_request("/v5/order/cancel-batch"));
+}
+
+#[test]
+fn managed_cancel_batch_anonymous_already_gone_row_waits_for_reconciliation() {
+    let mut h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"one"},{"orderId":"","orderLinkId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110001,"msg":"order not exists"}]}}"#,
+    );
+    assert_eq!(h.result(120), Some(&Ok("[]".into())));
+    assert!(h.engine.store().order("one").is_none());
+    assert!(
+        h.engine.store().order("two").is_some(),
+        "absence code does not fabricate a cancellation event"
+    );
+    answer_reconcile(&mut h);
+    assert!(h.engine.store().order("two").is_none());
+    assert!(!h.unknown.contains(&120));
+}
+
+#[test]
+fn managed_single_cancel_batch_accepts_a_single_status_with_an_empty_identity() {
+    for variant in [Variant::Linear, Variant::Demo] {
+        let mut h = ready(variant);
+        h.message("/v5/private", r#"{"topic":"order","data":[{"symbol":"BTCUSDT","orderId":"one","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+        h.command(Command::CancelOrders {
+            command: 121,
+            ids: vec!["one".into()],
+        });
+        h.respond("/v5/order/cancel-batch", 200, r#"{"retCode":0,"result":{"list":[{"orderId":"","orderLinkId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+        assert_eq!(h.result(121), Some(&Ok("[]".into())));
+        assert!(!h.unknown.contains(&121));
+    }
+}
+
+#[test]
+fn managed_cancel_batch_unproven_reply_is_actionable_and_diagnoses_shape_without_values() {
+    let h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"one","orderLinkId":"private-client-needle"},{"orderId":"two"}]},"retExtInfo":{"list":[{"code":0,"msg":"private-status-needle"}]}}"#,
+    );
+    let error = h.result(120).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("check open orders on Bybit before retrying"));
+    assert!(error.contains("targets=2; result.list=array/2; retExtInfo.list=array/1"));
+    assert!(!error.contains("private-client-needle"));
+    assert!(!error.contains("private-status-needle"));
+    for id in ["one", "two"] {
+        assert!(h.engine.store().order(id).is_some());
+    }
+    assert!(h.unknown.contains(&120));
+    assert!(!h.has_request("/v5/order/cancel-batch"));
+}
+
+#[test]
+fn managed_cancel_batch_foreign_duplicate_and_ambiguous_echoes_leave_live_orders_unchanged() {
+    for list in [
+        r#"[{"orderId":"one"},{"orderId":"one"}]"#,
+        r#"[{"orderId":"foreign"},{"orderId":"two"}]"#,
+        r#"[{},{}]"#,
+    ] {
+        assert_invalid_managed_cancel_batch_preserves_rows(&format!(
+            r#"{{"retCode":0,"result":{{"list":{list}}},"retExtInfo":{{"list":[{{"code":0}},{{"code":0}}]}}}}"#
+        ));
+    }
+}
+
+#[test]
+fn managed_single_cancel_batch_already_gone_empty_list_is_satisfied_after_a_fresh_read() {
+    for code in [110001, 170213] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", r#"{"topic":"order","data":[{"symbol":"BTCUSDT","orderId":"one","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+        h.command(Command::CancelOrders {
+            command: 122,
+            ids: vec!["one".into()],
+        });
+        h.respond("/v5/order/cancel-batch", 200, &format!(r#"{{"retCode":0,"result":{{"list":[]}},"retExtInfo":{{"list":[{{"code":{code},"msg":"order does not exist"}}]}}}}"#));
+        assert_eq!(h.result(122), Some(&Ok("[]".into())));
+        assert_eq!(
+            h.engine.store().order("one").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+        answer_reconcile(&mut h);
+        assert!(h.engine.store().order("one").is_none());
+        assert!(!h.unknown.contains(&122));
+        assert!(!h.has_request("/v5/order/cancel-batch"));
+    }
+}
+
+/// An Unknown placement on Bybit Inverse fences its symbol until the engine's
+/// reconcile reads the INVERSE category's orders and the clean read releases it
+/// (one user hit the fence on bybitinverse; the fence must not outlive the read).
+#[test]
+fn an_unknown_inverse_placement_reconciles_on_the_inverse_category_and_releases() {
+    let mut h = ready(Variant::Inverse);
+    place(&mut h, 1, vec![order("BTCUSD", 10.0)]);
+    resolve_mode(&mut h, "BTCUSD");
+    let write = h.take("/v5/order/create-batch");
+    assert!(body(&write).contains("\"category\":\"inverse\""));
+    h.event(Event::HttpFailed {
+        request: write.id,
+        error: "connection reset",
+    });
+    // The reconcile read is the inverse product's own.
+    let reads: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .cloned()
+        .collect();
+    assert!(!reads.is_empty(), "the seal's reconcile read");
+    assert!(
+        reads.iter().all(|r| r.url.contains("category=inverse")),
+        "{:?}",
+        reads.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    // Fenced until it answers.
+    place(&mut h, 2, vec![order("BTCUSD", 10.0)]);
+    assert!(
+        h.result(2)
+            .is_some_and(|r| r.as_ref().is_err_and(|e| e.contains("uncertain"))),
+        "{:?}",
+        h.result(2)
+    );
+    assert!(!h.has_request("/v5/order/create-batch"));
+    for read in reads {
+        h.reply(read.id, 200, EMPTY);
+    }
+    place(&mut h, 3, vec![order("BTCUSD", 10.0)]);
+    while h.has_request("/v5/position/list") {
+        resolve_mode(&mut h, "BTCUSD");
+    }
+    assert!(
+        h.has_request("/v5/order/create-batch"),
+        "the clean inverse read releases the fence: {:?}",
+        h.result(3)
+    );
+}
+
+// The November 12 default-history change also affects link-filtered lookups.
+fn answer_terminal_link(h: &mut Harness, id: &str, status: &str) {
+    let filter = format!("orderLinkId={id}");
+    for expected in [
+        None,
+        None,
+        Some("Cancelled"),
+        Some("Rejected"),
+        Some("Deactivated"),
+    ] {
+        let read = h.take(&filter);
+        assert!(read.url.starts_with("https://hyro.example/"));
+        match expected {
+            None => assert!(!read.url.contains("orderStatus=")),
+            Some(value) => assert!(read.url.contains(&format!("orderStatus={value}"))),
+        }
+        assert!(!h.has_request("/v5/order/create"));
+        if expected == Some(status) {
+            h.reply(read.id, 200, &lookup_row(id, status));
+            return;
+        }
+        h.reply(read.id, 200, EMPTY);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "empty earlier axis is no proof"
+        );
+    }
+    panic!("terminal status was not queried");
+}
+
+#[test]
+fn hyro_background_explicit_terminal_history_preserves_original_identity() {
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        answer_terminal_link(&mut h, &id, status);
+        assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+        assert!(!h.has_request("/v5/order/create"));
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        if status == "Rejected" {
+            assert_ne!(
+                link(&h.take("/v5/order/create")),
+                id,
+                "positive rejection remints"
+            );
+        } else {
+            assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+            assert!(!h.has_request("/v5/order/create"));
+            assert!(h.engine.store().order("recovered").is_none());
+        }
+    }
+}
+
+#[test]
+fn hyro_preflight_explicit_terminal_history_preserves_original_identity() {
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        answer_terminal_link(&mut h, &id, status);
+        if status == "Rejected" {
+            assert_ne!(
+                link(&h.take("/v5/order/create")),
+                id,
+                "positive rejection remints"
+            );
+        } else {
+            assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+            assert!(!h.has_request("/v5/order/create"));
+        }
+    }
+}
+
+#[test]
+fn hyro_terminal_history_failure_never_proves_absence() {
+    for body in [
+        "unavailable",
+        r#"{"retCode":0,"result":{"list":[],"nextPageCursor":"more"}}"#,
+    ] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+        h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+        let terminal = h.take("orderStatus=Cancelled");
+        h.reply(terminal.id, 200, body);
+        assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(!h.has_request(&format!("orderLinkId={id}")));
+    }
+}
+
+#[test]
+fn hyro_explicit_terminal_reads_share_the_original_background_deadline() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    let started = h.now;
+    let filter = format!("orderLinkId={id}");
+    for _ in 0..4 {
+        let read = h.take(&filter);
+        h.advance(9_000.0);
+        h.reply(read.id, 200, EMPTY);
+    }
+    let last = h.take("orderStatus=Deactivated");
+    h.advance(started + 40_000.0 - h.now);
+    h.reply(last.id, 200, &lookup_row(&id, "Deactivated"));
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request(&filter),
+        "late DATA did not resolve the expired lookup"
+    );
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(h.result(2).is_none());
+}
+
+#[test]
+fn review_terminal_history_retention_expiry_is_not_complete_absence() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request("/v5/order/create"),
+        "initial create: {:?}",
+        h.done
+    );
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost after reaching venue",
+    });
+    h.respond(&format!("orderLinkId={id}"), 500, "lookup unavailable");
+    // The actual original order was Cancelled. All its status-filtered history
+    // axes cease returning it after the documented 24-hour retention window.
+    h.advance(24.0 * 60.0 * 60.0 * 1000.0 + 1.0);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    for op in ["auth", "subscribe"] {
+        let frame = h
+            .sent_on("/v5/private")
+            .into_iter()
+            .rev()
+            .find(|m| m.contains(&format!("\"op\":\"{op}\"")))
+            .unwrap();
+        let frame: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        h.message(
+            "/v5/private",
+            &serde_json::json!({"op":op,"success":true,"req_id":frame["req_id"]}).to_string(),
+        );
+    }
+    for (path, body) in [
+        ("/v5/order/realtime", EMPTY),
+        ("/v5/position/list", EMPTY),
+        ("/v5/account/wallet-balance", WALLET),
+    ] {
+        while h.has_request(path) {
+            h.respond(path, 200, body);
+        }
+    }
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request(&format!("orderLinkId={id}")),
+        "retry genuinely enters reconciliation"
+    );
+    while h.has_request(&format!("orderLinkId={id}")) {
+        h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+    }
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "expired terminal coverage cannot authorize a second physical create"
+    );
+    assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+    let error = h.result(2).unwrap().as_ref().unwrap_err();
+    assert!(
+        error.contains("24-hour") && error.contains("broker"),
+        "{error}"
+    );
+}
+
+#[test]
+fn review_extra_status_reads_cannot_create_after_the_original_caller_deadline() {
+    for wait in [120_000, 40_000] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+        let began = h.now;
+        h.engine
+            .handle_command(
+                h.now,
+                Command::PlaceOrders {
+                    command: 2,
+                    orders: vec![order("BTCUSDT", 1.0)],
+                },
+                Some(wait),
+            )
+            .unwrap();
+        h.collect();
+        for _ in 0..5 {
+            let filter = format!("orderLinkId={id}");
+            let read = h.has_request(&filter).then(|| h.take(&filter));
+            for _ in 0..2 {
+                h.advance(9_500.);
+                h.message("/v5/private", r#"{"op":"pong"}"#);
+                for (path, body) in [
+                    ("/v5/order/realtime", EMPTY),
+                    ("/v5/position/list", EMPTY),
+                    ("/v5/account/wallet-balance", WALLET),
+                ] {
+                    loop {
+                        let next = h
+                            .requests
+                            .iter()
+                            .find(|r| r.url.contains(path) && !r.url.contains("orderLinkId="))
+                            .map(|r| r.id);
+                        let Some(id) = next else {
+                            break;
+                        };
+                        h.requests.retain(|r| r.id != id);
+                        h.reply(id, 200, body);
+                    }
+                }
+            }
+            if let Some(read) = read {
+                h.reply(read.id, 200, EMPTY);
+            }
+        }
+        assert_eq!(h.now - began, 95_000.);
+        if wait == 40_000 {
+            assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+            assert!(
+                h.notices.iter().any(|notice| matches!(notice,
+                    safe_cex_engine::Notice::CommandFailed { command: 2, error }
+                    if error.kind == Some(safe_cex_engine::ErrorKind::Timeout)
+                )),
+                "expiry keeps its typed Timeout cause"
+            );
+            assert!(
+                h.result(2).unwrap().is_err(),
+                "expired caller is visibly settled"
+            );
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 2).count(), 1);
+        }
+        let late = h
+            .requests
+            .iter()
+            .find(|r| r.url.contains("/v5/order/create"));
+        assert_eq!(
+            late.is_some(),
+            wait == 120_000,
+            "caller wait={wait},elapsed95s; create link={:?}, result={:?}",
+            late.map(link),
+            h.result(2)
+        );
+    }
+}
+
+#[test]
+fn review_every_incomplete_axis_fails_closed_for_both_lookup_owners() {
+    for preflight in [false, true] {
+        for axis in 0..5 {
+            for body in [
+                r#"{"retCode":0,"result":{"list":[],"nextPageCursor":"more"}}"#,
+                r#"{"retCode":0,"result":{"list":null}}"#,
+                r#"{"retCode":0,"result":{}}"#,
+                r#"{"retCode":10001,"result":{"list":[]}}"#,
+            ] {
+                let mut h = ready(Variant::Hyrotrader);
+                place(&mut h, 1, vec![order("BTCUSDT", 1.)]);
+                let create = h.take("/v5/order/create");
+                let id = link(&create);
+                h.event(Event::HttpFailed {
+                    request: create.id,
+                    error: "lost",
+                });
+                if preflight {
+                    h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+                    place(&mut h, 2, vec![order("BTCUSDT", 1.)]);
+                }
+                for _ in 0..axis {
+                    h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+                    assert!(!h.has_request("/v5/order/create"));
+                }
+                h.respond(&format!("orderLinkId={id}"), 200, body);
+                assert!(
+                    !h.has_request("/v5/order/create"),
+                    "preflight={preflight} axis={axis} body={body}"
+                );
+                assert!(
+                    !h.has_request(&format!("orderLinkId={id}")),
+                    "incomplete axis stops the walk"
+                );
+                assert_eq!(
+                    outcome(&h, if preflight { 2 } else { 1 }),
+                    Some(safe_cex_engine::Outcome::Unknown)
+                );
+            }
+        }
+    }
+}
+
+fn retained_hyro_link_after(age_ms: f64) -> (Harness, String) {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost after dispatch",
+    });
+    h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+    h.advance(age_ms);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    for op in ["auth", "subscribe"] {
+        let frame = h
+            .sent_on("/v5/private")
+            .into_iter()
+            .rev()
+            .find(|m| m.contains(&format!("\"op\":\"{op}\"")))
+            .unwrap();
+        let frame: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        h.message(
+            "/v5/private",
+            &serde_json::json!({"op":op,"success":true,"req_id":frame["req_id"]}).to_string(),
+        );
+    }
+    for (path, body) in [
+        ("/v5/order/realtime", EMPTY),
+        ("/v5/position/list", EMPTY),
+        ("/v5/account/wallet-balance", WALLET),
+    ] {
+        while h.has_request(path) {
+            h.respond(path, 200, body);
+        }
+    }
+    (h, id)
+}
+
+#[test]
+fn hyro_absence_coverage_expires_at_equality_and_when_the_last_axis_crosses_it() {
+    let day = 86_400_000.0;
+    for (age, last_delay, may_create) in [
+        (day - 1.0, 0.0, true),
+        (day, 0.0, false),
+        (day - 1.0, 1.0, false),
+    ] {
+        let (mut h, id) = retained_hyro_link_after(age);
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        for axis in 0..5 {
+            let read = h.take(&format!("orderLinkId={id}"));
+            if axis == 4 {
+                h.advance(last_delay);
+            }
+            h.reply(read.id, 200, EMPTY);
+        }
+        assert_eq!(
+            h.has_request("/v5/order/create"),
+            may_create,
+            "age={age} delay={last_delay}"
+        );
+        if !may_create {
+            assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+            assert!(
+                h.result(2)
+                    .unwrap()
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("24-hour")
+            );
+        }
+    }
+}
+
+#[test]
+fn hyro_positive_terminal_evidence_still_resolves_expired_absence_coverage() {
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let (mut h, id) = retained_hyro_link_after(86_400_001.0);
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        answer_terminal_link(&mut h, &id, status);
+        if status == "Rejected" {
+            assert_ne!(
+                link(&h.take("/v5/order/create")),
+                id,
+                "positive rejection retains remint"
+            );
+        } else {
+            assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+            assert!(!h.has_request("/v5/order/create"));
+        }
+    }
+}
+
+#[test]
+fn hyro_a_second_send_cannot_renew_the_earliest_send_retention_window() {
+    let (mut h, id) = retained_hyro_link_after(86_399_999.0);
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    answer_link_absent(&mut h, &id);
+    let second = h.take("/v5/order/create");
+    assert_eq!(link(&second), id);
+    h.event(Event::HttpFailed {
+        request: second.id,
+        error: "second acknowledgement lost",
+    });
+    h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+    h.advance(2.0);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    answer_link_absent(&mut h, &id);
+    assert!(!h.has_request("/v5/order/create"));
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        h.result(3)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("24-hour"),
+        "coverage is measured from the first send, not the second"
+    );
+}
+
+#[test]
+fn market_quantity_cap_splits_each_reduce_only_child_but_keeps_the_limit_cap() {
+    for (kind, reduce_only, expected) in [
+        (OrderType::Market, false, vec![500.0, 500.0, 100.0]),
+        (OrderType::Market, true, vec![500.0, 500.0, 100.0]),
+        (OrderType::Limit, false, vec![1100.0]),
+    ] {
+        let mut h = ready(Variant::Demo);
+        let mut opts = order("BTCUSDT", 1100.0);
+        opts.kind = kind;
+        opts.reduce_only = Some(reduce_only);
+        place(&mut h, 1, vec![opts]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let children = payload["request"].as_array().unwrap();
+        let quantities: Vec<f64> = children
+            .iter()
+            .map(|child| child["qty"].as_str().unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(quantities, expected, "{kind:?}, reduceOnly={reduce_only}");
+        assert!(
+            children
+                .iter()
+                .all(|child| child["reduceOnly"] == reduce_only)
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .market("BTCUSDT")
+                .unwrap()
+                .limits
+                .amount
+                .max,
+            500.0
+        );
+    }
+}
+
+#[test]
+fn a_zero_market_only_cap_still_publishes_the_limit_maximum() {
+    let instrument = support::INSTRUMENTS.replace("500.000", "0");
+    assert!(instrument.contains("\"maxMktOrderQty\":\"0\""));
+    let h = ready_listing_with_instruments(options(Variant::Demo), EMPTY, Some(instrument));
+    assert_eq!(
+        h.engine
+            .store()
+            .market("BTCUSDT")
+            .unwrap()
+            .limits
+            .amount
+            .max,
+        1190.0
+    );
+}
+
+#[test]
+fn market_quantity_cap_never_exceeds_limit_cap_and_missing_field_keeps_limit_cap() {
+    for (instrument, expected) in [
+        (support::INSTRUMENTS.replace("500.000", "2000.000"), 1190.0),
+        (support::INSTRUMENTS.replace("500.000", "0"), 1190.0),
+        (support::INSTRUMENTS.replace("500.000", "-1"), 1190.0),
+        (
+            support::INSTRUMENTS.replace(",\"maxMktOrderQty\":\"500.000\"", ""),
+            1190.0,
+        ),
+    ] {
+        let mut h = ready_listing_with_instruments(options(Variant::Demo), EMPTY, Some(instrument));
+        assert_eq!(
+            h.engine
+                .store()
+                .market("BTCUSDT")
+                .unwrap()
+                .limits
+                .amount
+                .max,
+            expected
+        );
+        let mut opts = order("BTCUSDT", 1500.0);
+        opts.kind = OrderType::Market;
+        opts.reduce_only = Some(true);
+        place(&mut h, 1, vec![opts]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(
+            payload["request"][0]["qty"]
+                .as_str()
+                .unwrap()
+                .parse::<f64>()
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            payload["request"][1]["qty"]
+                .as_str()
+                .unwrap()
+                .parse::<f64>()
+                .unwrap(),
+            1500.0 - expected
+        );
+    }
+}
+
+#[test]
+fn market_quantity_cap_refuses_caller_identity_that_would_span_children() {
+    let mut h = ready(Variant::Demo);
+    let mut opts = order("BTCUSDT", 1100.0);
+    opts.kind = OrderType::Market;
+    opts.client_order_id = Some("cap-control".into());
+    place(&mut h, 1, vec![opts]);
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(
+        h.done
+            .iter()
+            .any(|(command, outcome)| *command == 1 && outcome.is_err())
+    );
+}
+
+#[test]
+fn spot_attached_take_profit_amend_omits_derivative_trigger_reference() {
+    let mut h = ready(Variant::Spot);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"spot","symbol":"BTCUSDT","orderId":"spot-parent","side":"Buy","orderType":"Limit","orderStatus":"New","qty":"1","price":"100","leavesQty":"1","takeProfit":"110","tpTriggerBy":"UNKNOWN"}]}"#);
+    assert!(h.engine.store().order("spot-parent__take_profit").is_some());
+    h.command(Command::AmendOrder {
+        command: 980,
+        id: "spot-parent__take_profit".into(),
+        price: Some(115.0),
+        amount: None,
+    });
+    let request = h.take("/v5/order/amend");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["category"], "spot");
+    assert_eq!(body["orderId"], "spot-parent");
+    assert_eq!(body["takeProfit"], "115");
+    assert!(
+        body.get("tpTriggerBy").is_none(),
+        "spot has no derivative trigger reference: {body}"
+    );
+    assert!(!h.has_request("/v5/order/cancel"));
+}
+
+#[test]
+fn spot_attached_stop_loss_amend_omits_derivative_trigger_reference() {
+    let mut h = ready(Variant::Spot);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"spot","symbol":"BTCUSDT","orderId":"spot-parent","side":"Buy","orderType":"Limit","orderStatus":"New","qty":"1","price":"100","leavesQty":"1","stopLoss":"90","slTriggerBy":"IndexPrice"}]}"#);
+    assert!(h.engine.store().order("spot-parent__stop_loss").is_some());
+    h.command(Command::AmendOrder {
+        command: 981,
+        id: "spot-parent__stop_loss".into(),
+        price: Some(85.0),
+        amount: None,
+    });
+    let request = h.take("/v5/order/amend");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["category"], "spot");
+    assert_eq!(body["orderId"], "spot-parent");
+    assert_eq!(body["stopLoss"], "85");
+    assert!(
+        body.get("slTriggerBy").is_none(),
+        "spot omits derivative reference: {body}"
+    );
+    assert!(!h.has_request("/v5/order/cancel"));
+}
+
+fn stop_row(trigger: &str, qty: &str) -> String {
+    format!(
+        r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"stop","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"Stop","triggerPrice":"{trigger}","triggerBy":"MarkPrice","side":"Sell","price":"0","qty":"{qty}","leavesQty":"{qty}","reduceOnly":true,"closeOnTrigger":true}}]}}"#
+    )
+}
+
+fn amend_stop(h: &mut Harness, command: u32, price: f64, amount: Option<f64>) -> String {
+    h.command(Command::AmendOrder {
+        command,
+        id: "stop".into(),
+        price: Some(price),
+        amount,
+    });
+    if h.has_request("/v5/position/list") {
+        resolve_mode(h, "BTCUSDT");
+    }
+    let request = h.take("/v5/order/amend");
+    let body = request.body.clone().unwrap_or_default();
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    body
+}
+
+/// A stop moved to the trigger it already has: Bybit answers "order not modified"
+/// (prod, release 7dd55432) and the edit is done, not an error.
+#[test]
+fn a_trigger_amend_equal_to_the_stored_stop_is_done_when_not_modified() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("60000", "1"));
+    let body = amend_stop(&mut h, 3, 60000.0, None);
+    assert!(body.contains(r#""triggerPrice":"60000""#), "{body}");
+    assert!(h.result(3).unwrap().is_ok(), "{:?}", h.result(3));
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("60000", "1"));
+    amend_stop(&mut h, 4, 60000.0, Some(1.0));
+    assert!(h.result(4).unwrap().is_ok(), "{:?}", h.result(4));
+}
+
+/// Anything the stored stop does not already hold stays Bybit's refusal.
+#[test]
+fn a_trigger_amend_that_differs_from_the_stored_stop_stays_refused() {
+    for (price, amount) in [(60100.0, None), (60000.0, Some(2.0))] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        amend_stop(&mut h, 5, price, amount);
+        let result = h.result(5).unwrap();
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.contains("order not modified")),
+            "{price} {amount:?}: {result:?}"
+        );
+    }
+}
+
+fn pending_trigger_amend(h: &mut Harness, price: f64) -> safe_cex_engine::HttpRequest {
+    h.command(Command::AmendOrder {
+        command: 87,
+        id: "stop".into(),
+        price: Some(price),
+        amount: None,
+    });
+    if h.has_request("/v5/position/list") {
+        resolve_mode(h, "BTCUSDT");
+    }
+    h.take("/v5/order/amend")
+}
+
+/// The no-op needs the whole answer to agree: another order's echo, an item row, or a
+/// server error keeps it the refusal it is.
+#[test]
+fn a_trigger_no_op_needs_a_clean_whole_answer() {
+    for (status, reply) in [
+        (
+            200,
+            r#"{"retCode":10001,"retMsg":"order not modified","result":{"orderId":"foreign"},"retExtInfo":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{"list":[{"code":10001,"msg":"invalid trigger"}]}}"#,
+        ),
+        (
+            500,
+            r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        let request = pending_trigger_amend(&mut h, 60000.0);
+        h.reply(request.id, status, reply);
+        assert!(
+            h.result(87).unwrap().is_err(),
+            "{reply}: {:?}",
+            h.result(87)
+        );
+    }
+}
+
+/// Only a trigger-bearing row stores its trigger: once the same id is an open limit
+/// (it triggered), its execution price is never trigger proof.
+#[test]
+fn a_trigger_no_op_never_reads_an_active_limits_price_as_its_trigger() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("59000", "1"));
+    let request = pending_trigger_amend(&mut h, 60000.0);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"stop","orderStatus":"New","orderType":"Limit","stopOrderType":"UNKNOWN","triggerPrice":"0","side":"Sell","price":"60000","qty":"1","leavesQty":"1","reduceOnly":true,"closeOnTrigger":false}]}"#);
+    assert_eq!(
+        h.engine.store().order("stop").unwrap().kind,
+        OrderType::Limit
+    );
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    assert!(h.result(87).unwrap().is_err(), "{:?}", h.result(87));
+}
+
+/// The comparison reads the store when the answer lands: a stop moved meanwhile keeps
+/// the refusal.
+#[test]
+fn a_trigger_no_op_compares_the_store_as_it_stands_when_answered() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("60000", "1"));
+    let request = pending_trigger_amend(&mut h, 60000.0);
+    h.message("/v5/private", &stop_row("59000", "1"));
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    assert!(h.result(87).unwrap().is_err(), "{:?}", h.result(87));
+}
+
+fn not_modified_with(result: &str, ext: &str) -> String {
+    format!(
+        r#"{{"retCode":10001,"retMsg":"order not modified","result":{result},"retExtInfo":{ext}}}"#
+    )
+}
+
+/// Only a provably clean answer is a no-op: unreadable identities, duplicated native
+/// ids or item lists are never read as clean absence.
+#[test]
+fn a_trigger_no_op_rejects_unreadable_or_duplicated_answers() {
+    for (result, ext) in [
+        (r#"{"orderId":"foreign","orderLinkId":123}"#, "{}"),
+        (r#"{"orderId":"foreign","orderId":"stop"}"#, "{}"),
+        (r#"{"orderId":123}"#, "{}"),
+        (
+            "{}",
+            r#"{"list":[{"code":10001,"msg":"invalid trigger"}],"list":[]}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        let request = pending_trigger_amend(&mut h, 60000.0);
+        h.reply(request.id, 200, &not_modified_with(result, ext));
+        assert!(
+            h.result(87).unwrap().is_err(),
+            "{result} {ext}: {:?}",
+            h.result(87)
+        );
+    }
+}
+
+/// A clean empty answer, or one echoing only its own order, is still done.
+#[test]
+fn a_trigger_no_op_accepts_a_clean_empty_or_own_echo() {
+    for (result, ext) in [
+        ("{}", "{}"),
+        (r#"{"orderId":"stop"}"#, "{}"),
+        ("{}", r#"{"list":[]}"#),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        let request = pending_trigger_amend(&mut h, 60000.0);
+        h.reply(request.id, 200, &not_modified_with(result, ext));
+        assert!(
+            h.result(87).unwrap().is_ok(),
+            "{result} {ext}: {:?}",
+            h.result(87)
+        );
+    }
+}
+
+#[test]
+fn fast_713_second_clock_write_retry_is_re_signed_and_never_replayed_twice() {
+    let mut h = ready(Variant::Spot);
+    let initial_stamp = h.engine.signing_clock(h.now).0.floor();
+    place(&mut h, 601, vec![order("BTCUSDT", 0.1)]);
+    let first = h.take("/v5/order/create");
+    let server = initial_stamp - 713_451.;
+    let refusal = format!(
+        r#"{{"retCode":10002,"retMsg":"recv_window server_timestamp[{server}]","result":{{}}}}"#
+    );
+    h.reply(first.id, 200, &refusal);
+    let second = h.take("/v5/order/create");
+    assert_eq!(
+        Harness::header(&first, "X-BAPI-TIMESTAMP"),
+        Some(initial_stamp.to_string())
+    );
+    assert_eq!(
+        Harness::header(&second, "X-BAPI-TIMESTAMP"),
+        Some(server.to_string())
+    );
+    assert_ne!(
+        Harness::header(&first, "X-BAPI-SIGN"),
+        Harness::header(&second, "X-BAPI-SIGN")
+    );
+    let payload = format!(
+        "{}{}{}{}",
+        Harness::header(&second, "X-BAPI-TIMESTAMP").unwrap(),
+        Harness::header(&second, "X-BAPI-API-KEY").unwrap(),
+        Harness::header(&second, "X-BAPI-RECV-WINDOW").unwrap(),
+        second.body.as_deref().unwrap()
+    );
+    assert_eq!(
+        Harness::header(&second, "X-BAPI-SIGN"),
+        Some(safe_cex_crypto::hmac_sha256(
+            b"secret",
+            payload.as_bytes(),
+            safe_cex_crypto::Encoding::Hex
+        ))
+    );
+    assert_eq!(
+        second.body, first.body,
+        "same client-order identity and economics"
+    );
+    h.reply(second.id, 200, &refusal);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "a second refusal grants no third placement"
+    );
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 601).count(), 1);
+}
+
+#[test]
+fn ambiguous_clock_like_write_failures_never_calibrate_or_replay() {
+    for (status, body) in [
+        (
+            504,
+            r#"{"retCode":10002,"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10016,"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, 602, vec![order("BTCUSDT", 0.1)]);
+        let first = h.take("/v5/order/create");
+        let clock = h.engine.signing_clock(h.now);
+        h.reply(first.id, status, body);
+        assert_eq!(h.engine.signing_clock(h.now), clock);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "ambiguous answer cannot grant a resend"
+        );
+        assert!(h.unknown.contains(&602));
+        assert!(!h.notices.iter().any(
+            |n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == "bybit.clock.corrected")
+        ));
+    }
+}
+
+/// A dispatched placement can have landed despite an HTTP refusal and a
+/// timestamp/signature diagnostic. Only reads may resolve that uncertainty.
+#[test]
+fn ambiguous_http_clock_refusals_never_resend_spot_creates() {
+    const SPOT_EMPTY: &str =
+        r#"{"retCode":0,"result":{"category":"spot","list":[],"nextPageCursor":""}}"#;
+    for status in [429, 408, 500, 503, 504] {
+        for code in [10002, 10004] {
+            // Complete the startup census so the unknown write owes a new read.
+            let mut h = ready_listing(options(Variant::Spot), SPOT_EMPTY);
+            place(&mut h, 603, vec![order("BTCUSDT", 0.1)]);
+            let first = h.take("/v5/order/create");
+            let clock = h.engine.signing_clock(h.now);
+            let refusal = format!(
+                r#"{{"retCode":{code},"retMsg":"recv_window server_timestamp[1793989307022]","result":{{}}}}"#
+            );
+            h.reply(first.id, status, &refusal);
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|r| r.method == safe_cex_engine::Method::Get),
+                "HTTP {status}, native {code}: no second physical write: {:?}",
+                h.requests
+            );
+            assert!(h.unknown.contains(&603), "HTTP {status}, native {code}");
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 603).count(), 1);
+            assert_eq!(h.engine.signing_clock(h.now), clock);
+            assert!(h.has_request("/v5/order/realtime"), "reconcile by reading");
+            while h.has_request("/v5/order/realtime") {
+                h.respond("/v5/order/realtime", 200, EMPTY);
+            }
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|r| r.method == safe_cex_engine::Method::Get)
+            );
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 603).count(), 1);
+        }
+    }
+}
+
+#[test]
+fn engine_ambiguity_429_clock_code_cannot_replay() {
+    for (status, body) in [
+        (
+            429,
+            r#"{"retCode":10002,"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10016,"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, 602, vec![order("BTCUSDT", 0.1)]);
+        let first = h.take("/v5/order/create");
+        h.reply(first.id, status, body);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "ambiguous answer cannot grant a resend"
+        );
+        assert!(h.unknown.contains(&602));
+        assert!(!h.notices.iter().any(
+            |n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == "bybit.clock.corrected")
+        ));
+    }
 }

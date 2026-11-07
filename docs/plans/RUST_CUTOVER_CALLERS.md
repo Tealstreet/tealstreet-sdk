@@ -83,14 +83,13 @@ of saved accounts.
 | `woo` | Yes | TS default; WOO X, not Orderly `woofi`; keep WOO position-history adapter used by Rust. |
 | `polymarket` | Yes | TS default, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage; generic algorithm fixtures do not enable venue features. Prediction CLOB V2 outcome shares with typed prediction/holding metadata; native local-wallet signature types 0/1/2/3 and supplied/derived L2 credentials. Limit/GTC only; no client IDs, market/conditional/bracket/reduce-only orders, or generic fills/order-history/income/public-trades query claims. Preserve authoritative final-fill-safe cancel-replace and bounded sampled price history. Read [venue-ports/POLYMARKET.md](venue-ports/POLYMARKET.md) for exact auth/product/query scope; private tests use documented fixtures, not live-key proof. |
 | `grvt` | Yes | TS default; perpetual-only Rust catalog, with local EIP-712 signing (chains 325/326), API-key/session login, routed/direct private auth, subaccount discovery and mandatory builder authorization. Canonical caller IDs are decimal 1..2^63-1; limit/market/protective/bracket commands and final-fill-safe cancel-replace, one-way positions, real leverage reads/updates; margin-mode mutation unsupported. Bounded fills/history/funding/public-trade queries and definitive client-ID lookup, including the chaser fill-verification hook. Preserve public browser builder-authorization exports and signing/session routing. [Explicit retirement decision](GRVT_PRODUCTS_DECISION.md) resolves unexposed mapper-only Future/Call/Put paths; no future/options claim or TS deletion. Exact scope/evidence: [GRVT_RUST_PORT.md](GRVT_RUST_PORT.md). |
-| `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
 | `bitunix` | Yes | TS default; opt-in USDT futures. Closed-PnL rows stay TS only (no `closedPositions` capability). Scope and gate evidence: [RUST_BITUNIX.md](RUST_BITUNIX.md). |
 
 Every `ExchangeName` is in `RUST_VENUES`.
 Do not silently route a venue through another family's adapter.
 
-Native consumer proof includes both WebSocket venues and HTTP-polling venues.
-BreakoutProp starts the actual Rust engine with documented DXtrade session/
+Historical consumer proof for the venue retired on 2026-11-07:
+BreakoutProp started the actual Rust engine with documented DXtrade session/
 account/quote responses; it emits no venue socket frames. Its fixture proves
 polling dispatch, frame/store publication and consumer compatibility under that
 input. It is not a live credential capture or evidence that new proprietary
@@ -398,7 +397,7 @@ and renderer can keep stale book levels visible after disconnect.
 | Set | Names | Selection |
 | --- | --- | --- |
 | Rust by default (TS classes deleted) | `coinbase`, `coinbasespot`, `kodiakfi`, `mode`, `what`, `woofi`, `txflow` (testnet only) | `registry.ts`, `registry.native.ts`; no opt-in, every factory/worker/server/CLI/MCP path |
-| Rust adapter, TS default | `apexomni`, `asterdex`, `backpack`, `binance`, `binancepm`, `binancespot`, `binanceinverse`, `bingx`, `bitget`, `bitgetusdc`, `bitgetinverse`, `bitrue`, `blofin`, `breakoutprop`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader`, `cryptocom`, `grvt`, `hyperliquid`, `hyperliquidspot`, `kraken`, `krakenspot`, `kucoin`, `kucoinspot`, `lighter`, `lighter-robinhood`, `mexc`, `okx`, `okxeu`, `okxdemo`, `okxeudemo`, `paradex`, `phemex`, `polymarket`, `weex`, `woo`, `bitunix` | `ExchangeOptions.engine: 'rust'` in `createExchange`, `createExchangeFromAccount` overrides, `ExchangeWorker`; MCP `EXCHANGE_ENGINE=rust`. No tealstreet-next caller sets it today. No `'typescript'` value (Owner decision 4) |
+| Rust adapter, TS default | `apexomni`, `asterdex`, `backpack`, `binance`, `binancepm`, `binancespot`, `binanceinverse`, `bingx`, `bitget`, `bitgetusdc`, `bitgetinverse`, `bitrue`, `blofin`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader`, `cryptocom`, `grvt`, `hyperliquid`, `hyperliquidspot`, `kraken`, `krakenspot`, `kucoin`, `kucoinspot`, `lighter`, `lighter-robinhood`, `mexc`, `okx`, `okxeu`, `okxdemo`, `okxeudemo`, `paradex`, `phemex`, `polymarket`, `weex`, `woo`, `bitunix` | `ExchangeOptions.engine: 'rust'` in `createExchange`, `createExchangeFromAccount` overrides, `ExchangeWorker`; MCP `EXCHANGE_ENGINE=rust`. No tealstreet-next caller sets it today. No `'typescript'` value (Owner decision 4) |
 | TS only | `binanceoptions` (master-only, survives the merge) | |
 
 `ExchangeName` keeps every name, so the exhaustive maps in
@@ -7568,15 +7567,14 @@ callback, accepted page delivery or queued trading work. Inventory: Orderly
 
 
 
-### BreakoutProp login transport (session core): OPEN obligations
+### BreakoutProp login transport (session core): closed by venue retirement
 
 The DXtrade password login now runs as an engine session write on the primary
 private egress. Login 401/403 now reaches waiting commands as
 `AuthInvalid`/`AuthPermission` (NotSent) with `AUTH_REJECTED`. It no longer
 arrives as untyped text.
 
-**OPEN, required before any BreakoutProp signer-migrated or remote-ready
-claim:**
+**Historical obligations, closed when the venue was retired on 2026-11-07:**
 - **Provider presentation:** the password is still serialized into the body
   at dispatch by the venue (claude-19pt8s).
 - **Remote readiness.**
@@ -9422,9 +9420,14 @@ signing and queueing. Equality expires before response admission in either event
 order. Typed integrity, provider and local refusals fail with their original
 cause and consume no transport retry. Native response compatibility, including
 40085 on HTTP 408/5xx, still uses actual response bodies. Native three retries
-and strict incomplete failure remain; no prefix success or INCOMPLETE marker is
-introduced. Expiry removes only this owner’s parked work. The unrelated account
-completion remains the one Bitget legacy request site.
+and strict failures remain for those error cases. A successful order-history
+page filling its requested limit without a usable continuation cursor now
+preserves validated rows through the core's `history.incomplete` protocol
+(`laterPageFailed`), so ingestion stores the lower bound without completing
+coverage. Short final pages and valid Classic `endId` / UTA `cursor` chains keep
+their completion behavior, including canceled zero-fill limit orders. Expiry
+removes only this owner’s parked work. The unrelated account completion remains
+the one Bitget legacy request site.
 
 Bitget malformed/non-UTF8 streamed envelopes keep native250/500/750ms response
 retries after exact delivery validation. They are distinct from typed Internal
@@ -9831,6 +9834,46 @@ zero-gap group. Legs are stamped from the call, not the root. Existing adopters
 pass `None` and are unchanged. Serial is deliberately stricter than Background:
 a non-member serial Read naming a positive-gap domain pacing is Invalid, while a
 Background Read naming it is admitted and kept out of the FIFO.
+
+### Binance Portfolio Margin: retired conditional API replaced by Algo Service
+
+PM UM conditional and trailing commands use `/papi/v1/um/algo/order`,
+`algo/allOpenOrders`, `algo/openAlgoOrders` and the targeted `algo/algoOrder`
+query. The April 14, 2026 [USD-M changelog](https://developers.binance.com/en/docs/derivatives/change-log)
+retired the old `/conditional/*` routes on April 28. PM `ALGO_UPDATE` is read
+from `ao`, keyed by `caid` plus native `aid`; USD-M's `o` routing is unchanged.
+A streamed cancellation requires explicit finite zero `aq`. Missing, malformed
+or negative `aq` leaves the current order unchanged and schedules reconciliation;
+positive `aq` is a triggered child, never a fabricated parent fill. An execution
+contradicting a cancellation read fences its replacement.
+
+A DELETE `{complete:true}` only acknowledges the request. Before any replacement,
+a separate Primary Read must return the exact captured algo ID, client ID and
+symbol, `CANCELED`, an explicitly empty `actualOrderId`, `triggerTime:0` and
+finite zero `actualPrice`. Execution requires a trigger producing a child order;
+all three never-triggered fields together prove zero execution ([query contract](https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/rest-api/trade#query-current-um-open-algo-order-user_data)).
+A pending, partial, foreign, malformed, failed or timed-out read is Unknown,
+with no recreate or put-back. The Read has no resend permission, shares the
+original command bound, and must have its full 20-second window inside that
+bound. A frame-fed command also performs this targeted proof Read; it remains
+free of background account discovery or polling.
+
+The small shared `inherit_http_uncertainty` API carries that failed read's
+uncertainty into the Mutation root's terminal projection, beside the existing
+Plan equivalent. It accepts only a live issued Mutation command root, is
+monotonic and failure-only, and grants no send, retry or success authority.
+
+PM algo trailing requests use `callbackRate` and `activatePrice`. The dated
+October 23, 2026 changelog advertises max 20, while the current
+[PM trade contract](https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/rest-api/trade)
+and official connector 22.0.1 still say max 10. Pending a consistent contract,
+PM conservatively accepts 0.1–10%, validating before cancel; an original outside
+that range cannot be edited because its exact put-back is not assured. USD-M's
+20% and COIN-M's 10% bounds are unchanged. Ordinary PM limit/market requests are
+pinned byte-for-byte against their pre-migration signed-wire fixture.
+
+The SDK's retained TS BinancePMExchange is a test reference. This runtime change
+does not patch the independently frozen NX preview TS adapter.
 
 ### Binance COIN-M: per-coin currencies and coinMargined, as in TypeScript
 
@@ -10316,3 +10359,193 @@ for the selected mode/network, checked through the declared endpoint setup polic
 now emits an `invalidInput/notSent` error and
 rejects before loading WASM or starting transport. Demo selection and the existing
 production-to-simulator fallback are unchanged; no destination is invented.
+
+### Phemex history symbol input
+
+Fills, order history and recent public trades resolve a unique listed market's
+symbol, normalized market ID or native symbol (ASCII case-insensitive aliases)
+before dispatch. Settlement products are never inferred: an inverse or delisted
+contract cannot silently become a USDT/USDC perpetual. Missing, unknown or
+ambiguous symbols fail locally with `invalidInput` and `venueCode: unknown-symbol`,
+with no HTTP or retry timer. The message asks the caller to select a listed
+USDT/USDC perpetual market. Client-order lookup retains its non-definitive
+not-found result for an unknown market. Private credential precedence and the
+original Read receipt bounds are unchanged.
+
+Phemex's income ledger has no symbol column, so it cannot prove an account-wide
+traded-symbol census. Callers must leave such fills/orders coverage incomplete;
+empty-symbol income rows are not evidence of an account with no trades. NX's
+companion stops non-retryable windows until the account/market inputs change.
+
+### Bybit batch cancel acknowledgements: identity matching and safe diagnostics
+
+`/v5/order/cancel-batch` (including one-order linear/demo batches) matches named
+response rows to the requested native `orderId`, rather than requiring the
+original request order. Each `retExtInfo.list` status remains paired with its
+response row, and the result is restored to request order before classification.
+A single unnamed remaining target is unambiguous; a sole-target empty result
+list follows the existing partial-stop cancel codec. Multiple ambiguous unnamed
+successes, foreign/duplicate IDs, missing/short/invalid statuses and malformed
+rows remain Unknown, keep live Store rows and never replay a cancel. A nonzero
+status still goes through the existing per-item refusal/absence classifier.
+
+The wire requests use native order IDs only. IDs remain opaque and case-sensitive;
+empty `orderLinkId` is harmless, and no client-ID alias or case folding is invented.
+Stock-token symbols use the same linear cancellation path. Cancel-all, single-cancel
+and partial-stop handling retain their own existing proof rules. Bybit's
+[batch cancel documentation](https://bybit-exchange.github.io/docs/v5/order/batch-cancel)
+describes separate identity and per-item status lists; it does not promise request-order echoes.
+An accepted acknowledgement retains the existing request-acceptance semantics,
+not a new guarantee of final asynchronous exchange execution.
+
+An unproven batch now asks the user to check open orders on Bybit before retrying.
+Its bounded diagnostic reports list presence/counts, order-ID/client-ID field
+presence and nonempty counts, target-match count, and success/refusal/invalid
+status counts. It never includes ID values, native messages or raw responses.
+The reported production events had no response body; the covered false-Unknown
+shapes are reproduced, while the specific live shape remains unconfirmed.
+
+
+### Binance and Bybit already-set margin acknowledgements
+
+Binance USD-M and COIN-M `SetMarginType` treat documented `-4046` as an
+already-applied setting, updating the requested stored margin type and completing
+once without an error or resend. The existing `-4059` position-mode success stays
+operation-specific. Ordinary leverage acknowledgements and the local already-at-
+requested-leverage shortcut remain successful. Binance `-4028` stays rejected:
+its documented meanings include invalid leverage as well as an already-existing
+value, so the numeric code alone does not prove the requested leverage.
+
+Bybit `110026` is admitted only by the margin-mode call's code table, selected
+before classification and fact recording. The general Bybit table rejects it:
+leverage, position mode and protective-order legs also use `Intent::Setting`,
+which alone is not proof of a margin change. Existing `110043` leverage and
+`110025` position-mode facts remain unchanged. Margin-mode no-ops use the same
+effects as normal success, including immediate account-wide settings/position
+updates and source frame holds. A contradictory `reasons` result remains unproven. HTTP gateway
+failures keep precedence over these codes, and non-setting writes cannot acquire
+setting-success authority.
+
+References: [Binance USD-M error codes](https://developers.binance.com/docs/derivatives/usds-margined-futures/error-code),
+[Binance COIN-M error codes](https://developers.binance.com/docs/derivatives/coin-margined-futures/error-code),
+[Bybit V5 error codes](https://bybit-exchange.github.io/docs/v5/error).
+
+
+### Bybit terminal-history lookup coverage (November 12, 2026)
+
+HyroTrader's Background reconciliation and caller Preflight lookup both read
+realtime, default history, then explicit Cancelled, Rejected and Deactivated
+history only while earlier axes are empty. A failed or unfinished axis never
+proves absence. Empty status results also prove nothing once the earliest
+possible send is 24 hours old, including a walk crossing that boundary; a later
+send never renews coverage. Expired coverage gives explicit Unknown guidance
+to check broker order/fill history. Positive terminal evidence may still resolve.
+The Background walk shares the original two 20 s windows;
+caller reads capture the genuine command_wait receipt at entry and cap every
+Read and final Plan admission to that lookup deadline. Expiry seals typed
+Timeout/Unknown. Shared execution/observer deadlines after admission stay native.
+Cancelled and Deactivated recover the original order ID without another create.
+A proven Rejected row retains the existing new-identity remint contract.
+
+Bybit's [announcement](https://t.me/Bybit_API_Announcements/464) does not exempt
+orderLinkId or orderId. The [endpoint documentation](https://bybit-exchange.github.io/docs/v5/order/order-list)
+limits these three terminal statuses to 24 hours; older missing orders cannot
+be recovered from this API. The historical-orders collection is a separate change.
+
+
+### Bybit historical-order terminal statuses (November 12, 2026)
+
+Historical orders read default history plus explicit Cancelled, Rejected and
+Deactivated axes for each enabled product category. Every axis retains the
+requested windows and independent cursor/page guards on the same caller Read
+root and signer. A dedicated engine Claim pacing group allows at most four
+physical order-history requests per second across all categories, cursors,
+statuses and concurrent commands; account reads do not share that clock.
+Limits apply to each axis before the combined
+result is sorted, deduplicated by symbol/order ID and truncated. A terminal-axis
+failure is typed with no collected rows, or explicitly incomplete with accepted
+rows retained; it cannot become an apparently complete default-only result.
+
+The [Bybit announcement](https://t.me/Bybit_API_Announcements/464) removes these
+statuses from default history. Explicit status calls retain the documented
+[24-hour availability](https://bybit-exchange.github.io/docs/v5/order/order-list);
+this change does not restore already expired terminal orders or claim longer
+retention. Hyro placement recovery is handled independently.
+
+### Bitrue protective replacement refusals
+
+Guarded stop edits recognize documented Futures placement refusals and may put
+back only one exact original order after proven cancellation. Ambiguous replies
+remain Unknown without a put-back; direct attached-leg edits refuse before any
+cancel. Ordinary amendments retain their master wire/error contract. See the
+[contract and regression controls](callers/bitrue-protective-refusals.md).
+
+### Paradex guarded cancel requires terminal proof before replacement
+
+A guarded trigger edit no longer treats `400 ORDER_ID_NOT_FOUND` or `204` as
+permission to create a replacement. The former proves no cancellation reason or
+fill quantity; the latter only queues cancellation under the documented
+[cancel contract](https://docs.paradex.trade/api/prod/orders/cancel).
+The edit now uses the authenticated [order-history endpoint](https://docs.paradex.trade/api/prod/orders/get-orders),
+filtered by market, CLOSED status and original client ID when present. Each
+proof read bounds `start_at` to the target's native `created_at` minus 60 seconds
+(saturating at zero) and `end_at` to that read's own time plus 60 seconds, in
+integer milliseconds, including bracket legs without a client ID. These margins
+accommodate exclusive window edges and modest device/venue clock skew; the exact
+target proof still decides whether a replacement may be sent. A full 100-row page
+missing the target still proves nothing, even with a cursor.
+At most three reads, one second apart, share one five-second deadline. Only one
+matching exchange ID with CLOSED / USER_CANCELED, the same original identity and parameters,
+and remaining quantity equal to the entire original size authorizes replacement.
+An empty, missing, duplicate, malformed, partially filled or conflicting target
+never proves cancellation; a cursor is not absence evidence. Exhaustion, read
+failure or deadline equality ends actionable Unknown, without create or put-back.
+A later proof or timer cannot revive the ended edit. Current fill/change/cancel
+observations and crossed or stale prices also withhold replacement.
+
+This is a live fix in Paradex's existing authenticated request lane; it does not
+introduce managed Plans or claim a new final-Claim veto. The existing pre-sign
+cancel guard remains. Ordinary placements, native limit amends and plain cancels
+retain their wire and outcomes, including plain-cancel not-found idempotency.
+Their full signed-request digest is pinned against master. Existing exact put-back
+controls now supply terminal cancellation proof before exercising replacement
+refusal; their original payload and protection-result assertions remain.
+
+
+## Released HTTP ambiguity and native rate limits
+
+Physically dispatched writes answered with HTTP 408, 429 or 5xx are Unknown.
+The managed boundary captures bounded native diagnostics without invoking the
+venue reducer or granting resend, restore or authentication authority. The
+status-exemption hook and Crypto.com's orphan exemption codec are removed.
+Retry-After remains attached to the Unknown fact for the existing read deferral.
+WEEX connects its existing account refresh to `reconcile_uncertain`, preserving
+the post-cooldown read when the engine seals before the native reducer.
+
+Outside those statuses, native RateLimited verdicts are Unknown for Place,
+Cancel, Amend and Setting, including batch rows and accepted prefixes. Reads
+keep their native signature retry, rate-limit delay and outcome-free contract.
+Journal projection cannot demote a recorded Unknown after an accepted sibling
+or when an older result wrapper calls it Rejected or KnownPartial.
+An engine-sealed ambiguous put-back replaces earlier definitive refusal words,
+including KnownPartial, with Unknown and Check Open Orders. It grants no
+protection claim or additional write.
+Batch rows retain their codec-selected table's code-less refusal verdict;
+the write ambiguity guard still dominates native rate limits and HTTP 408/429/5xx.
+Engine-sealed HTTP ambiguity says Unknown and Check Open Orders directly;
+it does not invoke a venue formatter that could authorize another write.
+Before sealing, a no-Cx observer preserves Phemex's pause, WEEX's shared pause
+and Binance's background weight budget. It grants no send, Store or completion
+authority and introduces no universal write pause; native-code/read paths stay native.
+
+The real-engine audit cases are centrally blocked for Binance, ApeX Omni,
+AsterDEX, Bybit, BingX, Bitrue, OKX and Crypto.com. This does not convert raw
+venue requests into managed writes. MEXC's batch-to-single fallback and Kraken
+Spot's shared private signature retry bypass the engine; GRVT's legacy auth
+replay is also venue-owned. Local classification-only ladders remain in
+BreakoutProp, Coinbase Advanced/INTX, ordinary KuCoin, MEXC, Orderly, Paradex,
+Polymarket and WOO. Paradex's legacy unset 429 outcome has no CommandWrites
+journal and needs its own venue fix. Lighter's HTTP-200 23000/23100 path labels
+all codes Rejected rather than RateLimited; the engine cannot infer that native
+meaning. A codec that hides a later rate row behind an earlier different refusal
+also needs a venue fix; the engine batch API checks every supplied BatchItem.

@@ -13,6 +13,7 @@ const bybitTimeUrl = async (): Promise<string> =>
   (await import('../transport/registry')).withPublicCorsProxy('https://api.bybit.com/v5/market/time');
 
 export const TIME_SYNC_INTERVAL_MS = 300_000;
+const CLOCK_STEP_SYNC_INTERVAL_MS = 15_000;
 
 type TimeSyncListener = (timeMs: number) => void;
 
@@ -33,7 +34,9 @@ class VirtualClock {
   // from `mapOrder` / `mapPosition` / `lastUpdate` writes / etc.
   // (~209 callsites in safe-cex), this was steady allocator pressure.
   private offsetMs = 0;
+  private receivedTimeSync = false;
   private syncInFlight: Promise<void> | null = null;
+  private lastAfterClockStepSync: number | null = null;
   private serverTimeSource: ServerTimeSource | undefined;
   private readonly syncListeners = new Set<TimeSyncListener>();
 
@@ -44,6 +47,21 @@ class VirtualClock {
       this.scheduleNextSync();
     } else if (this.syncInFlight) {
       await this.syncInFlight;
+    }
+    // A browser worker receives time from its page. Do not anchor an engine's
+    // epoch-shaped monotonic clock before that first synchronization arrives.
+    if (!isNodeOrBunRuntime() && typeof window === 'undefined' && !this.receivedTimeSync) {
+      await new Promise<void>((resolve, reject) => {
+        const unsubscribe = this.subscribeToTimeSync(() => {
+          clearTimeout(timeout);
+          unsubscribe();
+          resolve();
+        });
+        const timeout = setTimeout(() => {
+          unsubscribe();
+          reject(new Error('Clock synchronization did not arrive from the host'));
+        }, 30_000);
+      });
     }
   };
 
@@ -110,6 +128,8 @@ class VirtualClock {
       this.client = client;
       this.offsetMs = server.valueOf() - client.valueOf();
     }
+    this.receivedTimeSync = true;
+    this.notifyTimeSync();
   };
 
   private scheduleNextSync = () => {
@@ -152,36 +172,49 @@ class VirtualClock {
   // `dayjs.utc().valueOf()` minus the per-call dayjs allocation.
   getCurrentTimeMs = () => Date.now() + this.offsetMs;
 
-  public syncClientServerTime = () => {
+  public syncClientServerTime = ({ afterClockStep = false } = {}) => {
     if (this.syncInFlight) {
       return this.syncInFlight;
     }
 
-    this.syncInFlight = this.syncClientServerTimeInner().finally(() => {
+    // All transports share this realm's floor, including synchronous Node
+    // notifications. Wall-clock steps must not shorten the cooldown itself.
+    if (afterClockStep && this.lastAfterClockStepSync !== null &&
+      performance.now() - this.lastAfterClockStepSync < CLOCK_STEP_SYNC_INTERVAL_MS) {
+      return Promise.resolve();
+    }
+
+    this.syncInFlight = this.syncClientServerTimeInner(afterClockStep).finally(() => {
+      // Failed attempts also observe the floor, rather than retrying per engine.
+      if (afterClockStep) this.lastAfterClockStepSync = performance.now();
       this.syncInFlight = null;
     });
 
     return this.syncInFlight;
   };
 
-  private syncClientServerTimeInner = async () => {
+  private syncClientServerTimeInner = async (afterClockStep: boolean) => {
     if (isNodeOrBunRuntime()) {
       // A server keeps its own clock; one shared offset would move every user's.
       this.server = null;
       this.client = null;
       this.offsetMs = 0;
+      this.notifyTimeSync();
       return;
     }
     // A browser worker (no `window`) keeps the offset the main thread pushes or a
     // venue correction set; zeroing it here undid both every 5 minutes.
-    if (typeof window === 'undefined') return;
+    // After an actual wall step, the pushed offset is stale too. Allow one
+    // shared request in this realm rather than waiting for the next page push.
+    if (typeof window === 'undefined' && !afterClockStep) return;
 
-    this.syncFromServerTime((await this.fetchServerTime()).valueOf());
-    this.notifyTimeSync();
+    const serverTime = await this.fetchServerTime(afterClockStep);
+    if (serverTime) this.syncFromServerTime(serverTime.valueOf());
   };
 
-  private fetchServerTime = async () =>
-    (await this.fetchFromServerTimeSource()) ?? (await this.fetchVenueTime()) ?? dayjs.utc();
+  private fetchServerTime = async (afterClockStep: boolean) =>
+    (await this.fetchFromServerTimeSource()) ?? (await this.fetchVenueTime()) ??
+    (afterClockStep ? undefined : dayjs.utc());
 
   public syncBybitClientServerTime = async (time?: number) => {
     // A web worker has no `window` either; only a Node/Bun server skips. Testing
@@ -209,6 +242,8 @@ class VirtualClock {
     } else {
       this.offsetMs = this.server.valueOf() - this.client.valueOf();
     }
+    this.receivedTimeSync = true;
+    this.notifyTimeSync();
   };
 
   // Bybit-specific sync wants Bybit's actual clock, so venue time leads here.

@@ -84,7 +84,25 @@ fn place(engine: &mut Engine<Hyperliquid>, now: f64, command: u32, spot: bool) -
             orders: vec![order],
         }),
     );
-    prepared_now(engine).into_iter().collect()
+    let mut actions: Vec<_> = prepared_now(engine).into_iter().collect();
+    let approvals: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Http(request)
+                if request.url.ends_with("/info") && support::kind(request) == "maxBuilderFee" =>
+            {
+                Some(request.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    for approval in approvals {
+        // The live command promotes only the startup builder read; its held
+        // pre-mark order census remains outstanding and keeps its original epoch.
+        response(engine, now, &approval, "30");
+        actions.extend(prepared_now(engine));
+    }
+    actions
 }
 
 fn write(actions: &[Action]) -> &HttpRequest {

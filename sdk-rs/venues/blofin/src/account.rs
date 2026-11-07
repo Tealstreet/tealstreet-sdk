@@ -42,6 +42,12 @@ fn log_skip(
     logged.report(cx, key.to_owned(), level, message);
 }
 /// The identity fields of a position or order row that failed to decode.
+/// The one read-cover scope of BloFin's account-wide pending-order census.
+const ORDERS_SCOPE: &str = "orders";
+/// The least wait before the census owed after one the stream outran, so a
+/// busy symbol cannot drive back-to-back census reads.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.0;
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct RowIdentity<'a> {
@@ -106,6 +112,11 @@ pub(crate) struct Account {
     /// Symbols of this census's rejected rows that could be an uncertain write:
     /// no stored copy proves them older. Empty text: the row names no market.
     census_unproven: Vec<String>,
+    /// The earliest release among the running census's pages and families,
+    /// each its own read; its rows are that old.
+    census_read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+    /// A page answered outside its read response: the census proves nothing.
+    census_read_lost: bool,
     reporting_started: f64,
     startup_executions: VecDeque<Execution>,
     account_busy: bool,
@@ -837,6 +848,8 @@ impl Blofin {
         };
         self.account.orders_busy = true;
         self.account.census_unproven.clear();
+        self.account.census_read = None;
+        self.account.census_read_lost = false;
         let reconcile = std::mem::take(&mut self.account.reconcile_owed);
         self.orders_page(
             cx,
@@ -1278,7 +1291,51 @@ impl Blofin {
                         *failed = true;
                     }
                     let source = Self::source(&o);
-                    for order in self.map_orders(cx, &o) {
+                    let mapped = self.map_orders(cx, &o);
+                    let working = !matches!(
+                        o.state.as_ref(),
+                        "filled" | "effective" | "canceled" | "partially_canceled" | "order_failed"
+                    );
+                    let market = (o.inst_type.is_empty()
+                        || o.inst_type.eq_ignore_ascii_case("SWAP"))
+                    .then(|| cx.store.market_by_id(&o.inst_id).map(|m| m.symbol.clone()))
+                    .flatten();
+                    // A working order on this account's market that maps to nothing (an
+                    // unsupported category or type) is still there: its stored copies
+                    // stay, and the census proves nothing for its market.
+                    if mapped.is_empty()
+                        && working
+                        && let Some(symbol) = market
+                    {
+                        let mut ids = Vec::new();
+                        for base in [&o.order_id, &o.tpsl_id] {
+                            if !base.is_empty() {
+                                ids.extend(
+                                    ["take_profit", "stop_loss"]
+                                        .map(|suffix| format!("{base}__{suffix}")),
+                                );
+                            }
+                        }
+                        ids.extend(
+                            [&o.order_id, &o.algo_id]
+                                .into_iter()
+                                .filter(|id| !id.is_empty())
+                                .map(|id| id.to_string()),
+                        );
+                        if ids.is_empty() {
+                            rows.reject(None);
+                        }
+                        for id in ids {
+                            rows.reject(Some(id));
+                        }
+                        self.account.census_unproven.push(symbol);
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
+                            format!("BloFin working order {last_cursor} maps to no supported order; its stored copies stay"),
+                        );
+                    }
+                    for order in mapped {
                         sources.insert(order.id.clone(), source.clone());
                         rows.push(order);
                     }
@@ -1598,6 +1655,16 @@ impl Blofin {
                 read_epoch,
                 failed: false,
             } => {
+                match cx.order_read_mark() {
+                    Some(read) => {
+                        self.account.census_read = Some(
+                            self.account
+                                .census_read
+                                .map_or(read, |earliest| earliest.earliest(read)),
+                        );
+                    }
+                    None => self.account.census_read_lost = true,
+                }
                 if page_rows > 0 {
                     if page >= 49 || cursor == last_cursor {
                         self.account_failed(
@@ -1666,47 +1733,49 @@ impl Blofin {
                         self.seed_startup_executions(cx, rows.rows(), &sources);
                     }
                     let clean = rows.rejected() == 0;
-                    let committed = cx.store.commit_orders_snapshot([snapshot], |current| {
-                        if clean {
-                            self.account.order_skips.clear();
+                    let census_read = self
+                        .account
+                        .census_read
+                        .take()
+                        .filter(|_| !std::mem::take(&mut self.account.census_read_lost));
+                    let current: Vec<Order> = cx.store.orders().to_vec();
+                    let accepted = rows.rows().len();
+                    let mut rows = rows.commit(current.iter().cloned(), |o| o.id.clone());
+                    // Stored copies kept for rejected rows bypass the snapshot's own rules.
+                    let mut kept = rows.split_off(accepted);
+                    for order in &current {
+                        if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
+                            self.account.remember_terminal(&order.id);
                         }
-                        let accepted = rows.rows().len();
-                        let mut rows = rows.commit(current.iter().cloned(), |o| o.id.clone());
-                        // Stored copies kept for rejected rows bypass the snapshot's own rules.
-                        let mut kept = rows.split_off(accepted);
-                        for order in current {
-                            if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
-                                self.account.remember_terminal(&order.id);
+                    }
+                    rows.retain(|order| {
+                        !self.account.terminal.contains(&order.id)
+                            && (order
+                                .extra
+                                .as_ref()
+                                .and_then(|extra| extra.filled_in_placement_units)
+                                .unwrap_or(0.0)
+                                >= self.filled_native(&order.id)
+                                || current.iter().any(|existing| existing.id == order.id))
+                    });
+                    let retained: HashSet<_> = rows.iter().map(|order| order.id.clone()).collect();
+                    sources.retain(|id, _| retained.contains(id));
+                    for order in &mut rows {
+                        if let Some(existing) = current
+                            .iter()
+                            .find(|existing| existing.id == order.id)
+                            .filter(|existing| existing.filled > order.filled)
+                        {
+                            *order = existing.clone();
+                            if let Some(source) = self.account.sources.get(&order.id) {
+                                sources.insert(order.id.clone(), source.clone());
                             }
                         }
-                        rows.retain(|order| {
-                            !self.account.terminal.contains(&order.id)
-                                && (order
-                                    .extra
-                                    .as_ref()
-                                    .and_then(|extra| extra.filled_in_placement_units)
-                                    .unwrap_or(0.0)
-                                    >= self.filled_native(&order.id)
-                                    || current.iter().any(|existing| existing.id == order.id))
-                        });
-                        let retained: HashSet<_> =
-                            rows.iter().map(|order| order.id.as_str()).collect();
-                        sources.retain(|id, _| retained.contains(id.as_str()));
-                        for order in &mut rows {
-                            if let Some(existing) = current
-                                .iter()
-                                .find(|existing| existing.id == order.id)
-                                .filter(|existing| existing.filled > order.filled)
-                            {
-                                *order = existing.clone();
-                                if let Some(source) = self.account.sources.get(&order.id) {
-                                    sources.insert(order.id.clone(), source.clone());
-                                }
-                            }
-                        }
-                        kept.retain(|order| !self.account.terminal.contains(&order.id));
-                        // A kept attached TP/SL leg already stands for its parent's leg.
-                        let kept_leg = |parent: &str, kind: OrderType| {
+                    }
+                    kept.retain(|order| !self.account.terminal.contains(&order.id));
+                    // A kept attached TP/SL leg already stands for its parent's leg.
+                    let kept_leg =
+                        |parent: &str, kind: OrderType| {
                             kept.iter().any(|leg| {
                                 leg.kind == kind
                                     && self.account.sources.get(&leg.id).is_some_and(|s| {
@@ -1714,92 +1783,152 @@ impl Blofin {
                                     })
                             })
                         };
-                        let mut extra = Vec::new();
-                        for order in &rows {
-                            let Some(source) = sources.get(&order.id) else {
+                    let mut extra = Vec::new();
+                    for order in &rows {
+                        let Some(source) = sources.get(&order.id) else {
+                            continue;
+                        };
+                        if order.kind != OrderType::Limit
+                            || !source.tpsl_id.is_empty()
+                            || !source.algo_id.is_empty()
+                        {
+                            continue;
+                        }
+                        for (kind, price, suffix) in [
+                            (OrderType::TakeProfit, source.tp, "take_profit"),
+                            (OrderType::StopLoss, source.sl, "stop_loss"),
+                        ] {
+                            if price <= 0.0
+                                || rows.iter().any(|leg| {
+                                    leg.kind == kind
+                                        && sources.get(&leg.id).is_some_and(|s| {
+                                            s.order_id == order.id && !s.tpsl_id.is_empty()
+                                        })
+                                })
+                                || kept_leg(&order.id, kind)
+                            {
                                 continue;
+                            }
+                            let id = format!("{}__{suffix}", order.id);
+                            extra.push(Order {
+                                id: id.clone(),
+                                kind,
+                                price,
+                                side: order.side.opposite(),
+                                parent_id: Some(order.id.clone()),
+                                reduce_only: true,
+                                filled: 0.0,
+                                amount: if order.remaining > 0.0 {
+                                    order.remaining
+                                } else {
+                                    order.amount
+                                },
+                                remaining: if order.remaining > 0.0 {
+                                    order.remaining
+                                } else {
+                                    order.amount
+                                },
+                                extra: Some(OrderExtra {
+                                    remaining_native: order
+                                        .extra
+                                        .as_ref()
+                                        .and_then(|e| e.remaining_native),
+                                    ..OrderExtra::default()
+                                }),
+                                ..order.clone()
+                            });
+                        }
+                    }
+                    extra.retain(|order| !self.account.terminal.contains(&order.id));
+                    for order in &extra {
+                        if let Some(source) = order
+                            .parent_id
+                            .as_ref()
+                            .and_then(|id| sources.get(id))
+                            .cloned()
+                        {
+                            sources.insert(order.id.clone(), source);
+                        }
+                    }
+                    rows.extend(extra);
+                    kept.retain(|order| !rows.iter().any(|row| row.id == order.id));
+                    for order in &kept {
+                        if let Some(source) = self.account.sources.get(&order.id) {
+                            sources.insert(order.id.clone(), source.clone());
+                        }
+                    }
+                    rows.extend(kept);
+                    // Rows and their sources change together, only for the symbols this
+                    // census may replace (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+                    let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                        key: ORDERS_SCOPE,
+                        account: &[ORDERS_SCOPE],
+                    };
+                    let admission = census_read
+                        .filter(|_| cx.store.orders_snapshot_current(&snapshot))
+                        .and_then(|earliest| {
+                            cx.orders_read_refusals_from(earliest, scope, |_| true, &rows)
+                                .map(|refused| (earliest, refused))
+                        });
+                    let mut refused_symbols = Vec::new();
+                    let committed = match admission {
+                        Some((earliest, refused)) => {
+                            if clean {
+                                self.account.order_skips.clear();
+                            }
+                            let symbol_of = |id: &str| {
+                                rows.iter()
+                                    .chain(current.iter())
+                                    .find(|order| order.id == id)
+                                    .map(|order| order.symbol.clone())
                             };
-                            if order.kind != OrderType::Limit
-                                || !source.tpsl_id.is_empty()
-                                || !source.algo_id.is_empty()
-                            {
-                                continue;
-                            }
-                            for (kind, price, suffix) in [
-                                (OrderType::TakeProfit, source.tp, "take_profit"),
-                                (OrderType::StopLoss, source.sl, "stop_loss"),
-                            ] {
-                                if price <= 0.0
-                                    || rows.iter().any(|leg| {
-                                        leg.kind == kind
-                                            && sources.get(&leg.id).is_some_and(|s| {
-                                                s.order_id == order.id && !s.tpsl_id.is_empty()
-                                            })
-                                    })
-                                    || kept_leg(&order.id, kind)
-                                {
-                                    continue;
+                            let held = |id: &str| {
+                                symbol_of(id).is_none_or(|symbol| refused.contains(&symbol))
+                            };
+                            // A refused symbol keeps the sources its kept rows already had.
+                            let mut next: HashMap<String, Source> =
+                                sources.into_iter().filter(|(id, _)| !held(id)).collect();
+                            for (id, source) in &self.account.sources {
+                                if held(id) && !next.contains_key(id) {
+                                    next.insert(id.clone(), source.clone());
                                 }
-                                let id = format!("{}__{suffix}", order.id);
-                                extra.push(Order {
-                                    id: id.clone(),
-                                    kind,
-                                    price,
-                                    side: order.side.opposite(),
-                                    parent_id: Some(order.id.clone()),
-                                    reduce_only: true,
-                                    filled: 0.0,
-                                    amount: if order.remaining > 0.0 {
-                                        order.remaining
-                                    } else {
-                                        order.amount
-                                    },
-                                    remaining: if order.remaining > 0.0 {
-                                        order.remaining
-                                    } else {
-                                        order.amount
-                                    },
-                                    extra: Some(OrderExtra {
-                                        remaining_native: order
-                                            .extra
-                                            .as_ref()
-                                            .and_then(|e| e.remaining_native),
-                                        ..OrderExtra::default()
-                                    }),
-                                    ..order.clone()
-                                });
                             }
-                        }
-                        extra.retain(|order| !self.account.terminal.contains(&order.id));
-                        for order in &extra {
-                            if let Some(source) = order
-                                .parent_id
-                                .as_ref()
-                                .and_then(|id| sources.get(id))
-                                .cloned()
-                            {
-                                sources.insert(order.id.clone(), source);
+                            let mut cover_unproven = self.account.census_unproven.clone();
+                            if !clean {
+                                cover_unproven.push(String::new());
                             }
-                        }
-                        rows.extend(extra);
-                        kept.retain(|order| !rows.iter().any(|row| row.id == order.id));
-                        for order in &kept {
-                            if let Some(source) = self.account.sources.get(&order.id) {
-                                sources.insert(order.id.clone(), source.clone());
+                            let committed = cx
+                                .commit_orders_read_from(
+                                    earliest,
+                                    scope,
+                                    |_| true,
+                                    rows,
+                                    &cover_unproven,
+                                )
+                                .is_some();
+                            if committed {
+                                self.account.sources = next;
+                                cx.store.set_orders_loaded();
+                                refused_symbols = refused;
                             }
+                            committed
                         }
-                        rows.extend(kept);
-                        self.account.sources = sources;
-                        rows
-                    });
+                        None => false,
+                    };
                     if committed {
                         // The last page's token cannot freshen a pre-mark first page.
                         if reconcile
                             && uncertainty_generation == self.account.uncertainty_generation
                         {
-                            let unproven = std::mem::take(&mut self.account.census_unproven);
+                            let mut unproven = std::mem::take(&mut self.account.census_unproven);
+                            // A refused symbol's fence waits for a read released after it.
+                            let outran = !refused_symbols.is_empty();
+                            unproven.extend(refused_symbols);
                             self.account.reconcile_owed = !unproven.is_empty();
                             cx.orders_reconciled_except(&unproven, read_epoch);
+                            if outran && self.account.retry.is_none() {
+                                self.account.retry = Some((cx.set_timer(CENSUS_FOLLOW_UP_MS), 1));
+                            }
                         } else if reconcile {
                             self.account.reconcile_owed = true;
                         }
@@ -2402,4 +2531,29 @@ fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError 
         error = error.venue_message(msg);
     }
     error
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Positions { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            Self::Margin { .. } | Self::Mode { .. } => S::ACCOUNT,
+        }
+    }
+}
+
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    for read in [
+        Request::Margin { revision: 0 },
+        Request::Mode { revision: 0 },
+    ] {
+        assert_eq!(
+            read.startup_sections(),
+            safe_cex_engine::startup::Sections::ACCOUNT
+        );
+    }
 }

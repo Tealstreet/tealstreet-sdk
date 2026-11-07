@@ -47,6 +47,14 @@ fn stale_fallback_candle_cannot_overwrite_same_bar_from_recovered_stream() {
     );
     e.drain_actions().for_each(drop);
     e.take_frame(NOW);
+    // Traffic inside the two-minute silence bound keeps the public epoch current.
+    e.handle(
+        NOW + 100_000.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"type":"pong"}"#,
+        },
+    );
 
     e.handle(NOW + 120_000.0, Event::TimerFired { timer: poll });
     let fallback = prepared_actions(&mut e, NOW + 120_000.0)

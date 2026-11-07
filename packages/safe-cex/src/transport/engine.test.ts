@@ -7,10 +7,14 @@ import { Blob as NodeBlob } from 'node:buffer';
 import { createHash, createHmac } from 'node:crypto';
 import { deflateSync, gzipSync } from 'node:zlib';
 
+import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineObject } from '@tealstreet/safe-cex-wasm/workers';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { accountToExchangeOptions } from '../createExchangeFromAccount';
@@ -23,6 +27,7 @@ import { createAPI as createKucoinAPI } from '../__tests__/reference/kucoin/kuco
 import { createKucoinSpotAPI } from '../__tests__/reference/kucoin/kucoinspot.api';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
+import { SignedPublicProxyRefusal } from './publicProxyGuard';
 import { setDefaultTransport } from './registry';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
@@ -163,6 +168,44 @@ afterEach(() => {
 });
 
 describe('engine HTTP routing at the raw transport boundary', () => {
+  it('reports bounded Bybit 10006 metadata at the actual tunnel response without changing it', async () => {
+    const body = '{"retCode":10006,"retMsg":"Too many visits","secret":"never-report"}';
+    mocks.adapter.mockImplementation(async (config: InternalAxiosRequestConfig) => ({
+      status: 200, statusText: 'OK', config, data: body,
+      headers: { 'X-Tealstreet-Egress': 'proxy-tokyo-2', 'X-Bapi-Limit': '120', 'X-Bapi-Limit-Status': '0', 'X-Bapi-Limit-Reset-Timestamp': '1800000000000', 'Authorization': 'never-report' },
+    }));
+    const report = vi.fn();
+    const routed = createEngineTransport('bybit', options({ tealstreetTunnel: true }), makeRaw(), undefined, undefined, undefined, report);
+    try {
+      const reply = await routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1', headers: {} });
+      expect(new TextDecoder().decode(reply.body as Uint8Array)).toBe(body);
+      expect(report).toHaveBeenCalledExactlyOnceWith({ retCode: 10006, egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
+      expect(mocks.adapter).toHaveBeenCalledTimes(1);
+      report.mockImplementation(() => { throw new Error('listener'); });
+      await expect(routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?symbol=ETHUSDT&interval=1', headers: {} })).resolves.toMatchObject({ status: 200 });
+    } finally { routed.dispose!(); }
+  });
+
+  it('scrubs queries from relay failure notices even when the upstream error is unsanitized', async () => {
+    const url = 'https://api.bybit.com/v5/order/create?timestamp=123&sign=fixture-signature';
+    const error = new TradeTunnelTimeoutError(`connection lost (URL: ${url})`, {
+      config: {}, method: 'POST', url,
+      route: { selectedRegion: 'JA', tunnelHost: 'tokyo' },
+    });
+    error.message = `connection lost (URL: ${url})`;
+    mocks.adapter.mockRejectedValueOnce(error);
+    const reports: string[] = [];
+    const routed = createEngineTransport('bybit', options({ tealstreetTunnel: true }), makeRaw(), undefined, (message) => reports.push(message));
+    try {
+      await expect(routed.request(request(url))).rejects.toBe(error);
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toContain('https://api.bybit.com/v5/order/create');
+      expect(reports[0]).not.toContain('?');
+      expect(reports[0]).not.toContain('fixture-signature');
+      expect(mocks.adapter.mock.lastCall![0].url).toBe(url);
+    } finally { routed.dispose!(); }
+  });
+
   it.each(['coinbase', 'coinbasespot'] as const)('preserves %s venue JWT separately from REST proxy authorization', async (exchange) => {
     const raw = makeRaw();
     const opts = options({ tealstreetProxy: true, tealstreetTunnel: false });
@@ -521,31 +564,6 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     });
   });
 
-  it.each([
-    ['direct', false, false],
-    ['proxy', true, false],
-    ['HOW', true, true],
-  ] as const)('preserves Breakout DXAPI session authorization through %s routing', async (_label, tealstreetProxy, tealstreetTunnel) => {
-    const raw = makeRaw();
-    const url = 'https://breakout.prosp.devexperts.com/dxsca-web/accounts/default%3A00002/portfolio';
-    const input = { method: 'GET', url, headers: { Authorization: 'DXAPI documented-session' } };
-    const opts = options({ tealstreetProxy, tealstreetTunnel });
-    const routed = createEngineTransport('breakoutprop', opts, raw);
-    try {
-      await routed.request(input);
-      const delivered = tealstreetTunnel ? mocks.adapter.mock.lastCall![0] : raw.request.mock.lastCall![0];
-      const headers = tealstreetTunnel ? delivered.headers.toJSON() : delivered.headers;
-      expect(headers.Authorization).toBe('DXAPI documented-session');
-      expect(headers['Tealstreet-Authorization']).toBe(tealstreetProxy && !tealstreetTunnel ? 'Bearer proxy-jwt' : undefined);
-      expect(headers['Coinbase-Authorization']).toBeUndefined();
-      const plan = resolveEngineRoutingPlan('breakoutprop', opts, 'https://breakout.prosp.devexperts.com');
-      expect(plan.http.authorizationHeader).toBe('Tealstreet-Authorization');
-      expect(plan.http.authorize).toBe(tealstreetProxy && !tealstreetTunnel);
-      expect(plan.http.mode).toBe(tealstreetTunnel ? 'how' : 'direct');
-      if (tealstreetTunnel) expect(raw.request).not.toHaveBeenCalled();
-    } finally { routed.dispose!(); }
-  });
-
   it('fails closed if a tunnel adapter returns parsed JSON', async () => {
     mocks.adapter.mockResolvedValueOnce({ status: 200, headers: {}, data: { id: 9007199254740992 } });
     await expect(
@@ -578,7 +596,10 @@ describe('engine HTTP routing at the raw transport boundary', () => {
             const raw = makeRaw();
             const input = {
               ...request(`https://${exchange}.example/engine-routing`),
-              headers: { 'X-MBX-APIKEY': 'key' },
+              // Lighter authorizes in the payload: a key header to its public proxy is refused.
+              headers: (exchange === 'lighter' || exchange === 'lighter-robinhood'
+                ? {}
+                : { 'X-MBX-APIKEY': 'key' }) as Record<string, string>,
             };
             mocks.adapter.mockClear();
             mocks.createAdapter.mockClear();
@@ -1319,8 +1340,9 @@ describe('Aster secondary signer HTTP routing', () => {
     headers: { 'x-mbx-apikey': 'read-wallet' },
   });
 
+  // Secondary read keys are deprecated; their public-proxy read fails closed (publicProxyGuard).
   it.each(['GET', 'get'])(
-    'routes signed %s to the secondary CORS egress and every write to primary',
+    'refuses signed %s on the secondary CORS egress and routes every write to primary',
     async (method) => {
       const opts = options({
         tealstreetProxy: true,
@@ -1330,9 +1352,8 @@ describe('Aster secondary signer HTTP routing', () => {
       });
       const raw = makeRaw();
       const routed = createEngineTransport('asterdex', opts, raw);
-      await routed.request(privateRequest(method));
-      expect(raw.request.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${privateRequest(method).url}`);
-      expect(raw.request.mock.lastCall![0].headers['x-mbx-apikey']).toBe('read-wallet');
+      await expect(routed.request(privateRequest(method))).rejects.toThrow(SignedPublicProxyRefusal);
+      expect(raw.request).not.toHaveBeenCalled();
       for (const write of ['POST', 'PUT', 'DELETE']) {
         await routed.request(privateRequest(write));
         expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${privateRequest(write).url}`);
@@ -1343,7 +1364,7 @@ describe('Aster secondary signer HTTP routing', () => {
     },
   );
 
-  it('retains the primary HOW path and puts secondary CORS inside only its read RPC', async () => {
+  it('retains the primary HOW path and refuses the secondary read RPC to public CORS', async () => {
     const opts = options({
       tealstreetTunnel: true,
       secondary_key: 'read-wallet',
@@ -1351,15 +1372,14 @@ describe('Aster secondary signer HTTP routing', () => {
     });
     const raw = makeRaw();
     const routed = createEngineTransport('asterdex', opts, raw);
-    await routed.request(privateRequest('GET'));
-    expect(mocks.adapter.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${privateRequest('GET').url}`);
+    await expect(routed.request(privateRequest('GET'))).rejects.toThrow(SignedPublicProxyRefusal);
+    expect(mocks.adapter).not.toHaveBeenCalled();
     await routed.request(privateRequest('POST'));
     expect(mocks.adapter.mock.lastCall![0].url).toBe(privateRequest('POST').url);
     expect(raw.request).not.toHaveBeenCalled();
     const plan = resolveEngineRoutingPlan('asterdex', opts, baseURL);
     expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false });
-    expect(plan.readHttp).toMatchObject({ mode: 'how', prefix: PUBLIC_CORS_PROXY, authorize: false });
-    expect(plan.readHttp?.tunnelUrl).toBe(plan.http.tunnelUrl);
+    expect(plan).not.toHaveProperty('readHttp');
     expect(JSON.stringify(plan)).not.toMatch(/read-wallet|read-private-key|venue-key|venue-secret|proxy-jwt/);
     routed.dispose!();
   });
@@ -2212,4 +2232,59 @@ describe('managed engine HTTP preparation', () => {
     prepared.cancel!();
     routed.dispose!();
   });
+});
+
+it('retains bounded per-account close attribution at the actual native socket boundary', () => {
+  vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z') });
+  const raw = makeRaw();
+  const routed = createEngineTransport('bybit', options({ tealstreetProxy: false, tealstreetTunnel: false }), raw);
+  routed.connect('wss://stream.bybit.com/v5/private?secret=must-not-escape', {
+    channel: 'private',
+    onOpen() {},
+    onMessage() {},
+    onClose() {},
+  });
+  const callbacks = raw.connect.mock.calls[0][1];
+  callbacks.onOpen();
+  vi.setSystemTime(Date.now() + 33_000);
+  callbacks.onClose(1006);
+  const diagnostic = (routed as Transport & { reconnectDiagnostics?: () => unknown }).reconnectDiagnostics?.();
+  expect(diagnostic).toMatchObject({
+    private: {
+      initiator: 'unknown',
+      phase: 'established',
+      route: 'direct',
+      port: '443',
+      lifetime: '30-120s',
+    },
+  });
+  expect(routed.reconnectDiagnostics()).toBe(diagnostic);
+  expect(JSON.stringify(diagnostic)).not.toMatch(/secret|stream\.bybit|wss:/);
+  routed.dispose?.();
+});
+
+it('marks engine-initiated pre-open closes local and measures delayed hidden engine timers', () => {
+  vi.useFakeTimers({ now: 1_000 });
+  vi.stubGlobal('document', { visibilityState: 'hidden' });
+  const raw = makeRaw();
+  const routed = createEngineTransport('bybit', options({ tealstreetProxy: false, tealstreetTunnel: false }), raw);
+  const socket = routed.connect('wss://stream.bybit.com/v5/private', {
+    channel: 'private',
+    onOpen() {},
+    onMessage() {},
+    onClose() {},
+  });
+  socket.close();
+  expect(routed.reconnectDiagnostics()?.private).toMatchObject({
+    initiator: 'local',
+    phase: 'pre-open',
+    lifetime: 'unknown',
+  });
+  const callback = vi.fn();
+  routed.setTimeout(callback, 1_000);
+  vi.setSystemTime(8_000);
+  raw.setTimeout.mock.calls[0][0]();
+  expect(callback).toHaveBeenCalledOnce();
+  expect(routed.reconnectDiagnostics()?.hiddenTimerLateness).toBe('5-20s');
+  routed.dispose?.();
 });

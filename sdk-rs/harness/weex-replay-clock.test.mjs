@@ -30,7 +30,7 @@ test('all 49 covered venue configurations use deterministic private replay clock
   const covered = [
     'apexomni', 'asterdex', 'backpack', 'binance', 'binanceinverse',
     'binanceoptions', 'binancepm', 'binancespot', 'bingx', 'bitget', 'bitgetinverse',
-    'bitgetusdc', 'bitrue', 'bitunix', 'blofin', 'breakoutprop',
+    'bitgetusdc', 'bitrue', 'bitunix', 'blofin',
     'bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'coinbase',
     'coinbasespot', 'cryptocom', 'grvt', 'hyperliquid', 'hyperliquidspot',
     'hyrotrader', 'kodiakfi', 'kraken', 'krakenspot', 'kucoin',

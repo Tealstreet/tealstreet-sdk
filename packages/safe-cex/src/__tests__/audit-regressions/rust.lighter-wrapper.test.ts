@@ -66,9 +66,10 @@ afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
 describe.each(['lighter', 'lighter-robinhood'] as const)('Rust %s wrapper contract', (name) => {
   const variantSetup = (options: Partial<ExchangeOptions> = {}) => setup(options, name);
-  it('admits Lighter beta while leaving Robinhood disabled', () => {
+  it('admits Lighter and Robinhood beta', () => {
     expect(isRustVenue('lighter')).toBe(true);
-    expect(isRustVenue('lighter-robinhood')).toBe(false);
+    // Robinhood shares Lighter's beta admission and remote-signing policy.
+    expect(isRustVenue('lighter-robinhood')).toBe(true);
   });
   it.each([{}, { apiKeyIndex: '1' }, { secret: 'private' }])(
     'starts public without a complete signer tuple %j',

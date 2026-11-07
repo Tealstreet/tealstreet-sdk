@@ -287,6 +287,7 @@ fn inverse_with(extra_catalogue_rows: &str, position_risk: &str) -> Harness {
     h.respond("/dapi/v1/positionRisk", 200, position_risk);
     h.respond("/dapi/v1/account",200,r#"{"assets":[{"asset":"BTC","walletBalance":"1","availableBalance":"0.8","initialMargin":"0.1","unrealizedProfit":"0.01"}]}"#);
     h.respond("/dapi/v1/openOrders",200,r#"[{"symbol":"BTCUSD_PERP","orderId":12,"clientOrderId":"native","price":"9000","origQty":"5","executedQty":"2","type":"LIMIT","side":"BUY"}]"#);
+    h.respond("/dapi/v1/openAlgoOrders", 200, "[]");
     let private = h.socket("/ws/coin-key").unwrap();
     h.event(Event::WsOpened { socket: private });
     h.answer_open_position_read();

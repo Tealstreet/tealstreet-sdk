@@ -398,13 +398,13 @@ fn listed_pair_missing_from_the_ticker_snapshot_is_valued_at_zero_with_one_warni
         tickers,
         r###"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100"}]}}"###,
     );
-    let balance = wallet_read(&engine.drain_actions().collect::<Vec<_>>());
+    let balance = wallet_read(&support::actions(&mut engine));
     reply(&mut engine, balance, wallet);
     assert!(engine.store().loaded().balance);
     assert_eq!(engine.store().balance().total, 5.0);
     let mut warned = count(&engine.drain_actions().collect::<Vec<_>>(), "valued at 0");
     engine.handle(5000.0, Event::TimerFired { timer: poll });
-    let balance = wallet_read(&engine.drain_actions().collect::<Vec<_>>());
+    let balance = wallet_read(&support::actions(&mut engine));
     reply(&mut engine, balance, wallet);
     warned += count(&engine.drain_actions().collect::<Vec<_>>(), "valued at 0");
     assert_eq!(warned, 1);

@@ -155,6 +155,24 @@ impl Harness {
             self.reply(request, body);
         }
     }
+    fn native_stop(&mut self) {
+        if !self.requests.iter().any(|r| r.url.contains("/openOrders")) {
+            self.load(r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":1,"quantityPrecision":3,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"2"}]}]}"#);
+        }
+        let i = self
+            .requests
+            .iter()
+            .position(|r| r.url.contains("/openOrders"))
+            .unwrap();
+        let read = self.requests.remove(i);
+        self.reply(read, r#"[{"orderId":283194212,"symbol":"BTCUSDT","type":"STOP_MARKET","side":"SELL","price":"0","stopPrice":"9300","origQty":"1","executedQty":"0","reduceOnly":true,"closePosition":false,"workingType":"CONTRACT_PRICE","priceProtect":false,"status":"NEW","timeInForce":"GTX"}]"#);
+        self.engine.store_mut().set_tickers(vec![Ticker {
+            symbol: "BTCUSDT".into(),
+            last: 10000.0,
+            mark: 10000.0,
+            ..Ticker::default()
+        }]);
+    }
     fn place(&mut self, order: serde_json::Value) {
         self.command(Command::PlaceOrders {
             command: 1,
@@ -366,9 +384,7 @@ fn cancel_unknown_is_idempotent_and_does_not_replace_filled_status() {
 #[test]
 fn amend_uses_cancel_then_post_preserving_trigger_basis_and_tif() {
     let mut h = Harness::new();
-    h.engine
-        .store_mut()
-        .set_orders(vec![order("283194212", OrderType::StopLoss)]);
+    h.native_stop();
     h.command(Command::AmendOrder {
         command: 1,
         id: "283194212".into(),
@@ -376,7 +392,11 @@ fn amend_uses_cancel_then_post_preserving_trigger_basis_and_tif() {
         amount: Some(0.3),
     });
     let cancel = h.take(Method::Delete);
-    assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains("/order?"))
+    );
     h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
     let place = h.take(Method::Post);
     assert!(place.url.contains(
@@ -610,9 +630,7 @@ fn documented_algo_capacity_rejects_new_stop_but_allows_cancel_replace_at_limit(
         .unwrap();
     let mode = h.requests.remove(index);
     h.reply(mode, r#"{"dualSidePosition":false}"#);
-    h.engine
-        .store_mut()
-        .set_orders(vec![order("283194212", OrderType::StopLoss)]);
+    h.native_stop();
     h.place(json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":1,"triggerPrice":9200}));
     assert!(
         !h.requests
@@ -1169,11 +1187,9 @@ fn an_amend_size_at_or_below_the_filled_amount_is_refused_before_any_write() {
 }
 
 #[test]
-fn a_refused_stop_replacement_says_the_stop_is_gone() {
+fn a_refused_stop_replacement_restores_or_says_the_stop_is_gone() {
     let mut h = Harness::new();
-    h.engine
-        .store_mut()
-        .set_orders(vec![order("283194212", OrderType::StopLoss)]);
+    h.native_stop();
     h.command(Command::AmendOrder {
         command: 1,
         id: "283194212".into(),
@@ -1185,6 +1201,12 @@ fn a_refused_stop_replacement_says_the_stop_is_gone() {
     let place = h.take(Method::Post);
     h.reply(
         place,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let restore = h.take(Method::Post);
+    assert!(restore.url.contains("stopPrice=9300"));
+    h.reply(
+        restore,
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
     let message = h.result(1).as_ref().unwrap_err();
@@ -1330,7 +1352,16 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                 let sweep = h.requests.remove(index);
                 h.reply_status(sweep, status, body);
                 let message = h.result(7).as_ref().expect_err(body);
-                assert!(message.contains(told), "{v3} {status} {body}: {message}");
+                if status == 429 {
+                    let error = &h.failures.iter().find(|(id, _)| *id == 7).unwrap().1;
+                    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                    assert_eq!(
+                        error.message,
+                        "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                    );
+                } else {
+                    assert!(message.contains(told), "{v3} {status} {body}: {message}");
+                }
             }
         }
     }
@@ -1463,6 +1494,56 @@ fn an_off_step_amend_is_rounded_or_refused_before_the_cancel() {
             place.url.contains("quantity=150&reduceOnly=true&"),
             "{v3}: {}",
             place.url
+        );
+    }
+}
+
+#[test]
+fn engine_ambiguity_guarded_429_stays_unknown_in_journal() {
+    let mut h = Harness::new();
+    h.native_stop();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(9200.04),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+    let place = h.take(Method::Post);
+    h.reply_status(place, 429, r#"{"code":-1003,"msg":"Too many requests"}"#);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains("/order?")),
+        "{:?}",
+        h.requests
+    );
+    let error = &h.failures.last().expect("terminal").1;
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn engine_ambiguity_429_timestamp_cannot_resend() {
+    for status in [429, 503] {
+        let mut h = Harness::new();
+        h.place(limit());
+        let request = h.take(Method::Post);
+        h.reply_status(
+            request,
+            status,
+            r#"{"code":-1021,"msg":"Timestamp for this request outside window"}"#,
+        );
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.method == Method::Post && r.url.contains("/order?")),
+            "{status}: {:?}",
+            h.requests
         );
     }
 }

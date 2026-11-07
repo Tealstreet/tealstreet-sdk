@@ -28,6 +28,18 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## Browser request-failure diagnostics
+
+The JS host emits `http.request_failed` at Debug for failed managed HTTP work,
+including engine deadline refusals during preparation or after release. The native
+notice carries only its exact opaque request ID; the JS host joins the original
+resource before cancellation, without inferring a timeout from elapsed time.
+Facts contain only a closed HTTP method, phase, failure kind and a path template:
+fixed API vocabulary survives, all other segments become `:segment`, at most eight
+segments plus `:more`. Origins, queries, fragments, bodies and headers are excluded.
+The SDK adds the actual venue; consumers may retain a bounded recent breadcrumb.
+These diagnostics neither retry requests nor add a second user-facing error.
+
 ## Startup discovery deadlines
 
 Before both markets and tickers load, credential-free Background Reads using the
@@ -36,6 +48,40 @@ standard 20 s policy receive a 90 s total deadline: 60 s for discovery plus a
 deadline; it never resets the clock after readiness. Credentialed reads, caller
 commands, writes, explicit venue timeouts and reads after discovery keep their
 existing bounds.
+
+## HTTP request classes
+
+The TS HOW package's `requestBudget.ts` defines the parity reference: catalogue
+reads have 60 s, history pages 30 s, and order reads, writes and other reads 20 s.
+Engine history queries (fills, order history and income) use 30 s. Candles,
+public trades, live account/order reads and mutations use 20 s. Background
+catalogue/metadata reads alone use discovery: markets, instruments, contracts,
+symbol/asset/product catalogues and closed catalogue RPC kinds. Discovery keeps
+60 s, or the existing 90 s startup discovery/readiness allowance.
+
+Background issuance reserves a bounded catalogue ceiling while the semantic
+request is not yet available. The shared managed-HTTP boundary resolves the
+request and caps its physical deadline from the original Context issuance time.
+Depth/order books, tickers/market summaries, trades, candle polls, funding/mark
+prices and unknown public read kinds use 20 s on every family. Catalogue matching
+uses closed path components/RPC discriminators, never query parameter values.
+Explicit nonstandard venue bounds and shorter Plan/caller caps still win.
+Re-preparation and retry cannot restart the original class deadline.
+
+Native hosts query `http_request_class` only for an exact pending preparation.
+Browser preparation actions carry a compact `u8` class outside signed packet
+bytes (discovery 0, orderRead 1, orderWrite 2, history 3, read 4). The JS host
+maps that code to a closed label and formats timeout diagnostics. Native-only
+class names, legacy path classification and diagnostic formatting are excluded
+from wasm; engine issuance retains numeric bounded deadlines. TS conservatively
+labels non-GET methods `orderWrite` regardless of hints while honoring the
+explicit remaining engine deadline. Labels grant no send or retry authority.
+Timeouts name class, budget and elapsed milliseconds, including host diagnostics
+when engine expiry wins the timer race. HOW readiness remains capped at 30 s
+inside the same original deadline. Legacy GET paths use exact catalogue/history/
+order components; unknown paths use the 20 s read default and non-GET requests
+conservatively use the short write default. Explicit transport deadlines win.
+No server, retry, outcome-unknown or socket-silence policy changes are needed.
 
 ## Host entropy
 
@@ -146,6 +192,10 @@ selected time window so later depth resynchronizations remain reproducible.
 Legacy contract families stay filtered as in TypeScript. `Triggered` displays
 as Closed but remains nonterminal; a later native New update can reopen it.
 Public books request full depth and replace periodic snapshots.
+Live candles accept only `kline_p` incremental frames; subscription snapshots
+and backfill never publish live candles. Candle timestamps remain in seconds.
+Each public frame parse failure emits a `stream.malformed` warning with
+the raw frame's byte count and wire `type` (`unknown` for unreadable JSON).
 
 Fills and order history use bounded symbol-scoped reads (up to 200 rows), public
 trades up to 1000; they do not claim exhaustive range history. Generic income

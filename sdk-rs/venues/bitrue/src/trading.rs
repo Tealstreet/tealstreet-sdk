@@ -30,6 +30,83 @@ const CENSUS_UNCERTAIN: &str =
     "Bitrue protective placement outcome is uncertain; complete fresh order census is required";
 /// Native's Network/Timeout retries on a read, chained per call (D3).
 const READ_RETRIES: u8 = 3;
+/// An amend's cancel is re-read this long for a terminal status, then unproven.
+const VERIFY_MS: f64 = 3_000.0;
+const VERIFY_POLL_MS: u32 = 250;
+
+/// The last check before an amended stop's cancel: a refusal leaves it untouched.
+struct StopGuard {
+    order: Order,
+    trigger: f64,
+    reference: StopTriggerType,
+    /// The side of the reference the trigger stays on, from planning.
+    below: bool,
+    /// A closing stop needs a position on the side it closes.
+    closes: Option<PositionSide>,
+}
+impl StopGuard {
+    /// A refusal is typed NotSent and leaves the order untouched.
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        let unchanged = || format!("Your {} order was not changed", self.order.symbol);
+        // Its own cancel marks the row Canceling before the claim.
+        let same = store.order(&self.order.id).is_some_and(|order| {
+            Order {
+                status: self.order.status,
+                ..order.clone()
+            } == self.order
+                && matches!(order.status, OrderStatus::Canceling)
+                || order == &self.order
+        });
+        if !same {
+            return Err(refused(Some(format!(
+                "{}: it changed or filled before cancellation",
+                unchanged()
+            ))));
+        }
+        if let Some(side) = self.closes
+            && !store
+                .positions()
+                .iter()
+                .any(|p| p.symbol == self.order.symbol && p.side == side && p.contracts > 0.0)
+        {
+            return Err(refused(Some(format!(
+                "{}: no position for it to protect",
+                unchanged()
+            ))));
+        }
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::IndexPrice => "index",
+            StopTriggerType::LastPrice => "last",
+        };
+        let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
+            return Err(refused(Some(format!(
+                "{}: the {label} price reference is stale",
+                unchanged()
+            ))));
+        };
+        if (self.below && self.trigger >= price) || (!self.below && self.trigger <= price) {
+            return Err(refused(Some(format!(
+                "{}: the new trigger has already crossed the {label} price",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
+}
+/// The amended order as its Inspect read showed it.
+struct Original {
+    amount: f64,
+    filled: f64,
+    trigger: f64,
+}
+/// An amended stop's final check and, while nothing has filled, the exact
+/// original to put back once.
+struct StopProtect {
+    guard: StopGuard,
+    restore: Option<Vec<(Placement, Order)>>,
+}
 
 fn local_mutation_policy() -> safe_cex_engine::request_context::Policy {
     use safe_cex_engine::request_context::{Policy, RetryPolicy};
@@ -64,6 +141,8 @@ struct Active {
 enum At<'a> {
     Entry,
     Data(&'a Slot, &'a Context),
+    /// A delayed call's slot, readied by the Plan timer.
+    Ready(Slot),
 }
 enum Answer {
     Accepted,
@@ -108,6 +187,12 @@ struct Work {
     /// A cancel batch's native aggregate, appended to the projected terminal.
     note: Option<String>,
     read_retries: u8,
+    /// An amended stop or take profit: its final check and put-back.
+    stop: Option<Box<StopProtect>>,
+    /// The put-back of a refused stop replacement is in flight.
+    restoring: bool,
+    /// When this amend's cancel was first read back still live.
+    verify_since: Option<f64>,
 }
 #[derive(Serialize)]
 struct CancelFailure {
@@ -368,6 +453,9 @@ impl Work {
             cancel_errors: vec![],
             note: None,
             read_retries: 0,
+            stop: None,
+            restoring: false,
+            verify_since: None,
         }
     }
     fn symbol(&mut self, symbol: &str) {
@@ -677,6 +765,107 @@ impl Bitrue {
         }
         Ok(result)
     }
+    /// For a stop or take-profit edit, from its Inspect read: the final
+    /// pre-cancel check, checked now too, and the untouched original to put back.
+    fn stop_protect(
+        &self,
+        cx: &Cx<'_, Pending>,
+        amend: &Amend,
+        edited: &PlaceOrderOpts,
+        reference: StopTriggerType,
+        original: Original,
+    ) -> Result<Box<StopProtect>, String> {
+        let order = &amend.order;
+        let guard = StopGuard {
+            order: order.clone(),
+            trigger: edited.price.ok_or("Bitrue amendment has no trigger")?,
+            reference,
+            // A stop sells below (buys above) the market; a take profit the reverse.
+            below: (order.kind == OrderType::StopLoss) == (order.side == OrderSide::Sell),
+            // Bitrue places every protective order as closing (CLOSE), so the
+            // position on its closing side must still be held at the claim.
+            closes: Some(if order.side == OrderSide::Sell {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            }),
+        };
+        guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
+        // Only an untouched original is put back, exactly as the Inspect read
+        // showed it: never the edit's size or trigger.
+        let restore = if original.filled == 0.0
+            && order.parent_id.is_none()
+            && order.take_profit.is_none()
+            && order.stop_loss.is_none()
+            && !cx
+                .store
+                .orders()
+                .iter()
+                .any(|leg| leg.parent_id.as_ref() == Some(&order.id))
+        {
+            let precision = cx
+                .store
+                .market(&order.symbol)
+                .map_or(0.0, |m| m.precision.amount);
+            let reference = Some(reference);
+            let put_back = PlaceOrderOpts {
+                symbol: order.symbol.clone(),
+                kind: order.kind,
+                side: order.side,
+                amount: safe_cex_engine::num::adjust(original.amount, precision),
+                price: Some(original.trigger),
+                trigger_price: None,
+                stop_loss: None,
+                take_profit: None,
+                reduce_only: Some(order.reduce_only),
+                time_in_force: order.time_in_force,
+                trigger_type: None,
+                tp_trigger_type: reference.filter(|_| order.kind == OrderType::TakeProfit),
+                sl_trigger_type: reference.filter(|_| order.kind == OrderType::StopLoss),
+                client_order_id: None,
+                close: order.close,
+                stp_mode: None,
+                max_slippage_pct: None,
+                bybit_bbo: None,
+                bybit_slippage_tolerance_ticks: None,
+                implied_volatility: None,
+            };
+            let rows = self.placement(cx, &put_back)?;
+            // Current precision/limits may differ from the original venue order.
+            // Never guess a rounded quantity/trigger or a split/grouped put-back.
+            let exact = matches!(rows.as_slice(), [(payload, restored)]
+                if restored.kind == order.kind
+                    && restored.amount == original.amount
+                    && payload.volume.as_ref().and_then(|value| value.parse::<f64>().ok()) == Some(original.amount)
+                    && payload.trigger_price == Some(original.trigger)
+                    && payload.trigger_order_create_params.is_empty());
+            exact.then_some(rows)
+        } else {
+            None
+        };
+        Ok(Box::new(StopProtect { guard, restore }))
+    }
+    /// The final-claim re-check of an amended stop's cancel, every send of it.
+    pub(crate) fn trade_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        request: &Request,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Effect::Cancel(_) = &request.step.effect else {
+            return Ok(());
+        };
+        match self
+            .trading
+            .active
+            .as_ref()
+            .filter(|active| active.work.command == request.command && !active.work.cancel_batch)
+            .and_then(|active| active.work.stop.as_ref())
+        {
+            Some(stop) => stop.guard.validate(store, release.time.raw_ms),
+            None => Ok(()),
+        }
+    }
     fn cancel_target(&self, cx: &Cx<'_, Pending>, order: &Order) -> Result<Target, String> {
         if terminal(order.status) || order.status == OrderStatus::Creating {
             return Err("Cannot cancel a terminal or creating Bitrue order".into());
@@ -739,6 +928,11 @@ impl Bitrue {
                 let order = cx.store.order(&id).ok_or("Unknown Bitrue order to amend")?;
                 if terminal(order.status) {
                     return Err("Cannot amend a terminal Bitrue order".into());
+                }
+                if order.parent_id.is_some()
+                    && matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                {
+                    return Err("Bitrue attached protection was not changed: direct leg edits are unsupported; re-place protection through the parent order".into());
                 }
                 if price.is_none() && amount.is_none() {
                     return Err("Bitrue amendment requires a price or amount".into());
@@ -1133,7 +1327,7 @@ impl Bitrue {
     fn drive(&mut self, cx: &mut Cx<'_, Pending>, mut active: Active, at: At<'_>) {
         let current = match &at {
             At::Data(slot, context) => Some((*slot, *context)),
-            At::Entry => None,
+            At::Entry | At::Ready(_) => None,
         };
         // The protective census is the job's own final Read calls (D4).
         if active.work.steps.is_empty() && !active.work.census_started {
@@ -1190,6 +1384,7 @@ impl Bitrue {
                     }
                 }
             }
+            At::Ready(slot) => slot,
         };
         self.issue_call(cx, active, slot, step, false, None);
     }
@@ -1224,6 +1419,20 @@ impl Bitrue {
         };
         if !resent {
             cx.command_progress(active.work.command, step.receipts.clone());
+        }
+        // A 408 or 5xx on a put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        if active.work.restoring
+            && step.is_place()
+            && let Some(stop) = &active.work.stop
+        {
+            let order = &stop.guard.order;
+            let words = format!(
+                "Your {} {}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders",
+                order.symbol,
+                what(order.kind)
+            );
+            let _ = cx.present_plan_failure(&plan, words);
         }
         let protection = match &step.effect {
             Effect::Place {
@@ -1300,6 +1509,200 @@ impl Bitrue {
                     self.trade_call_failed(cx, request, reason.venue_error(), false);
                 }
             }
+        }
+    }
+    /// The amend's cancel read back: CANCELED with the planned quantities
+    /// proves it; FILLED means the stop fired; anything else is re-read until
+    /// `VERIFY_MS`, then the cancel is unproven.
+    fn verify_answer(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut active: Active,
+        request: Request,
+        target: &Target,
+        response: &Response<'_>,
+    ) {
+        let current = Some((&request.slot, &request.context));
+        let read = check(response).and_then(|()| {
+            let Reply { data } =
+                serde_json::from_str::<Reply<OneOrMany<Detail<'_>>>>(response.body)
+                    .map_err(|e| format!("Malformed Bitrue order detail: {e}"))?;
+            let detail = data.one()?;
+            let quantities = target.quantities(&detail)?;
+            Ok((detail.status.to_string(), quantities))
+        });
+        let Ok((status, (amount, filled))) = read else {
+            return self.cancel_unproven(cx, active, current);
+        };
+        let guarded = active.work.stop.is_some();
+        match status.as_str() {
+            "CANCELED" | "CANCELLED" if amount == target.amount && filled == target.filled => {
+                self.drive(cx, active, At::Data(&request.slot, &request.context))
+            }
+            "FILLED" if guarded => {
+                let order = &active.work.stop.as_ref().expect("guarded").guard.order;
+                let mut error = VenueError::new(format!(
+                    "Your {} {} was not changed: it filled before its cancel landed",
+                    order.symbol,
+                    what(order.kind)
+                ));
+                error.presents = true;
+                self.end(cx, active, current, error)
+            }
+            "CANCELED" | "CANCELLED" | "FILLED" if guarded => {
+                // It partly filled during its cancel: nothing replaces it.
+                let order = &active.work.stop.as_ref().expect("guarded").guard.order;
+                let mut error = VenueError::new(format!(
+                    "Your {} {} was removed: it partly filled during its cancel, please re-place it",
+                    order.symbol,
+                    what(order.kind)
+                ));
+                error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+                error.presents = true;
+                self.end(cx, active, current, error)
+            }
+            "CANCELED" | "CANCELLED" | "FILLED" => {
+                let error = VenueError::new(
+                    "Bitrue replacement final cancellation or filled quantity was not confirmed",
+                );
+                self.end(cx, active, current, error)
+            }
+            _ => {
+                let since = *active.work.verify_since.get_or_insert(cx.now);
+                if cx.now - since >= VERIFY_MS {
+                    return self.cancel_unproven(cx, active, current);
+                }
+                let plan = active.plan.clone().expect("live Plan");
+                let step = target.lookup(Effect::Verify(target.clone()));
+                let call = serial(&step);
+                active.work.steps.push_front(step);
+                match cx.continue_serial_plan_after(
+                    &plan,
+                    &request.slot,
+                    &request.context,
+                    VERIFY_POLL_MS,
+                    call,
+                ) {
+                    Ok(()) => self.trading.active = Some(active),
+                    Err(reason) => {
+                        let error = VenueError::new(reason.venue_error().message);
+                        self.end(cx, active, current, error)
+                    }
+                }
+            }
+        }
+    }
+    /// The amend's cancel was taken but never proven: nothing replaces it,
+    /// and only here is its standing unknown.
+    fn cancel_unproven(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        active: Active,
+        current: Option<(&Slot, &Context)>,
+    ) {
+        if let Some(plan) = &active.plan {
+            let _ = cx.inherit_plan_uncertainty(plan);
+        }
+        let symbol = active.work.symbols.first().cloned().unwrap_or_default();
+        let what = active.work.amend.map_or("order", |(_, kind)| what(kind));
+        let mut error = VenueError::new(format!(
+            "Your {symbol} {what} was not replaced: its cancel was sent but could not be confirmed, so whether it still stands is unknown. Check Open Orders"
+        ));
+        error.presents = true;
+        self.end(cx, active, current, error)
+    }
+    /// An amended stop's replacement or put-back failed. A definite refusal of
+    /// the replacement puts the untouched original back once.
+    fn guarded_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut active: Active,
+        request: Request,
+        mut error: VenueError,
+        data: bool,
+    ) {
+        // Documented codes and 401/403 are definite; 408, 5xx, 429 and
+        // transport stay unknown for the put-back and protection decisions.
+        let definite =
+            error.outcome == Some(Outcome::Rejected) && error.kind != Some(ErrorKind::RateLimited);
+        let unsent = error.outcome == Some(Outcome::NotSent);
+        let restoring = active.work.restoring;
+        // The put-back's rows are taken once: it is never sent twice.
+        if definite
+            && data
+            && let Some(rows) = active
+                .work
+                .stop
+                .as_mut()
+                .and_then(|stop| stop.restore.take())
+        {
+            let plan = active.plan.clone().expect("live Plan");
+            let orders: Vec<Order> = rows.iter().map(|(_, order)| order.clone()).collect();
+            active.work.steps.clear();
+            active.work.placements(rows);
+            let step = active.work.steps.pop_front().expect("a put-back");
+            if let Ok(slot) =
+                cx.continue_serial_plan(&plan, &request.slot, &request.context, serial(&step))
+            {
+                active.work.restoring = true;
+                for order in orders {
+                    cx.store.upsert_order(order);
+                }
+                return self.issue_call(cx, active, slot, step, false, None);
+            }
+        }
+        let current = data.then_some((&request.slot, &request.context));
+        let order = &active.work.stop.as_ref().expect("guarded").guard.order;
+        let (symbol, what) = (order.symbol.clone(), what(order.kind));
+        let (message, protection) = match (restoring, definite, unsent) {
+            (true, true, _) => (
+                format!(
+                    "Your {symbol} {what} was removed: its replacement and the put-back were both refused, please re-place it"
+                ),
+                Some(safe_cex_engine::error::Protection::Unprotected),
+            ),
+            (true, _, true) => (
+                format!(
+                    "Your {symbol} {what} was removed: its replacement was refused and the put-back could not be sent, please re-place it"
+                ),
+                Some(safe_cex_engine::error::Protection::Unprotected),
+            ),
+            (true, false, false) => (
+                format!(
+                    "Your {symbol} {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                ),
+                None,
+            ),
+            (false, true, _) | (false, _, true) => (
+                format!(
+                    "Your {symbol} {what} was removed: its replacement was refused, please re-place it"
+                ),
+                Some(safe_cex_engine::error::Protection::Unprotected),
+            ),
+            (false, false, false) => {
+                Self::note_replacement_lost(&mut active.work, &request.step.effect, true);
+                return self.end(cx, active, current, error);
+            }
+        };
+        error.message = format!("{message} ({})", error.message);
+        error.protection = protection;
+        error.presents = true;
+        self.end(cx, active, current, error)
+    }
+    /// The Plan timer readied a delayed call: issue it.
+    pub(crate) fn trading_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
+        let Some(active) = self.trading.active.take() else {
+            return;
+        };
+        let slot = active
+            .plan
+            .as_ref()
+            .filter(|own| own.owner() == plan.owner())
+            .and_then(|_| cx.plan_slots(plan).ok())
+            .and_then(|slots| slots.into_iter().next());
+        match slot {
+            Some(slot) => self.drive(cx, active, At::Ready(slot)),
+            None => self.trading.active = Some(active),
         }
     }
     /// Restores the job's optimistic rows: Creating removed, Canceling reopened.
@@ -1379,6 +1782,22 @@ impl Bitrue {
         if let Some((slot, context)) = current {
             let finished = cx.finish_plan_call(plan, slot, context);
             debug_assert!(finished.is_ok(), "Plan call seal stranded");
+        }
+        if active.work.restoring
+            && let Some(stop) = &active.work.stop
+        {
+            let order = &stop.guard.order;
+            let mut error = VenueError::new(format!(
+                "Your {} {} is unchanged: its replacement was refused, so the original was put back as a new order",
+                order.symbol,
+                what(order.kind)
+            ));
+            error.protection = Some(safe_cex_engine::error::Protection::Restored);
+            error.presents = true;
+            let failed = cx.fail_plan(plan, error.partial_ids(&active.work.ids));
+            debug_assert!(failed.is_ok(), "Plan terminal stranded");
+            self.refresh_after(cx, &active.work);
+            return self.next_job(cx);
         }
         let result = if active.work.refresh_result || active.work.cancel_batch {
             "[]".to_owned()
@@ -1532,6 +1951,9 @@ impl Bitrue {
                 request.census = None;
                 return self.issue_call(cx, active, slot, request.step, false, request.floor);
             }
+            if let Effect::Verify(_) = &request.step.effect {
+                return self.cancel_unproven(cx, active, None);
+            }
             // Transport text stays behind native's private diagnostic boundary.
             if let Effect::Census(symbol) = &request.step.effect {
                 cx.command_error(
@@ -1549,6 +1971,9 @@ impl Bitrue {
             error.outcome = Some(Outcome::Unknown);
         }
         let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
+        if request.step.is_place() && active.work.stop.is_some() {
+            return self.guarded_failed(cx, active, request, error, false);
+        }
         Self::note_replacement_lost(
             &mut active.work,
             &request.step.effect,
@@ -1609,6 +2034,10 @@ impl Bitrue {
                 return self.issue_call(cx, active, slot, request.step, true, request.floor);
             }
             active.work.read_retries = 0;
+            if let Effect::Verify(target) = &request.step.effect {
+                let target = target.clone();
+                return self.verify_answer(cx, active, request, &target, &response);
+            }
             let result = match request.census.take() {
                 Some(census) => self.census_answer(cx, *census, &response),
                 None => check(&response).and_then(|()| {
@@ -1670,6 +2099,9 @@ impl Bitrue {
                     }
                     let _ = cx.finish_plan_call(&plan, &request.slot, &request.context);
                     return self.batch_next(cx, active);
+                }
+                if request.step.is_place() && active.work.stop.is_some() {
+                    return self.guarded_failed(cx, active, request, error, true);
                 }
                 Self::note_replacement_lost(
                     &mut active.work,
@@ -1781,7 +2213,12 @@ impl Bitrue {
                 data: Option<&'a serde_json::value::RawValue>,
             }
             let parsed = serde_json::from_str::<Rejected<'_>>(response.body).ok();
-            let rejected = (200..500).contains(&response.status)
+            let guarded =
+                work.stop.is_some() && matches!(request.step.effect, Effect::Place { .. });
+            let no_order_data = parsed
+                .as_ref()
+                .is_some_and(|reply| reply.data.is_none_or(|data| data.get() == "null"));
+            let mut rejected = (200..500).contains(&response.status)
                 && response.status != 408
                 && parsed.as_ref().is_some_and(|reply| {
                     // Futures error list: signature, mandatory parameter, contract, balance.
@@ -1794,35 +2231,58 @@ impl Bitrue {
             let code = parsed
                 .as_ref()
                 .and_then(|reply| decode_int(&reply.code))
-                .filter(|_| rejected);
+                .filter(|_| {
+                    if guarded {
+                        // A rate status cannot become a refusal through its body.
+                        !matches!(response.status, 418 | 429)
+                    } else {
+                        rejected
+                    }
+                });
             let native = code.map(|code| Native {
                 code: NativeCode::Int(code),
                 message: "",
             });
-            let error = answer_failure(response, message, rejected);
-            let answer = match cx.classify_write(
-                context,
-                &codes::BITRUE,
-                native.as_ref(),
-                error.message.clone(),
-            ) {
-                Ok(fact) => match cx.http_write_fact(
-                    context,
-                    WriteFact::Failed {
-                        fact,
-                        known_effects: false,
-                    },
-                    None,
-                ) {
-                    Ok(Some(grant)) if !request.resent => Answer::Resend(grant),
-                    Ok(_) => Answer::Failed(error),
-                    Err(_) => Answer::Stopped,
-                },
-                Err(_) => match cx.http_write_unproven(context, error.message.clone()) {
-                    Ok(_) => Answer::Failed(error),
-                    Err(_) => Answer::Stopped,
-                },
+            let mut error = answer_failure(response, message, rejected);
+            let table = if guarded {
+                &codes::GUARDED_REPLACEMENT
+            } else {
+                &codes::BITRUE
             };
+            let answer =
+                match cx.classify_write(context, table, native.as_ref(), error.message.clone()) {
+                    Ok(fact) => {
+                        let fact = if guarded && !no_order_data {
+                            fact.unproven()
+                        } else {
+                            fact
+                        };
+                        if guarded {
+                            rejected = matches!(
+                                fact.verdict(),
+                                safe_cex_engine::classify::Verdict::Refused(_)
+                                    | safe_cex_engine::classify::Verdict::RefusedResend(_)
+                            );
+                            error = fact.error().clone();
+                        }
+                        match cx.http_write_fact(
+                            context,
+                            WriteFact::Failed {
+                                fact,
+                                known_effects: false,
+                            },
+                            None,
+                        ) {
+                            Ok(Some(grant)) if !request.resent => Answer::Resend(grant),
+                            Ok(_) => Answer::Failed(error),
+                            Err(_) => Answer::Stopped,
+                        }
+                    }
+                    Err(_) => match cx.http_write_unproven(context, error.message.clone()) {
+                        Ok(_) => Answer::Failed(error),
+                        Err(_) => Answer::Stopped,
+                    },
+                };
             // A resent placement keeps its fence until its own answer: a lost
             // resend may still leave native protection live.
             if rejected
@@ -2023,6 +2483,7 @@ impl Bitrue {
                     bybit_slippage_tolerance_ticks: None,
                     implied_volatility: None,
                 };
+                let mut source = None;
                 if protective {
                     if detail.trigger_type.map(|n| n.0)
                         != Some(if opts.kind == OrderType::StopLoss {
@@ -2050,6 +2511,7 @@ impl Bitrue {
                     } else {
                         opts.tp_trigger_type = Some(reference);
                     }
+                    source = Some(reference);
                 }
                 let mut seen = HashSet::new();
                 if let Some(children) = &detail.child_orders {
@@ -2103,6 +2565,14 @@ impl Bitrue {
                     return Err("Bitrue replacement cannot verify attached protection".into());
                 }
                 let rows = self.placement(cx, &opts)?;
+                if let Some(reference) = source {
+                    let original = Original {
+                        amount,
+                        filled,
+                        trigger: detail.trigger_price.map_or(amend.order.price, |n| n.0),
+                    };
+                    work.stop = Some(self.stop_protect(cx, amend, &opts, reference, original)?);
+                }
                 let mut target = amend.target.clone();
                 target.amount = amount;
                 target.filled = filled;
@@ -2125,6 +2595,14 @@ impl Bitrue {
     }
 }
 
+/// How a message names an amended order of `kind`.
+fn what(kind: OrderType) -> &'static str {
+    match kind {
+        OrderType::StopLoss => "stop",
+        OrderType::TakeProfit => "take profit",
+        _ => "order",
+    }
+}
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)

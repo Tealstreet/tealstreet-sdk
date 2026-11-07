@@ -57,6 +57,7 @@ mod execution;
 mod background_delivery_tests;
 
 struct CommandOwner {
+    request_class: crate::request_budget::RequestClass,
     generation: u64,
     /// Exact logical completion authority survives expired-handle cleanup.
     phase: CommandPhase,
@@ -98,6 +99,32 @@ enum CommandPhase {
     Planned(planned::State),
     #[cfg(feature = "http-plans")]
     Retiring(HttpOwnerRetirement),
+}
+
+impl ContextRegistry {
+    fn dispatch_request_class(&self, id: CommandId) -> crate::request_budget::RequestClass {
+        if self.dispatch.is_some_and(|(command, _)| command == id) {
+            self.dispatch_class
+        } else {
+            crate::request_budget::RequestClass::Read
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
+    fn request_class(&self, scope: Scope, policy: &Policy) -> crate::request_budget::RequestClass {
+        use crate::request_budget::RequestClass;
+        if policy.operation == Operation::Mutation {
+            return RequestClass::OrderWrite;
+        }
+        match scope {
+            Scope::Command(id) => self.commands.get(&id).map_or_else(
+                || self.dispatch_request_class(id),
+                |owner| owner.request_class,
+            ),
+            Scope::Background if policy.credential.is_none() => RequestClass::Discovery,
+            _ => RequestClass::OrderRead,
+        }
+    }
 }
 
 impl CommandOwner {
@@ -229,6 +256,7 @@ pub(super) struct ContextRegistry {
     bearer_legs: Vec<(u64, u64)>,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
+    pub(super) dispatch_class: crate::request_budget::RequestClass,
     executions: execution::Executions,
     #[cfg(feature = "http-plans")]
     retirements: VecDeque<HttpOwnerRetirement>,
@@ -261,7 +289,7 @@ pub(super) struct ContextRegistry {
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
-    read_marks: Vec<(Owner, u64)>,
+    read_marks: Vec<(Owner, u64, crate::order_read_cover::OrderReadMark)>,
 }
 
 /// Plan-backed executions' physical owners. Few live at once, so a vector
@@ -314,12 +342,18 @@ impl ContextRegistry {
     /// The order-read token for a Read released now under `owner`: the epoch of
     /// its earliest released Read. A mark only ever keeps a fence longer.
     #[cfg(feature = "order-locks")]
-    pub(super) fn read_mark(&mut self, owner: Owner, epoch: u64) -> u64 {
-        if let Some((_, mark)) = self.read_marks.iter().find(|(held, _)| *held == owner) {
-            return *mark;
+    /// The order-lock epoch and release of `owner`'s earliest released leg.
+    pub(super) fn read_mark(
+        &mut self,
+        owner: Owner,
+        epoch: u64,
+        read: crate::order_read_cover::OrderReadMark,
+    ) -> (u64, crate::order_read_cover::OrderReadMark) {
+        if let Some((_, mark, first)) = self.read_marks.iter().find(|(held, ..)| *held == owner) {
+            return (*mark, *first);
         }
-        self.read_marks.push((owner, epoch));
-        epoch
+        self.read_marks.push((owner, epoch, read));
+        (epoch, read)
     }
     #[cfg(all(test, feature = "order-locks"))]
     pub(super) fn read_mark_count(&self) -> usize {
@@ -333,7 +367,7 @@ impl ContextRegistry {
             return;
         }
         let (contexts, commands) = (&self.contexts, &self.commands);
-        self.read_marks.retain(|(owner, _)| {
+        self.read_marks.retain(|(owner, ..)| {
             matches!(owner, Owner::Command { id, generation }
                 if commands.get(id).is_some_and(|live| live.generation == *generation))
                 || contexts.values().any(|context| context.owner() == *owner)
@@ -341,7 +375,7 @@ impl ContextRegistry {
     }
     fn forget_read_mark(&mut self, _owner: Owner) {
         #[cfg(feature = "order-locks")]
-        self.read_marks.retain(|(held, _)| *held != _owner);
+        self.read_marks.retain(|(held, ..)| *held != _owner);
     }
     pub(super) fn prune(&mut self, now: f64) {
         self.contexts.retain(|_, old| old.deadline() > now);
@@ -425,6 +459,11 @@ impl ContextRegistry {
         self.commands
             .get(&command)
             .is_none_or(|owner| owner.credentialed)
+    }
+
+    #[cfg(feature = "order-locks")]
+    pub(super) fn owner_intent(&self, command: CommandId) -> Option<crate::classify::Intent> {
+        self.commands.get(&command).and_then(|owner| owner.intent)
     }
 
     #[cfg(test)]
@@ -582,6 +621,15 @@ impl ContextRegistry {
         egress: Option<Egress>,
         until: Option<f64>,
     ) -> Result<Context, Error> {
+        let scope = match owner {
+            Owner::Command { id, .. } => Scope::Command(id),
+            Owner::Background { .. } => Scope::Background,
+            _ => Scope::Execution,
+        };
+        let class = parent.map_or_else(
+            || self.request_class(scope, &policy),
+            Context::request_class,
+        );
         let deadline = until.unwrap_or(now + f64::from(policy.timeout_ms));
         let deadline = parent.map_or(deadline, |parent| parent.deadline().min(deadline));
         if let Owner::Command { id, .. } = owner
@@ -613,6 +661,7 @@ impl ContextRegistry {
         )?
         .with_retry(policy.retry)?
         .with_egress(egress)?;
+        context.set_request_class(class);
         if self.contexts.len() + self.reserved_context_count() >= CAPACITY
             || matches!(owner, Owner::Command { id, .. }
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
@@ -641,6 +690,7 @@ impl ContextRegistry {
                     owner.credentialed |= context.credential().is_some();
                 })
                 .or_insert(CommandOwner {
+                    request_class: context.request_class(),
                     generation,
                     phase: CommandPhase::Context {
                         root: context.clone(),
@@ -739,6 +789,7 @@ impl ContextRegistry {
             )?
             .with_retry(policy.retry)?
             .with_egress(parent.egress())?;
+            child.set_request_class(parent.request_class());
             child.bind_issuer(&self.issuer);
             legs.push(leg);
             children.push(child);
@@ -1638,6 +1689,40 @@ impl<P> Cx<'_, P> {
         self.make_http_context(scope, policy, None, None)
     }
 
+    /// Declare a live public read (book/depth, ticker, trades or candles).
+    /// Catalogue Background reads use `http_context` and keep the longer default.
+    /// Before public startup completes, live reads keep the discovery readiness bound.
+    /// Command classes and explicit venue timeouts retain their existing bounds.
+    pub fn http_live_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
+        self.live_http_context(scope, policy, None)
+    }
+
+    pub fn http_live_context_with_egress(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        egress: Egress,
+    ) -> Result<Context, Error> {
+        if matches!(egress, Egress::Session(_)) {
+            return Err(Error::Invalid);
+        }
+        self.live_http_context(scope, policy, Some(egress))
+    }
+
+    fn live_http_context(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        egress: Option<Egress>,
+    ) -> Result<Context, Error> {
+        if policy.operation != Operation::Read {
+            return Err(Error::Invalid);
+        }
+        let loaded = self.store.loaded();
+        self.core()
+            .make_http_context(scope, policy, None, egress, loaded, true)
+    }
+
     /// As `http_context`, with egress declared at issuance. Only unsigned
     /// reads declare egress; a credentialed context may only confirm Primary.
     pub fn http_context_with_egress(
@@ -1655,6 +1740,7 @@ impl<P> Cx<'_, P> {
 
     /// A new physical leg under the same logical authority. Preserve its exact
     /// raw deadline; integer timeout recomputation cannot round the bound up.
+    /// The declared physical cap is never expanded to the logical class budget.
     /// Session legs use `session_leg_context`, so families without Sessions
     /// never link Session issuance.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
@@ -1682,8 +1768,9 @@ impl<P> Cx<'_, P> {
         parent: Option<&Context>,
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
-        let policy = discovery_bound(scope, policy, self.store.loaded());
-        self.core().make_http_context(scope, policy, parent, egress)
+        let loaded = self.store.loaded();
+        self.core()
+            .make_http_context(scope, policy, parent, egress, loaded, false)
     }
 
     /// Validate context provenance and retry policy without extending its bound.
@@ -1710,6 +1797,31 @@ impl<P> Cx<'_, P> {
     pub fn validate_http_context(&self, context: &Context) -> Result<(), Error> {
         self.io.core.request_contexts.validate_legacy(context)?;
         self.io.core.request_contexts.validate(context, self.now)
+    }
+
+    /// Raise a live issued Mutation command root's failure projection to Unknown.
+    /// Monotonic and failure-only: it grants no send, retry or success authority,
+    /// records no write fact, and cannot clear earlier uncertainty.
+    pub fn inherit_http_uncertainty(&mut self, root: &Context) -> Result<(), Error> {
+        self.validate_http_context(root)?;
+        if root.operation() != Operation::Mutation || !matches!(root.owner(), Owner::Command { .. })
+        {
+            return Err(Error::Invalid);
+        }
+        let owner = self
+            .io
+            .core
+            .request_contexts
+            .owner_entry_mut(root.owner())
+            .ok_or(Error::Revoked)?;
+        if owner.context_root() != Some(root) {
+            return Err(Error::Invalid);
+        }
+        owner.inherited_uncertain = true;
+        if let Some(writes) = owner.writes.as_mut() {
+            writes.inherit_uncertain();
+        }
+        Ok(())
     }
 
     /// Read-only companion-event authority. A Read handle cannot publish a
@@ -2030,17 +2142,12 @@ impl<P> Cx<'_, P> {
             body: "",
         };
         let delivery = self.current_write_delivery(context)?;
-        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-        let status_exempt = self.io.core.http_status_exempt == Some(delivery.attempt.request);
-        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
-        let status_exempt = false;
-        Ok(crate::classify::fact_for_delivery(
+        Ok(crate::classify::fact(
             table,
             self.write_intent(context)?,
             crate::classify::Released::Response(&response),
             native,
             message,
-            status_exempt,
         )
         .for_attempt(delivery.attempt.request))
     }
@@ -2267,6 +2374,8 @@ impl crate::engine::CoreCx<'_> {
         policy: Policy,
         parent: Option<&Context>,
         egress: Option<Egress>,
+        loaded: crate::model::Loaded,
+        live: bool,
     ) -> Result<Context, Error> {
         #[cfg(feature = "http-plans")]
         if self.io.core.http_preflight_ready.is_some() {
@@ -2289,12 +2398,62 @@ impl crate::engine::CoreCx<'_> {
                 .domain_pacing(policy.operation, policy.pacing)?,
             ..policy
         };
+        let class = if live
+            && scope == Scope::Background
+            && (policy.credential.is_some() || (loaded.markets && loaded.tickers))
+        {
+            crate::request_budget::RequestClass::Read
+        } else {
+            parent
+                .map_or_else(
+                    || self.io.core.request_contexts.request_class(scope, &policy),
+                    Context::request_class,
+                )
+                .for_operation(policy.operation)
+        };
+        let default_discovery = parent.is_none()
+            && class == crate::request_budget::RequestClass::Discovery
+            && policy.timeout_ms == READ_TIMEOUT_MS;
+        let policy = if default_discovery {
+            discovery_bound(scope, policy, loaded)
+        } else {
+            policy
+        };
+        // Class budgets supply logical defaults; child policies declare physical caps.
+        let policy = if parent.is_none() && policy.timeout_ms == READ_TIMEOUT_MS {
+            Policy {
+                timeout_ms: class.budget_ms(),
+                ..policy
+            }
+        } else {
+            policy
+        };
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        let context = self
+        let mut context = self
             .io
             .core
             .request_contexts
             .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
+        if live || default_discovery {
+            context.set_request_class(class);
+            if default_discovery {
+                context.set_background_budget(self.now);
+            }
+            *self
+                .io
+                .core
+                .request_contexts
+                .contexts
+                .get_mut(&context.leg())
+                .expect("just issued") = context.clone();
+            if let Owner::Command { id, .. } = context.owner()
+                && let Some(owner) = self.io.core.request_contexts.commands.get_mut(&id)
+                && let CommandPhase::Context { root, .. } = &mut owner.phase
+                && root.leg() == context.leg()
+            {
+                *root = context.clone();
+            }
+        }
         #[cfg(feature = "order-locks")]
         if context.operation() == Operation::Mutation
             && let Owner::Command { id, .. } = context.owner()
@@ -2455,7 +2614,7 @@ impl crate::engine::CoreRef<'_> {
 mod tests {
     use super::*;
     use crate::request_context::{Operation, RetryPolicy};
-    use crate::{Notice, Store};
+    use crate::{Action, Notice, Store};
 
     #[test]
     fn only_standard_public_background_discovery_gets_the_readiness_allowance() {
@@ -2895,6 +3054,161 @@ mod tests {
     }
 
     #[test]
+    fn inherited_http_uncertainty_requires_a_live_issued_mutation_root() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mutation = Policy {
+            operation: Operation::Mutation,
+            retry: RetryPolicy::Never,
+            ..policy()
+        };
+        let background = cx.http_context(Scope::Background, policy()).unwrap();
+        let read = cx.http_context(Scope::Command(7), policy()).unwrap();
+        let root = cx
+            .http_context(Scope::Command(8), mutation.clone())
+            .unwrap();
+        let child = cx.http_leg_context(&root, mutation.clone()).unwrap();
+        let foreign = ContextRegistry::default()
+            .issue(1, Scope::Command(8), mutation.clone(), 0.)
+            .unwrap();
+        let counts = (
+            cx.io.core.next_id,
+            cx.io.core.actions.len(),
+            cx.io.core.timers.len(),
+        );
+        for (context, expected) in [
+            (&background, Error::Invalid),
+            (&read, Error::Invalid),
+            (&child, Error::Invalid),
+            (&foreign, Error::Revoked),
+        ] {
+            assert_eq!(cx.inherit_http_uncertainty(context), Err(expected));
+        }
+        assert_eq!(
+            (
+                cx.io.core.next_id,
+                cx.io.core.actions.len(),
+                cx.io.core.timers.len()
+            ),
+            counts
+        );
+        assert!(
+            !cx.io
+                .core
+                .request_contexts
+                .owner_entry_mut(root.owner())
+                .unwrap()
+                .inherited_uncertain
+        );
+        cx.fail_context(&root, "terminal").unwrap();
+        assert_eq!(cx.inherit_http_uncertainty(&root), Err(Error::Revoked));
+        let current = cx.http_context(Scope::Command(8), mutation).unwrap();
+        assert_eq!(cx.inherit_http_uncertainty(&root), Err(Error::Revoked));
+        cx.now = current.deadline();
+        assert_eq!(cx.inherit_http_uncertainty(&current), Err(Error::TimedOut));
+    }
+
+    #[test]
+    fn inherited_http_uncertainty_cannot_downgrade_or_authorize_a_write() {
+        for (fallback, retry) in [
+            (crate::Outcome::NotSent, RetryPolicy::Never),
+            (crate::Outcome::Rejected, RetryPolicy::Never),
+            (crate::Outcome::NotSent, RetryPolicy::DefinitiveRefusal),
+            (crate::Outcome::Rejected, RetryPolicy::DefinitiveRefusal),
+        ] {
+            for registered in [false, true] {
+                let mut io = super::super::Io::<()>::default();
+                let mut store = Store::default();
+                let mut cx = Cx {
+                    now: 0.,
+                    store: &mut store,
+                    io: &mut io,
+                };
+                let root = cx
+                    .http_context(
+                        Scope::Command(7),
+                        Policy {
+                            operation: Operation::Mutation,
+                            retry,
+                            ..policy()
+                        },
+                    )
+                    .unwrap();
+                if registered {
+                    cx.io
+                        .core
+                        .request_contexts
+                        .register_attempt(&root, RequestId(99), 0.)
+                        .unwrap();
+                }
+                let counts = (
+                    cx.io.core.next_id,
+                    cx.io.core.actions.len(),
+                    cx.io.core.timers.len(),
+                );
+                // A permissive policy can form a logical retry, but there is no
+                // physical refusal/resend grant, before or after inheritance.
+                assert_eq!(
+                    root.retry(RetryEvidence::DefinitiveRefusal, cx.now).is_ok(),
+                    retry == RetryPolicy::DefinitiveRefusal
+                );
+                assert_eq!(
+                    cx.http_retry_context(&root, RetryEvidence::DefinitiveRefusal),
+                    Err(Error::RetryForbidden)
+                );
+                cx.inherit_http_uncertainty(&root).unwrap();
+                cx.inherit_http_uncertainty(&root).unwrap();
+                assert_eq!(
+                    (
+                        cx.io.core.next_id,
+                        cx.io.core.actions.len(),
+                        cx.io.core.timers.len()
+                    ),
+                    counts
+                );
+                assert_eq!(
+                    cx.http_retry_context(&root, RetryEvidence::DefinitiveRefusal),
+                    Err(Error::RetryForbidden)
+                );
+                assert!(cx.io.pending.is_empty());
+                // Even a caller claiming success cannot confirm an unissued or unaccepted write.
+                cx.done_context(&root, "not accepted".into()).unwrap();
+                assert!(cx.io.core.actions.iter().any(|action| matches!(action,
+                    Action::Notice(Notice::CommandFailed { error, .. })
+                    if error.outcome == Some(crate::Outcome::Unknown))));
+
+                let root = cx
+                    .http_context(
+                        Scope::Command(8),
+                        Policy {
+                            operation: Operation::Mutation,
+                            retry: RetryPolicy::Never,
+                            ..policy()
+                        },
+                    )
+                    .unwrap();
+                cx.inherit_http_uncertainty(&root).unwrap();
+                cx.fail_context(
+                    &root,
+                    VenueError {
+                        outcome: Some(fallback),
+                        ..VenueError::new("less uncertain")
+                    },
+                )
+                .unwrap();
+                assert!(cx.io.core.actions.iter().any(|action| matches!(action,
+                    Action::Notice(Notice::CommandFailed { command: 8, error })
+                    if error.outcome == Some(crate::Outcome::Unknown))));
+            }
+        }
+    }
+
+    #[test]
     fn live_validation_cannot_borrow_completion_expiry_tolerance() {
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
@@ -2959,9 +3273,23 @@ mod tests {
         let mut registry = ContextRegistry::default();
         let first = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
         let other = registry.issue(2, Scope::Background, policy(), 0.).unwrap();
-        assert_eq!(registry.read_mark(first.owner(), 5), 5);
-        assert_eq!(registry.read_mark(first.owner(), 9), 5);
-        assert_eq!(registry.read_mark(other.owner(), 9), 9);
+        let at = |seq, sent| crate::order_read_cover::OrderReadMark {
+            seq,
+            sent,
+            epoch: 0,
+        };
+        assert_eq!(
+            registry.read_mark(first.owner(), 5, at(1, 1.)),
+            (5, at(1, 1.))
+        );
+        assert_eq!(
+            registry.read_mark(first.owner(), 9, at(2, 2.)),
+            (5, at(1, 1.))
+        );
+        assert_eq!(
+            registry.read_mark(other.owner(), 9, at(2, 2.)),
+            (9, at(2, 2.))
+        );
         assert_eq!(registry.read_mark_count(), 2);
     }
 
@@ -2976,27 +3304,34 @@ mod tests {
         let Owner::Command { id, generation } = command.owner() else {
             panic!("a command scope has a command owner");
         };
-        registry.read_mark(command.owner(), 1);
-        registry.read_mark(background.owner(), 1);
+        let at = crate::order_read_cover::OrderReadMark {
+            seq: 0,
+            sent: 0.,
+            epoch: 0,
+        };
+        registry.read_mark(command.owner(), 1, at);
+        registry.read_mark(background.owner(), 1, at);
         registry.read_mark(
             Owner::Command {
                 id,
                 generation: generation + 1,
             },
             1,
+            at,
         );
         registry.read_mark(
             Owner::Background {
                 generation: u64::MAX,
             },
             1,
+            at,
         );
         registry.forget_dead_read_marks();
         assert_eq!(registry.read_mark_count(), 2, "dead and regenerated swept");
         registry.forget_read_mark(background.owner());
         assert_eq!(registry.read_mark_count(), 1);
         assert_eq!(
-            registry.read_mark(command.owner(), 9),
+            registry.read_mark(command.owner(), 9, at).0,
             1,
             "the live mark stays"
         );

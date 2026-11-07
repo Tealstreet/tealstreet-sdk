@@ -1,3 +1,5 @@
+import { historyDecodeOf } from './history-decode.mjs';
+export { historyDecodeOf } from './history-decode.mjs';
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
 export { HttpPreparationError } from './managed-http.mjs';
 
@@ -218,6 +220,7 @@ function interruptedCommand(error, command, interrupted) {
 const ERROR_KINDS = new Set(['rejected', 'invalidInput', 'insufficientBalance', 'authInvalid', 'authExpired',
   'authPermission', 'rateLimited', 'network', 'timeout', 'venueUnavailable', 'unsupported', 'internal']);
 const ERROR_OUTCOMES = new Set(['notSent', 'rejected', 'unknown']);
+const ERROR_PROTECTIONS = new Set(['restored', 'unprotected']);
 const text = (value) => (typeof value === 'string' && value ? value : undefined);
 const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : undefined);
 
@@ -244,11 +247,15 @@ export class ExchangeError extends Error {
     if (builder) Object.assign(this, builder);
     if (ERROR_KINDS.has(detail.kind)) this.kind = detail.kind;
     if (ERROR_OUTCOMES.has(detail.outcome)) this.outcome = detail.outcome;
+    if (typeof detail.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(detail.causeCode)) this.causeCode = detail.causeCode;
+    const historyDecode = historyDecodeOf(detail.historyDecode);
+    if (historyDecode) this.historyDecode = historyDecode;
     const venueCode = text(detail.venueCode);
     if (venueCode) this.venueCode = venueCode;
     const venueMessage = text(detail.venueMessage);
     if (venueMessage) this.venueMessage = venueMessage;
     if (Number.isFinite(detail.retryAfterMs) && detail.retryAfterMs >= 0) this.retryAfterMs = detail.retryAfterMs;
+    if (ERROR_PROTECTIONS.has(detail.protection)) this.protection = detail.protection;
     const ids = detail.partial?.orderIds;
     if (Array.isArray(ids) && ids.length && ids.every((id) => typeof id === 'string')) {
       this.partialOrderIds = [...ids];
@@ -348,6 +355,10 @@ export class EngineHost {
         throw new TypeError('Engine signer algorithms must be an array');
       engine.useExternalSigner(options.signerAlgorithms === undefined ? undefined : JSON.stringify(options.signerAlgorithms));
     }
+    if (options.protocolTime !== undefined && typeof options.protocolTime !== 'function')
+      throw new TypeError('Host protocol time source must be a function');
+    this.readProtocolTime = options.protocolTime;
+    this.pendingProtocolTime = undefined;
     this.signer = options.signer;
     this.primitiveSignings = new Map();
     // Provider calls still running after their wait ended, for retirement joins.
@@ -355,6 +366,7 @@ export class EngineHost {
     this.hostedSignings = new Map();
     this.entropy = identity;
     this.engine = engine;
+    this.engineVerified = false;
     this.ownsEngine = options.ownsEngine === true;
     this.transport = transport;
     this.handlers = handlers;
@@ -391,6 +403,14 @@ export class EngineHost {
     this.run(this.invoke(this.engine.start, this.transport.now()));
   }
 
+  /** Update protocol UTC only. Scheduling always uses transport.now(). */
+  syncHostTime(utc, now = this.transport.now()) {
+    if (typeof this.engine.syncHostTime !== 'function')
+      throw new Error('Engine does not support separate protocol time');
+    if (!this.invoke(this.engine.syncHostTime, now, utc))
+      throw new Error('Engine refused host protocol time');
+  }
+
   get dead() { return this.deadError !== undefined; }
 
   deferHttpNotification(callback, value, binary = false) {
@@ -424,9 +444,26 @@ export class EngineHost {
     this.assertHttpHandoffIdle();
     if (this.disposed) return;
     try {
-      if (this.engine.failed?.()) {
+      // Failure is sticky and only engine calls set it: a passed post-call check
+      // covers this call unless an engine call ran outside invoke since.
+      if (!this.engineVerified && this.engine.failed?.()) {
         this.failEngine(new Error('Engine resource identities exhausted'));
         return;
+      }
+      this.engineVerified = false;
+      // Clock reads can queue a correction during a physical group handoff.
+      // Drain it only at a fenced host entry, before the next Rust operation.
+      this.pendingProtocolTime = this.readProtocolTime?.() ?? this.pendingProtocolTime;
+      if (this.pendingProtocolTime) {
+        const { now, utc } = this.pendingProtocolTime;
+        if (!Number.isFinite(now) || !Number.isFinite(utc)) throw new Error('Invalid host protocol time observation');
+        if (typeof this.engine.syncHostTime !== 'function') throw new Error('Engine does not support separate protocol time');
+        if (!this.engine.syncHostTime(now, utc)) throw new Error('Engine refused host protocol time');
+        this.pendingProtocolTime = undefined;
+        if (this.engine.failed?.()) {
+          this.failEngine(new Error('Engine resource identities exhausted'));
+          return;
+        }
       }
       let result;
       switch (arguments.length) {
@@ -440,6 +477,7 @@ export class EngineHost {
         this.failEngine(new Error('Engine resource identities exhausted'));
         return;
       }
+      this.engineVerified = true;
       return result;
     } catch (error) {
       // Do not inspect Rust state after a trap: its mutable borrow may be held.
@@ -668,7 +706,7 @@ export class EngineHost {
     let closed = 0;
     for (const [id, record] of [...this.socketRecords]) {
       // A connect in flight is left alone, as in TS: a second connect would leak it.
-      if ((channel !== undefined && record.channel !== channel) || !record.open || !this.sockets.has(id)) continue;
+      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open || !this.sockets.has(id)) continue;
       const socket = this.sockets.get(id);
       this.sockets.delete(id);
       this.socketClosed(id, 1006);
@@ -690,16 +728,17 @@ export class EngineHost {
     const record = this.socketRecords.get(id);
     if (!record) return;
     this.socketRecords.delete(id);
-    const { stats } = record;
-    if (record.open) stats.open--;
-    if (record.initialized) stats.initialized--;
+    for (const stats of record.stats) {
+      if (record.open) stats.open--;
+      if (record.initialized) stats.initialized--;
+      stats.lastCloseCode = code;
+      stats.lastCloseAt = Date.now();
+      stats.closes++;
+      stats.closeStreak++;
+    }
     // Frames still in flight from a closed socket must not count as recovery.
     record.open = false;
     record.initialized = false;
-    stats.lastCloseCode = code;
-    stats.lastCloseAt = Date.now();
-    stats.closes++;
-    stats.closeStreak++;
     this.socketChanged();
   }
 
@@ -1061,6 +1100,12 @@ export class EngineHost {
     return JSON.parse(this.invokeHosted(this.engine.hostedSigningClock, this.transport.now()));
   }
 
+  // A direct engine entry outside invoke: the next invoke checks failure first.
+  cancelEngineHostedSigning(id) {
+    this.engineVerified = false;
+    this.engine.cancelHostedSigning?.(id);
+  }
+
   invokeHosted(fn, ...args) {
     this.assertHttpHandoffIdle();
     const output = this.invoke(fn, ...args);
@@ -1080,14 +1125,14 @@ export class EngineHost {
     const duration = deadlineMs - this.transport.now();
     if (!Number.isInteger(id) || id <= 0 || id > 0xffff_ffff || this.hostedSignings.has(id)
       || !Number.isFinite(duration) || duration <= 0 || duration > 5000) {
-      this.engine.cancelHostedSigning?.(id);
+      this.cancelEngineHostedSigning(id);
       return Promise.reject(new ExchangeError('Invalid hosted signing request', { kind: 'invalidInput', outcome: 'notSent' }));
     }
     if (!this.signer) {
       try {
         return Promise.resolve(JSON.parse(this.invokeHosted(this.engine.localHostedSigning, id, this.transport.now())));
       } catch (error) {
-        try { this.engine.cancelHostedSigning(id); } catch { /* Preserve the closed native error. */ }
+        try { this.cancelEngineHostedSigning(id); } catch { /* Preserve the closed native error. */ }
         return Promise.reject(error);
       }
     }
@@ -1096,7 +1141,7 @@ export class EngineHost {
       const pending = this.primitiveSigning(work, duration, execute, (result, code) => {
         this.hostedSignings.delete(id);
         if (code || this.disposed) {
-          try { this.engine.cancelHostedSigning(id); } catch { /* Keep a closed signing error. */ }
+          try { this.cancelEngineHostedSigning(id); } catch { /* Keep a closed signing error. */ }
           reject(new ExchangeError(code === 'timedOut' ? 'Hosted signing timed out' : 'Hosted signing failed', {
             kind: code === 'timedOut' ? 'timeout' : code === 'refused' ? 'invalidInput' : 'internal', outcome: 'notSent',
           }));
@@ -1168,7 +1213,20 @@ export class EngineHost {
     if (this.disposed || !actionsJson) return;
     let unknown;
     let callbackFailure;
-    for (const action of JSON.parse(actionsJson)) {
+    const actions = JSON.parse(actionsJson);
+    // Native timeout IDs bind diagnostics before this batch cancels their original resources.
+    for (const action of actions) {
+      const request = action.op === 'event' ? action.fields?.httpTimeoutRequest : undefined;
+      if (typeof request !== 'string' || !/^[1-9][0-9]{0,19}$/.test(request)) continue;
+      for (const resource of this.managedHttp.resources.values()) {
+        if (!Number.isSafeInteger(resource.request) || String(resource.request) !== request) continue;
+        action.fields = { ...action.fields, httpMethod: resource.diagnostic.method, httpPath: resource.diagnostic.path, httpPhase: resource.phase, ...this.managedHttp.timeoutFacts(resource) };
+        if (action.message && !action.message.startsWith("Signing ") && !action.message.includes(" budget=")) action.message += ` (${this.managedHttp.timeoutMessage(resource)})`;
+        this.managedHttp.failure(resource, 'timeout');
+        break;
+      }
+    }
+    for (const action of actions) {
       if (this.disposed) return;
       // Unknown protocol actions remain errors, but cannot discard the batch's
       // subsequent command completions. Ordinary callbacks still propagate.
@@ -1232,15 +1290,17 @@ export class EngineHost {
           transport.setTimeout(notify, 0);
           break;
         }
-        const stats = this.socketStats[action.channel] ?? this.socketStats.public;
-        const record = { channel: action.channel ?? 'public', stats, open: false, initialized: false };
-        // Health tracking costs one write per frame; state changes notify once.
+        const channel = Object.hasOwn(this.socketStats, action.channel) ? action.channel : 'public';
+        const channels = action.publicTopics === true && channel !== 'public' ? [channel, 'public'] : [channel];
+        const stats = channels.map((role) => this.socketStats[role]);
+        const record = { channels, stats, open: false, initialized: false };
+        // One timestamp per carried channel; state changes notify once per socket.
         const received = () => {
-          stats.lastReceived = Date.now();
+          const now = Date.now();
+          for (const stat of stats) stat.lastReceived = now;
           if (record.initialized || !record.open) return;
           record.initialized = true;
-          stats.initialized++;
-          stats.closeStreak = 0;
+          for (const stat of stats) { stat.initialized++; stat.closeStreak = 0; }
           this.socketChanged();
         };
         this.socketRecords.set(id, record);
@@ -1250,6 +1310,7 @@ export class EngineHost {
           const callbacks = {
             binary: action.binary === true,
             channel: action.channel,
+            publicTopics: action.publicTopics === true,
             context: action.context,
             headers: action.headers && Object.fromEntries(action.headers),
             onOpen: () => {
@@ -1257,7 +1318,7 @@ export class EngineHost {
               if (this.disposed || !(connecting || (socket && this.sockets.get(id) === socket))) return;
               if (this.socketRecords.get(id) === record && !record.open) {
                 record.open = true;
-                stats.open++;
+                for (const stat of stats) stat.open++;
                 this.socketChanged();
               }
               this.run(this.invoke(engine.wsOpen, id, transport.now()));

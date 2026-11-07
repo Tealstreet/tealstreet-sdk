@@ -20,6 +20,60 @@ fn place(
 }
 
 #[test]
+fn ambiguous_http_signature_response_never_resends_a_released_create() {
+    use safe_cex_engine::{Method, Outcome, Response};
+
+    for status in [429, 408, 500, 503] {
+        let mut e = trading_engine();
+        let out = place(
+            &mut e,
+            vec![order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#,
+            )],
+        );
+        let writes: Vec<_> = out
+            .iter()
+            .filter_map(|action| match action {
+                Action::Http(request) if request.method != Method::Get => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(writes.len(), 1, "one physically released create");
+        e.handle(
+            6.0,
+            Event::HttpResponse {
+                request: writes[0].id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#,
+                },
+            },
+        );
+        let mut after = prepared(&mut e, 6.0);
+        after.extend(fire_armed(&mut e, &after.clone(), 30_000.0));
+        assert!(
+            !after.iter().any(
+                |action| matches!(action, Action::Http(request) if request.method != Method::Get)
+            ),
+            "HTTP {status} must not resend the create: {after:?}"
+        );
+        let terminal = terminals(&after, 1);
+        assert_eq!(terminal.len(), 1, "HTTP {status}: one terminal");
+        assert_eq!(
+            terminal[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        assert!(
+            after.iter().any(
+                |action| matches!(action, Action::Http(request) if request.method == Method::Get)
+            ),
+            "HTTP {status}: reconcile by reading back"
+        );
+    }
+}
+
+#[test]
 fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
     let mut e = trading_engine();
     let a = place(
@@ -197,16 +251,24 @@ fn ack(
     a: &Action,
     algo: bool,
 ) -> Vec<Action> {
-    reply(
-        e,
-        a,
-        &envelope(if algo {
+    let Action::Http(request) = a else {
+        panic!("HTTP action")
+    };
+    let response = if request.url.contains("/cancel-") {
+        let mut rows: Vec<serde_json::Value> = serde_json::from_str(body(a)).unwrap();
+        for row in &mut rows {
+            row["sCode"] = "0".into();
+            row["sMsg"] = "".into();
+        }
+        serde_json::json!({ "code": "0", "data": rows }).to_string()
+    } else {
+        envelope(if algo {
             r#"{"algoId":"42","sCode":"0","sMsg":""}"#
         } else {
             r#"{"ordId":"41","sCode":"0","sMsg":""}"#
-        }),
-        6.0,
-    );
+        })
+    };
+    reply(e, a, &response, 6.0);
     prepared(e, 6.0)
 }
 
@@ -391,6 +453,229 @@ fn oco_amend_keeps_sibling_stop_and_amends_only_selected_native_leg() {
 }
 
 #[test]
+fn an_idempotent_cancel_51400_completes_without_an_error_and_reconciles() {
+    use safe_cex_engine::model::*;
+    for (kind, ids, code) in [
+        (OrderType::Limit, vec!["1"], "1"),
+        (OrderType::Limit, vec!["1", "2"], "2"),
+        (OrderType::StopLoss, vec!["91_sl"], "0"),
+    ] {
+        let mut e = trading_engine();
+        for id in &ids {
+            e.store_mut().upsert_order(stored(id, kind));
+        }
+        e.handle(
+            5.,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: ids.iter().map(|id| (*id).into()).collect(),
+            }),
+        );
+        let out = prepared(&mut e, 5.);
+        let rows: Vec<_> = ids
+            .iter()
+            .map(|id| {
+                let (field, native) = if kind == OrderType::Limit {
+                    ("ordId", *id)
+                } else {
+                    ("algoId", id.strip_suffix("_sl").unwrap())
+                };
+                format!(r#"{{"{field}":"{native}","sCode":"51400","sMsg":"A ordem já foi executada ou cancelada"}}"#)
+            })
+            .collect();
+        reply(
+            &mut e,
+            http(&out),
+            &format!(r#"{{"code":"{code}","data":[{}]}}"#, rows.join(",")),
+            6.,
+        );
+        let out = prepared(&mut e, 6.);
+        assert!(
+            !out.iter().any(|action| matches!(
+                action,
+                Action::Notice(
+                    Notice::CommandError { command: 2, .. }
+                        | Notice::CommandFailed { command: 2, .. }
+                )
+            )),
+            "{out:?}"
+        );
+        assert_eq!(
+            out.iter()
+                .filter(|action| matches!(action,
+                    Action::Notice(Notice::CommandDone { command: 2, result }) if result == "[]"
+                ))
+                .count(),
+            1
+        );
+        assert!(
+            out.iter().any(|action| matches!(action,
+                Action::Http(r) if r.url.contains("orders-pending")
+            )),
+            "a missing terminal frame still needs reconciliation"
+        );
+        assert!(
+            !out.iter().any(|action| matches!(action,
+                Action::Http(r) if r.method != safe_cex_engine::Method::Get
+            )),
+            "a satisfied cancel is never resent"
+        );
+        for id in &ids {
+            assert_eq!(
+                e.store().order(id).unwrap().status,
+                OrderStatus::Open,
+                "51400 does not invent a Canceled state for a possibly filled order"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_idempotent_cancel_does_not_hide_a_sibling_failure() {
+    use safe_cex_engine::model::*;
+    for (code, failure) in [
+        ("1", "51000"),
+        ("2", "51000"),
+        ("2", "51410"),
+        ("2", "51412"),
+        ("2", "59999"),
+    ] {
+        let mut e = trading_engine();
+        for id in ["1", "2"] {
+            e.store_mut().upsert_order(stored(id, OrderType::Limit));
+        }
+        e.handle(
+            5.,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: vec!["1".into(), "2".into()],
+            }),
+        );
+        let out = prepared(&mut e, 5.);
+        reply(
+            &mut e,
+            http(&out),
+            &format!(
+                r#"{{"code":"{code}","data":[{{"ordId":"1","sCode":"51400","sMsg":"localized"}},{{"ordId":"2","sCode":"{failure}","sMsg":"real failure"}}]}}"#
+            ),
+            6.,
+        );
+        let out = prepared(&mut e, 6.);
+        assert!(
+            !out.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandError { message, .. }) if message.contains("51400")
+            )),
+            "{out:?}"
+        );
+        assert!(
+            out.iter().any(|a| match a {
+                Action::Notice(Notice::CommandError { message, .. }) => message.contains(failure),
+                Action::Notice(Notice::CommandFailed { error, .. }) =>
+                    error.message.contains(failure),
+                _ => false,
+            }),
+            "{out:?}"
+        );
+        assert!(
+            out.iter().any(|a| matches!(a,
+                Action::Http(r) if r.url.contains("orders-pending")
+            )),
+            "the satisfied row still needs reconciliation: {out:?}"
+        );
+    }
+}
+
+#[test]
+fn a_cancel_noop_never_overrides_a_bad_identity_count_or_http_status() {
+    use safe_cex_engine::{Outcome, Response, model::*};
+    for (status, data) in [
+        (200, r#"[{"ordId":"other","sCode":"51400"}]"#),
+        (200, r#"[]"#),
+        (503, r#"[{"ordId":"1","sCode":"51400"}]"#),
+    ] {
+        let mut e = trading_engine();
+        e.store_mut().upsert_order(stored("1", OrderType::Limit));
+        e.handle(
+            5.,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: vec!["1".into()],
+            }),
+        );
+        let out = prepared(&mut e, 5.);
+        let Action::Http(request) = http(&out) else {
+            unreachable!()
+        };
+        let body = format!(r#"{{"code":"1","data":{data}}}"#);
+        e.handle(
+            6.,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        let out = prepared(&mut e, 6.);
+        let result = terminals(&out, 2);
+        assert_eq!(result.len(), 1, "{out:?}");
+        assert_eq!(
+            result[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        assert!(!out.iter().any(|a| matches!(a,
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get
+        )));
+    }
+}
+
+#[test]
+fn code_51400_is_not_success_for_a_placement_or_amendment() {
+    use safe_cex_engine::model::*;
+    for amend in [false, true] {
+        let mut e = trading_engine();
+        let (out, command) = if amend {
+            e.store_mut().upsert_order(stored("1", OrderType::Limit));
+            e.handle(
+                5.,
+                Event::Command(Command::AmendOrder {
+                    command: 2,
+                    id: "1".into(),
+                    price: Some(37000.),
+                    amount: None,
+                }),
+            );
+            (prepared(&mut e, 5.), 2)
+        } else {
+            (
+                place(
+                    &mut e,
+                    vec![order(
+                        r#"{"symbol":"BTCUSDT","type":"market","side":"buy","amount":2}"#,
+                    )],
+                ),
+                1,
+            )
+        };
+        reply(
+            &mut e,
+            http(&out),
+            r#"{"code":"1","data":[{"ordId":"1","sCode":"51400","sMsg":"localized"}]}"#,
+            6.,
+        );
+        let out = prepared(&mut e, 6.);
+        let result = terminals(&out, command);
+        assert_eq!(result.len(), 1, "{out:?}");
+        assert!(result[0].is_err(), "{out:?}");
+        assert!(!out.iter().any(|a| matches!(a,
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get
+        )));
+    }
+}
+
+#[test]
 fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
     use safe_cex_engine::model::*;
     let mut e = trading_engine();
@@ -408,8 +693,10 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
         Event::Command(Command::CancelOrders { command: 2, ids }),
     );
     let out = prepared(&mut e, 5.0);
-    let mut rows = vec![r#"{"ordId":"1","sCode":"0","sMsg":""}"#; 19];
-    rows.push(r#"{"ordId":"2","sCode":"51400","sMsg":"Order does not exist"}"#);
+    let mut rows: Vec<_> = (0..19)
+        .map(|id| format!(r#"{{"ordId":"{id}","sCode":"0","sMsg":""}}"#))
+        .collect();
+    rows.push(r#"{"ordId":"19","sCode":"51000","sMsg":"Parameter error"}"#.into());
     let mixed = format!(
         r#"{{"code":"2","msg":"Bulk operation partially succeeded","data":[{}]}}"#,
         rows.join(",")
@@ -417,7 +704,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
     reply(&mut e, http(&out), &mixed, 6.0);
     let out = prepared(&mut e, 6.0);
     assert!(out.iter().any(
-        |a| matches!(a, Action::Notice(Notice::CommandError { command:2, message }) if message.contains("51400"))
+        |a| matches!(a, Action::Notice(Notice::CommandError { command:2, message }) if message.contains("51000"))
     ));
     let a = http(&out);
     assert!(matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders")));
@@ -433,7 +720,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
 }
 
 #[test]
-fn replacement_never_runs_after_cancellation_rejection() {
+fn protective_amend_51400_is_refused_without_any_replacement() {
     use safe_cex_engine::model::*;
     let mut e = trading_engine();
     e.store_mut()
@@ -448,7 +735,7 @@ fn replacement_never_runs_after_cancellation_rejection() {
         }),
     );
     let out = prepared(&mut e, 5.0);
-    assert!(matches!(http(&out), Action::Http(r) if r.url.ends_with("/cancel-algos")));
+    assert!(matches!(http(&out), Action::Http(r) if r.url.ends_with("/amend-algos")));
     reply(
         &mut e,
         http(&out),
@@ -464,38 +751,32 @@ fn replacement_never_runs_after_cancellation_rejection() {
     assert_eq!(e.store().order("91_sl").unwrap().status, OrderStatus::Open);
 }
 
-/// The cancel landed and the replacement was refused: the stop is gone.
+/// Native amendment rejection leaves the old protection standing.
 #[test]
-fn a_stop_whose_replacement_is_refused_is_gone_and_says_so() {
+fn refused_native_stop_amend_preserves_the_old_stop() {
     use safe_cex_engine::model::*;
     let mut e = trading_engine();
     e.store_mut()
         .upsert_order(stored("91_sl", OrderType::StopLoss));
     e.handle(
-        5.0,
+        5.,
         Event::Command(Command::AmendOrder {
             command: 2,
             id: "91_sl".into(),
-            price: Some(37000.0),
+            price: Some(37000.),
             amount: None,
         }),
     );
-    let out = prepared(&mut e, 5.0);
+    let out = prepared(&mut e, 5.);
+    let request = http(&out);
+    assert!(matches!(request, Action::Http(r) if r.url.ends_with("/amend-algos")));
     reply(
         &mut e,
-        http(&out),
-        &envelope(r#"{"algoId":"91","sCode":"0","sMsg":""}"#),
-        6.0,
+        request,
+        r#"{"code":"1","msg":"","data":[{"algoId":"91","sCode":"51277","sMsg":"TP trigger price cannot be lower than the last price"}]}"#,
+        6.,
     );
-    let out = prepared(&mut e, 6.0);
-    assert!(matches!(http(&out), Action::Http(r) if r.url.ends_with("/order-algo")));
-    reply(
-        &mut e,
-        http(&out),
-        r#"{"code":"1","msg":"","data":[{"algoId":"","sCode":"51277","sMsg":"TP trigger price cannot be lower than the last price"}]}"#,
-        7.0,
-    );
-    let out = prepared(&mut e, 7.0);
+    let out = prepared(&mut e, 6.);
     let error = out
         .iter()
         .find_map(|a| match a {
@@ -503,11 +784,14 @@ fn a_stop_whose_replacement_is_refused_is_gone_and_says_so() {
             _ => None,
         })
         .expect("a failure");
-    assert!(error.message.contains("has no stop"), "{}", error.message);
-    assert_eq!(
-        e.store().order("91_sl").unwrap().status,
-        OrderStatus::Canceled
+    assert_eq!(error.venue_code.as_deref(), Some("51277"));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert!(!error.message.contains("has no stop"));
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
+    assert_eq!(e.store().order("91_sl").unwrap().status, OrderStatus::Open);
 }
 
 #[test]
@@ -671,7 +955,7 @@ fn explicit_zero_sl_and_tp_still_close_the_whole_position() {
 }
 
 #[test]
-fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_cancel() {
+fn standalone_protective_limit_amend_is_native_and_preserves_original_on_refusal() {
     use safe_cex_engine::model::*;
     for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
         let mut e = trading_engine();
@@ -691,13 +975,31 @@ fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_canc
             Event::Command(Command::AmendOrder {
                 command: 2,
                 id: id.into(),
-                price: Some(36500.0),
+                // Each on its own side of the 40000 price: a sell stop below, a take profit above.
+                price: Some(if kind == OrderType::StopLoss {
+                    36500.0
+                } else {
+                    41000.0
+                }),
                 amount: None,
             }),
         );
         let out = prepared(&mut e, 5.0);
-        assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("execution price"))));
+        let request = http(&out);
+        assert!(matches!(request, Action::Http(r) if r.url.ends_with("/amend-algos")));
+        assert!(body(request).contains("35900"));
+        assert!(body(request).contains("\"cxlOnFail\":false"));
+        reply(
+            &mut e,
+            request,
+            r#"{"code":"1","data":[{"algoId":"91","sCode":"51000","sMsg":"refused"}]}"#,
+            6.,
+        );
+        let out = prepared(&mut e, 6.);
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
         assert_eq!(e.store().order(id), Some(&original));
     }
 }
@@ -881,10 +1183,15 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
     assert!(
         matches!(request, Action::Http(r) if r.url.ends_with("/cancel-algos") && r.body.as_ref().unwrap().contains("stop") && r.body.as_ref().unwrap().contains("profit"))
     );
+    let rows: Vec<serde_json::Value> = serde_json::from_str(body(request)).unwrap();
+    let acks: Vec<_> = rows
+        .iter()
+        .map(|row| serde_json::json!({ "algoId": row["algoId"], "sCode": "0" }))
+        .collect();
     reply(
         &mut e,
         request,
-        r#"{"code":"0","data":[{"algoId":"stop","sCode":"0"},{"algoId":"profit","sCode":"0"}]}"#,
+        &serde_json::json!({ "code": "0", "data": acks }).to_string(),
         9.0,
     );
     assert!(prepared(&mut e, 9.0).iter().any(|a| matches!(
@@ -1169,7 +1476,7 @@ fn definite_business_rejection_restores_cancel_or_amend_state() {
                 response: Response {
                     status: 200,
                     headers: "",
-                    body: r#"{"code":"1","data":[{"sCode":"51000","sMsg":"Parameter error"}]}"#,
+                    body: r#"{"code":"1","data":[{"ordId":"rejected","sCode":"51000","sMsg":"Parameter error"}]}"#,
                 },
             },
         );
@@ -1569,7 +1876,7 @@ fn trading_failures_are_classified_without_changing_their_text() {
         (
             r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
             Some(ErrorKind::RateLimited),
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some("50011"),
         ),
         (
@@ -2236,12 +2543,7 @@ fn a_rejected_row_with_a_stored_copy_still_releases_the_fence() {
                 _ => None,
             })
             .expect("retry timer");
-        e.handle(5_007.0, Event::TimerFired { timer: retry });
-        let mut reads: Vec<_> = prepared(&mut e, 5_007.0)
-            .into_iter()
-            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
-            .collect();
-        assert!(!reads.is_empty(), "the retry reads orders again");
+        // The stored copy predates the retry census, as a stream row would.
         e.store_mut().upsert_order(safe_cex_engine::model::Order {
             id: "maybe".into(),
             parent_id: None,
@@ -2263,6 +2565,12 @@ fn a_rejected_row_with_a_stored_copy_still_releases_the_fence() {
             stop_loss: None,
             extra: None,
         });
+        e.handle(5_007.0, Event::TimerFired { timer: retry });
+        let mut reads: Vec<_> = prepared(&mut e, 5_007.0)
+            .into_iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
+            .collect();
+        assert!(!reads.is_empty(), "the retry reads orders again");
         let mut first = malformed;
         while let Some(read) = reads.pop() {
             let body = if std::mem::take(&mut first) {
@@ -2348,6 +2656,15 @@ fn a_gone_cancel_row_asks_for_a_read_because_its_frame_may_never_come() {
     );
     let out = prepared(&mut e, 6.0);
     assert!(
+        !out.iter().any(|a| matches!(
+            a,
+            Action::Notice(
+                Notice::CommandError { command: 2, .. } | Notice::CommandFailed { command: 2, .. }
+            )
+        )),
+        "{out:?}"
+    );
+    assert!(
         out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
     );
@@ -2418,5 +2735,139 @@ fn hedge_mode_on_every_margin_account_level_is_sent() {
             1,
             "acctLv {level}"
         );
+    }
+}
+
+fn review_cancel_two_rows(data: &str) -> Vec<Action> {
+    use safe_cex_engine::model::*;
+    let mut e = trading_engine();
+    for id in ["1", "2"] {
+        e.store_mut().upsert_order(stored(id, OrderType::Limit));
+    }
+    e.handle(
+        5.,
+        Event::Command(Command::CancelOrders {
+            command: 2,
+            ids: vec!["1".into(), "2".into()],
+        }),
+    );
+    let out = prepared(&mut e, 5.);
+    reply(
+        &mut e,
+        http(&out),
+        &format!(r#"{{"code":"2","data":{data}}}"#),
+        6.,
+    );
+    prepared(&mut e, 6.)
+}
+
+#[test]
+fn review_cancel_51400_cannot_hide_a_wrong_success_sibling_echo() {
+    let correct = review_cancel_two_rows(
+        r#"[{"ordId":"1","sCode":"51400","sMsg":"localized"},{"ordId":"2","sCode":"0"}]"#,
+    );
+    assert!(
+        terminals(&correct, 2)[0].is_ok(),
+        "matching success sibling working control: {correct:?}"
+    );
+    assert!(
+        !correct.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandError { .. } | Notice::CommandFailed { .. })
+        )),
+        "{correct:?}"
+    );
+    let out = review_cancel_two_rows(
+        r#"[{"ordId":"1","sCode":"51400","sMsg":"localized"},{"ordId":"foreign","sCode":"0"}]"#,
+    );
+    let result = terminals(&out, 2);
+    assert_eq!(result.len(), 1, "{out:?}");
+    assert!(
+        matches!(&result[0],Err(error) if error.outcome==Some(safe_cex_engine::Outcome::Unknown)),
+        "foreign success sibling must not certify requested order2 cancelled/absent: {out:?}"
+    );
+}
+
+#[test]
+fn review_cancel_wrong_algo_echo_is_unknown() {
+    use safe_cex_engine::model::*;
+    let mut e = trading_engine();
+    e.store_mut()
+        .upsert_order(stored("91_sl", OrderType::StopLoss));
+    e.handle(
+        5.,
+        Event::Command(Command::CancelOrders {
+            command: 2,
+            ids: vec!["91_sl".into()],
+        }),
+    );
+    let out = prepared(&mut e, 5.);
+    reply(
+        &mut e,
+        http(&out),
+        r#"{"code":"0","data":[{"algoId":"foreign","sCode":"51400"}]}"#,
+        6.,
+    );
+    let out = prepared(&mut e, 6.);
+    assert!(
+        matches!(&terminals(&out,2)[0],Err(error) if error.outcome==Some(safe_cex_engine::Outcome::Unknown)),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn review_cancel_swapped_gone_rows_are_unknown() {
+    let out =
+        review_cancel_two_rows(r#"[{"ordId":"2","sCode":"51400"},{"ordId":"1","sCode":"51400"}]"#);
+    assert!(
+        matches!(&terminals(&out,2)[0],Err(error) if error.outcome==Some(safe_cex_engine::Outcome::Unknown)),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn review_cancel_same_localized_text_does_not_satisfy_other_code() {
+    let out = review_cancel_two_rows(
+        r#"[{"ordId":"1","sCode":"51400","sMsg":"Order cancellation failed as the order has been filled, canceled or does not exist."},{"ordId":"2","sCode":"51401","sMsg":"Order cancellation failed as the order has been filled, canceled or does not exist."}]"#,
+    );
+    assert!(
+        out.iter().any(|a| match a {
+            Action::Notice(Notice::CommandError { message, .. }) => message.contains("51401"),
+            Action::Notice(Notice::CommandFailed { error, .. }) => error.message.contains("51401"),
+            _ => false,
+        }),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn missing_cancel_row_echoes_are_unknown_for_every_code() {
+    for code in ["0", "51400", "51000"] {
+        let out = review_cancel_two_rows(&format!(
+            r#"[{{"ordId":"1","sCode":"51400"}},{{"sCode":"{code}"}}]"#
+        ));
+        let result = terminals(&out, 2);
+        assert_eq!(result.len(), 1, "{out:?}");
+        assert!(
+            matches!(&result[0], Err(error) if error.outcome == Some(safe_cex_engine::Outcome::Unknown)),
+            "missing {code} echo must be Unknown: {out:?}"
+        );
+    }
+}
+
+#[test]
+fn foreign_cancel_row_echoes_are_unknown_for_every_code() {
+    for code in ["0", "51400", "51000"] {
+        for id in ["foreign", "1"] {
+            let out = review_cancel_two_rows(&format!(
+                r#"[{{"ordId":"1","sCode":"51400"}},{{"ordId":"{id}","sCode":"{code}"}}]"#
+            ));
+            let result = terminals(&out, 2);
+            assert_eq!(result.len(), 1, "{out:?}");
+            assert!(
+                matches!(&result[0], Err(error) if error.outcome == Some(safe_cex_engine::Outcome::Unknown)),
+                "foreign/duplicate {code} echo must be Unknown: {out:?}"
+            );
+        }
     }
 }

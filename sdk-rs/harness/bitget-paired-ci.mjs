@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { createGithubReader } from './cpu-cohort.mjs';
+import { BitgetOracleChanged, collectBitgetOracle } from './bitget-paired-oracle.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
 import { BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256, BITGET_MEASUREMENT_FILES, BITGET_CUMULATIVE_ANCHOR,
@@ -22,6 +23,8 @@ const retiredLandingHolds = (gitRead, landingTip) =>
   gitRead('merge-base', '--is-ancestor', RETIRED_RUST_LANDING_TIP, landingTip) === '' &&
   gitRead('rev-list', '--first-parent', RETIRED_RUST_LANDING_TIP).split('\n').includes(BITGET_CUMULATIVE_ANCHOR);
 const write = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
+const mergedPull = pull => pull.state === 'closed' && typeof pull.merged_at === 'string' &&
+  Number.isFinite(Date.parse(pull.merged_at)) && /^[a-f0-9]{40}$/.test(pull.merge_commit_sha ?? '');
 
 /** Select from authenticated run/PR/commit APIs, never an input baseline flag.
  * The Git tree is recomputed before measuring, not accepted from the PR. */
@@ -32,25 +35,34 @@ export async function selectCpuComparison({ reader, runId, root, jobName, gitRea
     `missing/duplicate paired physical producer; candidates ${physicalCandidateRows(candidates)}`);
   const checkoutSha = gitRead('rev-parse', 'HEAD'), checkoutTree = gitRead('rev-parse', 'HEAD^{tree}');
   let pull, landing, mergeTree;
-  if (run.event === 'push' && run.head_branch === 'master') {
+  // A dispatched master run (the nightly certification) measures the landed tip like a push.
+  if ((run.event === 'push' || run.event === 'workflow_dispatch') && run.head_branch === 'master') {
     landing = await reader.getCommit(run.head_sha); mergeTree = checkoutTree;
   } else {
     const associated = await reader.listCommitPulls(run.head_sha);
-    const matching = associated.filter(item => item.state === 'open' && item.head?.sha === run.head_sha &&
+    const matching = associated.filter(item => (item.state === 'open' || mergedPull(item)) && item.head?.sha === run.head_sha &&
       item.base?.ref === 'master' && item.base?.repo?.full_name === 'Tealstreet/tealstreet-sdk');
-    insist(matching.length === 1, 'missing/ambiguous exact open PR for this run');
+    insist(matching.length === 1, 'missing/ambiguous exact open or merged PR for this run');
     pull = await reader.getPull(matching[0].number);
-    insist(pull.state === 'open' && pull.head?.sha === run.head_sha &&
+    const confirmedMerged = mergedPull(pull) && pull.merged === true;
+    insist((pull.state === 'open' || confirmedMerged) && pull.head?.sha === run.head_sha &&
       pull.base?.ref === 'master' && pull.base.repo?.full_name === 'Tealstreet/tealstreet-sdk' &&
-      run.repository.full_name === 'Tealstreet/tealstreet-sdk', 'live PR must name the authenticated Rust landing base');
+      run.repository.full_name === 'Tealstreet/tealstreet-sdk', 'open or confirmed merged PR must name the authenticated Rust landing base');
     let associatedBase;
     if (run.event === 'pull_request') {
-      const snapshots = run.pull_requests?.filter(item => item.number === pull.number && item.head?.sha === run.head_sha);
-      insist(snapshots?.length === 1 && snapshots[0].base?.ref === pull.base.ref &&
-        snapshots[0].base.repo?.url === `https://api.github.com/repos/${run.repository.full_name}` &&
-        snapshots[0].head.repo?.url === `https://api.github.com/repos/${run.repository.full_name}`,
-      'missing exact run PR association');
-      associatedBase = snapshots[0].base.sha;
+      // GitHub clears merged runs' PR snapshots; authenticate both head repositories instead.
+      if (confirmedMerged && Array.isArray(run.pull_requests) && run.pull_requests.length === 0) {
+        insist(pull.head.repo?.full_name === 'Tealstreet/tealstreet-sdk' &&
+          run.head_repository?.full_name === run.repository.full_name,
+        'merged PR without run snapshot requires authenticated same-repository heads');
+      } else {
+        const snapshots = run.pull_requests?.filter(item => item.number === pull.number && item.head?.sha === run.head_sha);
+        insist(snapshots?.length === 1 && snapshots[0].base?.ref === pull.base.ref &&
+          snapshots[0].base.repo?.url === `https://api.github.com/repos/${run.repository.full_name}` &&
+          snapshots[0].head.repo?.url === `https://api.github.com/repos/${run.repository.full_name}`,
+        'missing exact run PR association');
+        associatedBase = snapshots[0].base.sha;
+      }
     }
     const checkout = await reader.getCommit(checkoutSha);
     const localParents = gitRead('show', '-s', '--format=%P', checkoutSha).split(' ');
@@ -108,9 +120,11 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
   const script = resolve(destination, 'collect-bitget-paired.py');
   copyFileSync(resolve(root, 'sdk-rs/harness/collect-bitget-paired.py'), script);
   const declarations = JSON.parse(readFileSync(resolve(root, 'sdk-rs/harness/known-gate-failures.json'), 'utf8'));
-  const certificate = await readBitgetSteadyCertificate({ authority, manifest: declarations,
+  let certificate;
+  try { certificate = await readBitgetSteadyCertificate({ authority, manifest: declarations,
     readEvidence: async (name, selected) => {
       const directory = resolve(destination, name); mkdirSync(directory);
+      collectBitgetOracle({ root, directory, authority: selected });
       const authorityPath = resolve(directory, 'authority.json');
       write(authorityPath, { ...selected, protocolSha256: BITGET_PAIRED_PROTOCOL_SHA256,
         freezeSha256: BITGET_PAIRED_FREEZE_SHA256 });
@@ -124,6 +138,16 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
       }
       return readBitgetPairedEvidence(resolve(directory, 'records'));
     } });
+  } catch (error) {
+    if (!(error instanceof BitgetOracleChanged)) throw error;
+    const current = await selectBitgetPair({ reader, runId, root });
+    insist(isDeepStrictEqual(current, authority), 'source/base/physical producer changed during oracle collection');
+    const result = { valid: false, disposition: error.disposition, certified: false, certificate: null,
+      errors: [error.message], oracle: error.receipt };
+    write(resolve(destination, 'steady-assessment.json'), result);
+    console.error(error.message);
+    return result;
+  }
   const current = await selectBitgetPair({ reader, runId, root });
   insist(isDeepStrictEqual(current, authority), 'source/base/physical producer changed during collection');
   const result = { valid: true, errors: [], certificate };
@@ -145,5 +169,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const root = realpathSync(process.cwd()), destination = resolve(values.out);
   mkdirSync(dirname(destination), { recursive: true });
   const reader = createGithubReader({ repository: process.env.GITHUB_REPOSITORY, token: process.env.GITHUB_TOKEN });
-  await collectBitgetPair({ reader, runId: Number(process.env.GITHUB_RUN_ID), root, destination });
+  const result = await collectBitgetPair({ reader, runId: Number(process.env.GITHUB_RUN_ID), root, destination });
+  if (result.disposition === 'NOT-CERTIFIED') process.exitCode = 1;
 }

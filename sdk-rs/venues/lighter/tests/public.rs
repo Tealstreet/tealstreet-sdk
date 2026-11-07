@@ -3,7 +3,7 @@ mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
 use safe_cex_venue_lighter::Lighter;
 use support::Options;
-use support::{Timers, advance, drain};
+use support::{Timers, advance, drain_at};
 const MARKETS: &str = r#"{"code":200,"order_book_details":[{"market_id":0,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"10","min_initial_margin_fraction":"200"},{"market_id":1,"symbol":"BTC","status":"active","supported_size_decimals":5,"supported_price_decimals":1,"min_initial_margin_fraction":"100"},{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot"}]}"#;
 fn reply(e: &mut Engine<Lighter>, id: RequestId, body: &str) {
     e.handle(
@@ -234,7 +234,7 @@ fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
         .unwrap();
     reply(&mut e, id, MARKETS);
     let mut timers = Timers::new();
-    let socket = drain(&mut e, &mut timers)
+    let socket = drain_at(&mut e, &mut timers, 1_000.0)
         .iter()
         .find_map(|a| {
             if let Action::WsConnect { socket, .. } = a {
@@ -245,6 +245,7 @@ fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
         })
         .unwrap();
     e.handle(1_000.0, Event::WsOpened { socket });
+    drain_at(&mut e, &mut timers, 1_000.0);
     let closed = |actions: &[Action]| {
         actions
             .iter()

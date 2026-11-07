@@ -7,6 +7,12 @@ bridges store snapshots back via `postMessage`. Entry point:
 instance plus its `DefaultStore`, and pushes throttled store
 snapshots to the main thread on every `store.notify()`.
 
+## Worker lifecycle logs
+
+`ExchangeWorker.log` sends the emitter argument array `[JSON text, severity]`,
+serializing its level, message and context. A standalone object is coerced to
+`[object Object]` by existing main-thread log consumers; `warn` maps to `warning`.
+
 ## History result completeness
 
 Successful `callMethod:done` replies include optional `data.completeness:
@@ -15,6 +21,15 @@ has the host marker. Array properties do not survive clone/JSON transports.
 The matching BaseExchange receiver restores it before resolving or notifying
 result observers; senders and receivers must upgrade together. Never infer a
 complete window from missing metadata or attach a notice to another request.
+
+## Nuke flatness proof reads
+
+A frame-fed page closes positions locally, then forwards `readPositions` to the
+worker's engine for a fresh `{ skipped, open }` proof, even when its mirrored store
+is empty. Keep that RPC in both `WORKER_OPTIONAL_METHODS` and `WORKER_READ_METHODS`:
+a failed read cannot confirm flatness and is never an interrupted write.
+Unknown or unimplemented RPCs return a serialized `unsupported`/`notSent` error
+naming the venue and method; a failed reply without a cause becomes `Error('undefined')`.
 
 ## Write timing marks
 
@@ -32,6 +47,11 @@ to every local worker; `store.webworker.ts` applies it before exchange routing.
 Do not make each exchange worker call the public endpoint: one tab may have
 many accounts, and foreground/page-show handling already forces a fresh
 main-thread sync after sleep.
+
+The initial worker clock startup waits up to 30 s for that push. The engine
+then uses an epoch-shaped monotonic scheduling clock, while later pushes update
+protocol timestamps only. Worker startup elapsed telemetry also uses
+`performance.now()` at both ends, independent of system/venue clock corrections.
 
 ## The `exchangeWorkers` registry is keyed by accountName — single-tenant only
 
@@ -472,3 +492,12 @@ Rust `engine-event` diagnostics use the existing generation-guarded event bridge
 with `data: [EngineEvent]`. Legacy `error` options and the third `log` argument
 retain the event for callers migrating in place. Consumers must choose one
 channel per diagnostic to avoid double counting/toasting.
+
+History failures preserve the native closed `causeCode` alongside `kind` and the
+independent `venueCode` through `commandOutcome.ts`. Reporting code may use these
+classifications without forwarding the free-form message or a signed request.
+
+`__workerConfig.connectionVisibility` accepts only `hidden` or `visible` from
+the owning page. It supplies dedicated workers' timer-lateness diagnostics;
+it changes no reconnect, throttle or account policy. A callback delivered after
+the page is visible is not counted as a hidden callback.

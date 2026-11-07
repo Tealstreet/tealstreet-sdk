@@ -670,11 +670,9 @@ impl<P> Cx<'_, P> {
                     return Err(RepairRefusal::Invalid);
                 }
             }
-            Retire::SourceOrders { since } => {
-                if self
-                    .io
-                    .core
-                    .source_orders_cover
+            Retire::SourceOrders { since, symbol } => {
+                if (self.io.core.source_orders_covers.as_ref())
+                    .and_then(|covers| covers.cover(symbol))
                     .is_none_or(|cover| cover < since)
                 {
                     return Err(RepairRefusal::NotData);

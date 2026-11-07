@@ -6,7 +6,9 @@ import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../../exchanges/base';
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
+import { BaseExchange, WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../../exchanges/base';
+import { DefaultStore } from '../../store/store.base';
 import {
   decodeWorkerOrderIds,
   replacementClientOrderIdOf,
@@ -77,6 +79,7 @@ describe('CallMethodHandler', () => {
           fetchPositions: vi.fn().mockResolvedValue([{ symbol: 'BTCUSDT' }]),
           fetchBalance: vi.fn().mockResolvedValue({ total: 1 }),
           fetchPositionMode: vi.fn().mockResolvedValue(true),
+          readPositions: vi.fn().mockResolvedValue({ skipped: [], open: [] }),
         };
         Object.assign(mockExchange, reads);
         for (const [method, call] of Object.entries(reads)) {
@@ -313,8 +316,33 @@ describe('CallMethodHandler', () => {
         await vi.waitFor(() => {
           expect(mockPostMessage).toHaveBeenCalledWith({
             op: 'callMethod:done',
-            data: { requestId: 'req-8', success: false },
+            data: {
+              requestId: 'req-8',
+              success: false,
+              result: expect.objectContaining({
+                message: 'bybit does not support unknownMethod',
+                kind: 'unsupported',
+                outcome: 'notSent',
+              }),
+            },
           });
+        });
+      });
+
+      it('returns a typed cause when an optional method is not implemented', async () => {
+        await handler.handleCallMethod('missing', 'readPositions', []);
+        expect(mockPostMessage).toHaveBeenCalledOnce();
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: {
+            requestId: 'missing',
+            success: false,
+            result: expect.objectContaining({
+              message: 'bybit does not support readPositions',
+              kind: 'unsupported',
+              outcome: 'notSent',
+            }),
+          },
         });
       });
 
@@ -442,6 +470,28 @@ describe('CallMethodHandler', () => {
           },
         }),
       );
+    });
+
+    it.each(['40018', '406', '10003', '-2015'])('preserves venueCode %s through a real worker RPC round trip', async (venueCode) => {
+      const message = 'Venue refused the request';
+      const failure = new ExchangeError(message, { message, kind: 'authPermission', outcome: 'rejected', venueCode });
+      mockExchange.fetchOrders = vi.fn().mockRejectedValue(failure);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mirror = new BaseExchange('bitget', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+      mirror.on('callMethod', (data: { requestId: string; method: 'fetchOrders'; args: unknown[] }) =>
+        handler.handle({ op: 'callMethod', data }),
+      );
+      mockPostMessage.mockImplementation((payload) => {
+        const cloned = structuredClone(payload);
+        mirror.emitter.emit(cloned.op, cloned.data);
+      });
+      try {
+        await expect(mirror.callMethodInWorker('fetchOrders')).rejects.toMatchObject({
+          message, kind: 'authPermission', outcome: 'rejected', venueCode,
+        });
+      } finally {
+        mirror.dispose();
+      }
     });
 
     it('reads caller client IDs only from placement arguments', () => {

@@ -16,6 +16,7 @@ struct Feed {
     feed: Option<FeedId>,
     retired: Vec<RetireReason>,
     sent: Vec<String>,
+    delivered: usize,
 }
 
 fn policy() -> FeedPolicy {
@@ -52,6 +53,8 @@ impl Venue for Feed {
     fn socket_control(&self, _: &Store, _: FeedId, _: bool, text: &str) -> Control {
         if text == "pong" {
             Control::Pong
+        } else if text.starts_with("account") {
+            Control::Unwatched
         } else {
             Control::Other
         }
@@ -95,7 +98,9 @@ impl Venue for Feed {
         Some((self.feed?, "tick.BTC".into()))
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {
+        self.delivered += 1;
+    }
     fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
     fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
     fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
@@ -218,6 +223,22 @@ fn a_socket_answering_pings_but_carrying_no_data_is_reconnected() {
 }
 
 #[test]
+fn unwatched_traffic_is_delivered_but_never_proves_the_streams_alive() {
+    let mut h = Harness::subscribed(&["tick.BTC"]);
+    h.message("tick.BTC 100");
+    for second in (10..=50).step_by(10) {
+        h.advance(f64::from(second) * 1_000.);
+        h.message("account BTC position");
+    }
+    h.advance(62_000.);
+    assert_eq!(
+        h.engine.venue.delivered, 6,
+        "account frames still reach the venue"
+    );
+    assert_eq!(h.silent_retirements(), 1, "{:?}", h.engine.venue.retired);
+}
+
+#[test]
 fn a_feed_with_only_quiet_topics_is_left_alone() {
     let mut h = Harness::subscribed(&["candle.1h.BTC"]);
     h.advance(15. * 60_000.);
@@ -326,4 +347,29 @@ fn a_topic_repaired_again_after_ten_minutes_resubscribes_in_place() {
     repair(&mut h);
     assert_eq!(h.silent_retirements(), 0);
     assert_eq!(h.engine.venue.sent, ["false:tick.BTC", "true:tick.BTC"]);
+}
+
+#[test]
+fn an_unnamed_managed_topic_keeps_the_default_refusal_without_a_hook() {
+    let mut engine = crate::test_support::seeded_engine(Feed::default());
+    engine.handle(
+        0.,
+        Event::Command(Command::RepairSubscription(
+            crate::SubscriptionTopic::OrderBook {
+                symbol: "BTC".into(),
+            },
+        )),
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    let Action::Notice(Notice::Event(event)) = &actions[0] else {
+        panic!("only the original refusal is emitted: {actions:?}");
+    };
+    assert_eq!(event.level, Level::Warn);
+    assert_eq!(event.code, log_code::SUBSCRIPTION_REJECTED);
+    assert!(
+        event
+            .message
+            .ends_with("the venue cannot name its stream for this topic")
+    );
 }

@@ -83,6 +83,68 @@ pub struct BuilderAuthorization {
     pub authorized_raw: Option<u32>,
 }
 
+/// Closed history failure classifications; no raw venue text enters this field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ErrorCause {
+    HistoryRateLimited,
+    HistoryAuthInvalid,
+    HistoryAuthPermission,
+    HistoryInvalidParams,
+    HistoryVenueError,
+    HistoryHttpError,
+    HistoryDecode,
+    HistoryCursorStalled,
+    HistoryPageLimit,
+    HistoryWindowMismatch,
+    HistoryNetwork,
+    HistoryTimeout,
+}
+
+/// Closed native row schemas; never includes a symbol, identity or response text.
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistorySchema {
+    BitgetClassicFills,
+    BitgetUtaFills,
+    BitgetClassicOrders,
+    BitgetUtaOrders,
+    BitgetClassicIncome,
+    BitgetUtaIncome,
+    BitgetPublicTrades,
+    KrakenFills,
+    KrakenOrders,
+    KrakenIncome,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryDecodeReason {
+    RowShape,
+    Identity,
+    Symbol,
+    Quantity,
+    FilledQuantity,
+    Timestamp,
+    TimestampOrder,
+    Side,
+    OrderStatus,
+    OrderType,
+    Fee,
+    Market,
+    Economics,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryDecode {
+    pub schema: HistorySchema,
+    pub reason: HistoryDecodeReason,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VenueError {
@@ -93,6 +155,12 @@ pub struct VenueError {
     pub outcome: Option<Outcome>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub venue_code: Option<String>,
+    /// Closed, SDK-owned diagnostic classification, distinct from the venue's code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause_code: Option<ErrorCause>,
+    #[cfg(feature = "history-row-diagnostics")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_decode: Option<HistoryDecode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub venue_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,6 +169,24 @@ pub struct VenueError {
     pub partial: Option<Box<Partial>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub builder_authorization: Option<Box<BuilderAuthorization>>,
+    /// A stop or take-profit edit whose replacement was refused after its cancel landed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protection: Option<Protection>,
+    /// A command's fallback whose words describe its outcome better than its first
+    /// failed leg, without claiming `protection` (a put-back of unknown outcome).
+    #[serde(skip)]
+    pub presents: bool,
+}
+
+/// What a refused protective replacement left the position with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "test-support"), derive(serde::Deserialize))]
+#[serde(rename_all = "camelCase")]
+pub enum Protection {
+    /// The old order was placed again, unchanged; only its id differs.
+    Restored,
+    /// Placing the old order again failed too: the position has no such order.
+    Unprotected,
 }
 
 impl VenueError {
@@ -134,6 +220,19 @@ impl VenueError {
 
     pub fn venue_code(mut self, code: impl Into<String>) -> Self {
         self.venue_code = Some(code.into());
+        self
+    }
+
+    pub fn cause_code(mut self, code: ErrorCause) -> Self {
+        self.cause_code = Some(code);
+        self
+    }
+
+    #[cfg(feature = "history-row-diagnostics")]
+    pub fn history_decode(mut self, schema: HistorySchema, reason: HistoryDecodeReason) -> Self {
+        self.kind = Some(ErrorKind::Internal);
+        self.cause_code = Some(ErrorCause::HistoryDecode);
+        self.history_decode = Some(HistoryDecode { schema, reason });
         self
     }
 
@@ -624,6 +723,18 @@ mod tests {
             serde_json::to_string(&error).unwrap(),
             r#"{"message":"Too many requests","kind":"rateLimited","outcome":"notSent","venueCode":"10006","venueMessage":"Too many visits","retryAfterMs":1000.0}"#
         );
+    }
+
+    #[test]
+    fn a_closed_cause_serializes_separately_from_the_venue_code() {
+        let error = VenueError::new("read refused")
+            .kind(ErrorKind::RateLimited)
+            .cause_code(ErrorCause::HistoryRateLimited)
+            .venue_code("100410");
+        let json = serde_json::to_value(error).unwrap();
+        assert_eq!(json["causeCode"], "HISTORY_RATE_LIMITED");
+        assert_eq!(json["venueCode"], "100410");
+        assert!(std::mem::size_of::<VenueError>() < 128);
     }
 
     #[test]

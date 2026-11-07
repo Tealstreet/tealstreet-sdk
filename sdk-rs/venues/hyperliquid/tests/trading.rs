@@ -7,6 +7,108 @@ use serde_json::Value;
 use support::prepared_now;
 use support::*;
 const CLOID: &str = "0x00000000000000000000000000000001";
+
+#[test]
+fn dispatched_ambiguity_covers_ordinary_and_protective_writes() {
+    for (status, text) in [
+        (429, "Too many requests"),
+        (
+            429,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+        (
+            408,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+        (
+            500,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+        (
+            503,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+    ] {
+        for operation in ["create", "cancel", "amend", "amend-replacement", "setting"] {
+            for protective in [false, true] {
+                if protective && matches!(operation, "setting" | "amend-replacement") {
+                    continue;
+                }
+                let (mut e, socket) = ready("disabled");
+                let row = serde_json::json!({"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"cloid":CLOID,"side":"A","limitPx":"95","origSz":"1","sz":"1","reduceOnly":protective,"orderType":if protective {"Stop Market"} else {"Limit"},"triggerPx":if protective {"80"} else {"0"}},"status":"open"}]});
+                message(&mut e, socket, 1900.0, &row.to_string());
+                prepared_now(&mut e);
+                let kind = if protective { "stop_market" } else { "limit" };
+                let input = opts(&serde_json::json!({"symbol":"BTC-PERP","type":kind,"side":"sell","price":if protective {80} else {110},"amount":1,"reduceOnly":protective}).to_string());
+                let cmd = match operation {
+                    "create" => Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![input],
+                    },
+                    "cancel" => Command::CancelOrders {
+                        command: 1,
+                        ids: vec!["9".into()],
+                    },
+                    "amend" | "amend-replacement" => Command::AmendOrder {
+                        command: 1,
+                        id: "9".into(),
+                        price: Some(if protective { 75.0 } else { 110.0 }),
+                        amount: None,
+                    },
+                    _ => Command::SetLeverage {
+                        command: 1,
+                        symbol: "BTC-PERP".into(),
+                        leverage: 5.0,
+                        side: None,
+                    },
+                };
+                e.handle(2000.0, Event::Command(cmd));
+                let mut request = write(&mut e);
+                if operation == "amend-replacement" {
+                    reply(
+                        &mut e,
+                        &request,
+                        200,
+                        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+                    );
+                    request = write(&mut e);
+                    assert_eq!(body(&request)["action"]["type"], "order");
+                }
+                assert!(request.url.ends_with("/exchange"));
+                reply(&mut e, &request, status, text);
+                let actions = prepared_now(&mut e);
+                let errors: Vec<_> = actions
+                    .iter()
+                    .filter_map(|a| match a {
+                        Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    errors.len(),
+                    1,
+                    "{operation} protective={protective} {status}: {actions:?}"
+                );
+                let error = errors[0];
+                assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                assert_eq!(error.protection, None);
+                assert!(
+                    error.message.to_lowercase().contains("unknown"),
+                    "{error:?}"
+                );
+                assert!(error.message.contains("Check Open Orders"), "{error:?}");
+                assert!(!error.message.contains("refused"), "{error:?}");
+                assert!(!error.message.contains("no stop"), "{error:?}");
+                assert!(
+                    !actions
+                        .iter()
+                        .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange"))),
+                    "no resend or put-back"
+                );
+            }
+        }
+    }
+}
 #[test]
 fn all_actual_bracket_cloids_are_receipted_before_the_signed_write() {
     let (mut e, _) = ready("disabled");
@@ -46,6 +148,50 @@ fn all_actual_bracket_cloids_are_receipted_before_the_signed_write() {
     assert_eq!(receipts[0].identity, CLOID);
     assert_ne!(receipts[1].identity, receipts[2].identity);
 }
+/// codex-mxb4mq's P1: mark, last and index disagree by over 25%, so the TP-to-SL
+/// projection does not run; a sell take profit moved below the mark already fires,
+/// and is refused before its cancel.
+#[test]
+fn a_take_profit_that_stays_one_is_refused_before_its_cancel_when_it_fires() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.0,
+        &format!(
+            r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"A","limitPx":"95","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Market","triggerPx":"140"}},"status":"open"}}]}}"#
+        ),
+    );
+    e.store_mut().update_ticker("BTC-PERP", |ticker| {
+        ticker.mark = 100.0;
+        ticker.last = 130.0;
+        ticker.index = 100.0;
+    });
+    e.handle(
+        2001.0,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "9".into(),
+            price: Some(90.0),
+            amount: None,
+        }),
+    );
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange"))),
+        "nothing canceled"
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. }))),
+        "{actions:?} {:?}",
+        e.store().order("9")
+    );
+}
+
 fn opts(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
@@ -239,7 +385,7 @@ fn amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only() {
         s,
         2000.0,
         &format!(
-            r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"A","limitPx":"95","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Market","triggerPx":"120"}},"status":"open"}}]}}"#
+            r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"A","limitPx":"95","origSz":"0","sz":"0","isPositionTpsl":true,"reduceOnly":true,"orderType":"Take Profit Market","triggerPx":"120"}},"status":"open"}}]}}"#
         ),
     );
     e.handle(
@@ -1614,6 +1760,15 @@ fn a_take_profit_limit_is_read_and_moved_as_a_take_profit() {
     message(
         &mut e,
         s,
+        1500.,
+        &format!(
+            r#"{{"channel":"clearinghouseState","data":{{"user":"0x14791697260e4c9a71f18484c9f997b308e59325","dex":"","clearinghouseState":{}}}}}"#,
+            STATE.replace("\"szi\":\"2\"", "\"szi\":\"-2\"")
+        ),
+    );
+    message(
+        &mut e,
+        s,
         2000.0,
         &format!(
             r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"B","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Limit","triggerPx":"87"}},"status":"open"}}]}}"#
@@ -1632,17 +1787,189 @@ fn a_take_profit_limit_is_read_and_moved_as_a_take_profit() {
             amount: None,
         }),
     );
-    let r = write(&mut e);
+    let actions = prepared_now(&mut e);
+    let read = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(r) if kind(r) == "orderStatus" => Some(r),
+            _ => None,
+        })
+        .expect("fresh native execution parameters");
     reply(
         &mut e,
-        &r,
+        read,
+        200,
+        &format!(
+            r#"{{"status":"order","order":{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"B","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Limit","triggerPx":"87"}},"status":"open"}}}}"#
+        ),
+    );
+    let cancel = write(&mut e);
+    assert_eq!(body(&cancel)["action"]["type"], "cancel");
+    reply(
+        &mut e,
+        &cancel,
         200,
         r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
     );
     let r = write(&mut e);
     let b = body(&r);
+    assert_eq!(b["action"]["type"], "order");
+    assert_eq!(b["action"]["orders"][0]["t"]["trigger"]["tpsl"], "tp");
+    assert_eq!(b["action"]["orders"][0]["t"]["trigger"]["isMarket"], false);
+    assert_eq!(b["action"]["orders"][0]["t"]["trigger"]["triggerPx"], "85");
+    assert_eq!(b["action"]["orders"][0]["p"], "80");
+    assert_ne!(b["action"]["orders"][0]["c"], CLOID);
+}
+
+// codex-mxb4mq's #3018 reproducers, kept as regression tests.
+
+#[test]
+fn review_3018_mixed_references_cannot_bypass_tp_to_sl_guard() {
+    let (mut e, s) = ready("disabled");
+    let frame=r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"cloid":"CLOID_TOKEN","side":"A","limitPx":"95","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Market","triggerPx":"140"},"status":"open"}]}"#.replace("CLOID_TOKEN",CLOID);
+    message(&mut e, s, 2000., &frame);
+    assert!(
+        e.store().order("9").is_some(),
+        "real native old TP must be present"
+    );
+    e.store_mut().update_ticker("BTC-PERP", |t| {
+        t.mark = 100.;
+        t.last = 130.;
+        t.index = 100.;
+    });
+    e.handle(
+        2001.,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "9".into(),
+            price: Some(90.),
+            amount: None,
+        }),
+    );
+    let mut actions = Vec::new();
+    for _ in 0..3 {
+        let next = fire_timers(&mut e);
+        for action in &next {
+            if let Action::Http(r) = action
+                && kind(r) == "orderStatus"
+            {
+                answer_order_status(&mut e, r);
+            }
+        }
+        actions.extend(next);
+    }
+    eprintln!(
+        "guard probe native order: {:?}; outputs: {:?}",
+        e.store().order("9"),
+        actions
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/exchange"))),
+        "mixed references leave TP kind unchanged, so an already-firing TP90 must not cancel old TP140"
+    );
+}
+#[test]
+fn review_3018_consistent_tp_to_sl_working_control() {
+    amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only();
+}
+
+// codex-mxb4mq #3018 recheck: an allMids repeat of an unchanged price is an observation.
+#[test]
+fn review_recheck_same_price_hl_observation_keeps_stop_guard_fresh() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Stop Market","triggerPx":"80"},"status":"open"}]}"#,
+    );
     assert_eq!(
-        b["action"]["orders"][0]["t"]["trigger"]["tpsl"], "tp",
-        "{b}"
+        e.store().order("9").unwrap().kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+    message(
+        &mut e,
+        s,
+        12000.,
+        r#"{"channel":"allMids","data":{"mids":{"BTC":"100"}}}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-PERP").unwrap().last, 100.);
+    e.handle(
+        12001.,
+        Event::Command(Command::AmendOrder {
+            command: 92,
+            id: "9".into(),
+            price: Some(110.),
+            amount: None,
+        }),
+    );
+    let mut actions = Vec::new();
+    for _ in 0..3 {
+        let next = fire_timers(&mut e);
+        for a in &next {
+            if let Action::Http(r) = a
+                && kind(r) == "orderStatus"
+            {
+                answer_order_status(&mut e, r);
+            }
+        }
+        actions.extend(next);
+    }
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/exchange"))),
+        "fresh last100 must refuse immediately firing sell SL110, {actions:?}"
+    );
+}
+
+#[test]
+fn review_recheck_changed_price_hl_observation_working_control() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Stop Market","triggerPx":"80"},"status":"open"}]}"#,
+    );
+    assert_eq!(
+        e.store().order("9").unwrap().kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+    message(
+        &mut e,
+        s,
+        12000.,
+        r#"{"channel":"allMids","data":{"mids":{"BTC":"100.1"}}}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-PERP").unwrap().last, 100.1);
+    e.handle(
+        12001.,
+        Event::Command(Command::AmendOrder {
+            command: 92,
+            id: "9".into(),
+            price: Some(110.),
+            amount: None,
+        }),
+    );
+    let mut actions = Vec::new();
+    for _ in 0..3 {
+        let next = fire_timers(&mut e);
+        for a in &next {
+            if let Action::Http(r) = a
+                && kind(r) == "orderStatus"
+            {
+                answer_order_status(&mut e, r);
+            }
+        }
+        actions.extend(next);
+    }
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/exchange"))),
+        "fresh last100 must refuse immediately firing sell SL110, {actions:?}"
     );
 }

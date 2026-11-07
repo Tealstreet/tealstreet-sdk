@@ -12,6 +12,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::selected_read::{BackgroundReadError, ReadPolicy, ReadRole, SelectedRead};
 use safe_cex_engine::socket_lifecycle::{FeedId, Interest, SocketError};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, VenueError,
 };
@@ -372,7 +373,10 @@ impl ApexOmni {
                     cx.notice(
                         Level::Warn,
                         code::ROW_SKIPPED,
-                        format!("ApeX skipped malformed market rows ({})", labels.join(", ")),
+                        format!(
+                            "ApeX skipped malformed market rows ({})",
+                            labels.join_with(", ")
+                        ),
                     );
                 }
                 self.public.unlisted = skipped
@@ -564,7 +568,7 @@ impl ApexOmni {
             let _ = cx.fail_context(&context, "No usable ApeX candles");
             return;
         }
-        rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+        safe_cex_engine::model::sort_candles_by_time(&mut rows);
         {
             let result: Result<String, String> =
                 serde_json::to_string(&rows).map_err(|e| e.to_string());
@@ -683,7 +687,7 @@ impl ApexOmni {
         if message.op == "ping" {
             cx.send(
                 socket,
-                format!(r#"{{"op":"pong","args":["{}"]}}"#, cx.now as u64),
+                format!(r#"{{"op":"pong","args":["{}"]}}"#, cx.protocol_now() as u64),
             );
             return true;
         }
@@ -706,6 +710,11 @@ impl ApexOmni {
                     let Some(symbol) = symbol else {
                         continue;
                     };
+                    // A delta row restating an unchanged price still observes it.
+                    let observed = u16::from(row.p.is_some()) << 2
+                        | u16::from(row.mp.or(row.xp).is_some()) << 3
+                        | u16::from(row.xp.is_some()) << 4;
+                    cx.store.observe_ticker_fields(&symbol, observed);
                     cx.store.update_ticker(&symbol, |t| {
                         if let Some(n) = row.p {
                             t.last = n;
@@ -988,7 +997,7 @@ impl ApexOmni {
                 };
                 let limit = limit.filter(|n| *n > 0);
                 let count = limit.unwrap_or(500).min(1500) as f64;
-                let end = to_ms.filter(|n| n.is_finite()).unwrap_or(cx.now) / 1000.0;
+                let end = to_ms.filter(|n| n.is_finite()).unwrap_or(cx.protocol_now()) / 1000.0;
                 let start = if limit.is_none() {
                     from_ms
                         .filter(|n| n.is_finite())

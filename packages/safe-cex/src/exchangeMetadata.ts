@@ -1,5 +1,9 @@
+import type { AnyTimeframe } from './types';
+
 import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
-import { ExchangeName, MarginType, OrderStopTriggerType, PositionMode } from '@tealstreet/safe-cex/src/types';
+import {
+  ExchangeName, MarginType, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode,
+} from '@tealstreet/safe-cex/src/types';
 
 /** Features supported by an exchange - used to skip health checks for unsupported features */
 export type ExchangeFeatures = {
@@ -99,6 +103,8 @@ export type ExchangeMetadata = {
   tvMaxGetBarFetches: number;
   /** Maximum number of candles that can be fetched in a single API call */
   candleApiCountLimit: number;
+  /** Native candle intervals when the venue accepts only a declared subset. */
+  supportedCandleIntervals?: readonly AnyTimeframe[];
   /** Default quote currency for the exchange (e.g., 'USDT', 'USD', 'USDC') */
   defaultQuote: string;
   /** Supported position modes (OneWay, Hedged) */
@@ -178,6 +184,11 @@ export type ExchangeMetadata = {
   privateProxyRegions: { [key: string]: string[] };
   /** Whether to automatically reduce order size if it exceeds position size */
   autoDownSizeReduceOrders: boolean;
+  /**
+   * Whether resting close orders (reduce-only limits, sized TP/SL and trigger closes) lock position
+   * size, so only the free part can be closed. Position-level TP/SL (size 0) lock nothing.
+   */
+  reduceOrdersLockPositionSize: boolean;
   /** Whether the exchange supports chaser orders (orders that follow price) */
   supportsChaser: boolean;
   /** Whether the exchange exposes a per-position margin amount (Position.marginSize) */
@@ -208,6 +219,13 @@ export type ExchangeMetadata = {
   unifiedMargin?: boolean;
   /** Whether the exchange supports second-resolution kline/candle data */
   supportsKlineSeconds?: boolean;
+  /** Public order-shape restrictions; the engine still validates native reconciliation. */
+  orderAmendment?: {
+    limitTimeInForce: readonly OrderTimeInForce[];
+    triggerPriceTypes: readonly OrderType[];
+    unfilledOnly: boolean;
+    preserveAttachedLimitProtection: boolean;
+  };
   /** Default trading symbol to display when first loading the exchange */
   defaultSymbol?: string;
   /** Default symbol to use specifically for TradingView chart widget (overrides global BTCUSDT default) */
@@ -245,7 +263,7 @@ export type ExchangeMetadata = {
   /**
    * Whether fetchOHLCV must run in the worker/server (true) or can run directly
    * from the browser (false, default). Set to true for exchanges whose listenOHLCV
-   * calls fetchOHLCV internally (e.g., BitMEX polling, Coinbase REST from WS,
+   * calls fetchOHLCV internally (e.g., Coinbase REST from WS,
    * Bitrue WS klines, Lighter WS OHLCV, Paradex REST polling).
    */
   fetchOHLCVInWorker?: boolean;
@@ -301,7 +319,8 @@ const defaultMetaData: Omit<ExchangeMetadata, 'exchangeName' | 'features'> = {
   marketOrderDelayInSeconds: 2,
   privateProxyRegions: {},
   autoDownSizeReduceOrders: false,
-  // Safe default. Most exchanges override (BitMEX = 20_000, kraken = 500, etc.).
+  reduceOrdersLockPositionSize: false,
+  // Safe default. Most exchanges override (kraken = 500, etc.).
   tickInterval: 2_000,
   supportsChaser: false,
   supportsPositionMargin: false,
@@ -889,6 +908,8 @@ const BitgetMetadata: ExchangeMetadata = {
   tvMaxGetBarFetches: 5,
   hasIndependentHedgedLeverageInIsolatedMargin: true,
   autoDownSizeReduceOrders: true,
+  // Sized close plans and reduce-only limits hold position size: "Not enough position is available".
+  reduceOrdersLockPositionSize: true,
   supportsChaser: true,
   supportsPositionMargin: true,
   supportsTunnel: true,
@@ -933,6 +954,9 @@ const BitgetInverseMetadata: ExchangeMetadata = {
   // Hidden from the picker and not certified on mobile; the Bitget spread
   // above would otherwise inherit `true`.
   supportedOnMobile: false,
+  // Inverse order amounts are native contracts while position.contracts is the coin size, so the
+  // downsizer cannot net one against the other here; off until that conversion exists.
+  reduceOrdersLockPositionSize: false,
   logo: '/static/exchanges/logos/BITGET/logo.svg',
   lightLogo: '/static/exchanges/logos/BITGET/light.png',
   darkLogo: '/static/exchanges/logos/BITGET/dark.png',
@@ -1012,6 +1036,12 @@ const CryptocomMetadata: ExchangeMetadata = {
 
 const BingxMetadata: ExchangeMetadata = {
   ...defaultMetaData,
+  orderAmendment: {
+    limitTimeInForce: [OrderTimeInForce.GoodTillCancel, OrderTimeInForce.PostOnly],
+    triggerPriceTypes: [OrderType.StopLoss, OrderType.TakeProfit],
+    unfilledOnly: true,
+    preserveAttachedLimitProtection: true,
+  },
   supportsPublicOnly: true,
   exchangeName: 'bingx' as ExchangeName,
   logo: '/static/exchanges/logos/BINGX/logo.svg',
@@ -1104,56 +1134,6 @@ const BitrueMetadata: ExchangeMetadata = {
   enforceWsTunnel: true,
   latencyDomain: 'fapi.bitrue.com',
   fetchOHLCVInWorker: true,
-  features: {
-    kline: true,
-    orderbook: true,
-    orders: true,
-    positions: true,
-    balance: true,
-  },
-};
-
-const BreakoutpropMetadata: ExchangeMetadata = {
-  ...defaultMetaData,
-  supportsPublicOnly: true,
-  tvIntraDayMultipliers: ['1', '5', '15', '30', '60'],
-  // TODO: audit below....
-  exchangeName: 'breakoutprop' as ExchangeName,
-  logo: '/static/exchanges/logos/BREAKOUT_PROP/logo.svg',
-  lightLogo: '/static/exchanges/logos/BREAKOUT_PROP/light.png',
-  darkLogo: '/static/exchanges/logos/BREAKOUT_PROP/dark.png',
-  refLink: 'https://teal.link/breakout',
-  refImage: '/static/exchanges/reflinks/breakoutprop/ref.png',
-  requiresPassphrase: false,
-  requiresApplicationId: false,
-  enabled: false,
-  enableInPreview: false,
-  enabledInDev: true,
-  supportsTestnet: false,
-  orderbookTickDelay: 100,
-  prettyName: 'Breakout',
-  privateProxyIps: privateProxyIpsVultrTokyo,
-  orderPendingUpdateDelay: 2_000,
-  stopOrderPendingUpdateDelay: 4_000,
-  tickInterval: 2_000,
-  tvMaxGetBarFetches: 20,
-  hasEmptyPositions: false,
-  positionModeIsGlobal: true,
-  marginTypeIsGlobal: false,
-  hasIndependentHedgedLeverageInIsolatedMargin: true,
-  hasIndependentHedgedLeverageInCrossMargin: true,
-  supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice],
-  defaultTPTriggerType: OrderStopTriggerType.LastPrice,
-  defaultSLTriggerType: OrderStopTriggerType.LastPrice,
-  supportsChaser: false,
-  supportsPositionMargin: false,
-  requiresCors: false,
-  supportsMaxCrossLeverage: false,
-  positionModes: [PositionMode.OneWay],
-  marginTypes: [MarginType.Cross],
-  supportsSubaccount: true,
-  enforceWsTunnel: true,
-  latencyDomain: 'app.breakoutprop.com',
   features: {
     kline: true,
     orderbook: true,
@@ -1488,8 +1468,14 @@ const WhatMetadata: ExchangeMetadata = {
   },
 };
 
+const hyperliquidCandleIntervals: readonly AnyTimeframe[] = [
+  '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M',
+];
+
 const HyperliquidMetadata: ExchangeMetadata = {
   ...defaultMetaData,
+  supportsKlineSeconds: false,
+  supportedCandleIntervals: hyperliquidCandleIntervals,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquid' as ExchangeName,
   // One connection serves perps + spot; spot is opt-in per account.
@@ -1541,6 +1527,8 @@ const HyperliquidMetadata: ExchangeMetadata = {
 
 const HyperliquidSpotMetadata: ExchangeMetadata = {
   ...defaultMetaData,
+  supportsKlineSeconds: false,
+  supportedCandleIntervals: hyperliquidCandleIntervals,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquidspot' as ExchangeName,
   // Superseded by the `hyperliquid` connection's spot toggle. Kept enabled so
@@ -2029,6 +2017,7 @@ const ParadexMetadata: ExchangeMetadata = {
   marketOrderDelayInSeconds: 0,
   privateProxyRegions: {},
   autoDownSizeReduceOrders: false,
+  reduceOrdersLockPositionSize: false,
   supportsChaser: true,
   supportsPositionMargin: false,
   supportsClosedPnLEndpoint: false,
@@ -2036,6 +2025,8 @@ const ParadexMetadata: ExchangeMetadata = {
   forbidCors: false,
   orderPendingUpdateDelay: 1000,
   stopOrderPendingUpdateDelay: 1000,
+  // Local Paradex REST already installs HOW, including unsigned discovery.
+  supportsTunnel: true,
   enforceWsTunnel: true,
   latencyDomain: 'api.prod.paradex.trade',
   features: {
@@ -2267,7 +2258,6 @@ export const exchangeMetadata: {
   phemex: PhemexMetadata,
   bingx: BingxMetadata,
   bitrue: BitrueMetadata,
-  breakoutprop: BreakoutpropMetadata,
   blofin: BlofinMetadata,
   lighter: LighterMetadata,
   'lighter-robinhood': LighterRobinhoodMetadata,
@@ -2293,13 +2283,24 @@ export const exchangeMetadata: {
   polymarket: PolymarketMetadata,
 };
 
+/**
+ * A retired or unknown name (e.g. a saved `bitmex` account) refuses with the
+ * `unsupported`/`notSent` fields `serializeCommandError` carries. It is not an
+ * `ExchangeError`: the Rust source oracles load this file without the WASM host.
+ */
+const unknownExchangeMetadata = (exchange: string): Error =>
+  Object.assign(new Error(`Unknown exchange metadata: ${exchange}`), {
+    kind: 'unsupported' as const,
+    outcome: 'notSent' as const,
+  });
+
 export const getExchangeMetadata = (exchange: ExchangeName, opts: Record<string, any> = {}): ExchangeMetadata => {
   if (exchange === 'bybit') {
     return opts.isUnified ? BybitUnifiedMetadata : BybitMetadata;
   }
   const metadata = exchangeMetadata[exchange];
   if (!metadata) {
-    throw new Error(`Unknown exchange metadata: ${exchange}`);
+    throw unknownExchangeMetadata(exchange);
   }
   return metadata;
 };

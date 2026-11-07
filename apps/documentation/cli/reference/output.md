@@ -10,6 +10,25 @@ fill notifications, connection dots.
 
 ---
 
+## Windows console glyphs {#windows-console-glyphs}
+
+On Windows outside Windows Terminal, or when the console code page is not
+UTF-8, the CLI prints ASCII instead of glyphs the legacy console font cannot
+draw. Every other terminal keeps Unicode.
+
+| Unicode     | ASCII              |
+| ----------- | ------------------ |
+| `✗ ⚠ ✓ ℹ`   | `[x] [!] [ok] [i]` |
+| `⛔`        | `[!!]`             |
+| `─ ═ │ ┌ ┼` | `- = \| + +`       |
+| `— … → ≥`   | `- . > >=`         |
+
+`TEALSTREET_ASCII=1` forces ASCII on any platform; `TEALSTREET_ASCII=0` keeps
+Unicode. The code page is read once at startup. ASCII only applies to what a
+person reads in the terminal: `--json` documents, redirected or piped output,
+and output sent to web clients over the listener always keep the original
+Unicode text.
+
 ## Output kinds
 
 Every line the CLI prints carries a `PrintKind`. Listener `cmd:output` frames
@@ -34,12 +53,20 @@ Where each stream goes:
   Everything else prints **above** the prompt (readline-aware, so async output
   never shreds what you're mid-typing).
 - `console.warn / error` → log file + printed above the prompt, and the latest
-  one is mirrored on the [top status bar](#status-bar--footer).
+  one is mirrored on the [top status bar](#status-bar--footer). The terminal
+  line always carries the cause: an error's message, a venue envelope's
+  `retMsg`/`ret_msg`/`msg` (also inside a proxied `raw_response`), else its
+  code or kind, else the body serialized to 300 characters. The full body is
+  always in `cli.log`.
 - `console.debug` → log file **only when `DEBUG=1` / `DEBUG=true`** is set;
   dropped otherwise (it routes to `logger.debug`, gated by `MIN_LOG_LEVEL`,
   which defaults to `info`).
 - `print()` / `originalConsoleLog()` → terminal only, no rate limit — what
   command handlers use for primary output.
+
+Bybit timestamp refusals use the Rust engine's per-account clock correction and
+one bounded re-signed retry. A detected system-clock skew prints one warning per
+CLI session, including the measured fast/slow offset and Windows time-sync steps.
 
 Verbose HoW/tradetunnel request diagnostics also use the existing console
 pipeline: start the CLI with `DEBUG=1` or `DEBUG=true` to add sanitized

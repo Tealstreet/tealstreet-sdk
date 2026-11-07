@@ -4,6 +4,7 @@ use safe_cex_engine::classify::BatchItem;
 use safe_cex_engine::repair::{
     Binding, Effect, Entitlement, RepairNotice, RepairRoot, Retire, SnapshotReceipt, Subject,
 };
+use safe_cex_engine::text::JoinWith;
 
 #[derive(Default)]
 pub(super) struct State {
@@ -76,17 +77,21 @@ impl PhemexPerpetuals {
     /// its lost placements; one it does not show never landed, and its late
     /// cancel authority retires.
     pub(crate) fn expire_lost_from_frames(&mut self, cx: &mut Cx<'_, Pending>) {
-        let Some(cover) = cx
-            .source_orders_cover()
+        let Some(covers) = cx
+            .source_orders_covers()
             .filter(|_| cx.store.loaded().orders)
+            .cloned()
         else {
             return;
         };
-        for (symbol, since) in self.account.take_proven_lost(cover) {
+        for (symbol, since) in self.account.take_proven_lost(|symbol| covers.cover(symbol)) {
             for grant in &mut self.trading.repair.grants {
                 if grant.symbol == symbol {
                     grant.subjects.retain(|subject| {
-                        let proof = Retire::SourceOrders { since };
+                        let proof = Retire::SourceOrders {
+                            since,
+                            symbol: &symbol,
+                        };
                         cx.retire_repair_subject(&grant.entitlement, &subject.key, proof)
                             .is_err()
                     });
@@ -140,7 +145,7 @@ impl PhemexPerpetuals {
     }
     fn late_cancel_error(cx: &mut Cx<'_, Pending>, ids: &[String], error: &str) {
         cx.notice(Level::Error,code::CHILD_LEG_FAILED,format!(
-            "Phemex could not cancel late-landing order {} after cancel-all: {error}; cancel it manually",ids.join(", ")));
+            "Phemex could not cancel late-landing order {} after cancel-all: {error}; cancel it manually",ids.join_with(", ")));
     }
     pub(super) fn late_next(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.trading.repair.active.is_some() {
@@ -419,7 +424,7 @@ impl PhemexPerpetuals {
                 code::ORDERS_REPLACED,
                 format!(
                     "Phemex canceled late-landing order {} after cancel-all",
-                    ids.join(", ")
+                    ids.join_with(", ")
                 ),
             );
             self.account_write(cx);

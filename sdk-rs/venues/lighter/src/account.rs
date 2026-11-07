@@ -7,7 +7,6 @@ use safe_cex_engine::fresh_positions::{self, FreshPositions};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, SocketId, TimerId, VenueError, json};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -54,6 +53,7 @@ pub enum Request {
         market: Option<String>,
         orders: Vec<Order>,
         coverage: SnapshotCoverage<String>,
+        census: CensusRead,
         valid: bool,
     },
     Backfill {
@@ -62,6 +62,19 @@ pub enum Request {
         oldest: f64,
         count: usize,
     },
+}
+/// What an open-order census (one read, or one per market) has proved so far.
+#[derive(Default)]
+pub struct CensusRead {
+    /// The earliest release among its reads.
+    read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+    /// A read answered outside a read response: the census proves no cover.
+    lost: bool,
+    started: f64,
+    /// Rows naming a client order index (client, native, symbol), applied only
+    /// once their symbol's rows are admitted.
+    observed: Vec<(String, String, String)>,
+    originals: Vec<(Order, String)>,
 }
 #[derive(Clone)]
 pub struct Backfill {
@@ -76,39 +89,15 @@ pub struct Execution {
     timestamp: f64,
     fill: Fill,
 }
-struct Connection {
-    socket: Option<SocketId>,
-    open: bool,
+#[derive(Default)]
+pub(crate) struct Connection {
+    pub(crate) stream: crate::Connection,
     connected_at: f64,
     last_payload: Option<f64>,
     last_recovery: Option<f64>,
     recovery_started: Option<f64>,
     /// Early failures that read as an IP restriction; three switch to `?readonly=true`.
     read_only_failures: u32,
-    read_only: bool,
-    supervisor: Supervisor,
-}
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            connected_at: 0.0,
-            last_payload: None,
-            last_recovery: None,
-            recovery_started: None,
-            read_only_failures: 0,
-            read_only: false,
-            supervisor: Supervisor::new(Config {
-                connect_timeout_ms: 180_000.0,
-                idle_timeout_ms: 180_000.0,
-                ping_interval_ms: Some(10_000.0),
-                backoff_base_ms: 1_000.0,
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
-        }
-    }
 }
 struct OrderBatch {
     revision: u64,
@@ -116,6 +105,10 @@ struct OrderBatch {
     orders: Vec<Order>,
 }
 const STREAMED_POLL_MS: f64 = 5_000.0;
+/// The open-order census's read-cover scope: one census reads the whole account.
+const ORDERS_SCOPE: &str = "orders";
+/// A census the stream outran is read again no sooner than this after it began.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.0;
 const RATE_LIMITED_POLL_HOLD_MS: f64 = 30_000.0;
 /// How soon `readPositions` tries again after a read a newer stream frame held.
 const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
@@ -139,7 +132,7 @@ pub struct Account {
     pub(crate) client_orders: HashMap<String, String>,
     /// Placed orders the stream has not yet named: their client index can cancel them.
     pub(crate) unnamed_placements: HashMap<String, Order>,
-    connection: Connection,
+    pub(crate) connection: Connection,
     started: bool,
     revision: u64,
     position_revision: HashMap<String, u64>,
@@ -159,6 +152,7 @@ pub struct Account {
     /// predate the write, so another follows once it settles.
     orders_again: bool,
     batch: Option<OrderBatch>,
+    census_follow_up: Option<TimerId>,
     sync: Option<TimerId>,
     polls_held_until: f64,
     polled_at: f64,
@@ -695,8 +689,9 @@ impl Lighter {
         cx.store.set_hedged(false);
         for m in cx.store.markets().to_vec() {
             let mode = self.metadata.get(&m.symbol).map_or(0, |v| v.margin_mode);
+            let leverage = self.default_leverage(&m);
             cx.store.update_setting(&m.symbol, |s| {
-                s.leverage = m.limits.leverage.max;
+                s.leverage = leverage;
                 s.margin_type = Some(if mode == 1 {
                     MarginType::Isolated
                 } else {
@@ -873,8 +868,8 @@ impl Lighter {
         }
         self.account.account_index = Some(account);
         self.release_awaiting_identity(cx, account);
-        if self.account.identity.is_some() {
-            self.connect_private(cx);
+        if self.account.identity.is_some() && self.account.connection.stream.idle() {
+            self.open_feed(cx, crate::Channel::Private);
         }
         self.refresh_account(cx);
         self.refresh_orders(cx);
@@ -1013,7 +1008,17 @@ impl Lighter {
             return;
         }
         self.account.orders_inflight = true;
-        self.request_orders(cx, None, self.account.revision, SnapshotCoverage::default());
+        let census = CensusRead {
+            started: cx.now,
+            ..CensusRead::default()
+        };
+        self.request_orders(
+            cx,
+            None,
+            self.account.revision,
+            SnapshotCoverage::default(),
+            census,
+        );
     }
     /// An uncertainty reconcile needs a read requested after the write: one
     /// already in flight may predate it, so another follows once it settles.
@@ -1034,6 +1039,7 @@ impl Lighter {
         market: Option<String>,
         revision: u64,
         coverage: SnapshotCoverage<String>,
+        census: CensusRead,
     ) {
         let id = market.as_deref().unwrap_or("255");
         let account = self.account.account_index.unwrap();
@@ -1056,6 +1062,7 @@ impl Lighter {
                 market,
                 orders: Vec::new(),
                 coverage,
+                census,
                 valid: true,
             },
             Some(sign::AuthPlacement::Query),
@@ -1065,12 +1072,21 @@ impl Lighter {
         self.account.suppressed.contains(id)
     }
     pub(crate) fn record_cancel(&mut self, id: &str, _now: f64) {
+        self.protection.originals.remove(id);
+        self.protection.complex.remove(id);
         self.account.revision += 1;
         self.account
             .order_revision
             .insert(id.into(), self.account.revision);
         self.account.suppressed.insert(id.into());
         self.account.records.remove(id);
+    }
+    pub(crate) fn record_modify(&mut self, id: &str) {
+        self.protection.originals.remove(id);
+        self.account.revision += 1;
+        self.account
+            .order_revision
+            .insert(id.into(), self.account.revision);
     }
     pub(crate) fn record_placement(&mut self, order: Order) {
         self.account.revision += 1;
@@ -1097,25 +1113,6 @@ impl Lighter {
             self.account.heal = Some(cx.set_timer(500.0));
         }
     }
-    fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.connection.read_only {
-            // Legacy's degraded cadence; set before connecting so no live ping is rearmed.
-            self.account
-                .connection
-                .supervisor
-                .set_ping_interval(cx, Some(20_000.0));
-        }
-        self.account.connection.open = false;
-        self.account.connection.supervisor.connecting(cx);
-        self.account.connection.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(
-                    self.socket_url(self.account.connection.read_only),
-                )
-                .channel(safe_cex_engine::SocketChannel::Private),
-            ),
-        );
-    }
     fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let account = self.account.account_index.unwrap();
         cx.send(
@@ -1141,12 +1138,7 @@ impl Lighter {
             }
         }
     }
-    pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
-        if self.account.connection.socket != Some(socket) {
-            return false;
-        }
-        self.account.connection.open = true;
-        self.account.connection.supervisor.opened(cx);
+    pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         self.account.connection.connected_at = cx.now;
         self.account.connection.last_payload = None;
         self.account.connection.last_recovery = None;
@@ -1156,7 +1148,7 @@ impl Lighter {
         self.subscribe_private(cx, socket);
         cx.send(
             socket,
-            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
+            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.protocol_now()),
         );
         self.refresh_account(cx);
         self.refresh_orders(cx);
@@ -1173,43 +1165,29 @@ impl Lighter {
             };
             self.request_backfill(cx, run);
         }
-        true
     }
-    pub(crate) fn account_close(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        socket: SocketId,
-        code: u16,
-    ) -> bool {
-        if self.account.connection.socket != Some(socket) {
-            return false;
-        }
-        self.note_private_close(cx, code);
-        self.account.connection.open = false;
-        self.account.connection.socket = None;
+    /// The engine has closed the epoch and owns the retry.
+    pub(crate) fn account_retired(&mut self, cx: &mut Cx<'_, Pending>) {
         let connection = &self.account.connection;
         self.arm_outage(connection.last_payload.unwrap_or(connection.connected_at));
-        let minimum = if code == 1013 { 30_000.0 } else { 0.0 };
-        self.account.connection.supervisor.retry_after(cx, minimum);
         self.trade_stream_lost(cx);
-        true
     }
     /// Legacy lighter.ws-private.ts: a handshake that failed, or opened and closed
     /// within 10 s with no account stream, as 1006 or a 1008 restriction.
-    fn note_private_close(&mut self, cx: &mut Cx<'_, Pending>, code: u16) {
+    pub(crate) fn note_private_close(&mut self, cx: &mut Cx<'_, Pending>, code: u16) {
         let connection = &mut self.account.connection;
-        let early = connection.open
+        let early = connection.stream.open
             && connection.last_payload.is_none()
             && cx.now - connection.connected_at <= 10_000.0;
-        let restricted = matches!(code, 1006 | 1008) && (!connection.open || early);
-        if !restricted || connection.read_only || self.options.ws_routed {
+        let restricted = matches!(code, 1006 | 1008) && (!connection.stream.open || early);
+        if !restricted || connection.stream.read_only || self.options.ws_routed {
             return;
         }
         connection.read_only_failures += 1;
         if connection.read_only_failures < 3 {
             return;
         }
-        connection.read_only = true;
+        connection.stream.read_only = true;
         cx.notice(
             Level::Warn,
             code::STREAM_UNAVAILABLE,
@@ -1217,14 +1195,13 @@ impl Lighter {
         );
     }
     // Payload staleness is checked on the same 10s cadence as the heartbeat.
-    fn private_heartbeat(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+    pub(crate) fn private_heartbeat(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let connection = &self.account.connection;
         if connection
             .recovery_started
             .is_some_and(|at| cx.now - at >= 20_000.0)
         {
-            cx.close(socket);
-            self.account_close(cx, socket, 1006);
+            self.retire(cx, crate::Channel::Private);
             return;
         }
         let payload_age = cx.now - connection.last_payload.unwrap_or(connection.connected_at);
@@ -1234,7 +1211,7 @@ impl Lighter {
             180_000.0
         };
         if payload_age >= stale_after
-            && !connection.read_only
+            && !connection.stream.read_only
             && connection.recovery_started.is_none()
             && connection
                 .last_recovery
@@ -1249,7 +1226,7 @@ impl Lighter {
         }
         cx.send(
             socket,
-            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
+            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.protocol_now()),
         );
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -1268,36 +1245,10 @@ impl Lighter {
             self.next_lookup(cx, self.lookup_candidates());
             return true;
         }
-        match self.account.connection.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => {}
-            Tick::Reconnect => {
-                self.connect_private(cx);
-                return true;
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.close(socket);
-                    self.account_close(cx, socket, 1006);
-                }
-                return true;
-            }
-            Tick::Ping => {
-                if let Some(socket) = self
-                    .account
-                    .connection
-                    .socket
-                    .filter(|_| self.account.connection.open)
-                {
-                    self.private_heartbeat(cx, socket);
-                }
-                return true;
-            }
-            Tick::Handled => return true,
-        }
         if self.account.sync == Some(timer) {
             self.account.sync = Some(cx.set_poll_timer(2_000.0));
             // Two reads every 2 s fill Lighter's budget, and a close then gets refused.
-            let cadence = if self.account.connection.open {
+            let cadence = if self.account.connection.stream.open {
                 STREAMED_POLL_MS
             } else {
                 0.0
@@ -1321,6 +1272,14 @@ impl Lighter {
         {
             let (_, run) = self.account.backfill_retry.take().unwrap();
             self.request_backfill(cx, run);
+            return true;
+        }
+        if self.account.census_follow_up == Some(timer) {
+            self.account.census_follow_up = None;
+            // Within the poll's budget; a held poll reads it later.
+            if !self.trade_running() && cx.now >= self.account.polls_held_until {
+                self.refresh_orders(cx);
+            }
             return true;
         }
         if self.account.heal == Some(timer) {
@@ -1382,7 +1341,7 @@ impl Lighter {
                     .find(|p| p.symbol == symbol)
                     .map(|p| p.leverage)
             })
-            .unwrap_or(market.limits.leverage.max);
+            .unwrap_or_else(|| self.default_leverage(market));
         let leverage = safe_cex_engine::num::clamp_leverage(
             leverage,
             market.limits.leverage.min,
@@ -1683,6 +1642,7 @@ impl Lighter {
         market_hint: Option<&str>,
         orders: &mut Vec<Order>,
         coverage: &mut SnapshotCoverage<String>,
+        census: &mut CensusRead,
     ) {
         match self.map_order_row(cx, raw, market_hint, true) {
             Ok(order) => {
@@ -1690,8 +1650,12 @@ impl Lighter {
                 if let Some(order) = &order
                     && let Some(client_index) = client_order_index(raw)
                 {
-                    self.note_client_order(&client_index, &order.id);
-                    self.trade_group_observed(cx, &client_index);
+                    census
+                        .observed
+                        .push((client_index, order.id.clone(), order.symbol.clone()));
+                }
+                if let Some(order) = &order {
+                    census.originals.push((order.clone(), raw.get().into()));
                 }
                 return orders.extend(order);
             }
@@ -1810,6 +1774,7 @@ impl Lighter {
             _ => OrderType::Limit,
         };
         if kind == OrderType::Limit
+            && (wire.kind.0.is_empty() || wire.trigger_price.is_none())
             && let Some(o) = existing
             && o.kind != OrderType::Limit
         {
@@ -1916,22 +1881,6 @@ impl Lighter {
             .map(Bool::get)
             .or_else(|| existing.map(|o| o.reduce_only))
             .unwrap_or(false);
-        if kind == OrderType::Limit
-            && reduce_only
-            && price > 0.0
-            && let Some(t) = cx.store.ticker(symbol)
-        {
-            let reference = [t.mark, t.last, t.index].into_iter().find(|v| *v > 0.0);
-            if reference.is_some_and(|reference| {
-                if side == OrderSide::Sell {
-                    price <= reference
-                } else {
-                    price >= reference
-                }
-            }) {
-                kind = OrderType::StopLoss;
-            }
-        }
         let remaining_notional = wire
             .remaining_quote_amount
             .as_ref()
@@ -1968,6 +1917,11 @@ impl Lighter {
             take_profit: None,
             stop_loss: None,
             extra: Some(OrderExtra {
+                conditional_order_price: matches!(
+                    normalized(&wire.kind.0).as_str(),
+                    "3" | "5" | "STOP_LIMIT" | "STOP_LOSS_LIMIT" | "TAKE_PROFIT_LIMIT"
+                )
+                .then(|| wire.price.as_ref().map_or(0.0, |p| p.0)),
                 remaining_native: Some(remaining),
                 remaining_notional: Some(remaining_notional),
                 reject_reason,
@@ -2022,11 +1976,14 @@ impl Lighter {
             Request::Orders {
                 orders,
                 coverage,
+                census,
                 valid,
                 market,
                 ..
             } => match serde_json::from_str::<&RawValue>(item) {
-                Ok(raw) => self.snapshot_order(cx, raw, market.as_deref(), orders, coverage),
+                Ok(raw) => {
+                    self.snapshot_order(cx, raw, market.as_deref(), orders, coverage, census)
+                }
                 Err(_) => *valid = false,
             },
         }
@@ -2125,7 +2082,7 @@ impl Lighter {
             let (leverage, margin) = provided.unwrap_or_else(|| {
                 let old = cx.store.setting(&m.symbol);
                 (
-                    old.map_or(m.limits.leverage.max, |s| s.leverage),
+                    old.map_or_else(|| self.default_leverage(&m), |s| s.leverage),
                     old.and_then(|s| s.margin_type).unwrap_or(MarginType::Cross),
                 )
             });
@@ -2182,6 +2139,7 @@ impl Lighter {
         revision: u64,
         orders: Vec<Order>,
         coverage: &SnapshotCoverage<String>,
+        census: CensusRead,
         paged: bool,
     ) {
         let mut ids = HashSet::new();
@@ -2204,16 +2162,89 @@ impl Lighter {
                 })
                 .cloned(),
         );
-        let active = merged.iter().map(|o| o.id.as_str()).collect::<HashSet<_>>();
+        // What this census may replace, decided before any per-order state moves
+        // (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+        let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+            key: ORDERS_SCOPE,
+            account: &[ORDERS_SCOPE],
+        };
+        let refused = census.read.filter(|_| !census.lost).and_then(|earliest| {
+            cx.orders_read_refusals_from(earliest, scope, |_| true, &merged)
+                .map(|refused| (earliest, refused))
+        });
+        let Some((earliest, refused)) = refused else {
+            // Refused whole, or unprovable: newer rows already stand, and another
+            // census follows to prove what they cannot (absences).
+            self.census_follow_up(cx, census.started);
+            return;
+        };
+        if !refused.is_empty() {
+            self.census_follow_up(cx, census.started);
+        }
+        for (client_index, id, symbol) in census.observed {
+            if !refused.contains(&symbol) {
+                self.note_client_order(&client_index, &id);
+                self.trade_group_observed(cx, &client_index);
+            }
+        }
+        // Any rejected row proves the account nothing.
+        let mut cover_unproven = coverage.unproven().to_vec();
+        if coverage.rejected() != 0 {
+            cover_unproven.push(String::new());
+        }
+        if cx
+            .commit_orders_read_from(earliest, scope, |_| true, merged, &cover_unproven)
+            .is_none()
+        {
+            self.census_follow_up(cx, census.started);
+            return;
+        }
+        for (order, raw) in census.originals {
+            if !refused.contains(&order.symbol)
+                && self
+                    .account
+                    .order_revision
+                    .get(&order.id)
+                    .copied()
+                    .unwrap_or(0)
+                    <= revision
+                && cx.store.order(&order.id) == Some(&order)
+            {
+                self.observe_original(cx.store, &raw, &order);
+            }
+        }
+        self.protection
+            .originals
+            .retain(|id, original| cx.store.order(id) == Some(&original.observed));
+        self.protection
+            .complex
+            .retain(|id| cx.store.order(id).is_some());
+        cx.store.set_orders_loaded();
+        let active = cx
+            .store
+            .orders()
+            .iter()
+            .map(|o| o.id.as_str())
+            .collect::<HashSet<_>>();
         self.account
             .records
             .retain(|id, _| active.contains(id.as_str()));
-        cx.store.set_orders(merged);
         // Each per-market page carries its own read token, so the last one cannot
         // vouch for the first: a paged census owed a successor may predate the write.
         if revision == self.account.revision && !(paged && self.account.orders_again) {
-            cx.orders_reconciled_except(coverage.unproven(), u64::MAX);
+            let mut unproven = coverage.unproven().to_vec();
+            unproven.extend(refused);
+            cx.orders_reconciled_except(&unproven, u64::MAX);
         }
+    }
+    /// Owe a census after one the stream outran, `CENSUS_FOLLOW_UP_MS` after
+    /// that one started at the earliest.
+    fn census_follow_up(&mut self, cx: &mut Cx<'_, Pending>, started: f64) {
+        if self.account.census_follow_up.is_some() {
+            return;
+        }
+        let wait = (started + CENSUS_FOLLOW_UP_MS - cx.now).max(0.0);
+        self.account.census_follow_up = Some(cx.set_timer(wait));
     }
     pub(crate) fn account_response(
         &mut self,
@@ -2356,22 +2387,37 @@ impl Lighter {
                 market,
                 orders,
                 coverage,
+                mut census,
                 valid,
             } => {
+                match cx.order_read_mark() {
+                    Some(mark) => {
+                        census.read =
+                            Some(census.read.map_or(mark, |earliest| earliest.earliest(mark)));
+                    }
+                    None => census.lost = true,
+                }
                 if ok && valid {
                     if let Some(batch) = self.account.batch.as_mut() {
                         batch.orders.extend(orders);
                         if let Some(market) = batch.markets.pop_front() {
                             let revision = batch.revision;
                             // The batch's skipped rows ride along to its commit.
-                            self.request_orders(cx, Some(market), revision, coverage);
+                            self.request_orders(cx, Some(market), revision, coverage, census);
                         } else {
                             let batch = self.account.batch.take().unwrap();
-                            self.commit_orders(cx, batch.revision, batch.orders, &coverage, true);
+                            self.commit_orders(
+                                cx,
+                                batch.revision,
+                                batch.orders,
+                                &coverage,
+                                census,
+                                true,
+                            );
                             self.orders_settled(cx);
                         }
                     } else {
-                        self.commit_orders(cx, revision, orders, &coverage, false);
+                        self.commit_orders(cx, revision, orders, &coverage, census, false);
                         self.orders_settled(cx);
                     }
                 } else if market.is_none()
@@ -2392,11 +2438,17 @@ impl Lighter {
                             markets,
                             orders: Vec::new(),
                         });
+                        // The failed all-market read stays the census's earliest leg.
+                        let census = CensusRead {
+                            observed: Vec::new(),
+                            ..census
+                        };
                         self.request_orders(
                             cx,
                             Some(market),
                             revision,
                             SnapshotCoverage::default(),
+                            census,
                         );
                     } else {
                         self.orders_settled(cx);
@@ -2423,6 +2475,7 @@ impl Lighter {
             valid,
             orders,
             coverage,
+            census,
             market,
             ..
         } = &mut request
@@ -2438,7 +2491,14 @@ impl Lighter {
                 && raw.get().starts_with('{')
             {
                 let result = each_row(raw, |row: &RawValue, hint| {
-                    self.snapshot_order(cx, row, hint.or(market.as_deref()), orders, coverage)
+                    self.snapshot_order(
+                        cx,
+                        row,
+                        hint.or(market.as_deref()),
+                        orders,
+                        coverage,
+                        census,
+                    )
                 });
                 *valid = result.is_ok();
             }
@@ -2534,10 +2594,9 @@ impl Lighter {
         socket: SocketId,
         text: &str,
     ) -> bool {
-        if self.account.connection.socket != Some(socket) {
+        if self.account.connection.stream.socket != Some(socket) {
             return false;
         }
-        self.account.connection.supervisor.received(cx.now);
         let Ok(frame) = serde_json::from_str::<Frame<'_>>(text) else {
             cx.notice(
                 Level::Warn,
@@ -2549,7 +2608,7 @@ impl Lighter {
         if frame.kind == "ping" {
             cx.send(
                 socket,
-                format!(r#"{{"type":"pong","timestamp":{}}}"#, cx.now),
+                format!(r#"{{"type":"pong","timestamp":{}}}"#, cx.protocol_now()),
             );
             return true;
         }
@@ -2639,6 +2698,8 @@ impl Lighter {
                         cx.notice_error(Level::Error, code::ORDER_REJECTED, &error);
                     }
                     if matches!(order.status, OrderStatus::Canceled | OrderStatus::Closed) {
+                        self.protection.originals.remove(&order.id);
+                        self.protection.complex.remove(&order.id);
                         self.account.suppressed.insert(order.id.clone());
                         self.account.records.remove(&order.id);
                         if order.status == OrderStatus::Canceled {
@@ -2647,6 +2708,7 @@ impl Lighter {
                             cx.store.upsert_order(order);
                         }
                     } else {
+                        self.observe_original(cx.store, row.get(), &order);
                         cx.store.upsert_order(order);
                     }
                 }
@@ -2893,5 +2955,18 @@ fn snapshot_read_error(response: &Response<'_>, ok: bool) -> VenueError {
         error.kind(ErrorKind::RateLimited)
     } else {
         error
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Limits { .. } => S::ACCOUNT,
+            Self::Lookup { .. } => S::ACCOUNT,
+            Self::Snapshot { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }

@@ -127,6 +127,11 @@ pub struct PublicWsRoute {
     pub route: WsRoute,
 }
 
+/// The one method read routing makes: a GET may take a read or public-read egress.
+fn is_get(request: &HttpRequest) -> bool {
+    request.method == safe_cex_engine::Method::Get
+}
+
 /// Serializable output of TS resolution. This host has no venue routing table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -138,6 +143,9 @@ pub struct RoutingPlan {
     pub read_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_public_http: Option<HttpRoute>,
+    /// A bypassed read key's egress: managed public GETs only, never a signed request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_read_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_header: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -204,7 +212,7 @@ impl RoutingState {
                 .iter()
                 .any(|(name, value)| name.eq_ignore_ascii_case(header) && !value.is_empty())
         });
-        let read = request.method == safe_cex_engine::Method::Get
+        let read = is_get(request)
             && (self.plan.read_public
                 || self
                     .plan
@@ -256,6 +264,12 @@ impl RoutingState {
             .filter(|_| request.route != Some(safe_cex_engine::RequestRoute::Secondary))
         {
             return Ok(route);
+        }
+        if intent == RoutingIntent::Public
+            && is_get(request)
+            && let Some(route) = &self.plan.public_read_http
+        {
+            return Ok(route.clone());
         }
         match intent {
             RoutingIntent::Primary => Ok(self.plan.http.clone()),
@@ -980,6 +994,41 @@ mod tests {
     }
 
     #[test]
+    fn a_bypassed_read_egress_carries_only_managed_public_gets() {
+        use safe_cex_engine::request_context::RoutingIntent;
+        let route = |prefix: &str| HttpRoute {
+            prefix: prefix.into(),
+            ..HttpRoute::default()
+        };
+        let state = state(RoutingPlan {
+            http: route("account"),
+            public_read_http: Some(route("read-egress")),
+            ..RoutingPlan::default()
+        });
+        let request = |method| HttpRequest {
+            id: RequestId(0),
+            method,
+            route: None,
+            timeout_ms: None,
+            url: "https://venue.invalid/public".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
+        };
+        let prefix = |method, intent| state.managed_http(&request(method), intent).unwrap().prefix;
+        assert_eq!(prefix(Method::Get, RoutingIntent::Public), "read-egress");
+        assert_eq!(prefix(Method::Post, RoutingIntent::Public), "account");
+        assert_eq!(prefix(Method::Get, RoutingIntent::Primary), "account");
+        assert!(
+            state
+                .managed_http(&request(Method::Get), RoutingIntent::Secondary)
+                .is_err()
+        );
+        // Header-inferred requests never take it.
+        assert_eq!(state.http(&request(Method::Get)).unwrap().prefix, "account");
+    }
+
+    #[test]
     fn empty_or_absent_header_uses_public_route_case_insensitively() {
         let state = state(RoutingPlan {
             http: HttpRoute {
@@ -1380,7 +1429,7 @@ mod tests {
 
         let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 76);
+        assert_eq!(examples.len(), 72);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {

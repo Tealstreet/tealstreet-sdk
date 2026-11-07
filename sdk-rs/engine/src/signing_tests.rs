@@ -170,6 +170,63 @@ fn result() -> Result<SignResult, SignError> {
     Ok(SignResult::new(vec![vec![0; 32]], Default::default()))
 }
 #[test]
+fn completion_preserves_timer_retirement_before_outbound_and_retry_actions() {
+    for stale in [false, true] {
+        let mut engine = engine();
+        let (attempt, timer) = staged(&mut engine);
+        engine.sign_completed(if stale { 6000. } else { 1001. }, attempt, result());
+        let actions = engine.io.core.actions.as_slice();
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(actions[0], Action::ClearTimer { timer: id } if id == timer));
+        if stale {
+            let Action::Sign {
+                attempt: next,
+                work,
+                timeout_ms,
+            } = &actions[1]
+            else {
+                panic!("a stale completion queues exactly one reprepare");
+            };
+            assert_ne!(*next, attempt);
+            assert_eq!(*timeout_ms, 0);
+            assert!(work.operations.is_empty());
+            assert_eq!(work.receipt, Default::default());
+        } else {
+            let Action::SignedOutbound {
+                attempt: current,
+                outbound,
+            } = &actions[1]
+            else {
+                panic!("a current completion queues exactly one sealed outbound");
+            };
+            assert_eq!(*current, attempt);
+            let Action::Http(request) = outbound.as_ref() else {
+                panic!("the original HTTP target is retained");
+            };
+            assert_eq!(request.id, RequestId(1));
+            assert_eq!(request.url, "https://venue.test/private?timestamp=1000");
+            assert_eq!(request.headers, [("signature", "completed".into())]);
+            assert_eq!(request.route, Some(RequestRoute::Primary));
+        }
+        assert_eq!(engine.venue.failed, 0);
+    }
+}
+
+#[test]
+fn refused_completion_clears_its_timer_and_delivers_one_failure_without_outbound() {
+    let mut engine = engine();
+    let (attempt, timer) = staged(&mut engine);
+    engine.sign_completed(1001., attempt, Err(SignError::Refused));
+    assert!(
+        matches!(engine.io.core.actions.as_slice(), [Action::ClearTimer { timer: id }] if *id == timer)
+    );
+    assert_eq!(engine.venue.failed, 1);
+    engine.sign_completed(1002., attempt, result());
+    assert_eq!(engine.venue.failed, 1);
+    assert_eq!(engine.io.core.actions.len(), 1);
+}
+
+#[test]
 fn delayed_dispatch_stamps_current_time_and_preserves_route() {
     let mut engine = engine();
     engine.prepare_dispatch(4000.);
@@ -1303,6 +1360,7 @@ fn signing_context_uses_only_signing_stream_and_redraws_after_clock_revision() {
                 channel,
                 context,
                 binary,
+                ..
             } => Some((id, url, headers, channel, context, binary)),
             _ => None,
         })
@@ -2305,7 +2363,7 @@ fn c4s_a_credential_only_socket_login_latches_through_signing_ref() {
     let startup_failed: Vec<_> = actions
         .iter()
         .filter_map(|action| match action {
-            Action::Notice(Notice::StartupFailed { error }) => Some(error.clone()),
+            Action::Notice(Notice::StartupFailed { error, .. }) => Some(error.clone()),
             _ => None,
         })
         .collect();
@@ -2477,4 +2535,35 @@ fn schnorr_public_key_requests_validate_with_a_forty_byte_answer() {
             Err(SignError::InvalidResult)
         );
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn private_startup_completion_never_masks_a_signing_refusal() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_account_startup(true);
+    engine.start(1000.);
+    engine.store.set_loaded(|loaded| loaded.markets = true);
+    engine.store.set_balance(crate::model::Balance::default());
+    engine.store.set_positions(vec![]);
+    engine.store.set_orders(vec![]);
+    assert!(engine.private_startup_complete());
+    assert!(engine.io.core.signing.refuse());
+    assert!(!engine.private_startup_complete());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn non_opt_in_startup_recheck_never_enters_an_engine_turn() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_account_startup(true);
+    engine.start(1000.);
+    assert!(engine.private_startup_pending());
+    engine.io.core.auth_failure_counted = true;
+    let dispatch_now = engine.io.core.dispatch_now;
+    let actions = engine.io.core.actions.len();
+    assert!(!engine.recheck_startup_reads(9000.));
+    assert_eq!(engine.io.core.dispatch_now, dispatch_now);
+    assert!(engine.io.core.auth_failure_counted);
+    assert_eq!(engine.io.core.actions.len(), actions);
 }

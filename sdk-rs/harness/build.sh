@@ -4,7 +4,7 @@
 # place of the combined engine, for gates; --families builds every family into
 # pkg/{web,node}/<family>, which browser and Worker loaders fetch per venue.
 set -euo pipefail
-venues="breakoutprop, asterdex, binance, bitunix, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitgetusdc, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
+venues="asterdex, binance, bitunix, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitgetusdc, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
 mutation_barriers=false
 if [[ $# -eq 3 && $1 == --venue && $3 == --mutation-barriers ]]; then
   mutation_barriers=true
@@ -28,7 +28,7 @@ wasm_throughput_args=(--config 'profile.release.package.serde_json.opt-level=3')
 # The Cargo arguments building the family that contains a venue.
 family_args() {
   case "$1" in
-    breakoutprop|asterdex|binance|bitunix|kucoin|kucoinspot|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket|coinbase|orderly) family=$1 ;;
+    asterdex|binance|bitunix|kucoin|kucoinspot|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket|coinbase|orderly) family=$1 ;;
     bitgetusdc) family=bitget ;;
     lighter-robinhood) family=lighter ;;
     hyperliquidspot) family=hyperliquid ;;
@@ -68,12 +68,15 @@ family_args() {
 # Optimize a bound module with binaryen (behaviour-neutral; shrinks every
 # family). CI installs the pinned release (install-binaryen.sh) and sets
 # SAFE_CEX_WASM_OPT=required; a local build without wasm-opt only warns.
-# WASM_OPT_LEVEL defaults to -Oz.
+# WASM_OPT_LEVEL defaults to -Oz, run twice: the second identical pass saved
+# 7,367 B on the combined CI artifact, exports and imports unchanged.
 optimize() {
   if command -v wasm-opt >/dev/null; then
-    wasm-opt "${WASM_OPT_LEVEL:--Oz}" --enable-bulk-memory --enable-bulk-memory-opt \
-      --enable-mutable-globals --enable-sign-ext --enable-nontrapping-float-to-int \
-      --enable-reference-types --enable-multivalue "$1" -o "$1"
+    for _ in 1 2; do
+      wasm-opt "${WASM_OPT_LEVEL:--Oz}" --enable-bulk-memory --enable-bulk-memory-opt \
+        --enable-mutable-globals --enable-sign-ext --enable-nontrapping-float-to-int \
+        --enable-reference-types --enable-multivalue "$1" -o "$1"
+    done
   elif [[ ${SAFE_CEX_WASM_OPT:-} == required ]]; then
     echo "wasm-opt is required (sdk-rs/harness/install-binaryen.sh)" >&2
     exit 1
@@ -107,8 +110,9 @@ if [[ ${1:-} == --families ]]; then
   done
   exit 0
 fi
-# The broad shared size profile misses combined Bitget/KuCoin Spot CPU gates.
-# Measure a narrower host-only profile without changing their engine/dependencies.
+# safe-cex-wasm performs the fat-LTO link, so its "z" sets the whole module's
+# post-link pipeline (rustc back/lto.rs run_pass_manager): Oz inlining and no
+# unrolling for every crate. Package opt-levels only shape each crate's pre-link.
 build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
   --config 'profile.release.package.safe-cex-wasm.opt-level="z"'
   "${wasm_throughput_args[@]}")

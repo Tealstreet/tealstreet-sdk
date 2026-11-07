@@ -1,11 +1,14 @@
-import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { EngineEvent, Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
+
 import { setTunnelEgressUrls } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineTransport } from './engine';
+import { SignedPublicProxyRefusal } from './publicProxyGuard';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
-import { PUBLIC_CORS_PROXY } from './tealstreet/transportResolution';
 
 const tunnels = vi.hoisted(
   () =>
@@ -30,6 +33,7 @@ const tunnelState = (host: string) =>
 vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
   HOWWebSocket: class {
     epoch = 0;
+    ws = { OPEN: 1, readyState: 1, loopState: { phase: 'connected', since: 0 } };
     isOpen = true;
     isInitialized = true;
     isTimeSynced = true;
@@ -89,7 +93,6 @@ describe('engine through the real HOW package', () => {
     ['bybit', { tealstreetTunnel: true, proxyRegion: 'JA' }, TOKYO_HOW_EGRESS],
     ['bybit', { tealstreetTunnel: true, proxyRegion: 'SG' }, SINGAPORE_HOW_EGRESS],
     ['okx', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
-    ['breakoutprop', { tealstreetTunnel: true }, TOKYO_HOW_EGRESS],
     ['kodiakfi', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
     ['mode', { tealstreetTunnel: true, testnet: true }, SINGAPORE_HOW_EGRESS],
     ['what', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
@@ -110,9 +113,10 @@ describe('engine through the real HOW package', () => {
       : 'https://api.example.com';
     const url = `${origin}/order?a=1&a=2&encoded=%2F+%20&signature=abc`;
     const body = ' {"id":900719925474099312345, "price":1.2300}\n';
-    const headers = { 'Content-Type': 'application/json',
-      [exchange === 'breakoutprop' ? 'Authorization' : orderly ? 'orderly-signature' : 'X-Venue-Signature']:
-        exchange === 'breakoutprop' ? 'DXAPI documented-session' : 'signed' };
+    const headers = {
+      'Content-Type': 'application/json',
+      [orderly ? 'orderly-signature' : 'X-Venue-Signature']: 'signed',
+    };
     const response = await route.request({
       method: 'POST',
       url,
@@ -141,6 +145,62 @@ describe('engine through the real HOW package', () => {
     expect(new TextDecoder().decode(response.body as Uint8Array)).toBe(responseBody);
   });
 
+  it('times Hyperliquid tunnel writes per request and reads per window', async () => {
+    const events: EngineEvent[] = [];
+    const route = createEngineTransport(
+      'hyperliquid',
+      { key: 'fixture-key', secret: 'fixture-secret', tealstreetTunnel: true, transport: tealstreetTransport },
+      rawTransport(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (event) => events.push(event),
+    );
+    const state = tunnelState(TOKYO_HOW_EGRESS);
+    state.reply = { status: 200, data_raw: '{"status":"ok"}', headers: { 'x-tunnel-upstream-ms': '57' } };
+    const post = (path: string, body: string) =>
+      route.request({
+        method: 'POST',
+        url: `https://api.hyperliquid.xyz${path}`,
+        body,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    await post('/exchange', '{"action":{"type":"cancel"}}');
+    expect(state.sent).toHaveLength(1);
+    expect(events).toEqual([
+      expect.objectContaining({
+        code: 'transport.http.timing',
+        fields: expect.objectContaining({
+          route: 'tunnel',
+          requestKind: 'exchange',
+          stage: 'cancel',
+          outcome: 'ok',
+          httpStatus: 200,
+          upstreamMs: 57,
+          queuedMs: expect.any(Number),
+          wireMs: expect.any(Number),
+        }),
+      }),
+    ]);
+    // No URL, body or address in the event.
+    expect(JSON.stringify(events)).not.toMatch(/hyperliquid\.xyz|"action"|fixture/);
+    await post('/info', '{"type":"clearinghouseState","user":"0x0000000000000000000000000000000000000001"}');
+    expect(events).toHaveLength(1);
+    await post('/info', '{"type":"orderStatus","user":"private-account","oid":123}');
+    expect(events[1]).toMatchObject({
+      code: 'transport.http.timing',
+      fields: { requestKind: 'info', stage: 'orderStatus', queuedMs: expect.any(Number), wireMs: expect.any(Number) },
+    });
+    expect(JSON.stringify(events)).not.toMatch(/private-account|"oid"|hyperliquid\.xyz|"action"|fixture/);
+    route.dispose?.();
+    expect(events[2]).toMatchObject({
+      code: 'transport.http.window',
+      fields: { route: 'tunnel', count: 1, timeouts: 0, errors: 0 },
+    });
+    expect(JSON.stringify(events[1])).not.toMatch(/0x0+1|clearinghouse/);
+  });
+
   it('keeps overrideProxyUrl and Brazil headers inside the selected HOW RPC', async () => {
     const route = createEngineTransport(
       'bybit',
@@ -164,7 +224,7 @@ describe('engine through the real HOW package', () => {
       headers: { 'x-site-id': 'BRA_BTL' },
     });
   });
-  it('Aster secondary reads keep AWS CORS inside the real HOW RPC while writes keep the primary path', async () => {
+  it('Aster secondary reads to public CORS are refused before the HOW RPC while writes keep the primary path', async () => {
     const raw = rawTransport();
     const route = createEngineTransport(
       'asterdex',
@@ -181,12 +241,12 @@ describe('engine through the real HOW package', () => {
     const state = tunnelState(TOKYO_HOW_EGRESS);
     state.reply = { status: 200, data_raw: '{"balance":"1.2300"}', headers: {} };
     const url = 'https://fapi.asterdex.com/fapi/v3/account?user=owner&nonce=1001&signature=exact%2Bbytes';
-    await route.request({ method: 'GET', url, headers: { 'X-MBX-APIKEY': 'read-wallet' } });
-    expect(state.sent.at(-1)?.arg).toMatchObject({
-      method: 'GET',
-      url: `${PUBLIC_CORS_PROXY}/${url}`,
-      headers: { 'X-MBX-APIKEY': 'read-wallet' },
-    });
+    const sentBefore = state.sent.length;
+    // Secondary read keys are deprecated; their public-proxy read fails closed (publicProxyGuard).
+    await expect(route.request({ method: 'GET', url, headers: { 'X-MBX-APIKEY': 'read-wallet' } })).rejects.toThrow(
+      SignedPublicProxyRefusal,
+    );
+    expect(state.sent.length).toBe(sentBefore);
     await route.request({ method: 'POST', url, headers: { 'X-MBX-APIKEY': 'primary-wallet' } });
     expect(state.sent.at(-1)?.arg).toMatchObject({
       method: 'POST',
@@ -240,5 +300,49 @@ describe('managed engine through real HOW preparation', () => {
     expect(raw.request).not.toHaveBeenCalled();
     expect(() => bound.dispatch()).toThrow();
     routed.dispose!();
+  });
+  it.each([
+    ['cancel', 'cancel'],
+    ['order', 'place'],
+    ['batchModify', 'modify'],
+  ] as const)('review3098 managed unsigned preparation labels its final %s body as %s', async (type, stage) => {
+    const events: EngineEvent[] = [];
+    const route = createEngineTransport(
+      'hyperliquid',
+      { key: 'fixture-key', secret: 'fixture-secret', tealstreetTunnel: true, transport: tealstreetTransport },
+      rawTransport(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (event) => events.push(event),
+    );
+    tunnelState(TOKYO_HOW_EGRESS).reply = { status: 200, data_raw: '{"status":"ok"}', headers: {} };
+    try {
+      const original = {
+        request: 96,
+        method: 'POST',
+        intent: 'primary' as const,
+        url: 'https://api.hyperliquid.xyz/exchange',
+        headers: { 'Content-Type': 'application/json' },
+        timeoutMs: 20_000,
+      };
+      const prepared = await route.prepareHttp!(original);
+      const bound = prepared.bind({
+        ...original,
+        body: JSON.stringify({ action: { type }, signature: 'must-not-log' }),
+      });
+      expect(bound.ready()).toBe(true);
+      await bound.dispatch();
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          code: 'transport.http.timing',
+          fields: expect.objectContaining({ requestKind: 'exchange', stage }),
+        }),
+      );
+      expect(JSON.stringify(events)).not.toContain('must-not-log');
+    } finally {
+      route.dispose?.();
+    }
   });
 });

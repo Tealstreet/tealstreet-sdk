@@ -31,6 +31,10 @@
       "value": "binanceinverse"
     },
     {
+      "name": "Binanceoptions",
+      "value": "binanceoptions"
+    },
+    {
       "name": "Binancespot",
       "value": "binancespot"
     },
@@ -65,10 +69,6 @@
     {
       "name": "Blofin",
       "value": "blofin"
-    },
-    {
-      "name": "Breakoutprop",
-      "value": "breakoutprop"
     },
     {
       "name": "Bybit",
