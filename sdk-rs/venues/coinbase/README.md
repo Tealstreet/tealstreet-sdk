@@ -181,6 +181,8 @@ edits on an uncertain instrument wait for read-back, including when a new client
 ID is supplied. Recovery cannot reopen the failed command, grant a resend, roll
 back cumulative fills, or overwrite newer terminal state. Accepted writes
 invalidate older order-snapshot tokens.
+An unchanged open-order read does not resolve a lost edit or cancellation;
+recovery keeps polling until it sees the edited values or a terminal order.
 
 Offline fixtures in `tests/fixtures/drb-trading.json` are adapted from the
 [Coinbase OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json)

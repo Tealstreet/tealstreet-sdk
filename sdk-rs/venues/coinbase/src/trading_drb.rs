@@ -831,12 +831,12 @@ impl Coinbase {
                 {
                     if self.drb_apply_recovery(cx, &call, value).is_ok() {
                         self.trading_drb.recovery.remove(&key);
-                        if !self
-                            .trading_drb
-                            .recovery
-                            .values()
-                            .any(|r| r.uncertain && r.call.symbol == call.symbol)
-                        {
+                        if !self.trading_drb.recovery.values().any(|r| {
+                            r.uncertain
+                                && (call.symbol.is_empty()
+                                    || r.call.symbol.is_empty()
+                                    || r.call.symbol == call.symbol)
+                        }) {
                             cx.orders_reconciled_since(
                                 (!call.symbol.is_empty()).then_some(call.symbol.as_str()),
                                 epoch,
@@ -1181,6 +1181,19 @@ impl Coinbase {
             }
             let selected = self.drb_order_context(cx, call, &rows[0])?;
             let order = decode_order(&selected, &rows[0])?;
+            if call.method == Method::Cancel && order.status == OrderStatus::Open {
+                return Err(uncertain("drb cancellation is still unproven by read-back"));
+            }
+            if call.method == Method::Edit
+                && order.status == OrderStatus::Open
+                && (call.params["amount"].as_f64() != Some(order.amount)
+                    || call.params["price"].as_f64() != Some(order.price))
+            {
+                return Err(uncertain("drb read-back still shows the pre-edit order"));
+            }
+            if matches!(call.method, Method::Buy | Method::Sell) {
+                self.drb_ack(cx, call, &json!({"order":rows[0]}))?;
+            }
             if order_is_newer(cx, &order) {
                 cx.store.upsert_order(order);
             }

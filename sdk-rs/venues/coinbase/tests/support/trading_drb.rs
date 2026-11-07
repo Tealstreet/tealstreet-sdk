@@ -805,3 +805,50 @@ fn cancel_by_native_id_does_not_require_a_cached_order() {
     row["order_state"] = json!("cancelled");
     assert!(done(&reply(&mut e, &r, row)));
 }
+
+#[test]
+fn an_unchanged_read_does_not_resolve_an_uncertain_edit_or_cancel() {
+    for cancel in [false, true] {
+        let mut e = engine();
+        let r = place(&mut e, opts());
+        reply(&mut e, &r, fixtures()["partial"].clone());
+        let c = if cancel {
+            Command::CancelOrders {
+                command: 2,
+                ids: vec!["USDC-94166".into()],
+            }
+        } else {
+            Command::AmendOrder {
+                command: 2,
+                id: "USDC-94166".into(),
+                price: Some(66000.),
+                amount: Some(0.02),
+            }
+        };
+        let a = command(&mut e, c);
+        let r = requests(&a).pop().unwrap();
+        e.handle(
+            1002.,
+            Event::HttpFailed {
+                request: r.id,
+                error: "lost",
+            },
+        );
+        let a = prepared_now(&mut e);
+        let read = requests(&a).pop().unwrap();
+        reply(&mut e, &read, fixtures()["partial"]["order"].clone());
+        let mut o = opts();
+        o.client_order_id = Some("after-unknown".into());
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 3,
+                orders: vec![o],
+            },
+        );
+        assert!(
+            requests(&a).is_empty(),
+            "the read still shows the old state after unknown cancel={cancel}"
+        );
+    }
+}
