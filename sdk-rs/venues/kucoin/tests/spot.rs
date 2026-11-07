@@ -1657,8 +1657,8 @@ fn failed_write_diagnostic_precedes_done_without_a_second_uncorrelated_log() {
         request: request.id,
         error: "failed write transport",
     });
-    let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed write transport")).unwrap();
-    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed write transport")).unwrap();
+    let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="KuCoin write outcome is unknown. Check Open Orders")).unwrap();
+    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="KuCoin write outcome is unknown. Check Open Orders")).unwrap();
     assert!(
         error < done,
         "owner mapping must still exist when diagnostic arrives"
@@ -2764,4 +2764,44 @@ fn review_3259_spot_business_code_does_not_inherit_futures_rate_semantics() {
     assert_eq!(error.venue_code.as_deref(), Some("200002"));
     assert!(error.message.contains("suspended"));
     assert_eq!(h.requests.len(), sent);
+}
+
+#[test]
+fn postmerge_spot_server_error_warning_is_actionable() {
+    for transport in [false, true] {
+        let mut h = H::new(true);
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["order-1".into()],
+        });
+        let request = h.http("/hf/orders/");
+        let sent = h.requests.len();
+        h.actions.clear();
+        if transport {
+            h.event(Event::HttpFailed {
+                request: request.id,
+                error: "connection reset",
+            });
+        } else {
+            h.respond(&request, 200, r#"{"code":"500000","msg":"system error"}"#);
+        }
+        let error = h.failures.last().unwrap();
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(h.requests.len(), sent);
+        let warnings: Vec<_> = h
+            .actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandError { message, .. }) => Some(message.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            error.message.contains("unknown")
+                && error.message.contains("Check Open Orders")
+                && warnings[0].contains("Check Open Orders"),
+            "terminal={error:?}; warnings={warnings:?}"
+        );
+    }
 }
