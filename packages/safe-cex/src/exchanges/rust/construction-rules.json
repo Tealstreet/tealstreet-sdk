@@ -5,7 +5,7 @@
   },
   "venues": {
     "grvt": {"remoteSigning": {"enabled": true, "payloadSupported": false, "protectedHeaders": []}, "bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"secretEncoding": "hex", "signingAlgorithm": "secp256k1Digest"}}},
-    "backpack": {"bridge": {"readCredentials": "publicRead"}},
+    "backpack": {"remoteSigning": {"enabled": true, "payloadSupported": false, "signatureEncoding": "base64", "protectedHeaders": ["X-API-Key", "X-Signature", "X-Timestamp", "X-Window", "X-Broker-Id"]}, "bridge": {"dispatchSigning": true, "readCredentials": "publicRead"}, "signerSetup": {"primary": {"secretEncoding": "base64", "signingAlgorithm": "ed25519"}, "secondary": {"secretEncoding": "base64", "signingAlgorithm": "ed25519"}}},
     "cryptocom": {"bridge": {"dispatchSigning": true, "readCredentials": "validateOnly"}},
     "bitrue": {"bridge": {"dispatchSigning": true}},
     "weex": {"bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},

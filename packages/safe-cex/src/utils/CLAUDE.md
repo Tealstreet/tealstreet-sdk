@@ -18,7 +18,6 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | asterdex, bitunix, phemex, weex       | `{B}{Q}`           | `BTCUSDT`        | USDT          | Concatenated, WEEX Contract V3 `symbol`                  |
 | bingx                                 | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT` but symbol is concat                |
 | apexomni                              | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT`                                     |
-| breakoutprop                          | `{B}USD`           | `BTCUSD`         | USD           | Quote hardcoded to 'USD'                                 |
 | blofin                                | `{B}{Q}`           | `BTCUSDC`        | USDC          | API id is `BTC-USDC`                                     |
 | okx                                   | `{B}{Q}`           | `ACTUSDT`        | USDT          | API id `ACT-USDT-SWAP`, normalized                       |
 | woo                                   | `{B}{Q}`           | `BCHUSDT`        | USDT          |                                                          |

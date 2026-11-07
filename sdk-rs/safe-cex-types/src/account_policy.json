@@ -312,20 +312,6 @@
     "requiresCors": true,
     "defaultProxyRegion": "SG"
   },
-  "breakoutprop": {
-    "prettyName": "Breakout",
-    "requiresNoSecret": false,
-    "requiresPassphrase": false,
-    "requiresApplicationId": false,
-    "requiresApiKeyIndex": false,
-    "requiresOmniKeySeed": false,
-    "supportsVault": false,
-    "supportsSubaccount": true,
-    "supportsTestnet": false,
-    "enabled": false,
-    "requiresCors": false,
-    "defaultProxyRegion": "SG"
-  },
   "blofin": {
     "prettyName": "BloFin",
     "requiresNoSecret": false,
