@@ -5,6 +5,10 @@ Kraken Spot treats a dispatched write's HTTP 408, 429, or 5xx response as
 or rate-limit error. HTTP 429 retains `ErrorKind::RateLimited` for diagnostics.
 These responses cannot authorize a resend or terminal credential rejection;
 uncertain placements trigger an `OpenOrders` read before another placement.
+An unknown result also refuses already-queued placements and amendments as
+`Outcome::NotSent`; they were admitted before the uncertainty was known.
+Queued cancellations remain available. Reconciliation never replays refused
+writes: the caller checks Open Orders before explicitly retrying.
 
 Definitive signature refusals retain the single re-sign attempt. Private reads
 also retain their existing bounded signature and transport retry policies.

@@ -372,7 +372,22 @@ impl KrakenSpot {
             if job.effective || !job.ids.is_empty() {
                 error.outcome = Some(Outcome::Unknown);
             }
+            let unknown = error.outcome == Some(Outcome::Unknown);
             cx.fail(job.command, error);
+            if unknown {
+                // Queued mutations were admitted before this uncertainty.
+                // Refuse them without replay; cancellation can still proceed.
+                self.trading.queue.retain(|queued| {
+                    if queued.cancel {
+                        return true;
+                    }
+                    cx.fail(
+                        queued.command,
+                        not_sent("Kraken Spot queued write was not sent: earlier write outcome is uncertain. Check Open Orders before retrying"),
+                    );
+                    false
+                });
+            }
         }
         self.trade_next(cx);
     }
