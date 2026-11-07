@@ -1,5 +1,5 @@
-// Nightly CPU certification (Sam, 2026-11-07): a suite whose CPU gate failed on the two
-// most recent completed nightly runs of rust.yml opens or updates one cpu-regression issue.
+// Nightly CPU certification (Sam, 2026-11-07): a suite whose CPU gate failed on two consecutive
+// UTC nights' runs of rust.yml opens or updates one cpu-regression issue.
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -9,12 +9,24 @@ export const ISSUE_LABEL = 'cpu-regression';
 export const ISSUE_TITLE = 'CPU regression on master (nightly certification)';
 const CPU_GATE = /^Rust \/ CPU gate \(([a-z0-9-]+)\)$/;
 
-/** Completed nightly runs, newest first: dispatched on master by the nightly workflow. */
+const utcNight = (run) => run.created_at.slice(0, 10);
+
+/** One result per UTC night, newest first: the last completed first-attempt run the nightly
+ * workflow dispatched on master that night. Extra same-night runs never count twice. */
 export function nightlyRuns(runs) {
-  return runs
+  const nights = new Map();
+  for (const run of runs
     .filter((run) => run.event === 'workflow_dispatch' && run.head_branch === 'master' && run.status === 'completed' &&
-      run.triggering_actor?.login === NIGHTLY_ACTOR && run.run_attempt === 1)
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id);
+      run.triggering_actor?.login === NIGHTLY_ACTOR && run.run_attempt === 1 && Number.isFinite(Date.parse(run.created_at)))
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id))
+    if (!nights.has(utcNight(run))) nights.set(utcNight(run), run);
+  return [...nights.values()];
+}
+
+/** The two runs are on adjacent UTC calendar nights. */
+export function consecutiveNights(latest, previous) {
+  return Boolean(latest && previous) &&
+    Date.parse(`${utcNight(latest)}T00:00:00Z`) - Date.parse(`${utcNight(previous)}T00:00:00Z`) === 86_400_000;
 }
 
 /** Suites whose CPU gate failed in one run's job inventory. */
@@ -66,6 +78,8 @@ export async function evaluate({ token, repository, log = console.log }) {
   const listed = await api.request('/actions/workflows/rust.yml/runs?event=workflow_dispatch&branch=master&status=completed&per_page=50');
   const [latest, previous] = nightlyRuns(listed.workflow_runs);
   if (!latest || !previous) return log('Fewer than two completed nightly runs; nothing to compare.');
+  if (!consecutiveNights(latest, previous))
+    return log(`Nights ${utcNight(previous)} and ${utcNight(latest)} are not consecutive; nothing is sustained.`);
   const suites = sustainedRegressions(failedCpuGates(await api.jobs(latest.id)), failedCpuGates(await api.jobs(previous.id)));
   if (!suites.length) return log(`No CPU gate failed on both run ${latest.id} and run ${previous.id}.`);
   const body = issueBody({ suites, runs: [latest, previous] });

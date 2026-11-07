@@ -90,6 +90,24 @@ class CommandReplayTimeout extends Error {
   }
 }
 
+/** Every non-CPU check of one performance set against the audited correctness pair. */
+function performanceRunDifferences(sets, audits, audited) {
+  const found = [];
+  for (const impl of ['ts', 'rust']) for (const [run, output] of sets[impl].entries()) {
+    for (const error of [...memoryMetricErrors(output.metrics), ...performanceMetricErrors(output.metrics, 'performance')])
+      found.push(`${impl} performance run ${run + 1}: ${error}`);
+    if (output.frames !== audits[impl][0].frames || output.commands.length !== audits[impl][0].commands.length ||
+        output.unserved || output.missingWrites || output.unusedWrites)
+      found.push(`${impl} performance run ${run + 1}: incomplete replay workload`);
+    found.push(...compareSnapshots(audited[impl], output, `${impl} performance run ${run + 1}`));
+    if (!sameCommandResults(audited[impl].commands, output.commands))
+      found.push(`${impl} performance run ${run + 1}: command workload differs from audited replay`);
+    if (!output.transportReceipt || !isDeepStrictEqual(audited[impl].transportReceipt, output.transportReceipt))
+      found.push(`${impl} performance run ${run + 1}: transport workload differs from audited replay`);
+  }
+  return found;
+}
+
 const replay = (impl, run, performanceRun = false) => {
   const out = `${outDir}/${impl}-${performanceRun ? "perf" : "audit"}-${run}.json`;
   artifacts.push({ impl, mode: performanceRun ? 'performance' : 'correctness', run, path: out });
@@ -176,7 +194,8 @@ if (!isPrivate && !values['correctness-only']) {
   // final set is reported and retained, so recorded revalidation never re-measures.
   const first = recorded ? undefined : performanceVerdict(metricsOf('ts'), metricsOf('rust'));
   if (first && cpuSlower(first.failures)) {
-    remeasure = { first };
+    const audited = { ts: structuredClone(results.ts[0]), rust: structuredClone(results.rust[0]) };
+    remeasure = { first, firstDifferences: performanceRunDifferences(performanceResults, results, audited) };
     for (const impl of ['ts', 'rust']) performanceResults[impl].length = 0;
     for (let index = artifacts.length - 1; index >= 0; index--) if (artifacts[index].mode === 'performance') artifacts.splice(index, 1);
     sampleOrder.length = 0;
@@ -370,18 +389,9 @@ for (let run = 0; run < correctnessRuns; run++) {
 
 // Performance artifacts are separate from the fully audited correctness pair.
 // A fast but incomplete workload cannot substitute for the measured tape.
-if (!isPrivate) for (const impl of ['ts', 'rust']) for (const [run, output] of performanceResults[impl].entries()) {
-  for (const error of [...memoryMetricErrors(output.metrics), ...performanceMetricErrors(output.metrics, 'performance')])
-    differences.push(`${impl} performance run ${run + 1}: ${error}`);
-  if (output.frames !== results[impl][0].frames || output.commands.length !== results[impl][0].commands.length ||
-      output.unserved || output.missingWrites || output.unusedWrites)
-    differences.push(`${impl} performance run ${run + 1}: incomplete replay workload`);
-  differences.push(...compareSnapshots(rawAudited[impl], output, `${impl} performance run ${run + 1}`));
-  if (!sameCommandResults(rawAudited[impl].commands, output.commands))
-    differences.push(`${impl} performance run ${run + 1}: command workload differs from audited replay`);
-  if (!output.transportReceipt || !isDeepStrictEqual(rawAudited[impl].transportReceipt, output.transportReceipt))
-    differences.push(`${impl} performance run ${run + 1}: transport workload differs from audited replay`);
-}
+if (!isPrivate) differences.push(...performanceRunDifferences(performanceResults, results, rawAudited));
+// A re-measure decides only the CPU verdict: the discarded set's non-CPU failures stay.
+if (remeasure) differences.push(...remeasure.firstDifferences);
 const measuredResults = isPrivate || values['correctness-only'] ? results : performanceResults;
 const summary = (impl) => ({
   cpuMs: median(measuredResults[impl].map((r) => r.metrics.cpuMs)),
@@ -446,7 +456,7 @@ writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   private: isPrivate, books: values.books, runs: isPrivate ? 0 : runs, correctnessRuns, requiredImprovement: 0.10,
   ...(values['correctness-only'] ? { correctnessOnly: true, coverage: { correctness: 'complete', performance: 'not-run' } } : {}),
   status: failures.length ? 'FAIL' : 'PASS', failures, artifacts, fixers: fixerReports,
-  ...(warnings.length ? { warnings } : {}), ...(remeasure ? { remeasure: { first: remeasure.first.failures } } : {}),
+  ...(warnings.length ? { warnings } : {}), ...(remeasure ? { remeasure: { first: remeasure.first.failures, firstDifferences: remeasure.firstDifferences } } : {}),
   ...(recorded ? {} : { measurement: { cpu: cpuObservation, sampleOrder } }),
   summary: { ts: t, rust: r },
   samples: { ts: measuredResults.ts.map((output) => output.metrics), rust: measuredResults.rust.map((output) => output.metrics) },

@@ -317,6 +317,16 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
           globalThis.rustPerformanceRuns = (globalThis.rustPerformanceRuns ?? 0) + 1;
           output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = globalThis.rustPerformanceRuns <= ${PUBLIC_REPLAY_PAIRS} ? 3 : 1;
         }
+        // #3248 review: a slow first set that also breaks a non-CPU check, then a clean re-measure.
+        if (defect?.startsWith('first-set-')) {
+          globalThis.firstSetRuns = (globalThis.firstSetRuns ?? 0) + 1;
+          if (globalThis.firstSetRuns <= ${PUBLIC_REPLAY_PAIRS}) {
+            if (!defect.includes('no-cpu')) output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = 3;
+            if (defect.includes('ticker')) output.tickers[0].last = 999;
+            if (defect.includes('transport')) output.transportReceipt = { changed: true };
+            if (defect.includes('memory')) output.metrics.heapBeforeBytes--;
+          }
+        }
         if (defect === 'late-invalid-cpu' && out.endsWith('-${PUBLIC_REPLAY_PAIRS - 1}.json')) output.metrics.cpuMs = null;
         if (defect === 'incomplete-perf' && out.endsWith('-${PUBLIC_REPLAY_PAIRS - 1}.json')) output.frames = 0;
         if (defect === 'dropped-perf-output' && out.endsWith('-${PUBLIC_REPLAY_PAIRS - 1}.json')) output.tickers[0].last = 0;
@@ -518,6 +528,22 @@ test('gate CLI re-measures once in the job: a near miss and a cleared miss warn,
   assert.equal(persisted.report.remeasure.first.length, 1);
   assert.match(persisted.report.failures.join('\n'), /process CPU: Rust is slower than TS/);
   assert.match(persisted.stdout, /::error title=CPU bybitinverse::.*persisted after the one re-measure/);
+});
+
+test('a re-measure decides only CPU: the discarded first set keeps its non-CPU failures', () => {
+  const control = gate('bybitinverse', false, 'first-set-no-cpu-ticker');
+  assert.equal(control.status, 1, control.stderr);
+  assert.equal(control.report.remeasure, undefined, 'no CPU miss, no re-measure');
+  assert.ok(control.report.failures.some((line) => line.includes('rust performance run') && line.includes('tickers')));
+  for (const [defect, pattern] of [['ticker', /rust performance run \d+ tickers/], ['transport', /rust performance run \d+: transport workload differs/],
+    ['memory', /rust performance run \d+: .*heap/]]) {
+    const result = gate('bybitinverse', false, `first-set-${defect}`);
+    assert.equal(result.status, 1, `${defect}: ${result.stderr}`);
+    assert.equal(result.report.status, 'FAIL');
+    assert.ok(result.report.remeasure, `${defect}: the CPU miss was re-measured`);
+    assert.ok(!result.report.failures.some((line) => line.includes('Rust is slower than TS')), `${defect}: the CPU verdict cleared`);
+    assert.match(result.report.failures.join('\n'), pattern, `${defect}: the first set's failure is retained`);
+  }
 });
 
 test('gate CLI reports command timeouts as incomplete failures and keeps runner crashes fatal', () => {
