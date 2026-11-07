@@ -5,9 +5,16 @@ import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
 import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
 import { amountPrecisionOf } from '../../utils/marketPrecision';
-import { resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
+import { resolveCompleteMarketSymbol, resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
 import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
+
+const ORDER_GRAMMAR_WORDS = new Set([
+  'buy', 'sell', 'buys', 'sells', 'at', 'stop', 'tp', 'trigger', 'best', 'po', 'reduce',
+  'into', 'over', 'duration', 'slices', 'chaser', 'timeout', 'fail', 'market', 'next',
+  'from', 'to', 'taker', 'irregular', 'top', 'bottom', 'first', 'last',
+  'long', 'short', 'longs', 'shorts', 'all', 'allpos', 'isolated', 'cross',
+]);
 
 /**
  * Base class for trading commands with utility methods for size/price processing
@@ -16,8 +23,8 @@ export abstract class TradingBaseCommand extends BaseCommand {
   protected refuseUnknownOrderArgs(
     ctx: CommandContext,
     consumed: number[],
-    { allowSymbol = true, symbolLists = false, symbolAfter = 0 }: {
-      allowSymbol?: boolean; symbolLists?: boolean; symbolAfter?: number;
+    { allowSymbol = true, symbolLists = false, symbolAfter = 0, allowAll = false, side }: {
+      allowSymbol?: boolean; symbolLists?: boolean; symbolAfter?: number; allowAll?: boolean; side?: PositionSide;
     } = {},
   ): CommandResult | undefined {
     if (allowSymbol && ctx.exchange) {
@@ -25,7 +32,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
         if (consumed.includes(i)) continue;
         const parts = ctx.args._[i].split(',');
         if (!symbolLists && parts.length > 1) continue;
-        if (parts.every(part => this.validateSymbols(ctx.exchange!, [part]).length > 0)) {
+        if (this.validateSymbols(ctx.exchange, parts, allowAll, side).length > 0) {
           consumed.push(i);
           break;
         }
@@ -274,15 +281,18 @@ export abstract class TradingBaseCommand extends BaseCommand {
     if (!Array.isArray(symbols)) {
       return [];
     }
-    if (allowAll && symbols.includes('%all%')) {
+    if (symbols.includes('%all%')) {
+      if (!allowAll || symbols.length !== 1) return [];
       return (exchange.store?.positions ?? [])
-        .filter((position) => position.side === side)
-        .map((position) => position.symbol);
+        .filter(position => position.side === side)
+        .map(position => position.symbol);
     }
-    return symbols
-      .filter((symbol) => !this.tokenLooksLikeNonSymbol(symbol))
-      .map((symbol) => this.transformSymbol(exchange, symbol))
-      .filter((symbol) => this.validateSymbol(exchange, symbol));
+    const resolved = symbols.map(symbol => {
+      if (this.tokenLooksLikeNonSymbol(symbol) || ORDER_GRAMMAR_WORDS.has(symbol.trim().toLowerCase())) return undefined;
+      const complete = resolveCompleteMarketSymbol(exchange.store?.markets, symbol);
+      return complete !== undefined && this.validateSymbol(exchange, complete) ? complete : undefined;
+    });
+    return resolved.every((symbol): symbol is string => symbol !== undefined) ? resolved : [];
   }
 
   /**

@@ -55,9 +55,9 @@ export class BumpCommand extends TradingBaseCommand {
     if (
       args[i] &&
       args.length > i + 1 &&
-      this.validateSymbol(exchange, this.transformSymbol(exchange, args[i]))
+      this.validateSymbols(exchange, [args[i]]).length > 0
     ) {
-      symbol = this.transformSymbol(exchange, args[i]);
+      symbol = this.validateSymbols(exchange, [args[i]])[0];
       i++;
     }
 
@@ -77,8 +77,8 @@ export class BumpCommand extends TradingBaseCommand {
     if (args[i] === 'top' || args[i] === 'bottom') {
       selector = args[i] as 'top' | 'bottom';
       i++;
-      selectorCount = parseInt(args[i], 10);
-      if (!Number.isFinite(selectorCount) || selectorCount <= 0) {
+      selectorCount = this.parseOrderNumber(args[i]);
+      if (!Number.isSafeInteger(selectorCount) || selectorCount <= 0) {
         this.printError(ctx, `bump ${selector}: count must be a positive integer`);
         return this.error('Invalid count');
       }
@@ -94,7 +94,7 @@ export class BumpCommand extends TradingBaseCommand {
       );
       return this.error('Missing amount argument');
     }
-    const amount = parseFloat(amountArg);
+    const amount = this.parseOrderNumber(amountArg);
     if (!Number.isFinite(amount) || amount === 0) {
       this.printError(ctx, `Invalid amount: ${amountArg}`);
       return this.error('Invalid amount');
@@ -105,9 +105,9 @@ export class BumpCommand extends TradingBaseCommand {
     if (
       symbol === null &&
       args[i] &&
-      this.validateSymbol(exchange, this.transformSymbol(exchange, args[i]))
+      this.validateSymbols(exchange, [args[i]]).length > 0
     ) {
-      symbol = this.transformSymbol(exchange, args[i]);
+      symbol = this.validateSymbols(exchange, [args[i]])[0];
       i++;
     }
 

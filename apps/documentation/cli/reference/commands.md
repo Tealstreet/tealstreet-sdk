@@ -40,6 +40,13 @@ optional reduce-only / post-only / bracket stop-loss and take-profit.
 | `sell $100 at 50000 stop 50500 tp 49000` | Short entry with both brackets |
 
 **Unknown order arguments refuse the entire command before any order is sent.**
+Symbol overrides must be complete market names, base symbols, or supported
+base+quote aliases; an arbitrary prefix never selects a market. Every member
+of a buy/sell/chase symbol list must resolve. TWAP and swarm accept one symbol
+per command. Duplicate or conflicting modifiers and numeric operands with
+trailing text are refused. `po` requires `at PRICE` or `best`; it cannot be
+applied to a market order.
+
 Use `stop PRICE` for an attached stop loss and `tp PRICE` for an attached
 take-profit on `buy`/`sell` (market, limit, or `best`). Relative prices use the
 current ticker, just like `at`. `sl=PRICE` and `tp=PRICE` are not supported:

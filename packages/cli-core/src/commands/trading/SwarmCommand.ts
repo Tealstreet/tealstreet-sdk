@@ -43,6 +43,8 @@ export class SwarmCommand extends TradingBaseCommand {
     if (!exchange.placeOrder) return this.error('Exchange does not support placing orders');
 
     const args = this.getRawArgs(ctx);
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['reduce'], ['irregular']]);
+    if (duplicate) return duplicate;
     const assignment = this.refuseOrderAssignments(ctx);
     if (assignment) return assignment;
 
@@ -56,9 +58,12 @@ export class SwarmCommand extends TradingBaseCommand {
     // Optional leading symbol: `swarm buy SYMBOL $100 into 5`
     let i = 2;
     let symbol = ctx.symbol;
-    const leading = this.validateSymbols(exchange, args[i]?.split(',') || []);
+    let explicitSymbol = false;
+    if (args[i]?.includes(',')) return this.error('swarm supports only one symbol per command');
+    const leading = this.validateSymbols(exchange, args[i] ? [args[i]] : []);
     if (leading.length > 0) {
       symbol = leading[0];
+      explicitSymbol = true;
       i++;
     }
 
@@ -73,8 +78,8 @@ export class SwarmCommand extends TradingBaseCommand {
     if (args[i] !== 'into') {
       return this.error("swarm: expected 'into <count>' after size");
     }
-    const count = parseInt(args[i + 1], 10);
-    if (!Number.isFinite(count) || count <= 0) {
+    const count = this.parseOrderNumber(args[i + 1]);
+    if (!Number.isSafeInteger(count) || count <= 0) {
       return this.error("swarm: 'into' must be followed by a positive integer count");
     }
     i += 2;
@@ -94,6 +99,8 @@ export class SwarmCommand extends TradingBaseCommand {
       }
       const trailing = this.validateSymbols(exchange, [a]);
       if (trailing.length > 0) {
+        if (explicitSymbol) return this.error('swarm accepts only one symbol per command');
+        explicitSymbol = true;
         symbol = trailing[0];
         continue;
       }

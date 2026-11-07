@@ -77,15 +77,15 @@ export class MoveCommand extends BaseCommand {
     // Parse the price - can be absolute (50000) or relative (+10, -5)
     let newPrice: number;
     if (priceArg.startsWith('+') || priceArg.startsWith('-')) {
-      const offset = parseFloat(priceArg);
-      if (isNaN(offset)) {
+      const offset = this.parseOrderNumber(priceArg);
+      if (!Number.isFinite(offset)) {
         this.printError(ctx, `Invalid price offset: ${priceArg}`);
         return this.error('Invalid price');
       }
       newPrice = order.price + offset;
     } else {
-      newPrice = parseFloat(priceArg);
-      if (isNaN(newPrice)) {
+      newPrice = this.parseOrderNumber(priceArg);
+      if (!Number.isFinite(newPrice)) {
         this.printError(ctx, `Invalid price: ${priceArg}`);
         return this.error('Invalid price');
       }

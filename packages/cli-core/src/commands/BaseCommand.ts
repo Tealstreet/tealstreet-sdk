@@ -61,6 +61,23 @@ export abstract class BaseCommand implements Command {
     return { success: false, error };
   }
 
+  protected parseOrderNumber(token: string | undefined): number {
+    return token !== undefined && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(token) ? Number(token) : NaN;
+  }
+
+  protected refuseDuplicateModifiers(
+    ctx: CommandContext,
+    groups: readonly (readonly string[])[],
+  ): CommandResult | undefined {
+    const keys = ctx.args._.slice(1).map((arg) => arg.split('=')[0]);
+    for (const group of groups) {
+      const found = keys.filter((key) => group.includes(key));
+      if (found.length > 1)
+        return this.error(`Duplicate or conflicting modifiers: ${found.join(', ')}. Nothing was sent.`);
+    }
+    return undefined;
+  }
+
   protected unknownOrderArgument(token: string): string {
     const value = token.slice(token.indexOf('=') + 1);
     const hint = /^sl=/i.test(token)
@@ -72,7 +89,7 @@ export abstract class BaseCommand implements Command {
   }
 
   protected refuseOrderAssignments(ctx: CommandContext): CommandResult | undefined {
-    const token = ctx.args._.slice(1).find(token => /^(sl|tp)=/i.test(token));
+    const token = ctx.args._.slice(1).find((token) => /^(sl|tp)=/i.test(token));
     return token === undefined ? undefined : this.error(this.unknownOrderArgument(token));
   }
 

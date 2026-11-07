@@ -490,7 +490,7 @@ export class ChaseCommand extends TradingBaseCommand {
     const consumed = leadingSymbols.length > 0 ? [1, 2, 3] : [1, 2];
     consumed.push(...skipIndices);
     if (args.indexOf('reduce') > 0) consumed.push(args.indexOf('reduce'));
-    const invalid = this.refuseUnknownOrderArgs(ctx, consumed, { allowSymbol: leadingSymbols.length === 0, symbolLists: true });
+    const invalid = this.refuseUnknownOrderArgs(ctx, consumed, { allowSymbol: leadingSymbols.length === 0, symbolLists: true, allowAll: reduceOnly, side: positionSide });
     if (invalid) return invalid;
     const chaserIds: string[] = [];
 

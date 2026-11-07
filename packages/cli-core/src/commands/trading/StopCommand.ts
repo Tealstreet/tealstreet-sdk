@@ -42,6 +42,8 @@ export class StopCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['buy', 'sell'], ['at'], ['trigger']]);
+    if (duplicate) return duplicate;
     const assignment = this.refuseOrderAssignments(ctx);
     if (assignment) return assignment;
     const targetSymbol = this.getTargetSymbol(ctx, ['buy', 'sell', 'at', 'trigger']);
@@ -105,7 +107,7 @@ export class StopCommand extends TradingBaseCommand {
         : this.hasArgValue(args, 'sell')
           ? OrderSide.Sell
           : undefined;
-      const limitPrice = parseFloat(this.processPrice(args[pricePosition], currentPrice));
+      const limitPrice = Number(this.processPrice(args[pricePosition], currentPrice));
 
       // Optional `trigger <abs>` keyword turns this into a true limit
       // stop. Without it, trigger == limit (market stop). Spec: trigprice
@@ -117,8 +119,8 @@ export class StopCommand extends TradingBaseCommand {
         if (!triggerArg) {
           return this.error('trigger: missing absolute price argument');
         }
-        const parsed = parseFloat(triggerArg);
-        if (!/^\+?\d+(?:\.\d+)?$/.test(triggerArg) || !Number.isFinite(parsed) || parsed <= 0) {
+        const parsed = this.parseOrderNumber(triggerArg);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
           return this.error(`trigger: '${triggerArg}' must be an absolute positive price`);
         }
         triggerPrice = parsed;

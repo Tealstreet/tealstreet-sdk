@@ -41,6 +41,9 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    if (args.includes('po') && !args.includes('at') && !args.includes('best')) {
+      return this.error('po requires a limit order: use at PRICE or best. Nothing was sent.');
+    }
     const leadingSymbol = this.validateSymbols(exchange, args[1]?.split(',') || []).length > 0;
     const consumed = leadingSymbol ? [1, 2] : [1];
     for (const keyword of ['reduce', 'po', 'best', 'stop', 'tp', ...(args.includes('best') ? [] : ['at'])]) {
@@ -127,9 +130,6 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     const exchange = ctx.exchange!;
     const args = this.getRawArgs(ctx);
     const reduceOnly = this.hasArgValue(args, 'reduce');
-    // `po` is parsed in market-order handling for symmetry but ignored
-    // — market orders don't have a post-only mode. We still consume
-    // the keyword so it doesn't trip symbol detection.
     // Check for symbol at start: "buy SYMBOL $100"
     const symbolsAtStart = this.validateSymbols(exchange, args[1]?.split(',') || []);
     if (symbolsAtStart.length > 0) {
