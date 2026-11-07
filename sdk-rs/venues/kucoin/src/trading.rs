@@ -1,6 +1,6 @@
 //! Preflighted write plans; a lost response never resends a mutation.
 pub(crate) mod protective;
-use crate::wire::{Envelope, Number, not_sent, write_failure};
+use crate::wire::{Envelope, Number, dispatched_write_failure, not_sent, write_failure};
 use crate::{Kucoin, Pending, api_symbol, encode};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
@@ -1126,6 +1126,7 @@ impl Kucoin {
         if let Ok(row) = &envelope
             && row.code == "400005"
             && !request.retried
+            && (request.step.method == Method::Get || !matches!(status, 408 | 429 | 500..))
         {
             request.retried = true;
             request.position_open = false;
@@ -1366,7 +1367,11 @@ impl Kucoin {
                 return;
             }
             cx.command_error(request.command, &error);
-            let mut error = write_failure(status, body, error);
+            let mut error = if read {
+                write_failure(status, body, error)
+            } else {
+                dispatched_write_failure(status, body, error)
+            };
             if confirming {
                 // The cancel was accepted; only its outcome is unproven. Whether
                 // the order still stands is unknown, so nothing replaces it.

@@ -37,3 +37,14 @@ pages and retries. Background snapshots use a bounded root for each physical
 page. Public reads stay unsigned when no identity was selected. Trading jobs
 and POST socket-token requests do not enter this recovery path; writes are
 never replayed on `400002`.
+
+Ordinary Futures and Spot writes treat dispatched HTTP 408, 429, and 5xx replies,
+and native `429000` rate limits, as `Outcome::Unknown`. The write-only classifier
+weakens these failures before job settlement, including after an accepted cancel
+or placement. User text directs reconciliation through Open Orders; these replies
+cannot authorize a resend or a protective put-back. The ordinary Futures `400005`
+signature retry excludes these ambiguous write statuses. Protective replacement
+text states uncertainty without claiming the position has no stop. Managed
+protective writes retain the engine's unproven-fact boundary. Private reads and
+documented definitive refusals on non-ambiguous responses keep their existing
+classification.

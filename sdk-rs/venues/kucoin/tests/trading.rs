@@ -1271,23 +1271,28 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
     let unknown = (None, Some(Outcome::Unknown));
     for (status, body, classified, text) in [
-        (503, "<html>", unknown, "Invalid KuCoin response (HTTP 503)"),
+        (
+            503,
+            "<html>",
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+            "KuCoin write outcome is unknown. Check Open Orders",
+        ),
         (
             503,
             r#"{"code":"500000","msg":"busy"}"#,
-            unknown,
-            "KuCoin API Error 500000: busy (HTTP 503)",
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+            "KuCoin write outcome is unknown. Check Open Orders",
         ),
         (
             429,
             r#"{"code":"429000","msg":"too many"}"#,
-            rejected(ErrorKind::RateLimited),
-            "KuCoin API Error 429000: too many (HTTP 429)",
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
+            "KuCoin write outcome is unknown. Check Open Orders",
         ),
         (
             200,
@@ -3030,7 +3035,9 @@ fn protective_failure_words_keep_the_kind_and_protected_position_side() {
                         "Your BTCUSDT {position} position's {label} cancel was sent but could not be confirmed"
                     ),
                     "unknown_place" => {
-                        format!("Your BTCUSDT {position} position may have no {label}")
+                        format!(
+                            "Your BTCUSDT {position} position's {label} replacement outcome is unknown"
+                        )
                     }
                     _ => format!(
                         "Your BTCUSDT {position} position's {label} put-back outcome is unknown"
@@ -3057,6 +3064,133 @@ fn protective_failure_words_keep_the_kind_and_protected_position_side() {
                 );
                 assert!(writes(&h).is_empty());
             }
+        }
+    }
+}
+
+// Dispatched writes: transport ambiguity and native rate limits never prove refusal.
+#[test]
+fn dispatched_write_ambiguity_matrix() {
+    for (status, body) in [
+        (429, "{}"),
+        (429, REFUSED),
+        (429, RATE_LIMITED),
+        (429, r#"{"code":"400005","msg":"signature refused"}"#),
+        (200, RATE_LIMITED),
+        (408, REFUSED),
+        (500, REFUSED),
+        (503, RATE_LIMITED),
+        (408, r#"{"code":"400005","msg":"signature refused"}"#),
+        (500, r#"{"code":"400005","msg":"signature refused"}"#),
+        (503, r#"{"code":"400005","msg":"signature refused"}"#),
+        (599, r#"{"code":"400005","msg":"signature refused"}"#),
+        (400, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+    ] {
+        for operation in [
+            "create",
+            "stop_create",
+            "amend_cancel",
+            "amend_replace",
+            "stop_cancel",
+            "stop_replace",
+            "stop_restore",
+            "cancel",
+            "cancel_stop",
+            "setting",
+        ] {
+            let mut h = Harness::new();
+            let request = match operation {
+                "create" | "stop_create" => {
+                    let mut o = order();
+                    if operation == "stop_create" {
+                        o.kind = OrderType::StopLoss;
+                        o.client_order_id = None;
+                        o.price = Some(90.0);
+                    }
+                    place(&mut h, vec![o]);
+                    h.metadata(false, "CROSS");
+                    h.take("/api/v1/")
+                }
+                "amend_cancel" | "amend_replace" | "stop_cancel" | "stop_replace"
+                | "stop_restore" => {
+                    if operation.starts_with("stop") {
+                        resting_stop(&mut h);
+                    } else {
+                        h.set_order("old", OrderType::Limit, 6.0);
+                    }
+                    amend_stop(&mut h, "old", 120.0);
+                    if operation.ends_with("replace") || operation == "stop_restore" {
+                        let request = to_replacement(
+                            &mut h,
+                            "old",
+                            if operation == "amend_replace" {
+                                4.0
+                            } else {
+                                0.0
+                            },
+                        );
+                        if operation == "stop_restore" {
+                            h.fresh_ticker(95.0);
+                            h.response(&request, 200, REFUSED);
+                            h.pace();
+                            h.take("/api/v1/orders")
+                        } else {
+                            request
+                        }
+                    } else {
+                        h.metadata(false, "CROSS");
+                        h.take("/api/v1/orders/old")
+                    }
+                }
+                "cancel" | "cancel_stop" => {
+                    h.set_order(
+                        "old",
+                        if operation == "cancel_stop" {
+                            OrderType::StopLoss
+                        } else {
+                            OrderType::Limit
+                        },
+                        6.0,
+                    );
+                    h.command(Command::CancelOrders {
+                        command: 1,
+                        ids: vec!["old".into()],
+                    });
+                    h.take("/api/v1/")
+                }
+                _ => {
+                    h.command(Command::SetLeverage {
+                        command: 1,
+                        symbol: "BTCUSDT".into(),
+                        leverage: 10.0,
+                        side: None,
+                    });
+                    h.metadata(false, "CROSS");
+                    h.take("changeCrossUserLeverage")
+                }
+            };
+            assert_ne!(request.method, Method::Get, "{operation}");
+            h.response(&request, status, body);
+            assert!(
+                writes(&h).is_empty(),
+                "immediate resend/put-back: {operation} {status} {body}: {:?}",
+                writes(&h)
+            );
+            h.pace();
+            let error = failure(&h);
+            let case = format!("{operation} {status} {body}: {error:?}");
+            assert_eq!(error.outcome, Some(Outcome::Unknown), "{case}");
+            let text = error.legacy_text().to_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "{case}"
+            );
+            assert!(
+                !text.contains("refused") && !text.contains("no stop"),
+                "{case}"
+            );
+            assert_eq!(error.protection, None, "{case}");
+            assert!(writes(&h).is_empty(), "resend/put-back: {case}");
         }
     }
 }
