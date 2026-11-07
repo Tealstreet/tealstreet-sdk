@@ -274,6 +274,12 @@ field mismatch still fails. Testnet accounts ignore the venue-keyed source and r
 their own feed. Websocket gateways still reject.
 A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
+Shared ticker `observedAt` carries source engine receipt times for last/mark/index,
+including unchanged observations. SCXF's optional TICKER_OBSERVATIONS section and
+an opt-in shared-feed handshake preserve those times across frame/port/in-process
+hops; polling, snapshots and local REST restoration never date them as now.
+Older producers retain changed-value-only dating; older native consumers receive
+only the legacy JSON shape. Only genuinely observed fields gain freshness.
 Matching shared ticker seeds wake startup even when identical REST data means
 the native engine emits no changed frame.
 Book/candle listeners registered before startup retain current demand and replay

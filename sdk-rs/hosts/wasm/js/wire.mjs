@@ -25,6 +25,7 @@ export const SECTION = {
   CAPABILITIES: 19,
   UNDERLYING_TOKENS: 20,
   ACCOUNT_READ: 21,
+  TICKER_OBSERVATIONS: 24,
 };
 
 export const NONE = 0xffffffff;
@@ -403,6 +404,21 @@ export class Frame {
       for (let bits = mask; bits; bits &= bits - 1) width++;
       i += width;
       if (i > values.length) throw new Error('truncated ticker delta');
+    }
+    return values;
+  }
+
+  /** Source receipt times, independent of price changes: [row, last, mark, index]. */
+  tickerObservations() {
+    const section = this.first(SECTION.TICKER_OBSERVATIONS);
+    if (!section) return undefined;
+    if (section.length % 32) throw new Error('invalid ticker observation length');
+    const values = new Float64Array(this.buffer, section.offset, section.length / 8);
+    for (let i = 0; i < values.length; i += 4) {
+      if (!Number.isInteger(values[i]) || values[i] < 0) throw new Error('invalid ticker observation row');
+      for (let j = 1; j < 4; j++) {
+        if (values[i + j] !== -Infinity && (!Number.isFinite(values[i + j]) || values[i + j] < 0)) throw new Error('invalid ticker observation time');
+      }
     }
     return values;
   }
