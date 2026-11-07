@@ -35,7 +35,7 @@ const sign = (outputFormat: string, toSign: string, secret = SECRET) => {
 };
 
 describe('BaseExchange.signWsAuth output formats', () => {
-  it('signs hex as bybit/bitmex/woo/phemex do locally', async () => {
+  it('signs hex as bybit/woo/phemex do locally', async () => {
     const result = await sign('hex', 'GET/realtime1700000000');
     expect(result.wsAuthSignature).toBe('dda0c91ab082cccc37125f5adc7d4c99902bcdcd938e581b7fb76f38650d4626');
   });

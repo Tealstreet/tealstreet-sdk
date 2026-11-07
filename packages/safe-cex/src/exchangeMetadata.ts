@@ -263,7 +263,7 @@ export type ExchangeMetadata = {
   /**
    * Whether fetchOHLCV must run in the worker/server (true) or can run directly
    * from the browser (false, default). Set to true for exchanges whose listenOHLCV
-   * calls fetchOHLCV internally (e.g., BitMEX polling, Coinbase REST from WS,
+   * calls fetchOHLCV internally (e.g., Coinbase REST from WS,
    * Bitrue WS klines, Lighter WS OHLCV, Paradex REST polling).
    */
   fetchOHLCVInWorker?: boolean;
@@ -320,7 +320,7 @@ const defaultMetaData: Omit<ExchangeMetadata, 'exchangeName' | 'features'> = {
   privateProxyRegions: {},
   autoDownSizeReduceOrders: false,
   reduceOrdersLockPositionSize: false,
-  // Safe default. Most exchanges override (BitMEX = 20_000, kraken = 500, etc.).
+  // Safe default. Most exchanges override (kraken = 500, etc.).
   tickInterval: 2_000,
   supportsChaser: false,
   supportsPositionMargin: false,

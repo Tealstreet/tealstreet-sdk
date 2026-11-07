@@ -76,7 +76,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
   let isInMonitorRef: (() => boolean) | null = null;
 
   // Wire the proxy-token refresh function once, regardless of account flags.
-  // Many exchanges (BitMEX, Bitget, etc.) force the HOW tunnel via metadata
+  // Many exchanges (Bitget, KuCoin, etc.) force the HOW tunnel via metadata
   // even when the user hasn't set tealstreetTunnel on their account, and the
   // HOW adapter polls getProxyToken() globally. Setting this once here means
   // HOW always sees the freshest token from config; login() also primes the
