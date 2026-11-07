@@ -156,27 +156,34 @@ struct Job {
     restoring: Option<(String, OrderSide, OrderType)>,
 }
 impl Job {
-    /// One failure keeps its classification; several join their text and share
-    /// an outcome only when they agree. Any Unknown leg makes the command Unknown.
+    /// Joined failures retain the first Unknown leg's diagnostics and classification.
+    /// Without an Unknown leg, an outcome is shared only when every failure agrees.
     fn failure(mut self) -> VenueError {
         let unknown = self
             .errors
             .iter()
-            .any(|e| e.outcome == Some(Outcome::Unknown));
+            .position(|e| e.outcome == Some(Outcome::Unknown));
         let mut error = if self.errors.len() == 1 {
             self.errors.pop().expect("one failure")
         } else {
             let outcome = self.errors[0].outcome;
-            let message: Vec<_> = self.errors.iter().map(|e| e.message.as_str()).collect();
-            let error = VenueError::new(message.join_with("; "));
-            match outcome {
-                Some(outcome) if self.errors.iter().all(|e| e.outcome == Some(outcome)) => {
-                    error.outcome(outcome)
+            let messages: Vec<_> = self.errors.iter().map(|e| e.message.as_str()).collect();
+            let message = messages.join_with("; ");
+            if let Some(index) = unknown {
+                let mut error = self.errors.remove(index);
+                error.message = message;
+                error
+            } else {
+                let error = VenueError::new(message);
+                match outcome {
+                    Some(outcome) if self.errors.iter().all(|e| e.outcome == Some(outcome)) => {
+                        error.outcome(outcome)
+                    }
+                    _ => error,
                 }
-                _ => error,
             }
         };
-        if unknown {
+        if unknown.is_some() {
             error.outcome = Some(Outcome::Unknown);
         } else if (self.effective || !self.results.is_empty())
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))

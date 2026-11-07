@@ -2030,6 +2030,121 @@ fn several_failed_placements_share_an_outcome_only_when_they_agree() {
 }
 
 #[test]
+fn aggregation_preserves_transport_diagnostic_before_refusal() {
+    assert_aggregated_unknown_diagnostic(true, false);
+}
+
+#[test]
+fn aggregation_preserves_transport_diagnostic_after_refusal() {
+    assert_aggregated_unknown_diagnostic(false, false);
+}
+
+#[test]
+fn aggregation_preserves_malformed_ack_diagnostic_before_refusal() {
+    assert_aggregated_unknown_diagnostic(true, true);
+}
+
+#[test]
+fn aggregation_preserves_malformed_ack_diagnostic_after_refusal() {
+    assert_aggregated_unknown_diagnostic(false, true);
+}
+
+fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
+    let mut h = private();
+    let mut second = opts(OrderType::Market);
+    second.client_order_id = Some("second".into());
+    place(&mut h, 73, vec![opts(OrderType::Market), second]);
+    for unknown in [unknown_first, !unknown_first] {
+        let request = take_method(&mut h, Method::Post, "/orders");
+        if unknown && malformed {
+            h.respond(request, 200, "{}");
+        } else if unknown {
+            h.e.handle(
+                h.now,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "review transport diagnostic",
+                },
+            );
+            h.collect();
+        } else {
+            h.respond(
+                request,
+                400,
+                r#"{"error":"INVALID_PRICE","message":"definitive refusal"}"#,
+            );
+        }
+    }
+    let [error] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures)
+    };
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let diagnostic = if malformed {
+        "invalid Paradex placement response"
+    } else {
+        "review transport diagnostic"
+    };
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some(diagnostic),
+        "{error:?}"
+    );
+    let kind = (!malformed).then_some(safe_cex_engine::ErrorKind::Network);
+    assert_eq!(error.kind, kind);
+    let text = error.legacy_text().to_ascii_lowercase();
+    assert!(
+        text.contains("unknown") && text.contains("check open orders"),
+        "{error:?}"
+    );
+    assert!(text.contains("definitive refusal"), "{text}");
+    assert!(!error.message.contains(diagnostic), "{error:?}");
+    assert!(
+        !h.pending.iter().any(|r| r.method != Method::Get),
+        "no resend or put-back: {:?}",
+        h.pending
+    );
+}
+
+#[test]
+fn aggregation_retains_first_unknown_diagnostics_when_both_legs_are_uncertain() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for transport_first in [false, true] {
+        let mut h = private();
+        let mut second = opts(OrderType::Market);
+        second.client_order_id = Some("second".into());
+        place(&mut h, 73, vec![opts(OrderType::Market), second]);
+        for transport in [transport_first, !transport_first] {
+            let request = take_method(&mut h, Method::Post, "/orders");
+            if transport {
+                h.e.handle(
+                    h.now,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "first transport diagnostic",
+                    },
+                );
+                h.collect();
+            } else {
+                h.respond(request, 429, "rate diagnostic");
+            }
+        }
+        let [error] = h.failures.as_slice() else {
+            panic!("{:?}", h.failures)
+        };
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        let (kind, diagnostic) = if transport_first {
+            (ErrorKind::Network, "first transport diagnostic")
+        } else {
+            (ErrorKind::RateLimited, "Paradex HTTP 429")
+        };
+        assert_eq!(error.kind, Some(kind));
+        assert_eq!(error.venue_message.as_deref(), Some(diagnostic));
+        assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+        assert!(!h.pending.iter().any(|r| r.method != Method::Get));
+    }
+}
+
+#[test]
 fn aggregation_normalizes_transport_unknown_warning() {
     for lost_first in [false, true] {
         let mut h = private();

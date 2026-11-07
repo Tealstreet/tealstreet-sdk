@@ -28,6 +28,8 @@ ask the caller to Check Open Orders. Native refusal text on these responses is
 diagnostic evidence only and cannot authorize a protective put-back.
 Transport loss and unusable write acknowledgements carry the same warning before
 aggregation, while preserving the original diagnostic separately.
+Joined failures retain the first uncertain leg's structured diagnostics and
+classification alongside the public messages from every failed leg.
 Independent placement operations continue after a failure, preserving accepted
 IDs in the result and reporting failed client identities at Error level. Failed
 entries skip their attached children; a rejected TP/SL child reports an Error
