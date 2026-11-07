@@ -238,7 +238,7 @@ fn replacement_stale_refusal(status: u16, code: i64, unknown: bool) {
         "{error:?}"
     );
     if unknown {
-        let text = error.message.to_ascii_lowercase();
+        let text = error.message.lines().next().unwrap().to_ascii_lowercase();
         assert!(
             text.contains("unknown") && text.contains("check open orders"),
             "{error:?}"
@@ -410,8 +410,9 @@ fn assert_batch_unknown(e: &mut TestEngine, now: f64, code: i64, check_native: b
         text.contains("unknown") && text.contains("check open orders"),
         "{error:?}"
     );
+    let headline = error.message.lines().next().unwrap().to_ascii_lowercase();
     assert!(
-        !text.contains("refused") && !text.contains("no stop"),
+        !headline.contains("refused") && !headline.contains("no stop"),
         "{error:?}"
     );
     assert!(

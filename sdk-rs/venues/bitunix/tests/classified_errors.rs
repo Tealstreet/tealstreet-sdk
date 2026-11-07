@@ -83,14 +83,14 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
         // The status classifies a non-2xx answer; its body code is not evidence,
         // and the engine seals 408/429/5xx before the venue reads the body.
         let unproven = matches!(status, 408 | 429) || status >= 500;
-        assert_eq!(
-            error.message,
-            if unproven {
-                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
-            } else {
-                "Sign signature error"
-            }
-        );
+        if unproven {
+            assert_eq!(
+                error.message,
+                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+            );
+        } else {
+            assert_eq!(error.message, "Sign signature error");
+        }
         assert_eq!(error.venue_code, None);
     }
 }
@@ -148,7 +148,10 @@ fn write_transport_and_malformed_success_are_unknown_but_preflight_is_not_sent()
             })
         );
         if body.is_none() {
-            assert_eq!(error.message, "response lost");
+            assert_eq!(
+                error.message,
+                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: response lost"
+            );
         }
     }
 }
@@ -469,6 +472,9 @@ fn undocumented_native_code_is_uncertain_even_with_an_empty_message() {
     let error = classified_failure(&mut e, 1012);
     assert_eq!(error.kind, Some(ErrorKind::VenueUnavailable));
     assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert_eq!(error.message, "");
+    assert_eq!(
+        error.message,
+        "The outcome of this Bitunix write is unknown. Check Open Orders"
+    );
     assert_eq!(error.venue_code.as_deref(), Some("99999"));
 }

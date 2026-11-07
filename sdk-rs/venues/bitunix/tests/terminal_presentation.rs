@@ -153,6 +153,7 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
     let answers = [
         "refused",
         "unknown",
+        "empty message",
         "rate 10005",
         "rate 10006",
         "malformed data",
@@ -180,6 +181,7 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
             let body = match answer {
                 "refused" => r#"{"code":20003,"msg":"definitive refusal"}"#.to_owned(),
                 "unknown" => r#"{"code":10001,"msg":"network error"}"#.to_owned(),
+                "empty message" => r#"{"code":99999,"msg":""}"#.to_owned(),
                 "rate 10005" => r#"{"code":10005,"msg":"throttled"}"#.to_owned(),
                 "rate 10006" => r#"{"code":10006,"msg":"throttled"}"#.to_owned(),
                 "malformed data" => r#"{"code":0,"data":true}"#.to_owned(),
@@ -249,10 +251,8 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
             assert_eq!(error.outcome, expected, "{path}/{answer}: {error:?}");
             let text = error.legacy_text().to_ascii_lowercase();
             if expected == Some(Outcome::Unknown) {
-                if !text.contains("unknown")
-                    || !text.contains("check open orders")
-                    || text.contains("earlier refused chunk")
-                    || text.contains("does not support this operation")
+                if error.message.lines().next()
+                    != Some("The outcome of this Bitunix write is unknown. Check Open Orders")
                 {
                     missing_guidance.push(format!("{path}/{answer}: {error:?}"));
                 }
@@ -261,10 +261,12 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
                         command: 7,
                         message,
                     }) = action
+                        && message.lines().next()
+                            != Some(
+                                "The outcome of this Bitunix write is unknown. Check Open Orders",
+                            )
                     {
-                        if !message.to_ascii_lowercase().contains("check open orders") {
-                            missing_guidance.push(format!("warning {path}/{answer}: {message}"));
-                        }
+                        missing_guidance.push(format!("warning {path}/{answer}: {message}"));
                     }
                 }
             } else {
@@ -305,7 +307,7 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 91);
+    assert_eq!(checked, 99);
     assert!(
         missing_guidance.is_empty(),
         "{}",

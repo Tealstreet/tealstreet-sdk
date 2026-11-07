@@ -1906,7 +1906,7 @@ impl OrdersRefresh {
 }
 
 struct IoCore {
-    command_failure_message: fn(&VenueError) -> Option<String>,
+    command_failure_summary: fn(&VenueError) -> Option<String>,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2209,7 +2209,7 @@ impl Default for IoCore {
     #[inline]
     fn default() -> Self {
         Self {
-            command_failure_message: |_| None,
+            command_failure_summary: |_| None,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,
@@ -3890,11 +3890,19 @@ impl crate::engine::CoreCx<'_> {
         // Presentation sees the final journal outcome, including engine-owned
         // failures; it cannot change evidence, partial IDs or reconciliation.
         if let Err(error) = &mut result
-            && let Some(message) = (self.io.core.command_failure_message)(error)
+            && let Some(summary) = (self.io.core.command_failure_summary)(error)
         {
-            error.message = message;
+            error.message = if error.message.is_empty() {
+                summary.clone()
+            } else {
+                format!("{summary}\nContext: {}", error.message)
+            };
             for report in &mut reports {
-                report.clone_from(&error.message);
+                *report = if report.is_empty() {
+                    summary.clone()
+                } else {
+                    format!("{summary}\nContext: {report}")
+                };
             }
         }
         for message in reports {
@@ -4079,9 +4087,12 @@ impl PublicFeedWatch {
 }
 
 pub trait Venue {
-    /// Optional terminal words after outcome projection, shared by the command
-    /// failure and its warnings. Native evidence and execution facts are read-only.
-    fn command_failure_message(_error: &VenueError) -> Option<String> {
+    /// Optional summary after outcome projection, preceding the command failure
+    /// and its warnings. Their original detail remains as context; facts are read-only.
+    fn command_failure_summary(_error: &VenueError) -> Option<String>
+    where
+        Self: Sized,
+    {
         None
     }
 
@@ -4948,7 +4959,7 @@ impl<V: Venue> Engine<V> {
                 socket_capabilities: V::socket_capabilities(),
             },
         )?;
-        core.command_failure_message = V::command_failure_message;
+        core.command_failure_summary = V::command_failure_summary;
         Ok(Self {
             venue,
             http_release,
