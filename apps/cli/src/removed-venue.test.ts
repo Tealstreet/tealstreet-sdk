@@ -11,12 +11,16 @@ const account = (exchange: string, name = `${exchange}-main`) =>
   ({ name, exchange, key: 'saved-key', secret: 'saved-secret', active: true }) as unknown as ExchangeAccountConfig;
 
 describe('removed venues on saved CLI accounts', () => {
-  it.each(['bitmex', 'bitmextestnet'])('refuses %s typed before login or network work', async (exchange) => {
-    const adapter = createStandalonePlatformAdapter();
-    const error = await adapter.createExchange(account(exchange)).catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(ExchangeError);
-    expect(error).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
-  });
+  // breakoutprop still has metadata (it enforces the tunnel), so it must refuse before login checks.
+  it.each(['bitmex', 'bitmextestnet', 'breakoutprop'])(
+    'refuses %s typed before login or network work',
+    async (exchange) => {
+      const adapter = createStandalonePlatformAdapter();
+      const error = await adapter.createExchange(account(exchange)).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(ExchangeError);
+      expect(error).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+    },
+  );
 
   it('leaves the other saved accounts enabling', async () => {
     const real = createStandalonePlatformAdapter();
@@ -29,11 +33,20 @@ describe('removed venues on saved CLI accounts', () => {
       updateAccount: vi.fn(),
     });
     const results = await Promise.allSettled(
-      [account('bitmex'), account('binance'), account('bitmextestnet')].map((saved) => manager.enable(saved)),
+      [account('bitmex'), account('binance'), account('bitmextestnet'), account('breakoutprop')].map((saved) =>
+        manager.enable(saved),
+      ),
     );
-    expect(results.map((result) => result.status)).toEqual(['rejected', 'fulfilled', 'rejected']);
+    expect(results.map((result) => result.status)).toEqual(['rejected', 'fulfilled', 'rejected', 'rejected']);
+    for (const index of [0, 2, 3]) {
+      expect((results[index] as PromiseRejectedResult).reason).toMatchObject({
+        kind: 'unsupported',
+        outcome: 'notSent',
+      });
+    }
     expect(manager.isConnected('binance-main')).toBe(true);
     expect(manager.isConnected('bitmex-main')).toBe(false);
     expect(manager.isConnected('bitmextestnet-main')).toBe(false);
+    expect(manager.isConnected('breakoutprop-main')).toBe(false);
   });
 });
