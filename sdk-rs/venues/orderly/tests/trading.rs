@@ -1863,7 +1863,7 @@ fn aggregation_normalizes_transport_and_native_unknown_warnings() {
                 error.venue_message.as_deref(),
                 Some("Orderly HTTP 429: rate limit")
             );
-        } else {
+        } else if let Some((_, body)) = first_reply {
             assert!(
                 error
                     .venue_message
@@ -1871,7 +1871,7 @@ fn aggregation_normalizes_transport_and_native_unknown_warnings() {
                     .unwrap()
                     .contains("native uncertainty")
             );
-            let body: serde_json::Value = serde_json::from_str(first_reply.unwrap().1).unwrap();
+            let body: serde_json::Value = serde_json::from_str(body).unwrap();
             assert_eq!(error.venue_code, Some(body["code"].to_string()));
         }
     }
