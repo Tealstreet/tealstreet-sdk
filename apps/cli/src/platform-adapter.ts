@@ -30,6 +30,7 @@ import { logAccountRoute } from './account-log';
 // Static import for token management - must match what safe-cex uses internally
 import { setProxyToken, setTokenRefreshFunction } from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
+import { assertBetaVenue } from '@tealstreet/safe-cex/src/exchanges/rust/betaVenues';
 import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
 import { defaultProxyRegion, resolveAccountTransport } from '@tealstreet/safe-cex/src/transport/tealstreet/transportResolution';
 import { BRAND } from './brand';
@@ -76,7 +77,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
   let isInMonitorRef: (() => boolean) | null = null;
 
   // Wire the proxy-token refresh function once, regardless of account flags.
-  // Many exchanges (BitMEX, Bitget, etc.) force the HOW tunnel via metadata
+  // Many exchanges (Bitget, KuCoin, etc.) force the HOW tunnel via metadata
   // even when the user hasn't set tealstreetTunnel on their account, and the
   // HOW adapter polls getProxyToken() globally. Setting this once here means
   // HOW always sees the freshest token from config; login() also primes the
@@ -206,6 +207,9 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
     // Exchange management
     async createExchange(account: ExchangeAccountConfig): Promise<ExchangeLike> {
+      // Removed or unsupported venues (saved bitmex, breakoutprop) refuse typed
+      // before any transport or login work, so only that account fails.
+      assertBetaVenue(account.exchange);
       // Use safe-cex's single source of truth for transport resolution instead of
       // re-deriving it: tunnel/proxy may be forced on by metadata (enforceWsTunnel /
       // requiresCors) even when the user didn't enable it on the account.
