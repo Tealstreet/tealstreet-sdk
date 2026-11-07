@@ -12,7 +12,7 @@ import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExe
 import { readArtifactZip } from './cpu-artifacts.mjs';
 import { captureCache, verifyCache } from './cpu-cache.mjs';
 import { assessGateReport } from './known-failure-policy.mjs';
-import { assessEligibility, decideRemeasurement, isCpuOnlyMiss, validatePublicEvidence } from './cpu-remeasure.mjs';
+import { assessEligibility, decideRemeasurement, splitCpuErrors, validatePublicEvidence } from './cpu-remeasure.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
 import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint, environmentIdentity, environmentMismatch } from './cpu-runtime.mjs';
@@ -56,7 +56,10 @@ export function classifyInitialCase(evidence, declarations, paired, family, refu
   }
   const eligible = assessEligibility(evidence, paired);
   // A CPU-only miss beyond remeasurement refuses only this suite's CPU gate.
-  if (!eligible.eligible && isCpuOnlyMiss(evidence, paired)) return { decision: 'cpu-refused', assessment };
+  if (!eligible.eligible) {
+    const split = splitCpuErrors(evidence, assessment.errors, paired);
+    if (split.deferred.length && !split.kept.length) return { decision: 'cpu-refused', assessment };
+  }
   insist(eligible.eligible, [...assessment.errors, ...eligible.errors].join('\n'));
   return { decision: 'second', assessment };
 }

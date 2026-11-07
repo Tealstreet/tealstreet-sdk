@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 import { assessGateReport, assessCorrectnessReport, acceptedReplayErrors, ACCEPTED_DIFFERENCES } from './known-failure-policy.mjs';
 import { expectedGateCases, validateGateCoverage } from './ci-gate-suites.mjs';
-import { assessEligibility, isCpuOnlyMiss } from './cpu-remeasure.mjs';
+import { assessEligibility, splitCpuErrors } from './cpu-remeasure.mjs';
 import { cpuRemeasureEnabled } from './cpu-rollout.mjs';
 import { readEvidenceText } from './recorded-replay.mjs';
 import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
@@ -36,10 +36,14 @@ export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_
     if (unchanged) assessment = familyCpuAssessment(assessment, report, family, sourceHead);
     const eligible = mode === 'collect' && cpuRemeasureEnabled(suite) && !ledgerMismatch && assessment.errors.length > 0 &&
       (assessEligibility({ report, raw: entry.raw }).eligible || suite === 'bitget' && pendingBitgetSteady(entry, manifest));
-    const cpuMiss = mode === 'collect' && !eligible && !ledgerMismatch && assessment.errors.length > 0 && isCpuOnlyMiss({ report, raw: entry.raw });
+    const split = mode === 'collect' && !eligible && !ledgerMismatch && assessment.errors.length > 0
+      ? splitCpuErrors({ report, raw: entry.raw }, assessment.errors) : { kept: assessment.errors, deferred: [] };
+    const cpuMiss = split.deferred.length > 0 && split.kept.length === 0;
     if (eligible) pending.push({ venue: report.venue, tape: report.tape, books: report.books, tapeSha256: report.tapeSha256 });
-    else if (cpuMiss) cpuMisses.push({ venue: report.venue, tape: report.tape, books: report.books, tapeSha256: report.tapeSha256 });
-    else errors.push(...assessment.errors);
+    else {
+      if (split.deferred.length) cpuMisses.push({ venue: report.venue, tape: report.tape, books: report.books, tapeSha256: report.tapeSha256 });
+      errors.push(...split.kept);
+    }
     if (report.status === 'PASS' && !assessment.errors.length) passes++;
     // Every strict difference is a named acceptance: parity with exceptions, not debt.
     const acceptedOnly = report.status === 'FAIL' && !assessment.errors.length && !assessment.known.length && assessment.accepted.length > 0;

@@ -326,3 +326,33 @@ writeFileSync(out+'/build.json',JSON.stringify({sourceHead:execFileSync('git',['
     fs.rmSync(proof, { recursive: true });
   }
 });
+
+// #3246 review: only the exact computed CPU failures are deferred to the CPU gate.
+async function cpuOnlyCollection() {
+  const data = await fixture(), first = evidence(data.metadata, false, { ts: 17.924, rust: 20.579 });
+  const privateReport = { ...first.report, ...expectedGateCases('txflow')[1], tapeSha256: sha('private tape'), private: true,
+    status: 'PASS', failures: [], runs: 0, samples: Object.fromEntries(['ts', 'rust'].map(impl =>
+      [impl, [{ ...first.report.samples[impl][0], measuredMode: 'correctness' }]])) };
+  return { suite: 'txflow', entries: [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }], manifest: declarations,
+    mode: 'collect', sourceHead: data.state.sourceHead };
+}
+test('a valid CPU-only miss beyond remeasurement is collection success', async () => {
+  const result = verifyGateSuite(await cpuOnlyCollection());
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.cpuMisses.length, 1);
+});
+test('a correctness-only report with a CPU miss still fails the measurement', async () => {
+  const options = await cpuOnlyCollection();
+  options.entries[0].report.correctnessOnly = true;
+  const result = verifyGateSuite(options);
+  assert.ok(result.errors.some(error => error.includes('correctness-only reports cannot substitute')), JSON.stringify(result.errors));
+  assert.ok(!result.errors.some(error => error.includes('performance ')), 'the CPU failure itself is still deferred');
+});
+test('a stale accepted difference with a CPU miss still fails the measurement', async () => {
+  const options = await cpuOnlyCollection(), report = options.entries[0].report;
+  options.accepted = { schema: 1, differences: [{ venue: report.venue, tape: report.tape, tapeSha256: report.tapeSha256, diagnostics: [{
+    failures: ['checkpoint 0 markets[0].limits.amount.min: ts=1 rust=2'], category: 'rust-better',
+    rationale: 'Previously accepted market limit difference', evidence: 'Pinned old limits' }] }] };
+  const result = verifyGateSuite(options);
+  assert.ok(result.errors.some(error => error.includes('stale accepted difference')), JSON.stringify(result.errors));
+});
