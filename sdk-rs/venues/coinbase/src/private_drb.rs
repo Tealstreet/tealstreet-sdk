@@ -416,6 +416,7 @@ impl Coinbase {
                             self.private_ready(ProductKind::Intx, cx);
                         }
                         self.drb_after_markets(cx);
+                        self.drb_trading_ready(cx);
                     }
                 } else if read.bearer_revision == self.private_drb.bearer_revision {
                     match read.kind {
@@ -439,6 +440,22 @@ impl Coinbase {
                 }
             }
             Err(failure) => {
+                if matches!(read.kind, Kind::Auth)
+                    && matches!(
+                        failure.verdict,
+                        safe_cex_engine::classify::Verdict::Refused(
+                            ErrorKind::AuthInvalid
+                                | ErrorKind::AuthExpired
+                                | ErrorKind::AuthPermission
+                        )
+                    )
+                {
+                    self.drb_trading_auth_failed(
+                        cx,
+                        VenueError::new("drb HTTP authentication was refused")
+                            .kind(ErrorKind::AuthInvalid),
+                    );
+                }
                 if read.bearer_revision == self.private_drb.bearer_revision
                     && (matches!(failure.code, Some(10000 | 13009)) || response.status == 401)
                 {

@@ -10,6 +10,7 @@ mod public;
 mod rest;
 pub mod sign;
 mod trading;
+mod trading_drb;
 mod wire;
 
 use safe_cex_engine::book::Book;
@@ -47,6 +48,7 @@ pub enum Pending {
     /// The flag records whether the read-only key signed the request.
     Account(account::Request, bool),
     Trading(trading::Request),
+    TradingDrb(trading_drb::Request),
     History(history::Request),
     PrivateDrb(private_drb::Request),
 }
@@ -62,6 +64,7 @@ pub struct Coinbase {
     rest: rest::Rest,
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
+    pub(crate) trading_drb: trading_drb::Trading,
     pub(crate) history: history::History,
     pub(crate) private_drb: private_drb::Private,
 }
@@ -98,6 +101,7 @@ impl Coinbase {
             rest: rest::Rest::default(),
             account: account::Account::new(),
             trading: trading::Trading::default(),
+            trading_drb: trading_drb::Trading::default(),
             history: history::History::default(),
             private_drb: private_drb::Private::default(),
         })
@@ -121,6 +125,51 @@ impl Coinbase {
 }
 
 impl Venue for Coinbase {
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::TradingDrb(request) => self.drb_capture(request),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.drb_reconcile(cx);
+    }
+    fn discard_unproven_http_command(&mut self, owner: safe_cex_engine::request_context::Owner) {
+        self.drb_discard(owner);
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        _command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        if matches!(action, safe_cex_engine::VenueAction::CancelAccountOrders) {
+            self.drb_cancel_account(cx);
+        } else {
+            cx.refuse_command(
+                safe_cex_engine::request_context::Operation::Read,
+                "This action is not supported on Coinbase",
+            );
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _cause: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::TradingDrb(request) => self.drb_trading_failed(cx, request, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
     fn session_bearer(&self, generation: u64) -> safe_cex_engine::request_context::SessionBearer {
         self.private_drb.bearer(generation)
     }
@@ -168,6 +217,7 @@ impl Venue for Coinbase {
             income_history: false,
             account: safe_cex_engine::AccountLookup::AfterLoad,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            nuke_account_cancel: self.drb_authenticated(),
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -198,6 +248,7 @@ impl Venue for Coinbase {
             Pending::Public(p) => self.public_response(cx, p, response),
             Pending::Account(p, read) => self.private_on_response(cx, p, read, response),
             Pending::Trading(p) => self.trading_response(cx, p, response),
+            Pending::TradingDrb(p) => self.drb_trading_response(cx, p, response),
             Pending::History(p) => self.history_response(cx, p, response),
             Pending::PrivateDrb(p) => self.drb_private_response(cx, p, response),
         }
@@ -206,7 +257,7 @@ impl Venue for Coinbase {
         match pending {
             Pending::Public(p) => self.public_item(cx, p, item),
             Pending::Account(p, _) => self.private_on_item(cx, p, item),
-            Pending::Trading(_) => {}
+            Pending::Trading(_) | Pending::TradingDrb(_) => {}
             Pending::History(p) => self.history_item(cx, p, item),
             Pending::PrivateDrb(_) => {}
         }
@@ -216,12 +267,16 @@ impl Venue for Coinbase {
             Pending::Public(p) => self.public_failed(cx, p, error),
             Pending::Account(p, _) => self.private_failed(cx, p, error),
             Pending::Trading(p) => self.trading_failed(cx, p, error),
+            Pending::TradingDrb(p) => {
+                self.drb_trading_failed(cx, p, safe_cex_engine::VenueError::new(error))
+            }
             Pending::History(p) => self.history_failed(cx, p, error),
             Pending::PrivateDrb(p) => self.drb_private_failed(cx, p, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if !self.drb_private_timer(cx, timer)
+        if !self.drb_trading_timer(cx, timer)
+            && !self.drb_private_timer(cx, timer)
             && !self.rest_timer(cx, timer)
             && !self.public_timer(cx, timer)
         {
@@ -243,6 +298,7 @@ impl Venue for Coinbase {
         };
         if let Some(Command::Query { command, query }) = self
             .public_command(cx, command)
+            .and_then(|command| self.drb_trading_command(cx, command))
             .and_then(|command| self.trading_command(cx, command))
         {
             self.history_start(cx, command, query);

@@ -133,3 +133,59 @@ Offline protocol fixtures follow the [technical migration guide](https://docs.cd
 [OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json),
 and [AsyncAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-asyncapi.json).
 No live private authentication, account request, or order is part of validation.
+
+## Trading (S3)
+
+`trading_drb` intercepts USDC perpetual commands using the discovered native
+instrument name (or S0's legacy INTX alias mapping). Spot and CFM retain their
+existing trading codecs. All gateway writes use genuine command-owned Mutation
+contexts with `RetryPolicy::Never`; authentication and reconciliation use Read
+contexts. Supported trading methods already belong to S0's closed authority
+table. HTTP bearer tokens are exchanged with the primary CDP key, refreshed
+before expiry, and attached only by the engine's session callbacks.
+
+Market and limit entry support IOC/FOK; limits also support GTC and post-only
+with `reject_post_only`, so the gateway cannot silently move a post-only price.
+`amount` is in base-coin units for these linear USDC perpetuals. Native
+`reduce_only` also implements explicit closes. Amend uses `private/edit`,
+preserving the native ID and cumulative fills. Cancel supports one or more IDs,
+all orders on an instrument, and `VenueAction::CancelAccountOrders` for the
+gateway account. Bulk cancellation acknowledgements prove a count; they do not
+invent per-order terminal states.
+
+An entry's attached TP/SL uses OTOCO with incremental fill handling and opposite,
+reduce-only market exits. A single attached exit uses OTO. Standalone protective
+orders use native reduce-only `stop_market` / `take_market` triggers, with last,
+mark or index price. Generic conditional orders, GTT, slippage/BBO/STP controls,
+and edits of linked/protective legs without native leg identity are refused
+before I/O. There is no silent cancel-and-recreate fallback.
+
+Instrument leverage uses `private/set_leverage` and `private/get_leverage`.
+Side-specific leverage and hedged-position mode are unsupported. The gateway's
+account-wide SM/PM margin-model change cannot safely implement Tealstreet's
+per-symbol isolated/cross toggle, so that command returns an explicit refusal.
+Testnet commands are refused rather than sent to the production gateway.
+
+Client IDs map to `label` (at most 64 bytes). **The gateway does not guarantee
+label uniqueness or server-side idempotency.** This engine reserves each label
+once, including after a rejection or loss, and never repeats a released write.
+Reservations are bounded to 4096 labels per engine lifetime; reaching the bound
+requires an engine restart and fresh IDs. This does not deduplicate submissions
+made by another client or a previous engine instance.
+
+Timeouts, transport loss, mismatched acknowledgements and unlisted RPC errors
+finish as Unknown. Reconciliation reads the primary account by label/native ID,
+or reads leverage/open orders for settings and bulk cancels. Empty/duplicate
+label matches preserve uncertainty and are read again later. New placements and
+edits on an uncertain instrument wait for read-back, including when a new client
+ID is supplied. Recovery cannot reopen the failed command, grant a resend, roll
+back cumulative fills, or overwrite newer terminal state. Accepted writes
+invalidate older order-snapshot tokens.
+
+Offline fixtures in `tests/fixtures/drb-trading.json` are adapted from the
+[Coinbase OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json)
+and the [technical migration guide](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/guides/derivatives/technical).
+The first 10 command tests were run RED against the legacy route; further RED
+tests caught acknowledgement mismatch, stale recovery, uncertain-ID fencing,
+settings recovery and absent-label polling bugs. No live private calls or orders
+are used.
