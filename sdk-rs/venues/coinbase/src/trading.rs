@@ -38,6 +38,11 @@ enum Step {
         proof: Editable,
     },
 }
+impl Step {
+    fn is_write(&self) -> bool {
+        !matches!(self, Self::Confirm { .. })
+    }
+}
 struct Job {
     command: CommandId,
     steps: VecDeque<Step>,
@@ -1474,19 +1479,30 @@ impl Coinbase {
         {
             return;
         }
+        let rate_code = native_rate_code(response.body);
+        let write = request.step.is_write();
         if !(200..300).contains(&response.status) {
             let error = http_error(response.status, response.body);
-            // 408 and 5xx do not prove the write was rejected.
-            if response.status == 408 || response.status >= 500 {
+            // Status uncertainty outranks refusal words; native throttling is not write proof.
+            if response.status == 408
+                || response.status >= 500
+                || write && (response.status == 429 || rate_code.is_some())
+            {
                 self.private_after_write(cx);
                 self.placement_unresolved(cx, &request.step);
-                self.trading_finish_error(
-                    cx,
-                    request.command,
-                    unknown(format!(
-                        "Coinbase write outcome requires reconciliation: {error}"
-                    )),
-                );
+                let kind = match response.status {
+                    408 => ErrorKind::Timeout,
+                    500.. => ErrorKind::VenueUnavailable,
+                    _ => ErrorKind::RateLimited,
+                };
+                let mut error = unknown(format!(
+                    "Coinbase write outcome requires reconciliation: {error}"
+                ))
+                .kind(kind);
+                if let Some(code) = rate_code {
+                    error = error.venue_code(code);
+                }
+                self.trading_finish_error(cx, request.command, error);
                 return;
             }
             if let Step::Place { payload, .. } = &request.step {
@@ -1501,7 +1517,7 @@ impl Coinbase {
                 429 => rejected(error, ErrorKind::RateLimited),
                 // Any other 4xx (3xx answers prove nothing).
                 400..=499 => rejected(error, ErrorKind::Rejected),
-                _ => error.outcome(Outcome::Unknown),
+                _ => unknown(error.message),
             };
             // The cancellation proof is a read before the replacement write.
             let error = if matches!(request.step, Step::Confirm { .. }) {
@@ -1515,7 +1531,8 @@ impl Coinbase {
             self.trading_finish_error(cx, request.command, error);
             return;
         }
-        let result = self.apply_trade_response(cx, &request.step, response.body);
+        let result =
+            self.apply_trade_response(cx, &request.step, response.body, rate_code.as_deref());
         self.trading.waiting = false;
         match result {
             Ok(id) => {
@@ -1531,6 +1548,11 @@ impl Coinbase {
             Err(error) => {
                 self.private_after_write(cx);
                 self.placement_unresolved(cx, &request.step);
+                let error = if write && let Some(code) = rate_code {
+                    rate_limited(&code)
+                } else {
+                    error
+                };
                 self.trading_finish_error(cx, request.command, error);
             }
         }
@@ -1551,12 +1573,16 @@ impl Coinbase {
         cx: &mut Cx<'_, Pending>,
         step: &Step,
         body: &str,
+        rate_code: Option<&str>,
     ) -> Result<Option<String>, VenueError> {
         match step {
             Step::Place { payload, order, .. } => {
                 let result: CreateResponse = serde_json::from_str(body)
                     .map_err(|_| unknown("Malformed Coinbase placement response"))?;
                 if !result.success {
+                    if let Some(code) = rate_code {
+                        return Err(rate_limited(code));
+                    }
                     self.trading.reductions.remove(&payload.client_order_id);
                     self.private_placement_finished(&payload.client_order_id);
                     // `success: false` is Coinbase's documented refusal: no order was created,
@@ -1727,7 +1753,6 @@ impl Coinbase {
     }
 }
 
-/// The write reached Coinbase but its result is unproven; reconcile before resending.
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
@@ -1739,7 +1764,73 @@ fn rejected(message: impl Into<String>) -> VenueError {
         .outcome(Outcome::Rejected)
 }
 fn unknown(message: impl Into<String>) -> VenueError {
-    VenueError::new(message).outcome(Outcome::Unknown)
+    VenueError::new(format!(
+        "{}. The outcome is unknown. Check Open Orders",
+        message.into()
+    ))
+    .outcome(Outcome::Unknown)
+}
+
+fn rate_limited(code: &str) -> VenueError {
+    unknown(format!("Coinbase rate limit: {code}"))
+        .kind(ErrorKind::RateLimited)
+        .venue_code(code)
+}
+
+fn native_rate_code(body: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct RateEnvelope {
+        error: Option<String>,
+        success: Option<bool>,
+        failure_reason: Option<String>,
+        error_response: Option<CreateError>,
+        errors: Option<Vec<RateError>>,
+        results: Option<Vec<RateResult>>,
+    }
+    #[derive(Deserialize)]
+    struct RateError {
+        id: Option<String>,
+        edit_failure_reason: Option<String>,
+        preview_failure_reason: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct RateResult {
+        success: Option<bool>,
+        failure_reason: Option<String>,
+    }
+    fn rate(code: Option<String>) -> Option<String> {
+        code.filter(|code| {
+            code.eq_ignore_ascii_case("RESOURCE_EXHAUSTED")
+                || code.eq_ignore_ascii_case("RATE_LIMIT_EXCEEDED")
+        })
+    }
+    let result: RateEnvelope = serde_json::from_str(body).ok()?;
+    rate(result.error)
+        .or_else(|| {
+            if result.success != Some(false) {
+                return None;
+            }
+            rate(result.failure_reason).or_else(|| {
+                let error = result.error_response?;
+                rate(error.error)
+                    .or_else(|| rate(error.new_order_failure_reason))
+                    .or_else(|| rate(error.preview_failure_reason))
+            })
+        })
+        .or_else(|| {
+            result.errors?.into_iter().find_map(|error| {
+                rate(error.id)
+                    .or_else(|| rate(error.edit_failure_reason))
+                    .or_else(|| rate(error.preview_failure_reason))
+            })
+        })
+        .or_else(|| {
+            result.results?.into_iter().find_map(|r| {
+                (r.success == Some(false))
+                    .then(|| rate(r.failure_reason))
+                    .flatten()
+            })
+        })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
