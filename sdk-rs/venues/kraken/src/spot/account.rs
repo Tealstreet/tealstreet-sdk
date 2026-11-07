@@ -692,9 +692,13 @@ impl KrakenSpot {
         let text = match result(response) {
             Ok(t) => t,
             Err(e) => {
-                let signature_refused = response.status != 408
+                // An ambiguous write response cannot prove a signature refusal.
+                // Reads retain their bounded signature retry policy.
+                let is_trade = matches!(request.kind, Kind::Trade(_));
+                let definitive = response.status != 408
                     && response.status < 500
-                    && e.contains("EAPI:Invalid signature");
+                    && (response.status != 429 || !is_trade);
+                let signature_refused = definitive && e.contains("EAPI:Invalid signature");
                 if signature_refused && request.signature_retries < 1 {
                     let mut r = request;
                     r.signature_retries += 1;
@@ -703,11 +707,9 @@ impl KrakenSpot {
                 }
                 // A status alone is not permanent account evidence. Only the exhausted
                 // definitive signature refusal retains the existing terminal policy.
-                let credential_refused = response.status != 408
-                    && response.status < 500
+                let credential_refused = definitive
                     && (e.contains("EAPI:Invalid key")
-                        || (e.contains("EGeneral:Permission denied")
-                            && !matches!(request.kind, Kind::Trade(_)))
+                        || (e.contains("EGeneral:Permission denied") && !is_trade)
                         || (signature_refused && request.signature_retries == 1));
                 if credential_refused {
                     self.reject_auth(cx, &e);

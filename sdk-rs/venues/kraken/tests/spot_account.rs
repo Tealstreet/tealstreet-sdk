@@ -272,30 +272,38 @@ fn support_fill_count(frame: &[u8]) -> u32 {
 }
 #[test]
 fn balance_read_signature_rejection_resigns_once() {
-    let (mut e, _, private) = ready(false);
-    message(
-        &mut e,
-        private.unwrap(),
-        r#"{"channel":"balances","type":"update","data":[]}"#,
-    );
-    let first = requests(&mut e).pop().unwrap();
-    reply(
-        &mut e,
-        &first,
-        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
-    );
-    let second = requests(&mut e).pop().unwrap();
-    assert_ne!(first.body, second.body);
-    assert_ne!(first.headers, second.headers);
-    reply(
-        &mut e,
-        &second,
-        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
-    );
-    assert!(
-        requests(&mut e).is_empty(),
-        "a signature rejection resigns once"
-    );
+    for status in [200, 429] {
+        let (mut e, _, private) = ready(false);
+        message(
+            &mut e,
+            private.unwrap(),
+            r#"{"channel":"balances","type":"update","data":[]}"#,
+        );
+        let first = requests(&mut e).pop().unwrap();
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: first.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body: r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+                },
+            },
+        );
+        let second = requests(&mut e).pop().expect("reads still re-sign once");
+        assert_ne!(first.body, second.body);
+        assert_ne!(first.headers, second.headers);
+        reply(
+            &mut e,
+            &second,
+            r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+        );
+        assert!(
+            requests(&mut e).is_empty(),
+            "a signature rejection resigns once"
+        );
+    }
 }
 
 #[test]
