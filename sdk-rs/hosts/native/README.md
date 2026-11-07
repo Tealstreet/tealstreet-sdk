@@ -82,6 +82,14 @@ feed identities isolate sockets that share a role and URL. Other decoded venue
 messages reset the silent streak. The native TLS WebSocket upgrade uses
 HTTP/1.1; Tealstreet upgrade and REST headers come from the resolved policy.
 
+Typed WebSocket writes reserve the writer and check socket readiness before
+claiming. Release hooks and IO-authority callbacks run outside the socket-state
+mutex. The synchronous handoff then checks the same socket epoch and readiness
+again; retirement, replacement or lost authority during a claim refuses the
+frame and reports `Unknown` through the existing released-attempt contract.
+Claims are never replayed. Callback panics propagate, while writer retirement
+and driver cleanup tolerate poisoned socket state.
+
 Paradex signs through its trusted local Stark provider: `build` consumes the
 account key in trusted setup and seals the provider's public key. There is no
 delegated payload-signing callback; a private Paradex account with an external

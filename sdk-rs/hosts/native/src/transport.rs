@@ -21,9 +21,9 @@ mod http;
 mod websocket;
 pub use http::{BoundHttp, HttpPrepareError, HttpPrepareFuture, PreparedHttp};
 
-/// Check an open physical writer before calling `claim` at most once, then hand
-/// off its frame synchronously without an async queue or yield. Failures after
-/// claiming may have sent bytes; async flush failures must report HttpFailed.
+/// Check readiness, call `claim` at most once without socket-state locks, then
+/// revalidate and hand off synchronously without an async queue or yield.
+/// Post-claim failures may have sent bytes; async flush failures report HttpFailed.
 pub trait WebSocketWriter: Send + Sync {
     fn try_write(
         &self,

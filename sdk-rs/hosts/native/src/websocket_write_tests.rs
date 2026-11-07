@@ -11,6 +11,7 @@ struct Probe {
     socket: Option<SocketId>,
     url: Option<String>,
     deny: bool,
+    panic_release: bool,
     releases: usize,
 }
 impl Venue for Probe {
@@ -50,6 +51,7 @@ impl Venue for Probe {
     fn http_release() -> safe_cex_engine::HttpRelease<Self> {
         safe_cex_engine::HttpRelease::Mutable(|this, _, _| {
             this.releases += 1;
+            assert!(!this.panic_release, "venue release panic");
             Ok(if this.deny {
                 Admission::Denied
             } else {
@@ -311,4 +313,57 @@ async fn open_socket_writer_handoff_control() {
         "an open physical writer must accept the authorized frame: {notices:?}"
     );
     assert_eq!(releases, 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn release_panic_does_not_break_host_stop() {
+    use futures_util::StreamExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        tokio::time::timeout(Duration::from_millis(500), ws.next()).await
+    });
+    let engine = safe_cex_engine::test_support::seeded_engine(Probe {
+        url: Some(format!("ws://{address}")),
+        panic_release: true,
+        ..Probe::default()
+    });
+    let mut host = Host::new(engine, NetworkTransport::new());
+    host.clock = || 0.;
+    host.engine.start(0.);
+    host.execute(&mut |_| {});
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(2), host.inbox.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let opened = matches!(event, HostEvent::WsOpened(_));
+        host.dispatch(event);
+        if opened {
+            break;
+        }
+    }
+    host.engine.handle(
+        0.,
+        Event::Command(Command::SetLeverage {
+            command: 71,
+            symbol: "BTC".into(),
+            leverage: 2.,
+            side: None,
+        }),
+    );
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| host.execute(&mut |_| {})));
+    assert!(
+        result.is_err(),
+        "venue bugs must retain their documented panic behavior"
+    );
+    let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| host.stop()));
+    assert!(
+        stopped.is_ok(),
+        "writer retirement panicked on its poisoned mutex after the expected venue panic"
+    );
+    let _ = server.await;
 }
