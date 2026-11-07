@@ -1341,6 +1341,10 @@ export interface RemoteSignerRequest {
       | 'bitunix-double-sha256'
       | 'backpack-ed25519'
       | 'kucoin-batch'
+      // AsterDEX: device-owned slot selection and canonical wallet statements.
+      | 'asterdex-address'
+      | 'asterdex-hmac'
+      | 'asterdex-wallet'
       // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
       // the digest from; `hyperliquid-address` binds the agent address.
       | 'grvt-order'

@@ -8,6 +8,8 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
+AsterDEX (V1 HMAC and V3 API-wallet RemoteSigner; V1 PayloadSigner REST only;
+see `sdk-rs/venues/asterdex/README.md`),
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
@@ -185,6 +187,10 @@ wire stays intact. Shared standalone Binance/Bybit and AsterDEX V1 (an explicit,
 setup-resolved `apiVersion: v1` only; never V3 wallet keys) request-shape interceptors,
 their codec/site tables and the capture utility are the TS retained for remote
 signing after TS venue classes are deleted; no TS venue/API factory is created.
+AsterDEX V3 native requests use closed `asterdex-wallet` statements instead;
+the device derives account-bound EIP-191/712 digests and the engine verifies the
+returned signature. `asterdex-address` proves wallets for nonce setup, and
+`asterdex-hmac` selects V1 primary/secondary custody. PayloadSigner is V1 REST only.
 They retain real qs/Axios serialization and caller-owned WS preimages. Capture
 tokens are single use and fenced by raw deadlines, protocol expiry and clock
 revision; provider text and partial results are not returned on failure.

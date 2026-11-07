@@ -4088,6 +4088,7 @@ dependencies = [
  "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-venue-binance",
+ "safe-cex-venues",
  "serde",
  "serde_json",
 ]

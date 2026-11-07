@@ -5,6 +5,7 @@ import type { CredentialPresence } from './construction';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { nanoid } from 'nanoid';
 
+import { resolveAsterDEXSignerVersion } from './asterdexSignerSetup';
 import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
 import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
 import { createRemoteSignerProvider, remoteSignerAlgorithms } from './remoteSignerProvider';
@@ -53,6 +54,10 @@ export class DelegatedSignerSetup {
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
     this.usesPayloadSigner = selectDelegatedSigningMode(options) === 'payload';
+    if (name === 'asterdex' && this.usesPayloadSigner && resolveAsterDEXSignerVersion(options) === 'v3') {
+      const message = 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     if (name === 'grvt' && this.usesPayloadSigner) {
       const message = 'GRVT PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });

@@ -1062,6 +1062,14 @@ impl WasmEngine {
                         grvt_trading_account_id: options.grvt_trading_account_id.clone(),
                         #[cfg(not(feature = "grvt"))]
                         grvt_trading_account_id: None,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_v3: matches!(options.asterdex.api_version, Some(version) if version.prefix() == "/fapi/v3"),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_v3: false,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_user_address: options.asterdex.user_address.clone(),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_user_address: None,
                     };
                     (venue.to_owned(), identities, account)
                 })

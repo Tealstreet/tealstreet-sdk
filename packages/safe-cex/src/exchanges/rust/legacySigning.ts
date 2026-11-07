@@ -302,6 +302,7 @@ export const signHostedWsAuth = async (
   const { toSign, outputFormat } = request.wsAuth ?? {};
   if (!toSign || !outputFormat) return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
   if (outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address' || outputFormat === 'lighter-tx'
+    || outputFormat === 'asterdex-address' || outputFormat === 'asterdex-hmac' || outputFormat === 'asterdex-wallet'
     || outputFormat === 'grvt-order' || outputFormat === 'grvt-address'
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
