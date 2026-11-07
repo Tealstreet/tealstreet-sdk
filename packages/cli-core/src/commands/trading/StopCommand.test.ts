@@ -158,7 +158,7 @@ describe('StopCommand — fractional percentages', () => {
 
   const placed = (ex: ExchangeLike) => (ex.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
 
-  it('accepts the command\'s own first documented example', async () => {
+  it("accepts the command's own first documented example", async () => {
     const ex = makeExchange([pos()]);
     const r = await cmd.execute(ctx(['stop', 'at', '0.1%'], ex));
     expect(r.success).toBe(true);
@@ -332,6 +332,32 @@ describe('StopCommand — sized stops (partial)', () => {
 
     expect(result.success).toBe(true);
     expect(lastOrder(ex)).toMatchObject({ price: 60_000, triggerPrice: 65_000, amount: 0.01 });
+  });
+
+  it.each(['$27', '0$'])('refuses explicit %s that rounds to zero instead of placing a Full stop', async (size) => {
+    const ex = makeExchange([pos()]);
+    ex.name = 'bybit';
+
+    const result = await cmd.execute(ctx(['stop', size, 'at', '60000'], ex));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/size.*lot step.*stop not placed/i);
+    expect(ex.placeOrder).not.toHaveBeenCalled();
+
+    const full = await cmd.execute(ctx(['stop', 'at', '60000'], ex));
+    expect(full.success).toBe(true);
+    expect(lastOrder(ex).amount).toBe(0);
+  });
+
+  it('sizes a USD stop at its tick-rounded limit price', async () => {
+    const ex = makeExchange([pos({ symbol: 'MEMEUSDT', contracts: 100_000 })]);
+    Object.assign(ex.store!.markets![0], { symbol: 'MEMEUSDT', base: 'MEME', precision: { amount: 1, price: 0.001 } });
+    Object.assign(ex.store!.tickers![0], { symbol: 'MEMEUSDT', last: 0.002, mark: 0.002 });
+
+    const result = await cmd.execute(ctx(['stop', '$20', 'at', '0.0015', 'trigger', '0.003'], ex, 'MEMEUSDT'));
+
+    expect(result.success).toBe(true);
+    expect(lastOrder(ex)).toMatchObject({ price: 0.002, triggerPrice: 0.003, amount: 10_000 });
   });
 
   it('"500$ at -1%" suffix form also resolves', async () => {
@@ -514,10 +540,7 @@ describe('StopCommand — suffix-USD size regression', () => {
       ...(ex.store!.markets ?? []),
       { symbol: '1000USDT', base: '1000', quote: 'USDT', precision: { amount: 1, price: 0.0001 } } as never,
     ];
-    ex.store!.tickers = [
-      ...(ex.store!.tickers ?? []),
-      { symbol: '1000USDT', last: 0.5 } as never,
-    ];
+    ex.store!.tickers = [...(ex.store!.tickers ?? []), { symbol: '1000USDT', last: 0.5 } as never];
     await cmd.execute(ctx(['stop', '1000$', 'at', '49000'], ex));
     const order = lastOrder(ex);
     expect(order.symbol).toBe('BTCUSDT');

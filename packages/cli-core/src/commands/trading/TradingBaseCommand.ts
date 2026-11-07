@@ -7,6 +7,7 @@ import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positi
 import { amountPrecisionOf } from '../../utils/marketPrecision';
 import { resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
+import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
 
 /**
  * Base class for trading commands with utility methods for size/price processing
@@ -159,7 +160,10 @@ export abstract class TradingBaseCommand extends BaseCommand {
         const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
         return adjust(notional / contractSize, amountPrecisionOf(market));
       }
-      const conversionPrice = price ?? exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
+      const conversionPrice =
+        price === undefined
+          ? exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last
+          : prepareCliAmendPrice(exchange, symbol, price);
       if (!conversionPrice) {
         throw new Error(`Price not available for ${symbol}`);
       }
@@ -208,7 +212,11 @@ export abstract class TradingBaseCommand extends BaseCommand {
       return adjust(notional / contractSize, amountPrecision);
     }
 
-    const conversionPrice = price ?? exchange.store?.tickers?.find((ticker) => ticker.symbol === symbol)?.last;
+    // Use the same validated tick-rounded price that order preparation sends.
+    const conversionPrice =
+      price === undefined
+        ? exchange.store?.tickers?.find((ticker) => ticker.symbol === symbol)?.last
+        : prepareCliAmendPrice(exchange, symbol, price);
     if (!conversionPrice) {
       throw new Error('Price data is not available yet for a symbol');
     }
