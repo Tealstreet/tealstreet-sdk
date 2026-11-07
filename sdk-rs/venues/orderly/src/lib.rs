@@ -315,7 +315,13 @@ impl Orderly {
         }
     }
     fn seed(&mut self, cx: &mut Cx<'_, Pending>, kind: Seed) {
-        let context = match cx.http_context(
+        let issue = if matches!(kind, Seed::Tickers) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -714,6 +720,16 @@ impl Venue for Orderly {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(_, request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             reject_order_history_filters: true,
@@ -1101,11 +1117,13 @@ impl Venue for Orderly {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        if let Some(context) = Self::candle_context(&pending) {
-            let _ = cx.fail_context(context, error);
-        } else {
-            self.on_sign_error(cx, pending, error);
-        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if let Some(context) = Self::candle_context(&pending) {
+                let _ = cx.fail_context(context, error);
+            } else {
+                self.on_sign_error(cx, pending, error);
+            }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
@@ -1121,10 +1139,10 @@ impl Venue for Orderly {
     /// A provider refusal of a private read: history is strict; an account
     /// read fails as a native failed read does, reported and retried.
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::History(request) => self.history_refused(cx, request, error),
             pending => self.on_sign_failed(cx, pending, &error.message),
-        }
+        });
     }
     /// A malformed stream was delivered, so its custody is checked first: a
     /// stale or superseded leg only closes its Context and changes nothing.

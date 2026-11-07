@@ -609,10 +609,21 @@ impl AsterDex {
         policy: Policy,
         recipe: Option<Box<dyn safe_cex_engine::SignStep>>,
     ) -> bool {
+        let issue = if matches!(
+            &unsent.pending,
+            Pending::Daily { .. }
+                | Pending::OpenInterest { .. }
+                | Pending::Klines { .. }
+                | Pending::DepthRead { .. }
+        ) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
         let read = match (unsent.read.clone(), &unsent.root) {
             (Some(read), _) => Ok(read),
             (None, Some(root)) => cx.http_leg_context(root, policy),
-            (None, None) => cx.http_context(Scope::Background, policy),
+            (None, None) => issue(cx, Scope::Background, policy),
         };
         let read = match read {
             Ok(read) => read,

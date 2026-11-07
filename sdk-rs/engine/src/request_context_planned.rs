@@ -791,6 +791,7 @@ impl crate::engine::CoreCx<'_> {
         let execution = match (moved, founder_root) {
             (Some((identity, _)), Some(root)) => {
                 let physical = CommandOwner {
+                    request_class: owner.request_class,
                     generation: identity,
                     phase: CommandPhase::Planned(State { body }),
                     last_deadline: deadline,
@@ -1243,6 +1244,17 @@ impl<P> Cx<'_, P> {
         {
             context = context.with_egress(session_egress)?;
         }
+        let class = if context.operation() == Operation::Mutation {
+            crate::request_budget::RequestClass::OrderWrite
+        } else {
+            self.io
+                .core
+                .request_contexts
+                .owner_entry(plan.owner())
+                .ok_or(Error::Revoked)?
+                .request_class
+        };
+        context.set_request_class(class);
         context.bind_issuer(&self.io.core.request_contexts.issuer);
         let call = Call::open(
             context.clone(),
@@ -2209,7 +2221,8 @@ impl<P> Cx<'_, P> {
     /// Raise a live Mutation Plan's failure projection to Unknown, for an
     /// effect the venue can no longer prove (such as a failed protective
     /// census after an accepted placement). Monotonic; it grants no send,
-    /// retry or success authority and records no write fact.
+    /// retry or success authority and records no write fact. Legacy HTTP command
+    /// roots use `inherit_http_uncertainty` with the same failure-only contract.
     pub fn inherit_plan_uncertainty(&mut self, plan: &Plan) -> Result<(), Error> {
         let body = self
             .io

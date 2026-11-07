@@ -29,6 +29,7 @@ import { clearHeartbeat, HEARTBEAT_INTERVAL_MS, writeHeartbeat } from './cross-t
 import { recordCrossTradeEvent } from './audit-log';
 import { logger } from './logger';
 import { BRAND } from './brand';
+import { G } from './console-glyphs';
 
 const STATUS_INTERVAL_MS = 30_000;
 
@@ -206,14 +207,14 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
   for (const accountName of accountsToBoot) {
     const account = liveAccounts.get(accountName);
     if (!account) {
-      console.log(chalk.red(`  ✗ Account "${accountName}" not found in config — skipped`));
+      console.log(chalk.red(`  ${G.error} Account "${accountName}" not found in config — skipped`));
       continue;
     }
     try {
       console.log(chalk.gray(`  Booting ${accountName} (${account.exchange})…`));
       await exchangeManager.enable(account);
     } catch (err) {
-      console.log(chalk.red(`  ✗ Failed to boot ${accountName}: ${(err as Error).message}`));
+      console.log(chalk.red(`  ${G.error} Failed to boot ${accountName}: ${(err as Error).message}`));
     }
   }
 
@@ -250,7 +251,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  console.log(chalk.green('\n✓ Cross-trade engine running. Press Ctrl+C to stop.\n'));
+  console.log(chalk.green(`\n${G.ok} Cross-trade engine running. Press Ctrl+C to stop.\n`));
 
   ctx.statusTimer = setInterval(() => {
     if (ctx.stopped) return;
@@ -284,7 +285,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
         logger.warn(`cross-trade daemon shutdown error: ${(err as Error).message}`);
       } finally {
         currentContext = null;
-        console.log(chalk.green('✓ Cross-trade engine stopped.\n'));
+        console.log(chalk.green(`${G.ok} Cross-trade engine stopped.\n`));
         resolve();
       }
     };

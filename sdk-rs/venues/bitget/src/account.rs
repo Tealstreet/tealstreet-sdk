@@ -881,11 +881,8 @@ impl BitgetFutures {
                             row.strategy_type = std::borrow::Cow::Borrowed("trailing_stop");
                         }
                         let orders = self.map_order(cx, &row)?;
-                        if let Some(price) = row
-                            .execute_price
-                            .0
-                            .filter(|price| price.is_finite() && *price >= 0.0)
-                        {
+                        self.observe_close_bookings(cx, &orders, snapshot.started);
+                        if let Some(price) = execution_price(&row, !self.account.uta) {
                             for order in &orders {
                                 snapshot.execution_prices.push((order.id.clone(), price));
                             }
@@ -2460,6 +2457,7 @@ impl BitgetFutures {
                         self.reject_stream_order(cx, item.get());
                         continue;
                     };
+                    self.observe_close_bookings(cx, &orders, cx.now);
                     let Some(order) = orders.first() else {
                         continue;
                     };
@@ -2477,11 +2475,7 @@ impl BitgetFutures {
                         self.emit_execution(cx, &raw, order);
                     }
                     for order in orders {
-                        if let Some(price) = raw
-                            .execute_price
-                            .0
-                            .filter(|price| price.is_finite() && *price >= 0.0)
-                        {
+                        if let Some(price) = execution_price(&raw, !self.account.uta) {
                             self.account
                                 .execution_prices
                                 .insert(order.id.clone(), price);
@@ -2769,6 +2763,19 @@ impl BitgetFutures {
 
     pub(crate) fn positions_in_flight(&self) -> bool {
         self.account.positions_in_flight
+    }
+
+    /// A native read proved the order absent: drop it without claiming how it ended.
+    pub(crate) fn forget_order(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        self.account
+            .terminal
+            .insert(id.to_owned(), cx.now + 10_000.0);
+        self.account.opened.remove(id);
+        self.account.plans.remove(id);
+        self.account.trailing.remove(id);
+        self.account.execution_prices.remove(id);
+        self.account.cancel_checks.retain(|c| c.target.id != id);
+        cx.store.remove_orders(&[id]);
     }
 
     pub(crate) fn mark_canceled(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
@@ -3401,6 +3408,24 @@ pub(crate) fn is_algo(kind: OrderType) -> bool {
         OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
     )
 }
+fn execution_price(row: &OrderRow<'_>, classic: bool) -> Option<f64> {
+    match row.execute_price {
+        ExecutionPrice::Value(price) if price.is_finite() && price >= 0.0 => Some(price),
+        // Only explicit Classic TPSL market rows prove that blank means market.
+        ExecutionPrice::Blank
+            if classic
+                && row.order_type == "market"
+                && matches!(
+                    row.plan_type.as_ref(),
+                    "pos_loss" | "pos_profit" | "loss_plan" | "profit_plan"
+                ) =>
+        {
+            Some(0.0)
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn plan_type(value: &str) -> Option<&'static str> {
     Some(match value {
         "psl" | "pos_loss" => "pos_loss",
@@ -3638,6 +3663,20 @@ pub(crate) fn read_error(response: &Response<'_>, message: String) -> VenueError
     .error
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Probe => S::ACCOUNT,
+            Self::Balance { .. } => S::BALANCE,
+            Self::UtaBalance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders(_) => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod secondary_policy_tests {
     use super::*;
@@ -3685,4 +3724,12 @@ mod key_refusal_tests {
             );
         }
     }
+}
+
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    assert_eq!(
+        Request::Probe.startup_sections(),
+        safe_cex_engine::startup::Sections::ACCOUNT
+    );
 }
