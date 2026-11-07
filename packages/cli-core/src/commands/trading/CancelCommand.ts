@@ -177,19 +177,17 @@ export class CancelCommand extends TradingBaseCommand {
       return this.success();
     }
 
-    // Basic cancel (no filter or just a symbol). Symbol resolution falls back
-    // to a base-prefix match, so `buys` resolves to BUSDT, `sells` / `stops`
-    // to SUSDT and an id suffix like `b3f9` to BUSDT on venues listing a `B`
-    // or `S` market. Cancel-all therefore needs a keyword-free token that
-    // names the market exactly: its symbol (`ETHUSDT`) or its base (`eth`).
-    // Anything else falls through to the id match below, or errors.
+    // Prefix matches can turn filter keywords or IDs into markets (buys -> BUSDT).
+    // Cancel-all accepts only a symbol, bare base, or complete base+quote alias.
     const token = (args[1] ?? '').trim().toUpperCase();
     const resolved = token ? this.transformSymbol(exchange, token) : '';
-    const resolvedBase = exchange.store?.markets?.find((m) => m.symbol === resolved)?.base;
+    const resolvedMarket = exchange.store?.markets?.find((m) => m.symbol === resolved);
     const namesMarket =
       !FILTER_KEYWORDS.includes(head) &&
       this.validateSymbol(exchange, resolved) &&
-      (resolved.toUpperCase() === token || resolvedBase?.toUpperCase() === token);
+      (resolved.toUpperCase() === token ||
+        resolvedMarket?.base.toUpperCase() === token ||
+        (resolvedMarket !== undefined && `${resolvedMarket.base}${resolvedMarket.quote}`.toUpperCase() === token));
     if (!args[1] || namesMarket) {
       if (exchange.cancelSymbolOrders) {
         await exchange.cancelSymbolOrders(targetSymbol);

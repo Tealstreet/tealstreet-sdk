@@ -175,6 +175,10 @@ Global variants (`longs`, `shorts`, `all`, `allpos`) honor the
 
 Filters compose: side × kind × reduce-only × position-selector × range × id.
 
+An unfiltered market token must be its full symbol, a supported bare base, or a
+complete base+quote alias (`cancel BTCUSDC` selects `BTC-PERP` on Hyperliquid).
+Filter keywords and arbitrary market prefixes never select cancel-all.
+
 | Form                          | Result                                          |
 | ----------------------------- | ----------------------------------------------- |
 | `cancel`                      | All orders, focused symbol                      |

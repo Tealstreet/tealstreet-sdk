@@ -173,6 +173,56 @@ describe('CancelCommand', () => {
     });
   });
 
+  describe('complete base+quote aliases', () => {
+    function hyperliquidExchange(orders: Order[] = []): ExchangeLike {
+      const exchange = createMockExchange(orders, { name: 'hyperliquid' });
+      const store = exchange.store as unknown as { markets: unknown[]; tickers: unknown[] };
+      store.markets.push({ symbol: 'BTC-PERP', base: 'BTC', quote: 'USDC', precision: { amount: 0.001, price: 1 } });
+      store.tickers.push({ symbol: 'BTC-PERP', last: 50000 });
+      return exchange;
+    }
+
+    it.each(['BTCUSDC', 'btcusdc'])('cancels the resolved native market for %s', async (token) => {
+      const exchange = hyperliquidExchange();
+      const ctx = createMockContext(['cancel', token], exchange, 'ETHUSDT');
+
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(true);
+      expect(exchange.cancelSymbolOrders).toHaveBeenCalledExactlyOnceWith('BTC-PERP');
+      expect(exchange.cancelOrders).not.toHaveBeenCalled();
+      expect(ctx.adapter.printSuccess).toHaveBeenCalledWith('Cancelling all BTC-PERP orders');
+    });
+
+    it('keeps the cancelOrders fallback scoped to the aliased market', async () => {
+      const orders = [
+        createMockOrder('1', 'BTC-PERP', OrderSide.Buy, OrderType.Limit),
+        createMockOrder('2', 'BTC-PERP', OrderSide.Sell, OrderType.StopLoss),
+        createMockOrder('3', 'BTCUSDT', OrderSide.Buy, OrderType.Limit),
+        createMockOrder('4', 'ETHUSDT', OrderSide.Sell, OrderType.Limit),
+      ];
+      const exchange = hyperliquidExchange(orders);
+      exchange.cancelSymbolOrders = undefined;
+      const ctx = createMockContext(['cancel', 'BTCUSDC'], exchange, 'ETHUSDT');
+
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(true);
+      expect(exchange.cancelOrders).toHaveBeenCalledExactlyOnceWith([orders[0], orders[1]]);
+    });
+
+    it('rejects trailing junk after a complete base+quote alias', async () => {
+      const exchange = hyperliquidExchange();
+      const ctx = createMockContext(['cancel', 'BTCUSDCextra'], exchange, 'ETHUSDT');
+
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(false);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      expect(exchange.cancelOrders).not.toHaveBeenCalled();
+    });
+  });
+
   describe('cancel buy orders', () => {
     it('cancels only buy limit orders', async () => {
       const orders = [
