@@ -1,7 +1,7 @@
 // Same-workflow physical evidence only. No lifetime history scan or retry API.
 import { createHash } from 'node:crypto';
 import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
-export const CPU_COHORT_STEPS = Object.freeze({ first: 'Retain CPU runtime capsule', second: 'Retain CPU remeasurement results', plan: 'Retain CPU remeasurement plan', final: 'Retain CPU certificate', strict: 'Retain strict gate reports and artifact budgets', runtime: 'Retain the eligible original runtime bytes' });
+export const CPU_COHORT_STEPS = Object.freeze({ first: 'Retain CPU runtime capsule', plan: 'Retain CPU remeasurement plan', final: 'Retain CPU certificate', strict: 'Retain strict gate reports and artifact budgets' });
 const CPU_WORKFLOW_ID = 386369161;
 const WORKFLOW_PATH = '.github/workflows/rust.yml';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -166,15 +166,13 @@ export function authenticateArtifactMetadata({ artifact, run, job, logBytes, ste
   } else if (jobName === 'Rust / CPU certification audit') {
     throw new Error('CPU cohort: no all-suite audit in this rollout');
   } else {
-    const match = /^Rust \/ (replay measurement|CPU remeasurement|replay gate) \(([a-z0-9-]+)\)$/.exec(jobName);
+    const match = /^Rust \/ (replay measurement|CPU gate) \(([a-z0-9-]+)\)$/.exec(jobName);
     check(match, 'unknown artifact authority job name');
-    const kind = match[1] === 'replay measurement' ? 'first' : match[1] === 'CPU remeasurement' ? 'second' : 'final';
-    expectedArtifact = `${kind === 'first' ? 'cpu-cohort' : kind === 'second' ? 'cpu-second' : 'cpu-cert'}-${match[2]}`;
+    const kind = match[1] === 'replay measurement' ? 'first' : 'final';
+    expectedArtifact = `${kind === 'first' ? 'cpu-cohort' : 'cpu-cert'}-${match[2]}`;
     expectedStep = CPU_COHORT_STEPS[kind];
     if (kind === 'first' && artifact?.name === `strict-replay-${match[2]}`) {
       expectedArtifact = artifact.name; expectedStep = CPU_COHORT_STEPS.strict;
-    } else if (kind === 'first' && artifact?.name === `cpu-runtime-${match[2]}`) {
-      expectedArtifact = artifact.name; expectedStep = CPU_COHORT_STEPS.runtime;
     }
   }
   check(stepName === expectedStep, 'unknown artifact authority upload step');
@@ -186,8 +184,7 @@ export function authenticateArtifactMetadata({ artifact, run, job, logBytes, ste
   return { schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id, attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha, logSha256: sha(bytes(logBytes)) };
 }
 
-/** Downloaded bundles additionally require the exact archive bytes. Metadata-only
- * runtime refs are useful after a successful second producer verified restoration. */
+/** Downloaded bundles additionally require the exact archive bytes. */
 export function authenticateArtifactExecution(input) {
   const receipt = authenticateArtifactMetadata(input), raw = bytes(input.artifactBytes);
   check(raw.length === input.artifact.size_in_bytes && `sha256:${sha(raw)}` === input.artifact.digest, 'artifact ZIP digest/length mismatch');
@@ -252,8 +249,8 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
 }
 
 export function requireGithubResponseSize(length, kind = 'metadata') {
-  check(['metadata', 'log', 'artifact', 'runtime-artifact'].includes(kind), 'invalid GitHub response kind');
-  const limit = kind === 'runtime-artifact' ? 4 * 1024 ** 3 : 512 * 1024 ** 2;
+  check(['metadata', 'log', 'artifact'].includes(kind), 'invalid GitHub response kind');
+  const limit = 512 * 1024 ** 2;
   check(integer(length) && length <= limit, 'empty/oversized GitHub response');
 }
 
@@ -297,7 +294,7 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
         } else {
           check(response.status === 200, `GitHub evidence unavailable (${response.status})`);
           raw = Buffer.from(await response.arrayBuffer());
-          if (!raw.length && immutable && ['artifact', 'runtime-artifact'].includes(kind) && attempt === 0) {
+          if (!raw.length && immutable && kind === 'artifact' && attempt === 0) {
             retryReason = 'empty immutable artifact HTTP 200';
           } else {
             requireGithubResponseSize(raw.length, kind);

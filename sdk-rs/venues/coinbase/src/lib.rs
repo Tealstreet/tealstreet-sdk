@@ -190,6 +190,7 @@ impl Venue for Coinbase {
             Pending::Public(
                 public::Request::Products { .. } | public::Request::Instruments { .. },
             ) => S::PUBLIC,
+            Pending::Public(public::Request::Drb { startup: true, .. }) => S::PUBLIC,
             Pending::Account(request, _) => request.startup_sections(),
             _ => S::NONE,
         }

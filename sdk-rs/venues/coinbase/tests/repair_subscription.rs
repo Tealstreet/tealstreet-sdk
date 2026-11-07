@@ -9,7 +9,7 @@ use safe_cex_engine::{
 };
 use support::Driver;
 
-const SYMBOL: &str = "BTC-PERP-INTX";
+const SYMBOL: &str = "BTC-USD";
 
 struct Public {
     engine: Driver,
