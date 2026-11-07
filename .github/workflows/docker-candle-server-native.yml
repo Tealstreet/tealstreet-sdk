@@ -26,8 +26,10 @@ on:
 permissions:
   contents: read
 
+# One group per sha, as in the exchange workflow: a shared group keeps only one pending
+# run, so a newer push canceled the queued build and its `:sdk-<sha>` was never pushed.
 concurrency:
-  group: docker-candle-server-native
+  group: docker-candle-server-native-${{ github.sha }}
   cancel-in-progress: false
 
 env:
