@@ -7,12 +7,14 @@ use safe_cex_venue_paradex::Options;
 use support::*;
 
 fn private() -> Harness {
-    let mut h = Harness::empty(Options {
-        key: Some(format!("0x{}1", "0".repeat(63))),
-        paradex_address: Some("0x0123".into()),
-        subkey_address: Some("0x456".into()),
-        ..Options::default()
-    });
+    let mut h = Harness::keyed(
+        Options {
+            paradex_address: Some("0x0123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Options::default()
+        },
+        STARK_KEY,
+    );
     h.reply("/markets", MARKETS);
     h.reply("summary", TICKERS);
     h.reply(
@@ -68,6 +70,11 @@ fn a_snapshot_read_that_never_answers_ends_at_its_window_and_the_cycle_continues
     h.timer(h.now + 10_000.);
     let positions = h.take("/positions");
     assert_eq!(positions.method, Method::Get);
+    assert_eq!(positions.timeout_ms, Some(20_000));
+    assert_eq!(
+        h.e.http_read_class(positions.id),
+        safe_cex_engine::HttpReadClass::Reconciliation
+    );
     // Unanswered, the read must not hold the account cycle forever.
     let timer = window(&h, from, 20_000.);
     assert!(timer.is_some(), "the positions read has no deadline");

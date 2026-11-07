@@ -161,9 +161,13 @@ http('POST', '/api/v5/trade/order-algo', [{ algoId: '302', algoClOrdId: GENERATE
 const placedTrigger = algo({ algoId: '302', ordType: 'trigger', side: 'buy', reduceOnly: 'false', triggerPx: '3100', triggerPxType: 'last', ordPx: '-1', sz: '2' });
 push('business', 'algo-advance', [placedTrigger]);
 command({ op: 'amendOrder', id: '302', price: 3150, amount: 3 });
-http('POST', '/api/v5/trade/amend-algos', [{ algoId: '302', sCode: '0', sMsg: '' }], {
+const legacyTriggerAmend = {
   instId: ETH, algoId: '302', newTriggerPx: '3150', newOrdPx: '-1', newTriggerPxType: 'last', newSz: '3',
-});
+};
+// Rust explicitly retains the original on failure; TS sends the implicit-false default.
+// Match each exact body so a cancel-on-failure request cannot borrow this ACK.
+http('POST', '/api/v5/trade/amend-algos', [{ algoId: '302', sCode: '0', sMsg: '' }],
+  { ...legacyTriggerAmend, cxlOnFail: false }, { tsRequestBody: legacyTriggerAmend });
 push('business', 'orders-algo', [{ ...placedTrigger, triggerPx: '3150', sz: '3', uTime: '1760880005000' }]);
 command({ op: 'cancelOrders', ids: ['302'] });
 http('POST', '/api/v5/trade/cancel-algos', [{ algoId: '302', sCode: '0', sMsg: '' }], [{ instId: ETH, algoId: '302' }]);

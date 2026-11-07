@@ -25,9 +25,15 @@ pub struct Product<'a> {
     pub max_order_qty_rq: f64,
     #[serde(deserialize_with = "number")]
     pub max_leverage: f64,
+    #[serde(default, borrow)]
+    pub status: Str<'a>,
 }
 impl Product<'_> {
     pub fn supported(&self) -> bool {
+        // A delisted market has no last price, and an order sized from it cannot be sent.
+        if self.status == "Delisted" {
+            return false;
+        }
         self.kind == "PerpetualV2" && matches!(self.settle_currency.as_ref(), "USDT" | "USDC")
     }
     pub fn valid(&self) -> bool {
@@ -198,6 +204,8 @@ pub struct CandleRow(
     pub N,
     pub N,
     serde::de::IgnoredAny,
+    // REST rows append the symbol; socket `kline_p` rows stop at turnover.
+    #[serde(default)] serde::de::IgnoredAny,
 );
 impl CandleRow {
     pub fn candle(&self) -> Candle {
@@ -247,4 +255,16 @@ pub fn snapshot_sides(text: &str) -> bool {
         _asks: &'a serde_json::value::RawValue,
     }
     serde_json::from_str::<Sides<'_>>(text).is_ok()
+}
+
+#[cfg(test)]
+mod product_tests {
+    use super::*;
+
+    #[test]
+    fn a_delisted_product_is_not_a_market() {
+        let row = r#"{"symbol":"APTUSDT","status":"Delisted","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"APT","quoteCurrency":"USDT","qtyStepSize":"0.01","tickSize":"0.01","maxOrderQtyRq":"100","maxLeverage":"20"}"#;
+        let product: Product<'_> = serde_json::from_str(row).unwrap();
+        assert!(!product.supported());
+    }
 }

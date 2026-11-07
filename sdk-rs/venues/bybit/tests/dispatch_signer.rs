@@ -393,10 +393,19 @@ fn ready_options(options: Options) -> (Harness, Arc<Gate>) {
         if h.has_request("status=PreLaunch") {
             h.respond("status=PreLaunch", 200, EMPTY);
         }
-        h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
-        h.respond("/v5/market/tickers", 200, support::TICKERS);
+        // Signing stamps here follow the host clock, so no answer calibrates it.
+        h.respond(
+            "/v5/market/instruments-info",
+            200,
+            &support::untimed(support::INSTRUMENTS),
+        );
+        h.respond(
+            "/v5/market/tickers",
+            200,
+            &support::untimed(support::TICKERS),
+        );
     } else {
-        h.load_public();
+        h.load_public_untimed();
     }
     if variant.is_hyro() {
         let socket = h.socket("/v5/private").unwrap();
@@ -738,7 +747,10 @@ fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence
             Some(Outcome::Rejected),
             "provider_first={provider_first}: a native refusal proves a POST reached the venue"
         );
-        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
+        assert_eq!(
+            error.kind,
+            Some(safe_cex_engine::ErrorKind::InsufficientBalance)
+        );
         assert_eq!(error.venue_code.as_deref(), Some("110007"));
         // The journal reports the earliest leg that reached the venue.
         assert!(
@@ -1109,9 +1121,18 @@ fn hyro_retry_refused_after_a_released_create_stays_unknown() {
         error: "lost after dispatch",
     });
     h.respond("/v5/order/realtime", 200, EMPTY_PAGE);
-    // Both axes are now complete and absent: the same-ID retry is signed next.
-    gate.mode.store(2, Ordering::SeqCst);
     h.respond("/v5/order/history", 200, EMPTY_PAGE);
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        h.respond(&format!("orderStatus={status}"), 200, EMPTY_PAGE);
+    }
+    // A caller retry must still reconcile under its original uncertainty.
+    gate.mode.store(2, Ordering::SeqCst);
+    h.command(Command::PlaceOrders {
+        command: 43,
+        orders: vec![order()],
+    });
+    assert!(!h.has_request("/v5/order/create"));
+    assert_eq!(h.outcomes.last(), Some(&(43, Some(Outcome::Unknown))));
     assert_eq!(
         h.outcomes
             .iter()

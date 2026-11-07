@@ -3,11 +3,15 @@
 // user commands with their responses. Replay it with the gate.
 //
 //   corepack yarn rust:private-tape-bybit --out sdk-rs/harness/tapes/bybit-private.jsonl
+//   corepack yarn rust:private-tape-bybit --history-only --out sdk-rs/harness/tapes/bybit-history-private.jsonl
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 
-const { values } = parseArgs({ options: { out: { type: 'string', default: 'sdk-rs/harness/tapes/bybit-private.jsonl' } } });
+const { values } = parseArgs({ options: {
+  out: { type: 'string', default: 'sdk-rs/harness/tapes/bybit-private.jsonl' },
+  'history-only': { type: 'boolean', default: false },
+} });
 
 const REST = 'https://api.bybit.com';
 const PRIVATE = 'wss://stream.bybit.com/v5/private';
@@ -80,7 +84,7 @@ const stop = order({
   reduceOnly: true, closeOnTrigger: true, timeInForce: 'IOC',
 });
 const page = (list) => ok({ list, nextPageCursor: '', category: 'linear' });
-http('GET', '/v5/order/realtime', 'category=linear&settleCoin=USDT&limit=50&cursor=', page([resting, stop]));
+http('GET', '/v5/order/realtime', 'category=linear&settleCoin=USDT&limit=50&cursor=', page(values['history-only'] ? [] : [resting, stop]));
 http('GET', '/v5/order/realtime', 'category=linear&settleCoin=USDC&limit=50&cursor=', page([]));
 
 // "Get Position Info": a one-way BTCUSDT long and a flat ETHUSDT row carrying its leverage.
@@ -97,7 +101,7 @@ const btc = position({
   unrealisedPnl: '10', curRealisedPnl: '-0.5',
 });
 const eth = position({ symbol: 'ETHUSDT', leverage: '20', markPrice: '3000' });
-http('GET', '/v5/position/list', 'category=linear&settleCoin=USDT&limit=200&cursor=', page([btc, eth]));
+http('GET', '/v5/position/list', 'category=linear&settleCoin=USDT&limit=200&cursor=', page(values['history-only'] ? [btc] : [btc, eth]));
 http('GET', '/v5/position/list', 'category=linear&settleCoin=USDC&limit=200&cursor=', page([]));
 
 // "Get Wallet Balance".
@@ -165,7 +169,45 @@ ws(PRIVATE, stream('order', [
   { ...stop, orderStatus: 'Deactivated', leavesQty: '0', rejectReason: 'EC_PerCancelRequest' },
 ]));
 
+if (values['history-only']) {
+  // Bybit Tech Bot API announcement, effective 2026-11-12. Default history
+  // omits these terminal orders. Each explicit status owns its cursor, even
+  // when the venue reuses the same token; repeated order IDs must merge once.
+  const historyFrom = 1760880000000;
+  const historyTo = historyFrom + 60_000;
+  const historyRows = ['Filled', 'Cancelled', 'Rejected', 'Deactivated'].map((orderStatus, index) => order({
+    orderId: `history-${orderStatus}`, symbol: 'ETHUSDT', side: 'Buy', orderStatus,
+    price: '3000', qty: '1', cumExecQty: orderStatus === 'Filled' ? '1' : '0',
+    avgPrice: orderStatus === 'Filled' ? '3000' : '',
+    createdTime: String(historyFrom + index), updatedTime: String(historyFrom + index),
+  }));
+  command({
+    op: 'fetchOrderHistory', symbol: 'ETHUSDT', from: historyFrom, to: historyTo,
+    expected: [...historyRows].reverse().map((row) => ({
+      id: row.orderId, symbol: 'ETHUSDT', side: 'buy', type: 'limit',
+      status: row.orderStatus === 'Cancelled' ? 'canceled' : 'closed',
+      price: 3000, ...(row.orderStatus === 'Filled' ? { averagePrice: 3000 } : {}),
+      amount: 1, filled: Number(row.cumExecQty), reduceOnly: false, positionSide: 'both',
+      createdTime: Number(row.createdTime), updatedTime: Number(row.updatedTime),
+    })),
+  });
+  const historyQuery = `category=linear&symbol=ETHUSDT&startTime=${historyFrom}&endTime=${historyTo}&limit=50`;
+  http('GET', '/v5/order/history', historyQuery, page([historyRows[0]]));
+  for (const row of historyRows.slice(1)) {
+    const query = `${historyQuery}&orderStatus=${row.orderStatus}`;
+    http('GET', '/v5/order/history', query, ok({ list: [row], nextPageCursor: 'shared', category: 'linear' }));
+    http('GET', '/v5/order/history', `${query}&cursor=shared`, page([row]));
+  }
+}
+
 mkdirSync(dirname(values.out), { recursive: true });
-records.sort((a, b) => a.t - b.t);
-writeFileSync(values.out, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
-console.log(JSON.stringify({ out: values.out, records: records.length }));
+// The focused gate keeps the real private startup and history command while
+// the ordinary lifecycle corpus remains byte-for-byte unchanged.
+const output = values['history-only'] ? records.filter((record) => {
+  if (record.type === 'http') return record.method === 'GET';
+  if (record.type === 'command') return record.op === 'fetchOrderHistory';
+  return record.url === PUBLIC || JSON.parse(record.text).op === 'auth';
+}) : records;
+output.sort((a, b) => a.t - b.t);
+writeFileSync(values.out, `${output.map((r) => JSON.stringify(r)).join('\n')}\n`);
+console.log(JSON.stringify({ out: values.out, records: output.length }));

@@ -6,6 +6,7 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 import type { Market } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
+import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -26,6 +27,9 @@ const setup = (publicDataOnly = false) => {
   const command = vi.fn().mockResolvedValue(125);
   Object.defineProperty(exchange, 'command', { value: command });
   adoptEngineCapabilities(exchange);
+  // The metadata refresh waits for the engine's own markets; no engine starts here.
+  Object.defineProperty(exchange, 'nativeLoaded', { value: LOADED_FLAG.MARKETS, writable: true });
+  Object.defineProperty(exchange, 'start', { value: async () => undefined });
   return { exchange, store, command };
 };
 

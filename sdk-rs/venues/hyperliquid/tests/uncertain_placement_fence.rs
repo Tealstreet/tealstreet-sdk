@@ -1,11 +1,11 @@
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, Outcome, Response, Venue,
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+use support::prepared_now;
 
 const SPOT_META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"1","markPx":"1","prevDayPx":"1","dayNtlVlm":"100"}]]"#;
 
@@ -26,16 +26,10 @@ fn response(engine: &mut Engine<Hyperliquid>, now: f64, request: &HttpRequest, b
 fn boot(spot: bool) -> (Engine<Hyperliquid>, HttpRequest) {
     let options = Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Options::default()
     };
-    let venue = if spot {
-        Hyperliquid::new_spot(options)
-    } else {
-        Hyperliquid::new(options)
-    };
-    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+    let mut engine = support::private_engine(options, support::TEST_SECRET.into(), spot);
     engine.start(1_000.0);
     let mut old_read = None;
     for _ in 0..20 {
@@ -90,7 +84,25 @@ fn place(engine: &mut Engine<Hyperliquid>, now: f64, command: u32, spot: bool) -
             orders: vec![order],
         }),
     );
-    prepared_now(engine).into_iter().collect()
+    let mut actions: Vec<_> = prepared_now(engine).into_iter().collect();
+    let approvals: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Http(request)
+                if request.url.ends_with("/info") && support::kind(request) == "maxBuilderFee" =>
+            {
+                Some(request.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    for approval in approvals {
+        // The live command promotes only the startup builder read; its held
+        // pre-mark order census remains outstanding and keeps its original epoch.
+        response(engine, now, &approval, "30");
+        actions.extend(prepared_now(engine));
+    }
+    actions
 }
 
 fn write(actions: &[Action]) -> &HttpRequest {
@@ -308,4 +320,40 @@ fn failed_reconciliation_is_reasked_without_replaying_the_write() {
     for spot in [false, true] {
         unknown_then_stale_then_fresh(spot, ReconcileReply::Lost);
     }
+}
+
+#[test]
+fn a_fence_an_unreadable_order_holds_says_why() {
+    let spot = false;
+    let (mut engine, old_read) = boot(spot);
+    let first = place(&mut engine, 2_000.0, 101, spot);
+    let first = write(&first);
+    engine.handle(
+        2_400.0,
+        Event::HttpFailed {
+            request: first.id,
+            error: "placement reply lost after dispatch",
+        },
+    );
+    prepared_now(&mut engine).into_iter().for_each(drop);
+    response(&mut engine, 2_900.0, &old_read, "[]");
+    let fresh = prepared_now(&mut engine)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if support::kind(&request) == "frontendOpenOrders" => {
+                Some(request)
+            }
+            _ => None,
+        })
+        .expect("a fresh read follows");
+    response(&mut engine, 4_000.0, &fresh, r#"[{"oid":7}]"#);
+    let held = place(&mut engine, 6_500.0, 105, spot);
+    refused(&held, 105);
+    assert!(
+        held.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandFailed { command: 105, error })
+            if error.message.contains("Cancel that order on Hyperliquid")
+        )),
+        "{held:?}"
+    );
 }

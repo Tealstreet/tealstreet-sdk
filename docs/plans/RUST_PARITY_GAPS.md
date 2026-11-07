@@ -928,3 +928,48 @@ Gate PASS above means the existing replay oracle passed. The landing audit notes
 partial final-state comparisons and Binance/Bybit margin-size normalization;
 this PR does not turn those checks into full financial or live-account evidence.
 Those unchanged limitations remain in [RUST_AUDITS.md](RUST_AUDITS.md#gate-honesty).
+
+## Differential parity: accepted differences and the parity report
+
+Owner: claude-tbz5hr (2026-10-28). The differential harness is the existing
+replay gate. `sdk-rs/harness/gate.mjs` replays one recorded tape through the
+TS adapter and the Rust/wasm engine, then compares markets, tickers, books,
+account orders, positions, balance, fills, settings, flat-position PnL and
+command results, including errors. This change adds a third classification
+next to the known failures.
+
+- **Accepted differences** (`sdk-rs/harness/accepted-differences.json`) are
+  TS/Rust output differences kept on purpose: `rust-better` (Rust is more
+  correct or fresher, such as a later freshness epoch) or `ts-unsupported`
+  (TS cannot express the native value). Each entry names the exact venue
+  and tape SHA, lists the exact failure lines with both values, and carries
+  a rationale and evidence. The
+  auditor's exact-tree GO on the PR that adds an entry is its sign-off.
+- **Known failures** (`known-gate-failures.json`) stay debt: they never
+  certify parity.
+- **New** diagnostics fail verification, as before.
+
+`known-failure-policy.mjs` classifies each diagnostic key. An accepted key
+must be an output comparison (account, command results, books, markets or
+tickers). Performance, coverage, transport and harness-integrity diagnostics
+can never be accepted. A path cannot be both known and accepted, and an
+accepted key that a complete replay no longer reproduces fails verification
+as stale. The values are pinned too: if either value at an accepted path
+changes, that is a new divergence. A harness test requires each entry's tape
+to belong to a CI gate case. Private tapes are generated in CI, so
+`verify-gates.mjs` then requires each suite's ledger to replay every accepted
+entry it owns at the recorded tape SHA. A re-recorded or dropped tape cannot
+leave an acceptance unchecked.
+`verify-gates.mjs` labels a gate whose only differences are
+accepted `PARITY WITH ACCEPTED DIFFERENCES` and counts those gates separately
+from known failures.
+
+`sdk-rs/harness/parity-report.mjs` aggregates gate reports, either `gate.json`
+files or a gate ledger directory (`--ledger`). It prints a per-venue,
+per-entity table of accepted, known and new counts, with samples in `--json`.
+It reports and never gates.
+
+Work order: Bitget end to end first, then the cross-venue client-ID and
+time-in-force classes, then the beta venue families. Every remaining
+divergence becomes a fix or an accepted entry. Hyperliquid freshness is out of
+scope; Hyperliquid divergences go to the Hyperliquid lane.

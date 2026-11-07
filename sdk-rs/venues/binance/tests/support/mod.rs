@@ -9,13 +9,52 @@ mod config;
 #[allow(unused_imports)]
 pub use config::keyed;
 pub use config::{Options, engine};
+use safe_cex_engine::signing::{
+    Algorithm, Capability, KeyRef, Provider, SignError, SignFuture, SignRequest, SignResult, Signer,
+};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-pub const EXCHANGE_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"#;
+/// The fixture's local signer, made to defer while `hold` is set: each signature
+/// is then a parked `Action::Sign` that the test delivers in the order it chooses.
+struct Gated {
+    inner: Provider,
+    hold: Arc<AtomicBool>,
+}
+impl Signer for Gated {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.inner.sign(request)
+    }
+    fn immediate(&self) -> bool {
+        !self.hold.load(Ordering::SeqCst)
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if self.hold.load(Ordering::SeqCst) {
+            None
+        } else {
+            self.inner.sign_ready(request)
+        }
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+}
+
+pub struct Deferred {
+    inner: Provider,
+    hold: Arc<AtomicBool>,
+    /// Parked signatures in arrival order: (attempt, work).
+    pub parked: Vec<(RequestId, SignRequest)>,
+}
+
+pub const EXCHANGE_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"MIN_NOTIONAL","notional":"5"},{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"#;
 pub const DAILY: &str = r#"[{"symbol":"BTCUSDT","lastPrice":"100","priceChangePercent":"1","volume":"2","quoteVolume":"3"}]"#;
 pub const BOOK_TICKERS: &str = r#"[{"symbol":"BTCUSDT","bidPrice":"99.9","askPrice":"100.1"}]"#;
 pub const PREMIUM: &str = r#"[{"symbol":"BTCUSDT","markPrice":"100","indexPrice":"100","lastFundingRate":"0.0001","nextFundingTime":1700000000000}]"#;
 
 pub struct Harness {
+    /// The latest body answered per path, to repeat for the first open's position read.
+    answered: Vec<(String, String)>,
     pub engine: Engine<BinanceFutures>,
     pub now: f64,
     pub requests: Vec<HttpRequest>,
@@ -26,6 +65,9 @@ pub struct Harness {
     pub done: Vec<(u32, Result<String, String>)>,
     /// Structured detail of failed commands.
     pub failures: Vec<(u32, safe_cex_engine::VenueError)>,
+    /// Startup failures a test expects; any other panics.
+    pub expect_startup_failure: bool,
+    pub startup_failures: Vec<safe_cex_engine::VenueError>,
     pub logs: Vec<String>,
     /// Logs at `Level::Error`, also present in `logs`.
     pub errors: Vec<String>,
@@ -34,6 +76,7 @@ pub struct Harness {
     pub command_notices: Vec<(u32, &'static str)>,
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
     pub progress_at_request: Vec<(RequestId, usize)>,
+    pub deferred: Option<Deferred>,
 }
 
 impl Harness {
@@ -60,7 +103,35 @@ impl Harness {
         Self::from_engine(engine)
     }
 
+    /// `started`, with signing that defers on `hold_signatures(true)`.
+    pub fn started_deferred(options: Options) -> Self {
+        let (venue, inner) = options.build();
+        let hold = Arc::new(AtomicBool::new(false));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+        engine
+            .set_signer(Some(Arc::new(Gated {
+                inner: inner.clone(),
+                hold: hold.clone(),
+            })))
+            .unwrap();
+        engine
+            .set_public_feed_policy(PublicFeedPolicy::Direct)
+            .unwrap();
+        Self::build(
+            engine,
+            Some(Deferred {
+                inner,
+                hold,
+                parked: Vec::new(),
+            }),
+        )
+    }
+
     pub fn from_engine(engine: Engine<BinanceFutures>) -> Self {
+        Self::build(engine, None)
+    }
+
+    fn build(engine: Engine<BinanceFutures>, deferred: Option<Deferred>) -> Self {
         let mut harness = Self {
             engine,
             now: 1_000.0,
@@ -69,8 +140,11 @@ impl Harness {
             sent: Vec::new(),
             closed: Vec::new(),
             timers: Vec::new(),
+            answered: Vec::new(),
             done: Vec::new(),
             failures: Vec::new(),
+            expect_startup_failure: false,
+            startup_failures: Vec::new(),
             logs: Vec::new(),
             errors: Vec::new(),
             command_errors: Vec::new(),
@@ -78,6 +152,7 @@ impl Harness {
             events: Vec::new(),
             progress: Vec::new(),
             progress_at_request: Vec::new(),
+            deferred,
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -95,8 +170,86 @@ impl Harness {
         }
     }
 
+    pub fn hold_signatures(&mut self, hold: bool) {
+        let deferred = self.deferred.as_ref().expect("a deferred-signing harness");
+        deferred.hold.store(hold, Ordering::SeqCst);
+    }
+
+    /// Delivers the parked signature of the request whose path contains `path`.
+    pub fn sign(&mut self, path: &str) {
+        let deferred = self.deferred.as_mut().expect("a deferred-signing harness");
+        let index = deferred
+            .parked
+            .iter()
+            .position(|(_, work)| work.context.path.contains(path))
+            .unwrap_or_else(|| panic!("no parked signature for {path}"));
+        let (attempt, work) = deferred.parked.remove(index);
+        let result = deferred.inner.sign_ready(&work).expect("local signer");
+        self.event(Event::Signed { attempt, result });
+    }
+
+    /// Prepares every managed route at once and parks each `Action::Sign`.
+    fn deferred_actions(&mut self) -> Vec<Action> {
+        use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+        let now = self.now;
+        self.engine.prepare_dispatch(now);
+        let mut queue: std::collections::VecDeque<_> = self.engine.drain_actions().collect();
+        let mut actions = Vec::new();
+        while let Some(action) = queue.pop_front() {
+            match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => {
+                        if self.engine.http_preparation_pending(preparation) {
+                            let id = request.id.0;
+                            let prepared = Prepared {
+                                id,
+                                expires_at: None,
+                            };
+                            self.engine.http_prepared(now, preparation, prepared);
+                        }
+                    }
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => match self.engine.claim_http(now, permit) {
+                        Ok(Claim::Released(_)) => actions.push(Action::Http(request)),
+                        Ok(Claim::WaitUntil(_)) => panic!("delayed fixture pacing is unsupported"),
+                        Err(_) => {}
+                    },
+                    HttpAction::BindGroup { .. } => {
+                        panic!("grouped binds are unsupported by the deferred fixture")
+                    }
+                    HttpAction::Cancel { .. } => {}
+                },
+                Action::Sign { attempt, work, .. } => {
+                    let deferred = self.deferred.as_mut().expect("checked by caller");
+                    deferred.parked.push((attempt, work));
+                }
+                action => actions.push(action),
+            }
+            for action in self
+                .engine
+                .drain_actions()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+            {
+                queue.push_front(action);
+            }
+        }
+        actions
+    }
+
     pub fn collect(&mut self) {
-        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
+        let actions = if self.deferred.is_some() {
+            self.deferred_actions()
+        } else {
+            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now)
+        };
+        for action in actions {
             match action {
                 Action::RetireAddressSetup { .. } => {
                     panic!("address setup is unsupported in the binance test harness")
@@ -104,9 +257,7 @@ impl Harness {
                 Action::ManagedHttp(_) => {
                     panic!("managed HTTP preparation is not configured in this harness yet")
                 }
-                Action::SignPayload { .. }
-                | Action::Sign { .. }
-                | Action::SignedOutbound { .. } => {
+                Action::Sign { .. } | Action::SignedOutbound { .. } => {
                     panic!("delegated signing is unsupported in the binance test harness")
                 }
                 Action::Http(request) => {
@@ -140,9 +291,16 @@ impl Harness {
                     self.done.push((command, Err(error.legacy_text())));
                     self.failures.push((command, error));
                 }
-                Action::Notice(Notice::StartupFailed { error }) => {
-                    panic!("unexpected Binance startup failure: {error}")
+                Action::Notice(Notice::StartupFailed { error, .. }) => {
+                    assert!(
+                        self.expect_startup_failure,
+                        "unexpected Binance startup failure: {error}"
+                    );
+                    self.startup_failures.push(error);
                 }
+                // The rig's public socket stays silent, so this notice is true here.
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
                 Action::Notice(Notice::Event(event)) => {
                     if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE {
                         for (key, value) in &event.fields {
@@ -223,8 +381,33 @@ impl Harness {
     }
 
     pub fn respond(&mut self, path: &str, status: u16, body: &str) {
+        self.answered.push((path.to_owned(), body.to_owned()));
         let request = self.take(path).id;
         self.reply(request, status, "", body);
+    }
+
+    pub fn answered_count(&self, fragment: &str) -> usize {
+        self.answered
+            .iter()
+            .filter(|(path, _)| path.contains(fragment))
+            .count()
+    }
+
+    /// A private open re-reads positions; startup answers it with what it answered before.
+    pub fn answer_open_position_read(&mut self) {
+        for fragment in ["ositionRisk", "symbolConfig"] {
+            let answer = self
+                .answered
+                .iter()
+                .rev()
+                .find(|(path, _)| path.contains(fragment))
+                .cloned();
+            if let Some((path, body)) = answer
+                && self.has_request(&path)
+            {
+                self.respond(&path, 200, &body);
+            }
+        }
     }
 
     pub fn message(&mut self, path: &str, text: &str) {
@@ -248,6 +431,23 @@ impl Harness {
 
     pub fn best_bid(&self) -> Option<f64> {
         self.engine.book("BTCUSDT").and_then(|book| book.best_bid())
+    }
+
+    /// Answer the targeted PM algo query, separately from the DELETE acknowledgement.
+    pub fn pm_cancel_proof(&mut self, native: u64, client: &str, symbol: &str) {
+        let query = self.take("/papi/v1/um/algo/algoOrder");
+        assert_eq!(query.method, safe_cex_engine::Method::Get);
+        assert!(query.url.contains(&format!("algoId={native}")));
+        self.reply(
+            query.id,
+            200,
+            "",
+            &serde_json::json!({
+                "algoId": native, "clientAlgoId": client, "symbol": symbol,
+                "algoStatus": "CANCELED", "actualOrderId": "", "actualPrice": "0", "triggerTime": 0,
+            })
+            .to_string(),
+        );
     }
 
     /// Move the clock forward, firing every timer that comes due.

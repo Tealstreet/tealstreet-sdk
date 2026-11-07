@@ -269,9 +269,47 @@ pub fn candle(row: &[Number], rest: bool) -> Option<Candle> {
     })
 }
 
+/// The request IP is not in the API key's whitelist.
+pub(crate) const IP_REFUSED: &str = "400006";
+
 /// Refused before any request was sent.
 pub(crate) fn not_sent(message: impl Into<String>) -> safe_cex_engine::VenueError {
     safe_cex_engine::VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
+}
+
+// 200002 is a business-layer rate limit for Futures; Spot uses it for suspended cancellation.
+// https://www.kucoin.com/docs-new/error-code/futures
+pub(crate) const FUTURES_RATE_CODES: &[&str] = &["200002", "429000"];
+#[cfg(feature = "spot")]
+pub(crate) const SPOT_RATE_CODES: &[&str] = &["429000"];
+
+/// Legacy ordinary writes must weaken ambiguous evidence before job settlement.
+/// Reads keep the native refusal classification used by startup and recovery.
+pub(crate) fn dispatched_write_failure(
+    status: u16,
+    body: &str,
+    message: String,
+    native_rate_codes: &[&str],
+) -> safe_cex_engine::VenueError {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let mut error = write_failure(status, body, message);
+    let kind = match status {
+        408 => Some(ErrorKind::Timeout),
+        429 => Some(ErrorKind::RateLimited),
+        500.. => Some(ErrorKind::VenueUnavailable),
+        _ if error
+            .venue_code
+            .as_deref()
+            .is_some_and(|code| native_rate_codes.contains(&code)) =>
+        {
+            Some(ErrorKind::RateLimited)
+        }
+        _ => return error,
+    };
+    error.kind = kind;
+    error.outcome = Some(Outcome::Unknown);
+    error.message = "KuCoin write outcome is unknown. Check Open Orders".into();
+    error
 }
 
 /// A failed private write answer. 408/5xx, transport loss (status 0) and
@@ -297,6 +335,10 @@ pub(crate) fn write_failure(
         Some(e) if !e.msg.is_empty() => error.venue_message(e.msg),
         _ => error,
     };
+    // 400006: the request IP is not in the API key's whitelist, at any 4xx or 2xx.
+    if status < 500 && status != 408 && envelope.as_ref().is_some_and(|e| e.code == IP_REFUSED) {
+        return error.outcome(Outcome::Rejected).ip_whitelist_refused();
+    }
     match status {
         200..=299 => {}
         401 => return rejected(error, ErrorKind::AuthInvalid),

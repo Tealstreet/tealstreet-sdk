@@ -3,6 +3,7 @@ use crate::{ApexOmni, Pending, private_wire as wire, read, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::credential_selection::CredentialUnavailable;
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -13,9 +14,10 @@ use safe_cex_engine::request_context::{CommandEntryError, Context, Operation, Re
 use safe_cex_engine::selected_read::{
     BackgroundReadError, CommandReadError, LocalRefusal, ReadPolicy, ReadRole, SelectedRead,
 };
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::socket_lifecycle::{FeedId, SocketError};
 use safe_cex_engine::store::Store;
-use safe_cex_engine::{Command, Cx, Fill, Response, SocketChannel, SocketId, TimerId, VenueError};
+use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::{Command, Cx, Fill, Response, SocketId, TimerId, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -45,13 +47,25 @@ pub enum Request {
         generation: Option<u64>,
         revision: u64,
         rows: SnapshotBuilder<String, Position>,
+        read: u32,
     },
     Orders {
+        read_epoch: u64,
         generation: Option<u64>,
         revision: u64,
         rows: SnapshotBuilder<String, Order>,
     },
     Balance,
+}
+
+fn order_row_symbol(store: &safe_cex_engine::Store, item: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: &'a str,
+    }
+    let row = serde_json::from_str::<Row<'_>>(item).ok();
+    safe_cex_engine::coverage::fence_symbol(store, row.as_ref().map(|row| row.symbol))
 }
 
 /// Rejects a row the snapshot could not map; its stored copies keep their last known state.
@@ -61,12 +75,13 @@ fn reject<T>(
     kind: &str,
     key: &str,
     ids: Vec<String>,
+    symbol: &str,
 ) {
     if key.trim().is_empty() {
         cx.notice(Level::Warn, code::ROW_SKIPPED,
             format!("ApeX skipped malformed {kind} row without an identity; keeping the last known state"),
         );
-        rows.reject(None);
+        rows.reject_in(None, symbol);
         return;
     }
     cx.notice(
@@ -75,7 +90,19 @@ fn reject<T>(
         format!("ApeX skipped malformed {kind} row {key}; keeping its last known state"),
     );
     for id in ids {
-        rows.reject(Some(id));
+        rows.reject_in(Some(id), symbol);
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::Balance => S::BALANCE,
+            _ => S::NONE,
+        }
     }
 }
 
@@ -142,6 +169,9 @@ pub(crate) struct Execution {
 struct Snapshot {
     generation: u64,
     revision: u64,
+    /// The number of this snapshot's positions read, and whether it rejected a row.
+    read: u32,
+    rejected: bool,
     positions: Option<Vec<Position>>,
     orders: Option<Vec<Order>>,
     metadata: Option<(String, String, String)>,
@@ -158,30 +188,34 @@ struct Progress {
 
 #[derive(Default)]
 pub struct Account {
-    supervisor: Supervisor,
-    authenticated: bool,
+    pub(super) feed: Option<FeedId>,
+    pub(super) authenticated: bool,
     pub(crate) account_id: String,
     pub(crate) maker_fee: String,
     pub(crate) taker_fee: String,
     pub(crate) initialized: bool,
     pub(crate) recent_executions: Vec<Execution>,
     started: bool,
-    socket: Option<SocketId>,
-    open: bool,
-    opened_at: f64,
-    ping_at: f64,
+    /// An edge-blocked private read already ended this start.
+    start_blocked: bool,
+    pub(super) socket: Option<SocketId>,
+    pub(super) opened_at: f64,
+    pub(super) ping_at: f64,
     tick: Option<TimerId>,
     orders_heal: Option<TimerId>,
     positions_heal: Option<TimerId>,
     balance_pending: bool,
     positions_pending: bool,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
     orders_pending: bool,
     /// An uncertain placement asked for an orders read dispatched after its mark.
     reconcile_owed: bool,
     /// The orders read in flight started after every such ask, so it may release the fence.
     order_read_fresh: bool,
     snapshot: Option<Snapshot>,
-    generation: u64,
+    pub(super) generation: u64,
     revision: u64,
     position_versions: HashMap<String, (u64, f64, Position)>,
     leverage_versions: HashMap<String, (u64, f64, f64)>,
@@ -190,6 +224,9 @@ pub struct Account {
     snapshot_floor: u64,
     terminal: HashMap<String, (u64, OrderStatus)>,
     cancelling: HashMap<String, f64>,
+    /// Resting STOP_MARKET and TAKE_PROFIT_MARKET orders: an edit or put-back
+    /// keeps the market type, which fills through a gap where a limit may not.
+    market_triggers: HashSet<String>,
     seen: HashSet<String>,
     seen_queue: VecDeque<String>,
     progress: HashMap<String, Progress>,
@@ -197,15 +234,7 @@ pub struct Account {
 
 impl Account {
     pub(crate) fn new() -> Self {
-        Self {
-            supervisor: Supervisor::new(Config {
-                auth_timeout_ms: Some(10_000.0),
-                idle_timeout_ms: 30_000.0,
-                ping_interval_ms: Some(5_000.0),
-                ..Config::default()
-            }),
-            ..Self::default()
-        }
+        Self::default()
     }
 
     pub(crate) fn note_leverage(&mut self, symbol: &str, leverage: f64, now: f64) {
@@ -215,6 +244,17 @@ impl Account {
     }
     /// An accepted cancel fences older reads and hides the order briefly; only
     /// a venue terminal event tombstones it, so an order the venue kept reappears.
+    pub(crate) fn note_trigger_type(&mut self, raw: &wire::OrderRow<'_>) {
+        let resting = matches!(raw.status.as_ref(), "PENDING" | "OPEN" | "UNTRIGGERED");
+        if resting && matches!(raw.kind.as_ref(), "STOP_MARKET" | "TAKE_PROFIT_MARKET") {
+            self.market_triggers.insert(raw.id.clone());
+        } else {
+            self.market_triggers.remove(&raw.id);
+        }
+    }
+    pub(crate) fn market_trigger(&self, id: &str) -> bool {
+        self.market_triggers.contains(id)
+    }
     pub(crate) fn note_cancel(&mut self, id: &str, now: f64) {
         self.record_order(id, None);
         self.cancelling.retain(|_, at| now - *at < CANCEL_GRACE_MS);
@@ -617,7 +657,9 @@ impl ApexOmni {
             return;
         }
         cx.store.set_hedged(true);
-        self.connect_private(cx);
+        if let Err(error) = self.connect_private(cx) {
+            Self::socket_notice(cx, error);
+        }
         self.refresh_account(cx);
         self.account.tick = Some(cx.set_poll_timer(self.tick_interval()));
     }
@@ -629,42 +671,31 @@ impl ApexOmni {
             .unwrap_or(2000.0)
     }
 
-    fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
-        let host = if self.options.testnet {
-            "qa-quote.omni.apex.exchange"
-        } else {
-            "quote.omni.apex.exchange"
-        };
+    pub(super) fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) -> Result<(), SocketError> {
+        if !cx.now.is_finite() {
+            return Err(SocketError::InvalidTime);
+        }
         self.account.generation += 1;
         self.account.authenticated = false;
-        self.account.supervisor.connecting(cx);
-        self.account.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(format!(
-                    "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
-                    cx.now as u64, self.account.generation
-                ))
-                .channel(SocketChannel::Private),
-            ),
-        );
+        self.proof.borrow_mut().take();
+        self.connect_feed(cx, true)
     }
 
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.supervisor.opened(cx);
         let Some(identity) = self.options.identity.clone() else {
             cx.notice(
                 Level::Error,
                 code::CONFIG_INVALID,
                 "ApeX API key, signing key and passphrase are required",
             );
-            cx.close(socket);
-            self.account_close(cx, socket);
+            if let Some(feed) = self.account.feed {
+                cx.stop_socket_feed(feed);
+            }
             return true;
         };
-        self.account.open = true;
         self.account.opened_at = cx.now;
         // The provider signs the login at dispatch; it precedes the sends below.
         let host = if self.options.testnet {
@@ -691,39 +722,17 @@ impl ApexOmni {
         true
     }
 
-    pub(crate) fn account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+    pub(crate) fn account_close(&mut self, _cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
             return false;
         }
         self.account.socket = None;
-        self.account.open = false;
-        self.account.supervisor.retry(cx);
+        self.account.authenticated = false;
+        self.proof.borrow_mut().take();
         true
     }
 
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.account.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => (),
-            Tick::Reconnect => {
-                self.connect_private(cx);
-                return true;
-            }
-            Tick::Ping => {
-                if let Some(socket) = self.account.socket {
-                    cx.send(socket, r#"{"op":"ping"}"#);
-                    self.account.ping_at = cx.now;
-                }
-                return true;
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.account.socket {
-                    cx.close(socket);
-                    self.account_close(cx, socket);
-                }
-                return true;
-            }
-            Tick::Handled => return true,
-        }
         if self.account.tick == Some(timer) {
             self.account.tick = None;
             self.refresh_account(cx);
@@ -755,6 +764,8 @@ impl ApexOmni {
         self.account.snapshot = Some(Snapshot {
             generation,
             revision: self.account.revision,
+            read: self.account.positions_read + 1,
+            rejected: false,
             positions: None,
             orders: None,
             metadata: None,
@@ -788,10 +799,12 @@ impl ApexOmni {
 
     fn request_positions(&mut self, cx: &mut Cx<'_, Pending>, generation: Option<u64>) {
         self.account.positions_pending = true;
+        self.account.positions_read += 1;
         let pending = Request::Positions {
             generation,
             revision: self.account.revision,
             rows: SnapshotBuilder::default(),
+            read: self.account.positions_read,
         };
         self.snapshot_read(
             cx,
@@ -805,6 +818,7 @@ impl ApexOmni {
         self.account.orders_pending = true;
         self.account.order_read_fresh = std::mem::take(&mut self.account.reconcile_owed);
         let pending = Request::Orders {
+            read_epoch: cx.order_read_epoch(),
             generation,
             revision: self.account.revision,
             rows: SnapshotBuilder::default(),
@@ -856,9 +870,11 @@ impl ApexOmni {
     }
 
     fn snapshot_refused(&mut self, cx: &mut Cx<'_, Pending>, leg: Request, error: String) {
+        let fresh = VenueError::new(error.clone());
         let snapshot = match leg {
-            Request::Positions { .. } => {
+            Request::Positions { read, .. } => {
                 self.account.positions_pending = false;
+                self.account.fresh_positions.failed(cx, 0, read, &fresh);
                 true
             }
             Request::Orders { .. } => {
@@ -871,8 +887,9 @@ impl ApexOmni {
             }
             Request::Identity => return,
         };
-        if snapshot {
-            self.account.snapshot = None;
+        if snapshot && let Some(dropped) = self.account.snapshot.take() {
+            let read = dropped.read;
+            self.account.fresh_positions.failed(cx, 0, read, &fresh);
         }
         cx.notice(Level::Error, code::CONFIG_INVALID, error);
     }
@@ -915,7 +932,7 @@ impl ApexOmni {
                         let legs = [PositionSide::Long, PositionSide::Short]
                             .map(|side| position_id(&symbol, side))
                             .into();
-                        reject(cx, rows, "position", &symbol, legs);
+                        reject(cx, rows, "position", &symbol, legs, "");
                     }
                 }
             }
@@ -928,14 +945,16 @@ impl ApexOmni {
                             cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "ApeX owned order has unavailable market metadata; preserving previous orders");
                             return Err("unknown owned order market".into());
                         }
+                        self.account.note_trigger_type(&raw);
                         map_order(cx.store, &raw, cx.now)
                     })
                 {
                     Ok(mapped) => mapped.into_iter().for_each(|order| rows.push(order)),
                     Err(_) => {
                         let id = wire::row_key(item).id;
+                        let symbol = order_row_symbol(cx.store, item);
                         let ids = vec![id.clone()];
-                        reject(cx, rows, "order", &id, ids);
+                        reject(cx, rows, "order", &id, ids, &symbol);
                     }
                 }
             }
@@ -991,6 +1010,7 @@ impl ApexOmni {
                 generation,
                 revision,
                 rows,
+                read,
             } => {
                 self.account.positions_pending = false;
                 let metadata = data
@@ -998,9 +1018,12 @@ impl ApexOmni {
                 let Some(metadata) =
                     metadata.filter(|m| m.positions.get().starts_with('[') && !m.id.is_empty())
                 else {
+                    let error = VenueError::new("ApeX positions: invalid account snapshot");
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
                     self.snapshot_failed(cx, generation, "invalid account snapshot");
                     return;
                 };
+                let rejected = rows.rejected() != 0;
                 let rows = rows.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                 let fees = metadata
                     .contract_account
@@ -1019,17 +1042,20 @@ impl ApexOmni {
                         .filter(|s| s.generation == generation)
                     {
                         snapshot.positions = Some(rows);
+                        snapshot.rejected = rejected;
                         snapshot.metadata = Some((metadata.id, fees.0, fees.1));
                     }
                     self.commit_snapshot(cx);
                 } else {
-                    self.commit_positions(cx, rows, revision);
+                    let held = self.commit_positions(cx, rows, revision);
+                    self.settle_fresh_positions(cx, read, rejected, held);
                     self.account.account_id = metadata.id;
                     self.account.maker_fee = fees.0;
                     self.account.taker_fee = fees.1;
                 }
             }
             Request::Orders {
+                read_epoch,
                 generation,
                 revision,
                 rows,
@@ -1048,8 +1074,8 @@ impl ApexOmni {
                     return;
                 }
                 // A clean read started after the mark releases the fence once published.
-                let release =
-                    rows.rejected() == 0 && std::mem::take(&mut self.account.order_read_fresh);
+                let release = std::mem::take(&mut self.account.order_read_fresh);
+                let unproven = rows.unproven().to_vec();
                 // Bracket children share their parent's identity.
                 let rows = rows.commit(cx.store.orders().iter().cloned(), |o| {
                     base_id(&o.id).to_owned()
@@ -1065,12 +1091,12 @@ impl ApexOmni {
                     }
                     // Released here only: this response's token certifies the orders read.
                     if self.commit_snapshot(cx) && release {
-                        cx.orders_reconciled(None);
+                        cx.orders_reconciled_except(&unproven, read_epoch);
                     }
                 } else {
                     self.commit_orders(cx, rows, revision);
                     if release {
-                        cx.orders_reconciled(None);
+                        cx.orders_reconciled_except(&unproven, read_epoch);
                     }
                 }
                 if self.account.reconcile_owed {
@@ -1132,8 +1158,12 @@ impl ApexOmni {
                 .snapshot
                 .as_ref()
                 .is_some_and(|s| s.generation == generation)
-        }) {
-            self.account.snapshot = None;
+        }) && let Some(dropped) = self.account.snapshot.take()
+        {
+            let fresh = VenueError::new(format!("ApeX positions: {error}"));
+            self.account
+                .fresh_positions
+                .failed(cx, 0, dropped.read, &fresh);
         }
         cx.notice(
             Level::Warn,
@@ -1149,17 +1179,43 @@ impl ApexOmni {
         context: &Context,
         error: VenueError,
     ) {
+        // An IP-bound key is refused here too, but it works again from an allowed IP.
+        // Only a refused start ends the account; later reads retry, as legacy's did.
+        let refused_at_start = cx.startup_read_refused(&error);
+        if refused_at_start && error.venue_code.as_deref() == Some("10002") {
+            cx.deactivate();
+        }
+        let loaded = cx.store.loaded();
+        if crate::is_edge_blocked(&error)
+            && !(loaded.balance && loaded.orders && loaded.positions)
+            && !std::mem::replace(&mut self.account.start_blocked, true)
+        {
+            cx.startup_failed(error.clone());
+        }
         let generation = match request {
             Request::Identity => {
                 let _ = cx.fail_context(context, error);
                 return;
             }
-            Request::Positions { generation, .. } => {
+            Request::Positions {
+                generation, read, ..
+            } => {
                 self.account.positions_pending = false;
+                self.account.fresh_positions.failed(cx, 0, read, &error);
                 generation
             }
             Request::Orders { generation, .. } => {
                 self.account.orders_pending = false;
+                // The positions half of this snapshot commits only with its orders.
+                if let Some(snapshot) = self
+                    .account
+                    .snapshot
+                    .as_ref()
+                    .filter(|s| Some(s.generation) == generation)
+                {
+                    let read = snapshot.read;
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
+                }
                 generation
             }
             Request::Balance => {
@@ -1189,11 +1245,12 @@ impl ApexOmni {
             );
             return false;
         }
-        self.commit_positions(
+        let held = self.commit_positions(
             cx,
             snapshot.positions.expect("positions"),
             snapshot.revision,
         );
+        self.settle_fresh_positions(cx, snapshot.read, snapshot.rejected, held);
         self.commit_orders(cx, snapshot.orders.expect("orders"), snapshot.revision);
         if let Some((id, maker, taker)) = snapshot.metadata {
             self.account.account_id = id;
@@ -1206,16 +1263,64 @@ impl ApexOmni {
         true
     }
 
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started || self.options.public_data_only || self.options.identity.is_none()
+        {
+            let error = VenueError::new("ApeX account is not loaded")
+                .kind(safe_cex_engine::ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.positions_read + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.refresh_positions(cx);
+        }
+    }
+
+    fn settle_fresh_positions(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: u32,
+        rejected: bool,
+        held: bool,
+    ) {
+        if rejected {
+            let error = VenueError::new("ApeX positions: a row could not be mapped");
+            self.account.fresh_positions.failed(cx, 0, read, &error);
+        } else if !held {
+            self.account.fresh_positions.committed(cx, 0, read, &[]);
+        }
+    }
+
+    /// With the delivered read's context retired: at once for a waiter it predates,
+    /// else once the stream frame that held it is past its guard.
+    pub(crate) fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        let fresh = &self.account.fresh_positions;
+        if self.account.positions_pending || self.account.snapshot.is_some() || !fresh.owed(0) {
+            return;
+        }
+        if fresh.predates(0, self.account.positions_read) {
+            self.refresh_positions(cx);
+        } else if self.account.positions_heal.is_none() {
+            self.account.positions_heal = Some(cx.set_timer(1000.0));
+        }
+    }
+
+    /// Whether a newer or too recent stream row overrode this read.
     fn commit_positions(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut rows: Vec<Position>,
         revision: u64,
-    ) {
+    ) -> bool {
+        let mut held = false;
         for row in &mut rows {
             if let Some((version, at, last)) = self.account.position_versions.get(&row.id)
                 && (*version > revision || cx.now - at < 1000.0)
             {
+                held = true;
                 *row = cx.store.position(&row.id).unwrap_or(last).clone();
             }
         }
@@ -1227,6 +1332,7 @@ impl ApexOmni {
                     .get(&current.id)
                     .is_some_and(|(version, at, _)| *version > revision || cx.now - at < 1000.0)
             {
+                held = true;
                 rows.push(current.clone());
             }
         }
@@ -1239,6 +1345,7 @@ impl ApexOmni {
             }
         }
         Self::apply_positions(cx, rows);
+        held
     }
 
     fn apply_positions(cx: &mut Cx<'_, Pending>, rows: Vec<Position>) {
@@ -1362,7 +1469,6 @@ impl ApexOmni {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
             return true;
         };
@@ -1372,7 +1478,7 @@ impl ApexOmni {
                 .map(|args| args.get())
                 .filter(|args| args.starts_with('[') && *args != "[]")
                 .map(str::to_owned)
-                .unwrap_or_else(|| format!(r#"["{}"]"#, cx.now as u64));
+                .unwrap_or_else(|| format!(r#"["{}"]"#, cx.protocol_now() as u64));
             cx.send(socket, format!(r#"{{"op":"pong","args":{args}}}"#));
         }
         if message.op == "pong" || message.ret_msg == "pong" || message.pong.is_some() {
@@ -1380,7 +1486,9 @@ impl ApexOmni {
                 .set_latency(((cx.now - self.account.ping_at).max(0.0) / 2.0).round());
         }
         if message.success == Some(false) {
-            let rejected = if message.op == "login" {
+            let rejected = if message.op == "login"
+                || super::socket_codec::documented_login_refusal(&message.op, &message.ret_msg)
+            {
                 code::AUTH_REJECTED
             } else {
                 code::SUBSCRIPTION_REJECTED
@@ -1390,15 +1498,7 @@ impl ApexOmni {
                 rejected,
                 format!("ApeX private socket rejected request: {}", message.ret_msg),
             );
-            if message.op == "login" {
-                cx.close(socket);
-                self.account_close(cx, socket);
-            }
             return true;
-        }
-        if message.op == "login" && message.success == Some(true) {
-            self.account.authenticated = true;
-            self.account.supervisor.authenticated(cx);
         }
         if message.topic != "ws_zk_accounts_v3" {
             return true;
@@ -1406,12 +1506,8 @@ impl ApexOmni {
         let Some(contents) = message.contents else {
             return true;
         };
-        if !self.account.authenticated
-            && matches!(message.kind.as_ref(), "snapshot" | "delta")
-            && self.private_auth_payload(cx.store, &contents, cx.now)
-        {
-            self.account.authenticated = true;
-            self.account.supervisor.authenticated(cx);
+        if !self.account.authenticated {
+            return true;
         }
         let snapshot = message.kind == "snapshot";
         for (kind, skipped) in [
@@ -1428,7 +1524,7 @@ impl ApexOmni {
                     code::ROW_SKIPPED,
                     format!(
                         "ApeX private stream skipped malformed {kind} rows ({})",
-                        skipped.join(", ")
+                        skipped.join_with(", ")
                     ),
                 );
             }
@@ -1523,7 +1619,12 @@ impl ApexOmni {
             .retain(|execution| execution.qty > 0.0);
     }
 
-    fn private_auth_payload(&self, store: &Store, contents: &wire::Contents<'_>, now: f64) -> bool {
+    pub(super) fn private_auth_payload(
+        &self,
+        store: &Store,
+        contents: &wire::Contents<'_>,
+        now: f64,
+    ) -> bool {
         let has_rows = contents.fills.is_some()
             || contents.orders.is_some()
             || contents.positions.is_some()
@@ -1676,6 +1777,7 @@ impl ApexOmni {
         raw: &wire::OrderRow<'_>,
         snapshot: bool,
     ) {
+        self.account.note_trigger_type(raw);
         let rows = match map_order(cx.store, raw, cx.now) {
             Ok(rows) => rows,
             Err(error) => {
@@ -1701,6 +1803,7 @@ impl ApexOmni {
             &raw.id,
             raw.cum_success_fill_size.unwrap_or(0.0),
             matches!(raw.status.as_ref(), "FILLED" | "EXPIRED"),
+            matches!(raw.status.as_ref(), "FILLED" | "EXPIRED" | "CANCELED"),
             raw.updated_at
                 .or(raw.updated_time)
                 .map(execution_milliseconds)

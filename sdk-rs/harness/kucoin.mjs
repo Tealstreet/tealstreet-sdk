@@ -42,6 +42,7 @@ export const kucoin = {
     catch { return false; }
   },
   compareFillPrices: true,
+  tsBooksBeforeStart: true,
   respondToJsonPing: true,
   tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook_')).length >= count,
   publicTickers: (records) => {

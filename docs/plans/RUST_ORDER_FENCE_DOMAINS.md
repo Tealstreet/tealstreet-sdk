@@ -1,6 +1,6 @@
 # Store order fence domains
 
-Owner: codex-uufub4. Status: documentation plan; no runtime change.
+Owner: codex-uufub4; follow-up claude-fe7lgm. Status: follow-up done; no runtime change.
 Audited landing: `6c7f4fcf292d01b8c056127a070783e3fd72dcd2`.
 
 ## Decision
@@ -62,3 +62,47 @@ deny late patches, and selective Epoch exhaustion permanently denies tokens.
 
 Runtime convergence is not proposed. Sharing a counter implementation in the
 future would still require two independent domains and is outside this plan.
+
+## Follow-up status
+
+Done:
+
+- Comments beside both Store fields and the `orders_revision` getter.
+- Links from RUST_REQUEST_CONTEXT.md and RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md.
+
+Crossing controls:
+
+- Crossings 1-3: `late_ack_and_snapshot_fences_cross_independently`
+  (http_lifecycle.rs) drives a released write's late ACK through `Reconciliation`
+  after each crossing. A row update or a sibling snapshot publish refuses the
+  patch and leaves a held token current. An explicit invalidation stales the
+  token and still lets the patch apply.
+- Crossing 4 was already pinned by
+  `order_snapshot_admission_rejects_before_native_rows_readiness_and_dirty_state`
+  (store.rs): a foreign Store's token, an exhausted epoch, an empty token set,
+  and no begin after exhaustion.
+
+## Venue convergence (overseer ruling, 2026-10-27)
+
+Nine venues fence order reads with a hand-rolled `orders_revision`. Each move
+onto `order_snapshot_epoch` is a one-for-one swap:
+
+- `begin_orders_snapshot` at read send;
+- `commit_orders_snapshot` at publish;
+- `invalidate_order_snapshots` at every existing bump site, adding none.
+
+The local counter already fences the simple crossing, so each PR carries a
+production-binding preservation control that passes before and after. It
+carries a RED only where its owner finds a crossing the local fence misses.
+The epoch exhausts permanently where a local counter wrapped or saturated. That
+is accepted: it is a u64 and unreachable.
+
+- Beta venues, in order: BingX, then BloFin (owner codex-mxb4mq), then Kraken
+  (owner codex-9czdjh). Kraken's WS census keeps its additive fallback:
+  `orders_snapshot_current` picks the atomic replace when current and today's
+  additive apply when stale or exhausted. A successful census commit keeps its
+  existing invalidation.
+- Deferred until after beta, since they are not in the beta roster: bitrue,
+  weex, txflow, grvt, and coinbase, including Coinbase's pure-read-fence check.
+- Excluded: Hyperliquid. Its revision is scoped per dex, while the snapshot
+  epoch is Store-global, so moving it would invalidate sibling dexes' reads.

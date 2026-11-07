@@ -353,7 +353,7 @@ fn local_refusals_leave_store_unchanged() {
 }
 #[test]
 fn valid_signed_fills_preserve_aliases_flooring_and_clamped_native_limit() {
-    for (limit, n) in [(None, 200), (Some(0), 1), (Some(9999), 1000)] {
+    for (limit, n) in [(None, 1000), (Some(0), 1), (Some(9999), 1000)] {
         let mut e = seeded(true);
         let a = query(
             &mut e,

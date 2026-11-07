@@ -144,9 +144,10 @@ fn unknown_symbols_read_nothing_and_the_page_cap_warns() {
         })
         .expect("semantic coverage survives Error-only logging");
     assert_eq!(
-        marker.fields,
-        vec![("command", safe_cex_engine::Value::Num(9.0))]
+        marker.fields[..1],
+        [("command", safe_cex_engine::Value::Num(9.0))]
     );
+    assert_eq!(marker.fields[1].0, "reason");
     let done_index = h
         .actions
         .iter()
@@ -201,7 +202,7 @@ fn second_page_failure_returns_only_accepted_rows_with_owned_incomplete() {
         .collect();
     assert_eq!(notices.len(), 2);
     assert!(matches!(notices[0], Action::Notice(Notice::Event(event))
-        if event.fields == vec![("command", safe_cex_engine::Value::Num(9.0))]
+        if event.fields.first() == Some(&("command", safe_cex_engine::Value::Num(9.0))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")
         && event.message.contains("152002")));
     assert!(matches!(
         notices[1],
@@ -304,7 +305,7 @@ fn a_cursor_cycle_keeps_rows_with_owned_incomplete_instead_of_requesting_again()
         .collect();
     assert_eq!(relevant.len(), 2);
     assert!(matches!(relevant[0], Action::Notice(Notice::Event(event))
-        if event.fields == vec![("command", safe_cex_engine::Value::Num(9.0))]
+        if event.fields.first() == Some(&("command", safe_cex_engine::Value::Num(9.0))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")
         && event.message.contains("repeated cursor")));
     assert!(matches!(
         relevant[1],

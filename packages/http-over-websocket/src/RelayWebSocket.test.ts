@@ -73,18 +73,20 @@ const waitFor = (pred: () => boolean, ms = 3000) =>
 
 describe('relay url helpers', () => {
   it('builds, detects and parses the ts-relay query on the regional tunnel url', () => {
+    // Both regions were fsjnpy143pbz.{asia,jp} (AWS) until AWS_EXIT.md step 3e moved
+    // every region to the one Vultr tunnel host.
     const url = buildRelayUrl('sg', 'wss://stream.bybit.com/v5/private');
     expect(url).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
+      'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
     );
     expect(buildRelayUrl('jp', 'wss://ws.okx.com:8443/ws/v5/private')).toContain(
-      'fsjnpy143pbz.jp.tealstreet.io/tunnel?',
+      'fsjnpy143pbz-tyo.tealstreet.io/tunnel?',
     );
     expect(isRelayUrl(url)).toBe(true);
     expect(isRelayUrl('wss://stream.bybit.com/v5/private?requestId=x')).toBe(false);
     expect(isRelayUrl('not a url')).toBe(false);
     expect(parseRelayUrl(url)).toEqual({
-      tunnelUrl: 'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel',
+      tunnelUrl: 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel',
       upstream: 'wss://stream.bybit.com/v5/private',
     });
   });
@@ -130,6 +132,23 @@ describe('RelayWebSocket', () => {
     await waitFor(() => events.includes('close'));
     expect(ws.readyState).toBe(RelayWebSocket.CLOSED);
     expect(events.filter((e) => e === 'close')).toHaveLength(1);
+    expect(ws.diagnostics.lastClose).toMatchObject({
+      initiator: 'local',
+      phase: 'established',
+      route: 'relay',
+      port: 'other',
+    });
+  });
+
+  it('attributes a close while tunnel authentication is pending to the handshake phase', async () => {
+    configureHOW({ getProxyToken: () => new Promise<string>(() => {}) });
+    const ws = new RelayWebSocket(relayUrlFor(tunnel.url, 'wss://stream.bybit.com/v5/private'));
+    const { events } = collect(ws);
+    await waitFor(() => tunnel.server.clients.size === 1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    ws.close();
+    await waitFor(() => events.includes('close'));
+    expect(ws.diagnostics.lastClose).toMatchObject({ initiator: 'local', phase: 'handshake', route: 'relay' });
   });
 
   it('authenticates with the token lookup bound at construction', async () => {
@@ -208,6 +227,12 @@ describe('relay handshake timeout', () => {
       for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
       expect(uncaught).toEqual([]);
       expect(events).toEqual(['error', 'close']);
+      expect(ws.diagnostics.lastClose).toMatchObject({
+        initiator: 'local',
+        phase: 'pre-open',
+        route: 'relay',
+        lifetime: 'unknown',
+      });
     } finally {
       vi.useRealTimers();
       process.off('uncaughtException', onUncaught);

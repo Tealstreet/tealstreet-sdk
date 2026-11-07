@@ -117,11 +117,7 @@ fn diagnostics(actions: &[Action]) -> usize {
 fn no_io(actions: &[Action]) {
     assert!(!actions.iter().any(|action| matches!(
         action,
-        Action::Http(_)
-            | Action::ManagedHttp(_)
-            | Action::WsSend { .. }
-            | Action::WsConnect { .. }
-            | Action::SignPayload { .. }
+        Action::Http(_) | Action::ManagedHttp(_) | Action::WsSend { .. } | Action::WsConnect { .. }
     )));
 }
 fn prep(actions: &[Action]) -> (Preparation, HttpRequest) {

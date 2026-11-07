@@ -1,6 +1,5 @@
 //! Atomic private snapshots, protected from newer stream and command updates.
 use super::*;
-use safe_cex_engine::Fill;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
@@ -10,16 +9,19 @@ use safe_cex_engine::credential_selection::{
 use safe_cex_engine::execution::{
     Arithmetic, CumulativePrice, Cursor, ExecutionRounding, Rejection, Report,
 };
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::selected_read::{
     AdmittedRead, BackgroundReadError, LocalRefusal, ReadPolicy, ReadRequest, ReadRole,
     SelectedRead,
 };
-use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::rate_limit_pause_ms;
+use safe_cex_engine::{Fill, OrderSnapshotToken};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+mod venue_state;
 
 /// BloFin counts REST limits per one-minute window, so a 418/429 without
 /// `Retry-After` waits out a whole window before the settings read retries.
@@ -40,6 +42,12 @@ fn log_skip(
     logged.report(cx, key.to_owned(), level, message);
 }
 /// The identity fields of a position or order row that failed to decode.
+/// The one read-cover scope of BloFin's account-wide pending-order census.
+const ORDERS_SCOPE: &str = "orders";
+/// The least wait before the census owed after one the stream outran, so a
+/// busy symbol cannot drive back-to-back census reads.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.0;
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct RowIdentity<'a> {
@@ -87,12 +95,10 @@ struct Execution {
 
 #[derive(Default)]
 pub(crate) struct Account {
-    pub(crate) supervisor: Supervisor,
-    authenticated: bool,
+    pub(super) authenticated: bool,
     pub connection: Connection,
     pub margin: Option<MarginType>,
     pub mode_loaded: bool,
-    pub orders_revision: u64,
     pub positions_revision: u64,
     pub balance_revision: u64,
     pub settings_revision: u64,
@@ -103,9 +109,23 @@ pub(crate) struct Account {
     /// A reconcile snapshot was requested while another was in flight.
     reconcile_owed: bool,
     uncertainty_generation: u64,
+    /// Symbols of this census's rejected rows that could be an uncertain write:
+    /// no stored copy proves them older. Empty text: the row names no market.
+    census_unproven: Vec<String>,
+    /// The earliest release among the running census's pages and families,
+    /// each its own read; its rows are that old.
+    census_read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+    /// A page answered outside its read response: the census proves nothing.
+    census_read_lost: bool,
     reporting_started: f64,
     startup_executions: VecDeque<Execution>,
     account_busy: bool,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     pub sources: HashMap<String, Source>,
     fills: HashMap<String, (f64, Option<f64>)>,
     fill_order: VecDeque<String>,
@@ -125,6 +145,8 @@ pub(crate) struct Account {
     /// Order ids (empty when unidentified) whose skipped row was already logged.
     order_skips: RowReports<String>,
 }
+/// How soon `readPositions` tries again after a read a newer stream frame overrode.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum StartupRead {
     Margin,
@@ -157,15 +179,7 @@ impl Account {
         }
     }
     pub(crate) fn new() -> Self {
-        Self {
-            supervisor: Supervisor::new(Config {
-                auth_timeout_ms: Some(10_000.0),
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(5_000.0),
-                ..Config::default()
-            }),
-            ..Self::default()
-        }
+        Self::default()
     }
 
     fn remember_terminal(&mut self, id: &str) {
@@ -202,16 +216,20 @@ pub enum Request {
         positions_revision: u64,
         balance_revision: u64,
         failed: bool,
+        read: u32,
+        /// Owned rows on a market the catalogue does not list.
+        unlisted: Vec<String>,
     },
     Balance {
         positions: SnapshotBuilder<String, Position>,
         used: f64,
         upnl: f64,
-        available: f64,
-        frozen: f64,
+        wallet: f64,
         positions_revision: u64,
         balance_revision: u64,
         failed: bool,
+        read: u32,
+        unlisted: Vec<String>,
     },
     Orders {
         family: u8,
@@ -222,10 +240,11 @@ pub enum Request {
         page_rows: usize,
         rows: SnapshotBuilder<String, Order>,
         sources: HashMap<String, Source>,
-        revision: u64,
+        snapshot: OrderSnapshotToken,
         /// A Primary-signed reconcile snapshot: only it may clear an order fence.
         reconcile: bool,
         uncertainty_generation: u64,
+        read_epoch: u64,
         failed: bool,
     },
 }
@@ -584,12 +603,14 @@ impl Blofin {
             return;
         }
         self.account.session_started = cx.now;
-        self.private_connect(cx);
+        if let Err(error) = self.connect_feed(cx, true) {
+            Self::socket_notice(cx, error);
+        }
         self.account.tick = Some(cx.set_poll_timer(10_000.0));
         self.read_setting(cx, StartupRead::Margin);
         self.read_setting(cx, StartupRead::Mode);
     }
-    fn read_setting(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
+    pub(crate) fn read_setting(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
         let revision = self.account.settings_revision;
         let (path, request) = match read {
             StartupRead::Margin => ("/api/v1/account/margin-mode", Request::Margin { revision }),
@@ -663,6 +684,7 @@ impl Blofin {
         if std::mem::replace(&mut self.account.startup_rejected, true) {
             return;
         }
+        self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
         for read in [StartupRead::Margin, StartupRead::Mode] {
             self.account.startup.succeeded(cx, &read);
         }
@@ -672,9 +694,10 @@ impl Blofin {
         if let Some((timer, _)) = self.account.retry.take() {
             cx.clear_timer(timer);
         }
-        self.account.supervisor.cancel(cx);
+        if let Some(feed) = self.account.connection.feed {
+            cx.stop_socket_feed(feed);
+        }
         self.account.authenticated = false;
-        self.account.connection.open = false;
         if let Some(socket) = self.account.connection.socket.take() {
             cx.close(socket);
         }
@@ -696,24 +719,14 @@ impl Blofin {
             "wss://openapi.blofin.com/ws/private"
         }
     }
-    fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.startup_rejected {
-            return;
-        }
-        let url = self.private_url();
-        self.account.connection.socket = Some(cx.connect(
-            safe_cex_engine::SocketSpec::new(url).channel(safe_cex_engine::SocketChannel::Private),
-        ));
-        self.account.authenticated = false;
-        self.account.supervisor.connecting(cx);
-    }
     /// The login signs through the provider with the Primary, as every
     /// private request does; a refusal latches the role and the engine closes.
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        self.account.supervisor.opened(cx);
         let Some(primary) = self.options.identities.primary.clone() else {
             cx.close(socket);
-            self.private_close(cx, socket);
+            if let Some(feed) = self.account.connection.feed {
+                cx.stop_socket_feed(feed);
+            }
             return;
         };
         cx.send_signed(
@@ -724,15 +737,40 @@ impl Blofin {
                 self.private_url(),
             )),
         );
-        self.account.connection.open = true;
 
         cx.send(socket, "ping");
     }
+    pub(super) fn private_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.authenticated = true;
+        if self.account.margin.is_some() && self.account.mode_loaded {
+            self.refresh_account(cx);
+            self.refresh_orders(cx, 1);
+        }
+    }
+    pub(super) fn private_auth_failure(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        if !self.account.authenticated
+            && !(cx.store.loaded().balance && cx.store.loaded().orders)
+            && error.venue_code.as_deref() != Some("152409")
+            && let Some(kind) = error.venue_code.as_deref().and_then(key_rejection)
+        {
+            let error = rejection(
+                "API key login",
+                error.venue_code.as_deref().unwrap_or_default(),
+                error.venue_message.as_deref().unwrap_or_default(),
+                kind,
+            );
+            self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid);
+            return;
+        }
+        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, error.message);
+    }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.account_busy || !self.signed() {
+        // Frame-fed: positions and balance arrive as frames.
+        if cx.frame_fed() || self.account.account_busy || !self.signed() {
             return;
         }
         self.account.account_busy = true;
+        self.account.positions_read += 1;
         self.private_read(
             cx,
             "/api/v1/account/positions",
@@ -743,9 +781,40 @@ impl Blofin {
                 positions_revision: self.account.positions_revision,
                 balance_revision: self.account.balance_revision,
                 failed: false,
+                read: self.account.positions_read,
+                unlisted: Vec::new(),
             },
             true,
         );
+    }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.signed()
+            || self.account.margin.is_none()
+            || !self.account.mode_loaded
+            || self.account.startup_rejected
+        {
+            let error =
+                VenueError::new("BloFin account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.positions_read + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.refresh_account(cx);
+        }
+    }
+    /// At once for a waiter the read predates, else once a newer stream frame
+    /// that held the read can have been overtaken.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, read: u32) {
+        if self.account.fresh_positions.predates(0, read) {
+            self.refresh_account(cx);
+        } else if self.account.fresh_positions.owed(0)
+            && self.account.fresh_positions_timer.is_none()
+        {
+            self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
     }
     pub(crate) fn reconcile_uncertain_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if !cx.reconcile_reask() {
@@ -765,10 +834,22 @@ impl Blofin {
         self.refresh_orders(cx, 1);
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>, attempt: u32) {
-        if self.account.orders_busy || !self.signed() {
+        // Frame-fed: the data source's ORDERS frames are the reconcile.
+        if cx.frame_fed() || self.account.orders_busy || !self.signed() {
             return;
         }
+        let Some(snapshot) = cx.store.begin_orders_snapshot() else {
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
+                "BloFin order snapshot fence exhausted",
+            );
+            return;
+        };
         self.account.orders_busy = true;
+        self.account.census_unproven.clear();
+        self.account.census_read = None;
+        self.account.census_read_lost = false;
         let reconcile = std::mem::take(&mut self.account.reconcile_owed);
         self.orders_page(
             cx,
@@ -781,9 +862,10 @@ impl Blofin {
                 page_rows: 0,
                 rows: SnapshotBuilder::default(),
                 sources: HashMap::new(),
-                revision: self.account.orders_revision,
+                snapshot,
                 reconcile,
                 uncertainty_generation: self.account.uncertainty_generation,
+                read_epoch: cx.order_read_epoch(),
                 failed: false,
             },
         );
@@ -823,7 +905,7 @@ impl Blofin {
         let filled = clean(o.filled_size.0 * m.contract_size.unwrap_or(1.0));
         let status = match o.state.as_ref() {
             "filled" | "effective" => OrderStatus::Closed,
-            "canceled" | "order_failed" => OrderStatus::Canceled,
+            "canceled" | "partially_canceled" | "order_failed" => OrderStatus::Canceled,
             _ => OrderStatus::Open,
         };
         let base = Order {
@@ -852,6 +934,12 @@ impl Blofin {
             extra: Some(OrderExtra {
                 remaining_native: Some(clean(o.size.0 - o.filled_size.0)),
                 filled_in_placement_units: Some(o.filled_size.0),
+                // The venue accepts a reduce-only with no position, then cancels it silently.
+                reject_reason: (o.state == "canceled"
+                    && o.reduce_only.0
+                    && o.filled_size.0 == 0.0
+                    && !cx.store.positions().iter().any(|p| p.symbol == m.symbol))
+                .then_some(safe_cex_engine::model::RejectReason::ReduceOnly),
                 ..OrderExtra::default()
             }),
         };
@@ -894,7 +982,8 @@ impl Blofin {
             })
             .collect();
         }
-        if o.order_id.is_empty() || o.order_category != "normal" {
+        // `pre_tp_sl` is an ordinary order with its bracket attached.
+        if o.order_id.is_empty() || !matches!(o.order_category.as_ref(), "normal" | "pre_tp_sl") {
             return vec![];
         }
         vec![Order {
@@ -1112,6 +1201,7 @@ impl Blofin {
                 used,
                 upnl,
                 failed,
+                unlisted,
                 ..
             } => match serde_json::from_str::<PositionRow<'_>>(item) {
                 Ok(p) => {
@@ -1136,7 +1226,11 @@ impl Blofin {
                                 p.inst_id
                             ),
                         );
+                        unlisted.push(p.inst_id.to_string());
                         return;
+                    }
+                    if p.positions.0 != 0.0 && cx.store.market_by_id(&p.inst_id).is_none() {
+                        unlisted.push(p.inst_id.to_string());
                     }
                     if let Some(position) = self.map_position(cx, &p) {
                         *used += p.maintenance_margin.0;
@@ -1144,18 +1238,11 @@ impl Blofin {
                         positions.push(position);
                     }
                 }
-                Err(_) => self.reject_position(cx, positions, failed, item),
+                Err(_) => self.reject_position(cx, positions, failed, unlisted, item),
             },
-            Request::Balance {
-                available,
-                frozen,
-                failed,
-                ..
-            } => match serde_json::from_str::<AssetRow>(item) {
-                Ok(b) => {
-                    *available += b.available.0;
-                    *frozen += b.frozen.0;
-                }
+            Request::Balance { wallet, failed, .. } => match serde_json::from_str::<AssetRow>(item)
+            {
+                Ok(b) => *wallet += b.balance.0,
                 Err(_) => *failed = true,
             },
             Request::Orders {
@@ -1174,7 +1261,11 @@ impl Blofin {
                     if (o.inst_type.is_empty() || o.inst_type.eq_ignore_ascii_case("SWAP"))
                         && !matches!(
                             o.state.as_ref(),
-                            "filled" | "effective" | "canceled" | "order_failed"
+                            "filled"
+                                | "effective"
+                                | "canceled"
+                                | "partially_canceled"
+                                | "order_failed"
                         )
                         && cx.store.market_by_id(&o.inst_id).is_none()
                     {
@@ -1200,7 +1291,51 @@ impl Blofin {
                         *failed = true;
                     }
                     let source = Self::source(&o);
-                    for order in self.map_orders(cx, &o) {
+                    let mapped = self.map_orders(cx, &o);
+                    let working = !matches!(
+                        o.state.as_ref(),
+                        "filled" | "effective" | "canceled" | "partially_canceled" | "order_failed"
+                    );
+                    let market = (o.inst_type.is_empty()
+                        || o.inst_type.eq_ignore_ascii_case("SWAP"))
+                    .then(|| cx.store.market_by_id(&o.inst_id).map(|m| m.symbol.clone()))
+                    .flatten();
+                    // A working order on this account's market that maps to nothing (an
+                    // unsupported category or type) is still there: its stored copies
+                    // stay, and the census proves nothing for its market.
+                    if mapped.is_empty()
+                        && working
+                        && let Some(symbol) = market
+                    {
+                        let mut ids = Vec::new();
+                        for base in [&o.order_id, &o.tpsl_id] {
+                            if !base.is_empty() {
+                                ids.extend(
+                                    ["take_profit", "stop_loss"]
+                                        .map(|suffix| format!("{base}__{suffix}")),
+                                );
+                            }
+                        }
+                        ids.extend(
+                            [&o.order_id, &o.algo_id]
+                                .into_iter()
+                                .filter(|id| !id.is_empty())
+                                .map(|id| id.to_string()),
+                        );
+                        if ids.is_empty() {
+                            rows.reject(None);
+                        }
+                        for id in ids {
+                            rows.reject(Some(id));
+                        }
+                        self.account.census_unproven.push(symbol);
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
+                            format!("BloFin working order {last_cursor} maps to no supported order; its stored copies stay"),
+                        );
+                    }
+                    for order in mapped {
                         sources.insert(order.id.clone(), source.clone());
                         rows.push(order);
                     }
@@ -1225,6 +1360,7 @@ impl Blofin {
         cx: &mut Cx<'_, Pending>,
         positions: &mut SnapshotBuilder<String, Position>,
         failed: &mut bool,
+        unlisted: &mut Vec<String>,
         item: &str,
     ) {
         let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
@@ -1233,6 +1369,12 @@ impl Blofin {
             .as_deref()
             .is_some_and(|t| !t.is_empty() && !t.eq_ignore_ascii_case("SWAP"))
         {
+            // Its quantity is unreadable, so an uncatalogued row is listed.
+            if let Some(inst_id) = row.inst_id.as_deref().filter(|id| !id.is_empty())
+                && cx.store.market_by_id(inst_id).is_none()
+            {
+                unlisted.push(inst_id.to_owned());
+            }
             return;
         }
         let inst_id = row.inst_id.as_deref().unwrap_or_default();
@@ -1247,6 +1389,8 @@ impl Blofin {
         let Some(symbol) = cx.store.market_by_id(inst_id).map(|m| m.symbol.clone()) else {
             if self.malformed_markets.contains(inst_id) {
                 *failed = true;
+            } else {
+                unlisted.push(inst_id.to_owned());
             }
             return;
         };
@@ -1300,7 +1444,18 @@ impl Blofin {
             }
         }
         ids.extend([order_id, algo_id].into_iter().filter(|id| !id.is_empty()));
-        let level = skip_level(ids.iter().any(|id| cx.store.order(id).is_some()));
+        let stored = ids.iter().any(|id| cx.store.order(id).is_some());
+        if !stored {
+            match row.inst_id.as_deref().filter(|id| !id.is_empty()) {
+                // A market this account cannot trade cannot hold its placement.
+                Some(inst_id) => self
+                    .account
+                    .census_unproven
+                    .extend(cx.store.market_by_id(inst_id).map(|m| m.symbol.clone())),
+                None => self.account.census_unproven.push(String::new()),
+            }
+        }
+        let level = skip_level(stored);
         let message = format!("BloFin skipped malformed order row {cursor}");
         log_skip(cx, &mut self.account.order_skips, &cursor, level, message);
         for id in ids {
@@ -1335,7 +1490,9 @@ impl Blofin {
             if response.body.contains("152401") || response.body.contains("152406") {
                 self.account.auth_failures += 1;
             }
+            self.account.read_error = read_refusal(&response, &e);
             self.account_failed(cx, request, &e);
+            self.account.read_error = None;
             return;
         }
         self.account.auth_failures = 0;
@@ -1412,6 +1569,7 @@ impl Blofin {
             Request::Positions {
                 positions,
                 positions_revision,
+                read,
                 ..
             } if positions.rejected() > 0 => {
                 // Used margin and UPnL sum the rows, so the balance waits for a clean read.
@@ -1422,6 +1580,9 @@ impl Blofin {
                         positions.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                     self.commit_positions(cx, positions);
                 }
+                let error = VenueError::new("BloFin positions: a row could not be mapped");
+                self.account.fresh_positions.failed(cx, 0, read, &error);
+                self.read_fresh_positions_again(cx, read);
             }
             Request::Positions {
                 positions,
@@ -1430,6 +1591,8 @@ impl Blofin {
                 positions_revision,
                 balance_revision,
                 failed: false,
+                read,
+                unlisted,
             } => self.private_read(
                 cx,
                 "/api/v1/asset/balances?accountType=futures",
@@ -1437,11 +1600,12 @@ impl Blofin {
                     positions,
                     used,
                     upnl,
-                    available: 0.0,
-                    frozen: 0.0,
+                    wallet: 0.0,
                     positions_revision,
                     balance_revision,
                     failed: false,
+                    read,
+                    unlisted,
                 },
                 true,
             ),
@@ -1449,25 +1613,30 @@ impl Blofin {
                 positions,
                 used,
                 upnl,
-                available,
-                frozen,
+                wallet,
                 positions_revision,
                 balance_revision,
                 failed: false,
+                read,
+                unlisted,
             } => {
                 self.account.account_busy = false;
                 if positions_revision == self.account.positions_revision {
                     self.account.position_skips.clear();
                     self.commit_positions(cx, positions.commit([], |p| p.id.clone()));
+                    self.account
+                        .fresh_positions
+                        .committed(cx, 0, read, &unlisted);
                 }
+                self.read_fresh_positions_again(cx, read);
                 if balance_revision == self.account.balance_revision {
                     let used = round_usd(used);
                     let upnl = round_usd(upnl);
                     cx.store.set_balance(Balance {
                         used,
                         upnl,
-                        free: clean(clean(round_usd(available) + round_usd(frozen)) - used),
-                        total: clean(clean(round_usd(available) + round_usd(frozen)) - upnl),
+                        free: clean(clean(round_usd(wallet) + upnl) - used),
+                        total: round_usd(wallet),
                     });
                 }
             }
@@ -1480,11 +1649,22 @@ impl Blofin {
                 page_rows,
                 rows,
                 mut sources,
-                revision,
+                snapshot,
                 reconcile,
                 uncertainty_generation,
+                read_epoch,
                 failed: false,
             } => {
+                match cx.order_read_mark() {
+                    Some(read) => {
+                        self.account.census_read = Some(
+                            self.account
+                                .census_read
+                                .map_or(read, |earliest| earliest.earliest(read)),
+                        );
+                    }
+                    None => self.account.census_read_lost = true,
+                }
                 if page_rows > 0 {
                     if page >= 49 || cursor == last_cursor {
                         self.account_failed(
@@ -1498,9 +1678,10 @@ impl Blofin {
                                 page_rows,
                                 rows,
                                 sources,
-                                revision,
+                                snapshot,
                                 reconcile,
                                 uncertainty_generation,
+                                read_epoch,
                                 failed: true,
                             },
                             "BloFin pending order pagination did not advance",
@@ -1518,9 +1699,10 @@ impl Blofin {
                             page_rows: 0,
                             rows,
                             sources,
-                            revision,
+                            snapshot,
                             reconcile,
                             uncertainty_generation,
+                            read_epoch,
                             failed: false,
                         },
                     );
@@ -1536,9 +1718,10 @@ impl Blofin {
                             page_rows: 0,
                             rows,
                             sources,
-                            revision,
+                            snapshot,
                             reconcile,
                             uncertainty_generation,
+                            read_epoch,
                             failed: false,
                         },
                     );
@@ -1549,49 +1732,50 @@ impl Blofin {
                         // complete cumulative rows still prove execution prefixes.
                         self.seed_startup_executions(cx, rows.rows(), &sources);
                     }
-                    if revision == self.account.orders_revision {
-                        let clean = rows.rejected() == 0;
-                        if clean {
-                            self.account.order_skips.clear();
+                    let clean = rows.rejected() == 0;
+                    let census_read = self
+                        .account
+                        .census_read
+                        .take()
+                        .filter(|_| !std::mem::take(&mut self.account.census_read_lost));
+                    let current: Vec<Order> = cx.store.orders().to_vec();
+                    let accepted = rows.rows().len();
+                    let mut rows = rows.commit(current.iter().cloned(), |o| o.id.clone());
+                    // Stored copies kept for rejected rows bypass the snapshot's own rules.
+                    let mut kept = rows.split_off(accepted);
+                    for order in &current {
+                        if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
+                            self.account.remember_terminal(&order.id);
                         }
-                        let accepted = rows.rows().len();
-                        let mut rows =
-                            rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
-                        // Stored copies kept for rejected rows bypass the snapshot's own rules.
-                        let mut kept = rows.split_off(accepted);
-                        for order in cx.store.orders() {
-                            if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
-                                self.account.remember_terminal(&order.id);
+                    }
+                    rows.retain(|order| {
+                        !self.account.terminal.contains(&order.id)
+                            && (order
+                                .extra
+                                .as_ref()
+                                .and_then(|extra| extra.filled_in_placement_units)
+                                .unwrap_or(0.0)
+                                >= self.filled_native(&order.id)
+                                || current.iter().any(|existing| existing.id == order.id))
+                    });
+                    let retained: HashSet<_> = rows.iter().map(|order| order.id.clone()).collect();
+                    sources.retain(|id, _| retained.contains(id));
+                    for order in &mut rows {
+                        if let Some(existing) = current
+                            .iter()
+                            .find(|existing| existing.id == order.id)
+                            .filter(|existing| existing.filled > order.filled)
+                        {
+                            *order = existing.clone();
+                            if let Some(source) = self.account.sources.get(&order.id) {
+                                sources.insert(order.id.clone(), source.clone());
                             }
                         }
-                        rows.retain(|order| {
-                            !self.account.terminal.contains(&order.id)
-                                && (order
-                                    .extra
-                                    .as_ref()
-                                    .and_then(|extra| extra.filled_in_placement_units)
-                                    .unwrap_or(0.0)
-                                    >= self.filled_native(&order.id)
-                                    || cx.store.order(&order.id).is_some())
-                        });
-                        let retained: HashSet<_> =
-                            rows.iter().map(|order| order.id.as_str()).collect();
-                        sources.retain(|id, _| retained.contains(id.as_str()));
-                        for order in &mut rows {
-                            if let Some(existing) = cx
-                                .store
-                                .order(&order.id)
-                                .filter(|existing| existing.filled > order.filled)
-                            {
-                                *order = existing.clone();
-                                if let Some(source) = self.account.sources.get(&order.id) {
-                                    sources.insert(order.id.clone(), source.clone());
-                                }
-                            }
-                        }
-                        kept.retain(|order| !self.account.terminal.contains(&order.id));
-                        // A kept attached TP/SL leg already stands for its parent's leg.
-                        let kept_leg = |parent: &str, kind: OrderType| {
+                    }
+                    kept.retain(|order| !self.account.terminal.contains(&order.id));
+                    // A kept attached TP/SL leg already stands for its parent's leg.
+                    let kept_leg =
+                        |parent: &str, kind: OrderType| {
                             kept.iter().any(|leg| {
                                 leg.kind == kind
                                     && self.account.sources.get(&leg.id).is_some_and(|s| {
@@ -1599,90 +1783,152 @@ impl Blofin {
                                     })
                             })
                         };
-                        let mut extra = Vec::new();
-                        for order in &rows {
-                            let Some(source) = sources.get(&order.id) else {
+                    let mut extra = Vec::new();
+                    for order in &rows {
+                        let Some(source) = sources.get(&order.id) else {
+                            continue;
+                        };
+                        if order.kind != OrderType::Limit
+                            || !source.tpsl_id.is_empty()
+                            || !source.algo_id.is_empty()
+                        {
+                            continue;
+                        }
+                        for (kind, price, suffix) in [
+                            (OrderType::TakeProfit, source.tp, "take_profit"),
+                            (OrderType::StopLoss, source.sl, "stop_loss"),
+                        ] {
+                            if price <= 0.0
+                                || rows.iter().any(|leg| {
+                                    leg.kind == kind
+                                        && sources.get(&leg.id).is_some_and(|s| {
+                                            s.order_id == order.id && !s.tpsl_id.is_empty()
+                                        })
+                                })
+                                || kept_leg(&order.id, kind)
+                            {
                                 continue;
+                            }
+                            let id = format!("{}__{suffix}", order.id);
+                            extra.push(Order {
+                                id: id.clone(),
+                                kind,
+                                price,
+                                side: order.side.opposite(),
+                                parent_id: Some(order.id.clone()),
+                                reduce_only: true,
+                                filled: 0.0,
+                                amount: if order.remaining > 0.0 {
+                                    order.remaining
+                                } else {
+                                    order.amount
+                                },
+                                remaining: if order.remaining > 0.0 {
+                                    order.remaining
+                                } else {
+                                    order.amount
+                                },
+                                extra: Some(OrderExtra {
+                                    remaining_native: order
+                                        .extra
+                                        .as_ref()
+                                        .and_then(|e| e.remaining_native),
+                                    ..OrderExtra::default()
+                                }),
+                                ..order.clone()
+                            });
+                        }
+                    }
+                    extra.retain(|order| !self.account.terminal.contains(&order.id));
+                    for order in &extra {
+                        if let Some(source) = order
+                            .parent_id
+                            .as_ref()
+                            .and_then(|id| sources.get(id))
+                            .cloned()
+                        {
+                            sources.insert(order.id.clone(), source);
+                        }
+                    }
+                    rows.extend(extra);
+                    kept.retain(|order| !rows.iter().any(|row| row.id == order.id));
+                    for order in &kept {
+                        if let Some(source) = self.account.sources.get(&order.id) {
+                            sources.insert(order.id.clone(), source.clone());
+                        }
+                    }
+                    rows.extend(kept);
+                    // Rows and their sources change together, only for the symbols this
+                    // census may replace (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+                    let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                        key: ORDERS_SCOPE,
+                        account: &[ORDERS_SCOPE],
+                    };
+                    let admission = census_read
+                        .filter(|_| cx.store.orders_snapshot_current(&snapshot))
+                        .and_then(|earliest| {
+                            cx.orders_read_refusals_from(earliest, scope, |_| true, &rows)
+                                .map(|refused| (earliest, refused))
+                        });
+                    let mut refused_symbols = Vec::new();
+                    let committed = match admission {
+                        Some((earliest, refused)) => {
+                            if clean {
+                                self.account.order_skips.clear();
+                            }
+                            let symbol_of = |id: &str| {
+                                rows.iter()
+                                    .chain(current.iter())
+                                    .find(|order| order.id == id)
+                                    .map(|order| order.symbol.clone())
                             };
-                            if order.kind != OrderType::Limit
-                                || !source.tpsl_id.is_empty()
-                                || !source.algo_id.is_empty()
-                            {
-                                continue;
-                            }
-                            for (kind, price, suffix) in [
-                                (OrderType::TakeProfit, source.tp, "take_profit"),
-                                (OrderType::StopLoss, source.sl, "stop_loss"),
-                            ] {
-                                if price <= 0.0
-                                    || rows.iter().any(|leg| {
-                                        leg.kind == kind
-                                            && sources.get(&leg.id).is_some_and(|s| {
-                                                s.order_id == order.id && !s.tpsl_id.is_empty()
-                                            })
-                                    })
-                                    || kept_leg(&order.id, kind)
-                                {
-                                    continue;
+                            let held = |id: &str| {
+                                symbol_of(id).is_none_or(|symbol| refused.contains(&symbol))
+                            };
+                            // A refused symbol keeps the sources its kept rows already had.
+                            let mut next: HashMap<String, Source> =
+                                sources.into_iter().filter(|(id, _)| !held(id)).collect();
+                            for (id, source) in &self.account.sources {
+                                if held(id) && !next.contains_key(id) {
+                                    next.insert(id.clone(), source.clone());
                                 }
-                                let id = format!("{}__{suffix}", order.id);
-                                extra.push(Order {
-                                    id: id.clone(),
-                                    kind,
-                                    price,
-                                    side: order.side.opposite(),
-                                    parent_id: Some(order.id.clone()),
-                                    reduce_only: true,
-                                    filled: 0.0,
-                                    amount: if order.remaining > 0.0 {
-                                        order.remaining
-                                    } else {
-                                        order.amount
-                                    },
-                                    remaining: if order.remaining > 0.0 {
-                                        order.remaining
-                                    } else {
-                                        order.amount
-                                    },
-                                    extra: Some(OrderExtra {
-                                        remaining_native: order
-                                            .extra
-                                            .as_ref()
-                                            .and_then(|e| e.remaining_native),
-                                        ..OrderExtra::default()
-                                    }),
-                                    ..order.clone()
-                                });
                             }
-                        }
-                        extra.retain(|order| !self.account.terminal.contains(&order.id));
-                        for order in &extra {
-                            if let Some(source) = order
-                                .parent_id
-                                .as_ref()
-                                .and_then(|id| sources.get(id))
-                                .cloned()
-                            {
-                                sources.insert(order.id.clone(), source);
+                            let mut cover_unproven = self.account.census_unproven.clone();
+                            if !clean {
+                                cover_unproven.push(String::new());
                             }
-                        }
-                        rows.extend(extra);
-                        kept.retain(|order| !rows.iter().any(|row| row.id == order.id));
-                        for order in &kept {
-                            if let Some(source) = self.account.sources.get(&order.id) {
-                                sources.insert(order.id.clone(), source.clone());
+                            let committed = cx
+                                .commit_orders_read_from(
+                                    earliest,
+                                    scope,
+                                    |_| true,
+                                    rows,
+                                    &cover_unproven,
+                                )
+                                .is_some();
+                            if committed {
+                                self.account.sources = next;
+                                cx.store.set_orders_loaded();
+                                refused_symbols = refused;
                             }
+                            committed
                         }
-                        rows.extend(kept);
-                        self.account.sources = sources;
-                        cx.store.set_orders(rows);
+                        None => false,
+                    };
+                    if committed {
                         // The last page's token cannot freshen a pre-mark first page.
-                        if clean
-                            && reconcile
+                        if reconcile
                             && uncertainty_generation == self.account.uncertainty_generation
                         {
-                            self.account.reconcile_owed = false;
-                            cx.orders_reconciled(None);
+                            let mut unproven = std::mem::take(&mut self.account.census_unproven);
+                            // A refused symbol's fence waits for a read released after it.
+                            let outran = !refused_symbols.is_empty();
+                            unproven.extend(refused_symbols);
+                            self.account.reconcile_owed = !unproven.is_empty();
+                            cx.orders_reconciled_except(&unproven, read_epoch);
+                            if outran && self.account.retry.is_none() {
+                                self.account.retry = Some((cx.set_timer(CENSUS_FOLLOW_UP_MS), 1));
+                            }
                         } else if reconcile {
                             self.account.reconcile_owed = true;
                         }
@@ -1728,8 +1974,15 @@ impl Blofin {
                         Some((cx.set_timer(1000.0 * f64::from(attempt)), attempt + 1));
                 }
             }
-            Request::Positions { .. } | Request::Balance { .. } => {
-                self.account.account_busy = false
+            Request::Positions { read, .. } | Request::Balance { read, .. } => {
+                self.account.account_busy = false;
+                let fresh = self
+                    .account
+                    .read_error
+                    .take()
+                    .unwrap_or_else(|| VenueError::new(error));
+                self.account.fresh_positions.failed(cx, 0, read, &fresh);
+                self.read_fresh_positions_again(cx, read);
             }
             Request::Margin { .. } => self.setting_unsettled(cx, StartupRead::Margin),
             Request::Mode { .. } => self.setting_unsettled(cx, StartupRead::Mode),
@@ -1742,7 +1995,6 @@ impl Blofin {
         socket: SocketId,
         text: &str,
     ) {
-        self.account.supervisor.received(cx.now);
         if text == "pong" {
             return;
         }
@@ -1753,49 +2005,7 @@ impl Blofin {
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
-        // BloFin answers a refused login with `event: "error"` (60009 or a 1524xx code).
-        // A socket 152409 reconnects with a fresh signature, like 60009.
-        let login_failed = (message.event == "login" && message.code != "0")
-            || (message.event == "error" && !self.account.authenticated);
-        if login_failed {
-            // Before the account is ready a refused key cannot recover by reconnecting.
-            if !self.account.authenticated
-                && !(cx.store.loaded().balance && cx.store.loaded().orders)
-                && message.code != "152409"
-                && let Some(kind) = key_rejection(&message.code)
-            {
-                let error = rejection("API key login", &message.code, &message.msg, kind);
-                self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid);
-                return;
-            }
-            cx.notice(
-                Level::Error,
-                code::STREAM_UNAVAILABLE,
-                format!("BloFin login rejected: {}", message.code),
-            );
-            cx.close(socket);
-            self.private_close(cx, socket);
-            return;
-        }
-        if message.event == "login" {
-            if self.account.authenticated {
-                return;
-            }
-            self.account.authenticated = true;
-            self.account.supervisor.authenticated(cx);
-            for channel in ["account", "positions", "orders", "orders-algo"] {
-                cx.send(
-                    socket,
-                    format!("{{\"op\":\"subscribe\",\"args\":[{{\"channel\":\"{channel}\"}}]}}"),
-                );
-            }
-            if self.account.margin.is_some() && self.account.mode_loaded {
-                self.refresh_account(cx);
-                self.refresh_orders(cx, 1);
-            }
-            return;
-        }
-        if !message.event.is_empty() {
+        if !message.event.is_empty() || !self.account.authenticated {
             return;
         }
         match message.arg.channel.as_ref() {
@@ -1825,7 +2035,7 @@ impl Blofin {
                 if let Ok(Data { data: rows }) =
                     serde_json::from_str::<Data<Vec<&serde_json::value::RawValue>>>(text)
                 {
-                    self.account.orders_revision += 1;
+                    cx.store.invalidate_order_snapshots();
                     for raw in rows {
                         let Ok(StreamOrder {
                             mut row,
@@ -2213,36 +2423,13 @@ impl Blofin {
         fill.amount = prepared.amount();
         cx.fill(fill);
     }
-    pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account.connection.socket != Some(socket) {
-            return;
-        }
-        let c = &mut self.account.connection;
-        c.socket = None;
-        c.open = false;
-        self.account.supervisor.retry(cx);
-    }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.account.supervisor.on_timer(cx, timer) {
-            SocketTick::Unhandled => (),
-            SocketTick::Reconnect => {
-                self.private_connect(cx);
-                return true;
+        if self.account.fresh_positions_timer == Some(timer) {
+            self.account.fresh_positions_timer = None;
+            if self.account.fresh_positions.owed(0) {
+                self.refresh_account(cx);
             }
-            SocketTick::Ping => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.send(socket, "ping");
-                }
-                return true;
-            }
-            SocketTick::TimedOut(_) => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.close(socket);
-                    self.private_close(cx, socket);
-                }
-                return true;
-            }
-            SocketTick::Handled => return true,
+            return true;
         }
         if let Some(read) = self.account.startup.on_timer(timer) {
             self.read_setting(cx, read);
@@ -2312,6 +2499,21 @@ fn execution_prefix(
 
 /// BloFin key refusals no retry can fix (docs "Error Codes", 1524xx); 152405,
 /// 152407, 152410 (timestamp/nonce) and every other code stay transient.
+/// A typed cause for a failing positions read: a refused key, or a rate limit.
+pub(crate) fn read_refusal(response: &Response<'_>, message: &str) -> Option<VenueError> {
+    #[derive(Deserialize)]
+    struct Code<'a> {
+        #[serde(borrow)]
+        code: Str<'a>,
+    }
+    let code = serde_json::from_str::<Code<'_>>(response.body).ok();
+    let kind = code
+        .as_ref()
+        .and_then(|c| key_rejection(c.code.as_ref()))
+        .or((response.status == 429).then_some(ErrorKind::RateLimited))?;
+    Some(VenueError::new(message).kind(kind))
+}
+
 fn key_rejection(code: &str) -> Option<ErrorKind> {
     match code {
         "152401" | "152408" | "152409" => Some(ErrorKind::AuthInvalid),
@@ -2329,4 +2531,29 @@ fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError 
         error = error.venue_message(msg);
     }
     error
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Positions { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            Self::Margin { .. } | Self::Mode { .. } => S::ACCOUNT,
+        }
+    }
+}
+
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    for read in [
+        Request::Margin { revision: 0 },
+        Request::Mode { revision: 0 },
+    ] {
+        assert_eq!(
+            read.startup_sections(),
+            safe_cex_engine::startup::Sections::ACCOUNT
+        );
+    }
 }

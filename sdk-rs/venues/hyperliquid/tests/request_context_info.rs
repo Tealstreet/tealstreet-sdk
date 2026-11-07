@@ -10,6 +10,9 @@ use safe_cex_venue_hyperliquid::{Hyperliquid, Options, Pending};
 use std::collections::{HashSet, VecDeque};
 
 const NOW: f64 = 1_000.;
+// Startup public reads before markets and tickers load get the engine's discovery deadline.
+const DISCOVERY_DEADLINE_MS: u32 = 90_000;
+const READ_TIMEOUT_MS: u32 = 20_000;
 const SPOT: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"1","markPx":"1"}]]"#;
 
 fn reply<V: Venue>(engine: &mut Engine<V>, request: &HttpRequest, body: &str) {
@@ -32,7 +35,7 @@ fn release<V: Venue>(engine: &mut Engine<V>, testnet: bool) -> Vec<Action> {
     let mut result = Vec::new();
     while let Some(action) = queue.pop_front() {
         match action {
-            Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. } => {
+            Action::Http(_) | Action::Sign { .. } => {
                 panic!("info read bypassed unsigned managed preparation")
             }
             Action::ManagedHttp(action) => match *action {
@@ -42,7 +45,24 @@ fn release<V: Venue>(engine: &mut Engine<V>, testnet: bool) -> Vec<Action> {
                     request,
                 } => {
                     assert_eq!(intent, RoutingIntent::Public);
-                    assert_eq!(request.timeout_ms, Some(20_000));
+                    let loaded = engine.store().loaded();
+                    let bound = if matches!(
+                        engine.http_read_class(request.id),
+                        safe_cex_engine::HttpReadClass::Critical
+                            | safe_cex_engine::HttpReadClass::Reconciliation
+                    ) {
+                        READ_TIMEOUT_MS
+                    } else if loaded.markets && loaded.tickers {
+                        60_000
+                    } else {
+                        DISCOVERY_DEADLINE_MS
+                    };
+                    assert_eq!(
+                        request.timeout_ms,
+                        Some(bound),
+                        "{}",
+                        support::kind(&request)
+                    );
                     assert_eq!(
                         request.headers,
                         [("Content-Type", "application/json".into())]
@@ -248,14 +268,15 @@ fn real_perps_spot_and_testnet_catalogues_require_prepare_bind_and_claim() {
 #[test]
 fn actual_private_bootstrap_info_reads_are_unsigned_managed_calls() {
     for portfolio in [false, true] {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
-            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-            secret: Some(
-                "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
-            ),
-            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-            ..Options::default()
-        }));
+        let mut engine = support::private_engine(
+            Options {
+                key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+                application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+                ..Options::default()
+            },
+            "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+            false,
+        );
         engine.start(NOW);
         let mut seen = HashSet::new();
         for _ in 0..20 {
@@ -346,7 +367,7 @@ fn preparation_at_deadline_does_not_publish_and_native_discovery_can_retry() {
         })
         .expect("real metadata preparation");
     engine.http_prepared(
-        NOW + 20_000.,
+        NOW + f64::from(DISCOVERY_DEADLINE_MS),
         preparation,
         Prepared {
             id: 77,
@@ -360,7 +381,7 @@ fn preparation_at_deadline_does_not_publish_and_native_discovery_can_retry() {
         _ => false,
     }));
     engine.handle(
-        NOW + 20_001.,
+        NOW + f64::from(DISCOVERY_DEADLINE_MS) + 1.,
         Event::HttpResponse {
             request: request.id,
             response: Response {

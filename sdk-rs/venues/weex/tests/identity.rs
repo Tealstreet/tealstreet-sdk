@@ -75,7 +75,6 @@ fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
                 ..
             })) => panic!("identity error must remain scoped"),
             Action::Http(_)
-            | Action::SignPayload { .. }
             | Action::WsConnect { .. }
             | Action::WsSend { .. }
             | Action::SetTimer { .. } => {

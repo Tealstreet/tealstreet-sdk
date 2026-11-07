@@ -22,6 +22,8 @@ def modes():
     closures = {}
     grouped = {
         (): ['engine baseline'],
+        # history-row-diagnostics OFF control: unrelated families omit the field.
+        ('test-support',): ['history row diagnostics OFF control'],
         ('order-locks', 'test-support'): ['explicit CI control'],
         # metadata-freshness OFF control: standalone Bitget with test support.
         ('order-locks', 'polling-control', 'test-support'): ['metadata freshness OFF control'],
@@ -30,11 +32,16 @@ def modes():
         # adopts, workspace tests unify it on, so this row alone proves the off build.
         ('http-plans', 'order-locks', 'test-support'): ['dispatch nonce OFF control', 'serial plans OFF control'],
     }
+    grouped[('history-row-diagnostics', 'test-support')] = ['history row diagnostics ON control']
     grouped[('metadata-freshness', 'test-support')] = ['metadata-only CI control']
     grouped[('http-plans', 'metadata-freshness', 'order-locks', 'test-support')] = [
         'metadata Plan CI control']
     # No venue enables address setup until its own adoption; exercise the real seam.
     grouped[('address-nonce', 'http-plans', 'test-support')] = ['verified address nonce setup control']
+    # No family enables owned takeover before its provider/host activation.
+    grouped[('http-plans', 'nonce-handoff', 'test-support')] = ['owned nonce handoff without order locks']
+    grouped[('http-plans', 'nonce-handoff', 'order-locks', 'serial-plans', 'test-support')] = [
+        'owned nonce handoff and uncertainty control']
     # No family enables serial Plans before adoption; keep them compiled and tested.
     grouped[('http-plans', 'order-locks', 'serial-plans', 'test-support')] = ['serial Plan control']
     # Condition waits imply serial-plans; no family enables them before adoption.

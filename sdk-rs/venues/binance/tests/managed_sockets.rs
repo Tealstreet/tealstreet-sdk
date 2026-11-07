@@ -101,6 +101,19 @@ fn an_expired_listen_key_retires_the_user_stream_for_authentication_and_resyncs_
     );
 }
 
+/// The reconnect notice names the venue's close code, as the legacy socket did.
+#[test]
+fn a_close_names_its_code_in_the_reconnect_notice() {
+    let mut h = Harness::new();
+    let socket = h.socket("/public/ws").unwrap();
+    h.event(Event::WsClosed { socket, code: 1013 });
+    assert!(
+        logged(&h, "Binance socket closed (1013); reconnecting"),
+        "{:?}",
+        h.logs
+    );
+}
+
 #[test]
 fn a_dropped_public_feed_replays_its_current_streams_once_on_reopen() {
     let mut h = Harness::new();
@@ -110,7 +123,7 @@ fn a_dropped_public_feed_replays_its_current_streams_once_on_reopen() {
         code: 1006,
     });
     assert!(
-        logged(&h, "Binance socket closed; reconnecting"),
+        logged(&h, "Binance socket closed (1006); reconnecting"),
         "{:?}",
         h.logs
     );
@@ -209,4 +222,23 @@ fn a_rejected_spot_user_data_subscription_retires_for_authentication_and_resubsc
     assert_eq!(sent.len(), 1, "{sent:?}");
     assert!(sent[0].contains("userDataStream.subscribe.signature"));
     assert!(sent[0].contains("\"id\":\"tealstreet-user-data-11\""));
+}
+
+#[test]
+fn public_data_only_streams_live_bid_and_ask() {
+    let mut h = Harness::started(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    let socket = h.socket("/public/ws").unwrap();
+    h.event(Event::WsOpened { socket });
+    assert!(
+        h.sent
+            .iter()
+            .any(|(s, text)| *s == socket && text.contains("!bookTicker"))
+    );
 }

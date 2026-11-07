@@ -88,7 +88,7 @@ selection. Do not impose one fallback blindly on both contracts.
 | `kraken` | Implemented: unsubscribe old selected set, replace symbols, subscribe new; empty/unknown-only falls back all. | Existing semantic parity; add lifecycle tests only if gaps found. |
 | `krakenspot` | Implemented: unsubscribe/subscribe, chunks50; empty means all, nonempty unknown-only means none. | TS Spot does not expose the same selector path; assess whether shared Base fallback is intended before changing. Do not call this a proven native bug merely because futures differs. |
 | `woo` | Explicit no-op; tickers/bbos/markprices aggregate. | Equivalent selected freshness once public socket is live; early-private ticker dependency is separate. |
-| `tealstreet-dex`, `woofi`, `kodiakfi`, `mode`, `salsadex`, `what` | Explicit no-op; Orderly tickers/bbos/markprices aggregate. | Equivalent selected freshness. Coordinate Orderly race lane before touching private state. |
+| `woofi`, `kodiakfi`, `mode`, `what` | Explicit no-op; Orderly tickers/bbos/markprices aggregate. | Equivalent selected freshness. Coordinate Orderly race lane before touching private state. |
 | `hyperliquid`, `hyperliquidspot` | No selector branch; allMids core+DEX feeds, requested books/candles/contexts. | Aggregate covers all midpoint prices; retain required per-market enrichment separately. |
 | `grvt` | Explicit no-op; all-market v1.ticker.d subscriptions paced batches20. | Selected prices covered; preserve sequence/first-ACK state if narrowing. |
 | `lighter`, `lighter-robinhood` | Explicit no-op; market_stats/all plus ticker/ID for every market. | Aggregate/per-market combination covers selected prices; do not drop account valuation feeds through a cosmetic filter. |

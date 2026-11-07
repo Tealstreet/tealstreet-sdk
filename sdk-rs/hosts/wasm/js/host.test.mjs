@@ -547,6 +547,13 @@ test('a terminal startup failure reaches the host with its structured detail', (
   assert.deepEqual(failures, [detail]);
 });
 
+test('an insufficient-balance refusal keeps its kind across the host bridge', () => {
+  const error = new ExchangeError('Margin is insufficient.', { kind: 'insufficientBalance', outcome: 'rejected', venueCode: '-2019' });
+  assert.equal(error.kind, 'insufficientBalance');
+  assert.equal(error.outcome, 'rejected');
+  assert.equal(new ExchangeError('x', { kind: 'insufficientFunds' }).kind, undefined);
+});
+
 test('socket feed identity and protocol recovery reach the account transport', () => {
   let received;
   const host = new EngineHost({}, {
@@ -616,161 +623,6 @@ test('native JS transport never forwards private headers to a redirect target', 
   }
 });
 
-test('delegated signing crosses back as an event before HTTP and forwards the opaque answer', async () => {
-  const calls = [];
-  const engine = {
-    payloadSigned(id, signature, headers, now) {
-      calls.push(['signed', id, signature, headers, now]);
-      return JSON.stringify([{ op: 'http', request: id, method: 'POST', url: 'https://venue.test/order', headers: [], body: signature }]);
-    },
-    httpStart: () => '', httpChunk: () => '', httpEnd: () => '',
-  };
-  const payload = { exchangeName: 'paradex', key: 'public', payload: '0x123', scheme: 'stark', encoding: 'felt-pair' };
-  const host = new EngineHost(engine, {
-    now: () => 100, setTimeout, clearTimeout,
-    signPayload: async (request, { signal }) => {
-      calls.push(['sign', request, signal.aborted]);
-      return { signature: 'opaque answer', headers: { 'X-Proof': 'proof' } };
-    },
-    request: async (request) => { calls.push(['http', request]); return { status: 200, body: new Uint8Array() }; },
-  });
-  host.execute({ op: 'signPayload', request: 7, payload, timeoutMs: 1000 });
-  assert.equal(calls.length, 0);
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls[0], ['sign', payload, false]);
-  assert.deepEqual(calls[1], ['signed', 7, 'opaque answer', 'X-Proof:proof', 100]);
-  assert.equal(calls[2][0], 'http');
-  assert.equal(calls[2][1].body, 'opaque answer');
-  assert.equal(host.signings.size, 0);
-  host.dispose();
-});
-
-test('delegated signing timeouts abort the signer and discard a late signature', async () => {
-  let timeout;
-  let resolveSign;
-  let signal;
-  const events = [];
-  const host = new EngineHost({
-    payloadSignFailed: (...args) => (events.push(args), ''),
-    payloadSigned() { throw new Error('late signature must not enter engine'); },
-  }, {
-    now: () => 200,
-    setTimeout: (fn) => (timeout = fn, 1), clearTimeout() {},
-    signPayload: (_, context) => (signal = context.signal, new Promise((resolve) => { resolveSign = resolve; })),
-  });
-  host.execute({ op: 'signPayload', request: 8, payload: {}, timeoutMs: 20_000 });
-  await Promise.resolve();
-  timeout();
-  assert.equal(signal.aborted, true);
-  assert.deepEqual(events, [[8, 'Payload signing timed out', 200]]);
-  assert.equal(host.signings.size, 0);
-  resolveSign({ signature: 'late' });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(events.length, 1);
-  host.dispose();
-});
-
-test('host disposal cancels pending signatures and prevents subsequent engine calls', async () => {
-  let resolveSign;
-  let signal;
-  let timers = 0;
-  const host = new EngineHost({
-    payloadSignFailed() { throw new Error('disposed'); }, payloadSigned() { throw new Error('disposed'); },
-  }, {
-    now: () => 0,
-    setTimeout: () => (++timers), clearTimeout: () => --timers,
-    signPayload: (_, context) => (signal = context.signal, new Promise((resolve) => { resolveSign = resolve; })),
-  });
-  host.execute({ op: 'signPayload', request: 9, payload: {}, timeoutMs: 20_000 });
-  await Promise.resolve();
-  host.dispose();
-  assert.equal(signal.aborted, true);
-  assert.equal(timers, 0);
-  assert.equal(host.signings.size, 0);
-  resolveSign({ signature: 'late' });
-  await new Promise((resolve) => setImmediate(resolve));
-});
-
-test('missing, rejected and malformed delegated signers fail without making HTTP requests', async () => {
-  for (const signPayload of [undefined, () => { throw new Error('denied'); }, () => ({ signature: 123 }), () => ({ signature: 'answer', headers: { 'X-Proof': 123 } })]) {
-    const failures = [];
-    const host = new EngineHost({ payloadSignFailed: (...args) => (failures.push(args), '') }, {
-      now: () => 0, setTimeout, clearTimeout, signPayload,
-      request() { throw new Error('must never issue HTTP'); },
-    });
-    host.execute({ op: 'signPayload', request: 10, payload: {}, timeoutMs: 1000 });
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(failures.length, 1);
-    assert.match(failures[0][1], /not configured|Payload signing failed|Invalid payload signer (result|header)/);
-    assert.equal(host.signings.size, 0);
-    host.dispose();
-  }
-});
-
-test('delegated header lines preserve empty values, colons and surrounding whitespace', async () => {
-  for (const [headers, expected] of [
-    [undefined, ''],
-    [{}, ''],
-    [{ 'X-Empty': '', 'X-Exact': '  a:b:c \t' }, 'X-Empty:\nX-Exact:  a:b:c \t'],
-  ]) {
-    const received = [];
-    const host = new EngineHost({ payloadSigned: (_id, _signature, lines) => (received.push(lines), '') }, {
-      now: () => 0, setTimeout, clearTimeout,
-      signPayload: () => ({ signature: 'opaque', headers }),
-    });
-    host.execute({ op: 'signPayload', request: 11, payload: {}, timeoutMs: 1000 });
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(received, [expected]);
-    host.dispose();
-  }
-});
-
-test('delegated header names and CR/LF fail before encoding or making HTTP requests', async () => {
-  for (const headers of [
-    { 'X-Proof': 'valid\nInjected: value' },
-    { 'X-Proof': 'valid\rInjected: value' },
-    { 'X-Proof\nInjected': 'value' },
-    { 'X-Proof\rInjected': 'value' },
-    { 'Invalid Header': 'value' },
-    { '': 'value' },
-  ]) {
-    const failures = [];
-    const host = new EngineHost({
-      payloadSigned() { assert.fail('invalid headers must never enter WASM as lines'); },
-      payloadSignFailed: (_id, error) => (failures.push(error), ''),
-    }, {
-      now: () => 0, setTimeout, clearTimeout,
-      signPayload: () => ({ signature: 'opaque', headers }),
-      request() { assert.fail('invalid headers must never reach HTTP'); },
-    });
-    host.execute({ op: 'signPayload', request: 12, payload: {}, timeoutMs: 1000 });
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(failures, ['Invalid payload signer header']);
-    assert.equal(host.signings.size, 0);
-    host.dispose();
-  }
-});
-
-
-test('external signer exceptions never forward credentials or signed URLs to the engine', async () => {
-  for (const asynchronous of [false, true]) {
-    const failures = [];
-    const host = new EngineHost({ payloadSignFailed: (_id, error) => { failures.push(error); return ''; } }, {
-      now: () => 0, setTimeout, clearTimeout,
-      signPayload: () => {
-        const error = new Error('https://venue.test/private?signature=private-signature Authorization: private-token');
-        if (asynchronous) return Promise.reject(error);
-        throw error;
-      },
-      request() { assert.fail('signing failure must not issue HTTP'); },
-    });
-    host.execute({ op: 'signPayload', request: 13, payload: {}, timeoutMs: 1000 });
-    await new Promise(setImmediate);
-    assert.deepEqual(failures, ['Payload signing failed']);
-    assert.equal(host.signings.size, 0);
-    host.dispose();
-  }
-});
 
 for (const failure of ['synchronous request', 'asynchronous request', 'response body']) {
   test(`unstructured ${failure} errors cannot leak credentials through command errors or logs`, async () => {
@@ -1017,6 +869,8 @@ test('socket health tracks open, first frame and every close path per channel wi
   assert.equal(changes, 2, 'open and first frame notify; later frames do not');
   assert.equal(host.socketHealth().private.open, 1);
   assert.equal(host.socketHealth().private.initialized, 1);
+  assert.equal(host.socketHealth().public.initialized, 0, 'a separate private socket does not initialize public');
+  assert.equal(host.socketHealth().public.open, 0);
   assert.ok(host.socketHealth().private.lastReceived > 0);
 
   // A connect still in flight is left alone, as in TS.
@@ -1048,4 +902,71 @@ test('socket health tracks open, first frame and every close path per channel wi
   assert.equal(host.socketHealth().business.closes, 0);
   host.dispose();
   assert.equal(host.reconnectSockets(), 0);
+});
+
+for (const channel of ['private', 'public']) {
+  test(`multiplexed ${channel} socket carries public health without changing routing`, () => {
+    let callbacks;
+    let closes = 0;
+    let changes = 0;
+    const host = new EngineHost({
+      start: () => JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://shared', channel, publicTopics: true }]),
+      wsOpen: () => '', wsMessage: () => '', wsClose: () => { closes++; return ''; },
+    }, { now: () => 1, connect: (_url, handlers) => {
+      callbacks = handlers;
+      return { close() {} };
+    } }, { onSocketChange: () => changes++ });
+    host.start();
+    assert.equal(callbacks.channel, channel, 'routing/authentication role is unchanged');
+    assert.equal(callbacks.publicTopics, true);
+    assert.equal(host.socketHealth().public.initialized, 0);
+    callbacks.onOpen();
+    callbacks.onMessage('snapshot');
+    callbacks.onMessage('next');
+    assert.equal(host.socketHealth().public.open, 1);
+    assert.equal(host.socketHealth().public.initialized, 1);
+    assert.equal(host.socketHealth().private.initialized, channel === 'private' ? 1 : 0);
+    assert.equal(changes, 2, 'one notification per transition, not per declared channel');
+    assert.equal(host.reconnectSockets('public'), 1, 'public reconnect finds the shared physical socket');
+    callbacks.onClose(1000);
+    callbacks.onMessage('late');
+    assert.equal(closes, 1);
+    assert.equal(host.socketHealth().public.initialized, 0);
+    assert.equal(host.socketHealth().public.closes, 1);
+    assert.equal(host.socketHealth().private.closes, channel === 'private' ? 1 : 0);
+    host.dispose();
+  });
+}
+
+
+test('host UTC synchronization uses scheduling time without changing it or allowing missing support', () => {
+  const calls = [];
+  let now = 1000;
+  const host = new EngineHost({ syncHostTime: (raw, utc) => { calls.push([raw, utc]); return Number.isFinite(utc); } }, { now: () => now });
+  host.syncHostTime(1800000000000);
+  now += 12000;
+  host.syncHostTime(1800000000000 - 162 * 86400000);
+  assert.deepEqual(calls, [[1000, 1800000000000], [13000, 1800000000000 - 162 * 86400000]]);
+  assert.equal(host.transport.now(), 13000);
+  assert.throws(() => host.syncHostTime(NaN), /refused host protocol time/);
+  host.dispose();
+  const old = new EngineHost({}, { now: () => 1000 });
+  assert.throws(() => old.syncHostTime(1800000000000), /does not support separate protocol time/);
+  old.dispose();
+});
+
+
+test('an already sampled host UTC correction does not resample or reenter the transport clock', () => {
+  const calls = [];
+  const host = new EngineHost({ syncHostTime: (raw, utc) => { calls.push([raw, utc]); return true; } }, {
+    now: () => { throw new Error('clock must not be sampled recursively'); },
+  });
+  host.syncHostTime(1800007200000, 1000);
+  assert.deepEqual(calls, [[1000, 1800007200000]]);
+  // A correction cannot bypass the physical HTTP group handoff's reentry fence.
+  host.managedHttp.groupHandoff = {};
+  assert.throws(() => host.syncHostTime(1800014400000, 1000), /HTTP group handoff/);
+  assert.equal(calls.length, 1);
+  host.managedHttp.groupHandoff = false;
+  host.dispose();
 });

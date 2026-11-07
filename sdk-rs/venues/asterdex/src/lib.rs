@@ -26,15 +26,29 @@ use safe_cex_engine::socket_lifecycle::{
     Interest as SocketInterest, Invalidation, LifecycleEvent, MAX_FRAME_BYTES, SocketCapabilities,
     SocketError, TrafficPolicy,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CredentialSlot, Cx, ErrorKind, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue, VenueError, json, num,
+    SubscriptionTopic, TimerId, Venue, VenueError, json, num,
 };
 use serde_json::value::RawValue;
 use sign::Version;
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use wire::*;
+
+/// Aster refuses a klines limit outside 1..=1500 (-1130).
+const MAX_KLINES: u32 = 1500;
+
+/// The REST depth sizes Aster accepts; any other value is refused (-1130 or -4021).
+/// A request rounds up to the next size, and anything larger asks for the deepest.
+fn depth_limit(requested: u32) -> u32 {
+    const SIZES: [u32; 7] = [5, 10, 20, 50, 100, 500, 1000];
+    SIZES
+        .into_iter()
+        .find(|size| *size >= requested)
+        .unwrap_or(1000)
+}
 
 const INTEREST_MS: f64 = 15_000.0;
 
@@ -95,6 +109,17 @@ impl Urls {
 pub struct MarketRule {
     pub tick_size: f64,
     pub max_algo_orders: Option<u32>,
+    pub min_notional: f64,
+    /// MARKET_LOT_SIZE, which governs MARKET orders in place of LOT_SIZE.
+    pub market_lot: MarketLot,
+}
+
+/// A zero `max` or `min` is a filter Aster did not send.
+#[derive(Clone, Copy)]
+pub struct MarketLot {
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
 }
 
 pub enum Pending {
@@ -148,6 +173,8 @@ fn feed_policy(role: SocketChannel, backoff_base_ms: f64) -> FeedPolicy {
         controls: ControlPolicy::None,
         invalidation: Invalidation::Required,
         subscription_interval_ms: 0.0,
+        close_floors: &[],
+        data_silence: None,
     }
 }
 
@@ -197,6 +224,14 @@ pub struct AsterDex {
     startup: safe_cex_engine::startup::Backoff<bool>,
     interest_cursor: usize,
     interest_fallback: VecDeque<String>,
+}
+
+fn book_topic(symbol: &str) -> String {
+    format!("{}@depth20@100ms", symbol.to_ascii_lowercase())
+}
+
+fn candle_topic(symbol: &str, interval: Interval) -> String {
+    format!("{}@kline_{interval}", symbol.to_ascii_lowercase())
 }
 
 fn slot_index(slot: CredentialSlot) -> usize {
@@ -368,6 +403,11 @@ impl AsterDex {
                 );
                 if at_start {
                     cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
+                    // Every signed read would only retry: end the start so public data takes over.
+                    cx.startup_failed(
+                        safe_cex_engine::VenueError::new(error.clone())
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                    );
                 }
                 self.signer_mismatch[slot_index(slot)] = Some(error);
             }
@@ -455,20 +495,27 @@ impl AsterDex {
     /// encodes only the deltas while connected.
     fn public_interests(&self) -> Vec<SocketInterest> {
         let mut topics = vec!["!ticker@arr".to_owned(), "!markPrice@arr@1s".to_owned()];
+        topics.extend(self.books.keys().map(|symbol| book_topic(symbol)));
         topics.extend(
-            self.books
+            self.candles
                 .keys()
-                .map(|symbol| format!("{}@depth20@100ms", symbol.to_ascii_lowercase())),
-        );
-        topics.extend(
-            self.candles.keys().map(|(symbol, interval)| {
-                format!("{}@kline_{interval}", symbol.to_ascii_lowercase())
-            }),
+                .map(|(symbol, interval)| candle_topic(symbol, *interval)),
         );
         topics
             .into_iter()
             .map(SocketInterest::from_wire_args)
             .collect()
+    }
+
+    /// The public feed and interest key `topic` streams on.
+    fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => book_topic(symbol),
+            SubscriptionTopic::Candles { symbol, interval } => {
+                supported(*interval).then(|| candle_topic(symbol, *interval))?
+            }
+        };
+        Some((self.public.feed?, key))
     }
 
     fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -584,6 +631,22 @@ impl AsterDex {
             let _ = json::each::<&RawValue>(text, |item| self.on_public_frame(cx, item.get()));
             return;
         }
+        if let Some(frame) = FastAggregate::decode(text) {
+            match frame {
+                FastAggregate::Tickers(rows) => {
+                    for row in rows {
+                        update_ticker(cx, row);
+                    }
+                }
+                FastAggregate::Marks(rows) => {
+                    for row in rows {
+                        update_mark(cx, row);
+                    }
+                }
+            }
+            return;
+        }
+        // General decoding preserves reordered frames and valid prefixes before a typed-row error.
         let Ok(envelope) = serde_json::from_str::<Envelope>(text) else {
             return;
         };
@@ -637,6 +700,9 @@ impl AsterDex {
             let price = num::parse(&event.p);
             cx.store
                 .update_ticker(&event.s, |ticker| ticker.last = price);
+            if price.is_finite() && price > 0.0 {
+                cx.store.observe_ticker_fields(&event.s, 1 << 2);
+            }
         }
     }
 
@@ -716,9 +782,15 @@ fn is_partial_stream(stream: &str) -> bool {
 }
 
 fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
+    let last = event
+        .c
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(num::parse);
+    let observed = last.is_some_and(|price| price > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
-        if let Some(value) = event.c.as_deref().filter(|s| !s.is_empty()) {
-            ticker.last = num::parse(value);
+        if let Some(value) = last {
+            ticker.last = value;
         }
         if let Some(value) = event.percentage.as_deref().filter(|s| !s.is_empty()) {
             ticker.percentage = num::parse(value);
@@ -730,12 +802,21 @@ fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
             ticker.quote_volume = num::parse(value);
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 2);
+    }
 }
 
 fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
+    let mark = event
+        .p
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(num::parse);
+    let observed = mark.is_some_and(|price| price > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
-        if let Some(value) = event.p.as_deref().filter(|s| !s.is_empty()) {
-            ticker.mark = num::parse(value);
+        if let Some(value) = mark {
+            ticker.mark = value;
         }
         if let Some(value) = event.i.as_deref().filter(|s| !s.is_empty()) {
             ticker.index = num::parse(value);
@@ -747,6 +828,9 @@ fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
             ticker.funding_time = value;
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 3);
+    }
 }
 
 fn collect_interest(body: &str, output: &mut HashMap<String, f64>) {
@@ -789,16 +873,35 @@ fn candle(time: f64, o: &str, h: &str, l: &str, c: &str, v: &str) -> Candle {
     }
 }
 
+fn qty(text: Option<&str>) -> f64 {
+    text.map_or(0.0, num::parse)
+}
+
 fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
     let find = |kind: &str| row.filters.iter().find(|filter| filter.filter_type == kind);
     let lot = find("LOT_SIZE");
+    let market_lot = find("MARKET_LOT_SIZE");
+    // Aster: quantityPrecision "please do not use it as stepSize".
+    let step = Some(qty(lot.and_then(|f| f.step_size.as_deref())))
+        .filter(|step| *step > 0.0)
+        .unwrap_or(10f64.powi(-row.quantity_precision));
     let price = 10f64.powi(-row.price_precision);
     let rule = MarketRule {
+        min_notional: find("MIN_NOTIONAL")
+            .and_then(|filter| filter.notional.as_deref())
+            .map_or(0.0, num::parse),
         tick_size: find("PRICE_FILTER")
             .and_then(|filter| filter.tick_size.as_deref())
             .map(num::parse)
             .unwrap_or(price),
         max_algo_orders: find("MAX_NUM_ALGO_ORDERS").and_then(|filter| filter.limit),
+        market_lot: MarketLot {
+            min: qty(market_lot.and_then(|f| f.min_qty.as_deref())),
+            max: qty(market_lot.and_then(|f| f.max_qty.as_deref())),
+            step: Some(qty(market_lot.and_then(|f| f.step_size.as_deref())))
+                .filter(|step| *step > 0.0)
+                .unwrap_or(step),
+        },
     };
     let market = Market {
         id: row.symbol.to_string(),
@@ -809,7 +912,7 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
         active: true,
         precision: Precision {
             price,
-            amount: 10f64.powi(-row.quantity_precision),
+            amount: step,
         },
         limits: Limits {
             amount: MinMax {
@@ -841,6 +944,15 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
 }
 
 impl Venue for AsterDex {
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.stop_release_veto(store, pending, release)
+    }
+
     #[inline]
     fn managed_sockets() -> bool {
         true
@@ -858,6 +970,9 @@ impl Venue for AsterDex {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
 
     /// The engine asks at each uncertain seal and re-asks with backoff while
     /// fenced; a call starts one read or joins the owed requery, and the clean
@@ -867,6 +982,17 @@ impl Venue for AsterDex {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Signed(request) => Self::startup_reads(&request.pending),
+            Pending::ExchangeInfo { .. } => S::MARKETS,
+            Pending::Daily { .. } | Pending::OpenInterest { initial: true, .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             stp_controls: self.version == Version::V3,
@@ -876,8 +1002,27 @@ impl Venue for AsterDex {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             cancel_with_symbols: true,
             order_book_query: true,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
 
     fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
@@ -957,6 +1102,14 @@ impl Venue for AsterDex {
         } else {
             Err(SocketError::Stale)
         }
+    }
+
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
     }
 
     /// One `{"method","params","id"}` frame per batch, split only to stay under
@@ -1290,7 +1443,11 @@ impl Venue for AsterDex {
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::Signed(req) => self.on_signed_failed(cx, req, error),
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
 
@@ -1442,11 +1599,19 @@ impl Venue for AsterDex {
                 let mut path = format!(
                     "{}?symbol={symbol}&interval={interval}&limit={}",
                     self.path("klines"),
-                    limit.unwrap_or(500)
+                    limit.unwrap_or(500).clamp(1, MAX_KLINES)
                 );
                 if let Some(from) = from_ms {
                     path.push_str(&format!("&startTime={}", num::format(from)));
                 }
+                // Aster refuses startTime == endTime (-1023), so one candle asks through its close.
+                let to_ms = to_ms.map(|to| {
+                    if from_ms == Some(to) {
+                        to + interval.ms() - 1.
+                    } else {
+                        to
+                    }
+                });
                 if let Some(to) = to_ms {
                     path.push_str(&format!("&endTime={}", num::format(to)));
                 }
@@ -1474,7 +1639,7 @@ impl Venue for AsterDex {
                     self.path("depth"),
                     sign::Query::new()
                         .str("symbol", &symbol)
-                        .num("limit", f64::from(limit.unwrap_or(100)))
+                        .num("limit", f64::from(depth_limit(limit.unwrap_or(100))))
                         .as_str()
                 );
                 let Ok(context) = cx.admit_http_command(request::public_read_policy()) else {
@@ -1522,7 +1687,7 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
             format!(
                 "Aster skipped {} malformed {kind} row(s): {}",
                 skipped.len(),
-                skipped.join(", ")
+                skipped.join_with(", ")
             ),
         );
     }
@@ -1550,7 +1715,11 @@ impl AsterDex {
             }) => {
                 let _ = cx.fail_context(&root, error);
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
 }

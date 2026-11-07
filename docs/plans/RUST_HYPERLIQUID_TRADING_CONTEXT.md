@@ -1,5 +1,173 @@
 # Hyperliquid trading ownership and EIP-712 dispatch
 
+## Beta execution after the managed-info slice
+
+Current owner: codex-zs5e83. Current base: master `2f2b62a02e8` (#2303).
+This section supersedes the historical base, phase holds and ownership notes
+below. One combined venue PR consumes existing shared APIs; no hosted activation
+or new engine API is proposed. #2303 removed two request fingerprints. The next
+slice targets the remaining 15 request fingerprints and 17 signing fingerprints;
+these are lexical inventory facts, not counts of physical requests. The later
+order_read_epoch adoption remains a separate, subsequent slice.
+
+### Trusted construction and selected authority
+
+Both native setup and the SDK's trusted setup mapping declare Primary
+`source: scalarOnly`, `signingAlgorithm: secp256k1Digest`, required signing and
+hex scalar decoding. The primary LocalIdentity starts from Default (absent key)
+and assigns only the consumed scalar. Public options.key, applicationId and vault
+remain public account configuration and never become credential material. No
+secondary is installed. Existing caller metadata is validated normally; stableId
+is not synthesized and is not required by the address-keyed nonce domain.
+A native/TS golden binds identical setup JSON, including prefixed/unprefixed
+hex, absent key and an ordinary nonempty-key negative. Invalid setup refuses.
+The measured legacy scalar parser does not trim: ASCII space, NEL and BOM
+around the scalar all refuse. Goldens retain that byte-exact policy. Native
+accepts 0X as well as 0x; the old SDK Wallet rejects 0X. The provider cutover
+uses the native hex decoder consistently on both trusted setup paths, preserving
+the same proven scalar rather than changing its bytes. Invalid hex, length,
+zero or out-of-range scalars yield fixed errors, never echoed input. Options,
+Debug and notices expose no scalar. Failed engine-owned address setup grants no
+private Mutation authority; no venue or TS derivation substitutes for its proof.
+
+The venue Options replaces its raw secret with an installed Identity reference.
+Trusted registry helpers install the provider and identities before host-owned
+address setup. Hyperliquid declares Primary public-address setup when private,
+HYPERLIQUID_AGENT address nonce domain, and dispatch_nonce. At start, the venue
+rebuilds its Primary Slots from cx.address_nonce_identities; it never expects an
+old clone to gain a binding. A selected Mutation uses Selection::authority and
+select_with_nonce(HYPERLIQUID_AGENT), not identity.credential. The actual sealed
+agent alone keys raw-ms, scale-one, MAX_SAFE reserved/released nonce custody.
+Wallet/user/vault/network/ref/stableId do not create a new agent counter.
+
+Perps retain the configured-agent mismatch warning. Spot retains its existing
+configured key versus actual signer check, using the engine-sealed public address
+instead of deriving it from a scalar. User/account and vault selection remain
+separate from that proof. Hosted remoteSigner and payloadSigner remain refused;
+this cutover enables local-key accounts only. Injected empty credential identities
+do not acquire the trusted ScalarOnly marker. Existing legacy engines must be
+retired before a new engine starts; sharing the reserved counter alone does not
+fence an old unfenced release.
+
+### Recipe, queue and journal API
+
+Exchange::new(identity, nonce_claim, action, vault, testnet) freezes ordered JSON
+and MessagePack before provider work. Its unsigned intent is exactly POST
+/exchange, Content-Type application/json, no body. Prepare reserves through the
+claim and computes the native action hash and Agent digest, then emits exactly
+same-ref PublicAddress plus Secp256k1Digest Sign. The receipt includes the genuine
+prepared stamp and decimal nonce. Apply validates the complete request/result/
+receipt/header graph, exact 20-byte address, low-s signature and recovery over
+the origin-computed digest to the sealed address before publishing the body.
+Stale preparation repeats real work; no eager signature/body cache survives.
+Every distinct physical successor mints a fresh selected Claim; stale repair
+remains engine-owned. Legacy handoff must cancel/fence late host release and
+join the actual old work before starting the new engine; dispose/map clearing
+or a shared reserved maximum alone does not prove that boundary.
+
+Each real command owns a WriteAfterReads Preflight with no read credential and
+the selected write authority. Early refusals use the real command-entry API,
+never a deferred numeric command id. A queued command retains a parked Preflight;
+only its exact on_http_preflight_ready callback admits the first serial Mutation.
+The serial root is unbounded, each physical call is 20 seconds, attempts one,
+CallAuth::Preflight, and refusals_complete false. Empty work uses genuine empty
+completion, without a dummy HTTP/write fact. Builder reads retain their actual
+background read owner and eight-second readiness timeout; they do not invent
+Session or Read-plan authority. Every successor call uses its exact Plan/Slot.
+
+The registered release domain has one 334ms group and Mutations membership.
+The engine stamps member Contexts, queues successful physical submissions FIFO,
+and advances the gap at final Claim. Info/builder reads are not members. Native
+job order and dependent amend cancel-before-create remain. No reservation is
+rolled back, and stale repairs keep the engine's cumulative budget. The old
+queue-time write_at timer is removed in the same cutover; there is no dual pacing.
+
+Delivery validation precedes classification, reduction or Store publication.
+The shared journal records accepted, refused, partial or Unknown write facts,
+retains structured IDs and owns the single command terminal and order locks.
+Transport failure, deadline, malformed data and unproven HTTP never resend.
+Unknown retains the existing placement fence and starts real reconciliation.
+The pure reply classifier retains exact row cardinality/kind, per-row cancel
+proofs and late-fill behavior; lexical macro fragments are not hidden by renames.
+
+### Required production-bound regressions
+
+- Actual native and SDK/WASM local setup retain no scalar in venue/options;
+  ScalarOnly has credential_ref None, genuine managed signed release, and Present
+  or Credential interpolation of the signing ref refuses before provider work.
+- Native signing goldens cover main/test, vault, Place/brackets, cancel,
+  leverage and scheduleCancel, with byte-equal body/digest for fixed nonce.
+- Real venue commands pin queued ownership/capacity, delayed provider/no early
+  HTTP, prepare/bind/claim, deadline equality, stale repair and 334ms final-release
+  pacing across two commands. Missing/invalid key and unsupported signer refuse
+  before financial side effects. Public reads remain unsigned and unpaced.
+- Malformed receipt/address/signature/high-s or changed outbound intent publishes
+  nothing; same-agent engines/vaults/networks share nonce highwater, with no
+  stableId requirement. The same packet cannot claim twice.
+- All existing financial assertions remain, including mixed Place IDs/Unknown,
+  cancel accepted/terminal versus refused rows, prior-call partials, amend source
+  fill, builder timeout and scheduleCancel uncertainty. Genuine failure and
+  no-I/O controls replace every migrated legacy terminal.
+
+CARGO_BUILD_JOBS=2, one cargo at a time. Scoped native/registry/SDK tests, strict,
+fmt, bans, exact removal-only inventory and CI family/replay/required coverage
+qualify the source. JS/WASM-host gates are the beta record, not native-only tests.
+Any cap raise is explicit and needs auditor disposition; no local family matrix.
+Credential review: m26ps4; money/recipe/API review: 9czdjh and/or fe7lgm/dazzy3;
+every landing requires 8x5tm1's exact-tree GO. This API direction grants no source,
+size, hosted or live-credential clearance.
+
+## Local source qualification checkpoint
+
+The local cutover removes every HL runtime raw exchange request, numeric command
+terminal, agent-scalar holder and eager signature call. It uses the declared
+ScalarOnly local provider and the sealed installed identity for every physical
+successor. The engine owns each selected nonce claim, serial leg and journal.
+The original native sender/hash helpers remain test oracles and the disabled
+TxFlow consumer's dependency; HL runtime has no fallback to them.
+
+The current full native receipt is 359 PASS across 27 targets, including the
+38 production custody controls. The later scoped source qualification has
+38 custody, 37 trading and 3 security controls green. Crypto capability ON/OFF
+is pinned; unchanged AsterDEX and GRVT suites total 628 PASS. Strict clippy for
+HL/registry/crypto all targets passes. Final source reviews, composed reruns,
+final composed JS/WASM qualification, CI bytes and auditor GO remain required.
+Fresh unoptimized browser bindings already passed the actual EngineHost path for
+both names and both native/private-capsule setup forms. The CI family and combined
+conformance paths run that same production-binding control.
+
+KnownPartial is the engine's deliberate accepted-plus-cited-refusal projection
+(outcome None with structured IDs). Unlisted errors and unmatched placement rows without an oid remain Unknown,
+without write replay. Confirmed waitingForFill attachments fold into their
+accepted parent's real oid; a standalone zero-size reduce-only positionTpsl is
+predeclared Setting and may acknowledge waitingForTrigger with no oid. The changed legacy outcome
+oracles are disclosed in the caller fragment; prices, sizes, grouping, actual IDs
+and the no-third-send/no-retry predicates stay asserted. Native packet fixtures
+now drive real readiness and release-domain timers without firing call deadlines.
+The read-only test-support clock accessor proves no host resource settlement.
+
+A settings write is marked at issue, so an engine-owned 503 seal cannot skip its
+native uncertainty guard. The existing reconcile hook joins the targeted read;
+its revision must follow the write before it can clear the mark. The connected
+stale-read/recovery control goes assertion RED when the issue mark is removed.
+A real joined failed address-setup execution leaves public reads available but
+refuses a private write before Prepare or provider signing.
+
+The source supports a fresh JS/WASM host, not warm legacy-owner replacement.
+Synchronous dispose cannot prove the original transport/provider promises joined.
+Replacement activation remains held until that external join and callback fence
+is genuinely demonstrated; a cold page teardown alone is not such evidence.
+Hosted signing and order_read_epoch adoption stay outside this change.
+
+The current request inventory has zero HL entries (15 removed in this slice;
+#2303 removed the first two). Pure enum predicates and explicit queued-read
+ownership remove the conservative non-call fragments without renaming receivers
+or weakening the checker. All 17 original signing fingerprints are removed;
+two new test-only startup JSON/policy fingerprints remain explicitly recorded
+as fixture inputs, not runtime signing debt. Their addition needs auditor GO.
+
+## Historical original plan and controls
+
 Owner: codex-zs5e83. Native/recipe reviewer: codex-9czdjh (or codex-uufub4).
 Base: b0ee0a9a4d5654980dea00d67d2066c7e524ed87, landing branch
 origin/feat/rust-rewrite. Assignment: trading.rs, 15 frozen request-inventory

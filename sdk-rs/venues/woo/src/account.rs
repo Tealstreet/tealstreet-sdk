@@ -12,14 +12,50 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, Method, OrderSnapshotToken, Response, SocketId, TimerId, num,
+    Command, CommandId, Cx, ErrorKind, Fill, Method, OrderSnapshotToken, Response, SocketId,
+    TimerId, VenueError, num,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
+
+fn http_read_error(response: &Response<'_>) -> VenueError {
+    #[derive(Deserialize)]
+    struct Code {
+        code: Option<i64>,
+    }
+    let code = serde_json::from_str::<Code>(response.body)
+        .ok()
+        .and_then(|value| value.code);
+    let (kind, message) = match (response.status, code) {
+        (408, _) => (ErrorKind::Timeout, "WOO account HTTP request timed out"),
+        (429, _) => (ErrorKind::RateLimited, "WOO account request rate limited"),
+        (500.., _) => (
+            ErrorKind::VenueUnavailable,
+            "WOO account service unavailable",
+        ),
+        (404, _) => (ErrorKind::Unsupported, "WOO account endpoint unavailable"),
+        (403, _) => (ErrorKind::AuthPermission, "WOO API key permission denied"),
+        (401, _) | (_, Some(-1001 | -1002)) => (ErrorKind::AuthInvalid, "WOO refused the API key"),
+        (_, Some(-1003)) => (ErrorKind::RateLimited, "WOO account request rate limited"),
+        (_, Some(-1000 | -1011 | -1012)) => (
+            ErrorKind::VenueUnavailable,
+            "WOO account service unavailable",
+        ),
+        (400..=499, _) | (_, Some(_)) => (ErrorKind::Rejected, "WOO account HTTP request rejected"),
+        _ => (ErrorKind::Internal, "WOO account response invalid"),
+    };
+    let detail = code.map_or_else(String::new, |value| format!(", WOO code {value}"));
+    let error = VenueError::new(format!("{message} (HTTP {}{detail})", response.status)).kind(kind);
+    match code {
+        Some(code) => error.venue_code(code.to_string()),
+        None => error,
+    }
+}
 
 pub enum Request {
     Info {
@@ -68,7 +104,7 @@ impl Skipped {
             format!(
                 "WOO {kind}: skipped {} unmappable row(s) [{}]",
                 rows.count(),
-                rows.ids().join(", ")
+                rows.ids().join_with(", ")
             )
         })
     }
@@ -154,6 +190,8 @@ pub struct Account {
     pause_until: f64,
     info_pending: bool,
     positions_pending: bool,
+    /// The stream became live while a read ran: repeat the reads once they settle.
+    read_again: bool,
     positions_guard: StaleGuard,
     orders: Option<OrdersJoin>,
     generation: u64,
@@ -286,7 +324,7 @@ struct Leverage<'a> {
     #[serde(borrow)]
     symbol: Str<'a>,
     #[serde(borrow)]
-    margin_mode: Str<'a>,
+    margin_mode: Option<Str<'a>>,
     #[serde(borrow)]
     position_mode: Str<'a>,
     #[serde(borrow)]
@@ -484,6 +522,7 @@ impl Woo {
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
         leverage: f64,
+        margin_type: Option<MarginType>,
         revision: u64,
     ) {
         if self.account_revision(symbol) > revision {
@@ -494,7 +533,10 @@ impl Woo {
         self.account.metadata_at.insert(symbol.into(), cx.now);
         cx.store.update_setting(symbol, |s| {
             s.leverage = leverage;
-            s.margin_type = Some(MarginType::Cross);
+            // A leverage-only response cannot confirm a margin-mode change.
+            if let Some(margin_type) = margin_type {
+                s.margin_type = Some(margin_type);
+            }
             s.buy_leverage = Some(leverage);
             s.sell_leverage = Some(leverage);
         });
@@ -708,12 +750,37 @@ impl Woo {
         let c = &mut self.account.connection;
         c.open = true;
         c.ping_at = cx.now;
-        let Some(text) = crate::sign::websocket_auth(&self.options, cx.now) else {
+        if let Some(identity) = &self.options.credentials {
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(crate::sign::dispatch::WsAuth::new(identity.clone(), socket)),
+            );
+            return true;
+        }
+        let Some(text) = crate::sign::websocket_auth(&self.options, cx.protocol_now()) else {
             return true;
         };
         cx.send(socket, text);
-        self.account_refresh(cx);
         true
+    }
+    /// Events before the subscriptions were never delivered, the first open included.
+    /// A read still running may predate the stream: read again after it settles.
+    pub(crate) fn socket_account_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.read_again = self.account.positions_pending
+            || self.account.orders.is_some()
+            || cx.now < self.account.pause_until;
+        self.account_refresh(cx);
+    }
+    pub(crate) fn account_read_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.read_again
+            && !self.account.positions_pending
+            && self.account.orders.is_none()
+            && cx.now >= self.account.pause_until
+        {
+            self.account.read_again = false;
+            self.account_refresh(cx);
+        }
     }
     pub(crate) fn account_close(&mut self, _cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
@@ -1129,13 +1196,13 @@ impl Woo {
             if response.status == 429 {
                 self.account.pause_until = cx.now + 10_000.0;
             }
-            self.account_failed(cx, req, "WOO account HTTP read rejected");
+            self.account_http_failed(cx, req, &response);
             return;
         }
         let envelope = match Envelope::checked(response.body) {
             Ok(v) => v,
-            Err(e) => {
-                self.account_failed(cx, req, &e);
+            Err(_) => {
+                self.account_http_failed(cx, req, &response);
                 return;
             }
         };
@@ -1480,7 +1547,10 @@ impl Woo {
                 let result = match parsed {
                     Ok(data) => {
                         let scoped = data.symbol == native(cx.store.market(&symbol).unwrap())
-                            && data.margin_mode == "CROSS"
+                            && data
+                                .margin_mode
+                                .as_deref()
+                                .is_none_or(|mode| mode == "CROSS")
                             && data.position_mode == "ONE_WAY"
                             && data.details.len() == 1;
                         let selected = scoped
@@ -1492,12 +1562,17 @@ impl Woo {
                                     cx,
                                     &symbol,
                                     detail.leverage,
+                                    data.margin_mode.as_ref().map(|_| MarginType::Cross),
                                     revision,
                                 );
                             }
                             let setting = cx.store.setting(&symbol).unwrap_or_default();
+                            let margin = data
+                                .margin_mode
+                                .as_ref()
+                                .map_or("", |_| r#","marginType":"cross""#);
                             Ok(format!(
-                                r#"{{"buyLeverage":{},"sellLeverage":{},"marginType":"cross"}}"#,
+                                r#"{{"buyLeverage":{},"sellLeverage":{}{margin}}}"#,
                                 num::format(setting.buy_leverage.unwrap_or(setting.leverage)),
                                 num::format(setting.sell_leverage.unwrap_or(setting.leverage))
                             ))
@@ -1549,7 +1624,23 @@ impl Woo {
             }
         }
     }
-    pub(crate) fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, req: Request, error: &str) {
+    pub(crate) fn account_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        req: Request,
+        response: &Response<'_>,
+    ) {
+        let error = http_read_error(response);
+        cx.startup_read_refused(&error);
+        self.account_failed(cx, req, error);
+    }
+    pub(crate) fn account_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        req: Request,
+        error: impl Into<VenueError>,
+    ) {
+        let error = error.into();
         match req {
             Request::Info { .. } => self.account.info_pending = false,
             Request::Positions { .. } => self.account.positions_pending = false,
@@ -1573,7 +1664,7 @@ impl Woo {
                 }
             }
         }
-        cx.retried_failure("woo.account:1597", error);
+        cx.retried_failure_error("woo.account:1597", &error);
     }
     fn account_schedule_fill_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.refresh.is_some() || self.account.refresh_attempt >= 4 {
@@ -1870,6 +1961,7 @@ impl Woo {
         }
         if self.account.timer == Some(timer) {
             self.account.timer = Some(cx.set_poll_timer(2000.0));
+            self.account_read_again(cx);
             self.account.tick += 1;
             self.account
                 .terminal
@@ -1907,5 +1999,17 @@ impl Woo {
             return true;
         }
         false
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Info { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }

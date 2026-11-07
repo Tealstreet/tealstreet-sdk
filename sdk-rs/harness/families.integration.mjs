@@ -7,6 +7,9 @@ import { readFileSync, statSync } from 'node:fs';
 import { venueFamilies, venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { wasmBudgetError } from './wasm-budget.mjs';
 import { checkAdvertisedCommands, constructionProfiles } from './capability-conformance.mjs';
+import { checkHyperliquidLocalSigning } from './hyperliquid-local-signing.mjs';
+import { checkParadexLocalSigning } from './paradex-local-signing.mjs';
+import { checkLighterModifySigning } from './lighter-modify-signing.mjs';
 
 const pkg = new URL('../hosts/wasm/pkg/', import.meta.url);
 const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.url), 'utf8')
@@ -14,7 +17,8 @@ const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.u
   .map((line) => line.trim().split(':')[0].replaceAll("'", ''));
 
 test('the venue list is read from the family map', () => {
-  assert.equal(venues.length, 50);
+  // Pin the live venue and alias inventory so isolation covers every name.
+  assert.equal(venues.length, 48);
   for (const venue of venues) assert.doesNotThrow(() => venueFamily(venue), venue);
 });
 
@@ -30,6 +34,12 @@ for (const family of selectedFamilies) {
     }
     const engine = await import(new URL(`web/${family}/safe_cex_wasm.js`, pkg));
     await engine.default({ module_or_path: readFileSync(new URL(`web/${family}/safe_cex_wasm_bg.wasm`, pkg)) });
+    if (family === 'hyperliquid') {
+      await checkHyperliquidLocalSigning(engine.WasmEngine, false);
+      await checkHyperliquidLocalSigning(engine.WasmEngine, true);
+    }
+    if (family === 'paradex') await checkParadexLocalSigning(engine.WasmEngine);
+    if (family === 'lighter') await checkLighterModifySigning(engine.WasmEngine);
     if (family === 'apexomni') {
       const corpus = JSON.parse(readFileSync(new URL('../crypto/tests/fixtures/zklink/npm-wasm.json', import.meta.url)));
       const seed = corpus.cases[0].seed;

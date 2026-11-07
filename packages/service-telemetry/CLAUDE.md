@@ -27,6 +27,22 @@ Projects: `exchange-server` (`4512049750933504`) and `candle-server`
 `CANDLE_SERVER_SENTRY_DSN` (on `tealstreet-data`), passed into the container by
 the `envVars` block — the container sees only what is listed there.
 
+## Exchange box identity
+
+`exchange-server` and its parent `exchange-gateway` use `TEALSTREET_BOX` as both
+Sentry `server_name` and the `box` tag. Only an explicit stable box label is
+allowed; automatic container hostnames stay stripped. Their release comes from
+the supplied release or runtime `TEALSTREET_RELEASE` image revision. Missing,
+blank and placeholder values are omitted. Their `region` tag is removed because
+`CONNECT_REGION` can be a stale routing default. Other services keep their
+existing identity behavior. Identity is normalized at client initialization and
+on error and session paths. Metric and log identities are rewritten on their
+serialized envelopes, after the SDK merges scope attributes. Sessions are
+omitted without an image release because the Sentry session schema requires one.
+The final envelope allowlist keeps only events, sessions, session aggregates,
+serialized metrics and logs. All other types, including future types, are
+dropped until their identity normalization is implemented.
+
 ## The default integration set is the leak, not the events
 
 `@sentry/bun` default-enables `Console`, `Http`, an outgoing fetch wrapper

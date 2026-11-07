@@ -15,7 +15,7 @@ import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
-import { classifiedError, deserializeCommandError, exchangeErrorTags } from '../commandOutcome';
+import { classifiedError, deserializeCommandError, exchangeErrorTags, markErrorReported } from '../commandOutcome';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
@@ -37,6 +37,7 @@ import {
   IncomeRecord,
   LogSeverity,
   Market,
+  NukeResult,
   OHLCVOptions,
   OHLCVSOptions,
   OptionChainQuery,
@@ -45,6 +46,7 @@ import {
   OrderBook,
   OrderHistoryOptions,
   OrderSide,
+  OrderStatus,
   OrderType,
   PlaceOrderOpts,
   Position,
@@ -81,6 +83,8 @@ import { InProcessPublicDataProvider } from './in-process-public-data';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { FrameApplier, FrameApplyError } from '../store/frameApplier';
 import { ExchangeEmitter } from './exchangeEmitter';
+import { claimWriteTiming, emitWriteTiming, TIMED_WRITE_METHODS } from '../writeTiming';
+import { startupDiagnosticTags } from './rust/startupDiagnostics';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -177,7 +181,8 @@ export const summarizeSocketHealth = (
   const privateHealthy =
     privateSockets.every((socket) => socket.isRecoveryComplete !== false) &&
     (initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy));
-  const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
+  // Reconnect resets initialization, not the last message's page-clock timestamp.
+  const privateTimestamps = privateSockets.map((s) => s.lastMessageTimestamp || 0);
   const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
 
   return {
@@ -301,7 +306,7 @@ export const CAPABILITY_METHODS = {
 } as const satisfies Record<string, BaseCapabilityMethod>;
 
 /** What this venue can answer. The only supported way to ask; never inspect the methods. */
-export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean>;
+export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean> & Partial<EngineCapabilities>;
 
 export type EngineSnapshot = {
   frame: ArrayBuffer;
@@ -328,6 +333,15 @@ export const WORKER_FORWARDED_METHODS = [
   'fetchHistoricalOrders',
   'fetchIncomeHistory',
   'fetchIncomeHistoryRange',
+  // Account settings and engine reads: a keyless mirror has neither the engine nor the key.
+  'setLeverage',
+  'setAllLeverage',
+  'changeMarginType',
+  'changePositionMode',
+  'updateSymbolMetadata',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ] as const;
 
 export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
@@ -338,18 +352,36 @@ export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
  */
 export const WORKER_OPTIONAL_METHODS = [
   'fetchHistoricalPositions',
+  // Rust raw closed-position rows, which a main-thread mirror maps into its journal.
+  'fetchClosedPositions',
   'changeAccountTier',
   'fetchAccountTier',
   'fetchEngineCapabilities',
   // Rust native account reads; a main-thread mirror asks the worker's engine.
+  'getAccount',
   'fetchPositions',
+  'readPositions',
   'fetchBalance',
   'fetchPositionMode',
+  // Rust-only engine methods a mirror forwards whole.
+  'fetchStpMode',
+  'changeStpMode',
+  'fetchOrderBook',
+  // A mirror answers these from its frame-fed rails and asks the worker only for a venue read.
+  'fetchSymbolMaxLeverage',
+  'fetchLeverageForSymbol',
+  // A frame-fed main engine runs a nuke's legs itself, after the data source stops its algos.
+  'stopAccountAlgos',
+  // ...and asks it to re-read the settings that engine just changed.
+  'refreshAccountSettings',
+  // ...and, while it holds an uncertain write, for orders from a fresh read.
+  'refreshAccountOrders',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'refreshMarkets',
   'fetchPositions',
+  'readPositions',
   'fetchBalance',
   'fetchPositionMode',
   'findOrderByClientOrderId',
@@ -360,16 +392,24 @@ const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'fetchIncomeHistory',
   'fetchIncomeHistoryRange',
   'fetchHistoricalPositions',
+  'fetchClosedPositions',
   'fetchAccountTier',
   'fetchEngineCapabilities',
+  'getAccount',
+  'fetchStpMode',
+  'fetchLeverageForSymbol',
+  'fetchSymbolMaxLeverage',
+  'updateSymbolMetadata',
+  'fetchOrderBook',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ]);
 
 /** Worker RPCs that dispatch venue writes: an interrupted one has an unknown outcome. */
 export const WORKER_WRITE_METHODS: ReadonlySet<string> = new Set<string>([
-  'setLeverage',
+  // Routed by its own method after validating the time; see RustEngineExchange.scheduleCancel.
   'scheduleCancel',
-  'changePositionMode',
-  'changeMarginType',
   ...[...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].filter((method) => !WORKER_READ_METHODS.has(method)),
 ]);
 
@@ -387,10 +427,7 @@ export const workerCallClientOrderIds = (method: unknown, args: unknown): string
 
 export type CallableMethodsInWorker =
   | WorkerForwardedMethod
-  | 'setLeverage'
   | 'scheduleCancel'
-  | 'changePositionMode'
-  | 'changeMarginType'
   | 'fetchAndSetPrivateSnapshot'
   | 'fetchEngineSnapshot'
   | 'reconnect'
@@ -399,13 +436,14 @@ export type CallableMethodsInWorker =
   | 'fetchHistoricalFills'
   | 'fetchOrders'
   | 'fetchAndSetOrders'
-  | 'updateSymbolMetadata'
   | 'fetchLastLogsFromWebsockets'
   | 'removeOrders'
   | 'fetchIncomeHistory'
   | 'fetchIncomeHistoryRange'
   | 'fetchHistoricalOrders'
   | 'fetchClosedPnl';
+
+export type OHLCVWebworkerOptions = Pick<OHLCVOptions, 'symbol' | 'interval'> & { reset?: boolean };
 
 export interface Exchange {
   // udf endpoints for TV, if supported
@@ -464,9 +502,10 @@ export interface Exchange {
   fetchOrders: (symbols?: string[]) => Promise<Order[]>;
   syncAccountState: () => void;
   start: () => Promise<void>;
-  nuke: (tries?: number) => Promise<void>;
-  nukePositions: (tries?: number) => Promise<void>;
-  nukeOrders: () => Promise<void>;
+  // Rust accounts resolve with the algos the nuke stopped first.
+  nuke: (tries?: number) => Promise<void | NukeResult>;
+  nukePositions: (tries?: number) => Promise<void | NukeResult>;
+  nukeOrders: () => Promise<void | NukeResult>;
   changePositionMode: (hedged: boolean, symbol?: string) => Promise<void>;
   changeMarginType: (isolated: boolean, symbol?: string) => Promise<void>;
   setLeverage: (symbol: string, leverage: number, side?: PositionSide) => Promise<void>;
@@ -503,7 +542,10 @@ export interface Exchange {
   listenOHLCV: (o: OHLCVOptions, c: (c: Candle) => void) => () => void;
   listenOHLCVs: (o: OHLCVSOptions, c: (c: Candle & { symbol: string; interval: Timeframe }) => void) => void;
   listenOrderBook: (s: string, c: (o: OrderBook) => void) => () => void;
-  listenOHLCVWebworker: (o: Pick<OHLCVOptions, 'symbol' | 'interval'>, c: (c: Candle) => void) => () => void;
+  /** `reset`: a forced resubscribe; the venue re-sends its subscribe for a stream gone dead. */
+  listenOHLCVWebworker: (o: OHLCVWebworkerOptions, c: (c: Candle) => void) => () => void;
+  /** Re-sends the venue's native subscribe for a live candle stream, where the venue can. */
+  repairOHLCV?: (o: Pick<OHLCVOptions, 'symbol' | 'interval'>) => void;
   listenOrderBookWebworker: (s: string, c: (o: OrderBook) => void) => () => void;
   updatePositionsInWebworker: (symbols?: string[]) => Promise<void>;
   callMethodInWorker: <M extends CallableMethodsInWorker>(
@@ -629,7 +671,12 @@ export class BaseExchange implements Exchange {
 
     this.on = this.emitter.on.bind(this.emitter);
     this.once = this.emitter.once.bind(this.emitter);
-    this.off = this.emitter.off.bind(this.emitter);
+    this.off = (event, handler) => {
+      this.emitter.off(event, handler);
+      // A kept page engine outlives its worker: nothing can answer what that worker held.
+      if (event === 'callMethod' && !this.emitter.hasListeners('callMethod')) this.abandonWorkerCalls();
+      return this.emitter;
+    };
 
     this.unsubscribeFromStore = this.store.subscribe((data) => {
       // Frames carry native orders; chaser tags arrive independently with the
@@ -763,7 +810,7 @@ export class BaseExchange implements Exchange {
   get capabilities(): ExchangeCapabilities {
     const answers = {} as ExchangeCapabilities;
     for (const [capability, method] of Object.entries(CAPABILITY_METHODS) as Array<
-      [keyof ExchangeCapabilities, BaseCapabilityMethod]
+      [keyof typeof CAPABILITY_METHODS, BaseCapabilityMethod]
     >)
       answers[capability] = !isInertCapability(this[method], method);
     return answers;
@@ -1107,7 +1154,9 @@ export class BaseExchange implements Exchange {
     const notFound: ClientOrderLookup = { found: false, definitive: false };
     // A venue that refuses caller IDs never sent one; some (Hyperliquid) also write the store while fetching.
     if (!this.clientOrderIdRule) return notFound;
-    const matches = (order: Order) => order.symbol === symbol && orderCarriesClientOrderId(order, clientOrderId);
+    // A Creating row can be this app's own placeholder for a send still in flight; found means the venue has it.
+    const matches = (order: Order) =>
+      order.symbol === symbol && order.status !== OrderStatus.Creating && orderCarriesClientOrderId(order, clientOrderId);
     const inStore = this.store.orders.find(matches);
     if (inStore) return { found: true, order: inStore };
     const order = (await this.fetchOrders([symbol])).find(matches);
@@ -1430,7 +1479,7 @@ export class BaseExchange implements Exchange {
     return result;
   };
 
-  nuke = async (tries = 0) => {
+  nuke = async (tries = 0): Promise<void | NukeResult> => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
 
@@ -1468,7 +1517,7 @@ export class BaseExchange implements Exchange {
     }
   };
 
-  nukePositions = async (tries = 0) => {
+  nukePositions = async (tries = 0): Promise<void | NukeResult> => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
 
@@ -1503,7 +1552,7 @@ export class BaseExchange implements Exchange {
     }
   };
 
-  nukeOrders = async () => {
+  nukeOrders = async (): Promise<void | NukeResult> => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
       try {
@@ -1559,6 +1608,7 @@ export class BaseExchange implements Exchange {
 
   dispose() {
     this.isDisposed = true;
+    this.abandonWorkerCalls();
     this.unsubscribeFromStore();
     this.remoteSignerAvailabilityCleanups.forEach((cleanup) => cleanup());
     this.remoteSignerAvailabilityCleanups.clear();
@@ -1614,9 +1664,14 @@ export class BaseExchange implements Exchange {
     this.store.reset();
   }
 
-  listenOHLCVWebworker(o: Pick<OHLCVOptions, 'symbol' | 'interval'>, c: (c: Candle) => void) {
+  listenOHLCVWebworker(o: OHLCVWebworkerOptions, c: (c: Candle) => void) {
     const subId = nanoid();
-    this.emitter.emit('subscribeOHLCV', { symbol: o.symbol, interval: o.interval, subId });
+    this.emitter.emit('subscribeOHLCV', {
+      symbol: o.symbol,
+      interval: o.interval,
+      subId,
+      ...(o.reset && { reset: true }),
+    });
     const handler = (event: any) => {
       if (event.symbol === o.symbol && event.interval === o.interval) {
         c(event.candle);
@@ -1780,23 +1835,52 @@ export class BaseExchange implements Exchange {
   protected workerCommandTimeoutError = (_method: CallableMethodsInWorker, _args: unknown[]): Error =>
     new Error('Timeout callMethodInWorker');
 
+  private readonly pendingWorkerCalls = new Set<() => void>();
+
+  private abandonWorkerCalls() {
+    for (const abandon of [...this.pendingWorkerCalls]) abandon();
+  }
+
   callMethodInWorker = async <M extends CallableMethodsInWorker>(
     method: M,
     ...args: Parameters<this[M]>
   ): Promise<ReturnType<this[M]>> => {
     const requestId = nanoid();
+    const timing = TIMED_WRITE_METHODS.has(method) ? claimWriteTiming(method).timing : undefined;
 
     return new Promise<ReturnType<this[M]>>((resolve, reject) => {
+      const abandon = () => {
+        clearTimeout(timeout);
+        this.pendingWorkerCalls.delete(abandon);
+        this.emitter.off('callMethod:done', handleDone);
+        if (timing) emitWriteTiming(this, timing, 'error');
+        reject(
+          Object.assign(this.workerCommandTimeoutError(method, args), {
+            ...(!WORKER_WRITE_METHODS.has(method) ? { code: 'WORKER_STOPPED' } : {}),
+            message: WORKER_WRITE_METHODS.has(method)
+              ? 'The account worker stopped before answering; reconcile interrupted writes before retrying'
+              : 'The account worker stopped before answering this read; retry after it reconnects',
+          }),
+        );
+      };
+      this.pendingWorkerCalls.add(abandon);
       const timeout = setTimeout(() => {
+        this.pendingWorkerCalls.delete(abandon);
         // Timeout path must also remove the listener, otherwise every timed-out
         // call leaks a handleDone closure permanently attached to the emitter.
         this.emitter.off('callMethod:done', handleDone);
+        if (timing) emitWriteTiming(this, timing, 'error');
         reject(this.workerCommandTimeoutError(method, args));
       }, this.workerCommandTimeoutMs(method));
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);
+          this.pendingWorkerCalls.delete(abandon);
           this.emitter.off('callMethod:done', handleDone);
+          if (timing) {
+            Object.assign(timing.marks, event.timing);
+            emitWriteTiming(this, timing, event.success ? 'ok' : 'error');
+          }
           if (event.success) {
             const result = withHistoryCompleteness(event.result, event.completeness);
             resolve(result);
@@ -1808,9 +1892,10 @@ export class BaseExchange implements Exchange {
       };
       this.emitter.on('callMethod:done', handleDone);
       try {
-        this.emitter.dispatch('callMethod', { method, args, requestId });
+        this.emitter.dispatch('callMethod', { method, args, requestId, ...(timing ? { timing: timing.marks } : {}) });
       } catch (error) {
         clearTimeout(timeout);
+        this.pendingWorkerCalls.delete(abandon);
         this.emitter.off('callMethod:done', handleDone);
         reject(error);
       }
@@ -1967,17 +2052,26 @@ export class BaseExchange implements Exchange {
     let formattedMsg;
     let errorObject: Error | undefined;
     let sentryContext: any = {};
-    const sentryTags =
-      structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
+    const sentryTags = {
+      ...(structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
         ? structuredExtraData.sentryTags
-        : {};
+        : {}),
+      ...(structuredExtraData.engineEvent?.code === 'startup.incomplete'
+        ? startupDiagnosticTags(structuredExtraData.engineEvent)
+        : {}),
+    };
     const sentryExtra =
       structuredExtraData.sentryExtra && typeof structuredExtraData.sentryExtra === 'object'
         ? structuredExtraData.sentryExtra
         : {};
     const legacyExtraData = Object.fromEntries(
       Object.entries(structuredExtraData).filter(
-        ([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog' && key !== 'engineEvent',
+        ([key]) =>
+          key !== 'sentryTags' &&
+          key !== 'sentryExtra' &&
+          key !== 'suppressConsoleLog' &&
+          key !== 'engineEvent' &&
+          key !== 'classified',
       ),
     );
 
@@ -2050,9 +2144,11 @@ export class BaseExchange implements Exchange {
       this._lastHttpFailure = undefined;
     }
 
+    // A diagnostic's own classification (engine events) wins over the error value's.
+    const classified = classifiedError(structuredExtraData.classified) ?? classifiedError(err);
     // Typed engine errors (kind/outcome/venueCode) as closed-set tags; explicit tags still win.
     const typedTags = {
-      ...exchangeErrorTags(err),
+      ...exchangeErrorTags(classified),
       ...(structuredExtraData.engineEvent ? { event_code: structuredExtraData.engineEvent.code } : {}),
     };
 
@@ -2089,7 +2185,7 @@ export class BaseExchange implements Exchange {
         // Pass enhanced error context for better toast messages
         enhancedContext: enhancedError?.context,
         engineEvent: structuredExtraData.engineEvent,
-        classified: classifiedError(err),
+        classified,
         suppressConsoleLog,
       });
     } else {
@@ -2124,7 +2220,7 @@ export class BaseExchange implements Exchange {
         enhancedContext: enhancedError?.context,
         // Typed engine errors: kind/outcome/venueCode, so listeners need not match text.
         engineEvent: structuredExtraData.engineEvent,
-        classified: classifiedError(err),
+        classified,
         suppressConsoleLog,
       });
     }
@@ -2133,7 +2229,10 @@ export class BaseExchange implements Exchange {
   /** Pre-flight reject: emit first (toast pipeline), then throw. See src/exchanges/CLAUDE.md. */
   protected rejectPreflight(message: string): never {
     this.emitAndLogError(message);
-    throw new Error(message);
+    // Marked so a page forwarding this call to its worker does not report it again.
+    const error = new Error(message);
+    markErrorReported(error);
+    throw error;
   }
 
   // if multiple child WS they will all send reconnect messages, try and only emit once...
@@ -2368,6 +2467,16 @@ export class BaseExchange implements Exchange {
       }
       case 'kraken-challenge':
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
+      case 'backpack-ed25519':
+      case 'grvt-order':
+      case 'grvt-address':
+      case 'kucoin-batch':
+      case 'hyperliquid-l1':
+      case 'hyperliquid-address':
+      case 'lighter-tx':
+      case 'paradex-stark':
+      case 'paradex-public':
+        return { id: request.id, error: `${outputFormat} requires the Rust engine signer` };
       case 'coinbase-jwt':
         return { id: request.id, error: 'coinbase-jwt requires the CoinbaseExchange signWsAuth override' };
       default: {

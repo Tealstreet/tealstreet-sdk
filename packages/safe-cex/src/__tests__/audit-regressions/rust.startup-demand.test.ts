@@ -347,3 +347,34 @@ it('shared catalog mismatch sends zero book/candle demand, even with a reentrant
   expect(requests.filter(({ op }) => op === 'book' || op === 'candle')).toEqual([]);
   expect(subscriptions(f.commands)).toEqual([]);
 });
+
+it('a candle repair reaches the engine only for a live stream, once demand is ready', async () => {
+  const f = fixture();
+  const repairs = () =>
+    f.commands
+      .filter(({ op }) => op === 'repairSubscription')
+      .map((command) => ({ op: command.op, topic: (command as { topic?: unknown }).topic }));
+  const log = vi.spyOn(f.exchange, 'log');
+  const unsent = () =>
+    log.mock.calls.map(([message]) => String(message)).filter((message) => message.includes('repair not sent'));
+  f.exchange.listenOHLCV({ symbol: 'BTC:USD', interval: '1m' }, vi.fn());
+  f.exchange.repairOHLCV({ symbol: 'BTC:USD', interval: '1m' });
+  void f.exchange.start().catch(() => {});
+  f.release();
+  await vi.waitFor(() => expect(f.constructed).toBe(1));
+  f.ready();
+  // Before demand is ready the subscribe has not gone out, so there is nothing to repair.
+  expect(repairs()).toEqual([]);
+  f.exchange.repairOHLCV({ symbol: 'BTC:USD', interval: '1m' });
+  f.exchange.repairOHLCV({ symbol: 'BTC:USD', interval: '5m' });
+  await vi.waitFor(() =>
+    expect(repairs()).toEqual([
+      { op: 'repairSubscription', topic: { kind: 'candles', symbol: 'BTC:USD', interval: '1m' } },
+    ]),
+  );
+  // A dropped repair names itself rather than vanishing.
+  expect(unsent()).toEqual([
+    expect.stringContaining('candles BTC:USD 1m repair not sent: public data is not ready'),
+    expect.stringContaining('candles BTC:USD 5m repair not sent: no candle listener'),
+  ]);
+});

@@ -1,3 +1,5 @@
+import { historyDecodeOf } from './history-decode.mjs';
+export { historyDecodeOf } from './history-decode.mjs';
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
 export { HttpPreparationError } from './managed-http.mjs';
 
@@ -215,9 +217,10 @@ function interruptedCommand(error, command, interrupted) {
   commandReceiptSnapshot(error, command);
 }
 
-const ERROR_KINDS = new Set(['rejected', 'invalidInput', 'authInvalid', 'authExpired', 'authPermission',
-  'rateLimited', 'network', 'timeout', 'venueUnavailable', 'unsupported', 'internal']);
+const ERROR_KINDS = new Set(['rejected', 'invalidInput', 'insufficientBalance', 'authInvalid', 'authExpired',
+  'authPermission', 'rateLimited', 'network', 'timeout', 'venueUnavailable', 'unsupported', 'internal']);
 const ERROR_OUTCOMES = new Set(['notSent', 'rejected', 'unknown']);
+const ERROR_PROTECTIONS = new Set(['restored', 'unprotected']);
 const text = (value) => (typeof value === 'string' && value ? value : undefined);
 const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : undefined);
 
@@ -244,11 +247,15 @@ export class ExchangeError extends Error {
     if (builder) Object.assign(this, builder);
     if (ERROR_KINDS.has(detail.kind)) this.kind = detail.kind;
     if (ERROR_OUTCOMES.has(detail.outcome)) this.outcome = detail.outcome;
+    if (typeof detail.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(detail.causeCode)) this.causeCode = detail.causeCode;
+    const historyDecode = historyDecodeOf(detail.historyDecode);
+    if (historyDecode) this.historyDecode = historyDecode;
     const venueCode = text(detail.venueCode);
     if (venueCode) this.venueCode = venueCode;
     const venueMessage = text(detail.venueMessage);
     if (venueMessage) this.venueMessage = venueMessage;
     if (Number.isFinite(detail.retryAfterMs) && detail.retryAfterMs >= 0) this.retryAfterMs = detail.retryAfterMs;
+    if (ERROR_PROTECTIONS.has(detail.protection)) this.protection = detail.protection;
     const ids = detail.partial?.orderIds;
     if (Array.isArray(ids) && ids.length && ids.every((id) => typeof id === 'string')) {
       this.partialOrderIds = [...ids];
@@ -348,11 +355,18 @@ export class EngineHost {
         throw new TypeError('Engine signer algorithms must be an array');
       engine.useExternalSigner(options.signerAlgorithms === undefined ? undefined : JSON.stringify(options.signerAlgorithms));
     }
+    if (options.protocolTime !== undefined && typeof options.protocolTime !== 'function')
+      throw new TypeError('Host protocol time source must be a function');
+    this.readProtocolTime = options.protocolTime;
+    this.pendingProtocolTime = undefined;
     this.signer = options.signer;
     this.primitiveSignings = new Map();
+    // Provider calls still running after their wait ended, for retirement joins.
+    this.signingJoins = new Map();
     this.hostedSignings = new Map();
     this.entropy = identity;
     this.engine = engine;
+    this.engineVerified = false;
     this.ownsEngine = options.ownsEngine === true;
     this.transport = transport;
     this.handlers = handlers;
@@ -361,9 +375,11 @@ export class EngineHost {
     this.socketStats = { public: socketStats(), business: socketStats(), private: socketStats() };
     this.timers = new Map();
     this.commands = new Map();
+    // Timed commands owning a sign attempt, HTTP request or managed preparation.
+    this.stageCauses = new Map();
+    this.stageCause = undefined;
     this.requests = new Map();
     this.managedHttp = new ManagedHttp(this);
-    this.signings = new Map();
     this.socketFailures = new Map();
     this.nextCommand = 1;
     this.receiptSession = undefined;
@@ -373,6 +389,11 @@ export class EngineHost {
     this.wsEncoder = undefined;
     this.wsScratch = undefined;
     this.wsScratchBusy = false;
+    this.algosStarted = false;
+    this.algoTimer = undefined;
+    this.algoTimerAt = undefined;
+    this.algosStopped = undefined;
+    this.algoStopAllWaiters = [];
   }
 
   start() {
@@ -380,6 +401,14 @@ export class EngineHost {
     if (this.disposed || this.started) return;
     this.started = true;
     this.run(this.invoke(this.engine.start, this.transport.now()));
+  }
+
+  /** Update protocol UTC only. Scheduling always uses transport.now(). */
+  syncHostTime(utc, now = this.transport.now()) {
+    if (typeof this.engine.syncHostTime !== 'function')
+      throw new Error('Engine does not support separate protocol time');
+    if (!this.invoke(this.engine.syncHostTime, now, utc))
+      throw new Error('Engine refused host protocol time');
   }
 
   get dead() { return this.deadError !== undefined; }
@@ -415,9 +444,26 @@ export class EngineHost {
     this.assertHttpHandoffIdle();
     if (this.disposed) return;
     try {
-      if (this.engine.failed?.()) {
+      // Failure is sticky and only engine calls set it: a passed post-call check
+      // covers this call unless an engine call ran outside invoke since.
+      if (!this.engineVerified && this.engine.failed?.()) {
         this.failEngine(new Error('Engine resource identities exhausted'));
         return;
+      }
+      this.engineVerified = false;
+      // Clock reads can queue a correction during a physical group handoff.
+      // Drain it only at a fenced host entry, before the next Rust operation.
+      this.pendingProtocolTime = this.readProtocolTime?.() ?? this.pendingProtocolTime;
+      if (this.pendingProtocolTime) {
+        const { now, utc } = this.pendingProtocolTime;
+        if (!Number.isFinite(now) || !Number.isFinite(utc)) throw new Error('Invalid host protocol time observation');
+        if (typeof this.engine.syncHostTime !== 'function') throw new Error('Engine does not support separate protocol time');
+        if (!this.engine.syncHostTime(now, utc)) throw new Error('Engine refused host protocol time');
+        this.pendingProtocolTime = undefined;
+        if (this.engine.failed?.()) {
+          this.failEngine(new Error('Engine resource identities exhausted'));
+          return;
+        }
       }
       let result;
       switch (arguments.length) {
@@ -431,6 +477,7 @@ export class EngineHost {
         this.failEngine(new Error('Engine resource identities exhausted'));
         return;
       }
+      this.engineVerified = true;
       return result;
     } catch (error) {
       // Do not inspect Rust state after a trap: its mutable borrow may be held.
@@ -447,6 +494,7 @@ export class EngineHost {
     if (this.disposed) return Promise.reject(this.deadError ?? new EngineDisposedError());
     let timeoutMs;
     let onEvent;
+    let onStage;
     try {
       if (command.op === 'scheduleCancel' && command.time != null
           && (!Number.isSafeInteger(command.time) || command.time < 0)) {
@@ -456,9 +504,11 @@ export class EngineHost {
       timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs);
       onEvent = options?.onEvent;
       if (onEvent !== undefined && typeof onEvent !== 'function') throw new TypeError('Command event observer must be a function');
+      onStage = options?.onStage;
+      if (onStage !== undefined && typeof onStage !== 'function') throw new TypeError('Command stage observer must be a function');
     } catch (error) { return Promise.reject(error); }
-    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
-      || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
+    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'networkRestored' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+      || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles' || command.op === 'repairSubscription'
       ? undefined
       : this.nextCommand++;
     const clientOrderIds = reply !== undefined && Array.isArray(command.orders)
@@ -471,13 +521,15 @@ export class EngineHost {
     } catch (error) { return Promise.reject(error); }
     const promise = reply === undefined
       ? Promise.resolve()
-      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent }));
+      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent, onStage }));
     try {
       const startedAt = this.transport.now();
       // Reply commands carry the caller's effective wait; the engine bounds
       // work that should not outlive it (RUST_COMMAND_TIMEOUT.md).
       const json = JSON.stringify(reply === undefined ? command : { ...command, command: reply, timeoutMs });
-      this.run(this.invoke(this.engine.command, json, startedAt));
+      const actions = this.invoke(this.engine.command, json, startedAt);
+      this.stage(reply, 'accepted');
+      this.runFor(reply, actions);
       if (reply === undefined && this.deadError) return Promise.reject(this.deadError);
       const pending = this.commands.get(reply);
       if (pending) {
@@ -518,11 +570,33 @@ export class EngineHost {
     return promise;
   }
 
+  /** Stamps a timed command's stage; observers cannot change the command. */
+  stage(command, name) {
+    const onStage = command === undefined ? undefined : this.commands.get(command)?.onStage;
+    if (!onStage) return;
+    try { onStage(name); } catch { /* Timing is diagnostic only. */ }
+  }
+
+  /** Records that the running timed command owns `key` (a sign, request or preparation). */
+  ownStage(key) {
+    const cause = this.stageCause;
+    if (cause !== undefined && this.commands.get(cause)?.onStage) this.stageCauses.set(key, cause);
+    return cause;
+  }
+
+  /** Runs actions on behalf of a timed command, so what they start is attributed to it. */
+  runFor(cause, actionsJson) {
+    const outer = this.stageCause;
+    this.stageCause = cause;
+    try { this.run(actionsJson); } finally { this.stageCause = outer; }
+  }
+
   settleCommand(id, value, rejected = false) {
     this.assertHttpHandoffIdle();
     const pending = this.commands.get(id);
     if (!pending) return;
     this.commands.delete(id);
+    for (const [key, cause] of this.stageCauses) if (cause === id) this.stageCauses.delete(key);
     try { pending.clearDeadline?.(); } catch { /* A timer adapter cannot strand the caller. */ }
     if (rejected) pending.reject(value);
     else pending.resolve(value);
@@ -553,7 +627,29 @@ export class EngineHost {
     this.assertHttpHandoffIdle();
     if (this.disposed) return;
     const frame = this.invoke(this.engine.takeFrame, this.transport.now(), marketOnly);
+    // A taken frame carries fills and state to the algos, which may wake them.
+    this.armAlgos();
     if (frame) this.handlers.onFrame?.(frame.buffer);
+  }
+
+  /** Apply one data-source frame (its exact SCXF bytes) to a `frameFed` engine.
+   * A snapshot resets the account state first. Runs whatever the ingest releases,
+   * such as writes held for a placement ack; an ingest refusal throws. */
+  applyFrame(frame, snapshot) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (typeof this.engine.applyFrame !== 'function') throw new TypeError('This engine has no frame ingest');
+    const bytes = frame instanceof Uint8Array ? frame : new Uint8Array(frame);
+    this.run(this.invoke(this.engine.applyFrame, bytes, snapshot === true, this.transport.now()));
+    if (this.deadError) throw this.deadError;
+  }
+
+  /** A frame-fed engine's data-source clock minus this host's, in ms, so its
+   * fences compare frame times on one clock; until set they wait 30 s. */
+  setSourceClockOffset(offsetMs) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed || typeof this.engine.setSourceClockOffset !== 'function') return;
+    this.invoke(this.engine.setSourceClockOffset, Number.isFinite(offsetMs) ? offsetMs : undefined);
   }
 
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
@@ -610,7 +706,7 @@ export class EngineHost {
     let closed = 0;
     for (const [id, record] of [...this.socketRecords]) {
       // A connect in flight is left alone, as in TS: a second connect would leak it.
-      if ((channel !== undefined && record.channel !== channel) || !record.open || !this.sockets.has(id)) continue;
+      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open || !this.sockets.has(id)) continue;
       const socket = this.sockets.get(id);
       this.sockets.delete(id);
       this.socketClosed(id, 1006);
@@ -622,27 +718,154 @@ export class EngineHost {
     return closed;
   }
 
+  redialWaitingSockets() {
+    this.assertHttpHandoffIdle();
+    if (!this.disposed) void this.command({ op: 'networkRestored' });
+  }
+
   socketClosed(id, code) {
     this.assertHttpHandoffIdle();
     const record = this.socketRecords.get(id);
     if (!record) return;
     this.socketRecords.delete(id);
-    const { stats } = record;
-    if (record.open) stats.open--;
-    if (record.initialized) stats.initialized--;
+    for (const stats of record.stats) {
+      if (record.open) stats.open--;
+      if (record.initialized) stats.initialized--;
+      stats.lastCloseCode = code;
+      stats.lastCloseAt = Date.now();
+      stats.closes++;
+      stats.closeStreak++;
+    }
     // Frames still in flight from a closed socket must not count as recovery.
     record.open = false;
     record.initialized = false;
-    stats.lastCloseCode = code;
-    stats.lastCloseAt = Date.now();
-    stats.closes++;
-    stats.closeStreak++;
     this.socketChanged();
   }
 
   socketChanged() {
     this.assertHttpHandoffIdle();
     try { this.handlers.onSocketChange?.(); } catch { /* Health observers must not break socket handling. */ }
+  }
+
+  /** Start this account's Rust algos (chaser, TWAP, exec) on an `algos` engine
+   * build. Their replies reach `handlers.onAlgoEmit(op, data)`. */
+  algoStart(accountName) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (typeof this.engine.algoStart !== 'function')
+      throw new ExchangeError('This engine has no algos', { kind: 'unsupported', outcome: 'notSent' });
+    this.invoke(this.engine.algoStart, accountName, this.transport.now(), Date.now());
+    if (this.deadError) throw this.deadError;
+    this.algosStarted = true;
+    this.armAlgos();
+  }
+
+  get algosRunning() { return this.algosStarted && !this.disposed; }
+
+  /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if the engine refuses it. */
+  algoOp(op, data) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (!this.algosStarted) throw new ExchangeError('Algos are not running', { kind: 'unsupported', outcome: 'notSent' });
+    this.runAlgos(this.invoke(this.engine.algoOp, op, JSON.stringify(data ?? null), this.transport.now(), Date.now()));
+    if (this.deadError) throw this.deadError;
+  }
+
+  /** Stop every algo: TWAPs at once, chases once their cancels settle (bounded by
+   * the engine). Resolves when they are gone; dispose the host after that. */
+  algoDispose(reason) {
+    this.assertHttpHandoffIdle();
+    if (!this.algosRunning) return Promise.resolve();
+    const stopped = this.algosStopped ??= {};
+    stopped.promise ??= new Promise((resolve) => { stopped.resolve = resolve; });
+    this.runAlgos(this.invoke(this.engine.algoDispose, this.transport.now(), Date.now(), reason));
+    return stopped.promise;
+  }
+
+  /** A nuke's first step: stop every TWAP and chase, the algos staying up for
+   * new ops. Resolves `{ stoppedChasers, stoppedTwaps, settled }` once chase
+   * cancels settle (at most 10 s on the algo clock); `settled` is false when they
+   * did not, or the algos ended first. */
+  algoStopAll(reason) {
+    this.assertHttpHandoffIdle();
+    if (!this.algosRunning) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
+    if (typeof this.engine.algoStopAll !== 'function')
+      throw new ExchangeError('This engine cannot stop its algos for a nuke', { kind: 'unsupported', outcome: 'notSent' });
+    const stopped = new Promise((resolve) => this.algoStopAllWaiters.push(resolve));
+    this.runAlgos(this.invoke(this.engine.algoStopAll, this.transport.now(), Date.now(), reason));
+    if (this.deadError) throw this.deadError;
+    return stopped;
+  }
+
+  /** Waits whose report can no longer come: the algos ended or the host went. */
+  abandonAlgoStopAll() {
+    for (const resolve of this.algoStopAllWaiters.splice(0)) resolve({ stoppedChasers: [], stoppedTwaps: [], settled: false });
+  }
+
+  advanceAlgos() {
+    this.runAlgos(this.invoke(this.engine.algoAdvance, this.transport.now(), Date.now()));
+  }
+
+  runAlgos(actionsJson) {
+    try { this.runActions(actionsJson); }
+    finally { this.deliverAlgoEmits(); }
+    this.armAlgos();
+  }
+
+  deliverAlgoEmits() {
+    if (this.disposed) return;
+    const json = this.invoke(this.engine.algoEmits);
+    if (!json) return;
+    for (const { op, data } of JSON.parse(json)) {
+      // The answer to `algoStopAll`, oldest wait first; the worker never sees it.
+      if (op === 'algos:stopped') {
+        this.algoStopAllWaiters.shift()?.(data);
+        continue;
+      }
+      try { this.handlers.onAlgoEmit?.(op, data); }
+      catch (error) {
+        try { this.handlers.onLog?.('error', `Algo reply handler failed: ${error?.message ?? error}`); }
+        catch { /* An observer cannot strand the remaining replies. */ }
+      }
+    }
+  }
+
+  /** Keep exactly one timer armed at the engine's next algo deadline. Every engine
+   * call that can wake algo work (completions, frames) ends here through `run`. */
+  armAlgos() {
+    if (!this.algosStarted || this.disposed) return;
+    if (!this.invoke(this.engine.algoRunning)) {
+      this.algosStarted = false;
+      this.clearAlgoTimer();
+      this.abandonAlgoStopAll();
+      this.algosStopped?.resolve?.();
+      return;
+    }
+    const at = this.invoke(this.engine.algoDeadline);
+    if (this.disposed || at === this.algoTimerAt) return;
+    this.clearAlgoTimer();
+    if (at === undefined) return;
+    let fired = false;
+    let handle;
+    const notify = () => {
+      if (this.deferHttpNotification(notify)) return;
+      if (fired || this.disposed || this.algoTimer !== handle) return;
+      fired = true;
+      this.algoTimer = this.algoTimerAt = undefined;
+      this.advanceAlgos();
+    };
+    handle = this.transport.setTimeout(notify, Math.max(0, at - this.transport.now()));
+    if (fired || this.disposed) return;
+    this.algoTimer = handle;
+    this.algoTimerAt = at;
+  }
+
+  clearAlgoTimer() {
+    const handle = this.algoTimer;
+    this.algoTimer = this.algoTimerAt = undefined;
+    if (handle !== undefined) {
+      try { this.transport.clearTimeout(handle); } catch { /* Its callback is revoked even if cancellation fails. */ }
+    }
   }
 
   dispose() {
@@ -663,13 +886,11 @@ export class EngineHost {
     for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
     attempt(() => this.managedHttp.dispose());
-    for (const pending of this.signings.values()) {
-      attempt(() => pending.controller.abort());
-      attempt(() => this.transport.clearTimeout(pending.timer));
-    }
-    this.signings.clear();
     for (const pending of this.primitiveSignings.values()) attempt(() => pending.cancel());
     this.primitiveSignings.clear();
+    const addressSetupWaiter = this.addressSetupWaiter;
+    this.addressSetupWaiter = undefined;
+    attempt(() => addressSetupWaiter?.());
     for (const pending of this.hostedSignings.values()) attempt(() => pending.cancel());
     this.hostedSignings.clear();
     for (const socket of this.sockets.values()) attempt(() => socket.close());
@@ -678,6 +899,10 @@ export class EngineHost {
     this.socketRecords.clear();
     this.wsScratch = undefined;
     this.timers.clear();
+    attempt(() => this.clearAlgoTimer());
+    this.algosStarted = false;
+    attempt(() => this.abandonAlgoStopAll());
+    attempt(() => this.algosStopped?.resolve?.());
     attempt(() => this.transport.dispose?.());
     // Release provider-owned keys on normal disposal instead of retaining the
     // wasm allocation (and an injected callback) until garbage collection.
@@ -692,13 +917,17 @@ export class EngineHost {
     this.assertHttpHandoffIdle();
     if (this.disposed || !active()) return;
     const { engine, transport } = this;
-    this.run(this.invoke(engine.httpStart, id, status, headers, transport.now()));
+    const cause = this.stageCauses.get(`http:${id}`);
+    this.stageCauses.delete(`http:${id}`);
+    this.stage(cause, 'response');
+    const run = (actions) => this.runFor(cause, actions);
+    run(this.invoke(engine.httpStart, id, status, headers, transport.now()));
     if (this.disposed || !active()) return;
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
           if (this.disposed || !active()) return;
-          this.run(this.invoke(engine.httpChunk, id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
+          run(this.invoke(engine.httpChunk, id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
           if (this.disposed || !active()) return;
         }
       } else {
@@ -706,18 +935,18 @@ export class EngineHost {
           if (this.disposed || !active()) return;
           for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
             if (this.disposed || !active()) return;
-            this.run(this.invoke(engine.httpChunk, id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
+            run(this.invoke(engine.httpChunk, id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
             if (this.disposed || !active()) return;
           }
         }
       }
     } catch {
       if (this.disposed || !active()) return;
-      this.run(this.invoke(engine.httpFailed, id, 'HTTP response body failed', transport.now()));
+      run(this.invoke(engine.httpFailed, id, 'HTTP response body failed', transport.now()));
       return;
     }
     if (this.disposed || !active()) return;
-    this.run(this.invoke(engine.httpEnd, id, transport.now()));
+    run(this.invoke(engine.httpEnd, id, transport.now()));
   }
 
   async request(action) {
@@ -740,6 +969,7 @@ export class EngineHost {
       if (!this.disposed) this.run(this.invoke(this.engine.httpFailed, id, 'HTTP transport request failed', this.transport.now()));
     } finally {
       this.requests.delete(id);
+      this.stageCauses.delete(`http:${id}`);
     }
   }
 
@@ -751,6 +981,10 @@ export class EngineHost {
     const expectedCount = work?.operations?.length;
     const controller = new AbortController();
     let settled = false;
+    // Settles once the provider call itself has, not when waiting was abandoned.
+    let workJoined;
+    const joined = new Promise((resolve) => { workJoined = resolve; });
+    let executing = false;
     const clearTimer = () => {
       if (pending.timer !== undefined) {
         try { this.transport.clearTimeout(pending.timer); } catch { /* Completion must still settle. */ }
@@ -764,12 +998,14 @@ export class EngineHost {
         try { controller.abort(); } catch { /* Provider listeners cannot strand completion. */ }
       }
       complete(result, code);
+      if (!executing) workJoined();
     };
     // Register correlation before arming: injected timers may fire inline or
     // throw. Both paths must retire the native capture and settle the caller.
     const pending = {
       controller,
       timer: undefined,
+      joined,
       cancel: () => finish(undefined, 'unavailable'),
       start: () => {
         const notify = () => {
@@ -782,16 +1018,49 @@ export class EngineHost {
         Promise.resolve().then(() => {
           if (controller.signal.aborted || this.disposed) return;
           if (!execute) { finish(undefined, 'unavailable'); return; }
+          executing = true;
           return execute({ signal: controller.signal });
         }).then((result) => {
           if (controller.signal.aborted || this.disposed) return;
           const checked = checkedSigningResult(expectedReceipt, expectedCount, result);
           if (!checked) { finish(undefined, 'invalidResult'); return; }
           finish(checked);
-        }).catch(() => finish(undefined, 'refused'));
+        }).catch(() => finish(undefined, 'refused')).finally(() => workJoined());
       },
     };
     return pending;
+  }
+
+  /** Pre-start PublicAddress setup through an injected provider. The engine asks
+   * to retire every task, success included; acknowledge only after that task's
+   * provider call has actually settled, never on a timeout or abort alone. */
+  prepareAddressSetup() {
+    this.assertHttpHandoffIdle();
+    const { engine } = this;
+    if (this.disposed || this.started || !this.signer || typeof engine.setAddressSetupSupport !== 'function')
+      return Promise.resolve();
+    this.invoke(engine.setAddressSetupSupport, 'publicAddressOwned');
+    this.addressSetupNegotiated = true;
+    const ready = new Promise((resolve) => { this.addressSetupWaiter = resolve; });
+    this.run(this.invoke(engine.initializeAddressSetup, this.transport.now(), false));
+    this.checkAddressSetup();
+    return ready;
+  }
+
+  checkAddressSetup() {
+    const waiter = this.addressSetupWaiter;
+    if (!waiter || (!this.disposed && !this.invoke(this.engine.addressSetupReady))) return;
+    this.addressSetupWaiter = undefined;
+    waiter();
+  }
+
+  retireAddressSetup({ task, token }) {
+    this.primitiveSignings.get(task)?.cancel();
+    Promise.resolve(this.signingJoins.get(task)).then(() => {
+      if (this.disposed) return;
+      this.run(this.invoke(this.engine.addressSetupRetired, token, this.transport.now()));
+      this.checkAddressSetup();
+    });
   }
 
   sign(action) {
@@ -807,14 +1076,19 @@ export class EngineHost {
       // An ordinary export failure leaves the legacy context intact.
     }
     if (this.disposed) return;
+    const cause = this.ownStage(`sign:${id}`);
     const pending = this.primitiveSigning(action.work, action.timeoutMs,
       this.signer && ((context) => this.signer(action.work, meta ? { ...context, meta } : context)), (result, code) => {
         if (this.primitiveSignings.get(id) !== pending || this.disposed) return;
         this.primitiveSignings.delete(id);
-        if (code) this.run(this.invoke(this.engine.signFailed, id, code, this.transport.now()));
-        else this.run(this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
+        this.stageCauses.delete(`sign:${id}`);
+        if (!code) this.stage(cause, 'signed');
+        if (code) this.runFor(cause, this.invoke(this.engine.signFailed, id, code, this.transport.now()));
+        else this.runFor(cause, this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
       });
     this.primitiveSignings.set(id, pending);
+    this.signingJoins.set(id, pending.joined);
+    pending.joined.then(() => { if (this.signingJoins.get(id) === pending.joined) this.signingJoins.delete(id); });
     pending.start();
   }
 
@@ -824,6 +1098,12 @@ export class EngineHost {
     if (typeof this.engine.hostedSigningClock !== 'function')
       throw new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' });
     return JSON.parse(this.invokeHosted(this.engine.hostedSigningClock, this.transport.now()));
+  }
+
+  // A direct engine entry outside invoke: the next invoke checks failure first.
+  cancelEngineHostedSigning(id) {
+    this.engineVerified = false;
+    this.engine.cancelHostedSigning?.(id);
   }
 
   invokeHosted(fn, ...args) {
@@ -845,14 +1125,14 @@ export class EngineHost {
     const duration = deadlineMs - this.transport.now();
     if (!Number.isInteger(id) || id <= 0 || id > 0xffff_ffff || this.hostedSignings.has(id)
       || !Number.isFinite(duration) || duration <= 0 || duration > 5000) {
-      this.engine.cancelHostedSigning?.(id);
+      this.cancelEngineHostedSigning(id);
       return Promise.reject(new ExchangeError('Invalid hosted signing request', { kind: 'invalidInput', outcome: 'notSent' }));
     }
     if (!this.signer) {
       try {
         return Promise.resolve(JSON.parse(this.invokeHosted(this.engine.localHostedSigning, id, this.transport.now())));
       } catch (error) {
-        try { this.engine.cancelHostedSigning(id); } catch { /* Preserve the closed native error. */ }
+        try { this.cancelEngineHostedSigning(id); } catch { /* Preserve the closed native error. */ }
         return Promise.reject(error);
       }
     }
@@ -861,7 +1141,7 @@ export class EngineHost {
       const pending = this.primitiveSigning(work, duration, execute, (result, code) => {
         this.hostedSignings.delete(id);
         if (code || this.disposed) {
-          try { this.engine.cancelHostedSigning(id); } catch { /* Keep a closed signing error. */ }
+          try { this.cancelEngineHostedSigning(id); } catch { /* Keep a closed signing error. */ }
           reject(new ExchangeError(code === 'timedOut' ? 'Hosted signing timed out' : 'Hosted signing failed', {
             kind: code === 'timedOut' ? 'timeout' : code === 'refused' ? 'invalidInput' : 'internal', outcome: 'notSent',
           }));
@@ -875,49 +1155,13 @@ export class EngineHost {
     });
   }
 
-  signPayload(action) {
+  hostedWalletSigning({ toSign, outputFormat }) {
     this.assertHttpHandoffIdle();
-    const id = action.request;
-    const controller = new AbortController();
-    const finish = (error, result) => {
-      const pending = this.signings.get(id);
-      if (!pending || pending.controller !== controller || this.disposed) return;
-      this.signings.delete(id);
-      this.transport.clearTimeout(pending.timer);
-      if (error) {
-        controller.abort();
-        this.run(this.invoke(this.engine.payloadSignFailed, id, String(error?.message ?? error), this.transport.now()));
-      } else {
-        this.run(this.invoke(this.engine.payloadSigned, id, result.signature, result.headers, this.transport.now()));
-      }
-    };
-    const notify = () => {
-      if (this.deferHttpNotification(notify)) return;
-      finish(new Error('Payload signing timed out'));
-    };
-    const timer = this.transport.setTimeout(notify, action.timeoutMs);
-    this.signings.set(id, { controller, timer });
-    Promise.resolve().then(() => {
-      if (this.disposed || controller.signal.aborted) return;
-      if (!this.transport.signPayload) { finish(new Error('Payload signing is not configured')); return; }
-      return this.transport.signPayload(action.payload, { signal: controller.signal });
-    }).then((result) => {
-      if (this.disposed || controller.signal.aborted) return;
-      const signature = result?.signature;
-      const record = result?.headers;
-      if (typeof signature !== 'string'
-        || (record !== undefined && (!record || typeof record !== 'object' || Array.isArray(record)))) {
-        finish(new Error('Invalid payload signer result'));
-        return;
-      }
-      const headers = Object.entries(record ?? {});
-      if (headers.some(([name, value]) => !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)
-        || typeof value !== 'string' || /[\r\n]/.test(value))) {
-        finish(new Error('Invalid payload signer header'));
-        return;
-      }
-      finish(undefined, { signature, headers: headers.map(([name, value]) => `${name}:${value}`).join('\n') });
-    }).catch(() => finish(new Error('Payload signing failed')));
+    if (this.disposed) throw new EngineDisposedError();
+    // Wallet keys sign only on the device that holds them, never through a callback.
+    if (this.signer || typeof this.engine.hostedWalletSigning !== 'function')
+      throw new ExchangeError('Hosted wallet signing is unsupported', { kind: 'unsupported', outcome: 'notSent' });
+    return this.invokeHosted(this.engine.hostedWalletSigning, toSign, outputFormat, this.transport.now());
   }
 
   clearSocketFailure(id) {
@@ -959,11 +1203,30 @@ export class EngineHost {
   }
 
   run(actionsJson) {
+    this.runActions(actionsJson);
+    // Completions for algo commands never reach the host as actions, so arm even when none came back.
+    this.armAlgos();
+  }
+
+  runActions(actionsJson) {
     this.assertHttpHandoffIdle();
     if (this.disposed || !actionsJson) return;
     let unknown;
     let callbackFailure;
-    for (const action of JSON.parse(actionsJson)) {
+    const actions = JSON.parse(actionsJson);
+    // Native timeout IDs bind diagnostics before this batch cancels their original resources.
+    for (const action of actions) {
+      const request = action.op === 'event' ? action.fields?.httpTimeoutRequest : undefined;
+      if (typeof request !== 'string' || !/^[1-9][0-9]{0,19}$/.test(request)) continue;
+      for (const resource of this.managedHttp.resources.values()) {
+        if (!Number.isSafeInteger(resource.request) || String(resource.request) !== request) continue;
+        action.fields = { ...action.fields, httpMethod: resource.diagnostic.method, httpPath: resource.diagnostic.path, httpPhase: resource.phase, ...this.managedHttp.timeoutFacts(resource) };
+        if (action.message && !action.message.startsWith("Signing ") && !action.message.includes(" budget=")) action.message += ` (${this.managedHttp.timeoutMessage(resource)})`;
+        this.managedHttp.failure(resource, 'timeout');
+        break;
+      }
+    }
+    for (const action of actions) {
       if (this.disposed) return;
       // Unknown protocol actions remain errors, but cannot discard the batch's
       // subsequent command completions. Ordinary callbacks still propagate.
@@ -1004,13 +1267,14 @@ export class EngineHost {
     const { engine, transport } = this;
     switch (action?.op) {
       case 'retireAddressSetup':
-        this.dispose();
-        throw new EngineDisposedError();
+        if (!this.addressSetupNegotiated) {
+          this.dispose();
+          throw new EngineDisposedError();
+        }
+        this.retireAddressSetup(action);
+        break;
       case 'sign':
         this.sign(action);
-        break;
-      case 'signPayload':
-        this.signPayload(action);
         break;
       case 'wsConnect': {
         const id = action.socket;
@@ -1026,15 +1290,17 @@ export class EngineHost {
           transport.setTimeout(notify, 0);
           break;
         }
-        const stats = this.socketStats[action.channel] ?? this.socketStats.public;
-        const record = { channel: action.channel ?? 'public', stats, open: false, initialized: false };
-        // Health tracking costs one write per frame; state changes notify once.
+        const channel = Object.hasOwn(this.socketStats, action.channel) ? action.channel : 'public';
+        const channels = action.publicTopics === true && channel !== 'public' ? [channel, 'public'] : [channel];
+        const stats = channels.map((role) => this.socketStats[role]);
+        const record = { channels, stats, open: false, initialized: false };
+        // One timestamp per carried channel; state changes notify once per socket.
         const received = () => {
-          stats.lastReceived = Date.now();
+          const now = Date.now();
+          for (const stat of stats) stat.lastReceived = now;
           if (record.initialized || !record.open) return;
           record.initialized = true;
-          stats.initialized++;
-          stats.closeStreak = 0;
+          for (const stat of stats) { stat.initialized++; stat.closeStreak = 0; }
           this.socketChanged();
         };
         this.socketRecords.set(id, record);
@@ -1044,6 +1310,7 @@ export class EngineHost {
           const callbacks = {
             binary: action.binary === true,
             channel: action.channel,
+            publicTopics: action.publicTopics === true,
             context: action.context,
             headers: action.headers && Object.fromEntries(action.headers),
             onOpen: () => {
@@ -1051,7 +1318,7 @@ export class EngineHost {
               if (this.disposed || !(connecting || (socket && this.sockets.get(id) === socket))) return;
               if (this.socketRecords.get(id) === record && !record.open) {
                 record.open = true;
-                stats.open++;
+                for (const stat of stats) stat.open++;
                 this.socketChanged();
               }
               this.run(this.invoke(engine.wsOpen, id, transport.now()));
@@ -1144,6 +1411,7 @@ export class EngineHost {
         this.managedHttp.execute(action);
         break;
       case 'http': {
+        this.stage(this.ownStage(`http:${action.request}`), 'sent');
         void this.request(action);
         break;
       }
@@ -1195,7 +1463,8 @@ export class EngineHost {
         const command = fields?.command;
         const pending = Number.isInteger(command) && command >= 0 && command <= 0xffff_ffff
           ? this.commands.get(command) : undefined;
-        if (code === 'history.incomplete' && pending) pending.incomplete = true;
+        // The engine's closed reason code, never the message (which may quote the venue).
+        if (code === 'history.incomplete' && pending) pending.incomplete = typeof fields?.reason === 'string' ? fields.reason : true;
         const event = { level, code, message, fields };
         let callbackFailure;
         try { pending?.onEvent?.(event); }
@@ -1235,6 +1504,7 @@ export class EngineHost {
         break;
       }
       case 'done': {
+        this.stage(action.command, 'reply');
         const pending = this.commands.get(action.command);
         if (!pending) {
           // Late definitive results close the receipt stream without a tombstone.
@@ -1270,7 +1540,10 @@ export class EngineHost {
           try { result = action.result === undefined ? undefined : JSON.parse(action.result); }
           catch (cause) { this.settleCommand(action.command, new CommandProtocolError(cause, pending.identity), true); break; }
           // Optional and non-enumerable: rows stay a plain array for existing callers.
-          if (pending.incomplete && Array.isArray(result)) Object.defineProperty(result, 'incomplete', { value: true, writable: true, configurable: true });
+          if (pending.incomplete && Array.isArray(result)) {
+            Object.defineProperty(result, 'incomplete', { value: true, writable: true, configurable: true });
+            if (typeof pending.incomplete === 'string') Object.defineProperty(result, 'incompleteReason', { value: pending.incomplete, writable: true, configurable: true });
+          }
           this.settleCommand(action.command, result);
         }
         // Settlement wins before any consumer runs: a broken toast/log handler

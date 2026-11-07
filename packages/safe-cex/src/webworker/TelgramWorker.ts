@@ -2,7 +2,7 @@ import axios from 'axios';
 
 import { Exchange } from '../exchanges/base';
 import { PositionSide } from '../types';
-import { getCommandExecutor } from './commandExecutor';
+import { rustAlgoExchange } from './handlers/BaseHandler';
 
 type TelegramMessage = { message: { chat: { id: number }; text: string }; update_id: number };
 
@@ -55,22 +55,13 @@ export class TelegramWorker {
           continue;
         }
 
-        // No-op if the host didn't register a command executor. The try/catch
-        // covers a synchronous throw (before a Promise is returned); awaiting
-        // inside covers async rejection — neither can surface as an unhandled
-        // rejection on the un-awaited processMessages() call.
-        const executor = getCommandExecutor();
-        if (executor) {
-          void (async () => {
-            try {
-              await executor(this._exchange, symbol, command);
-            } catch (e: unknown) {
-              this._exchange.emitter.emit('exec-log', {
-                message: `Command failed: ${e instanceof Error ? e.message : String(e)}`,
-              });
-            }
-          })();
-        }
+        // The command runs in the account engine's Rust algos, as the terminal's `exec` does.
+        const exchange = rustAlgoExchange(this._exchange);
+        if (exchange) exchange.algoOp('exec', { symbol, command });
+        else
+          this._exchange.emitter.emit('exec-log', {
+            message: 'Command failed: algos run only on a Rust engine account.',
+          });
       }
     }
   }

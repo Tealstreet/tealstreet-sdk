@@ -1,6 +1,6 @@
 import type { ExchangeLike } from '@tealstreet/cli-core/src/types';
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeName, StoreData } from '../../types';
+import type { ActiveTWAP, ExchangeName, StoreData } from '../../types';
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,13 +30,13 @@ import {
 } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInstance';
-import { ChaserOrderManager, chaserOrderManagerInstance } from '../../webworker/chaserOrder/ChaserOrderManager';
+import { ChaserOrderManager } from '../../webworker/chaserOrder/ChaserOrderManager';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
 import { DisplayedPositionsPostprocessor } from '../../webworker/postProcessors/DisplayedPositionsPostprocessor';
 import { independentPostprocessors } from '../../webworker/postProcessors/registry';
 import { TwapInstance } from '../../webworker/twap/TwapInstance';
-import { twapManager } from '../../webworker/twap/TwapManager';
+import { TwapStatus } from '../../webworker/twap/TwapStatus';
 import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
 import { consumerFrame } from './consumerFrame';
 
@@ -208,10 +208,8 @@ afterEach(async () => {
 async function consumer(name: ExchangeName) {
   const options = {
     engine: 'rust' as const,
-    // DXtrade requires a session even for public reads. Keep its production
-    // credential guard while the independent frame producer remains offline.
-    key: name === 'breakoutprop' ? 'replay-key' : '',
-    secret: name === 'breakoutprop' ? 'replay-secret' : '',
+    key: '',
+    secret: '',
     publicDataOnly: true,
   };
   const main = new BaseExchange(name, options, new DefaultStore());
@@ -420,13 +418,16 @@ describe.each(venues)('%s consumer conformance', (name) => {
         () => {},
       );
       await twap.start();
-      expect(place).toHaveBeenLastCalledWith({
+      // A slice carries the venue's minted client id where it mints one (#2514).
+      const placed = place.mock.lastCall![0] as { clientOrderId?: string };
+      expect(placed).toEqual({
         symbol: 'BTCUSDT',
         side,
         type: OrderType.Limit,
         price: side === OrderSide.Buy ? state(name).tickers![0].bid : state(name).tickers![0].ask,
         amount: size,
         reduceOnly: false,
+        ...(placed.clientOrderId === undefined ? {} : { clientOrderId: expect.stringMatching(/.+/) }),
       });
     }
     // The supervisor observes order updates immediately through BaseExchange's
@@ -479,43 +480,34 @@ describe.each(venues)('%s consumer conformance', (name) => {
     manager.cleanupExchange(exchange);
   });
 
-  it('ships active chaser/TWAP state and order enrichment through the real postprocessor pipeline', async () => {
-    const { worker, main, exchange, ctx, deliver } = await consumer(name);
-    vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['order-1']);
-    vi.spyOn(exchange, 'cancelOrders').mockResolvedValue();
+  it('ships the engine algo rows and order enrichment through the real postprocessor pipeline', async () => {
+    const { worker, main, exchange, deliver } = await consumer(name);
     exchange.store.update({
       socketHealth: { publicHealthy: true, privateHealthy: true, publicInitialized: true, privateInitialized: true },
     });
-    const chaser = new ChaserOrderInstance(exchange, {
+    // The rows the engine's Rust algos post: this fixture engine runs no algos.
+    const chaser = {
+      id: 'chaser-1',
       symbol: 'BTCUSDT',
       side: OrderSide.Buy,
-      size: name === 'binanceinverse' ? 7 : name.includes('inverse') ? 70 : native.includes(name) ? 7 : 0.7,
+      size: 0.7,
       maxAttempts: 5,
-      delay: 1000,
-    });
-    managers.push({ manager: chaserOrderManagerInstance, exchange });
-    chaserOrderManagerInstance.add(chaser);
-    const twap = new TwapInstance(
-      exchange,
-      ctx,
-      {
-        accountName: 'conformance',
-        activeMarket: exchange.store.markets[0],
-        size: 2,
-        side: OrderSide.Buy,
-        duration: 1,
-        ordersCount: 2,
-        chaserDelay: 1000,
-        reduceOnly: false,
-        randomnessPercentage: 0,
-        useLimitOrders: true,
-        useChaserOrders: false,
-      },
-      () => {},
-    );
-    twaps.push(twap);
-    twapManager.add(twap);
-    await twap.start();
+      attempts: 1,
+      isStopped: false,
+      stopReason: '',
+      currentOrderIds: ['order-1'],
+    };
+    const twap = {
+      id: 'twap-1',
+      symbol: 'BTCUSDT',
+      accountName: 'conformance',
+      activeMarket: exchange.store.markets[0],
+      side: OrderSide.Buy,
+      size: 2,
+      ordersExecuted: 1,
+      status: TwapStatus.Running,
+    } as unknown as ActiveTWAP;
+    exchange.store.update({ activeChasers: [chaser], activeTWAPs: [twap] });
     await vi.advanceTimersByTimeAsync(1000);
     worker.sendSnapshot();
     expect(main.store.activeChasers).toEqual([

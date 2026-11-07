@@ -104,7 +104,7 @@ const STEP = {
     amount: {
       ...nullableNumber,
       description:
-        "Size in the venue's own units — the same unit as a position's nativeContracts and an order's nativeRemaining, NOT the base contracts field.",
+        "Size in the venue's own units — the same unit as a position's nativeContracts and an order's nativeRemaining, NOT the base contracts field. For amend_order, the size that should remain open.",
     },
     price: { ...nullableNumber, description: 'Limit price, or the TRIGGER price for place_stop_loss.' },
     reduceOnly: { ...nullableBoolean, description: 'place_order only.' },

@@ -30,7 +30,12 @@ export type FrameCandle = { symbol: string; interval: string; candle: Candle };
 
 export class FrameApplyError extends Error {}
 
-const finite = (value: number) => (Number.isNaN(value) ? undefined : value);
+const finite = (value: number) => (Number.isFinite(value) ? value : undefined);
+/**
+ * Display-only position numbers read a non-finite engine value as the venue's 0 (none/unknown).
+ * Sizing inputs (`contracts`, `notional`) stay raw: a NaN there makes nuke refuse the close.
+ */
+const displayNumber = (value: number) => (Number.isFinite(value) ? value : 0);
 
 /** The sizing rules each `QuantityUnits` convention implies for order and position extras. */
 type UnitProfile = {
@@ -312,6 +317,27 @@ export class FrameApplier {
 
     attempt(() => {
       if (marketsFailed) return;
+      const observations = frame.tickerObservations?.();
+      if (!observations) return;
+      const rows = update.tickers ?? this.store.tickers;
+      const times: NonNullable<StoreUpdate['tickerObservations']> = [];
+      for (let i = 0; i < observations.length; i += 4) {
+        const row = observations[i];
+        if (!rows[row]) throw new Error('Invalid ticker observation row');
+        times.push([
+          row,
+          [
+            finite(observations[i + 1]) ?? null,
+            finite(observations[i + 2]) ?? null,
+            finite(observations[i + 3]) ?? null,
+          ],
+        ]);
+      }
+      update.tickerObservations = times;
+    }, LOADED_FLAG.TICKERS);
+
+    attempt(() => {
+      if (marketsFailed) return;
       const orders = frame.orders();
       if (orders) {
         const rows: Order[] = [];
@@ -355,8 +381,7 @@ export class FrameApplier {
               ? {
                   remainingNative: native,
                   remainingNotional:
-                    native *
-                    (inverseContractSized || nativePlacementAmounts ? contractSizes[orders.market[i]] : 1),
+                    native * (inverseContractSized || nativePlacementAmounts ? contractSizes[orders.market[i]] : 1),
                 }
               : inverseNativeAmounts
                 ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
@@ -479,14 +504,11 @@ export class FrameApplier {
             }),
             entryPrice: positions.entryPrice[i],
             notional: positions.notional[i],
-            leverage: positions.leverage[i],
-            unrealizedPnl: positions.unrealizedPnl[i],
+            leverage: displayNumber(positions.leverage[i]),
+            unrealizedPnl: displayNumber(positions.unrealizedPnl[i]),
             contracts: positions.contracts[i],
             ...(market &&
-              (nativePlacementAmounts ||
-                contractCountAmounts ||
-                market?.isInverse ||
-                inverseNativeAmounts) && {
+              (nativePlacementAmounts || contractCountAmounts || market?.isInverse || inverseNativeAmounts) && {
                 extra: {
                   ...(nativePlacementAmounts && {
                     contractsNative: divide(positions.contracts[i], contractSizes[positions.market[i]]),
@@ -501,15 +523,15 @@ export class FrameApplier {
                     : (market?.isInverse || inverseNativeAmounts) && {
                         contractsNative: divide(
                           positions.notional[i],
-                          inverseContractSized || nativePlacementAmounts
-                            ? contractSizes[positions.market[i]]
-                            : 1,
+                          inverseContractSized || nativePlacementAmounts ? contractSizes[positions.market[i]] : 1,
                         ),
-                        ...(!nativePlacementAmounts && { unrealizedPnlNative: positions.unrealizedPnl[i] }),
+                        ...(!nativePlacementAmounts && {
+                          unrealizedPnlNative: displayNumber(positions.unrealizedPnl[i]),
+                        }),
                       }),
                 },
               }),
-            liquidationPrice: positions.liquidationPrice[i],
+            liquidationPrice: displayNumber(positions.liquidationPrice[i]),
             ...(mode !== undefined && { positionMode: mode }),
             ...(enums.marginType !== undefined && { marginType: enums.marginType as MarginType }),
             ...(finite(positions.realizedPnl[i]) !== undefined && { realizedPnl: positions.realizedPnl[i] }),
@@ -552,10 +574,14 @@ export class FrameApplier {
         const hedged = (update.options ?? this.store.options).isHedged;
         const leverage: Record<string, FetchedLeverage> = {};
         for (let i = 0; i < settings.count; i++) {
-          const value = settings.leverage[i];
+          const value = finite(settings.leverage[i]);
+          const buyLeverage = finite(settings.buyLeverage?.[i] ?? NaN) ?? value;
+          const sellLeverage = finite(settings.sellLeverage?.[i] ?? NaN) ?? value;
+          // An unknown side omits the symbol: UiStateHandler copies these onto positions.
+          if (buyLeverage === undefined || sellLeverage === undefined) continue;
           leverage[resolveSymbol(settings.market[i], settings.symbol?.(i))] = {
-            buyLeverage: finite(settings.buyLeverage?.[i] ?? NaN) ?? value,
-            sellLeverage: finite(settings.sellLeverage?.[i] ?? NaN) ?? value,
+            buyLeverage,
+            sellLeverage,
             marginType: settings.marginType(i) as MarginType | undefined,
             positionMode: hedged ? PositionMode.Hedged : PositionMode.OneWay,
           };

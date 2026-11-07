@@ -62,6 +62,19 @@ fn response(e: &mut TestEngine, request: &HttpRequest, now: f64, body: &str) {
         },
     );
 }
+fn response_status(e: &mut TestEngine, request: &HttpRequest, now: f64, status: u16) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status,
+                headers: "",
+                body: "",
+            },
+        },
+    );
+}
 fn ws(e: &mut TestEngine, socket: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket, text });
 }
@@ -76,12 +89,20 @@ fn ready_with_provider(hmac_only: bool) -> (TestEngine, SocketId) {
     ready_with_provider_mode(hmac_only, false)
 }
 fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, SocketId) {
+    ready_with_signer(hmac_only, |provider| {
+        if remote {
+            Arc::new(DelegatedHmac(provider))
+        } else {
+            provider
+        }
+    })
+}
+fn ready_with_signer(
+    hmac_only: bool,
+    wrap: impl FnOnce(Arc<dyn Signer>) -> Arc<dyn Signer>,
+) -> (TestEngine, SocketId) {
     let (provider, identities) = write_provider(hmac_only);
-    let provider: Arc<dyn Signer> = if remote {
-        Arc::new(DelegatedHmac(provider))
-    } else {
-        provider
-    };
+    let provider = wrap(provider);
     let inner = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         identity: identities.primary.clone(),
         ..Options::default()
@@ -108,6 +129,13 @@ fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, Socke
             _ => None,
         })
         .collect::<Vec<_>>();
+    e.handle(
+        NOW + 1.0,
+        Event::WsOpened {
+            socket: socket.unwrap(),
+        },
+    );
+    e.drain_actions().for_each(drop);
     for request in reads {
         response(
             &mut e,
@@ -131,6 +159,7 @@ fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, Socke
     e.store_mut().update_ticker("BTCUSDT", |t| {
         t.last = 60000.0;
         t.mark = 60000.0;
+        t.index = 60000.0;
     });
     e.drain_actions().for_each(drop);
     (e, socket.unwrap())
@@ -414,12 +443,153 @@ fn signature_rejection_retries_once_with_same_l2_body_and_fresh_legacy_auth() {
     assert!(requests(&mut e).is_empty());
 }
 
+/// Real ApeX bodies (a user's key, 2026-11-02): no `code`; a cancel's `data` is the bare id.
+const REAL_PLACE: &str = r#"{"data":{"id":"904952998325649712","clientId":"c1","orderId":"904952998325649712","status":"PENDING"},"timeCost":21}"#;
+const REAL_CANCEL: &str = r#"{"data":"904952998325649712","timeCost":5897}"#;
+
+fn command_failures(out: &[Action]) -> Vec<String> {
+    out.iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ApeX's documented success has no `code`: `{"data":{...},"timeCost":3}`.
+#[test]
+fn a_success_with_no_code_is_a_placed_order_not_a_failure() {
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(&mut e, &first, NOW + 11.0, REAL_PLACE);
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+}
+
+#[test]
+fn a_cancel_answered_with_no_code_succeeds() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["abc".into()],
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    response(&mut e, &cancel, NOW + 11.0, REAL_CANCEL);
+    assert_eq!(command_failures(&actions(&mut e)), Vec::<String>::new());
+}
+
+#[test]
+fn an_amend_whose_cancel_has_no_code_still_places_the_replacement() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    response(
+        &mut e,
+        &cancel,
+        NOW + 15.0,
+        r#"{"data":"parent","timeCost":3}"#,
+    );
+    prove_cancel(&mut e);
+    let replacement = requests(&mut e).remove(0);
+    assert_eq!(form(&replacement)["size"], "4");
+}
+
+fn done(out: &[Action], command: safe_cex_engine::CommandId) -> bool {
+    out.iter().any(|action| {
+        matches!(action, Action::Notice(Notice::CommandDone { command: c, .. }) if *c == command)
+    })
+}
+
+/// Live replies on a user's key (2026-11-02): these writes answer only `timeCost`, or nothing.
+#[test]
+fn a_cancel_all_answered_with_only_time_cost_is_done() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 5,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let request = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/delete-open-orders"))
+        .expect("cancel-all write");
+    response(&mut e, &request, NOW + 11.0, r#"{"timeCost":6476}"#);
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+    assert!(done(&out, 5), "{out:?}");
+}
+
+#[test]
+fn a_leverage_change_answered_with_only_time_cost_is_done() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::SetLeverage {
+            command: 9,
+            symbol: "BTCUSDT".into(),
+            leverage: 10.0,
+            side: None,
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    response(&mut e, &request, NOW + 11.0, r#"{"timeCost":5694}"#);
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+    assert!(done(&out, 9), "{out:?}");
+}
+
+/// Legacy cancels an attached TP/SL by its parent's id; the venue answers an empty body.
+#[test]
+fn a_tpsl_cancel_answered_with_an_empty_body_is_done() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["abc__stop_loss".into()],
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    assert_eq!(form(&request)["id"], "abc");
+    response(&mut e, &request, NOW + 11.0, "");
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+    assert!(done(&out, 7), "{out:?}");
+}
+
+#[test]
+fn a_failure_never_shows_empty_text() {
+    for body in [
+        r#"{"timeCost":3}"#,
+        r#"{"code":10003,"msg":""}"#,
+        r#"{"data":null}"#,
+    ] {
+        let mut e = ready();
+        let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+        response(&mut e, &first, NOW + 11.0, body);
+        let failures = command_failures(&actions(&mut e));
+        assert_eq!(failures.len(), 1, "{body}");
+        assert!(!failures[0].trim_end().ends_with(':'), "{}", failures[0]);
+        if body.contains("10003") {
+            assert!(failures[0].contains("no reason given"), "{}", failures[0]);
+        }
+    }
+}
+
 #[test]
 fn http_and_business_rejections_never_cancel_replace_or_retry_writes() {
     for (status, body) in [
         (500, r#"{"msg":"server error"}"#),
         (200, r#"{"code":10003,"msg":"insufficient funds"}"#),
         (200, r#"{"code":0,"data":{}}"#),
+        (200, r#"{"data":{}}"#),
+        (200, r#"{"timeCost":3}"#),
         (200, r#"{"code":"broken","data":{"id":"must-not-accept"}}"#),
         (200, r#"{"code":{},"data":{"id":"must-not-accept"}}"#),
         (200, r#"{"code":0.5,"data":{"id":"must-not-accept"}}"#),
@@ -510,13 +680,47 @@ fn parent_update(
     );
 }
 
+/// The pause after an amend's cancel ends, and its proof read answers
+/// `status`; a zero fill leaves the amend's own fill accounting unchanged.
+fn prove_cancel_as(e: &mut TestEngine, status: &str) {
+    prove_cancel_of(e, "parent", status);
+}
+fn prove_cancel_of(e: &mut TestEngine, id: &str, status: &str) {
+    let (timer, at) = actions(e)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .expect("a cancel-proof pause");
+    e.handle(at, Event::TimerFired { timer });
+    let read = requests(e)
+        .into_iter()
+        .find(|request| request.url.contains("/v3/order?id="))
+        .expect("a cancel-proof read");
+    response(
+        e,
+        &read,
+        at,
+        &format!(r#"{{"data":{{"id":"{id}","status":"{status}","cumSuccessFillSize":"0"}}}}"#),
+    );
+}
+fn prove_cancel(e: &mut TestEngine) {
+    prove_cancel_as(e, "CANCELED");
+}
+
+/// A take profit moves up to 66000; anything else to 59000.
 fn amend(e: &mut TestEngine, id: &str, amount: Option<f64>) -> Vec<HttpRequest> {
     e.handle(
         NOW + 10.0,
         Event::Command(Command::AmendOrder {
             command: 99,
             id: id.into(),
-            price: Some(59000.0),
+            price: Some(if id.ends_with("__take_profit") {
+                66000.0
+            } else {
+                59000.0
+            }),
             amount,
         }),
     );
@@ -541,7 +745,8 @@ fn partial_parent_and_virtual_amendments_replace_only_remaining_and_keep_sibling
         parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
         e.drain_actions().for_each(drop);
         let cancel = amend(&mut e, id, None).remove(0);
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+        prove_cancel(&mut e);
         let replacement = requests(&mut e).remove(0);
         let fields = form(&replacement);
         assert_eq!(fields["size"], "4");
@@ -550,7 +755,7 @@ fn partial_parent_and_virtual_amendments_replace_only_remaining_and_keep_sibling
         assert_eq!(fields["slTriggerPrice"], "50000");
         assert_eq!(
             fields["tpTriggerPrice"],
-            if id == "parent" { "65000" } else { "59000" }
+            if id == "parent" { "65000" } else { "66000" }
         );
     }
 }
@@ -571,7 +776,8 @@ fn amend_rechecks_remaining_when_its_fifo_turn_starts() {
         },
     );
     let cancel = without_reconcile_read(requests(&mut e)).remove(0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel(&mut e);
     assert_eq!(
         form(&without_reconcile_read(requests(&mut e)).remove(0))["size"],
         "2"
@@ -592,7 +798,8 @@ fn in_flight_amend_counts_same_execution_once_in_both_topic_orders() {
         if !fill_first {
             amend_fill(&mut e, socket, NOW + 11.0, 1.0);
         }
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+        prove_cancel(&mut e);
         assert_eq!(form(&requests(&mut e).remove(0))["size"], "3");
     }
 }
@@ -604,7 +811,8 @@ fn delayed_pre_amend_fill_does_not_reduce_the_captured_remaining_again() {
     e.drain_actions().for_each(drop);
     let cancel = amend(&mut e, "parent", None).remove(0);
     amend_fill(&mut e, socket, NOW + 4.0, 6.0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel(&mut e);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "4");
 }
 
@@ -616,7 +824,8 @@ fn new_genuine_amend_fill_counts_despite_outstanding_old_synthetic_coverage() {
     e.drain_actions().for_each(drop);
     let cancel = amend(&mut e, "parent", None).remove(0);
     amend_fill(&mut e, socket, NOW + 11.0, 1.0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel(&mut e);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
 }
 
@@ -628,7 +837,8 @@ fn distinct_execution_after_a_cumulative_report_reduces_remaining_again() {
     let cancel = amend(&mut e, "parent", None).remove(0);
     parent_update(&mut e, socket, NOW + 11.0, 7.0, "OPEN", false);
     amend_fill(&mut e, socket, NOW + 12.0, 1.0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel(&mut e);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
 }
 
@@ -637,10 +847,11 @@ fn genuine_full_fill_during_cancel_suppresses_explicit_replacement_quantity() {
     let (mut e, socket) = ready_with_socket();
     parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
     e.drain_actions().for_each(drop);
-    let cancel = amend(&mut e, "parent", Some(2.5)).remove(0);
+    let cancel = amend(&mut e, "parent", Some(8.5)).remove(0);
     amend_fill(&mut e, socket, NOW + 11.0, 4.0);
     e.drain_actions().for_each(drop);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel(&mut e);
     let actions = actions(&mut e);
     assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
     assert!(http(actions).is_empty());
@@ -703,7 +914,8 @@ fn own_cancel_event_keeps_replacement_but_full_fill_suppresses_it() {
         let cancel = amend(&mut e, "parent", None).remove(0);
         parent_update(&mut e, socket, NOW + 12.0, filled, status, false);
         e.drain_actions().for_each(drop);
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        // The order's own update is the cancel's proof: no read is needed.
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         let actions = actions(&mut e);
         if status == "FILLED" {
             assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
@@ -715,14 +927,15 @@ fn own_cancel_event_keeps_replacement_but_full_fill_suppresses_it() {
 }
 
 #[test]
-fn explicit_amend_quantity_remains_verbatim_after_an_additional_fill() {
+fn an_explicit_total_comes_down_by_an_additional_fill() {
     let (mut e, socket) = ready_with_socket();
     parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
     e.drain_actions().for_each(drop);
-    let cancel = amend(&mut e, "parent", Some(2.5)).remove(0);
+    let cancel = amend(&mut e, "parent", Some(8.5)).remove(0);
     parent_update(&mut e, socket, NOW + 12.0, 7.0, "OPEN", false);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2.5");
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel(&mut e);
+    assert_eq!(form(&requests(&mut e).remove(0))["size"], "1.5");
 }
 
 #[test]
@@ -833,7 +1046,8 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
     // An additional fill discards the prebuilt replacement and selects new signed IDs.
     amend_fill(&mut e, socket, NOW + 11.0, 1.0);
     e.drain_actions().for_each(drop);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel(&mut e);
     let out: Vec<_> = actions(&mut e);
     let write = out
         .iter()
@@ -866,6 +1080,61 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
 }
 
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel(&mut e);
+    let replacement = requests(&mut e).remove(0);
+    response(&mut e, &replacement, NOW + 16.0, REFUSED);
+    let error = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 99, error }) => Some(error),
+            _ => None,
+        })
+        .expect("a failure");
+    assert!(
+        error.message.contains("Your BTCUSDT order is gone"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    for (id, expected) in [
+        (
+            "parent__stop_loss",
+            "Your BTCUSDT long position has no stop",
+        ),
+        (
+            "parent__take_profit",
+            "Your BTCUSDT long position has no take profit",
+        ),
+    ] {
+        let (mut e, socket) = ready_with_socket();
+        parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+        e.drain_actions().for_each(drop);
+        let cancel = amend(&mut e, id, None).remove(0);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+        prove_cancel(&mut e);
+        let replacement = requests(&mut e).remove(0);
+        response(&mut e, &replacement, NOW + 16.0, REFUSED);
+        let error = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 99, error }) => Some(error),
+                _ => None,
+            })
+            .expect("a failure");
+        assert!(error.message.contains(expected), "{}", error.message);
+    }
+}
+
+#[test]
 fn write_failures_use_shared_classification_and_preserve_network_text() {
     use safe_cex_engine::{ErrorKind, Outcome};
     for (status, body, kind, outcome, code) in [
@@ -887,7 +1156,7 @@ fn write_failures_use_shared_classification_and_preserve_network_text() {
             429,
             r#"{"code":429,"msg":"too many requests"}"#,
             Some(ErrorKind::RateLimited),
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some("429"),
         ),
         (
@@ -958,7 +1227,8 @@ fn default_decimal_amendment_subtracts_late_fill_without_float_noise() {
     let cancel = amend(&mut e, "parent", None).remove(0);
     ws(&mut e, socket, NOW + 12.0, &decimal_parent("0.2"));
     e.drain_actions().for_each(drop);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel(&mut e);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "0.1");
 }
 
@@ -1173,6 +1443,7 @@ fn write_provider(hmac_only: bool) -> (Arc<dyn Signer>, Identities) {
                     key: ExtraKey::ZklinkSeed,
                     field: ExtraFieldPolicy::RequiredForPrivate,
                     encoding: Some(KeyEncoding::Hex),
+                    trim: false,
                 }),
                 ..Default::default()
             }),
@@ -1296,7 +1567,12 @@ fn quoted_refusal_codes_share_the_integer_code_table_and_message() {
                 _ => None,
             })
             .unwrap();
-        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+        let outcome = if code == "429" {
+            safe_cex_engine::Outcome::Unknown
+        } else {
+            safe_cex_engine::Outcome::Rejected
+        };
+        assert_eq!(error.outcome, Some(outcome));
         assert_eq!(error.venue_code.as_deref(), Some(code));
         assert_eq!(error.venue_message.as_deref(), Some("native refusal"));
         assert_eq!(
@@ -1390,16 +1666,15 @@ fn late_cancel_ack_preserves_uncertainty_without_bypassing_native_read_fences() 
     }
 }
 
-/// A remote HMAC signer for writes. Account reads (GET), which the venue now
-/// signs through the provider too, answer inline from the local fixture so
-/// startup completes; writes wait for the remote reply.
+/// A remote HMAC signer for writes. Account reads and SessionAuth answer
+/// inline from the installed fixture; mutation signatures await a remote reply.
 struct DelegatedHmac(Arc<dyn Signer>);
 impl Signer for DelegatedHmac {
     fn sign(&self, _: SignRequest) -> SignFuture {
         Box::pin(std::future::pending())
     }
     fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
-        (work.context.method == "GET")
+        (matches!(work.context.method.as_str(), "GET" | "WS"))
             .then(|| self.0.sign_ready(work))
             .flatten()
     }
@@ -1689,7 +1964,7 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     let heal = actions(&mut e)
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms >= NOW + 1_000.0 => Some(timer),
+            Action::SetTimer { timer, at_ms } if at_ms == NOW + 1_005.0 => Some(timer),
             _ => None,
         })
         .expect("the order heal timer");
@@ -1858,6 +2133,45 @@ fn engine_re_asks_join_the_fresh_read_in_flight_and_its_clean_answer_releases() 
 /// Cancel-all on a symbol with an Unknown placement is refused NotSent until the
 /// fresh order read releases the fence (default `fence_uncertain_cancel_all`).
 #[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let (mut e, _socket) = ready_with_socket();
+    let place = |e: &mut TestEngine, now, command, client: &str| {
+        e.handle(
+            now,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![order(serde_json::json!({ "clientOrderId": client }))],
+            }),
+        );
+        actions(e)
+    };
+    let write = http(place(&mut e, NOW + 10.0, 42, "first"))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/order"))
+        .expect("the placement write");
+    e.handle(
+        NOW + 20.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "connection reset after write",
+        },
+    );
+    let fresh = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the reconcile read");
+    response(
+        &mut e,
+        &fresh,
+        NOW + 30.0,
+        r#"{"code":0,"data":[{"id":"77","symbol":"SOL-USDT"}]}"#,
+    );
+    actions(&mut e);
+    let retry = http(place(&mut e, NOW + 40.0, 43, "retry"));
+    assert!(retry.iter().any(|r| r.url.ends_with("/v3/order")));
+}
+
+#[test]
 fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() {
     const EMPTY: &str = r#"{"code":0,"data":[]}"#;
     let cancel_all = |e: &mut TestEngine, now: f64, command: safe_cex_engine::CommandId| {
@@ -1921,4 +2235,776 @@ fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() 
         "a fresh clean read releases cancel-all"
     );
     assert_eq!(cancels(&released), 1, "cancel-all is sent once released");
+}
+
+/// A coded 200: the listed code refuses and leaves no fence.
+#[test]
+fn documented_coded_refusal_leaves_no_fence() {
+    use safe_cex_engine::Outcome;
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(
+        &mut e,
+        &first,
+        NOW + 11.0,
+        r#"{"code":10002,"msg":"Your API key is wrong"}"#,
+    );
+    let settled = actions(&mut e);
+    assert!(
+        settled.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 42, error })
+            if error.outcome == Some(Outcome::Rejected))),
+        "{settled:?}"
+    );
+    let next = place_with_id(&mut e, 43, vec![order(serde_json::json!({}))]);
+    assert!(
+        next.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/order")))
+    );
+}
+
+/// An unlisted code stays Unknown, reads at once, and that read lifts the fence.
+#[test]
+fn unlisted_coded_placement_fence_clears_on_the_next_read() {
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(
+        &mut e,
+        &first,
+        NOW + 11.0,
+        r#"{"code":987654,"msg":"unlisted native failure"}"#,
+    );
+    let read = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the read starts with the answer");
+    let fenced = place_with_id(&mut e, 43, vec![order(serde_json::json!({}))]);
+    assert!(
+        fenced.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 43, error })
+            if error.message.contains("uncertain"))),
+        "{fenced:?}"
+    );
+    response(&mut e, &read, NOW + 12.0, r#"{"code":0,"data":[]}"#);
+    let _ = actions(&mut e);
+    let next = place_with_id(&mut e, 44, vec![order(serde_json::json!({}))]);
+    assert!(
+        next.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/order"))),
+        "{next:?}"
+    );
+}
+
+/// A resting reduce-only sell stop at 55000 on the index, guarding a long.
+fn resting_stop(e: &mut TestEngine, socket: SocketId, filled: f64) {
+    resting_stop_of(e, socket, filled, "STOP_MARKET");
+}
+fn resting_stop_of(e: &mut TestEngine, socket: SocketId, filled: f64, kind: &str) {
+    ws(
+        e,
+        socket,
+        NOW + 5.0,
+        &format!(
+            r#"{{"topic":"ws_zk_accounts_v3","type":"snapshot","contents":{{"orders":[{{"id":"stop","symbol":"BTC-USDT","side":"SELL","type":"{kind}","status":"UNTRIGGERED","size":"10","price":"54725","triggerPrice":"55000","triggerPriceType":"INDEX","reduceOnly":true,"cumSuccessFillSize":"{filled}","updatedAt":{}}}]}}}}"#,
+            NOW + 5.0
+        ),
+    );
+    e.store_mut().set_positions(vec![long_position()]);
+    e.drain_actions().for_each(drop);
+}
+fn long_position() -> safe_cex_engine::model::Position {
+    use safe_cex_engine::model::*;
+    Position {
+        id: "BTCUSDT:long".into(),
+        symbol: "BTCUSDT".into(),
+        side: PositionSide::Long,
+        entry_price: 60000.0,
+        notional: 600000.0,
+        leverage: 10.0,
+        margin_type: Some(MarginType::Cross),
+        position_mode: Some(PositionMode::Hedged),
+        unrealized_pnl: 0.0,
+        realized_pnl: None,
+        contracts: 10.0,
+        liquidation_price: 0.0,
+        margin_size: None,
+        last_update: None,
+    }
+}
+fn amend_command(e: &mut TestEngine, id: &str, price: f64) {
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::AmendOrder {
+            command: 99,
+            id: id.into(),
+            price: Some(price),
+            amount: None,
+        }),
+    );
+}
+fn amend_to(e: &mut TestEngine, id: &str, price: f64) -> Vec<HttpRequest> {
+    amend_command(e, id, price);
+    requests(e)
+}
+fn failure_of(out: &[Action]) -> safe_cex_engine::VenueError {
+    out.iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 99, error }) => Some(error.clone()),
+            _ => None,
+        })
+        .expect("a failure")
+}
+fn placements(requests: &[HttpRequest]) -> Vec<&HttpRequest> {
+    requests
+        .iter()
+        .filter(|r| r.url.ends_with("/v3/order") || r.url.ends_with("/v3/delete-order"))
+        .collect()
+}
+// A definite non-rate refusal; rate limits never authorize a put-back.
+const REFUSED: &str = r#"{"code":10002,"msg":"Requires Login: Your API key is wrong"}"#;
+/// Amends the resting stop to 56000 and lands its cancel; its replacement is next.
+fn to_stop_replacement(e: &mut TestEngine) -> HttpRequest {
+    let cancel = amend_to(e, "stop", 56000.0).remove(0);
+    assert!(cancel.url.ends_with("/v3/delete-order"), "{}", cancel.url);
+    response(e, &cancel, NOW + 15.0, REAL_CANCEL);
+    prove_cancel_of(e, "stop", "CANCELED");
+    let replacement = requests(e).remove(0);
+    assert_eq!(form(&replacement)["triggerPrice"], "56000");
+    replacement
+}
+
+#[test]
+fn a_stale_crossed_changed_or_flat_stop_at_the_final_claim_cancels_nothing() {
+    use safe_cex_engine::Outcome;
+    for (case, why) in [
+        ("stale", "index price reference is stale"),
+        ("crossed", "already crossed the index price"),
+        ("filled", "changed or filled before cancellation"),
+        ("flat", "no position for it to protect"),
+    ] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop(&mut e, socket, 0.0);
+        amend_command(&mut e, "stop", 56000.0);
+        // Between planning and the cancel's final claim.
+        match case {
+            "stale" => e.now = NOW + 10.0 + 6_000.0,
+            // The index fell through the new stop; last and mark did not.
+            "crossed" => e
+                .store_mut()
+                .update_ticker("BTCUSDT", |t| t.index = 55900.0),
+            "filled" => {
+                e.store_mut().update_order("stop", |o| o.filled = 1.0);
+            }
+            _ => e.store_mut().set_positions(vec![]),
+        }
+        let out = actions(&mut e);
+        assert!(
+            placements(&http(out.clone())).is_empty(),
+            "{case}: no cancel"
+        );
+        let error = failure_of(&out);
+        assert!(
+            error.message.contains("was not changed") && error.message.contains(why),
+            "{case}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::NotSent), "{case}");
+        assert_eq!(error.protection, None, "{case}: never Unprotected");
+        assert!(e.store().order("stop").is_some(), "{case}: untouched");
+    }
+}
+
+#[test]
+fn a_stop_veto_follows_the_index_source_not_the_mark() {
+    for (index, mark, sent) in [(60000.0, 55000.0, true), (55900.0, 60000.0, false)] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop(&mut e, socket, 0.0);
+        e.store_mut().update_ticker("BTCUSDT", |t| {
+            t.index = index;
+            t.mark = mark;
+            t.last = mark;
+        });
+        let sent_cancel = amend_to(&mut e, "stop", 56000.0)
+            .iter()
+            .any(|r| r.url.ends_with("/v3/delete-order"));
+        assert_eq!(sent_cancel, sent, "index {index}, mark and last {mark}");
+    }
+}
+
+#[test]
+fn a_resent_cancel_is_checked_again_at_its_own_claim() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let cancel = amend_to(&mut e, "stop", 56000.0).remove(0);
+    e.store_mut()
+        .update_ticker("BTCUSDT", |t| t.index = 55900.0);
+    response(
+        &mut e,
+        &cancel,
+        NOW + 15.0,
+        r#"{"code":20016,"msg":"signature expired"}"#,
+    );
+    let out = actions(&mut e);
+    assert!(placements(&http(out.clone())).is_empty(), "no resend");
+    let error = failure_of(&out);
+    assert!(
+        error.message.contains("already crossed the index price"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, None);
+}
+
+#[test]
+fn a_refused_stop_replacement_puts_the_original_back_once() {
+    use safe_cex_engine::error::Protection;
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(&mut e, &replacement, NOW + 200.0, REFUSED);
+    let restore = requests(&mut e).remove(0);
+    let fields = form(&restore);
+    for (key, value) in [
+        ("triggerPrice", "55000"),
+        ("triggerPriceType", "INDEX"),
+        ("side", "SELL"),
+        ("size", "10"),
+        ("reduceOnly", "true"),
+    ] {
+        assert_eq!(fields[key], value, "{key}: the original, not the edit");
+    }
+    assert_ne!(fields["clientOrderId"], form(&replacement)["clientOrderId"]);
+    response(&mut e, &restore, NOW + 201.0, REAL_PLACE);
+    let out = actions(&mut e);
+    let error = failure_of(&out);
+    assert!(
+        error.message.contains("is unchanged") && error.message.contains("put back"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Restored));
+    assert_ne!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "a proven cancel is never typed unknown"
+    );
+    assert!(placements(&http(out)).is_empty(), "one put-back only");
+}
+
+#[test]
+fn a_refused_put_back_is_unprotected_and_never_retried() {
+    use safe_cex_engine::error::Protection;
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(&mut e, &replacement, NOW + 200.0, REFUSED);
+    let restore = requests(&mut e).remove(0);
+    response(&mut e, &restore, NOW + 201.0, REFUSED);
+    let out = actions(&mut e);
+    let error = failure_of(&out);
+    assert!(
+        error.message.contains("both refused") && error.message.contains("re-place"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(placements(&http(out)).is_empty());
+}
+
+#[test]
+fn an_unknown_stop_replacement_or_put_back_is_never_resent() {
+    for unknown_put_back in [false, true] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop(&mut e, socket, 0.0);
+        let mut call = to_stop_replacement(&mut e);
+        if unknown_put_back {
+            response(&mut e, &call, NOW + 200.0, REFUSED);
+            call = requests(&mut e).remove(0);
+        }
+        e.handle(
+            NOW + 201.0,
+            Event::HttpFailed {
+                request: call.id,
+                error: "lost write response",
+            },
+        );
+        let out = actions(&mut e);
+        let error = failure_of(&out);
+        assert_eq!(
+            error.protection, None,
+            "put-back unknown: {unknown_put_back}"
+        );
+        if unknown_put_back {
+            assert!(
+                error.message.contains("put-back's outcome is unknown")
+                    && error.message.contains("Check Open Orders"),
+                "{}",
+                error.message
+            );
+        }
+        assert!(
+            placements(&without_reconcile_read(http(out))).is_empty(),
+            "no put-back or resend over an unknown"
+        );
+    }
+}
+
+#[test]
+fn a_stop_that_filled_during_its_cancel_or_a_partly_filled_entry_leg_is_not_put_back() {
+    use safe_cex_engine::error::Protection;
+    for leg in [false, true] {
+        let (mut e, socket) = ready_with_socket();
+        let replacement = if leg {
+            // A leg of an entry 6/10 filled: its put-back cannot be proven.
+            parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+            e.drain_actions().for_each(drop);
+            let cancel = amend_to(&mut e, "parent__stop_loss", 59000.0).remove(0);
+            response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+            prove_cancel(&mut e);
+            requests(&mut e).remove(0)
+        } else {
+            resting_stop(&mut e, socket, 0.0);
+            let cancel = amend_to(&mut e, "stop", 56000.0).remove(0);
+            response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+            let (timer, at) = actions(&mut e)
+                .into_iter()
+                .find_map(|action| match action {
+                    Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(at, Event::TimerFired { timer });
+            let read = requests(&mut e).remove(0);
+            response(
+                &mut e,
+                &read,
+                at,
+                r#"{"data":{"id":"stop","status":"CANCELED","cumSuccessFillSize":"2"}}"#,
+            );
+            requests(&mut e).remove(0)
+        };
+        response(&mut e, &replacement, NOW + 200.0, REFUSED);
+        let out = actions(&mut e);
+        let error = failure_of(&out);
+        assert!(
+            error.message.contains("was removed") && error.message.contains("please re-place it"),
+            "leg {leg}: {}",
+            error.message
+        );
+        assert_eq!(error.protection, Some(Protection::Unprotected), "leg {leg}");
+        assert!(placements(&http(out)).is_empty(), "leg {leg}");
+    }
+}
+
+#[test]
+fn an_unproven_cancel_sends_no_replacement_or_put_back() {
+    use safe_cex_engine::Outcome;
+    for lost in [true, false] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop(&mut e, socket, 0.0);
+        let cancel = amend_to(&mut e, "stop", 56000.0).remove(0);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+        // Lost reads are retried once; a cancel still open is read up to its bound.
+        let reads = if lost { 2 } else { 31 };
+        for _ in 0..reads {
+            let (timer, at) = actions(&mut e)
+                .into_iter()
+                .find_map(|action| match action {
+                    Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                    _ => None,
+                })
+                .expect("a pause before the next proof read");
+            e.handle(at, Event::TimerFired { timer });
+            let read = requests(&mut e).remove(0);
+            assert!(read.url.contains("/v3/order?id=stop"), "{}", read.url);
+            if lost {
+                e.handle(
+                    at,
+                    Event::HttpFailed {
+                        request: read.id,
+                        error: "lost proof read",
+                    },
+                );
+            } else {
+                response(
+                    &mut e,
+                    &read,
+                    at,
+                    r#"{"data":{"id":"stop","status":"OPEN","cumSuccessFillSize":"0"}}"#,
+                );
+            }
+        }
+        let out = actions(&mut e);
+        let error = failure_of(&out);
+        assert!(
+            error.message.contains("could not be confirmed")
+                && error.message.contains("unknown")
+                && error.message.contains("Check Open Orders"),
+            "lost {lost}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "lost {lost}");
+        assert_eq!(error.protection, None);
+        let sent = http(out);
+        assert!(placements(&sent).is_empty(), "lost {lost}");
+        assert!(
+            sent.iter().any(|r| r.url.contains("/v3/open-orders")),
+            "lost {lost}: the unknown original is reconciled: {:?}",
+            sent.iter().map(|r| &r.url).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn cancels_of_the_original_during_and_after_its_put_back() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    e.handle(
+        NOW + 150.0,
+        Event::Command(Command::CancelOrders {
+            command: 8,
+            ids: vec!["stop".into()],
+        }),
+    );
+    let out = actions(&mut e);
+    assert!(
+        out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, error }) if error.message.contains("already in flight"))),
+        "a cancel during the amend is refused visibly"
+    );
+    response(&mut e, &replacement, NOW + 200.0, REFUSED);
+    let restore = requests(&mut e).remove(0);
+    response(&mut e, &restore, NOW + 201.0, REAL_PLACE);
+    e.drain_actions().for_each(drop);
+    // A screen still showing the original cancels it by its old id.
+    e.handle(
+        NOW + 300.0,
+        Event::Command(Command::CancelOrders {
+            command: 9,
+            ids: vec!["stop".into()],
+        }),
+    );
+    let cancels = requests(&mut e);
+    assert!(
+        cancels
+            .iter()
+            .any(|r| r.url.ends_with("/v3/delete-order") && form(r)["id"] == "904952998325649712"),
+        "the put-back is cancelled: {:?}",
+        cancels
+            .iter()
+            .map(|r| (&r.url, &r.body))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// The put-back is one attempt: a refusal the engine would otherwise resend
+/// (20016) is never sent twice.
+#[test]
+fn a_put_back_is_one_attempt_on_the_wire() {
+    use safe_cex_engine::error::Protection;
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(&mut e, &replacement, NOW + 200.0, REFUSED);
+    let restore = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &restore,
+        NOW + 201.0,
+        r#"{"code":20016,"msg":"signature expired"}"#,
+    );
+    let out = actions(&mut e);
+    assert!(placements(&http(out.clone())).is_empty(), "never resent");
+    let error = failure_of(&out);
+    assert!(error.message.contains("both refused"), "{}", error.message);
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+}
+
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
+#[test]
+fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
+    for status in [408, 503] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop(&mut e, socket, 0.0);
+        let replacement = to_stop_replacement(&mut e);
+        response(&mut e, &replacement, NOW + 200.0, REFUSED);
+        let restore = requests(&mut e).remove(0);
+        response_status(&mut e, &restore, NOW + 201.0, status);
+        let out = actions(&mut e);
+        let error = failure_of(&out);
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("too many requests"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}"
+        );
+        assert_eq!(error.protection, None, "{status}");
+        assert!(
+            placements(&without_reconcile_read(http(out))).is_empty(),
+            "{status}: never resent"
+        );
+    }
+}
+
+/// A put-back refused before it is sent (it cannot be signed) never reached
+/// ApeX: the stop was removed and must be re-placed, not "both refused".
+#[test]
+fn a_put_back_refused_before_sending_says_the_stop_was_removed() {
+    use safe_cex_engine::error::Protection;
+    // The provider signs one order placement (the replacement), then refuses.
+    let placements_signed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = placements_signed.clone();
+    let (mut e, socket) = ready_with_signer(false, |provider| {
+        Arc::new(RefusesLaterPlacements(provider, counter))
+    });
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(&mut e, &replacement, NOW + 200.0, REFUSED);
+    let out = actions(&mut e);
+    let error = failure_of(&out);
+    assert!(
+        error.message.contains("was removed")
+            && error.message.contains("please re-place it")
+            && !error.message.contains("both refused"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(placements(&http(out)).is_empty(), "nothing was sent");
+}
+
+/// Signs through `0` until it has signed one order placement; refuses later ones.
+struct RefusesLaterPlacements(Arc<dyn Signer>, Arc<std::sync::atomic::AtomicUsize>);
+impl Signer for RefusesLaterPlacements {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.0.sign(request)
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if work.context.method == "POST" && work.context.path.ends_with("/v3/order") {
+            let signed = self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if signed >= 1 {
+                return Some(Err(SignError::Refused));
+            }
+        }
+        self.0.sign_ready(work)
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.0.can_sign(key, algorithm)
+    }
+}
+
+/// An edit or put-back keeps the original's native type: a STOP_MARKET stays
+/// one (a STOP_LIMIT may not fill through a gap); a STOP_LIMIT stays a limit.
+#[test]
+fn a_stop_edit_and_its_put_back_keep_the_native_order_type() {
+    for kind in ["STOP_MARKET", "STOP_LIMIT"] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop_of(&mut e, socket, 0.0, kind);
+        let cancel = amend_to(&mut e, "stop", 56000.0).remove(0);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+        prove_cancel_of(&mut e, "stop", "CANCELED");
+        let replacement = requests(&mut e).remove(0);
+        assert_eq!(form(&replacement)["type"], kind, "the edit");
+        response(&mut e, &replacement, NOW + 200.0, REFUSED);
+        let restore = requests(&mut e).remove(0);
+        assert_eq!(form(&restore)["type"], kind, "the put-back");
+        assert_eq!(form(&restore)["triggerPrice"], "55000");
+    }
+}
+
+#[test]
+fn ambiguous_rate_code_cannot_restore_protection() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(
+        &mut e,
+        &replacement,
+        NOW + 200.0,
+        r#"{"code":429,"msg":"too many requests"}"#,
+    );
+    let out = actions(&mut e);
+    assert!(
+        placements(&http(out.clone())).is_empty(),
+        "native rate code issued another place: {:?}",
+        out
+    );
+    let error = failure_of(&out);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.protection, None);
+}
+
+#[test]
+fn ambiguous_signature_code_cannot_resend() {
+    let mut e = ready();
+    e.handle(NOW + 10., Event::Command(hmac_cancel()));
+    let first = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 11.,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature refused"}"#,
+            },
+        },
+    );
+    let out = actions(&mut e);
+    assert!(
+        http(out.clone())
+            .iter()
+            .all(|r| r.method == safe_cex_engine::Method::Get),
+        "ambiguous status resends: {:?}",
+        out
+    );
+    let error = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 43, error }) => Some(error),
+            _ => None,
+        })
+        .expect("terminal failure");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+#[test]
+fn unproven_signature_control() {
+    let mut e = ready();
+    e.handle(NOW + 10., Event::Command(hmac_cancel()));
+    let first = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 11.,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature refused"}"#,
+            },
+        },
+    );
+    let out = requests(&mut e);
+    assert!(
+        out.iter().all(|r| r.method == safe_cex_engine::Method::Get),
+        "ambiguous status resends: {:?}",
+        out
+    );
+}
+
+#[test]
+fn ambiguous_protective_cancel_cannot_resend_or_create() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let cancel = amend_to(&mut e, "stop", 56000.0).remove(0);
+    e.handle(
+        NOW + 15.0,
+        Event::HttpResponse {
+            request: cancel.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature expired"}"#,
+            },
+        },
+    );
+    let out = actions(&mut e);
+    assert!(
+        placements(&http(out.clone())).is_empty(),
+        "ambiguous cancel sent another write: {out:?}"
+    );
+    let error = failure_of(&out);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.protection, None);
+    assert!(e.store().order("stop").is_some());
+}
+
+#[test]
+fn ambiguous_put_back_cannot_claim_unprotected_or_resend() {
+    for (status, code) in [(200, 429), (429, 20016)] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop(&mut e, socket, 0.0);
+        let replacement = to_stop_replacement(&mut e);
+        response(
+            &mut e,
+            &replacement,
+            NOW + 200.0,
+            r#"{"code":10002,"msg":"Requires Login: Your API key is wrong"}"#,
+        );
+        let restore = requests(&mut e).remove(0);
+        let body = format!(r#"{{"code":{code},"msg":"uncertain write"}}"#);
+        e.handle(
+            NOW + 201.0,
+            Event::HttpResponse {
+                request: restore.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        let out = actions(&mut e);
+        assert!(
+            placements(&http(out.clone())).is_empty(),
+            "{status}/{code}: {out:?}"
+        );
+        let error = failure_of(&out);
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}/{code}: {error:?}"
+        );
+        assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
+        assert!(error.message.contains("Check Open Orders"), "{error:?}");
+    }
+}
+
+#[test]
+fn engine_ambiguity_rate_code_cannot_restore_protection() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(
+        &mut e,
+        &replacement,
+        NOW + 200.0,
+        r#"{"code":429,"msg":"too many requests"}"#,
+    );
+    let out = requests(&mut e);
+    assert!(
+        placements(&out).is_empty(),
+        "native rate code issued another place: {:?}",
+        out
+    );
+}
+
+#[test]
+fn engine_ambiguity_429_signature_code_cannot_resend() {
+    let mut e = ready();
+    e.handle(NOW + 10., Event::Command(hmac_cancel()));
+    let first = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 11.,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature refused"}"#,
+            },
+        },
+    );
+    let out = requests(&mut e);
+    assert!(
+        out.iter().all(|r| r.method == safe_cex_engine::Method::Get),
+        "ambiguous status resends: {:?}",
+        out
+    );
 }

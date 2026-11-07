@@ -388,7 +388,7 @@ fn assert_unknown_setting_failure(h: &Harness, result: &[Action], provider_posts
                 assert_eq!(
                     error.message,
                     // A 5xx write is the engine's unproven seal; no body is decoded.
-                    "HTTP response does not prove the write outcome"
+                    "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
                 );
                 Some("failure")
             }
@@ -1489,4 +1489,22 @@ fn refused_inspect_resign_does_not_invent_an_unknown_write() {
     assert_eq!(failures.len(), 1, "{result:?}");
     assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
     assert_eq!(h.engine.store().orders(), [order]);
+}
+
+#[test]
+fn engine_ambiguity_429_signature_cannot_resend_setting() {
+    let mut h = fixture(options());
+    let first = setting(&mut h);
+    h.engine
+        .store_mut()
+        .update_setting(SYMBOL, |setting| setting.leverage = 5.);
+    let count = provider_setting_posts(&h);
+    let result = response(
+        &mut h,
+        NOW + 10.,
+        &first,
+        429,
+        r#"{"code":"-1022","msg":"Invalid signature"}"#,
+    );
+    assert_unknown_setting_failure(&h, &result, count);
 }

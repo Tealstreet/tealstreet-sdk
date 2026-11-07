@@ -239,17 +239,51 @@ fn unmapped_owned_rest_rows_keep_their_own_position_and_protection_while_peers_u
         } else {
             (vec![normal, unknown_normal], vec![known, unknown])
         };
+        // Read covers: the setup above replaced the store's rows after the pending
+        // census went out, so that census is refused and another follows it.
         h.respond(
             "/orders-pending",
             200,
-            &json!({"code":"00000","data":{"entrustedList":normal_rows}}).to_string(),
+            r#"{"code":"00000","data":{"entrustedList":[]}}"#,
         );
         h.respond(
             "planType=profit_loss",
             200,
-            &json!({"code":"00000","data":{"entrustedList":plan_rows}}).to_string(),
+            r#"{"code":"00000","data":{"entrustedList":[]}}"#,
         );
         h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
+        // The follow-up waits out its minimum interval; answer every poll that
+        // comes due and every census page until one full census has landed.
+        let normal_body = json!({"code":"00000","data":{"entrustedList":normal_rows}}).to_string();
+        let plan_body = json!({"code":"00000","data":{"entrustedList":plan_rows}}).to_string();
+        let pending = |h: &Harness, path: &str| h.requests.iter().any(|r| r.url.contains(path));
+        let mut landed = false;
+        for _ in 0..32 {
+            for (path, body) in [("/account/accounts", ACCOUNT), ("/all-position", POSITION)] {
+                if pending(&h, path) {
+                    h.respond(path, 200, body);
+                }
+            }
+            if pending(&h, "/orders-pending") {
+                h.respond("/orders-pending", 200, &normal_body);
+            } else if pending(&h, "planType=profit_loss") {
+                h.respond("planType=profit_loss", 200, &plan_body);
+            } else if pending(&h, "planType=track_plan") {
+                h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
+                landed = true;
+                break;
+            } else {
+                let (timer, at) = *h
+                    .timers
+                    .iter()
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .expect("a follow-up census is owed");
+                h.timers.retain(|(t, _)| *t != timer);
+                h.now = h.now.max(at);
+                h.event(safe_cex_engine::Event::TimerFired { timer });
+            }
+        }
+        assert!(landed, "a full follow-up census landed");
         let store = h.engine.store();
         assert!(store.order("valid-new").is_some());
         assert!(store.order("valid-new-sl").is_some());
@@ -272,12 +306,27 @@ fn unmapped_owned_rest_rows_keep_their_own_position_and_protection_while_peers_u
 fn unmappable_ws_position_row_does_not_discard_valid_snapshot_row() {
     let mut h = Harness::classic();
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[{"symbol":"UNKNOWNUSDT","total":"1"},{"symbol":"BTCUSDT","holdSide":"short","total":"2","openPriceAvg":"100","posMode":"one_way_mode"}]}"#);
-    assert_eq!(h.engine.store().positions().len(), 1);
-    assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
     assert_eq!(
-        h.engine.store().positions()[0].side,
-        safe_cex_engine::model::PositionSide::Short
+        h.engine.store().positions().len(),
+        2,
+        "WS omission retains the cached long"
     );
+    let short = h
+        .engine
+        .store()
+        .positions()
+        .iter()
+        .find(|p| p.side == safe_cex_engine::model::PositionSide::Short)
+        .unwrap();
+    assert_eq!(short.contracts, 2.0);
+    let long = h
+        .engine
+        .store()
+        .positions()
+        .iter()
+        .find(|p| p.side == safe_cex_engine::model::PositionSide::Long)
+        .unwrap();
+    assert_eq!(long.contracts, 1.0);
     assert!(
         h.logs
             .iter()
@@ -430,7 +479,7 @@ fn stale_rest_after_side_write_uses_matching_leg_setting_even_without_position()
 }
 
 #[test]
-fn unmappable_snapshot_rows_protect_only_their_identity_but_empty_lists_clear_it() {
+fn unmappable_snapshot_rows_protect_their_identity_until_a_clean_rest_omission() {
     let mut h = Harness::classic();
     h.respond(
         "/all-position",
@@ -445,7 +494,17 @@ fn unmappable_snapshot_rows_protect_only_their_identity_but_empty_lists_clear_it
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[{"symbol":"BTCUSDT","total":"-1"}]}"#);
     assert_eq!(h.engine.store().positions().len(), 1);
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[]}"#);
-    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(
+        h.engine.store().positions().len(),
+        1,
+        "empty WS is not absence"
+    );
+    h.timer_after(500.0);
+    h.respond("/all-position", 200, r#"{"code":"00000","data":[]}"#);
+    assert!(
+        h.engine.store().positions().is_empty(),
+        "fresh REST proves absence"
+    );
     let mut h = Harness::classic();
     h.respond("/all-position", 200, r#"{"code":"00000","data":[]}"#);
     h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
@@ -538,9 +597,8 @@ fn skipped_rest_rows_keep_their_stored_copy_until_a_valid_snapshot_omits_them() 
     assert_eq!(store.positions().len(), 1);
     assert!(store.order("1").is_none() && store.order("3").is_none());
     assert!(store.order("2").is_some());
-    // Classic polls keep any open SL/TP absent from REST (pre-existing), so the
-    // removed parent's preset legs remain until the venue reports them closed.
-    assert!(store.order("3__stop_loss").is_some() && store.order("3__take_profit").is_some());
+    // Preset legs exist only on their parent, so the read that omits it proves them gone.
+    assert!(store.order("3__stop_loss").is_none() && store.order("3__take_profit").is_none());
 }
 
 #[test]

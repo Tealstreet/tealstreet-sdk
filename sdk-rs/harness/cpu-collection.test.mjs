@@ -9,7 +9,7 @@ import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { prepareCollection, beforeCpuCase, afterCpuCase, readSourceTree, selectCollectionRuntimeInputs, resetCollectionCache, capturePublicRaw } from './cpu-collection.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
-import { performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, performanceOrder } from './performance-policy.mjs';
 
 // Fixture workspaces deliberately have no ambient module/loader overrides.
 const ambient = Object.fromEntries(['NODE_OPTIONS', 'NODE_PATH', 'TSX_DISABLE_CACHE', 'TSX_TSCONFIG_PATH'].map(key => [key, process.env[key]]));
@@ -38,8 +38,8 @@ function fixture(t, suite = 'binance') {
   fs.symlinkSync('../apps/cli', path.join(root, 'node_modules/unused-app'));
   write(root, 'packages/fixture/node_modules/local/index.js', 'module.exports = 2;');
   for (const item of expectedGateCases(suite)) {
-    if (!item.tape.includes('/fixtures/')) continue;
     const privateTape = item.tape.includes('-private.');
+    if (!item.tape.includes('/fixtures/') && privateTape) continue;
     const data = Buffer.from(`${JSON.stringify({ type: 'meta', private: privateTape })}\n${JSON.stringify({ type: 'config', private: privateTape })}\n`);
     write(root, item.tape, item.tape.endsWith('.gz') ? gzipSync(data) : data);
   }
@@ -50,9 +50,9 @@ function fixture(t, suite = 'binance') {
   const job = { id: 1234, runner_id: 5678, run_id: run.id, run_attempt: 1, head_sha: head, name: `Rust / replay measurement (${suite})` };
   return { root, suite, destination: path.join(temp, 'capsule'), environment, run, job };
 }
-function args(claim) { return ['--venue', claim.case.venue, '--tape', claim.case.tape, '--books', claim.case.books, '--runs', '9']; }
+function args(claim) { return ['--venue', claim.case.venue, '--tape', claim.case.tape, '--books', claim.case.books, '--runs', String(PUBLIC_REPLAY_PAIRS)]; }
 function reportFixture(state, claim, { exitCode = 0 } = {}) {
-  const slots = [...['ts', 'rust'].map(impl => ({ impl, mode: 'correctness', run: 0 })), ...Array.from({ length: 9 }, (_, run) => performanceOrder(run).map(impl => ({ impl, mode: 'performance', run }))).flat()];
+  const slots = [...['ts', 'rust'].map(impl => ({ impl, mode: 'correctness', run: 0 })), ...Array.from({ length: PUBLIC_REPLAY_PAIRS }, (_, run) => performanceOrder(run).map(impl => ({ impl, mode: 'performance', run }))).flat()];
   const artifacts = slots.map((slot, index) => {
     const filename = `sdk-rs/harness/out/raw-${claim.key}/${index}.json`;
     write(state.root, filename, JSON.stringify({ impl: slot.impl, metrics: { fixture: true }, retained: { exact: index } }));
@@ -66,11 +66,12 @@ async function pause() { await new Promise(resolve => setTimeout(resolve, 2)); }
 
 test('premeasurement claim bundle seals exact public roster, actual module, dependencies and shallow package roots', t => {
   const options = fixture(t), state = prepareCollection(options);
-  assert.equal(state.claims.length, 4);
+  assert.equal(state.claims.length, 5);
+  assert.equal(state.claims.filter(claim => claim.case.venue === 'binanceoptions').length, 1);
   const bundle = JSON.parse(fs.readFileSync(path.join(options.root, 'sdk-rs/harness/out/cpu-collection/cohort/cohort.json')));
   assert.deepEqual(bundle.claims, state.claims);
   assert.equal(bundle.claims[0].measuredCheckoutSha, options.run.head_sha);
-  assert.ok(bundle.claims.every(claim => claim.case.private === false && claim.case.runs === 9 && claim.case.correctnessRuns === 1));
+  assert.ok(bundle.claims.every(claim => claim.case.private === false && claim.case.runs === PUBLIC_REPLAY_PAIRS && claim.case.correctnessRuns === 1));
   const manifest = JSON.parse(fs.readFileSync(path.join(options.destination, 'manifest.json')));
   assert.deepEqual(fs.readdirSync(path.join(options.root, 'sdk-rs/harness/out/cpu-collection/cohort')).sort(), ['cohort.json', 'manifest.json']);
   assert.deepEqual(manifest.directoryAnchors, ['apps/cli', 'packages/fixture', 'sdk-rs/hosts/wasm']);
@@ -94,7 +95,7 @@ test('each public case starts empty, records immediate final cache, exact report
   const original = reportFixture(state, first, { exitCode: 1 }); await pause();
   const result = afterCpuCase({ context: before, reportPath: original.reportPath, exitCode: 1 });
   assert.equal(result.evidence.reportBytes, fs.readFileSync(original.reportPath, 'utf8'));
-  assert.equal(result.evidence.raw.length, 20); assert.equal(result.evidence.exitCode, 1);
+  assert.equal(result.evidence.raw.length, 2 + 2 * PUBLIC_REPLAY_PAIRS); assert.equal(result.evidence.exitCode, 1);
   assert.notEqual(result.evidence.execution.finalCacheSha256, result.evidence.execution.initialCacheSha256);
   assert.equal(result.evidence.execution.jobId, String(options.job.id)); assert.equal(result.evidence.execution.runnerId, String(options.job.runner_id));
   assert.ok(result.evidence.raw.every(item => sha(item.bytes) === item.sha256));
@@ -120,7 +121,7 @@ test('private invocation remains unchanged and cannot clear a public cache or co
 
 test('public preflight rejects unknown/mutated case, active duplicate, runtime drift and CI module substitution', t => {
   const options = fixture(t), state = prepareCollection(options), claim = state.claims[0];
-  for (const values of [{ ...claim.case, runs: 7 }, { ...claim.case, books: 'wrong' }, { ...claim.case, runs: 9, 'ci-wasm': 'family-archive' }, { ...claim.case, runs: 9, 'recorded-evidence': 'prior.json' }])
+  for (const values of [{ ...claim.case, runs: 7 }, { ...claim.case, books: 'wrong' }, { ...claim.case, runs: PUBLIC_REPLAY_PAIRS, 'ci-wasm': 'family-archive' }, { ...claim.case, runs: PUBLIC_REPLAY_PAIRS, 'recorded-evidence': 'prior.json' }])
     assert.throws(() => beforeCpuCase({ state, args: values }));
   const originalTape = fs.readFileSync(path.join(options.root, claim.case.tape)); fs.appendFileSync(path.join(options.root, claim.case.tape), 'tamper');
   assert.throws(() => beforeCpuCase({ state, args: args(claim) })); fs.writeFileSync(path.join(options.root, claim.case.tape), originalTape);
@@ -180,7 +181,7 @@ test('shared reset and raw capture enforce authenticated manifest paths and exac
   const reset = resetCollectionCache(state); assert.deepEqual(fs.readdirSync(reset.env.TMPDIR), []);
   assert.equal(reset.cacheDigest, reset.initialCacheSha256);
   for (const change of [{ cachePath: 'other-cache' }, { runtimeSha256: '0'.repeat(64) }, { nodePath: '/unsealed/node' }]) assert.throws(() => resetCollectionCache({ ...state, ...change }));
-  const original = reportFixture(state, state.claims[0]); assert.equal(capturePublicRaw({ root: state.root, report: original.report }).length, 20);
+  const original = reportFixture(state, state.claims[0]); assert.equal(capturePublicRaw({ root: state.root, report: original.report }).length, 2 + 2 * PUBLIC_REPLAY_PAIRS);
   original.report.artifacts.reverse(); assert.throws(() => capturePublicRaw({ root: state.root, report: original.report }));
 });
 
@@ -268,14 +269,14 @@ test('shallow PR checkout refuses absent tested parents and single-parent commit
 
 // Exercise the shell, recorder and collector; only the measurement child is
 // scripted, so this checks invocation rather than CPU acceptance.
-test('actual post-merge workflow invocation enters and completes the real collector with explicit nine pairs', t => {
+test('actual post-merge workflow invocation enters and completes the real collector with explicit fixed balanced pairs', t => {
   const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   const measured = /^  gate:\n([\s\S]*?)(?=^  bitget-paired:)/m.exec(workflow)[1];
   const publicCommands = measured.split('\n').filter(line => line.includes('rust:gate:record') && line.includes('-public.jsonl.gz'));
   assert.equal(publicCommands.length, 11);
-  for (const command of publicCommands) assert.match(command, / --runs 9$/);
+  for (const command of publicCommands) assert.match(command, / --runs 16$/);
   const options = fixture(t, 'bitget');
-  const gate = `import fs from 'node:fs'; import path from 'node:path';
+  const gate = `const PUBLIC_REPLAY_PAIRS = ${PUBLIC_REPLAY_PAIRS}; import fs from 'node:fs'; import path from 'node:path';
     const write = ${write.toString()};
     const performanceOrder = ${performanceOrder.toString()};
     const reportFixture = ${reportFixture.toString()};
@@ -295,9 +296,9 @@ test('actual post-merge workflow invocation enters and completes the real collec
     .replaceAll('${{ matrix.venue }}', 'bitget').replaceAll('${{ matrix.books }}', claim.case.books);
   const invoke = value => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', value], {
     cwd: options.root, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`,
-      CPU_COLLECTION_STATE: state.statePath, RUST_REPLAY_CORRECTNESS_ONLY: 'false', RUST_REPLAY_PUBLIC_RUNS: '9' },
+      CPU_COLLECTION_STATE: state.statePath, RUST_REPLAY_CORRECTNESS_ONLY: 'false', RUST_REPLAY_PUBLIC_RUNS: String(PUBLIC_REPLAY_PAIRS) },
   });
-  for (const mutant of [command.replace(' --runs 9', ''), command.replace(' --runs 9', ' --runs 7')]) {
+  for (const mutant of [command.replace(' --runs 16', ''), command.replace(' --runs 16', ' --runs 7')]) {
     const refused = invoke(mutant);
     assert.notEqual(refused.status, 0); assert.match(refused.stderr, /public case\/hash\/runs differ/);
     assert.equal(JSON.parse(fs.readFileSync(state.statePath)).active, null);
@@ -307,7 +308,17 @@ test('actual post-merge workflow invocation enters and completes the real collec
   const complete = JSON.parse(fs.readFileSync(state.statePath));
   assert.equal(complete.active, null); assert.equal(complete.records.length, 1);
   const evidence = JSON.parse(fs.readFileSync(complete.records[0].evidencePath));
-  assert.equal(evidence.report.runs, 9); assert.equal(evidence.raw.length, 20);
+  assert.equal(evidence.report.runs, PUBLIC_REPLAY_PAIRS); assert.equal(evidence.raw.length, 2 + 2 * PUBLIC_REPLAY_PAIRS);
   const ledger = fs.readFileSync(path.join(options.root, 'sdk-rs/harness/out/ci/ledger.jsonl'), 'utf8').trim().split('\n');
   assert.equal(ledger.length, 1); assert.equal(JSON.parse(ledger[0]).exitCode, 0);
+});
+
+test('Binance Options public input is generated before CPU measurement inputs are sealed', () => {
+  const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  const measurement = workflow.slice(workflow.indexOf('\n  gate:\n'), workflow.indexOf('\n  bitget-paired:\n'));
+  const generation = measurement.indexOf('corepack yarn rust:private-tape-binanceoptions --public');
+  const sealing = measurement.indexOf('node sdk-rs/harness/cpu-ci.mjs --command prepare');
+  assert.ok(generation >= 0 && generation < sealing, 'Options public tape must exist before the exact CPU roster is sealed');
+  assert.equal(measurement.match(/corepack yarn rust:private-tape-binanceoptions --public/g).length, 1);
+  assert.ok(measurement.indexOf('corepack yarn rust:private-tape-binanceoptions\n') > sealing);
 });

@@ -16,9 +16,9 @@ describe('Rust leverage command side boundary', () => {
   const exchanges: RustEngineExchange[] = [];
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
-  // Venues answering leverage reads from their published rails. BingX and WEEX
-  // read the venue (`onRead`); their crates test per-leg reads and write fencing.
-  const independentVenues: ExchangeName[] = ['bitget', 'bitgetinverse', 'bitgetusdc', 'mexc', 'phemex'];
+  // Venues answering leverage reads from their published rails. BingX, WEEX and
+  // Bitget read the venue; their crates test per-leg reads and write fencing.
+  const independentVenues: ExchangeName[] = ['mexc', 'phemex'];
   it.each(independentVenues)('keeps confirmed %s leg settings when leverage is read', async (name) => {
     const store = new DefaultStore();
     const market: Market = {
@@ -91,5 +91,31 @@ describe('Rust leverage command side boundary', () => {
       { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 8, side: PositionSide.Long },
       { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 8, side: PositionSide.Short },
     ]);
+  });
+  it.each([false, true])('checks market membership after native readiness (market remains=%s)', async (remains) => {
+    const store = new DefaultStore();
+    const market = {
+      id: 'BTCUSDT',
+      symbol: 'BTCUSDT',
+      base: 'BTC',
+      quote: 'USDT',
+      active: true,
+      precision: { amount: 0.001, price: 0.1 },
+      limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+      info: {},
+    };
+    store.update({ markets: [market] });
+    const exchange = new RustEngineExchange('bybit', { key: 'read-test', secret: 'read-secret' }, store);
+    exchanges.push(exchange);
+    adoptEngineCapabilities(exchange);
+    const ready = Promise.withResolvers<void>();
+    Object.defineProperty(exchange, 'untilNativeData', { value: () => ready.promise });
+    const command = vi.fn().mockResolvedValue({ leverage: 5 });
+    Object.defineProperty(exchange, 'command', { value: command });
+    const pending = exchange.updateSymbolMetadata('BTCUSDT');
+    if (!remains) store.update({ markets: [] });
+    ready.resolve();
+    await pending;
+    expect(command).toHaveBeenCalledTimes(remains ? 1 : 0);
   });
 });

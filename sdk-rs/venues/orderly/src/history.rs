@@ -16,6 +16,7 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::selected_read::{
     CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, CommandWait, Cx, Method, Query, Response, TimerId, VenueError};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::borrow::Cow;
@@ -403,6 +404,23 @@ impl Orderly {
         command: CommandId,
         query: Query,
     ) {
+        // A window with no limit walks to its start; no default may stop it.
+        let open_window = matches!(
+            &query,
+            Query::Fills {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | Query::OrderHistory {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | Query::Income {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            }
+        );
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
                 reject_local_history(cx, "Orderly client-order lookup is not supported");
@@ -553,11 +571,15 @@ impl Orderly {
                 order_id,
                 from,
                 to,
-                limit: limit.min(if kind == Kind::Trades {
-                    PAGE_SIZE as u32
+                limit: if open_window {
+                    usize::MAX
                 } else {
-                    MAX_RESULTS
-                }) as usize,
+                    limit.min(if kind == Kind::Trades {
+                        PAGE_SIZE as u32
+                    } else {
+                        MAX_RESULTS
+                    }) as usize
+                },
                 algo: false,
                 page: 1,
                 page_count: 0,
@@ -629,7 +651,7 @@ impl Orderly {
                 params.push(format!("size={PAGE_SIZE}"));
             }
             path.push('?');
-            path.push_str(&params.join("&"));
+            path.push_str(&params.join_with("&"));
         }
         let origin = self.rest();
         let url = format!("{origin}{path}");

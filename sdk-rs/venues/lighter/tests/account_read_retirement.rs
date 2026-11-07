@@ -2,7 +2,7 @@ mod support;
 
 use safe_cex_engine::request_context::{HttpAction, Prepared};
 use safe_cex_engine::{Action, Event};
-use support::{NOW, ready};
+use support::{NOW, ready_unopened, reopen};
 
 #[test]
 fn expired_background_preparation_releases_only_its_inflight_generation() {
@@ -13,7 +13,7 @@ fn expired_background_physical_read_releases_only_its_inflight_generation() {
     expiry_recovers(true);
 }
 fn expiry_recovers(released: bool) {
-    let (mut engine, socket) = ready();
+    let (mut engine, socket) = ready_unopened();
     engine.handle(NOW + 1.0, Event::WsOpened { socket });
     let actions = engine.drain_actions().collect::<Vec<_>>();
     let held = actions
@@ -76,7 +76,7 @@ fn expiry_recovers(released: bool) {
     );
     assert!(!engine.drain_actions().any(|action| matches!(action,
         Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Bind { .. }))));
-    engine.handle(NOW + 20_002.0, Event::WsOpened { socket });
+    reopen(&mut engine, socket, NOW + 20_002.0);
     let actions = engine.drain_actions().collect::<Vec<_>>();
     assert_eq!(actions.iter().filter(|action| matches!(action,
         Action::ManagedHttp(action) if matches!(action.as_ref(),

@@ -17,7 +17,7 @@ use safe_cex_engine::selected_read::{
     AdmittedRead, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Method, Response, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, VenueError};
 use std::collections::{HashMap, HashSet};
 
 pub const ACCOUNT: &str = "/api/v1/futures/account";
@@ -101,6 +101,8 @@ pub struct Read {
     pub baselines: Vec<(String, (f64, f64))>,
     /// A Primary order snapshot after an uncertain write.
     pub reconcile: bool,
+    /// `order_read_epoch` at dispatch: a release clears only marks it saw.
+    pub epoch: u64,
 }
 impl Read {
     pub(crate) fn orders_current(&self, store: &safe_cex_engine::Store) -> bool {
@@ -113,14 +115,26 @@ impl Read {
         self.order_rejected.any() || self.order_newer.overflowed()
     }
     fn reject_order(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
-        self.order_rejected.skip(
+        let symbol = order_row_symbol(cx.store, item);
+        self.order_rejected.skip_in(
             cx,
             order_identity(item),
+            &symbol,
             Level::Warn,
             "Bitunix malformed order row; keeping its cached native family",
         );
     }
 }
+fn order_row_symbol(store: &safe_cex_engine::Store, item: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: &'a str,
+    }
+    let row = serde_json::from_str::<Row<'_>>(item).ok();
+    safe_cex_engine::coverage::fence_symbol(store, row.as_ref().map(|row| row.symbol))
+}
+
 fn order_identity(item: &str) -> Option<String> {
     #[derive(serde::Deserialize)]
     struct Identity<'a> {
@@ -177,21 +191,23 @@ pub struct NativeOrder {
     pub sl_execution: String,
     pub tp_limit: f64,
     pub sl_limit: f64,
+    /// Reduce-only came from the venue's row or this session's own placement, not a default.
+    pub reduce_reconciled: bool,
 }
 pub struct OrderReadProgress {
     serial: u64,
     issued: f64,
     timer: TimerId,
     dirty: bool,
-    /// Issued as an owed uncertain-write census: a later request joins it.
+    /// Issued as an owed uncertain-write census: a re-ask joins it.
     owed: bool,
-    /// `writes_settled` when issued: unchanged, a later request is a re-ask.
-    writes_settled: u64,
     newer: RowAdmission<String>,
     rejected: RowAdmission<String>,
 }
 #[derive(Default)]
 pub struct AccountState {
+    /// A startup read already met one 10007; legacy re-signs once, so the next is final.
+    pub signature_retried: bool,
     pub(crate) recovery: crate::recovery::State,
     /// Set while an uncertain write's census is issued: it supersedes an
     /// ordinary census in flight and joins an owed one.
@@ -200,14 +216,14 @@ pub struct AccountState {
     /// issued after the request. Reads stay Primary-signed until a complete
     /// snapshot at or past it commits.
     pub owed: [Option<u64>; 2],
-    /// Trading writes settled (answered or lost) and jobs ended, engine
-    /// retirement included. Every uncertain seal bumps it, so an owed census
-    /// issued since the last bump is still fresh.
-    pub writes_settled: u64,
-    /// `writes_settled` at the last uncertain-write request.
-    pub request_writes: Option<u64>,
-    /// Regular and TP/SL order snapshots committed since that reconcile.
-    pub reconciled: [bool; 2],
+    /// Set while the engine re-asks (`cx.reconcile_reask`) with a debt still
+    /// owed: an owed census in flight is joined at its floor.
+    pub reask: bool,
+    /// The dispatch epoch of each slot's paying snapshot since the last new
+    /// request; the release needs both and reports from the earlier.
+    pub paid: [Option<u64>; 2],
+    /// Markets of rows those paid censuses rejected, which stay fenced.
+    pub paid_unproven: Vec<String>,
     /// Symbols whose leverage/margin mode were read on first candle interest.
     pub symbol_settings: std::collections::HashSet<String>,
     /// Serial of the last balance read that was answered (reply or failure).
@@ -220,6 +236,9 @@ pub struct AccountState {
     /// Current ordinary or command-owned read; background refresh cannot supersede it.
     pub position_read: Option<(u64, f64)>,
     pub position_dirty: bool,
+    pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<safe_cex_engine::VenueError>,
     pub serials: [u64; 4],
     pub initial_orders: [Option<Read>; 2],
     pub order_reads: [Option<OrderReadProgress>; 2],
@@ -235,10 +254,18 @@ pub struct AccountState {
     pub filled: HashMap<String, (f64, f64)>,
     pub pending_executions: HashMap<String, f64>,
     pub login_retry: Option<(TimerId, safe_cex_engine::SocketId)>,
+    pub login_answered: bool,
+    /// The private socket's login succeeded since it last opened.
+    pub private_live: bool,
+    /// A private event moved margin: the next tick reads balance even when slowed.
+    pub balance_due: bool,
 }
 /// The TS Bitunix tick (exchange metadata): balance every tick, the full
 /// account every 32 ticks.
 const TICK_MS: f64 = 500.0;
+/// With the private socket live its balance events drive reads, so the poll only
+/// catches what they miss: every 5 s instead of every tick.
+const LIVE_BALANCE_TICKS: u32 = 10;
 /// An unanswered balance read is abandoned after this long.
 const BALANCE_STALL_MS: f64 = 10_000.0;
 const POSITION_STALL_MS: f64 = 10_000.0;
@@ -276,11 +303,16 @@ pub fn order_type(s: &str) -> OrderType {
     }
 }
 pub fn tif(s: &str) -> TimeInForce {
+    known_tif(s).unwrap_or(TimeInForce::GoodTillCancel)
+}
+/// Live socket frames carry "effect":"SHORT", which names no TIF.
+pub fn known_tif(s: &str) -> Option<TimeInForce> {
     match s.to_ascii_uppercase().as_str() {
-        "IOC" => TimeInForce::ImmediateOrCancel,
-        "FOK" => TimeInForce::FillOrKill,
-        "POST_ONLY" => TimeInForce::PostOnly,
-        _ => TimeInForce::GoodTillCancel,
+        "GTC" => Some(TimeInForce::GoodTillCancel),
+        "IOC" => Some(TimeInForce::ImmediateOrCancel),
+        "FOK" => Some(TimeInForce::FillOrKill),
+        "POST_ONLY" => Some(TimeInForce::PostOnly),
+        _ => None,
     }
 }
 pub fn trigger(s: &str) -> StopTriggerType {
@@ -594,13 +626,12 @@ impl BitunixFutures {
             }
         }
         if let Some(slot) = axis.order_slot() {
-            // A re-ask keeps an owed census issued since the last settled write;
-            // after a newer write only a later census pays the debt.
-            let fresh = self.account.order_reads[slot]
-                .as_ref()
-                .is_some_and(|progress| {
-                    progress.owed && progress.writes_settled == self.account.writes_settled
-                });
+            // A re-ask keeps the owed census in flight at its floor; a new
+            // request owes a census issued after it.
+            let fresh = self.account.reask
+                && self.account.order_reads[slot]
+                    .as_ref()
+                    .is_some_and(|progress| progress.owed);
             if self.account.reconcile && !fresh {
                 self.account.owed[slot] = Some(self.account.serials[slot + 2] + 1);
             }
@@ -660,6 +691,7 @@ impl BitunixFutures {
             reconcile: axis
                 .order_slot()
                 .is_some_and(|slot| self.account.owed[slot].is_some()),
+            epoch: cx.order_read_epoch(),
         };
         if let Some(slot) = axis.order_slot() {
             self.account.order_reads[slot] = Some(OrderReadProgress {
@@ -668,7 +700,6 @@ impl BitunixFutures {
                 timer: cx.set_timer(ORDER_STALL_MS),
                 dirty: false,
                 owed: read.reconcile,
-                writes_settled: self.account.writes_settled,
                 newer: Default::default(),
                 rejected: Default::default(),
             });
@@ -680,6 +711,28 @@ impl BitunixFutures {
         }
         self.signed_request(cx, path, params, Pending::Private(read));
     }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.slots.has_primary() || self.account.tick.is_none() {
+            let error = VenueError::new("Bitunix account is not loaded")
+                .kind(safe_cex_engine::ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.serials[1] as u32 + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.read_axis(cx, Axis::Positions);
+        }
+    }
+
+    /// A waiter this read predates gets a new one at once, not the debounce.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, serial: u32) {
+        if self.account.fresh_positions.predates(0, serial) {
+            self.read_axis(cx, Axis::Positions);
+        }
+    }
+
     /// Like TS listenOHLCV: read a symbol's leverage and margin mode once,
     /// so a flat symbol reports its real settings instead of defaults.
     pub(crate) fn read_symbol_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -765,7 +818,11 @@ impl BitunixFutures {
                 };
                 self.trade_error(cx, request, crate::error::not_sent(error, kind));
             }
-            Pending::Private(read) => self.account_failed(cx, read, None),
+            Pending::Private(read) => {
+                self.account.read_error = Some(VenueError::new(error));
+                self.account_failed(cx, read, None);
+                self.account.read_error = None;
+            }
             Pending::SymbolSettings {
                 symbol,
                 write_revision,
@@ -928,9 +985,19 @@ impl BitunixFutures {
             // A slow reply must not be superseded every tick (stale serials are
             // dropped), so poll again only once the last balance read finished.
             // A read lost without any answer cannot stall polling forever.
-            if self.account.balance_answered == self.account.serials[0]
-                || cx.now - self.account.balance_polled_at >= BALANCE_STALL_MS
+            let live = self.account.private_live
+                && self
+                    .sockets
+                    .iter()
+                    .any(|s| s.active && s.opened && matches!(s.feed, Feed::Private));
+            let due = !live
+                || self.account.balance_due
+                || self.account.count.is_multiple_of(LIVE_BALANCE_TICKS);
+            if due
+                && (self.account.balance_answered == self.account.serials[0]
+                    || cx.now - self.account.balance_polled_at >= BALANCE_STALL_MS)
             {
+                self.account.balance_due = false;
                 self.read_axis(cx, Axis::Balance);
             }
             self.account.count += 1;
@@ -958,7 +1025,7 @@ impl BitunixFutures {
     pub(crate) fn account_item(&mut self, cx: &mut Cx<'_, Pending>, read: &mut Read, item: &str) {
         let result = match read.axis {
             Axis::Positions => serde_json::from_str::<PositionRow<'_>>(item).map(|p| {
-                if p.symbol.is_empty() {
+                if p.symbol.is_empty() || !p.has_quantity() {
                     read.reject_position(cx, item);
                     return;
                 }
@@ -1091,6 +1158,15 @@ impl BitunixFutures {
         read: Read,
         response: Option<&Response<'_>>,
     ) {
+        if let Some(response) = response {
+            let signature = crate::recovery::native(response) == Some(10007);
+            if signature && !self.account.signature_retried {
+                // The read recovery below sends it again, freshly signed.
+                self.account.signature_retried = true;
+            } else {
+                cx.startup_read_refused(&crate::recovery::failed(response));
+            }
+        }
         self.position_answered(cx, &read);
         self.order_answered(cx, &read);
         if read.axis == Axis::Balance {
@@ -1103,6 +1179,20 @@ impl BitunixFutures {
                 response.map_or(0.0, crate::recovery::pause),
             );
             crate::recovery::notice(cx, response);
+            if read.axis == Axis::Positions {
+                let error = response.map_or_else(
+                    || {
+                        self.account
+                            .read_error
+                            .take()
+                            .unwrap_or_else(|| VenueError::new("Bitunix positions read failed"))
+                    },
+                    crate::recovery::failed,
+                );
+                let serial = read.serial as u32;
+                self.account.fresh_positions.failed(cx, 0, serial, &error);
+                self.read_fresh_positions_again(cx, serial);
+            }
         }
         if let Some(command) = read.after {
             self.prepared(cx, command, false, None);
@@ -1286,7 +1376,13 @@ impl BitunixFutures {
                 }
             }
             Axis::Positions => {
-                if read.position_rejected.any() && !cx.store.loaded().positions {
+                let serial = read.serial as u32;
+                let rejected = read.position_rejected.any();
+                if rejected {
+                    let error = VenueError::new("Bitunix positions: a row could not be mapped");
+                    self.account.fresh_positions.failed(cx, 0, serial, &error);
+                }
+                if rejected && !cx.store.loaded().positions {
                     cx.notice(
                         Level::Warn,
                         code::SNAPSHOT_DISCARDED,
@@ -1357,7 +1453,11 @@ impl BitunixFutures {
                 self.account.position_ids = identities;
                 held.extend(read.positions);
                 cx.store.set_positions(held);
+                if !rejected {
+                    self.account.fresh_positions.committed(cx, 0, serial, &[]);
+                }
                 self.read_axis(cx, Axis::Tpsl);
+                self.read_fresh_positions_again(cx, serial);
             }
             Axis::Orders | Axis::Tpsl => {
                 self.commit_orders(cx, read);
@@ -1368,11 +1468,15 @@ impl BitunixFutures {
         let Some(token) = read.order_token.take() else {
             return;
         };
-        let (reconcile, slot, partial, serial) = (
+        let mut unproven = read.order_rejected.unproven().to_vec();
+        if read.order_newer.overflowed() {
+            unproven.push(String::new());
+        }
+        let (reconcile, slot, serial, epoch) = (
             read.reconcile,
             usize::from(read.axis == Axis::Tpsl),
-            read.partial_orders(),
             read.serial,
+            read.epoch,
         );
         if !cx
             .store
@@ -1381,15 +1485,17 @@ impl BitunixFutures {
             self.debounce(cx, Axis::Orders);
             return;
         }
-        // A slot counts only when its own clean snapshot pays the debt: the
-        // engine judges freshness by the last response alone, so a joined
-        // census older than the latest request must never complete a release.
-        if reconcile && !partial && self.account.owed[slot].is_some_and(|owed| serial >= owed) {
+        // A slot counts only when its own clean snapshot pays the debt. The
+        // release reports from the earlier slot's dispatch epoch, so a mark
+        // made after either census began survives it.
+        if reconcile && self.account.owed[slot].is_some_and(|owed| serial >= owed) {
             self.account.owed[slot] = None;
-            self.account.reconciled[slot] = true;
-            if self.account.reconciled == [true, true] {
-                self.account.reconciled = [false, false];
-                cx.orders_reconciled(None);
+            self.account.paid[slot] = Some(epoch);
+            self.account.paid_unproven.extend(unproven);
+            if let [Some(regular), Some(tpsl)] = self.account.paid {
+                self.account.paid = [None, None];
+                let unproven = std::mem::take(&mut self.account.paid_unproven);
+                cx.orders_reconciled_except(&unproven, regular.min(tpsl));
             }
         }
     }
@@ -1466,17 +1572,21 @@ impl BitunixFutures {
         ws: bool,
     ) -> (Vec<Order>, Vec<(String, NativeOrder)>) {
         let raw = o.order_id.to_string();
-        let reduce = o
+        let known = o
             .reduce_only
             .as_ref()
             .and_then(Supported::boolean)
-            .unwrap_or_else(|| {
+            .or_else(|| self.account.reduces.get(o.client_id.as_ref()).copied())
+            // The private channel omits reduceOnly on UPDATE: keep this order's reconciled value.
+            .or_else(|| {
                 self.account
-                    .reduces
-                    .get(o.client_id.as_ref())
-                    .copied()
-                    .unwrap_or(false)
+                    .native
+                    .get(&raw)
+                    .filter(|meta| meta.reduce_reconciled)
+                    .and_then(|_| cx.store.order(&raw))
+                    .map(|row| row.reduce_only)
             });
+        let reduce = known.unwrap_or(false);
         let side = if tpsl {
             cx.store
                 .positions()
@@ -1524,6 +1634,7 @@ impl BitunixFutures {
             sl_execution: o.sl_order_type.to_ascii_uppercase(),
             tp_limit: o.tp_order_price.0,
             sl_limit: o.sl_order_price.0,
+            reduce_reconciled: known.is_some(),
         };
         let base = Order {
             id: raw.clone(),
@@ -1639,6 +1750,7 @@ impl BitunixFutures {
             m.op.as_ref()
         };
         if operation == "login" {
+            self.account.login_answered = true;
             #[derive(serde::Deserialize)]
             struct Login {
                 result: bool,
@@ -1648,6 +1760,10 @@ impl BitunixFutures {
                 .and_then(|raw| serde_json::from_str::<Login>(raw.get()).ok())
                 .map(|login| login.result);
             if result == Some(true) {
+                self.account.private_live = true;
+                if let Some(socket) = self.sockets.iter_mut().find(|s| s.id == socket) {
+                    socket.supervisor.authenticated(cx);
+                }
                 if let Some((timer, owner)) = self.account.login_retry
                     && owner == socket
                 {
@@ -1698,10 +1814,12 @@ impl BitunixFutures {
         let text = raw.get();
         match operation {
             "balance" => {
+                self.account.balance_due = true;
                 self.account.generations[0] += 1;
                 self.debounce(cx, Axis::Balance);
             }
             "position" => {
+                self.account.balance_due = true;
                 if let Ok(p) = serde_json::from_str::<PositionRow<'_>>(text) {
                     let side = if p.side.eq_ignore_ascii_case("BUY")
                         || p.side.eq_ignore_ascii_case("LONG")
@@ -1723,6 +1841,7 @@ impl BitunixFutures {
                 self.debounce(cx, Axis::Positions);
             }
             "order" | "tpsl" => {
+                self.account.balance_due = true;
                 let tpsl = m.ch == "tpsl";
                 if let Ok(o) = serde_json::from_str::<OrderRow<'_>>(text) {
                     let raw = o.order_id.as_ref();
@@ -1827,10 +1946,10 @@ impl BitunixFutures {
                             || o.side.eq_ignore_ascii_case("SELL"))
                     {
                         let (rows, native) = self.map_orders(cx, &o, tpsl, true);
-                        if !o.client_id.is_empty() && !o.effect.is_empty() {
-                            self.account
-                                .tifs
-                                .insert(o.client_id.to_string(), tif(&o.effect));
+                        if !o.client_id.is_empty()
+                            && let Some(effect) = known_tif(&o.effect)
+                        {
+                            self.account.tifs.insert(o.client_id.to_string(), effect);
                         }
                         for row in rows {
                             cx.store.upsert_order(row);

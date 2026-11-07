@@ -25,6 +25,8 @@ fn policy() -> FeedPolicy {
         controls: ControlPolicy::Native,
         invalidation: Invalidation::None,
         subscription_interval_ms: 0.,
+        close_floors: &[],
+        data_silence: None,
     }
 }
 

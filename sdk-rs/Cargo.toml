@@ -1,9 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
+    "algos/*",
     "crypto",
     "engine",
+    "hosts/candle-server",
     "hosts/native",
+    "hosts/remote-signer",
+    "hosts/server",
     "hosts/wasm",
     "registry",
     # Restored verbatim from master for the monorepo candle-server image
@@ -16,8 +20,10 @@ members = [
 # A bare `cargo build|test` never unifies the candle-cache serde_json features
 # into the port; those crates build only with `-p`.
 default-members = [
+    "algos/*",
     "crypto",
     "engine",
+    "hosts/candle-server",
     "hosts/native",
     "hosts/wasm",
     "registry",
@@ -168,9 +174,6 @@ opt-level = "z"
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-blofin]
-opt-level = "z"
-
-[profile.release.package.safe-cex-venue-breakoutprop]
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-cryptocom]

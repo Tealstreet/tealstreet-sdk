@@ -23,7 +23,10 @@ fn option_seed_envelope_limit_preserves_reset_headers_and_retries_after_reset() 
         .position(|r| r.url.contains("tickers") && r.url.contains("baseCoin=BTC"))
         .unwrap();
     let request = h.requests.remove(index);
-    let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 60_000.0);
+    let headers = format!(
+        "X-Bapi-Limit-Reset-Timestamp: {}",
+        h.engine.signing_clock(h.now).0 + 60_000.0
+    );
     h.event(Event::HttpResponse {
         request: request.id,
         response: safe_cex_engine::Response {
@@ -420,7 +423,14 @@ fn account_wide_histories_visit_enabled_categories_and_symbol_queries_route_dire
         },
     });
     for category in ["linear", "inverse", "option"] {
+        h.advance(250.0);
         respond(&mut h, "order/history", category, None, EMPTY);
+        for status in ["Cancelled", "Rejected", "Deactivated"] {
+            let request = h.take(&format!("orderStatus={status}"));
+            assert!(request.url.contains(&format!("category={category}")));
+            assert!(!request.url.contains("cursor="));
+            h.reply(request.id, 200, EMPTY);
+        }
     }
     assert_eq!(h.result(91).unwrap().as_ref().unwrap(), "[]");
     h.command(Command::Query {
@@ -1074,9 +1084,10 @@ fn owned_history_category_failure_keeps_sorted_globally_limited_prior_rows() {
                 if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
             {
                 assert_eq!(
-                    event.fields,
+                    event.fields[..1],
                     [("command", safe_cex_engine::Value::Num(811.0))]
                 );
+                assert_eq!(event.fields[1].0, "reason");
                 Some(index)
             }
             _ => None,
@@ -1092,7 +1103,7 @@ fn owned_history_category_failure_keeps_sorted_globally_limited_prior_rows() {
 #[test]
 fn unsupported_order_memory_is_separate_and_persistent_across_product_swaps() {
     let mut h = ready(true);
-    let expected = "Bybit order shared-unsupported has an unsupported type and is not shown";
+    let expected = r#"Bybit order shared-unsupported has an unsupported type (orderType Some("FutureType"), stopOrderType None, createType None, tpslMode None, side None, triggerPrice None) and is not shown"#;
     for round in 0..3 {
         if round > 0 {
             h.advance(15_000.0);
@@ -1349,7 +1360,8 @@ fn option_seeds_are_managed_background_reads() {
         .collect();
     assert!(!seeds.is_empty(), "option seeds requested");
     for seed in seeds {
-        assert_eq!(seed.timeout_ms, Some(20_000), "{} is managed", seed.url);
+        // Option seeds share startup discovery's 60 s read plus 30 s readiness bound.
+        assert_eq!(seed.timeout_ms, Some(90_000), "{} is managed", seed.url);
     }
 }
 
@@ -1417,4 +1429,48 @@ fn greeks_never_re_read_on_text_alone() {
     h.reply(first.id, 401, "error sign: recv_window");
     assert!(!h.has_request("/v5/asset/coin-greeks"));
     assert_eq!(h.done.iter().filter(|(id, _)| *id == 96).count(), 1);
+}
+
+#[test]
+fn one_category_cannot_release_an_account_refresh_slot() {
+    let mut h = ready(true);
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    h.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    });
+    let linear: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime") && r.url.contains("category=linear"))
+        .map(|r| r.id)
+        .collect();
+    assert!(!linear.is_empty());
+    for id in linear {
+        h.requests.retain(|r| r.id != id);
+        h.reply(id, 200, EMPTY);
+    }
+    let outstanding: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert!(!outstanding.is_empty(), "inverse and option are still out");
+    h.command(Command::Venue {
+        command: 91,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    });
+    let after: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(
+        after, outstanding,
+        "H7: completing linear alone must not permit another complete refresh batch while inverse and option remain out"
+    );
 }

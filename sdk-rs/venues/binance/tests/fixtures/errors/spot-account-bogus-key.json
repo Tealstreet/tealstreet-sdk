@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T01:19:03.150Z",
+  "endpoint": "/api/v3/account?timestamp=1793150329917&signature=<redacted>",
+  "http_status": 400,
+  "body": "{\"code\":-1021,\"msg\":\"Timestamp for this request is outside of the recvWindow.\"}",
+  "expect": {
+    "kind": "rejected",
+    "outcome": null,
+    "path": "read"
+  }
+}

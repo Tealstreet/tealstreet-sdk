@@ -14,8 +14,8 @@ import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderType } from '../types';
 import { prepareRecordedHttp } from './support/managedHttp';
 
-const aliases: ExchangeName[] = ['tealstreet-dex', 'kodiakfi', 'woofi', 'mode', 'salsadex', 'what'];
-const tags = ['TEALSTREET', 'TEALKODIAK', 'TEALSTREET', 'TEALMODE', 'TEALSALSA', 'TEALWHAT'];
+const aliases: ExchangeName[] = ['kodiakfi', 'woofi', 'mode', 'what'];
+const tags = ['TEALKODIAK', 'TEALSTREET', 'TEALMODE', 'TEALWHAT'];
 const envelope = (data: unknown) => new TextEncoder().encode(JSON.stringify({ success: true, data }));
 const transport = (validation = 200) => {
   const writes: Array<{ method: string; url: string; headers: Record<string, string>; body?: string }> = [];
@@ -126,7 +126,7 @@ describe('retained Orderly Rust family oracle', () => {
       return request(input);
     };
     setRustEngineTransport(() => tape.native);
-    exchange = await createExchange('tealstreet-dex', {
+    exchange = await createExchange('woofi', {
       key: `ed25519:${bs58.encode(new Uint8Array(32))}`,
       secret: `ed25519:${bs58.encode(new Uint8Array(32).fill(7))}`,
       applicationId: 'documented-test-account',
@@ -164,7 +164,7 @@ describe('retained Orderly Rust family oracle', () => {
   it('rejects terminal startup and releases its subscription', async () => {
     const tape = transport(401);
     setRustEngineTransport(() => tape.native);
-    exchange = await createExchange('tealstreet-dex', {
+    exchange = await createExchange('woofi', {
       key: `ed25519:${bs58.encode(new Uint8Array(32))}`,
       secret: `ed25519:${bs58.encode(new Uint8Array(32).fill(7))}`,
       applicationId: 'documented-test-account',
@@ -172,7 +172,7 @@ describe('retained Orderly Rust family oracle', () => {
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
     const deactivated = vi.fn();
     exchange.on('deactivate', deactivated);
-    await expect(exchange.start()).rejects.toThrow(/credentials were rejected/);
+    await expect(exchange.start()).rejects.toThrow(/API key expired or rejected/);
     expect(deactivated).toHaveBeenCalledTimes(1);
     expect((exchange as any).startupWaiters.size).toBe(0);
   });
@@ -180,7 +180,7 @@ describe('retained Orderly Rust family oracle', () => {
   it('rejects malformed credentials before network access', async () => {
     const tape = transport();
     setRustEngineTransport(() => tape.native);
-    exchange = await createExchange('tealstreet-dex', { key: 'invalid', secret: 'invalid', applicationId: 'account' }) as RustEngineExchange;
+    exchange = await createExchange('woofi', { key: 'invalid', secret: 'invalid', applicationId: 'account' }) as RustEngineExchange;
     await expect(exchange.start()).rejects.toThrow(/base58-encoded 32-byte/);
     expect(tape.sockets).toEqual([]);
     expect(tape.writes).toEqual([]);
@@ -190,7 +190,7 @@ describe('retained Orderly Rust family oracle', () => {
     const tape = transport();
     tape.native.request = () => new Promise(() => {});
     setRustEngineTransport(() => tape.native);
-    exchange = await createExchange('tealstreet-dex', { key: '', secret: '', publicDataOnly: true }) as RustEngineExchange;
+    exchange = await createExchange('woofi', { key: '', secret: '', publicDataOnly: true }) as RustEngineExchange;
     const pending = expect(exchange.start()).rejects.toThrow(/disposed during startup/);
     await new Promise((resolve) => setTimeout(resolve, 10));
     exchange.dispose();

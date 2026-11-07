@@ -239,7 +239,7 @@ fn the_private_login_signs_with_the_primary_against_the_oracle() {
     assert_eq!(args["apiKey"], PRIMARY_KEY);
     let expected = oracle(
         args["nonce"].as_str().unwrap(),
-        args["timestamp"].as_str().unwrap(),
+        &args["timestamp"].to_string(),
         PRIMARY_KEY,
         "",
         "",

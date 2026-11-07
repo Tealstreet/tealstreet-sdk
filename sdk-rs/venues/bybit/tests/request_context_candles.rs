@@ -237,3 +237,80 @@ fn kline_failures_keep_native_and_transport_evidence() {
     });
     assert_eq!(failure(&h, 52).kind, Some(ErrorKind::Network));
 }
+
+fn refuse_with(h: &mut Harness, id: safe_cex_engine::RequestId, headers: &str, body: &[u8]) {
+    h.event(Event::HttpStart {
+        request: id,
+        status: 200,
+        headers,
+    });
+    h.event(Event::HttpChunk {
+        request: id,
+        data: body,
+    });
+    h.event(Event::HttpEnd { request: id });
+}
+
+const TOO_MANY: &[u8] =
+    br#"{"retCode":10006,"retMsg":"Too many visits. Exceeded the API Rate Limit."}"#;
+
+// Sentry 37d3cb: chart history retried a 10006 at once, from every pane.
+#[test]
+fn a_rate_limited_kline_read_holds_later_reads_until_bybits_reset() {
+    let mut h = ready();
+    candles(&mut h, 60, "BTCUSDT", Interval::M1);
+    let kline = h.take("/v5/market/kline");
+    let reset = format!(
+        "x-bapi-limit-reset-timestamp: {}\r\n",
+        h.engine.signing_clock(h.now).0 + 15_000.
+    );
+    refuse_with(&mut h, kline.id, &reset, TOO_MANY);
+    let error = failure(&h, 60);
+    assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+    assert_eq!(error.venue_code.as_deref(), Some("10006"));
+    assert_eq!(error.retry_after_ms, Some(15_000.));
+
+    h.advance(5_000.);
+    h.requests.clear();
+    candles(&mut h, 61, "ETHUSDT", Interval::M5);
+    assert!(h.requests.is_empty(), "a held read sends nothing");
+    let held = failure(&h, 61);
+    assert_eq!(held.kind, Some(ErrorKind::RateLimited));
+    assert_eq!(held.outcome, Some(Outcome::NotSent));
+    assert_eq!(held.retry_after_ms, Some(10_000.));
+
+    h.advance(10_000.);
+    candles(&mut h, 62, "BTCUSDT", Interval::M1);
+    h.take("/v5/market/kline");
+}
+
+#[test]
+fn a_10006_without_a_reset_header_holds_reads_for_ten_seconds() {
+    let mut h = ready();
+    candles(&mut h, 63, "BTCUSDT", Interval::M1);
+    let kline = h.take("/v5/market/kline");
+    refuse_with(&mut h, kline.id, "", TOO_MANY);
+    assert_eq!(failure(&h, 63).retry_after_ms, Some(10_000.));
+    h.advance(9_999.);
+    h.requests.clear();
+    candles(&mut h, 64, "BTCUSDT", Interval::M1);
+    assert!(h.requests.is_empty());
+    h.advance(1.);
+    candles(&mut h, 65, "BTCUSDT", Interval::M1);
+    h.take("/v5/market/kline");
+}
+
+#[test]
+fn an_ordinary_kline_refusal_holds_nothing() {
+    let mut h = ready();
+    candles(&mut h, 66, "BTCUSDT", Interval::M1);
+    let kline = h.take("/v5/market/kline");
+    h.reply(
+        kline.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"params error"}"#,
+    );
+    assert_eq!(failure(&h, 66).retry_after_ms, None);
+    candles(&mut h, 67, "BTCUSDT", Interval::M1);
+    h.take("/v5/market/kline");
+}

@@ -3,11 +3,11 @@ use crate::{Lighter, Pending, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::de::number;
+use safe_cex_engine::fresh_positions::{self, FreshPositions};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json};
+use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, SocketId, TimerId, VenueError, json};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::{
@@ -53,6 +53,7 @@ pub enum Request {
         market: Option<String>,
         orders: Vec<Order>,
         coverage: SnapshotCoverage<String>,
+        census: CensusRead,
         valid: bool,
     },
     Backfill {
@@ -61,6 +62,19 @@ pub enum Request {
         oldest: f64,
         count: usize,
     },
+}
+/// What an open-order census (one read, or one per market) has proved so far.
+#[derive(Default)]
+pub struct CensusRead {
+    /// The earliest release among its reads.
+    read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+    /// A read answered outside a read response: the census proves no cover.
+    lost: bool,
+    started: f64,
+    /// Rows naming a client order index (client, native, symbol), applied only
+    /// once their symbol's rows are admitted.
+    observed: Vec<(String, String, String)>,
+    originals: Vec<(Order, String)>,
 }
 #[derive(Clone)]
 pub struct Backfill {
@@ -75,40 +89,30 @@ pub struct Execution {
     timestamp: f64,
     fill: Fill,
 }
-struct Connection {
-    socket: Option<SocketId>,
-    open: bool,
+#[derive(Default)]
+pub(crate) struct Connection {
+    pub(crate) stream: crate::Connection,
     connected_at: f64,
     last_payload: Option<f64>,
     last_recovery: Option<f64>,
     recovery_started: Option<f64>,
-    supervisor: Supervisor,
-}
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            connected_at: 0.0,
-            last_payload: None,
-            last_recovery: None,
-            recovery_started: None,
-            supervisor: Supervisor::new(Config {
-                connect_timeout_ms: 180_000.0,
-                idle_timeout_ms: 180_000.0,
-                ping_interval_ms: Some(10_000.0),
-                backoff_base_ms: 1_000.0,
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
-        }
-    }
+    /// Early failures that read as an IP restriction; three switch to `?readonly=true`.
+    read_only_failures: u32,
 }
 struct OrderBatch {
     revision: u64,
     markets: VecDeque<String>,
     orders: Vec<Order>,
 }
+const STREAMED_POLL_MS: f64 = 5_000.0;
+/// The open-order census's read-cover scope: one census reads the whole account.
+const ORDERS_SCOPE: &str = "orders";
+/// A census the stream outran is read again no sooner than this after it began.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.0;
+const RATE_LIMITED_POLL_HOLD_MS: f64 = 30_000.0;
+/// How soon `readPositions` tries again after a read a newer stream frame held.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
+const FRESH_PAUSED: &str = "Lighter account reads are paused after a rate limit";
 #[derive(Default)]
 pub struct Account {
     pub account_index: Option<u64>,
@@ -116,7 +120,19 @@ pub struct Account {
     pub identity: Option<safe_cex_engine::signing::Identity>,
     setting_epochs: HashMap<String, u64>,
     pub records: HashMap<String, Order>,
-    connection: Connection,
+    lookup_failed: bool,
+    lookup_retry: Option<TimerId>,
+    /// The lookup ended without an account index; parked reads cannot be answered.
+    pub(crate) lookup_abandoned: bool,
+    /// Private history reads that arrived while the account index lookup was pending.
+    pub(crate) awaiting_identity: Vec<crate::history::Request>,
+    /// Refuses the parked reads outside the lookup's own delivery, which cannot settle them.
+    pub(crate) identity_refusal: Option<TimerId>,
+    /// Client order index to native order index, as rows report them.
+    pub(crate) client_orders: HashMap<String, String>,
+    /// Placed orders the stream has not yet named: their client index can cancel them.
+    pub(crate) unnamed_placements: HashMap<String, Order>,
+    pub(crate) connection: Connection,
     started: bool,
     revision: u64,
     position_revision: HashMap<String, u64>,
@@ -127,12 +143,19 @@ pub struct Account {
     suppressed: HashSet<String>,
     pub snapshot_inflight: bool,
     snapshot_serial: u64,
+    pub(crate) fresh_positions: FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     orders_inflight: bool,
     /// An uncertainty reconcile arrived while a read was in flight; that read may
     /// predate the write, so another follows once it settles.
     orders_again: bool,
     batch: Option<OrderBatch>,
+    census_follow_up: Option<TimerId>,
     sync: Option<TimerId>,
+    polls_held_until: f64,
+    polled_at: f64,
     heal: Option<TimerId>,
     seen_fills: HashSet<String>,
     fill_queue: VecDeque<String>,
@@ -202,8 +225,13 @@ impl Status<'_> {
 }
 #[derive(Deserialize)]
 struct AccountWire<'a> {
-    #[serde(default, borrow, alias = "account_index", alias = "accountIndex")]
+    // Real rows carry both names; an alias would refuse them as a duplicate field.
+    #[serde(default, borrow)]
     index: Option<Atom<'a>>,
+    #[serde(default, borrow)]
+    account_index: Option<Atom<'a>>,
+    #[serde(default, borrow, rename = "accountIndex")]
+    account_index_camel: Option<Atom<'a>>,
     #[serde(default, borrow)]
     positions: Option<&'a RawValue>,
     #[serde(default)]
@@ -214,6 +242,14 @@ struct AccountWire<'a> {
     cross_asset_value: Option<Num>,
     #[serde(default, alias = "availableBalance")]
     available_balance: Option<Num>,
+}
+impl<'a> AccountWire<'a> {
+    fn identity(&self) -> Option<&Atom<'a>> {
+        self.index
+            .as_ref()
+            .or(self.account_index.as_ref())
+            .or(self.account_index_camel.as_ref())
+    }
 }
 #[derive(Default, Deserialize)]
 struct PositionWire<'a> {
@@ -257,8 +293,10 @@ struct PositionWire<'a> {
     allocated_margin: Option<Num>,
     #[serde(default, alias = "maintenanceMarginFraction")]
     maintenance_margin_fraction: Option<Num>,
-    #[serde(default, alias = "updatedAt", alias = "timestamp")]
+    #[serde(default, alias = "updatedAt")]
     updated_at: Option<Num>,
+    #[serde(default)]
+    timestamp: Option<Num>,
     #[serde(default)]
     transaction_time: Option<Num>,
 }
@@ -273,10 +311,11 @@ pub(crate) struct OrderWire<'a> {
         borrow,
         alias = "marketId",
         alias = "marketIndex",
-        alias = "MarketIndex"
+        alias = "MarketIndex",
+        alias = "market_index"
     )]
     market_id: Atom<'a>,
-    #[serde(default, borrow, alias = "marketSymbol")]
+    #[serde(default, borrow, alias = "marketSymbol", alias = "market_symbol")]
     symbol: Cow<'a, str>,
     #[serde(
         default,
@@ -350,8 +389,10 @@ pub(crate) struct OrderWire<'a> {
     remaining_quote_amount: Option<Num>,
     #[serde(default, alias = "quoteAmount")]
     quote_amount: Option<Num>,
-    #[serde(default, alias = "updatedAt", alias = "timestamp")]
+    #[serde(default, alias = "updatedAt")]
     updated_at: Option<Num>,
+    #[serde(default)]
+    timestamp: Option<Num>,
     #[serde(default)]
     transaction_time: Option<Num>,
 }
@@ -480,7 +521,48 @@ impl OrderRowError {
         Self::Invalid(error.to_string())
     }
 }
-/// A stream row's own client order index (top level or nested `order`).
+/// Native stream rejection with a readable post-only explanation.
+/// No notice for the user's own cancellation.
+fn rejection_error(raw: &RawValue, order: &Order) -> Option<VenueError> {
+    #[derive(Deserialize)]
+    struct Nested<'a> {
+        #[serde(default, borrow)]
+        order: Option<&'a RawValue>,
+    }
+    #[derive(Deserialize)]
+    struct Row<'a> {
+        #[serde(default, borrow)]
+        status: Cow<'a, str>,
+        #[serde(default, borrow, alias = "cancelReason")]
+        cancel_reason: Cow<'a, str>,
+    }
+    let nested = serde_json::from_str::<Nested<'_>>(raw.get()).ok()?;
+    let row = serde_json::from_str::<Row<'_>>(nested.order.unwrap_or(raw).get()).ok()?;
+    let reason = row.cancel_reason.trim();
+    if matches!(
+        reason.to_ascii_uppercase().as_str(),
+        "USER_CANCELLED" | "USER_CANCELED"
+    ) {
+        return None;
+    }
+    let reject_reason = order.extra.as_ref().and_then(|extra| extra.reject_reason);
+    let native_message = if !reason.is_empty() {
+        reason
+    } else if reject_reason.is_some() {
+        row.status.as_ref()
+    } else {
+        return None;
+    };
+    // Translate only the native post-only rejection, retaining its typed diagnostics.
+    Some(if reject_reason == Some(RejectReason::PostOnly) {
+        VenueError::new("Post-only order would execute immediately as taker; not placed.")
+            .kind(ErrorKind::Rejected)
+            .venue_message(native_message)
+    } else {
+        VenueError::new(native_message)
+    })
+}
+
 fn client_order_index(raw: &RawValue) -> Option<String> {
     #[derive(Deserialize)]
     struct Nested<'a> {
@@ -596,11 +678,20 @@ impl Lighter {
             return;
         }
         self.account.started = true;
+        if cx.frame_fed() {
+            // The data source owns the account rows, settings and lookup; the
+            // account index arrives in VENUE_STATE. Only the own credential loads.
+            if !self.options.public_data_only {
+                self.load_credential();
+            }
+            return;
+        }
         cx.store.set_hedged(false);
         for m in cx.store.markets().to_vec() {
             let mode = self.metadata.get(&m.symbol).map_or(0, |v| v.margin_mode);
+            let leverage = self.default_leverage(&m);
             cx.store.update_setting(&m.symbol, |s| {
-                s.leverage = m.limits.leverage.max;
+                s.leverage = leverage;
                 s.margin_type = Some(if mode == 1 {
                     MarginType::Isolated
                 } else {
@@ -621,6 +712,10 @@ impl Lighter {
             cx.store.set_balance(Balance::default());
             return;
         }
+        self.load_credential();
+        self.next_lookup(cx, self.lookup_candidates());
+    }
+    fn load_credential(&mut self) {
         self.account.identity = self
             .options
             .identity
@@ -631,7 +726,22 @@ impl Lighter {
             .api_key_index
             .as_deref()
             .and_then(|s| s.parse::<u8>().ok());
-        self.next_lookup(cx, self.lookup_candidates());
+    }
+    /// Frame-fed: the data source's resolved account index, refused when it
+    /// names another account than the configured Application ID.
+    pub(crate) fn apply_account_index(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
+        if let Some(expected) = self.options.application_id.as_deref().and_then(index)
+            && expected != account
+        {
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "Lighter data source names a different account index",
+            );
+            return;
+        }
+        self.account.account_index = Some(account);
+        self.release_awaiting_identity(cx, account);
     }
     pub(crate) fn lookup_candidates(&self) -> VecDeque<Lookup> {
         self.candidates(true)
@@ -674,7 +784,12 @@ impl Lighter {
                 address: false,
             });
         }
-        if key_index && let Some(key) = self.options.api_key_index.as_deref().and_then(index) {
+        // The key index names a stranger's account when a selector is present.
+        let selected = index(app).is_some() || !addresses.is_empty();
+        if key_index
+            && !selected
+            && let Some(key) = self.options.api_key_index.as_deref().and_then(index)
+        {
             candidates.push_back(Lookup {
                 by: "index",
                 value: key.to_string(),
@@ -689,6 +804,19 @@ impl Lighter {
             });
         }
         candidates
+    }
+    /// A placement answers with its client index; rows name the native one.
+    pub(crate) fn note_client_order(&mut self, client: &str, native: &str) {
+        if self.account.client_orders.len() >= 1_000 {
+            self.account.client_orders.clear();
+            self.account.unnamed_placements.clear();
+        }
+        if client != native {
+            self.account.unnamed_placements.remove(client);
+        }
+        self.account
+            .client_orders
+            .insert(client.to_owned(), native.to_owned());
     }
     fn next_lookup(&mut self, cx: &mut Cx<'_, Pending>, mut candidates: VecDeque<Lookup>) {
         if let Some(candidate) = candidates.pop_front() {
@@ -708,12 +836,21 @@ impl Lighter {
                 },
                 None,
             );
+        } else if std::mem::take(&mut self.account.lookup_failed) {
+            // No lookup was answered, so nothing says the account is absent.
+            cx.retried_failure(
+                "lighter.account:lookup",
+                "Lighter account lookup failed; retrying",
+            );
+            self.account.lookup_retry = Some(cx.set_timer(5_000.0));
         } else {
             cx.notice(
                 Level::Error,
                 code::CONFIG_INVALID,
                 "Failed to resolve Lighter account index. Provide account index in Application ID.",
             );
+            self.account.lookup_abandoned = true;
+            self.schedule_identity_refusal(cx);
         }
     }
     fn identity_ready(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
@@ -725,11 +862,14 @@ impl Lighter {
                 code::CONFIG_INVALID,
                 "Lighter account lookup returned a different account index",
             );
+            self.account.lookup_abandoned = true;
+            self.schedule_identity_refusal(cx);
             return;
         }
         self.account.account_index = Some(account);
-        if self.account.identity.is_some() {
-            self.connect_private(cx);
+        self.release_awaiting_identity(cx, account);
+        if self.account.identity.is_some() && self.account.connection.stream.idle() {
+            self.open_feed(cx, crate::Channel::Private);
         }
         self.refresh_account(cx);
         self.refresh_orders(cx);
@@ -838,7 +978,8 @@ impl Lighter {
             .then_some(self.account.snapshot_serial)
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.snapshot_inflight {
+        // Frame-fed account rows and their reconcile arrive from the data source.
+        if cx.frame_fed() || self.account.snapshot_inflight {
             return;
         }
         let Some(account) = self.account.account_index else {
@@ -860,14 +1001,24 @@ impl Lighter {
         );
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.orders_inflight || self.account.identity.is_none() {
+        if cx.frame_fed() || self.account.orders_inflight || self.account.identity.is_none() {
             return;
         }
         if self.account.account_index.is_none() {
             return;
         }
         self.account.orders_inflight = true;
-        self.request_orders(cx, None, self.account.revision, SnapshotCoverage::default());
+        let census = CensusRead {
+            started: cx.now,
+            ..CensusRead::default()
+        };
+        self.request_orders(
+            cx,
+            None,
+            self.account.revision,
+            SnapshotCoverage::default(),
+            census,
+        );
     }
     /// An uncertainty reconcile needs a read requested after the write: one
     /// already in flight may predate it, so another follows once it settles.
@@ -888,6 +1039,7 @@ impl Lighter {
         market: Option<String>,
         revision: u64,
         coverage: SnapshotCoverage<String>,
+        census: CensusRead,
     ) {
         let id = market.as_deref().unwrap_or("255");
         let account = self.account.account_index.unwrap();
@@ -910,6 +1062,7 @@ impl Lighter {
                 market,
                 orders: Vec::new(),
                 coverage,
+                census,
                 valid: true,
             },
             Some(sign::AuthPlacement::Query),
@@ -919,12 +1072,21 @@ impl Lighter {
         self.account.suppressed.contains(id)
     }
     pub(crate) fn record_cancel(&mut self, id: &str, _now: f64) {
+        self.protection.originals.remove(id);
+        self.protection.complex.remove(id);
         self.account.revision += 1;
         self.account
             .order_revision
             .insert(id.into(), self.account.revision);
         self.account.suppressed.insert(id.into());
         self.account.records.remove(id);
+    }
+    pub(crate) fn record_modify(&mut self, id: &str) {
+        self.protection.originals.remove(id);
+        self.account.revision += 1;
+        self.account
+            .order_revision
+            .insert(id.into(), self.account.revision);
     }
     pub(crate) fn record_placement(&mut self, order: Order) {
         self.account.revision += 1;
@@ -951,16 +1113,6 @@ impl Lighter {
             self.account.heal = Some(cx.set_timer(500.0));
         }
     }
-    fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.connection.open = false;
-        self.account.connection.supervisor.connecting(cx);
-        self.account.connection.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(self.ws_url())
-                    .channel(safe_cex_engine::SocketChannel::Private),
-            ),
-        );
-    }
     fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let account = self.account.account_index.unwrap();
         cx.send(
@@ -986,12 +1138,7 @@ impl Lighter {
             }
         }
     }
-    pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
-        if self.account.connection.socket != Some(socket) {
-            return false;
-        }
-        self.account.connection.open = true;
-        self.account.connection.supervisor.opened(cx);
+    pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         self.account.connection.connected_at = cx.now;
         self.account.connection.last_payload = None;
         self.account.connection.last_recovery = None;
@@ -1001,7 +1148,7 @@ impl Lighter {
         self.subscribe_private(cx, socket);
         cx.send(
             socket,
-            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
+            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.protocol_now()),
         );
         self.refresh_account(cx);
         self.refresh_orders(cx);
@@ -1018,35 +1165,43 @@ impl Lighter {
             };
             self.request_backfill(cx, run);
         }
-        true
     }
-    pub(crate) fn account_close(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        socket: SocketId,
-        code: u16,
-    ) -> bool {
-        if self.account.connection.socket != Some(socket) {
-            return false;
-        }
-        self.account.connection.open = false;
-        self.account.connection.socket = None;
+    /// The engine has closed the epoch and owns the retry.
+    pub(crate) fn account_retired(&mut self, cx: &mut Cx<'_, Pending>) {
         let connection = &self.account.connection;
         self.arm_outage(connection.last_payload.unwrap_or(connection.connected_at));
-        let minimum = if code == 1013 { 30_000.0 } else { 0.0 };
-        self.account.connection.supervisor.retry_after(cx, minimum);
         self.trade_stream_lost(cx);
-        true
+    }
+    /// Legacy lighter.ws-private.ts: a handshake that failed, or opened and closed
+    /// within 10 s with no account stream, as 1006 or a 1008 restriction.
+    pub(crate) fn note_private_close(&mut self, cx: &mut Cx<'_, Pending>, code: u16) {
+        let connection = &mut self.account.connection;
+        let early = connection.stream.open
+            && connection.last_payload.is_none()
+            && cx.now - connection.connected_at <= 10_000.0;
+        let restricted = matches!(code, 1006 | 1008) && (!connection.stream.open || early);
+        if !restricted || connection.stream.read_only || self.options.ws_routed {
+            return;
+        }
+        connection.read_only_failures += 1;
+        if connection.read_only_failures < 3 {
+            return;
+        }
+        connection.stream.read_only = true;
+        cx.notice(
+            Level::Warn,
+            code::STREAM_UNAVAILABLE,
+            "Lighter georestrictions detected; connectivity status is degraded. Private updates may rely on read-only/REST fallback from this IP. Use a VPN or Tealstreet WS proxy; account tier changes will not fix this.",
+        );
     }
     // Payload staleness is checked on the same 10s cadence as the heartbeat.
-    fn private_heartbeat(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+    pub(crate) fn private_heartbeat(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let connection = &self.account.connection;
         if connection
             .recovery_started
             .is_some_and(|at| cx.now - at >= 20_000.0)
         {
-            cx.close(socket);
-            self.account_close(cx, socket, 1006);
+            self.retire(cx, crate::Channel::Private);
             return;
         }
         let payload_age = cx.now - connection.last_payload.unwrap_or(connection.connected_at);
@@ -1056,6 +1211,7 @@ impl Lighter {
             180_000.0
         };
         if payload_age >= stale_after
+            && !connection.stream.read_only
             && connection.recovery_started.is_none()
             && connection
                 .last_recovery
@@ -1070,40 +1226,41 @@ impl Lighter {
         }
         cx.send(
             socket,
-            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
+            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.protocol_now()),
         );
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.account.connection.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => {}
-            Tick::Reconnect => {
-                self.connect_private(cx);
-                return true;
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.close(socket);
-                    self.account_close(cx, socket, 1006);
-                }
-                return true;
-            }
-            Tick::Ping => {
-                if let Some(socket) = self
-                    .account
-                    .connection
-                    .socket
-                    .filter(|_| self.account.connection.open)
-                {
-                    self.private_heartbeat(cx, socket);
-                }
-                return true;
-            }
-            Tick::Handled => return true,
+        if self.account.identity_refusal == Some(timer) {
+            self.account.identity_refusal = None;
+            self.refuse_awaiting_identity(cx);
+            return true;
+        }
+        if self.account.fresh_positions_timer == Some(timer) {
+            self.account.fresh_positions_timer = None;
+            self.retry_fresh_positions(cx);
+            return true;
+        }
+        if self.account.lookup_retry == Some(timer) {
+            self.account.lookup_retry = None;
+            self.next_lookup(cx, self.lookup_candidates());
+            return true;
         }
         if self.account.sync == Some(timer) {
             self.account.sync = Some(cx.set_poll_timer(2_000.0));
-            self.refresh_account(cx);
-            self.refresh_orders(cx);
+            // Two reads every 2 s fill Lighter's budget, and a close then gets refused.
+            let cadence = if self.account.connection.stream.open {
+                STREAMED_POLL_MS
+            } else {
+                0.0
+            };
+            if !self.trade_running()
+                && cx.now >= self.account.polls_held_until
+                && cx.now - self.account.polled_at >= cadence
+            {
+                self.account.polled_at = cx.now;
+                self.refresh_account(cx);
+                self.refresh_orders(cx);
+            }
             self.refresh_limits(cx);
             return true;
         }
@@ -1115,6 +1272,14 @@ impl Lighter {
         {
             let (_, run) = self.account.backfill_retry.take().unwrap();
             self.request_backfill(cx, run);
+            return true;
+        }
+        if self.account.census_follow_up == Some(timer) {
+            self.account.census_follow_up = None;
+            // Within the poll's budget; a held poll reads it later.
+            if !self.trade_running() && cx.now >= self.account.polls_held_until {
+                self.refresh_orders(cx);
+            }
             return true;
         }
         if self.account.heal == Some(timer) {
@@ -1176,7 +1341,7 @@ impl Lighter {
                     .find(|p| p.symbol == symbol)
                     .map(|p| p.leverage)
             })
-            .unwrap_or(market.limits.leverage.max);
+            .unwrap_or_else(|| self.default_leverage(market));
         let leverage = safe_cex_engine::num::clamp_leverage(
             leverage,
             market.limits.leverage.min,
@@ -1319,7 +1484,7 @@ impl Lighter {
         cx: &mut Cx<'_, Pending>,
         wire: AccountWire<'_>,
     ) -> Result<Snapshot, String> {
-        if let Some(identity) = wire.index.as_ref()
+        if let Some(identity) = wire.identity()
             && index(&identity.0) != self.account.account_index
         {
             return Err("Lighter account snapshot belongs to another account".into());
@@ -1477,14 +1642,20 @@ impl Lighter {
         market_hint: Option<&str>,
         orders: &mut Vec<Order>,
         coverage: &mut SnapshotCoverage<String>,
+        census: &mut CensusRead,
     ) {
         match self.map_order_row(cx, raw, market_hint, true) {
             Ok(order) => {
                 // A snapshot row proves a grouped leg by its own client order index.
-                if order.is_some()
+                if let Some(order) = &order
                     && let Some(client_index) = client_order_index(raw)
                 {
-                    self.trade_group_observed(cx, &client_index);
+                    census
+                        .observed
+                        .push((client_index, order.id.clone(), order.symbol.clone()));
+                }
+                if let Some(order) = &order {
+                    census.originals.push((order.clone(), raw.get().into()));
                 }
                 return orders.extend(order);
             }
@@ -1494,7 +1665,7 @@ impl Lighter {
                     code::ROW_SKIPPED,
                     format!("Lighter skipped order {id} on an unknown market"),
                 );
-                return coverage.reject(Some(id));
+                return coverage.reject_in(Some(id), market_hint.unwrap_or(""));
             }
             Err(OrderRowError::Invalid(_)) => {}
         }
@@ -1527,7 +1698,7 @@ impl Lighter {
                 None => "Lighter skipped unmappable order without an id".into(),
             },
         );
-        coverage.reject(id);
+        coverage.reject_in(id, market_hint.unwrap_or(""));
     }
     fn map_order_row(
         &self,
@@ -1603,6 +1774,7 @@ impl Lighter {
             _ => OrderType::Limit,
         };
         if kind == OrderType::Limit
+            && (wire.kind.0.is_empty() || wire.trigger_price.is_none())
             && let Some(o) = existing
             && o.kind != OrderType::Limit
         {
@@ -1709,22 +1881,6 @@ impl Lighter {
             .map(Bool::get)
             .or_else(|| existing.map(|o| o.reduce_only))
             .unwrap_or(false);
-        if kind == OrderType::Limit
-            && reduce_only
-            && price > 0.0
-            && let Some(t) = cx.store.ticker(symbol)
-        {
-            let reference = [t.mark, t.last, t.index].into_iter().find(|v| *v > 0.0);
-            if reference.is_some_and(|reference| {
-                if side == OrderSide::Sell {
-                    price <= reference
-                } else {
-                    price >= reference
-                }
-            }) {
-                kind = OrderType::StopLoss;
-            }
-        }
         let remaining_notional = wire
             .remaining_quote_amount
             .as_ref()
@@ -1749,14 +1905,23 @@ impl Lighter {
             remaining,
             reduce_only,
             close: None,
-            client_order_id: None,
+            // What the placement answered with: it names this row to whoever holds that id.
+            client_order_id: client_order_index(raw),
             time_in_force: tif,
-            last_update: event_time(wire.updated_at.as_ref(), wire.transaction_time.as_ref())
-                .unwrap_or(cx.now),
+            last_update: event_time(
+                wire.updated_at.as_ref().or(wire.timestamp.as_ref()),
+                wire.transaction_time.as_ref(),
+            )
+            .unwrap_or(cx.now),
             trigger_type: None,
             take_profit: None,
             stop_loss: None,
             extra: Some(OrderExtra {
+                conditional_order_price: matches!(
+                    normalized(&wire.kind.0).as_str(),
+                    "3" | "5" | "STOP_LIMIT" | "STOP_LOSS_LIMIT" | "TAKE_PROFIT_LIMIT"
+                )
+                .then(|| wire.price.as_ref().map_or(0.0, |p| p.0)),
                 remaining_native: Some(remaining),
                 remaining_notional: Some(remaining_notional),
                 reject_reason,
@@ -1793,7 +1958,7 @@ impl Lighter {
                 if found.is_none()
                     && let Ok(wire) = serde_json::from_str::<AccountWire<'_>>(item)
                 {
-                    *found = wire.index.and_then(|n| index(&n.0));
+                    *found = wire.identity().and_then(|n| index(&n.0));
                 }
             }
             Request::Snapshot { account, valid, .. } => {
@@ -1811,16 +1976,31 @@ impl Lighter {
             Request::Orders {
                 orders,
                 coverage,
+                census,
                 valid,
                 market,
                 ..
             } => match serde_json::from_str::<&RawValue>(item) {
-                Ok(raw) => self.snapshot_order(cx, raw, market.as_deref(), orders, coverage),
+                Ok(raw) => {
+                    self.snapshot_order(cx, raw, market.as_deref(), orders, coverage, census)
+                }
                 Err(_) => *valid = false,
             },
         }
     }
-    fn commit_snapshot(&mut self, cx: &mut Cx<'_, Pending>, revision: u64, snapshot: Snapshot) {
+    /// Whether the read rejected a row, and whether a newer stream frame held any.
+    fn commit_snapshot(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        revision: u64,
+        snapshot: Snapshot,
+    ) -> (bool, bool) {
+        let rejected = snapshot.coverage.rejected() != 0;
+        let held = self
+            .account
+            .position_revision
+            .values()
+            .any(|changed| *changed > revision);
         let mut positions = snapshot
             .positions
             .into_iter()
@@ -1902,7 +2082,7 @@ impl Lighter {
             let (leverage, margin) = provided.unwrap_or_else(|| {
                 let old = cx.store.setting(&m.symbol);
                 (
-                    old.map_or(m.limits.leverage.max, |s| s.leverage),
+                    old.map_or_else(|| self.default_leverage(&m), |s| s.leverage),
                     old.and_then(|s| s.margin_type).unwrap_or(MarginType::Cross),
                 )
             });
@@ -1939,7 +2119,7 @@ impl Lighter {
                     code::VALUATION_UNAVAILABLE,
                     "Lighter position PnL invalid; preserving previous balance",
                 );
-                return;
+                return (rejected, held);
             };
             cx.store.set_balance(Balance {
                 total: snapshot.equity - upnl,
@@ -1951,6 +2131,7 @@ impl Lighter {
         if self.account.revision != revision {
             self.schedule_heal(cx);
         }
+        (rejected, held)
     }
     fn commit_orders(
         &mut self,
@@ -1958,6 +2139,7 @@ impl Lighter {
         revision: u64,
         orders: Vec<Order>,
         coverage: &SnapshotCoverage<String>,
+        census: CensusRead,
         paged: bool,
     ) {
         let mut ids = HashSet::new();
@@ -1980,19 +2162,89 @@ impl Lighter {
                 })
                 .cloned(),
         );
-        let active = merged.iter().map(|o| o.id.as_str()).collect::<HashSet<_>>();
+        // What this census may replace, decided before any per-order state moves
+        // (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+        let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+            key: ORDERS_SCOPE,
+            account: &[ORDERS_SCOPE],
+        };
+        let refused = census.read.filter(|_| !census.lost).and_then(|earliest| {
+            cx.orders_read_refusals_from(earliest, scope, |_| true, &merged)
+                .map(|refused| (earliest, refused))
+        });
+        let Some((earliest, refused)) = refused else {
+            // Refused whole, or unprovable: newer rows already stand, and another
+            // census follows to prove what they cannot (absences).
+            self.census_follow_up(cx, census.started);
+            return;
+        };
+        if !refused.is_empty() {
+            self.census_follow_up(cx, census.started);
+        }
+        for (client_index, id, symbol) in census.observed {
+            if !refused.contains(&symbol) {
+                self.note_client_order(&client_index, &id);
+                self.trade_group_observed(cx, &client_index);
+            }
+        }
+        // Any rejected row proves the account nothing.
+        let mut cover_unproven = coverage.unproven().to_vec();
+        if coverage.rejected() != 0 {
+            cover_unproven.push(String::new());
+        }
+        if cx
+            .commit_orders_read_from(earliest, scope, |_| true, merged, &cover_unproven)
+            .is_none()
+        {
+            self.census_follow_up(cx, census.started);
+            return;
+        }
+        for (order, raw) in census.originals {
+            if !refused.contains(&order.symbol)
+                && self
+                    .account
+                    .order_revision
+                    .get(&order.id)
+                    .copied()
+                    .unwrap_or(0)
+                    <= revision
+                && cx.store.order(&order.id) == Some(&order)
+            {
+                self.observe_original(cx.store, &raw, &order);
+            }
+        }
+        self.protection
+            .originals
+            .retain(|id, original| cx.store.order(id) == Some(&original.observed));
+        self.protection
+            .complex
+            .retain(|id| cx.store.order(id).is_some());
+        cx.store.set_orders_loaded();
+        let active = cx
+            .store
+            .orders()
+            .iter()
+            .map(|o| o.id.as_str())
+            .collect::<HashSet<_>>();
         self.account
             .records
             .retain(|id, _| active.contains(id.as_str()));
-        cx.store.set_orders(merged);
         // Each per-market page carries its own read token, so the last one cannot
         // vouch for the first: a paged census owed a successor may predate the write.
-        if !coverage.any()
-            && revision == self.account.revision
-            && !(paged && self.account.orders_again)
-        {
-            cx.orders_reconciled(None);
+        if revision == self.account.revision && !(paged && self.account.orders_again) {
+            let mut unproven = coverage.unproven().to_vec();
+            unproven.extend(refused);
+            cx.orders_reconciled_except(&unproven, u64::MAX);
         }
+    }
+    /// Owe a census after one the stream outran, `CENSUS_FOLLOW_UP_MS` after
+    /// that one started at the earliest.
+    fn census_follow_up(&mut self, cx: &mut Cx<'_, Pending>, started: f64) {
+        if self.account.census_follow_up.is_some() {
+            return;
+        }
+        let wait = (started + CENSUS_FOLLOW_UP_MS - cx.now).max(0.0);
+        self.account.census_follow_up = Some(cx.set_timer(wait));
     }
     pub(crate) fn account_response(
         &mut self,
@@ -2001,6 +2253,9 @@ impl Lighter {
         response: Response<'_>,
     ) {
         let status = serde_json::from_str::<Status<'_>>(response.body).ok();
+        if matches!(response.status, 405 | 429) {
+            self.account.polls_held_until = cx.now + RATE_LIMITED_POLL_HOLD_MS;
+        }
         let ok = (200..300).contains(&response.status)
             && (status.as_ref().is_some_and(Status::valid)
                 || response.body.trim_start().starts_with('['));
@@ -2066,12 +2321,13 @@ impl Lighter {
                     serde_json::from_str::<Legacy<'_>>(response.body)
                         .ok()
                         .and_then(|l| l.data)
-                        .and_then(|a| a.index)
-                        .and_then(|a| index(&a.0))
+                        .and_then(|a| a.identity().and_then(|n| index(&n.0)))
                 };
                 if ok && let Some(index) = found {
                     self.identity_ready(cx, index);
                 } else {
+                    // Only these say the account is absent; a 405 verification page says nothing.
+                    self.account.lookup_failed |= !ok && !matches!(response.status, 400 | 404);
                     self.next_lookup(cx, candidates);
                 }
             }
@@ -2101,11 +2357,18 @@ impl Lighter {
                         account.coverage.allows_absence(symbol)
                             && !account.unconfirmed_positions.contains(symbol)
                     });
-                    self.commit_snapshot(cx, revision, account);
+                    let (rejected, held) = self.commit_snapshot(cx, revision, account);
                     if self.account.identity.is_none() && !cx.store.loaded().orders {
                         cx.store.set_orders(vec![]);
                     }
                     self.trade_account_ready(cx, serial, confirmed);
+                    let read = serial as u32;
+                    if rejected {
+                        let error = VenueError::new("Lighter positions: a row could not be mapped");
+                        self.account.fresh_positions.failed(cx, 0, read, &error);
+                    } else if !held {
+                        self.account.fresh_positions.committed(cx, 0, read, &[]);
+                    }
                 } else {
                     self.trade_account_ready(cx, serial, false);
                     cx.notice(
@@ -2113,29 +2376,48 @@ impl Lighter {
                         code::SNAPSHOT_DISCARDED,
                         "Lighter account snapshot failed; preserving account state",
                     );
+                    let error = snapshot_read_error(&response, ok);
+                    let read = serial as u32;
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
                 }
+                self.read_fresh_positions_again(cx, serial as u32);
             }
             Request::Orders {
                 revision,
                 market,
                 orders,
                 coverage,
+                mut census,
                 valid,
             } => {
+                match cx.order_read_mark() {
+                    Some(mark) => {
+                        census.read =
+                            Some(census.read.map_or(mark, |earliest| earliest.earliest(mark)));
+                    }
+                    None => census.lost = true,
+                }
                 if ok && valid {
                     if let Some(batch) = self.account.batch.as_mut() {
                         batch.orders.extend(orders);
                         if let Some(market) = batch.markets.pop_front() {
                             let revision = batch.revision;
                             // The batch's skipped rows ride along to its commit.
-                            self.request_orders(cx, Some(market), revision, coverage);
+                            self.request_orders(cx, Some(market), revision, coverage, census);
                         } else {
                             let batch = self.account.batch.take().unwrap();
-                            self.commit_orders(cx, batch.revision, batch.orders, &coverage, true);
+                            self.commit_orders(
+                                cx,
+                                batch.revision,
+                                batch.orders,
+                                &coverage,
+                                census,
+                                true,
+                            );
                             self.orders_settled(cx);
                         }
                     } else {
-                        self.commit_orders(cx, revision, orders, &coverage, false);
+                        self.commit_orders(cx, revision, orders, &coverage, census, false);
                         self.orders_settled(cx);
                     }
                 } else if market.is_none()
@@ -2156,11 +2438,17 @@ impl Lighter {
                             markets,
                             orders: Vec::new(),
                         });
+                        // The failed all-market read stays the census's earliest leg.
+                        let census = CensusRead {
+                            observed: Vec::new(),
+                            ..census
+                        };
                         self.request_orders(
                             cx,
                             Some(market),
                             revision,
                             SnapshotCoverage::default(),
+                            census,
                         );
                     } else {
                         self.orders_settled(cx);
@@ -2187,6 +2475,7 @@ impl Lighter {
             valid,
             orders,
             coverage,
+            census,
             market,
             ..
         } = &mut request
@@ -2202,7 +2491,14 @@ impl Lighter {
                 && raw.get().starts_with('{')
             {
                 let result = each_row(raw, |row: &RawValue, hint| {
-                    self.snapshot_order(cx, row, hint.or(market.as_deref()), orders, coverage)
+                    self.snapshot_order(
+                        cx,
+                        row,
+                        hint.or(market.as_deref()),
+                        orders,
+                        coverage,
+                        census,
+                    )
                 });
                 *valid = result.is_ok();
             }
@@ -2218,7 +2514,10 @@ impl Lighter {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
             Request::Backfill { run, .. } => self.backfill_failed(cx, run, error.into()),
-            Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
+            Request::Lookup { candidates, .. } => {
+                self.account.lookup_failed = true;
+                self.next_lookup(cx, candidates);
+            }
             Request::Snapshot { serial, .. } => {
                 self.account.snapshot_inflight = false;
                 self.trade_account_ready(cx, serial, false);
@@ -2227,6 +2526,14 @@ impl Lighter {
                     code::REQUEST_FAILED,
                     format!("Lighter account snapshot failed: {error}"),
                 );
+                let fresh = self
+                    .account
+                    .read_error
+                    .take()
+                    .unwrap_or_else(|| VenueError::new(error));
+                let read = serial as u32;
+                self.account.fresh_positions.failed(cx, 0, read, &fresh);
+                self.read_fresh_positions_again(cx, read);
             }
             Request::Orders { .. } => {
                 self.account.batch = None;
@@ -2239,16 +2546,57 @@ impl Lighter {
             }
         }
     }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.account_index.is_none() {
+            let error =
+                VenueError::new("Lighter account is not loaded").kind(ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        if cx.now < self.account.polls_held_until {
+            let wait = self.account.polls_held_until - cx.now;
+            fresh_positions::refuse(cx, fresh_positions::rate_limited(FRESH_PAUSED, wait));
+            return;
+        }
+        let need = self.account.snapshot_serial as u32 + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.refresh_account(cx);
+        }
+    }
+
+    /// At once for a waiter the read predates, else once a newer stream frame
+    /// that held the read can have been overtaken.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, read: u32) {
+        if self.account.fresh_positions.predates(0, read) {
+            self.retry_fresh_positions(cx);
+        } else if self.account.fresh_positions.owed(0)
+            && self.account.fresh_positions_timer.is_none()
+        {
+            self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
+    }
+
+    fn retry_fresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now < self.account.polls_held_until {
+            let wait = self.account.polls_held_until - cx.now;
+            let error = fresh_positions::rate_limited(FRESH_PAUSED, wait);
+            self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
+            return;
+        }
+        self.refresh_account(cx);
+    }
+
     pub(crate) fn account_message(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         socket: SocketId,
         text: &str,
     ) -> bool {
-        if self.account.connection.socket != Some(socket) {
+        if self.account.connection.stream.socket != Some(socket) {
             return false;
         }
-        self.account.connection.supervisor.received(cx.now);
         let Ok(frame) = serde_json::from_str::<Frame<'_>>(text) else {
             cx.notice(
                 Level::Warn,
@@ -2260,7 +2608,7 @@ impl Lighter {
         if frame.kind == "ping" {
             cx.send(
                 socket,
-                format!(r#"{{"type":"pong","timestamp":{}}}"#, cx.now),
+                format!(r#"{{"type":"pong","timestamp":{}}}"#, cx.protocol_now()),
             );
             return true;
         }
@@ -2297,6 +2645,7 @@ impl Lighter {
         if meaningful {
             self.account.connection.last_payload = Some(cx.now);
             self.account.connection.recovery_started = None;
+            self.account.connection.read_only_failures = 0;
             self.account.revision += 1;
             self.schedule_heal(cx);
         }
@@ -2341,7 +2690,16 @@ impl Lighter {
                     self.account
                         .order_revision
                         .insert(order.id.clone(), self.account.revision);
+                    if order.status == OrderStatus::Canceled
+                        && cx.now - order.last_update <= 5_000.0
+                        && cx.now - self.account.connection.connected_at > 5_000.0
+                        && let Some(error) = rejection_error(row, &order)
+                    {
+                        cx.notice_error(Level::Error, code::ORDER_REJECTED, &error);
+                    }
                     if matches!(order.status, OrderStatus::Canceled | OrderStatus::Closed) {
+                        self.protection.originals.remove(&order.id);
+                        self.protection.complex.remove(&order.id);
                         self.account.suppressed.insert(order.id.clone());
                         self.account.records.remove(&order.id);
                         if order.status == OrderStatus::Canceled {
@@ -2350,6 +2708,7 @@ impl Lighter {
                             cx.store.upsert_order(order);
                         }
                     } else {
+                        self.observe_original(cx.store, row.get(), &order);
                         cx.store.upsert_order(order);
                     }
                 }
@@ -2360,11 +2719,12 @@ impl Lighter {
         }
         if let Some(raw) = payload.positions {
             let result = each_row(raw, |wire: PositionWire<'_>, hint| {
-                let time = event_time(wire.updated_at.as_ref(), wire.transaction_time.as_ref())
-                    .or_else(|| {
-                        event_time(frame.timestamp.as_ref(), frame.transaction_time.as_ref())
-                    })
-                    .unwrap_or(cx.now);
+                let time = event_time(
+                    wire.updated_at.as_ref().or(wire.timestamp.as_ref()),
+                    wire.transaction_time.as_ref(),
+                )
+                .or_else(|| event_time(frame.timestamp.as_ref(), frame.transaction_time.as_ref()))
+                .unwrap_or(cx.now);
                 let explicit_zero = wire.size.as_ref().is_some_and(|n| n.0 == 0.0);
                 if let Some((position, symbol, leverage, margin)) =
                     self.position_row(cx, wire, hint)
@@ -2579,5 +2939,34 @@ impl Lighter {
             },
             Some(sign::AuthPlacement::Header),
         );
+    }
+}
+
+/// The reply's own error for a positions read that cannot answer.
+fn snapshot_read_error(response: &Response<'_>, ok: bool) -> VenueError {
+    if ok {
+        return VenueError::new("Lighter positions: malformed account snapshot");
+    }
+    let error = VenueError::new(format!(
+        "Lighter positions HTTP {}: {}",
+        response.status, response.body
+    ));
+    if matches!(response.status, 405 | 429) {
+        error.kind(ErrorKind::RateLimited)
+    } else {
+        error
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Limits { .. } => S::ACCOUNT,
+            Self::Lookup { .. } => S::ACCOUNT,
+            Self::Snapshot { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }

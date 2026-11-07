@@ -96,12 +96,6 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
       (m) => m.BlofinExchange,
     ),
 
-  // Breakoutprop
-  breakoutprop: () =>
-    import(/* webpackChunkName: "exchange-breakoutprop" */ './breakoutprop/breakoutprop.exchange').then(
-      (m) => m.BreakoutpropExchange,
-    ),
-
   // Bybit
   bybit: () =>
     import(/* webpackChunkName: "exchange-bybit" */ './bybit/bybit.exchange').then(
@@ -247,9 +241,6 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
 
   mode: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  salsadex: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
-
-  'tealstreet-dex': () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
   // TxFlow testnet
   txflow: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
@@ -269,8 +260,6 @@ export const hostedSigningReferenceRegistry = {
   coinbasespot: () => import('./coinbase/coinbasespot.exchange').then((m) => m.CoinbaseSpotExchange),
   kodiakfi: () => import('./orderly/exchanges/kodiakfi/kodiakfi.exchange').then((m) => m.KodiakFIExchange),
   mode: () => import('./orderly/exchanges/mode/mode.exchange').then((m) => m.MODEExchange),
-  salsadex: () => import('./orderly/exchanges/salsadex/salsadex.exchange').then((m) => m.SalsaDEXExchange),
-  'tealstreet-dex': () => import('./orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange').then((m) => m.TealstreetDEXExchange),
   what: () => import('./orderly/exchanges/what/what.exchange').then((m) => m.WhatExchange),
   woofi: () => import('./orderly/exchanges/woofi/woofi.exchange').then((m) => m.WoofiExchange),
 } as Partial<Record<ExchangeName, ExchangeLoader>>;

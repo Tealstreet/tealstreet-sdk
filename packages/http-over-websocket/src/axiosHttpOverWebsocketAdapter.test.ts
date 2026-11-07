@@ -17,6 +17,7 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 // mock class has to be in place by then.
 vi.mock('./HOWWebSocket', () => {
   class MockHOWWebSocket {
+    ws = { OPEN: 1, readyState: 1, loopState: { phase: 'connected', since: 0 } };
     isOpen = true;
     isInitialized = true;
     isTimeSynced = true;
@@ -102,6 +103,41 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     vi.restoreAllMocks();
   });
 
+  it.each([
+    ['discovery', 60_000],
+    ['orderRead', 20_000],
+    ['orderWrite', 20_000],
+    ['history', 30_000],
+    ['read', 20_000],
+  ] as const)('expires %s once at its class budget, with useful diagnostics', async (requestClass, budgetMs) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    try {
+      let error: any;
+      const pending = adapter({
+        url: 'https://venue.test/read?signature=secret-sentinel',
+        method: 'GET',
+        headers: {},
+        requestClass,
+      } as any).catch((e) => {
+        error = e;
+      });
+      await vi.advanceTimersByTimeAsync(budgetMs - 1);
+      expect(error).toBeUndefined();
+      expect(mockWs.sentMessages).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(error).toMatchObject({ name: 'TradeTunnelTimeoutError', requestClass, budgetMs, elapsedMs: budgetMs });
+      expect(error.message).toContain(`class=${requestClass} budget=${budgetMs}ms elapsed=${budgetMs}ms`);
+      expect(error.message).not.toContain('secret-sentinel');
+      expect(mockWs.sentMessages).toHaveLength(1);
+    } finally {
+      adapter.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('prepares and binds without HTTP, then hands exact signed bytes off synchronously once', async () => {
     const adapter = createAxiosHttpOverWebsocketAdapter({ customParser: (body) => body });
     const controller = new AbortController();
@@ -140,20 +176,20 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     adapter.dispose();
   });
 
-  it('managed default adapters preserve large integer and decimal request and response bytes', async () => {
+  it('managed bodies reach the tunnel as the map it takes, and response bytes stay raw', async () => {
     const adapter = createAxiosHttpOverWebsocketAdapter();
+    const raw = ' {"id":18446744073709551615,"n":1.000}\n';
     const config: any = {
       url: 'https://example.com/read?x=%2B+%20',
       method: 'POST',
       headers: {},
-      data: ' {"id":18446744073709551615,"n":1.000}\n',
+      data: '{"b":"1.000","a":{"c":[1,2.5]}}',
     };
     const prepared = await adapter.prepare(config);
-    mockWs.replyTo = (sent) =>
-      mockWs.emitter.emit('sub:' + sent.nonce, { data_raw: config.data, status: 200, headers: {} });
+    mockWs.replyTo = (sent) => mockWs.emitter.emit('sub:' + sent.nonce, { data_raw: raw, status: 200, headers: {} });
     const response = await prepared.bind(config).dispatch();
     expect(mockWs.sentMessages[0].arg.data).toBe(config.data);
-    expect(response.data).toBe(config.data);
+    expect(response.data).toBe(raw);
     expect(mockWs.sentMessages[0]).toMatchObject({ format: 'raw', accept_encoding: ['gzip'], accept_binary: true });
     adapter.dispose();
   });
@@ -219,7 +255,23 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     }
   });
 
-  it('attaches caller config (with custom keys + headers) to the resolved tunnel response', async () => {
+  it.each([
+    ['a sorted form', 'quantity=1&symbol=BTC+USDT', { 'Content-Type': 'application/x-www-form-urlencoded' }],
+    ['an unsorted form', 'symbol=BTC&quantity=1', { 'Content-Type': 'application/x-www-form-urlencoded' }],
+    ['a JSON array', '[{"tag":"x","sz":"1"}]', { 'Content-Type': 'application/json' }],
+    ['numbers JS would change', '{"n":1.000,"id":18446744073709551615}', {}],
+    ['spacing', ' {"a": 1}\n', {}],
+    ['a signed empty object', '{}', {}],
+  ])('sends %s as the exact signed text', async (_label, data, headers) => {
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const config: any = { url: 'https://example.com/w', method: 'POST', headers, data };
+    const prepared = await adapter.prepare(config);
+    prepared.bind(config).dispatch().catch(() => {});
+    expect(mockWs.sentMessages[0].arg.data).toBe(data);
+    adapter.dispose();
+  });
+
+it('attaches caller config (with custom keys + headers) to the resolved tunnel response', async () => {
     const adapter = createAxiosHttpOverWebsocketAdapter();
     const callerConfig: any = {
       url: '/api/path',
@@ -411,6 +463,44 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     const response: any = await adapter(callerConfig);
     expect(response.data.orderId).toBe('9007199254740993');
   });
+
+  it.each(['relay', 'response timeout', 'readiness', 'token'])(
+    'keeps signed queries on the wire and off %s diagnostics',
+    async (mode) => {
+      vi.useFakeTimers();
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      if (mode === 'relay') vi.stubEnv('DEBUG', '1');
+      const adapter = createAxiosHttpOverWebsocketAdapter();
+      const url = 'https://example.com/private?timestamp=123&signature=fixture-signature&sign=fixture-sign';
+      const config: any = { url, method: 'GET', headers: {}, timeout: mode === 'readiness' ? 35_000 : 100 };
+      try {
+        if (mode === 'readiness') mockWs.isOpen = false;
+        if (mode === 'token') {
+          mockWs.isTokenSent = false;
+          configureHOW({ getProxyToken: async () => '', isTokenExpired: () => true });
+        }
+        if (mode === 'relay')
+          mockWs.replyTo = (sent) => {
+            mockWs.emitter.emit('sub:' + sent.nonce, { error: `connection lost (${url})` });
+          };
+        const pending = Promise.resolve(adapter(config)).catch((error) => error);
+        await vi.advanceTimersByTimeAsync(mode === 'readiness' ? 30_100 : 150);
+        const error = await pending;
+        expect(error).toBeInstanceOf(Error);
+        expect(error.message).toContain('https://example.com/private');
+        expect(error.message).not.toContain('?');
+        expect(error.message).not.toContain('fixture-signature');
+        expect(JSON.stringify(log.mock.calls)).not.toContain('fixture-signature');
+        if (error.url) expect(error.url).toBe('https://example.com/private');
+        expect(error.config).toBe(config);
+        expect(config.url).toBe(url);
+        if (mode === 'relay' || mode === 'response timeout') expect(mockWs.sentMessages[0]?.arg.url).toBe(url);
+      } finally {
+        adapter.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('attaches caller config to the rejected tunnel error', async () => {
     const adapter = createAxiosHttpOverWebsocketAdapter();
@@ -678,8 +768,9 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
       const longResult = adapter(longConfig);
 
       await vi.advanceTimersByTimeAsync(600);
+      // Its deadline ran out waiting on its own token fetch: our authorization, not the tunnel.
       await expect(shortResult).resolves.toMatchObject({
-        name: 'TradeTunnelTimeoutError',
+        name: 'ProxyTokenUnavailableError',
         config: shortConfig,
       });
 
@@ -979,4 +1070,67 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     expect(debugSpy).not.toHaveBeenCalled();
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[TradeTunnel]'), expect.anything());
   });
+
+
+  it.each([
+    [
+      'structured sign',
+      { message: 'bad upstream', details: { sign: 'fixture-secret', key: 'fixture-key', status: 503 } },
+    ],
+    ['header tuples', { message: 'bad upstream', headers: [['X-API-KEY', 'fixture-secret']] }],
+    ['relative', 'GET /private?signature=fixture-secret failed'],
+    ['encoded', encodeURIComponent('https://venue.example/private?signature=fixture-secret')],
+    ['JSON escaped', String.raw`lost https:\/\/venue.example\/private?signature=fixture-secret`],
+  ])('does not leak %s upstream relay error in display or verbose console', async (_, upstream) => {
+    vi.useFakeTimers();
+    vi.stubEnv('DEBUG', '1');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const url = 'https://venue.example/private?signature=wire-secret';
+    const config: any = { url, method: 'GET', headers: {}, timeout: 100 };
+    try {
+      mockWs.replyTo = (sent) => mockWs.emitter.emit('sub:' + sent.nonce, { error: upstream });
+      const pending = Promise.resolve(adapter(config)).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(10);
+      const error = await pending;
+      expect(error).toBeInstanceOf(Error);
+      expect(mockWs.sentMessages[0]?.arg.url).toBe(url);
+      expect(config.url).toBe(url);
+      expect(error.message + ' ' + JSON.stringify(log.mock.calls)).not.toContain('fixture-secret');
+      expect(JSON.stringify(log.mock.calls)).not.toContain('fixture-key');
+    } finally {
+      adapter.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['HTML encoded key', 'GET /private?&#83;ignature=probe-auth-value'],
+    ['standalone base64', btoa('Signature=probe-auth-value&symbol=BTC')],
+    ['HTML JSON', 'error {&quot;passphrase&quot;&#58;&quot;probe-auth-value&quot;}'],
+    ['wrapped base64', '/private?query=' + btoa('Signature=probe-auth-value&symbol=BTC')],
+  ])('new real relay probe %s', async (_, upstream) => {
+    vi.useFakeTimers();
+    vi.stubEnv('DEBUG', '1');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const url = 'https://venue.example/private?Signature=wire-auth-value&symbol=BTC';
+    const config: any = { url, method: 'GET', headers: {}, timeout: 100 };
+    try {
+      mockWs.replyTo = (sent) => mockWs.emitter.emit('sub:' + sent.nonce, { error: upstream });
+      const pending = Promise.resolve(adapter(config)).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(10);
+      const error = await pending;
+      expect(error).toBeInstanceOf(Error);
+      expect(mockWs.sentMessages[0]?.arg.url).toBe(url);
+      expect(config.url).toBe(url);
+      const rendered = error.message + ' ' + JSON.stringify(log.mock.calls);
+      expect(rendered).not.toContain('probe-auth-value');
+      expect(rendered).not.toContain(btoa('Signature=probe-auth-value&symbol=BTC'));
+    } finally {
+      adapter.dispose();
+      vi.useRealTimers();
+    }
+  });
+
 });

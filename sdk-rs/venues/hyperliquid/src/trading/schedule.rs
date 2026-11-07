@@ -32,7 +32,7 @@ impl Hyperliquid {
             );
             return;
         }
-        let time_ms = match deadline(time, cx.now) {
+        let time_ms = match deadline(time, cx.protocol_now()) {
             Ok(time) => time,
             Err(error) => {
                 cx.refuse_command(
@@ -42,25 +42,28 @@ impl Hyperliquid {
                 return;
             }
         };
-        if self.options.public_data_only || self.options.secret.as_deref().is_none_or(str::is_empty)
-        {
-            cx.fail(
+        self.enqueue_trade(
+            cx,
+            Job {
+                custody: None,
                 command,
-                not_sent("Hyperliquid signing key is missing").kind(ErrorKind::AuthInvalid),
-            );
-            return;
-        }
-        self.trading.queue.push_back(Job {
-            command,
-            steps: VecDeque::from([Step::ScheduleCancel { time_ms }]),
-            ids: vec![],
-            replacement: None,
-            amend_source: None,
-            amend_filled: false,
-            builder_checked: false,
-            effective: false,
-        });
-        self.pump_trades(cx);
+                steps: VecDeque::from([Step::ScheduleCancel { time_ms }]),
+                ids: vec![],
+                replacement: None,
+                amend_source: None,
+                amend_filled: false,
+                amend_total: None,
+                amend_read: false,
+                amend_deadline: None,
+                builder_checked: false,
+                amend_builder: None,
+                effective: false,
+                replacing_stop: None,
+                replacing_order: None,
+                stop_note: None,
+                protection: None,
+            },
+        );
     }
 }
 #[derive(Deserialize)]

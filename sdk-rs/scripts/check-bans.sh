@@ -12,7 +12,8 @@ ban() {
   shift 2
   local hits
   hits=$(grep -rnE --include='*.rs' --include='Cargo.toml' "$pattern" "$@" 2>/dev/null \
-    | sed -E "s/$allowed//g" | grep -E "$pattern" || true)
+    | sed -E "s/$allowed//g" | sed -E "${candle_wire:+/^hosts\/candle-server\//s/$candle_wire//g}" \
+    | grep -E "$pattern" || true)
   if [[ -n $hits ]]; then
     echo "BANNED: $description"
     echo "$hits"
@@ -24,12 +25,17 @@ crates=$(ls -d engine/ crypto/ hosts/*/ registry/ venues/*/)
 
 # JavaScript value, number, string and runtime emulation.
 ban 'JS-shaped value types' '\bJs[A-Z][A-Za-z]*\b|\bjs_runtime\b|\bJsValue\b' $crates
+# The candle server serves the legacy JS wire byte-for-byte to live clients, so
+# its UTF-16 length helper and ryu-js number writer alone are exempt there.
+candle_wire='utf16_len|text\.encode_utf16\(\)\.count\(\)'
 ban 'UTF-16 string emulation' 'encode_utf16|from_utf16|[Uu]tf16' $crates
+candle_wire=':ryu-js\.workspace = true$|ryu_js::Buffer::new\(\)\.format_finite'
 ban 'JS number formatting emulation' 'ryu[-_]js|js_number_string|to_precision|ECMAScript' $crates
+candle_wire=
 ban 'emulated promises, microtasks or timers' '\bmicrotask|\bMicrotask|\bPromise[A-Z]?\b|setTimeout|setInterval' $crates
 ban 'Axios or BaseExchange facades' '\bAxios|\bBaseExchange\b|\bbase_exchange\b' $crates
 ban 'JSON map-order or arbitrary-precision emulation' 'preserve_order|arbitrary_precision|IndexMap' $crates
-ban 'deleted port crates' 'safe-cex-(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle-cache|lighter-sdk)\b|safe_cex_(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle_cache|lighter_sdk)\b' $crates
+ban 'deleted port crates' 'safe-cex-(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle-cache|lighter-sdk)([^-_[:alnum:]]|$)|safe_cex_(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle_cache|lighter_sdk)([^-_[:alnum:]]|$)' $crates
 
 # Untyped JSON trees stay out of engine and venue hot paths.
 hot=$(ls -d engine/src registry/src venues/*/src 2>/dev/null || true)
@@ -60,6 +66,17 @@ then
   status=1
 fi
 
+# A socket write or open that can stall must not wedge what waits on it: in the
+# native host each one sits inside tokio::time::timeout on the same line. The one
+# open, transport::open_socket, is bounded by every caller.
+unbounded=$(grep -rnE --include='*.rs' '\b(ws|socket|open|sink)\s*\.\s*(send|flush|close)\(.*\)\s*\.await|connect_async\(' hosts/native/src \
+  | grep -v 'timeout' || true)
+if [[ -n $unbounded ]]; then
+  echo 'BANNED: a native socket open or write outside a timeout (wrap it in tokio::time::timeout)'
+  echo "$unbounded"
+  status=1
+fi
+
 if ! python3 scripts/check-signing.test.py || ! python3 scripts/check-signing.py; then
   status=1
 fi
@@ -77,6 +94,10 @@ if ! python3 scripts/check-credential-selection.test.py || ! python3 scripts/che
 fi
 
 if ! python3 scripts/check-credential-only.test.py || ! python3 scripts/check-credential-only.py; then
+  status=1
+fi
+
+if ! python3 scripts/check-plan-declarations.test.py || ! python3 scripts/check-plan-declarations.py; then
   status=1
 fi
 

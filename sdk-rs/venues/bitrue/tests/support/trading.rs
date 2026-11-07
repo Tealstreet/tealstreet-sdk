@@ -111,6 +111,26 @@ impl Harness {
             }
         }
     }
+    /// Fires every armed timer at its time: a delayed Plan call goes out.
+    pub fn elapse(&mut self) {
+        let due = std::mem::take(&mut self.timers);
+        for (timer, at) in due {
+            self.handle(at, Event::TimerFired { timer });
+        }
+        self.collect();
+    }
+    /// Answers the amend's cancel-proof reads with `body` until none follows.
+    pub fn verify_until_unproven(&mut self, body: &str) {
+        while let Some(index) = self
+            .requests
+            .iter()
+            .position(|r| r.method == Method::Get && r.url.contains("/fapi/v2/order?"))
+        {
+            let request = self.requests.remove(index);
+            self.reply(request, body);
+            self.elapse();
+        }
+    }
     pub fn take(&mut self, method: Method, path: &str) -> HttpRequest {
         let index = self
             .requests
@@ -136,6 +156,35 @@ impl Harness {
             },
         );
         self.collect();
+    }
+    pub fn reply_status(&mut self, request: HttpRequest, status: u16, body: &str) {
+        self.e.handle(
+            self.now,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        self.collect();
+    }
+    /// Answers `request` without releasing what follows: the caller changes
+    /// state before the next call's final claim, then collects.
+    pub fn answer_only(&mut self, request: HttpRequest, body: &str) {
+        self.e.handle(
+            self.now,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
     }
     pub fn command(&mut self, command: Command) {
         self.e.handle(self.now, Event::Command(command));

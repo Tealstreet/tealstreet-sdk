@@ -5,7 +5,8 @@ use safe_cex_engine::{Action, Engine, Event, HttpRequest, Method, Notice, Respon
 use safe_cex_venue_orderly::{Options, Orderly};
 
 type Driver = Engine<Orderly>;
-const LIMIT: f64 = 20_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const TICKERS_AT: f64 = 100.;
 
 fn start(testnet: bool) -> Driver {
@@ -26,7 +27,6 @@ fn no_command_or_signing(out: &[Action]) {
             a,
             Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
                 | Action::Sign { .. }
-                | Action::SignPayload { .. }
         )),
         "seed cannot borrow command/signing authority: {out:?}"
     );
@@ -127,16 +127,20 @@ fn tickers_waits_for_prepare_before_raw_release() {
 fn market_final_at_its_own_deadline_cannot_publish_or_start_tickers() {
     let mut e = start(false);
     let r = request(actions(&mut e, 0.), false, "/v1/public/info");
-    let out = answer(&mut e, &r, LIMIT, support::MARKETS);
+    let out = answer(&mut e, &r, DISCOVERY_DEADLINE_MS, support::MARKETS);
     assert!(!e.store().loaded().markets, "expired market seed published");
     assert!(e.store().markets().is_empty());
     assert!(
         !out.iter().any(|a| matches!(a, Action::Http(_))),
         "expired DATA must not start ticker seed"
     );
-    let timer = retry(&out, LIMIT);
-    e.handle(LIMIT + 1000., Event::TimerFired { timer });
-    let again = request(actions(&mut e, LIMIT + 1000.), false, "/v1/public/info");
+    let timer = retry(&out, DISCOVERY_DEADLINE_MS);
+    e.handle(DISCOVERY_DEADLINE_MS + 1000., Event::TimerFired { timer });
+    let again = request(
+        actions(&mut e, DISCOVERY_DEADLINE_MS + 1000.),
+        false,
+        "/v1/public/info",
+    );
     assert_ne!(again.id, r.id);
 }
 #[test]
@@ -144,7 +148,7 @@ fn ticker_final_at_its_own_deadline_cannot_publish_or_open_public_socket() {
     let mut e = start(false);
     let r = catalogue(&mut e, false);
     let before = e.store().markets().to_vec();
-    let deadline = TICKERS_AT + LIMIT;
+    let deadline = TICKERS_AT + DISCOVERY_DEADLINE_MS;
     let out = answer(&mut e, &r, deadline, support::TICKERS);
     assert!(!e.store().loaded().tickers, "expired ticker seed published");
     assert!(e.store().tickers().is_empty());
@@ -170,7 +174,7 @@ fn unprepared_markets_has_admission_deadline_and_late_prepare_is_inert() {
     let timer = out
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == LIMIT => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == DISCOVERY_DEADLINE_MS => Some(*timer),
             _ => None,
         })
         .expect("market bound starts before Prepare");
@@ -184,10 +188,10 @@ fn unprepared_markets_has_admission_deadline_and_late_prepare_is_inert() {
             _ => None,
         })
         .expect("managed market preparation");
-    e.handle(LIMIT, Event::TimerFired { timer });
+    e.handle(DISCOVERY_DEADLINE_MS, Event::TimerFired { timer });
     assert!(!e.http_preparation_pending(token));
     e.http_prepared(
-        LIMIT,
+        DISCOVERY_DEADLINE_MS,
         token,
         Prepared {
             id: token.attempt().request.0,
@@ -200,7 +204,7 @@ fn unprepared_markets_has_admission_deadline_and_late_prepare_is_inert() {
         |a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. }))
     ));
     assert!(!e.store().loaded().markets);
-    let _ = retry(&out, LIMIT);
+    let _ = retry(&out, DISCOVERY_DEADLINE_MS);
 }
 
 fn native_wire(testnet: bool) {

@@ -49,8 +49,8 @@ describe('option tools', () => {
     for (const name of OPTION_TOOLS) expect(names(bybit, false)).not.toContain(name);
   });
 
-  it('refuses disabled options-only venues before runtime loading', async () => {
-    await expect(exchangeRegistry.binanceoptions()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+  it('loads the options-only beta venue through the Rust registry', async () => {
+    await expect(exchangeRegistry.binanceoptions()).resolves.toBe(RustEngineExchange);
   });
 
   it('does not advertise cold Rust option methods without native support', async () => {

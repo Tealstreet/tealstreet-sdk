@@ -100,7 +100,7 @@ Bitunix is also the shared "unmigrated control" in:
 - `registry/tests/dispatch_provider.rs:445`
 - `registry/tests/hosted_signing.rs:227`
 - `hosts/wasm/src/lib.rs:1453`
-- `rust.hosted-signing-venues.test.ts:134`
+- `rust.hosted-signing-venues.wasm.test.ts:134`
 
 Migrating Bitunix moves those controls to a still-unmigrated family.
 

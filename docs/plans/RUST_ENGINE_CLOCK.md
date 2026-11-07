@@ -5,6 +5,13 @@ Clock policy is cross-cutting. Fix the shared engine clock ingress rather than
 adding another venue opt-in. Signing core and Binance belong to codex-uufub4;
 its dispatch preparation continues to consume `Cx.now: f64` epoch milliseconds.
 
+## Current default-clock correction
+
+The dynamic synchronized scheduling ingress described in PR1 below is superseded
+by [the monotonic scheduling contract](callers/engine-monotonic-deadlines.md).
+Late synchronization updates protocol UTC only. Explicit injected clocks retain
+the original contract. The earlier phase notes below record the prior rollout.
+
 ## Contract and phases
 
 1. PR1: audit clock ingress and tape-clock injection. The default SDK transport

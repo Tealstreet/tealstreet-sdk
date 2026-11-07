@@ -60,6 +60,12 @@ impl Harness {
     ) -> Self {
         Self::build(instruments, broker_attribution, now, fill, false, |_| {})
     }
+    /// A frame-fed engine (`safe_cex_engine::frame_fed`) after its only startup
+    /// request, the public instrument read.
+    #[allow(dead_code)]
+    pub fn frame_fed() -> Self {
+        Self::setup(INSTRUMENT, false, 0.0, None, false, |_| {}, true)
+    }
     fn build(
         instruments: &str,
         broker_attribution: bool,
@@ -67,6 +73,26 @@ impl Harness {
         fill: Option<safe_cex_engine::entropy::Fill>,
         secondary: bool,
         adjust: impl FnOnce(&mut safe_cex_engine::signing::Identities),
+    ) -> Self {
+        Self::setup(
+            instruments,
+            broker_attribution,
+            now,
+            fill,
+            secondary,
+            adjust,
+            false,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn setup(
+        instruments: &str,
+        broker_attribution: bool,
+        now: f64,
+        fill: Option<safe_cex_engine::entropy::Fill>,
+        secondary: bool,
+        adjust: impl FnOnce(&mut safe_cex_engine::signing::Identities),
+        frame_fed: bool,
     ) -> Self {
         // Trusted setup registers the same opaque refs the venue holds.
         let setup = if secondary {
@@ -87,6 +113,9 @@ impl Harness {
         if let Some(fill) = fill {
             e.set_signing_entropy(fill).unwrap();
         }
+        if frame_fed {
+            e.set_frame_fed().unwrap();
+        }
         e.start(now);
         let mut h = Self {
             e,
@@ -101,6 +130,9 @@ impl Harness {
         h.collect_at(now);
         let instrument_request = h.take("instruments");
         h.respond_at(instrument_request, instruments, now);
+        if frame_fed {
+            return h;
+        }
         let tickers = h.take("tickers");
         h.respond_at(tickers,r#"{"code":"0","data":[{"instId":"BTC-USDT","last":"60000","open24h":"59000","bidPrice":"59999","askPrice":"60001","volCurrency24h":"1","vol24h":"60000"}]}"#,now);
         h.private = h
@@ -115,6 +147,7 @@ impl Harness {
         h.tick = h
             .actions
             .iter()
+            .rev()
             .find_map(|a| match a {
                 Action::SetTimer { timer, at_ms } if *at_ms == now + 10_000.0 => Some(*timer),
                 _ => None,
@@ -212,16 +245,16 @@ impl Harness {
         self.respond(r, body);
     }
     pub fn respond(&mut self, r: HttpRequest, body: &str) {
-        let start = self.start;
-        self.respond_at(r, body, start);
+        let now = self.now.max(self.start);
+        self.respond_at(r, body, now);
     }
     pub fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
         self.respond_status_at(r, 200, body, now);
     }
     #[allow(dead_code)]
     pub fn respond_status(&mut self, r: HttpRequest, status: u16, body: &str) {
-        let start = self.start;
-        self.respond_status_at(r, status, body, start);
+        let now = self.now.max(self.start);
+        self.respond_status_at(r, status, body, now);
     }
     fn respond_status_at(&mut self, r: HttpRequest, status: u16, body: &str, now: f64) {
         self.e.handle(
@@ -236,6 +269,67 @@ impl Harness {
             },
         );
         self.collect_at(now);
+    }
+    /// Explicit lifecycle setup for fixtures that exercise private stream rows.
+    #[allow(dead_code)]
+    pub fn open_private(&mut self) {
+        let now = self.now;
+        self.handle(
+            now,
+            Event::WsOpened {
+                socket: self.private,
+            },
+        );
+        self.collect();
+        self.handle(
+            now,
+            Event::WsMessage {
+                socket: self.private,
+                text: r#"{"event":"login","code":"0"}"#,
+            },
+        );
+        self.collect();
+    }
+    /// Reconnect through the exact emitted backoff; the caller supplies its ACK.
+    #[allow(dead_code)]
+    pub fn reconnect_private(&mut self) {
+        let begin = self.actions.len();
+        self.handle(
+            self.now,
+            Event::WsClosed {
+                socket: self.private,
+                code: 1006,
+            },
+        );
+        self.collect();
+        let (timer, at) = self.actions[begin..]
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms }
+                    if *at_ms > self.now && *at_ms <= self.now + 1000. =>
+                {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .expect("actual private backoff");
+        let begin = self.actions.len();
+        self.handle(at, Event::TimerFired { timer });
+        self.collect();
+        self.private = self.actions[begin..]
+            .iter()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
+                _ => None,
+            })
+            .expect("actual replacement private connection");
+        self.handle(
+            at,
+            Event::WsOpened {
+                socket: self.private,
+            },
+        );
+        self.collect();
     }
     pub fn modes(&mut self) {
         self.reply(
@@ -255,7 +349,7 @@ impl Harness {
         );
         self.reply(
             "balances",
-            r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#,
+            r#"{"code":"0","data":[{"currency":"USDT","balance":"1010","available":"1000","frozen":"10"}]}"#,
         );
         for path in [
             "orders-pending",
@@ -265,10 +359,11 @@ impl Harness {
             self.reply(path, r#"{"code":"0","data":[]}"#);
         }
     }
+    #[allow(dead_code)]
     pub fn ws(&mut self, text: &str) {
         self.now = self.now.max(1.0);
         self.e.handle(
-            1.0,
+            self.now,
             Event::WsMessage {
                 socket: self.private,
                 text,

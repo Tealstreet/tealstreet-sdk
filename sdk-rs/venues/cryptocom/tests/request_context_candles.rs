@@ -208,8 +208,11 @@ fn original_candle_preparation_binding_and_one_claim_preserve_native_rows() {
     e.drain_actions().for_each(drop);
     let result = terminals(&reply(&mut e, NOW + 5., &packet, 200, ROWS, true), 7);
     let rows: serde_json::Value = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
-    assert_eq!(rows[0]["timestamp"], 120001.);
-    assert_eq!(rows[1]["timestamp"], 60001.);
+    assert_eq!(
+        rows[0]["timestamp"], 120.001,
+        "`t` is milliseconds; candles carry seconds"
+    );
+    assert_eq!(rows[1]["timestamp"], 60.001);
     assert_eq!(rows[1]["open"], 0.);
     assert!(reply(&mut e, NOW + 6., &packet, 200, ROWS, false).is_empty());
     assert!(e.take_frame(NOW + 6.).is_none());
@@ -383,7 +386,10 @@ fn finite_native_candle_urls_options_timeframes_and_ignored_limit_stay_unsigned(
                 let rows: serde_json::Value =
                     serde_json::from_str(results[0].as_ref().unwrap()).unwrap();
                 assert_eq!(rows.as_array().unwrap().len(), 2);
-                assert_eq!(rows[0]["timestamp"], 120001.);
+                assert_eq!(
+                    rows[0]["timestamp"], 120.001,
+                    "`t` is milliseconds; candles carry seconds"
+                );
                 assert_eq!(rows[1]["open"], 0.);
                 assert_eq!(e.health().auth_failures, 0);
             }
@@ -595,7 +601,7 @@ fn original_retired_bind_item_failure_and_timer_do_not_touch_reused_owner() {
     let rows: serde_json::Value = serde_json::from_str(results[0].as_ref().unwrap()).unwrap();
     assert_eq!(
         rows,
-        serde_json::json!([{"timestamp":900001.,"open":9.,"high":10.,"low":8.,"close":9.5,"volume":11.}])
+        serde_json::json!([{"timestamp":900.001,"open":9.,"high":10.,"low":8.,"close":9.5,"volume":11.}])
     );
     assert!(e.take_frame(NOW + 20_007.).is_none());
     assert_eq!(e.health().auth_failures, 0);

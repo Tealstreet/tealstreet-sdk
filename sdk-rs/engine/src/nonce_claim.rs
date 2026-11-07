@@ -25,6 +25,10 @@ pub(crate) struct ClaimAuthority {
     /// From the trusted identity's `credential_absent()`: nothing is presented.
     pub(crate) signing_only: bool,
     bound: AtomicBool,
+    #[cfg(feature = "nonce-handoff")]
+    epoch: Option<Arc<()>>,
+    #[cfg(feature = "nonce-handoff")]
+    owner: Option<Arc<super::handoff::Owner>>,
     #[cfg(feature = "address-nonce")]
     address: Option<crate::engine::address_nonce_setup::VerifiedAddress>,
 }
@@ -95,8 +99,27 @@ impl NonceClaim {
                     .map_err(|_| NonceSelectionError::InvalidSubject)?,
             )
         };
+        #[cfg(feature = "nonce-handoff")]
+        let owner = if address_domain {
+            None
+        } else {
+            identity.nonce_owner.clone()
+        };
+        #[cfg(feature = "nonce-handoff")]
+        let epoch = {
+            let store = NONCES
+                .get_or_init(Mutex::default)
+                .lock()
+                .map_err(|_| NonceSelectionError::InvalidSubject)?;
+            super::handoff::epoch(store.get(&(domain.name, subject.0)), owner.as_ref())
+                .map_err(|_| NonceSelectionError::InvalidSubject)?
+        };
         Ok(Self {
             authority: Arc::new(ClaimAuthority {
+                #[cfg(feature = "nonce-handoff")]
+                epoch,
+                #[cfg(feature = "nonce-handoff")]
+                owner,
                 domain,
                 subject: NonceSubject(subject),
                 #[cfg(feature = "address-nonce")]
@@ -122,9 +145,9 @@ pub(crate) struct NonceReservation {
     pub(crate) nonce: u64,
 }
 impl ClaimAuthority {
-    #[cfg(feature = "address-nonce")]
+    #[cfg(all(feature = "address-nonce", not(feature = "nonce-handoff")))]
     pub(crate) fn address_bound(&self) -> bool {
-        self.domain.subject == super::NonceSubjectStrategy::Address
+        self.address.is_some()
     }
 
     pub(crate) fn matches_identity(&self, identity: &Identity) -> bool {
@@ -132,6 +155,31 @@ impl ClaimAuthority {
             || self.credential.reference != *identity.authority_ref()
             || self.signing_only != identity.credential_absent()
             || !identity.signing_ref().is_ok_and(|key| *key == self.signing)
+        {
+            return false;
+        }
+        #[cfg(feature = "nonce-handoff")]
+        let owner_current = if self.domain.subject == super::NonceSubjectStrategy::Address {
+            self.owner.is_none()
+        } else {
+            match (self.owner.as_ref(), identity.nonce_owner.as_ref()) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
+        };
+        #[cfg(feature = "nonce-handoff")]
+        if !owner_current
+            || !NONCES
+                .get_or_init(Mutex::default)
+                .lock()
+                .is_ok_and(|store| {
+                    super::handoff::current(
+                        store.get(&(self.domain.name, self.subject.0.0)),
+                        self.epoch.as_ref(),
+                        self.owner.as_ref(),
+                    )
+                })
         {
             return false;
         }
@@ -178,6 +226,16 @@ impl ClaimAuthority {
             super::NonceFloor::ProtocolMs { scale } => (protocol_now, scale),
         };
         let floor = super::floor(ms, scale, self.domain.limit)?;
+        #[cfg(feature = "nonce-handoff")]
+        let nonce = super::reserve_claim(
+            self.domain.name,
+            self.subject.0.0,
+            floor,
+            self.domain.limit,
+            self.epoch.as_ref(),
+            self.owner.as_ref(),
+        )?;
+        #[cfg(not(feature = "nonce-handoff"))]
         let nonce = super::reserve(self.domain.name, self.subject.0.0, floor, self.domain.limit)?;
         Ok(NonceReservation {
             authority: self.clone(),
@@ -186,17 +244,23 @@ impl ClaimAuthority {
     }
 }
 impl NonceReservation {
+    /// An epoch revocation is terminal; ordinary nonce supersession may reprepare.
     pub(crate) fn fresh(&self) -> Result<bool, NonceError> {
         let store = NONCES
             .get_or_init(Mutex::default)
             .lock()
             .map_err(|_| NonceError::Unavailable)?;
+        #[cfg(feature = "nonce-handoff")]
+        if !super::handoff::current(
+            store.get(&(self.authority.domain.name, self.authority.subject.0.0)),
+            self.authority.epoch.as_ref(),
+            self.authority.owner.as_ref(),
+        ) {
+            return Err(NonceError::InvalidClaim);
+        }
         Ok(store
             .get(&(self.authority.domain.name, self.authority.subject.0.0))
-            .is_some_and(|state| {
-                self.nonce <= state.reserved
-                    && state.released.is_none_or(|floor| self.nonce > floor)
-            }))
+            .is_some_and(|state| releasable(state, self.nonce, self.authority.domain.window)))
     }
 
     /// The engine supplies only its private infallible Lifecycle/pacing commit.
@@ -205,11 +269,20 @@ impl NonceReservation {
             .get_or_init(Mutex::default)
             .lock()
             .map_err(|_| NonceError::Unavailable)?;
+        #[cfg(feature = "nonce-handoff")]
+        if !super::handoff::current(
+            store.get(&(self.authority.domain.name, self.authority.subject.0.0)),
+            self.authority.epoch.as_ref(),
+            self.authority.owner.as_ref(),
+        ) {
+            return Ok(false);
+        }
         let Some(state) = store.get_mut(&(self.authority.domain.name, self.authority.subject.0.0))
         else {
             return Err(NonceError::Unavailable);
         };
-        if self.nonce > state.reserved || state.released.is_some_and(|floor| self.nonce <= floor) {
+        let window = self.authority.domain.window;
+        if !releasable(state, self.nonce, window) {
             return Ok(false);
         }
         commit();
@@ -218,8 +291,28 @@ impl NonceReservation {
                 .released
                 .map_or(self.nonce, |floor| floor.max(self.nonce)),
         );
+        if window > 0 {
+            let at = state.recent.partition_point(|&n| n < self.nonce);
+            state.recent.insert(at, self.nonce);
+            if state.recent.len() > window {
+                state.recent.remove(0);
+            }
+        }
         Ok(true)
     }
+}
+
+/// The venue's own rule: a reserved nonce never released, and, in a windowed domain,
+/// above the lowest of its kept highest nonces; otherwise above every release.
+fn releasable(state: &super::NonceState, nonce: u64, window: usize) -> bool {
+    if nonce > state.reserved {
+        return false;
+    }
+    if window == 0 {
+        return state.released.is_none_or(|floor| nonce > floor);
+    }
+    state.recent.binary_search(&nonce).is_err()
+        && (state.recent.len() < window || state.recent.first().is_some_and(|&low| nonce > low))
 }
 
 #[cfg(test)]
@@ -311,6 +404,29 @@ mod tests {
         assert!(b.commit_release(|| {}).unwrap());
         assert!(!a.fresh().unwrap());
         assert!(!a.commit_release(|| panic!("older cannot commit")).unwrap());
+    }
+    #[test]
+    fn a_windowed_domain_releases_out_of_order_until_below_its_kept_highest() {
+        let state = |reserved, recent: Vec<u64>| crate::nonce::NonceState {
+            reserved,
+            released: recent.last().copied(),
+            recent,
+            #[cfg(feature = "nonce-handoff")]
+            tracking: None,
+        };
+        // Strict: a lower nonce after a higher one is stale.
+        assert!(!releasable(&state(10, vec![9]), 5, 0));
+        // Hyperliquid's 100: any unused nonce above the lowest kept one.
+        assert!(releasable(&state(10, vec![9]), 5, 100));
+        assert!(!releasable(&state(10, vec![5, 9]), 5, 100), "never reused");
+        let full: Vec<u64> = (101..=200).collect();
+        assert!(!releasable(&state(300, full.clone()), 150, 100), "reused");
+        assert!(
+            !releasable(&state(300, full.clone()), 100, 100),
+            "below the lowest kept"
+        );
+        assert!(releasable(&state(300, full), 250, 100));
+        assert!(!releasable(&state(10, vec![]), 11, 100), "never reserved");
     }
     #[test]
     fn a_claim_cannot_be_bound_to_two_physical_requests() {

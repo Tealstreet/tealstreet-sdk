@@ -24,6 +24,8 @@ pub enum Step {
     Cancel {
         id: String,
     },
+    /// Every open order on the account; only a nuke asks for it.
+    CancelAll,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -300,6 +302,7 @@ impl KrakenSpot {
             Step::Place { params, .. } => ("/0/private/AddOrder", params.clone()),
             Step::Amend { params, .. } => ("/0/private/AmendOrder", params.clone()),
             Step::Cancel { id } => ("/0/private/CancelOrder", vec![("txid", id.clone())]),
+            Step::CancelAll => ("/0/private/CancelAll", vec![]),
         };
         self.trading.waiting = true;
         if let Step::Place { receipt, .. } = &step {
@@ -340,6 +343,11 @@ impl KrakenSpot {
                     }
                     job.ids.push(id);
                 }
+                // A count of zero is an answer too: nothing was open.
+                Step::CancelAll => {
+                    serde_json::from_str::<Canceled>(text)
+                        .map_err(|_| unproven("Kraken Spot missing cancel-all count"))?;
+                }
             }
             job.effective = true;
             Ok::<_, VenueError>(())
@@ -352,6 +360,11 @@ impl KrakenSpot {
             Err(e) => self.trade_failed(cx, e),
         }
     }
+    pub(super) fn trade_refused(&self, cx: &mut Cx<'_, Pending>) {
+        if let Some(job) = self.trading.active.as_ref().filter(|job| !job.effective) {
+            cx.placement_resolved(job.command);
+        }
+    }
     pub(super) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
@@ -362,6 +375,10 @@ impl KrakenSpot {
             cx.fail(job.command, error);
         }
         self.trade_next(cx);
+    }
+    /// A nuke's account-wide cancel, queued behind the trading in flight.
+    pub(super) fn cancel_account_orders(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        self.enqueue(cx, command, VecDeque::from([Step::CancelAll]), true)
     }
     pub(super) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
         match command {
@@ -472,6 +489,7 @@ impl KrakenSpot {
                     }
                     Query::Fills { .. } | Query::OrderHistory { .. } | Query::Income { .. } => {
                         completion.incomplete(
+                            safe_cex_engine::history::IncompleteReason::NoNativeRead,
                             "history is INCOMPLETE: Kraken Spot adapter has no native history read",
                         );
                         HistoryRows::<()>::new(completion, |rows| {
@@ -498,8 +516,8 @@ fn unproven(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
-/// A refused private write, classified by HTTP status and Kraken's documented
-/// error prefixes. 408/5xx and malformed answers do not prove a refusal.
+/// A failed private write, classified by HTTP status and Kraken's documented
+/// error prefixes. 408/429/5xx and malformed answers do not prove a refusal.
 pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueError {
     let error = VenueError::new(message);
     let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
@@ -507,7 +525,7 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         200..=299 => {}
         401 => return rejected(error, ErrorKind::AuthInvalid),
         403 => return rejected(error, ErrorKind::AuthPermission),
-        429 => return rejected(error, ErrorKind::RateLimited),
+        429 => return error.kind(ErrorKind::RateLimited).outcome(Outcome::Unknown),
         408 => return error.outcome(Outcome::Unknown),
         400..=499 => return rejected(error, ErrorKind::Rejected),
         _ => return error.outcome(Outcome::Unknown),
@@ -523,6 +541,10 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
             rejected(error, ErrorKind::AuthInvalid)
         }
         "EGeneral:Permission denied" => rejected(error, ErrorKind::AuthPermission),
+        // Documented: docs.kraken.com/exchange/guides/general/errors.md
+        "ETrade:Invalid request"
+        | "EService:Market in cancel_only mode"
+        | "EService:Market in post_only mode" => rejected(error, ErrorKind::Rejected),
         "EAPI:Rate limit exceeded" | "EOrder:Rate limit exceeded" => {
             rejected(error, ErrorKind::RateLimited)
         }
@@ -530,6 +552,8 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         | "EService:Busy"
         | "EService:Deadline elapsed"
         | "EGeneral:Internal error" => error.outcome(Outcome::Unknown),
+        // Documented to partially fill and cancel the remainder, so nothing proves no fill.
+        "EOrder:Reduce only:Position is closed" => error.outcome(Outcome::Unknown),
         code if code.starts_with("EOrder:") || code.starts_with("EGeneral:Invalid arguments") => {
             rejected(error, ErrorKind::Rejected)
         }

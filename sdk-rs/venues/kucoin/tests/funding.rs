@@ -1,9 +1,11 @@
 //! Oracles: Classic Futures Get Private Funding History, including its
 //! recommendation to page by time rather than unstable offsets.
+mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Query};
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
 use serde::Deserialize;
+use support::credentials::Options;
 
 struct Harness {
     engine: Engine<Kucoin>,
@@ -12,12 +14,15 @@ struct Harness {
 }
 impl Harness {
     fn new() -> Self {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-            key: Some("fixture-key".into()),
-            secret: Some("fixture-secret".into()),
-            passphrase: Some("fixture-passphrase".into()),
-            ..Default::default()
-        }));
+        let mut engine = support::credentials::engine(
+            Options {
+                key: Some("fixture-key".into()),
+                secret: Some("fixture-secret".into()),
+                passphrase: Some("fixture-passphrase".into()),
+                ..Default::default()
+            },
+            Kucoin::new,
+        );
         engine.store_mut().set_markets(vec![Market {
             id: "XBTUSDTM".into(),
             symbol: "BTCUSDT".into(),
@@ -57,7 +62,11 @@ impl Harness {
     }
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
-        self.actions.extend(self.engine.drain_actions());
+        self.actions
+            .extend(safe_cex_engine::test_support::prepared_actions(
+                &mut self.engine,
+                self.now,
+            ));
     }
     fn query(&mut self, from: f64, to: f64, limit: Option<u32>) {
         self.event(Event::Command(Command::Query {
@@ -369,4 +378,34 @@ fn zero_width_requested_range_is_filtered_after_native_window_expansion() {
     let rows: Vec<Income> = serde_json::from_str(h.result().as_ref().unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].tran_id, "1");
+}
+
+#[test]
+fn open_ended_funding_window_with_no_limit_walks_past_the_default() {
+    let mut h = Harness::new();
+    let now = h.engine.signing_clock(h.now).0 as u64;
+    h.event(Event::Command(Command::Query {
+        command: 1,
+        query: Query::Income {
+            symbol: Some("BTCUSDT".into()),
+            kind: Some("FUNDING_FEE".into()),
+            from_ms: Some((now - 3_600_000) as f64),
+            to_ms: None,
+            limit: None,
+        },
+    }));
+    // Twenty full pages reach the old default of 1000 rows; the walk continues.
+    for page in 0..20 {
+        let r = h.take();
+        let rows = (0..50)
+            .map(|n| {
+                let id = page * 50 + n + 1;
+                row(id, now - 1000 - id)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        h.reply(&r, &rows, true);
+        h.advance();
+    }
+    assert!(h.take().url.contains("funding-history"));
 }

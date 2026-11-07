@@ -756,3 +756,72 @@ fn settled_cleanup_error_refuses_binding_but_allows_explicit_reinitialize() {
         assert!(mint(&e).is_ok());
     }
 }
+
+#[test]
+fn both_slots_preserve_setup_action_order_and_exact_signing_bytes() {
+    let mut e = external();
+    assert_eq!(
+        e.initialize_address_nonce(100.).unwrap(),
+        AddressSetupProgress::Pending
+    );
+    let work = SignRequest {
+        receipt: SignReceipt::default(),
+        operations: vec![Operation::PublicAddress {
+            key: KeyRef("signing".into()),
+        }],
+        context: Context::default(),
+    };
+    assert_eq!(
+        serde_json::to_vec(&work).unwrap(),
+        br#"{"receipt":{},"operations":[{"kind":"publicAddress","key":"signing"}],"context":{"venue":"","method":"","host":"","path":""}}"#
+    );
+    assert_eq!(
+        e.drain_actions().collect::<Vec<_>>(),
+        vec![
+            Action::SetTimer {
+                timer: TimerId(1),
+                at_ms: 20_100.,
+            },
+            Action::Sign {
+                attempt: RequestId(1),
+                work: work.clone(),
+                timeout_ms: 20_000,
+            },
+            Action::SetTimer {
+                timer: TimerId(2),
+                at_ms: 20_100.,
+            },
+            Action::Sign {
+                attempt: RequestId(2),
+                work: work.clone(),
+                timeout_ms: 20_000,
+            },
+        ]
+    );
+    for (attempt, timer) in [(RequestId(2), TimerId(2)), (RequestId(1), TimerId(1))] {
+        e.handle(
+            101.,
+            Event::Signed {
+                attempt,
+                result: Ok(result(&work, 20)),
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let [Action::RetireAddressSetup { task, token }] = actions.as_slice() else {
+            panic!("one retirement precedes each binding");
+        };
+        assert_eq!(*task, attempt);
+        assert!(e.address_setup_retired(token.clone(), 102.));
+        assert_eq!(
+            e.drain_actions().collect::<Vec<_>>(),
+            vec![Action::ClearTimer { timer }]
+        );
+    }
+    assert!(e.address_nonce_setup_ready());
+    for identity in [&e.identities().primary, &e.identities().secondary] {
+        assert_eq!(
+            identity.as_ref().unwrap().verified_signing_address(),
+            Ok([19; 20])
+        );
+    }
+}
