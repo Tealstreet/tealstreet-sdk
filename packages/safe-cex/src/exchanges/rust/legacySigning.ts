@@ -27,6 +27,23 @@ const BYBIT = new Set<ExchangeName>(['bybit', 'bybitinverse', 'bybitspot', 'bybi
 const OKX = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const BITGET = new Set<ExchangeName>(['bitget', 'bitgetusdc', 'bitgetinverse']);
 
+const isMexcUnsignedRequest = (url = '') => {
+  const path = url.split('?')[0];
+  return ['/api/v1/contract/detail', '/api/v1/contract/ticker', '/api/v1/contract/depth', '/api/v1/contract/kline']
+    .some((endpoint) => path === endpoint || path.startsWith(`${endpoint}/`));
+};
+
+/** MEXC signs public key, integer milliseconds and the exact query or JSON bytes. */
+const prepareMexcRequest = (config: InternalAxiosRequestConfig, key: string, stampMs: number) => {
+  const method = config.method?.toUpperCase() || 'GET';
+  const stamp = String(Math.floor(stampMs));
+  const body = typeof config.data === 'string' ? config.data : config.data == null ? '' : JSON.stringify(config.data);
+  const query = config.params ? qs.stringify(config.params, { arrayFormat: 'repeat', sort: (a, b) => a.localeCompare(b) })
+    : (config.url ?? '').split('?')[1] ?? '';
+  return { config: { ...config, ...(method === 'GET' ? {} : { data: body || config.data }) }, stamp,
+    payload: `${key}${stamp}${method === 'GET' ? query : body}` };
+};
+
 /** Phemex's REST preimage `path ‖ query ‖ expiry ‖ body`, as the retired TS venue
  * built it: the decoded qs query without `?`, expiry in rounded seconds a minute on.
  */
@@ -166,13 +183,15 @@ export const signHostedHttp = async (
   const bitunix = name === 'bitunix';
   const bingx = name === 'bingx';
   const phemex = name === 'phemex';
+  const mexc = name === 'mexc';
   const woo = name === 'woo';
   const blofin = name === 'blofin';
-  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster && !woo)
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster && !woo && !mexc)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
   // The legacy Bitget and Phemex interceptors sign every request once credentials exist.
-  const unsigned = woo ? request.config.url?.includes('/public/') === true : phemex ? false : binance ? isBinancePublicSigningRequest(name, request.config.url)
+  const unsigned = mexc ? options.publicDataOnly === true || isMexcUnsignedRequest(request.config.url)
+    : woo ? request.config.url?.includes('/public/') === true : phemex ? false : binance ? isBinancePublicSigningRequest(name, request.config.url)
     : okx ? isOkxUnsignedSigningRequest(request.config.url)
     : aster ? isAsterDEXPublicEndpoint(request.config.url)
       : bitunix ? isBitunixUnsignedRequest(request.config.url)
@@ -212,6 +231,7 @@ export const signHostedHttp = async (
     timeout: 20_000,
     paramsSerializer: {
       serialize: (params) => binance ? qs.stringify(params, { arrayFormat: 'repeat' })
+        : mexc ? qs.stringify(params, { arrayFormat: 'repeat', sort: (a, b) => a.localeCompare(b) })
         : bingx ? serializeBingxParams(params) : qs.stringify(params),
     },
     headers: okx ? {
@@ -226,7 +246,7 @@ export const signHostedHttp = async (
       'X-BX-APIKEY': credential,
       'X-SOURCE-KEY': 'Tealstreet',
       'Content-Type': 'application/json, charset=utf-8',
-    } : woo ? { 'cache-control': 'no-cache' } : phemex ? {} : blofin ? {
+    } : mexc ? { 'Content-Type': 'application/json' } : woo ? { 'cache-control': 'no-cache' } : phemex ? {} : blofin ? {
       'Content-Type': 'application/json',
     } : binance ? {
       'X-MBX-APIKEY': credential,
@@ -238,7 +258,17 @@ export const signHostedHttp = async (
       ...siteHeaders,
     },
   });
-  xhr.interceptors.request.use(okx ? async (config) => {
+  xhr.interceptors.request.use(mexc ? async (config) => {
+    if (isMexcUnsignedRequest(config.url)) markSkipRemoteSigning(config);
+    if (!credential) return config;
+    const prepared = prepareMexcRequest(config, credential, now());
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+    return { ...prepared.config, headers: new AxiosHeaders({ ...config.headers, ApiKey: credential,
+      'Request-Time': prepared.stamp, Signature: output.signature,
+      'Recv-Window': String(Math.max(1, Math.min(20_000, options.extra?.recvWindow ?? 20_000))),
+      'Content-Type': 'application/json' }) };
+  } : okx ? async (config) => {
     // Market paths keep the existing local signing behavior. The skip flag
     // concerns the keyless transport roundtrip, not browser-held signing.
     if (isOkxPublicSigningRequest(config.url)) {
@@ -292,7 +322,7 @@ export const signHostedHttp = async (
   } : binance
     ? createBinanceRequestInterceptor(signingOptions, name, now)
     : createBybitRequestInterceptor(signingOptions, name, now, siteHeaders));
-  return signHttpCapture(xhr, request);
+  return signHttpCapture(xhr, request, { preserveSerializedBody: mexc });
 };
 
 export const signHostedWsAuth = async (

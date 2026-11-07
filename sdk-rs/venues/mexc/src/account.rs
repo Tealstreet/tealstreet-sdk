@@ -257,6 +257,9 @@ impl MexcFutures {
         );
     }
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !cx.private_feed_policy().streaming() {
+            return;
+        }
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
         self.account.private.socket = Some(cx.connect(
