@@ -237,9 +237,9 @@ impl MexcFutures {
             params.extend([
                 (
                     "start_time",
-                    safe_cex_engine::num::format(cx.now - 89.0 * 86400000.0),
+                    safe_cex_engine::num::format(cx.protocol_now() - 89.0 * 86400000.0),
                 ),
-                ("end_time", safe_cex_engine::num::format(cx.now)),
+                ("end_time", safe_cex_engine::num::format(cx.protocol_now())),
             ]);
             params.push(if snapshot.scope == Scope::Plan {
                 ("states", "1".into())

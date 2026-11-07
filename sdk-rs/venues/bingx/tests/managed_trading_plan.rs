@@ -307,6 +307,13 @@ fn gateway_100001_does_not_grant_a_write_resend() {
     );
 }
 #[test]
+fn rate_limited_100001_does_not_grant_a_write_resend() {
+    assert_uncertain_response_never_resends(
+        429,
+        r#"{"code":100001,"msg":"Signature verification failed"}"#,
+    );
+}
+#[test]
 fn timeout_status_100001_does_not_grant_a_write_resend() {
     assert_uncertain_response_never_resends(
         408,
@@ -1090,4 +1097,12 @@ fn generic_invalid_parameter_text_is_not_a_missing_order_cancel_or_a_resend() {
             safe_cex_engine::model::OrderStatus::Open
         );
     }
+}
+
+#[test]
+fn engine_ambiguity_429_signature_body_cannot_resend() {
+    assert_uncertain_response_never_resends(
+        429,
+        r#"{"code":100001,"msg":"Signature verification failed"}"#,
+    );
 }

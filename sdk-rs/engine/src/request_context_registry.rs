@@ -2142,17 +2142,12 @@ impl<P> Cx<'_, P> {
             body: "",
         };
         let delivery = self.current_write_delivery(context)?;
-        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-        let status_exempt = self.io.core.http_status_exempt == Some(delivery.attempt.request);
-        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
-        let status_exempt = false;
-        Ok(crate::classify::fact_for_delivery(
+        Ok(crate::classify::fact(
             table,
             self.write_intent(context)?,
             crate::classify::Released::Response(&response),
             native,
             message,
-            status_exempt,
         )
         .for_attempt(delivery.attempt.request))
     }

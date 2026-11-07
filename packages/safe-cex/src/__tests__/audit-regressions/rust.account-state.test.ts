@@ -123,6 +123,7 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
       quantityUnitsCode(name),
     );
   const native: WasmEngineLike = {
+    syncHostTime: () => true,
     capabilities: () => engineCapabilities(name),
     start: vi.fn(idle),
     wsOpen: idle,
@@ -498,7 +499,7 @@ describe('Rust native current-account reads', () => {
     ]);
   });
 
-  it.each(['woo', 'grvt', 'kucoin', 'kucoinspot', 'polymarket', 'breakoutprop'] as ExchangeName[])(
+  it.each(['woo', 'grvt', 'kucoin', 'kucoinspot', 'polymarket'] as ExchangeName[])(
     '%s preserves its native venue-global cancel-all command',
     async (name) => {
       const r = fixture(name);

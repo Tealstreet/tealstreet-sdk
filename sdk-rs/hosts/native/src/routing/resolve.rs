@@ -645,7 +645,7 @@ fn venue_headers(name: &str, o: &RoutingInputs) -> BTreeMap<String, String> {
 }
 
 fn proxy_authorization_header(name: &str) -> &'static str {
-    if matches!(name, "grvt" | "mexc" | "paradex" | "breakoutprop") {
+    if matches!(name, "grvt" | "mexc" | "paradex") {
         "Tealstreet-Authorization"
     } else {
         "Authorization"

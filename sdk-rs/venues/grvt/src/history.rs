@@ -412,8 +412,12 @@ impl Grvt {
             cx.refuse_command(Operation::Read, "Unknown GRVT query market");
             return;
         }
-        let result =
-            (|| Ok::<_, String>((from.map(bound).transpose()?, bound(to.unwrap_or(cx.now))?)))();
+        let result = (|| {
+            Ok::<_, String>((
+                from.map(bound).transpose()?,
+                bound(to.unwrap_or(cx.protocol_now()))?,
+            ))
+        })();
         let (from, to) = match result {
             Ok(v) => v,
             Err(e) => {

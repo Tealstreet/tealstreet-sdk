@@ -1171,7 +1171,7 @@ fn the_journal_owns_a_non_2xx_outcome() {
             r#"{"code":"102015","msg":"Order price is not within the price limit"}"#,
             Some(Outcome::Rejected),
         ),
-        (429, "{}", Some(Outcome::Rejected)),
+        (429, "{}", Some(Outcome::Unknown)),
     ] {
         let mut h = seeded();
         command(&mut h, place(7, 1.0));

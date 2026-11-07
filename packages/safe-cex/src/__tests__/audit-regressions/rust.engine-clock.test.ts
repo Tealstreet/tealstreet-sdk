@@ -34,7 +34,12 @@ vi.mock('../../utils/runtime', async (original) => ({
 
 const EPOCH = 1_760_000_000_000;
 const running: RustEngineExchange[] = [];
-beforeEach(() => { virtualClock.setServerTimeSource(async () => EPOCH); });
+let monotonic = 0;
+beforeEach(() => {
+  monotonic = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => monotonic);
+  virtualClock.setServerTimeSource(async () => EPOCH);
+});
 afterEach(() => {
   running.splice(0).forEach((exchange) => exchange.dispose());
   virtualClock.stop();
@@ -101,7 +106,7 @@ function fixture(name: ExchangeName, now: () => number, legacyClock?: boolean, h
     completeHttp: (response: HttpResponse) => completeHttp!(response) };
 }
 
-it.each([...RUST_VENUES])('uses the synchronized production clock for %s at startup and later events', async (name) => {
+it.each([...RUST_VENUES])('keeps the production scheduling clock monotonic for %s after synchronization', async (name) => {
   let synced = EPOCH;
   vi.spyOn(Date, 'now').mockReturnValue(EPOCH + 600_000);
   vi.spyOn(virtualClock, 'getCurrentTimeMs').mockImplementation(() => synced);
@@ -110,6 +115,7 @@ it.each([...RUST_VENUES])('uses the synchronized production clock for %s at star
   expect(f.seen.find(([event]) => event === 'start')).toEqual(['start', EPOCH]);
   expect(f.timers.some(({ ms }) => ms === 1500)).toBe(true);
   synced += 2345;
+  monotonic += 2345;
   await f.exchange.setLeverage('BTCUSDT', 2);
   expect(f.seen.filter(([event]) => event === 'command').at(-1)).toEqual(['command', synced]);
   expect(f.seen.filter(([event]) => event === 'frame').at(-1)).toEqual(['frame', synced]);
@@ -119,17 +125,18 @@ it.each([...RUST_VENUES])('uses the synchronized production clock for %s at star
   synced -= 3456;
   f.timers.find(({ ms }) => ms === 1500)!.fn();
   f.socket().onClose(1006);
-  expect(f.seen.find(([event]) => event === 'timer')).toEqual(['timer', synced]);
-  expect(f.seen.find(([event]) => event === 'close')).toEqual(['close', synced]);
+  expect(f.seen.find(([event]) => event === 'timer')).toEqual(['timer', EPOCH + monotonic]);
+  expect(f.seen.find(([event]) => event === 'close')).toEqual(['close', EPOCH + monotonic]);
 });
 
-it('uses the current synchronized clock for every streamed HTTP completion callback', async () => {
+it('uses the stable scheduling clock for every streamed HTTP completion callback', async () => {
   let synced = EPOCH;
   vi.spyOn(virtualClock, 'getCurrentTimeMs').mockImplementation(() => synced);
   const f = fixture('mexc', () => EPOCH + 600_000, undefined, true);
   await f.exchange.start();
   await vi.waitFor(() => expect(f.hasHttp()).toBe(true));
   synced += 1234;
+  monotonic += 1234;
   f.completeHttp({ status: 200, headers: '', body: new TextEncoder().encode('{}') });
   await vi.waitFor(() => expect(f.seen).toContainEqual(['httpEnd', synced]));
   expect(f.seen.filter(([event]) => event.startsWith('http'))).toEqual([

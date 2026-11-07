@@ -1011,7 +1011,7 @@ impl Cryptocom {
                     self.message_id,
                     quoted("subscribe"),
                     serde_json::to_string(&channels).unwrap(),
-                    cx.now as u64
+                    cx.protocol_now() as u64
                 ),
             );
             self.reconcile(cx);

@@ -9,6 +9,7 @@ Historical Rust-adapter fixtures mock only beta admission through
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
+Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
 KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
@@ -213,6 +214,13 @@ The delegated provider initializes UTF-8 codecs only when provider work begins.
 Importing the native registry before its host installs TextEncoder/TextDecoder
 must remain supported; signing and frame I/O require those runtime codecs.
 
+Backpack's `backpack-ed25519` device codec resolves `[Present, Sign Ed25519]`
+atomically for the selected primary/secondary slot. Registry engines hold only
+provider refs; private startup and WS use them without raw credentials. Private
+PayloadSigner remains refused. The direct native raw-options compatibility API
+retains its previous WS path. The caller document above owns parity and hold
+requirements; betaVenues.ts keeps its existing refusal wording.
+
 The beta registry always selects Rust in SDK factories and `ExchangeWorker`;
 `ExchangeOptions.engine` remains an accepted compatibility input only.
 `src/__tests__/cutover/*.wasm.test.ts` verifies the worker frame/store consumer
@@ -379,9 +387,17 @@ read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
 maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
 order-book queries and options. Clock selection is shared engine-host policy:
-the default SDK transport awaits the shared `virtualClock` startup and reads it
-dynamically for every venue. Explicit host/recording transports retain their own
-clock; native servers supply their OS clock and own its synchronization. There is no per-venue
+the default SDK transport awaits shared `virtualClock` startup, anchors an
+epoch-shaped scheduling clock to `performance.now()`, and never moves its live
+deadlines on subsequent synchronization. Browser workers wait up to 30 s for
+an initial host time push before anchoring. Later syncs update only the engine's
+protocol UTC fallback; small corrections preserve venue calibration, while a
+>1 s host-baseline discontinuity (including suspend) invalidates it. The default
+transport records wall-versus-monotonic divergence as pending UTC data only;
+EngineHost drains it outside HTTP handoffs before the next Rust call. Journal
+UTC bounds and scheduled-cancel validation still use synchronized wall time.
+Explicit host/recording transports retain their own clock; native servers supply
+their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue
 `hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
 `start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
@@ -680,7 +696,7 @@ SDK.
   included (`isHonorableShape`): a stop is one native order, and on a bracket
   the caller's ID goes on the entry while each TP/SL leg gets its own minted
   cloid. It also mints a cloid for every order it places, caller ID or not.
-  **Rejecting venues**: AsterDEX, BreakoutProp, HyroTrader, Kraken (+spot),
+  **Rejecting venues**: AsterDEX, HyroTrader, Kraken (+spot),
   Lighter, MEXC, Polymarket.
 - **No broker prefix is composed onto a caller ID.** The generated paths keep
   their broker-attributed IDs (`x-s3vFFRQp…`, OKX/BloFin `BROKER_ID…`, Phemex
@@ -1426,10 +1442,7 @@ raw primary/secondary clients on `this._primaryXhr` / `this._secondaryXhr`. The 
 that wires it MUST equal the set the UI offers it for — i.e. everything **not** in
 `exchangesWithoutSecondaryKey` (`src/utils/exchangeSupportsSecondaryKey.ts`). That
 exclusion list is the wallet / single-keypair venues (hyperliquid, paradex,
-grvt, apexomni, lighter, polymarket, and the orderly ed25519 family) **plus** the
-session-login venue `breakoutprop` (DXtrade
-session token) — there a shared per-session token is injected on every request so a
-second client can't authenticate as a distinct key. A read-only "second API key" is
+grvt, apexomni, lighter, polymarket, and the orderly ed25519 family). A read-only "second API key" is
 not a coherent concept for any of these.
 When adding an exchange, wire the helper **and** reconcile that list.
 `binancepm` is the one bespoke case: it has no single `this.xhr` (uses
@@ -1513,7 +1526,7 @@ Is requiresCors true?
 │   └── Is enforceWsTunnel true?
 │       ├── YES → WS tunnel only, no CORS proxy
 │       │   Examples: Hyperliquid, Paradex, KuCoin, Kraken,
-│       │            AsterDEX, BreakoutProp, BitUnix, BybitDemo
+│       │            AsterDEX, BitUnix, BybitDemo
 │       └── NO → Fully direct, no proxy or tunnel
 │           Examples: OKX, Binance, BinancePM, BinanceSpot,
 │                     Bybit, BybitSpot, BybitInverse, Woo, WEEX
