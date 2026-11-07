@@ -12,7 +12,7 @@ const OKX = ['okx', 'okxeu', 'okxdemo', 'okxeudemo'];
  */
 export const engineCapabilities = (venue: string, overrides: Partial<EngineCapabilities> = {}): string => {
   const is = (...names: string[]) => names.includes(venue);
-  const noHistory = is('breakoutprop', 'hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse');
+  const noHistory = is('hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse');
   const noOrdersOrIncome = noHistory || is('apexomni', 'bitrue', 'kucoinspot');
   const record: EngineCapabilities = {
     account: is(
@@ -29,7 +29,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     orderHistory: !noOrdersOrIncome,
     incomeHistory: !noOrdersOrIncome,
     fillsByOrderId: is('grvt'),
-    cancelAll: is('polymarket', 'breakoutprop', 'woo', 'grvt', 'kucoin', 'kucoinspot', ...ORDERLY)
+    cancelAll: is('polymarket', 'woo', 'grvt', 'kucoin', 'kucoinspot', ...ORDERLY)
       ? 'native'
       : is('phemex', 'asterdex', 'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue', ...OKX)
         ? 'eachPlacedSymbol'
@@ -41,7 +41,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
         : is('mexc', 'woo', 'kraken', 'hyperliquid')
           ? 'onMetadata'
           : 'settings',
-    maxLeverage: is('bitrue') ? 'query' : is('polymarket') ? 'rails' : is('breakoutprop') ? 'unsupported' : 'market',
+    maxLeverage: is('bitrue') ? 'query' : is('polymarket') ? 'rails' : 'market',
     accountLeverage: is(...ORDERLY),
     accountMarginType: is('blofin', 'kucoinspot'),
     cancelWithSymbols: is('asterdex', 'kucoinspot'),
@@ -76,7 +76,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     finiteCommandNumbers: is('coinbase', 'coinbasespot'),
     finiteHistoryBounds: is('coinbase', 'coinbasespot'),
     rejectOrderHistoryFilters: is('txflow', 'coinbase', 'coinbasespot', ...ORDERLY),
-    publicCatalogueValidation: is('breakoutprop'),
+    publicCatalogueValidation: false,
     isolatedBookSubscriptions: is('asterdex'),
     scheduleCancel: is('hyperliquid'),
     orderHistoryNeedsSymbol: is('binance', 'binancepm', 'phemex'),
