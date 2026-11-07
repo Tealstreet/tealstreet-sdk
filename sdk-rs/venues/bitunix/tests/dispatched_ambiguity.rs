@@ -301,7 +301,12 @@ fn stale_refusal_definitive_replacement_response_stays_known_partial() {
     replacement_stale_refusal(200, 20003, false);
 }
 
-fn batch_rate_rows(code: i64, refused_prefix: bool) {
+fn batch_failure_rows(code: i64, refused_prefix: bool) {
+    let native_message = if code == 10001 {
+        "network error"
+    } else {
+        "throttled"
+    };
     let (mut e, _) = startup();
     let mut cmd = command("create");
     if let Command::PlaceOrders { orders, .. } = &mut cmd {
@@ -350,8 +355,8 @@ fn batch_rate_rows(code: i64, refused_prefix: bool) {
     let body = serde_json::json!({"code": 0, "data": {
         "successList": [],
         "failureList": [
-            {"errorCode": code, "errorMsg": "throttled"},
-            {"errorCode": code, "errorMsg": "throttled"},
+            {"errorCode": code, "errorMsg": native_message},
+            {"errorCode": code, "errorMsg": native_message},
         ],
     }})
     .to_string();
@@ -382,9 +387,23 @@ fn assert_batch_unknown(e: &mut TestEngine, now: f64, code: i64, check_native: b
     let error = failures[0];
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
     if check_native {
-        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+        assert_eq!(
+            error.kind,
+            Some(if code == 10001 {
+                safe_cex_engine::ErrorKind::Network
+            } else {
+                safe_cex_engine::ErrorKind::RateLimited
+            })
+        );
         assert_eq!(error.venue_code, Some(code.to_string()));
-        assert_eq!(error.venue_message.as_deref(), Some("throttled"));
+        assert_eq!(
+            error.venue_message.as_deref(),
+            Some(if code == 10001 {
+                "network error"
+            } else {
+                "throttled"
+            })
+        );
     }
     let text = error.legacy_text().to_ascii_lowercase();
     assert!(
@@ -422,25 +441,35 @@ fn assert_batch_unknown(e: &mut TestEngine, now: f64, code: i64, check_native: b
 
 #[test]
 fn native_10005_batch_rows_present_unknown_guidance() {
-    batch_rate_rows(10005, false);
+    batch_failure_rows(10005, false);
 }
 
 #[test]
 fn native_10006_batch_rows_present_unknown_guidance() {
-    batch_rate_rows(10006, false);
+    batch_failure_rows(10006, false);
 }
 
 #[test]
 fn native_10005_batch_rows_replace_an_earlier_chunks_refusal() {
-    batch_rate_rows(10005, true);
+    batch_failure_rows(10005, true);
 }
 
 #[test]
 fn native_10006_batch_rows_replace_an_earlier_chunks_refusal() {
-    batch_rate_rows(10006, true);
+    batch_failure_rows(10006, true);
 }
 
-fn cancel_batch_rate_rows(code: i64) {
+#[test]
+fn native_10001_batch_rows_replace_an_earlier_chunks_refusal() {
+    batch_failure_rows(10001, true);
+}
+
+#[test]
+fn native_10001_batch_rows_present_unknown_guidance() {
+    batch_failure_rows(10001, false);
+}
+
+fn cancel_batch_failure_rows(code: i64) {
     let (mut e, _) = startup();
     e.handle(100.0, Event::Command(command("cancel")));
     let writes = requests(&mut e);
@@ -469,10 +498,54 @@ fn cancel_batch_rate_rows(code: i64) {
 
 #[test]
 fn native_10005_cancel_rows_present_unknown_guidance() {
-    cancel_batch_rate_rows(10005);
+    cancel_batch_failure_rows(10005);
 }
 
 #[test]
 fn native_10006_cancel_rows_present_unknown_guidance() {
-    cancel_batch_rate_rows(10006);
+    cancel_batch_failure_rows(10006);
+}
+
+#[test]
+fn native_10001_cancel_rows_present_unknown_guidance() {
+    cancel_batch_failure_rows(10001);
+}
+
+#[test]
+fn native_10001_cancel_rows_with_refused_siblings_present_unknown_guidance() {
+    let (mut e, socket) = startup();
+    for id in ["two", "three"] {
+        event(
+            &mut e,
+            socket,
+            &serde_json::json!({"ch":"order", "data":{
+                "event":"CREATE", "symbol":"BTCUSDT", "orderId":id,
+                "side":"Buy", "type":"LIMIT", "qty":"1", "price":"90", "dealAmount":"0",
+            }})
+            .to_string(),
+        );
+        assert!(e.store().order(id).is_some());
+    }
+    e.handle(
+        100.0,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["two".into(), "three".into()],
+        }),
+    );
+    let writes = requests(&mut e);
+    assert_eq!(writes.len(), 1);
+    assert!(writes[0].url.ends_with("cancel_orders"));
+    e.handle(
+        110.0,
+        Event::HttpResponse {
+            request: writes[0].id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":0,"data":{"successList":[],"failureList":[{"orderId":"two","errorCode":20003,"errorMsg":"earlier refused row"},{"orderId":"three","errorCode":10001,"errorMsg":"network error"}]}}"#,
+            },
+        },
+    );
+    assert_batch_unknown(&mut e, 110.0, 10001, true);
 }

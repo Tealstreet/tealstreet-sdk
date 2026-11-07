@@ -252,20 +252,14 @@ fn text<T: Serialize>(v: &T) -> String {
 fn empty_list() -> &'static serde_json::value::RawValue {
     serde_json::from_str("[]").expect("literal empty array")
 }
-fn explain_batch_rate(items: &[BatchItem<'_>], message: &mut String) -> bool {
-    let rate_limited = items.iter().any(|item| {
-        matches!(
-            item,
-            BatchItem::Native(Native {
-                code: NativeCode::Int(10005 | 10006),
-                ..
-            })
-        )
-    });
-    if rate_limited {
-        message.push_str(". The outcome is unknown. Check Open Orders");
+fn explain_batch_unknown(error: &mut VenueError) {
+    if error.outcome == Some(Outcome::Unknown) {
+        error
+            .message
+            .push_str(". The outcome is unknown. Check Open Orders");
+        // A later uncertain chunk supersedes an earlier chunk's refusal text.
+        error.presents = true;
     }
-    rate_limited
 }
 fn ack_rows(
     raw: &serde_json::value::RawValue,
@@ -2431,12 +2425,11 @@ impl BitunixFutures {
         if malformed {
             items.push(BatchItem::Accepted(""));
         }
-        let mut message = if messages.is_empty() {
+        let message = if messages.is_empty() {
             "Bitunix batch response has incomplete order acknowledgements".to_owned()
         } else {
             messages.join_with("; ")
         };
-        let rate_limited = explain_batch_rate(&items, &mut message);
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.job.ids.extend(ids.iter().cloned());
         }
@@ -2458,8 +2451,7 @@ impl BitunixFutures {
                 Ok(())
             }
             Ok(WriteResult::PartialUnknown(mut error) | WriteResult::Failed(mut error)) => {
-                // A later uncertain chunk supersedes an earlier chunk's refusal text.
-                error.presents = rate_limited;
+                explain_batch_unknown(&mut error);
                 Err(Some(error))
             }
             Err(_) => Err(None),
@@ -2581,7 +2573,7 @@ impl BitunixFutures {
                 }
             })
             .collect::<Vec<_>>();
-        let mut message = if require_ack && canceled.len() != ids.len() {
+        let message = if require_ack && canceled.len() != ids.len() {
             "Bitunix cancellation not acknowledged for every order; replacement was not placed"
                 .to_owned()
         } else if message.is_empty() {
@@ -2589,7 +2581,6 @@ impl BitunixFutures {
         } else {
             message.join_with("; ")
         };
-        let rate_limited = explain_batch_rate(&items, &mut message);
         match cx.http_write_batch(
             &request.context,
             &codes::BITUNIX,
@@ -2605,7 +2596,7 @@ impl BitunixFutures {
                 | WriteResult::PartialUnknown(mut error)
                 | WriteResult::Failed(mut error),
             ) => {
-                error.presents = rate_limited;
+                explain_batch_unknown(&mut error);
                 Err(Some(error))
             }
             Err(_) => Err(None),
