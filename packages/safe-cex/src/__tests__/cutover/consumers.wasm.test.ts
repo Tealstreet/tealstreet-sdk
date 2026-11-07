@@ -208,10 +208,8 @@ afterEach(async () => {
 async function consumer(name: ExchangeName) {
   const options = {
     engine: 'rust' as const,
-    // DXtrade requires a session even for public reads. Keep its production
-    // credential guard while the independent frame producer remains offline.
-    key: name === 'breakoutprop' ? 'replay-key' : '',
-    secret: name === 'breakoutprop' ? 'replay-secret' : '',
+    key: '',
+    secret: '',
     publicDataOnly: true,
   };
   const main = new BaseExchange(name, options, new DefaultStore());

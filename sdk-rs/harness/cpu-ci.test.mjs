@@ -31,7 +31,7 @@ test('paired raw restoration preserves bytes at original paths and refuses escap
 });
 
 test('the global plan binds all complete public rosters and rejects missing/duplicate suites or reused pairs', () => {
-  assert.equal(validatePlannedCases(plan()).suites.length, 32);
+  assert.equal(validatePlannedCases(plan()).suites.length, 31);
   const changes = [p => { p.suites = []; }, p => { p.suites.push(structuredClone(p.suites[0])); },
     p => { p.suites[0].suite = 'unknown'; }, p => { p.suites[0].cases = []; },
     p => { p.suites[0].cases.push(structuredClone(p.suites[0].cases[0])); },

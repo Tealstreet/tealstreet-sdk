@@ -177,24 +177,6 @@ const WALLET: &str = "0x1111111111111111111111111111111111111111";
 const PRIVATE_KEY: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
 #[test]
-fn breakoutprop_needs_dxtrade_credentials_even_for_market_data() {
-    let message = "BreakoutProp market data requires a legacy DXtrade username and password";
-    for options in [
-        r#"{"publicDataOnly":true}"#,
-        r#"{"key":"user"}"#,
-        r#"{"key":"user","secret":""}"#,
-        r#"{"secret":"password"}"#,
-    ] {
-        assert_eq!(rejected("breakoutprop", options), message, "{options}");
-    }
-    construct(
-        "breakoutprop",
-        r#"{"publicDataOnly":true,"key":"user","secret":"password"}"#,
-    )
-    .unwrap();
-}
-
-#[test]
 fn polymarket_private_accounts_need_a_wallet_key_and_coherent_l2_credentials() {
     let account =
         |polymarket: &str| format!(r#"{{"key":"{PRIVATE_KEY}","polymarket":{polymarket}}}"#);
@@ -354,7 +336,6 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
         "lighter",
         "coinbase",
         "polymarket",
-        "breakoutprop",
     ] {
         assert_ne!(
             construct(venue, r#"{"remoteSigning":true}"#)

@@ -59,7 +59,6 @@ const legacyWhitelist: Record<string, LegacyWhitelist> = {
   phemex: singapore,
   bingx: singapore,
   bitrue: tokyo,
-  breakoutprop: singapore,
   blofin: singapore,
   lighter: singapore,
   'lighter-robinhood': singapore,

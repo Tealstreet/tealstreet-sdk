@@ -18,7 +18,6 @@ pub(crate) fn infinity(venue: &str) -> bool {
             | "mexc"
             | "phemex"
             | "bingx"
-            | "breakoutprop"
             | "blofin"
             | "okx"
             | "okxdemo"
@@ -147,9 +146,9 @@ mod tests {
             );
             count += 1;
         }
-        // Two retired broker metadata entries were deleted; every remaining entry is checked.
+        // Retired venue metadata entries were deleted; every remaining entry is checked.
         assert_eq!(
-            count, 48,
+            count, 47,
             "metadata extraction must not silently skip source"
         );
     }
