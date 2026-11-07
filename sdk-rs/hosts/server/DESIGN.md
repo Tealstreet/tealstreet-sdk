@@ -45,14 +45,16 @@ only into a Debian slim runtime running as UID/GID 65532. Exchange publishes as
 Candle's `candle-cache-owner` is installed beside `candle-server` after a separate
 Cargo invocation, preserving engine/cache JSON feature isolation.
 
-NX owns `docker-exchange-server-rust.yml` and `docker-candle-server-rust.yml`.
-Each publishes `latest` and the full source SHA to GHCR, then keylessly signs
-the exact pushed digest. Vultr requires GitHub OIDC issuer
-`https://token.actions.githubusercontent.com` and an exact certificate identity
-(`cosign verify --certificate-identity`, not a workflow-directory prefix):
+This mirror's `docker-exchange-server-native.yml` and
+`docker-candle-server-native.yml` build on push to `master` only, publish
+`sdk-<mirror sha>` to GHCR, and keylessly sign the exact pushed digest. Nothing
+publishes `latest`; the Vultr boxes run digest pins. They require GitHub OIDC
+issuer `https://token.actions.githubusercontent.com` and the exact certificate
+identity of this mirror's workflow (the monorepo's `*-server-rust.yml` signers
+were deleted 2026-11-07):
 
-- Exchange: `https://github.com/Tealstreet/tealstreet-next/.github/workflows/docker-exchange-server-rust.yml@refs/heads/master`
-- Candle: `https://github.com/Tealstreet/tealstreet-next/.github/workflows/docker-candle-server-rust.yml@refs/heads/master`
+- Exchange: `https://github.com/Tealstreet/tealstreet-sdk/.github/workflows/docker-exchange-server-native.yml@refs/heads/master`
+- Candle: `https://github.com/Tealstreet/tealstreet-sdk/.github/workflows/docker-candle-server-native.yml@refs/heads/master`
 
 Images do not contain credentials and the workflows do not deploy hosts.
 
