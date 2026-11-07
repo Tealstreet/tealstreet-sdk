@@ -16,16 +16,17 @@ export type RustPublicFeedPolicy = { mode: 'direct' | 'disabled' } | { mode: 'sh
 type FeedUpdate = {
   op: 'publicFeedUpdate';
   tickers?: Array<
-    Partial<Record<Exclude<keyof Ticker, 'id' | 'symbol' | 'info' | 'midPrice'>, number>> & {
+    Partial<Record<Exclude<keyof Ticker, 'id' | 'symbol' | 'info' | 'midPrice' | 'observedAt'>, number>> & {
       symbol: string;
       midPrice?: number | null;
+      observedAt?: Ticker['observedAt'];
     }
   >;
   books?: Array<{ symbol: string; bids: number[][]; asks: number[][] }>;
   candles?: Array<Candle & { symbol: string; interval: string }>;
 };
 type Request =
-  | { op: 'hello'; identity: string }
+  | { op: 'hello'; identity: string; observations?: boolean }
   | { op: 'tickerSymbols'; symbols: string[] }
   | { op: 'snapshot' | 'dispose' | 'ping' }
   | { op: 'book'; symbol: string; subscribe: boolean }
@@ -140,6 +141,7 @@ export class RustPublicFeedProvider {
     if (this.disposed || this.source.isDisposed) throw new Error('Shared public feed provider disposed');
     if (this.clients.has(port)) throw new Error('Shared public feed port already attached');
     let ready = false;
+    let observations = false;
     let lastSeen = Date.now();
     const catalog = () =>
       JSON.stringify(this.source.store.markets.map(feedMarket).sort((a, b) => a.symbol.localeCompare(b.symbol)));
@@ -154,14 +156,7 @@ export class RustPublicFeedProvider {
     };
     const seed = () => {
       if (!ready || !this.source.store.loaded.tickers) return;
-      const tickers = this.source.store.tickers.map((ticker) => {
-        const row: NonNullable<FeedUpdate['tickers']>[number] = {
-          symbol: ticker.symbol,
-          midPrice: Number.isFinite(ticker.midPrice) ? ticker.midPrice! : null,
-        };
-        for (const field of tickerFields) if (Number.isFinite(ticker[field])) row[field] = ticker[field];
-        return row;
-      });
+      const tickers = this.source.store.tickers.map((ticker) => tickerRow(ticker, observations));
       send({ op: 'publicFeedUpdate', tickers });
     };
     const unsubscribe = this.source.observePublicFeed({
@@ -203,6 +198,7 @@ export class RustPublicFeedProvider {
           return;
         }
         ready = true;
+        observations = data.observations === true;
         send({ op: 'ready', markets: this.source.store.markets.map(feedMarket) });
         seed();
       } else if (data.op === 'dispose') cleanup();
@@ -311,7 +307,7 @@ export class RustPublicFeedClient {
     private readonly identity: string,
     private readonly ingest: (update: FeedUpdate) => Promise<unknown>,
     private readonly fail: (error: Error) => void,
-    private readonly policy: { handshakeTimeoutMs?: number; inProcess?: boolean } = {},
+    private readonly policy: { handshakeTimeoutMs?: number; inProcess?: boolean; observations?: boolean } = {},
   ) {}
 
   get isReady() {
@@ -333,7 +329,7 @@ export class RustPublicFeedClient {
           this.reject = undefined;
         }
       }, this.policy.handshakeTimeoutMs ?? 10_000);
-      this.send({ op: 'hello', identity: this.identity });
+      this.send({ op: 'hello', identity: this.identity, ...(this.policy.observations && { observations: true }) });
     });
   }
   private failed = (error: Error) => {
@@ -450,19 +446,24 @@ const IN_PROCESS_TICKER_INTERVAL_MS = 250;
 const IN_PROCESS_CLIENT_EXPIRY_MS = 20_000;
 
 type TickerRow = NonNullable<FeedUpdate['tickers']>[number];
-const tickerRow = (ticker: Ticker): TickerRow => {
+const tickerRow = (ticker: Ticker, observations = true): TickerRow => {
   const row: TickerRow = {
     symbol: ticker.symbol,
     midPrice: Number.isFinite(ticker.midPrice) ? ticker.midPrice! : null,
   };
   for (const field of tickerFields) if (Number.isFinite(ticker[field])) row[field] = ticker[field];
+  if (observations && ticker.observedAt) row.observedAt = [...ticker.observedAt];
   return row;
 };
 const sameRow = (a: TickerRow, b: TickerRow) =>
-  a.midPrice === b.midPrice && tickerFields.every((field) => a[field] === b[field]);
+  a.midPrice === b.midPrice &&
+  (a.observedAt === undefined) === (b.observedAt === undefined) &&
+  [0, 1, 2].every((slot) => a.observedAt?.[slot] === b.observedAt?.[slot]) &&
+  tickerFields.every((field) => a[field] === b[field]);
 
 type HubClient = {
   ready: boolean;
+  observations: boolean;
   lastSeen: number;
   send(message: Reply): void;
   resubscribe(): void;
@@ -547,7 +548,7 @@ class InProcessHub {
   seed(client: HubClient) {
     const tickers = this.read(() => this.source.store.tickers);
     if (!tickers?.length) return;
-    client.send({ op: 'publicFeedUpdate', tickers: tickers.map(tickerRow) });
+    client.send({ op: 'publicFeedUpdate', tickers: tickers.map((ticker) => tickerRow(ticker, client.observations)) });
   }
 
   private updated() {
@@ -652,11 +653,16 @@ export const serveInProcessPublicData = (source: PublicDataSource, port: Message
           );
   };
   const client: HubClient = {
+    observations: false,
     ready: false,
     lastSeen: Date.now(),
     send: (message) => {
       try {
-        port.postMessage(message);
+        const outgoing =
+          message.op === 'publicFeedUpdate' && message.tickers && !client.observations
+            ? { ...message, tickers: message.tickers.map(({ observedAt: _observedAt, ...row }) => row) }
+            : message;
+        port.postMessage(outgoing);
       } catch {
         cleanup();
       }
@@ -679,8 +685,10 @@ export const serveInProcessPublicData = (source: PublicDataSource, port: Message
     const data = event.data;
     if (disposed || !data || typeof data !== 'object') return;
     client.lastSeen = Date.now();
-    if (data.op === 'hello') owner.greet(client);
-    else if (data.op === 'dispose') cleanup();
+    if (data.op === 'hello') {
+      client.observations = data.observations === true;
+      owner.greet(client);
+    } else if (data.op === 'dispose') cleanup();
     else if (data.op === 'ping') client.send({ op: 'pong' });
     else if (client.ready && data.op === 'snapshot') owner.seed(client);
     else if (data.op === 'book' || data.op === 'candle') {

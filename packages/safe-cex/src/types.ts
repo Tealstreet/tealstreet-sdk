@@ -545,7 +545,11 @@ export type Market = {
   readonly makerFee?: number;
 };
 
+/** Source engine receipt times for last, mark and index; null is unobserved. */
+export type TickerObservedAt = [number | null, number | null, number | null];
+
 export type Ticker = {
+  readonly observedAt?: TickerObservedAt;
   readonly id: string;
   readonly symbol: string;
   readonly bid: number;
@@ -1335,6 +1339,7 @@ export interface RemoteSignerRequest {
       | 'kraken-challenge'
       | 'apexomni-base64'
       | 'bitunix-double-sha256'
+      | 'kucoin-batch'
       // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
       // the digest from; `hyperliquid-address` binds the agent address.
       | 'grvt-order'

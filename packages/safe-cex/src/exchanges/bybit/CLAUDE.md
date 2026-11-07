@@ -723,6 +723,34 @@ The rate limit system is VIP-level aware and adjusts batch order limits dynamica
 - Income history: 50 per page (the venue's own cap, clamped), max 10 pages safety limit, 1000-record cap (`fetchBybitIncomeHistory` in `bybit.income.ts`)
 - OHLCV: max 1000 candles per request (`bybit.exchange.ts:773`)
 
+### Terminal order history after 2026-11-12
+
+The Bybit Tech Bot API announcement, effective 2026-11-12 (supplied by
+Tealstreet ops), says unfiltered `/v5/order/history` and
+`/v5/spread/order/history` no longer return recent `Cancelled`, `Rejected` or
+`Deactivated` orders. Each status remains queryable explicitly for 24 hours.
+This announcement is not present in the checked v5 changelog. The standard
+history docs list a single string `orderStatus`; the spread history docs do
+not list that request parameter. Neither stack currently calls spread history.
+
+The TS replay reference's `fetchHistoricalOrders` and Rust's shared Bybit
+history walker read the default history plus separate `Cancelled`, `Rejected`
+and `Deactivated` histories. Each status/category/window owns its cursor and
+page budget. Merge by order ID, sort newest first, then apply the caller's
+global limit. Keep the existing seven-day windows; explicit status requests
+do not extend Bybit's terminal-order retention.
+
+Hyro lost-create recovery checks realtime, default history and all three
+explicit terminal statuses before treating the identity as absent. A matched
+cancelled/deactivated order proves acceptance without restoring an open row;
+a matched rejection follows the existing rejection path. A failed filtered
+lookup leaves the outcome unknown and cannot justify a create retry.
+
+See `docs/plans/callers/bybit-order-history-status.md` for the caller census
+and replay coverage. The separate Bybit history gate checks a result whose
+cancelled orders exist only in filtered pages, including duplicate IDs and
+independent reuse of the same cursor token.
+
 ## State Reconciliation
 
 ### Position Merge Strategy (`bybit.exchange.ts:294-334`)
@@ -1179,12 +1207,12 @@ instead of pretending its exchange name is `bybitdemo`:
     endpoint which they'll poll every 30 s and surface revocation
     within 30 s. Preferable to inferring state from `retCode 10003`
     once that lifecycle signal exists.
-  Deferred OAuth/server-held credential design lives in
-  `docs/plans/HYROTRADER_OAUTH_V2.md`; do not implement a browser-held
-  OAuth credential path. Sam's current direction is that OAuth-linked HyroTrader
-  private trading should run through `services/exchange-server` because every
-  private request may need Tealstreet-held signing material. OAuth has no known
-  end-user launch timeline yet.
+    Deferred OAuth/server-held credential design lives in
+    `docs/plans/HYROTRADER_OAUTH_V2.md`; do not implement a browser-held
+    OAuth credential path. Sam's current direction is that OAuth-linked HyroTrader
+    private trading should run through `services/exchange-server` because every
+    private request may need Tealstreet-held signing material. OAuth has no known
+    end-user launch timeline yet.
 - reconciliation is USDT-only (`linear`, `settleCoin=USDT`) because the simulator
   contract does not support Bybit's USDC linear branch
 - order placement sends a generated `orderLinkId` because the simulator requires
@@ -2044,7 +2072,6 @@ Shared consumers must refresh their source then restart provider/accounts throug
 the existing identity-change contract. Hyro retains its USDT perpetual filter
 and normal 10 s ping deadline; 5 s watch wakes never imply an early ping.
 
-
 ## Rust private row admission
 
 Ordinary REST order/position snapshots and WS order/position arrays admit healthy
@@ -2062,7 +2089,6 @@ repair. Orders use the existing bounded retry cadence; positions use account
 polling. Strict Hyro handshake/account evidence and financial execution/history
 coverage remain separate. Structural/envelope or paging failures never establish
 authoritative empty exposure.
-
 
 Rust acknowledged leverage writes (including native leverage-not-modified replies)
 advance the existing positions revision before publishing the selected leverage.
