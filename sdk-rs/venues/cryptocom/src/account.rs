@@ -1170,3 +1170,14 @@ impl Cryptocom {
         Ok(())
     }
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.read {
+            Read::Balance => S::BALANCE,
+            Read::Positions => S::POSITIONS,
+            Read::Orders | Read::AdvancedOrders => S::ORDERS,
+        }
+    }
+}

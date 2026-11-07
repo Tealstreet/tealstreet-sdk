@@ -103,6 +103,41 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     vi.restoreAllMocks();
   });
 
+  it.each([
+    ['discovery', 60_000],
+    ['orderRead', 20_000],
+    ['orderWrite', 20_000],
+    ['history', 30_000],
+    ['read', 20_000],
+  ] as const)('expires %s once at its class budget, with useful diagnostics', async (requestClass, budgetMs) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    try {
+      let error: any;
+      const pending = adapter({
+        url: 'https://venue.test/read?signature=secret-sentinel',
+        method: 'GET',
+        headers: {},
+        requestClass,
+      } as any).catch((e) => {
+        error = e;
+      });
+      await vi.advanceTimersByTimeAsync(budgetMs - 1);
+      expect(error).toBeUndefined();
+      expect(mockWs.sentMessages).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(error).toMatchObject({ name: 'TradeTunnelTimeoutError', requestClass, budgetMs, elapsedMs: budgetMs });
+      expect(error.message).toContain(`class=${requestClass} budget=${budgetMs}ms elapsed=${budgetMs}ms`);
+      expect(error.message).not.toContain('secret-sentinel');
+      expect(mockWs.sentMessages).toHaveLength(1);
+    } finally {
+      adapter.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('prepares and binds without HTTP, then hands exact signed bytes off synchronously once', async () => {
     const adapter = createAxiosHttpOverWebsocketAdapter({ customParser: (body) => body });
     const controller = new AbortController();

@@ -100,6 +100,58 @@ pub struct Prices<'a> {
 }
 
 // OKX sends `null` for some unset quote/catalog fields; treat it like a blank.
+/// The fixed shape of an OKX public push, `{"arg":{"channel":C,"instId":I},"data":[R]}`
+/// with `R` one flat object of plain strings: its arg channel and row, read the way
+/// serde reads them. `None` (escapes, control bytes, null or non-string values,
+/// whitespace, other keys or rows, a repeated known field) leaves it to serde.
+pub fn scan_price(text: &str) -> Option<(&str, Prices<'_>)> {
+    let (channel, rest) = plain(text.strip_prefix(r#"{"arg":{"channel":""#)?)?;
+    let (_, rest) = plain(rest.strip_prefix(r#"","instId":""#)?)?;
+    let mut rest = rest.strip_prefix(r#""},"data":[{""#)?;
+    let mut row = Prices::default();
+    let mut seen = 0u16;
+    loop {
+        let (key, after) = plain(rest)?;
+        let (value, after) = plain(after.strip_prefix(r#"":""#)?)?;
+        let field = match key {
+            "instId" => Some((0, &mut row.inst_id)),
+            "bidPx" => Some((1, &mut row.bid_px)),
+            "askPx" => Some((2, &mut row.ask_px)),
+            "last" => Some((3, &mut row.last)),
+            "open24h" => Some((4, &mut row.open24h)),
+            "volCcy24h" => Some((5, &mut row.vol_ccy24h)),
+            "vol24h" => Some((6, &mut row.vol24h)),
+            "markPx" => Some((7, &mut row.mark_px)),
+            "idxPx" => Some((8, &mut row.idx_px)),
+            "oiCcy" => Some((9, &mut row.oi_ccy)),
+            "fundingRate" => Some((10, &mut row.funding_rate)),
+            "fundingTime" => Some((11, &mut row.funding_time)),
+            _ => None,
+        };
+        if let Some((bit, slot)) = field {
+            if seen & 1 << bit != 0 {
+                return None;
+            }
+            seen |= 1 << bit;
+            *slot = value;
+        }
+        let after = after.strip_prefix('"')?;
+        if let Some(next) = after.strip_prefix(",\"") {
+            rest = next;
+        } else {
+            return (after == "}]}").then_some((channel, row));
+        }
+    }
+}
+
+/// A string body up to its closing quote, when it holds no escape or control byte.
+fn plain(text: &str) -> Option<(&str, &str)> {
+    let end = text
+        .bytes()
+        .position(|b| b == b'"' || b == b'\\' || b < 0x20)?;
+    (text.as_bytes()[end] == b'"').then(|| (&text[..end], &text[end..]))
+}
+
 fn nullable<'de: 'a, 'a, D: serde::Deserializer<'de>>(d: D) -> Result<&'a str, D::Error> {
     Ok(Option::<&'a str>::deserialize(d)?.unwrap_or_default())
 }
@@ -315,4 +367,220 @@ pub fn readable_rows(text: &str) -> Option<String> {
     let mut rows = serde_json::from_str::<Json>(text).ok()?;
     clean(&mut rows);
     serde_json::to_string(&rows).ok()
+}
+
+#[cfg(test)]
+mod scan_price_tests {
+    use super::*;
+    use safe_cex_engine::json;
+
+    const MARK: &str = r#"{"arg":{"channel":"mark-price","instId":"ETH-USD-SWAP"},"data":[{"instId":"ETH-USD-SWAP","instType":"SWAP","markPx":"2410.10","ts":"1792468506156"}]}"#;
+    const INDEX: &str = r#"{"arg":{"channel":"index-tickers","instId":"ETH-USD"},"data":[{"instId":"ETH-USD","idxPx":"2411.18","open24h":"2420.88","high24h":"2443.66","low24h":"2370.75","sodUtc0":"2405.25","sodUtc8":"2391.55","ts":"1792468506113"}]}"#;
+    const TICKER: &str = r#"{"arg":{"channel":"tickers","instId":"BTC-USD-SWAP"},"data":[{"instType":"SWAP","instId":"BTC-USD-SWAP","last":"81973.5","lastSz":"99.3","askPx":"81973.6","askSz":"174.9","bidPx":"81973.5","bidSz":"752.3","open24h":"82351.3","high24h":"83108.2","low24h":"81060.6","sodUtc0":"81810.2","sodUtc8":"81810.2","volCcy24h":"6134.9012","vol24h":"5038815.6","ts":"1792468506174"}]}"#;
+
+    fn fields<'a>(p: &Prices<'a>) -> [&'a str; 12] {
+        [
+            p.inst_id,
+            p.bid_px,
+            p.ask_px,
+            p.last,
+            p.open24h,
+            p.vol_ccy24h,
+            p.vol24h,
+            p.mark_px,
+            p.idx_px,
+            p.oi_ccy,
+            p.funding_rate,
+            p.funding_time,
+        ]
+    }
+
+    /// What the generic path reads: the arg channel and every row it decodes.
+    fn generic(text: &str) -> Option<(String, Vec<[String; 12]>)> {
+        let message = serde_json::from_str::<Message<'_>>(text).ok()?;
+        let mut rows = Vec::new();
+        json::each::<Prices<'_>>(message.data?.get(), |p| {
+            rows.push(fields(&p).map(str::to_owned));
+        })
+        .ok()?;
+        Some((message.arg.channel.to_owned(), rows))
+    }
+
+    fn assert_scan_matches_serde(text: &str) -> bool {
+        let Some((channel, row)) = scan_price(text) else {
+            return false;
+        };
+        let (expected, rows) = generic(text).expect("a scanned push is valid JSON for serde");
+        assert_eq!(channel, expected, "{text}");
+        assert_eq!(rows, vec![fields(&row).map(str::to_owned)], "{text}");
+        true
+    }
+
+    #[test]
+    fn the_hot_pushes_scan_exactly_as_serde_reads_them() {
+        for text in [MARK, INDEX, TICKER] {
+            assert!(assert_scan_matches_serde(text), "{text}");
+        }
+        let empty = MARK.replace(r#""markPx":"2410.10""#, r#""markPx":"""#);
+        let unicode = MARK.replace("SWAP\",\"markPx", "SWAP\u{e9}\",\"markPx");
+        let repeated_unknown = MARK.replace(r#""ts":"#, r#""ts":"1","ts":"#);
+        for text in [empty, unicode, repeated_unknown] {
+            assert!(assert_scan_matches_serde(&text), "{text}");
+        }
+    }
+
+    #[test]
+    fn anything_off_the_fixed_shape_is_left_to_serde() {
+        let off = [
+            MARK.replace(r#""markPx":"2410.10""#, r#""markPx": "2410.10""#),
+            MARK.replace("2410.10", r"2410\u002e10"),
+            MARK.replace("2410.10", "2410\t10"),
+            MARK.replace(r#""markPx":"2410.10""#, r#""markPx":null"#),
+            MARK.replace(r#""markPx":"2410.10""#, r#""markPx":2410.10"#),
+            MARK.replace(r#""ts":"#, r#""markPx":"1","ts":"#),
+            MARK.replace(r#"[{"instId"#, r#"[{},{"instId"#),
+            MARK.replace(r#""ts":"1792468506156"}]"#, r#""ts":"1"},{"instId":"X"}]"#),
+            MARK.replace(r#""data":[{"instId":"ETH-USD-SWAP","instType":"SWAP","markPx":"2410.10","ts":"1792468506156"}]"#, r#""data":[{}]"#),
+            MARK.replace(r#"},"data""#, r#","x":"y"},"data""#),
+            MARK.replace(r#"{"arg""#, r#"{"event":"x","arg""#),
+            MARK.replace("}]}", r#"}],"action":"snapshot"}"#),
+            format!("{MARK}\n"),
+            MARK.replace(r#""channel":"mark-price","instId":"ETH-USD-SWAP""#, r#""instId":"ETH-USD-SWAP","channel":"mark-price""#),
+            MARK.trim_end_matches("}]}").to_owned(),
+        ];
+        for (case, text) in off.iter().enumerate() {
+            assert!(scan_price(text).is_none(), "case {case}: {text:?}");
+        }
+    }
+
+    /// Deterministic xorshift64 so a failure reproduces from its case number.
+    fn next(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    #[test]
+    fn differential_fuzz_never_scans_what_serde_reads_differently() {
+        let tokens = [
+            "\"",
+            "\\",
+            ",",
+            ":",
+            "{",
+            "}",
+            "[",
+            "]",
+            " ",
+            "\n",
+            "\t",
+            "\u{1}",
+            "0",
+            "9",
+            ".",
+            "-",
+            "e",
+            "null",
+            "true",
+            "\"markPx\"",
+            "\"instId\"",
+            "\"x\"",
+            "\\u0041",
+            "\u{e9}",
+            "\"\"",
+        ];
+        let seeds = [MARK, INDEX, TICKER];
+        let (mut scanned, mut fallback, mut state) = (0, 0, 0x9e37_79b9_7f4a_7c15u64);
+        for case in 0..20_000 {
+            let mut text = seeds[case % seeds.len()].to_owned();
+            for _ in 0..=next(&mut state) % 3 {
+                let mut at = next(&mut state) as usize % (text.len() + 1);
+                while !text.is_char_boundary(at) {
+                    at -= 1;
+                }
+                let token = &tokens[next(&mut state) as usize % tokens.len()];
+                match next(&mut state) % 3 {
+                    0 => text.insert_str(at, token),
+                    1 => {
+                        let mut end = (at + 1 + next(&mut state) as usize % 4).min(text.len());
+                        while !text.is_char_boundary(end) {
+                            end += 1;
+                        }
+                        text.replace_range(at..end, "");
+                    }
+                    _ => {
+                        let mut end = (at + 1).min(text.len());
+                        while !text.is_char_boundary(end) {
+                            end += 1;
+                        }
+                        text.replace_range(at..end, token);
+                    }
+                }
+            }
+            if assert_scan_matches_serde(&text) {
+                scanned += 1;
+            } else {
+                fallback += 1;
+            }
+        }
+        // Well-formed pushes with random keys, order, repeats and values.
+        let keys = [
+            "instId",
+            "markPx",
+            "idxPx",
+            "last",
+            "bidPx",
+            "askPx",
+            "open24h",
+            "volCcy24h",
+            "vol24h",
+            "oiCcy",
+            "fundingRate",
+            "fundingTime",
+            "ts",
+            "instType",
+            "sodUtc0",
+            "x",
+        ];
+        let values = [
+            "",
+            "1",
+            "2410.10",
+            "-0.5",
+            "1e5",
+            "\u{e9}",
+            "BTC-USD-SWAP",
+            " 1",
+        ];
+        for _ in 0..5_000 {
+            let mut row = Vec::new();
+            for _ in 0..next(&mut state) % 8 {
+                let key = keys[next(&mut state) as usize % keys.len()];
+                let value = values[next(&mut state) as usize % values.len()];
+                row.push(format!(r#""{key}":"{value}""#));
+            }
+            let text = format!(
+                r#"{{"arg":{{"channel":"mark-price","instId":"X"}},"data":[{{{}}}]}}"#,
+                row.join(",")
+            );
+            if assert_scan_matches_serde(&text) {
+                scanned += 1;
+            } else {
+                fallback += 1;
+            }
+        }
+        assert!(
+            scanned > 5_000 && fallback > 5_000,
+            "{scanned} scanned, {fallback} fallback"
+        );
+    }
+
+    #[test]
+    fn other_channels_scan_but_only_price_channels_take_the_fast_path() {
+        let funding = MARK.replace("mark-price", "funding-rate");
+        let (channel, _) = scan_price(&funding).unwrap();
+        assert_eq!(channel, "funding-rate");
+        assert!(assert_scan_matches_serde(&funding));
+    }
 }

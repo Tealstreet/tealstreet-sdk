@@ -64,3 +64,13 @@ test('optional fields match the encoder and valid route/intent declarations stay
   const output = [prepare(), { op: 'done', command: 17, error: 'not implemented', detail: { kind: 'unsupported' } }];
   assert.throws(() => probeCapabilityCommand({ command: () => JSON.stringify(output) }, command, 'managed unsupported'), /managed unsupported/);
 });
+
+test('compact browser class metadata is closed and only belongs to preparation', () => {
+  for (const requestClass of [0, 1, 2, 3, 4]) {
+    assert.equal(probe({ ...prepare(), requestClass }).evidence, 'request');
+  }
+  for (const requestClass of [-1, 5, 255, 1.5, 'history', '0', null, false]) {
+    assert.throws(() => probe({ ...prepare(), requestClass }), /managed schema/);
+  }
+  assert.throws(() => probe({ ...bind(), requestClass: 3 }), /managed schema/);
+});

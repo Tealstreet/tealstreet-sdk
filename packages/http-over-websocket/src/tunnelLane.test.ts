@@ -64,7 +64,14 @@ class LaneSocket {
   private fire(type: string, event: any) {
     for (const listener of [...(this.listeners[type] ?? [])]) listener(event);
   }
-  send() {}
+  send(frame: string) {
+    const message = JSON.parse(frame);
+    // Keep an opened fake tunnel healthy while the 60 s lane test runs.
+    // Otherwise the real 25 s silence watchdog races its final assertion.
+    if (message.type === 'rpc.ping') queueMicrotask(() => this.fire('message', {
+      data: JSON.stringify({ type: 'rpc.ping', status: 'success', nonce: message.nonce }),
+    }));
+  }
   close() {
     if (this.readyState === 3) return;
     this.readyState = 3;
