@@ -611,9 +611,9 @@ test('#3193 kucoin provenance at ad4f1d6d5d9 keeps the larger composed cap', () 
   const measured = 1_696_803;
   const measuredCap = 1_708_032;
   const incomingCap = 1_802_240;
-  const cap = 1_802_240;
+  const cap = WASM_VENUE_OVERRIDES.kucoin;
   assert.equal(measuredCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(cap, Math.max(incomingCap, measuredCap));
+  assert.ok(cap >= Math.max(incomingCap, measuredCap));
   for (const name of ['kucoin']) {
     const family = venueFamily(name);
     assert.equal(family, 'kucoin');
