@@ -102,6 +102,7 @@ pub(crate) struct Private {
     ws_ready: bool,
     payload: f64,
     reconnect_at: f64,
+    auth_retry_at: f64,
     failures: u32,
     versions: HashMap<String, f64>,
     versions_fifo: VecDeque<String>,
@@ -129,6 +130,7 @@ impl Default for Private {
             ws_ready: false,
             payload: 0.,
             reconnect_at: 0.,
+            auth_retry_at: 0.,
             failures: 0,
             versions: HashMap::new(),
             versions_fifo: VecDeque::new(),
@@ -208,7 +210,7 @@ impl Coinbase {
                 }
             }
         }
-        self.drb_authenticate(cx);
+        self.drb_ensure_http(cx);
         self.drb_schedule(cx);
     }
     fn drb_schedule(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -216,7 +218,27 @@ impl Coinbase {
             self.private_drb.timer = Some(cx.set_timer(1000.));
         }
     }
-    fn drb_authenticate(&mut self, cx: &mut Cx<'_, Pending>) {
+    /// Opaque engine bearer binding shared with the trading consumer. No token
+    /// bytes leave the private module; preparation still asks Venue for headers.
+    pub(crate) fn drb_http_session(&self) -> Option<&Session> {
+        if !self.private_drb.active || self.private_drb.http.needs_refresh(self.private_drb.now) {
+            return None;
+        }
+        self.private_drb.bearer.as_ref()
+    }
+    /// Start or refresh the shared HTTP login without consuming a caller's
+    /// command root. Consumers retain that root while authentication is pending.
+    pub(crate) fn drb_ensure_http(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.private_drb.now = cx.now;
+        if !self.private_drb.enabled {
+            if self.account.is_intx() && !self.options.spot_only {
+                self.drb_private_start(cx);
+            }
+            return;
+        }
+        if !self.private_drb.http.needs_refresh(cx.now) || cx.now < self.private_drb.auth_retry_at {
+            return;
+        }
         if self
             .private_drb
             .pending
@@ -276,11 +298,12 @@ impl Coinbase {
         let session = if matches!(kind, Kind::Auth) {
             None
         } else {
-            self.private_drb.bearer.as_ref()
-        };
+            self.drb_http_session()
+        }
+        .cloned();
         match self
             .drb
-            .http(cx, &context, method, params, session, pending)
+            .http(cx, &context, method, params, session.as_ref(), pending)
         {
             Ok((rpc, _)) => {
                 self.private_drb.pending.insert(
@@ -444,7 +467,7 @@ impl Coinbase {
                 self.private_drb.http.invalidate();
                 self.private_drb.active = false;
                 self.private_drb.failures = self.private_drb.failures.saturating_add(1);
-                self.private_drb.reconnect_at = cx.now
+                self.private_drb.auth_retry_at = cx.now
                     + safe_cex_engine::backoff::Backoff::new(2000., 5, 60000.)
                         .delay(self.private_drb.failures);
                 warn(cx, error.message);
@@ -841,9 +864,7 @@ impl Coinbase {
             );
         }
         if self.private_drb.http.needs_refresh(cx.now) {
-            if cx.now >= self.private_drb.reconnect_at {
-                self.drb_authenticate(cx);
-            }
+            self.drb_ensure_http(cx);
         } else {
             self.drb_after_markets(cx);
             self.drb_connect(cx);
