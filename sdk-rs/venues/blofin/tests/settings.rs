@@ -44,7 +44,7 @@ fn issue(h: &mut Harness, command: Command, path: &str) -> HttpRequest {
 fn assert_unknown_setting(command: Command, path: &str, response: &str) {
     let mut h = Harness::new();
     h.seed();
-    let before = h.e.store().setting("BTCUSDT").unwrap().clone();
+    let before = h.e.store().setting("BTCUSDT").unwrap();
     let request = issue(&mut h, command, path);
     assert_eq!(request.method, Method::Post);
     h.respond(request, response);
