@@ -779,3 +779,241 @@ fn read_context_cannot_authorize_an_http_order_mutation() {
         );
     });
 }
+
+#[test]
+fn background_read_cannot_release_a_margin_model_change() {
+    let mut transport = Transport::default();
+    let mut refused = false;
+    let actions = run(1000., |cx| {
+        let session = cx
+            .open_session(SessionPolicy {
+                credential: None,
+                repeat_safe: false,
+                private_egress: None,
+            })
+            .unwrap();
+        let read = cx
+            .http_context(Scope::Background, policy(Operation::Read))
+            .unwrap();
+        refused = transport
+            .http(
+                cx,
+                &read,
+                "private/change_margin_model",
+                json!({"margin_model":"cross_pm"}),
+                Some(&session),
+                (),
+            )
+            .is_err();
+    });
+    let http = actions
+        .iter()
+        .filter(|action| matches!(action, Action::Http(_)))
+        .count();
+    assert_eq!(
+        http, 0,
+        "a Background Read released an account-setting HTTP POST"
+    );
+    assert!(refused, "the setting write must require Mutation authority");
+}
+
+// Closed snapshot of the supported Coinbase gateway methods (OpenAPI 2.1.1),
+// plus the existing position-move transport contract. Authentication/heartbeat/subscription
+// control is Read; account/trading changes require Mutation authority.
+const READ_METHODS: &[&str] = &[
+    "private/get_access_log",
+    "private/get_account_summaries",
+    "private/get_account_summary",
+    "private/get_cancel_on_disconnect",
+    "private/get_leg_prices",
+    "private/get_leverage",
+    "private/get_margins",
+    "private/get_max_order_size",
+    "private/get_open_orders",
+    "private/get_open_orders_by_currency",
+    "private/get_open_orders_by_instrument",
+    "private/get_open_orders_by_label",
+    "private/get_order_history_by_currency",
+    "private/get_order_history_by_instrument",
+    "private/get_order_margin_by_ids",
+    "private/get_order_state",
+    "private/get_order_state_by_label",
+    "private/get_pme_params",
+    "private/get_position",
+    "private/get_positions",
+    "private/get_risk_profile",
+    "private/get_settlement_history_by_currency",
+    "private/get_settlement_history_by_instrument",
+    "private/get_subaccounts",
+    "private/get_subaccounts_details",
+    "private/get_trading_limits",
+    "private/get_transaction_log",
+    "private/get_trigger_order_history",
+    "private/get_user_locks",
+    "private/get_user_trades_by_currency",
+    "private/get_user_trades_by_currency_and_time",
+    "private/get_user_trades_by_instrument",
+    "private/get_user_trades_by_instrument_and_time",
+    "private/get_user_trades_by_order",
+    "private/simulate_portfolio",
+    "private/subscribe",
+    "private/unsubscribe",
+    "private/unsubscribe_all",
+    "public/auth",
+    "public/disable_heartbeat",
+    "public/get_announcements",
+    "public/get_book_summary_by_currency",
+    "public/get_book_summary_by_instrument",
+    "public/get_combo_details",
+    "public/get_combo_ids",
+    "public/get_combos",
+    "public/get_contract_size",
+    "public/get_currencies",
+    "public/get_delivery_prices",
+    "public/get_expirations",
+    "public/get_funding_chart_data",
+    "public/get_funding_rate_history",
+    "public/get_funding_rate_value",
+    "public/get_historical_volatility",
+    "public/get_index_chart_data",
+    "public/get_index_price",
+    "public/get_index_price_names",
+    "public/get_instrument",
+    "public/get_instruments",
+    "public/get_last_settlements_by_currency",
+    "public/get_last_settlements_by_instrument",
+    "public/get_last_trades_by_currency",
+    "public/get_last_trades_by_currency_and_time",
+    "public/get_last_trades_by_instrument",
+    "public/get_last_trades_by_instrument_and_time",
+    "public/get_mark_price_history",
+    "public/get_order_book",
+    "public/get_order_book_by_instrument_id",
+    "public/get_supported_index_names",
+    "public/get_time",
+    "public/get_trade_volumes",
+    "public/get_tradingview_chart_data",
+    "public/get_volatility_index_data",
+    "public/hello",
+    "public/set_heartbeat",
+    "public/status",
+    "public/subscribe",
+    "public/test",
+    "public/ticker",
+    "public/tickers_by_currency",
+    "public/unsubscribe",
+    "public/unsubscribe_all",
+];
+const MUTATION_METHODS: &[&str] = &[
+    "private/buy",
+    "private/cancel",
+    "private/cancel_all",
+    "private/cancel_all_by_currency",
+    "private/cancel_all_by_currency_pair",
+    "private/cancel_all_by_instrument",
+    "private/cancel_all_by_kind_or_type",
+    "private/cancel_by_label",
+    "private/change_margin_model",
+    "private/close_position",
+    "private/create_combo",
+    "private/disable_cancel_on_disconnect",
+    "private/edit",
+    "private/edit_by_label",
+    "private/enable_cancel_on_disconnect",
+    "private/logout",
+    "private/move_positions",
+    "private/sell",
+    "private/set_leverage",
+    "private/submit_transfer_between_subaccounts",
+];
+
+#[test]
+fn every_supported_method_has_explicit_http_authority() {
+    for (methods, required) in [
+        (READ_METHODS, Operation::Read),
+        (MUTATION_METHODS, Operation::Mutation),
+    ] {
+        for &method in methods {
+            for operation in [Operation::Read, Operation::Mutation] {
+                let mut transport = Transport::default();
+                let allowed = required == Operation::Read || operation == Operation::Mutation;
+                let actions = run(1000., |cx| {
+                    let session = cx
+                        .open_session(SessionPolicy {
+                            credential: None,
+                            repeat_safe: false,
+                            private_egress: None,
+                        })
+                        .unwrap();
+                    let context = cx.session_context(&session, policy(operation)).unwrap();
+                    assert_eq!(
+                        transport
+                            .http(cx, &context, method, json!({}), Some(&session), ())
+                            .is_ok(),
+                        allowed,
+                        "{method} under {operation:?}"
+                    );
+                });
+                assert_eq!(
+                    actions
+                        .iter()
+                        .filter(|a| matches!(a, Action::Http(_)))
+                        .count(),
+                    usize::from(allowed),
+                    "physical release of {method} under {operation:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unknown_methods_are_rejected_on_both_transports_before_admission() {
+    for method in [
+        "public/get_future_data",
+        "public/future_control",
+        "private/get_future_setting",
+        "private/set_position_mode",
+        "private/cancel_future",
+        "private/unknown_write",
+        "private/mass_quote",
+        "private/cancel_quotes",
+        "private/mass_quote_cancel",
+    ] {
+        let mut transport = Transport::default();
+        let actions = run(1000., |cx| {
+            let session = cx
+                .open_session(SessionPolicy {
+                    credential: None,
+                    repeat_safe: false,
+                    private_egress: None,
+                })
+                .unwrap();
+            for operation in [Operation::Read, Operation::Mutation] {
+                let context = cx.session_context(&session, policy(operation)).unwrap();
+                assert!(
+                    transport
+                        .http(cx, &context, method, json!({}), Some(&session), ())
+                        .is_err(),
+                    "unknown {method} admitted under {operation:?}"
+                );
+            }
+            assert!(
+                transport
+                    .websocket(cx, SocketId(7), method, json!({}))
+                    .is_err(),
+                "unknown {method} admitted over WS"
+            );
+            // Rejection consumes no RPC ID: three rejected attempts above
+            // precede this first send.
+            assert_eq!(
+                transport
+                    .websocket(cx, SocketId(7), "public/subscribe", json!({}))
+                    .unwrap(),
+                1
+            );
+        });
+        assert_eq!(actions.len(), 1, "unexpected effects for {method}");
+        assert!(matches!(&actions[0], Action::WsSend { .. }));
+    }
+}

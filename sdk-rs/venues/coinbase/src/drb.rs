@@ -238,12 +238,11 @@ impl Transport {
         session: Option<&Session>,
         pending: P,
     ) -> Result<(RpcId, RequestId), String> {
+        let intent = method_intent(method)?;
         if method.starts_with("private/") && session.is_none() {
             return Err("drb HTTP private request requires an engine bearer session".into());
         }
-        if (pool_for(method) == 1 || method == "private/move_positions")
-            && context.operation() != Operation::Mutation
-        {
+        if intent != Intent::Read && context.operation() != Operation::Mutation {
             return Err("drb HTTP mutation requires a Mutation context".into());
         }
         // The production chart route is GET-only and its response has no RPC ID.
@@ -264,7 +263,7 @@ impl Transport {
                 safe_cex_engine::url::encode_into(&mut url, &value);
             }
         }
-        let (id, body) = self.prepare(Channel::Http, method, params, cx.now)?;
+        let (id, body) = self.prepare(Channel::Http, method, intent, params, cx.now)?;
         let request = match cx.request_managed_with_headers(
             context.clone(),
             session,
@@ -297,7 +296,9 @@ impl Transport {
         if socket == SocketId(0) {
             return Err("drb invalid socket".into());
         }
-        let (id, body) = self.prepare(Channel::WebSocket(socket), method, params, cx.now)?;
+        let intent = method_intent(method)?;
+        let (id, body) =
+            self.prepare(Channel::WebSocket(socket), method, intent, params, cx.now)?;
         cx.send(socket, body);
         Ok(id)
     }
@@ -306,28 +307,12 @@ impl Transport {
         &mut self,
         channel: Channel,
         method: &str,
+        intent: Intent,
         params: Value,
         now: f64,
     ) -> Result<(RpcId, String), String> {
-        let name = method
-            .strip_prefix("public/")
-            .or_else(|| method.strip_prefix("private/"));
-        if !name.is_some_and(|s| {
-            s.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-                && s.bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-        }) || !params.is_object()
-            || !now.is_finite()
-            || now < 0.
-        {
+        if !params.is_object() || !now.is_finite() || now < 0. {
             return Err("drb invalid request".into());
-        }
-        // These methods have additional dedicated quotas, outside S0's pools.
-        if matches!(
-            method,
-            "private/mass_quote" | "private/cancel_quotes" | "private/mass_quote_cancel"
-        ) {
-            return Err("drb mass quote limits are unsupported".into());
         }
         if self.next_id > MAX_RPC_ID || self.in_flight.len() >= MAX_PENDING {
             return Err("drb request capacity exhausted".into());
@@ -361,12 +346,6 @@ impl Transport {
         }
         self.pools[pool].credits -= self.pools[pool].cost;
         self.next_id += 1;
-        let intent = match method {
-            "private/buy" | "private/sell" => Intent::Place,
-            name if name.starts_with("private/cancel") => Intent::Cancel,
-            "private/edit" | "private/edit_by_label" => Intent::Amend,
-            _ => Intent::Read,
-        };
         self.in_flight.insert(
             id,
             InFlight {
@@ -509,6 +488,116 @@ impl Transport {
             .filter_map(|id| self.failed(id, ErrorKind::Timeout).map(|f| (id, f)))
             .collect()
     }
+}
+
+// Closed semantic contract, independent of rate pools. New methods must be
+// classified here and pinned in the foundation authority table before use.
+// Authentication/heartbeat/subscription control is Read; account and trading writes are not.
+fn method_intent(method: &str) -> Result<Intent, String> {
+    Ok(match method {
+        "private/buy" | "private/sell" | "private/close_position" => Intent::Place,
+        "private/cancel"
+        | "private/cancel_all"
+        | "private/cancel_all_by_currency"
+        | "private/cancel_all_by_currency_pair"
+        | "private/cancel_all_by_instrument"
+        | "private/cancel_all_by_kind_or_type"
+        | "private/cancel_by_label" => Intent::Cancel,
+        "private/edit" | "private/edit_by_label" => Intent::Amend,
+        "private/change_margin_model"
+        | "private/create_combo"
+        | "private/disable_cancel_on_disconnect"
+        | "private/enable_cancel_on_disconnect"
+        | "private/logout"
+        | "private/move_positions"
+        | "private/set_leverage"
+        | "private/submit_transfer_between_subaccounts" => Intent::Setting,
+        "private/get_access_log"
+        | "private/get_account_summaries"
+        | "private/get_account_summary"
+        | "private/get_cancel_on_disconnect"
+        | "private/get_leg_prices"
+        | "private/get_leverage"
+        | "private/get_margins"
+        | "private/get_max_order_size"
+        | "private/get_open_orders"
+        | "private/get_open_orders_by_currency"
+        | "private/get_open_orders_by_instrument"
+        | "private/get_open_orders_by_label"
+        | "private/get_order_history_by_currency"
+        | "private/get_order_history_by_instrument"
+        | "private/get_order_margin_by_ids"
+        | "private/get_order_state"
+        | "private/get_order_state_by_label"
+        | "private/get_pme_params"
+        | "private/get_position"
+        | "private/get_positions"
+        | "private/get_risk_profile"
+        | "private/get_settlement_history_by_currency"
+        | "private/get_settlement_history_by_instrument"
+        | "private/get_subaccounts"
+        | "private/get_subaccounts_details"
+        | "private/get_trading_limits"
+        | "private/get_transaction_log"
+        | "private/get_trigger_order_history"
+        | "private/get_user_locks"
+        | "private/get_user_trades_by_currency"
+        | "private/get_user_trades_by_currency_and_time"
+        | "private/get_user_trades_by_instrument"
+        | "private/get_user_trades_by_instrument_and_time"
+        | "private/get_user_trades_by_order"
+        | "private/simulate_portfolio"
+        | "private/subscribe"
+        | "private/unsubscribe"
+        | "private/unsubscribe_all"
+        | "public/auth"
+        | "public/disable_heartbeat"
+        | "public/get_announcements"
+        | "public/get_book_summary_by_currency"
+        | "public/get_book_summary_by_instrument"
+        | "public/get_combo_details"
+        | "public/get_combo_ids"
+        | "public/get_combos"
+        | "public/get_contract_size"
+        | "public/get_currencies"
+        | "public/get_delivery_prices"
+        | "public/get_expirations"
+        | "public/get_funding_chart_data"
+        | "public/get_funding_rate_history"
+        | "public/get_funding_rate_value"
+        | "public/get_historical_volatility"
+        | "public/get_index_chart_data"
+        | "public/get_index_price"
+        | "public/get_index_price_names"
+        | "public/get_instrument"
+        | "public/get_instruments"
+        | "public/get_last_settlements_by_currency"
+        | "public/get_last_settlements_by_instrument"
+        | "public/get_last_trades_by_currency"
+        | "public/get_last_trades_by_currency_and_time"
+        | "public/get_last_trades_by_instrument"
+        | "public/get_last_trades_by_instrument_and_time"
+        | "public/get_mark_price_history"
+        | "public/get_order_book"
+        | "public/get_order_book_by_instrument_id"
+        | "public/get_supported_index_names"
+        | "public/get_time"
+        | "public/get_trade_volumes"
+        | "public/get_tradingview_chart_data"
+        | "public/get_volatility_index_data"
+        | "public/hello"
+        | "public/set_heartbeat"
+        | "public/status"
+        | "public/subscribe"
+        | "public/test"
+        | "public/ticker"
+        | "public/tickers_by_currency"
+        | "public/unsubscribe"
+        | "public/unsubscribe_all" => Intent::Read,
+        // Mass quotes have additional quotas unsupported by S0. All other
+        // unlisted methods also fail closed, including plausible get_/set_ names.
+        _ => return Err("drb unsupported method".into()),
+    })
 }
 
 fn pool_for(method: &str) -> usize {
