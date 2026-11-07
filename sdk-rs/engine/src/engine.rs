@@ -4086,6 +4086,16 @@ pub trait Venue {
     ) {
     }
 
+    /// Rate-limit bookkeeping for a validated delivery, before its Unknown seal.
+    /// No Cx: this cannot send, publish financial rows or complete a command.
+    fn observe_unproven_http_response(
+        &mut self,
+        _now: f64,
+        _pending: &Self::Pending,
+        _response: Response<'_>,
+    ) {
+    }
+
     /// Drop only this generation's native command planning after the engine
     /// has sealed and retired it. No Store, response or completion authority.
     fn discard_unproven_http_command(&mut self, _owner: crate::request_context::Owner) {}

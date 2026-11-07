@@ -10536,6 +10536,9 @@ Batch rows retain their codec-selected table's code-less refusal verdict;
 the write ambiguity guard still dominates native rate limits and HTTP 408/429/5xx.
 Engine-sealed HTTP ambiguity says Unknown and Check Open Orders directly;
 it does not invoke a venue formatter that could authorize another write.
+Before sealing, a no-Cx observer preserves Phemex's pause, WEEX's shared pause
+and Binance's background weight budget. It grants no send, Store or completion
+authority and introduces no universal write pause; native-code/read paths stay native.
 
 The real-engine audit cases are centrally blocked for Binance, ApeX Omni,
 AsterDEX, Bybit, BingX, Bitrue, OKX and Crypto.com. This does not convert raw
