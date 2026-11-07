@@ -76,7 +76,7 @@ default = [
     "orderly",
     "phemex",
 ]
-cryptocom = ["safe-cex-venues/cryptocom", "text-ingress", "dispatch-signing"]
+cryptocom = ["safe-cex-venues/cryptocom", "text-ingress", "dispatch-signing", "hosted-signing"]
 binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing", "hosted-signing", "safe-cex-algos?/product-semantics"]
 kucoin = ["safe-cex-venues/kucoin", "dispatch-signing", "text-ingress", "hosted-signing"]
 kucoinspot = ["safe-cex-venues/kucoinspot", "dispatch-signing", "text-ingress", "safe-cex-engine/command-kucoinspot"]

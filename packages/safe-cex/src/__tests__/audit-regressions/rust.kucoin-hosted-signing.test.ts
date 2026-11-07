@@ -15,7 +15,7 @@ it('admits KuCoin remote custody while undeclared venues still refuse before sig
   const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
   expect(deriveRemoteSigningPolicy('kucoin')?.enabled).toBe(true);
   expect(() => assertBetaAccount('kucoin', { remoteSigner })).not.toThrow();
-  for (const name of ['kucoinspot', 'krakenspot', 'cryptocom'] as const) {
+  for (const name of ['kucoinspot', 'krakenspot', 'kraken'] as const) {
     const prettyName = exchangeMetadata[name].prettyName;
     expect(() => assertBetaAccount(name, { remoteSigner })).toThrow(
       `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
