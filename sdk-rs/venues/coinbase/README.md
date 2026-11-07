@@ -37,8 +37,10 @@ Integration contract:
 - Authenticate with fresh `Session::params`, send `public/auth`, then pass its
   decoded result and request-start time to `Session::accept`. Schedule refresh
   using `refresh_at`, gate private sends with `needs_refresh`, and invalidate the
-  socket session on close and invalidate rejected credentials. Invalidation keeps
-  the authentication-start watermark, so older completions cannot revive the cache.
+  socket session on close and invalidate rejected credentials. Invalidation fences
+  the latest issued or accepted authentication start, so pending completions cannot
+  revive the cache. A fresh exchange must use a strictly later start timestamp;
+  equal starts fail closed without changing the auth API signatures.
   The HTTP session-bearer callback can use `authorization`; WS authenticates
   in-band. Refresh always exchanges a fresh CDP JWT using `coinbase_cdp`; no refresh-token grant is assumed.
 - Share one transport across streams so HTTP and WS consume the same credit
