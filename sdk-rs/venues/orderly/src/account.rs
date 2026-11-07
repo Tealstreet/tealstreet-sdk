@@ -1135,11 +1135,12 @@ impl Orderly {
                 && (400..500).contains(&response.status)
                 && !matches!(response.status, 408 | 429)
             {
-                cx.notice(
-                    Level::Error,
-                    code::AUTH_REJECTED,
-                    "Orderly API key expired or rejected",
-                );
+                let refused =
+                    safe_cex_engine::VenueError::new("Orderly API key expired or rejected")
+                        .kind(safe_cex_engine::ErrorKind::AuthInvalid);
+                if !cx.startup_read_refused(&refused) {
+                    cx.notice(Level::Error, code::AUTH_REJECTED, &refused.message);
+                }
                 cx.deactivate();
                 return;
             }
@@ -2004,6 +2005,18 @@ impl Orderly {
             SocketTick::Handled => {}
         }
         true
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Info => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::Modes { .. } => S::POSITIONS,
+        }
     }
 }
 

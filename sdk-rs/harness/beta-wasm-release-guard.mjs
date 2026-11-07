@@ -8,6 +8,7 @@
 //   node sdk-rs/harness/beta-wasm-release-guard.mjs create    <owner/repo> <tag> <sha>
 //   node sdk-rs/harness/beta-wasm-release-guard.mjs certified <owner/repo> <sha>
 //   node sdk-rs/harness/beta-wasm-release-guard.mjs published <owner/repo> <fingerprint>
+//   node sdk-rs/harness/beta-wasm-release-guard.mjs superseded <owner/repo> <sha>
 import { pathToFileURL } from 'node:url';
 
 /** `api(method, path, body?)` resolves to `{ status, json }`; it never throws for an HTTP status. */
@@ -95,6 +96,24 @@ export const publishedFingerprint = async ({ api, repo, fingerprint, fetchImpl =
   return undefined;
 };
 
+/**
+ * The tag of a published beta release built from a descendant of `sha`, or undefined. A slow
+ * master run that finishes after a newer commit was released must not publish older source.
+ */
+export const supersededBy = async ({ api, repo, sha }) => {
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('source must be a full commit SHA');
+  const { status, json } = await api('GET', `/repos/${repo}/releases?per_page=30`);
+  if (status !== 200) throw new Error(`release listing returned HTTP ${status}`);
+  for (const release of json ?? []) {
+    const tag = release.tag_name ?? '';
+    if (release.draft || !/^rust-beta-wasm-[0-9a-f]{11}$/.test(tag)) continue;
+    const compare = await api('GET', `/repos/${repo}/compare/${sha}...${encodeURIComponent(tag)}?per_page=1`);
+    if (compare.status !== 200) throw new Error(`comparing ${sha} with ${tag} returned HTTP ${compare.status}`);
+    if (compare.json?.status === 'ahead') return tag;
+  }
+  return undefined;
+};
+
 const githubApi = (token) => async (method, path, body) => {
   const response = await fetch(`https://api.github.com${path}`, {
     method,
@@ -122,6 +141,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     else if (mode === 'create') await createAndVerifyTag({ api, repo, tag: args[0], sha: args[1] });
     else if (mode === 'certified') await assertCertified({ api, repo, sha: args[0] });
     else if (mode === 'published') console.log((await publishedFingerprint({ api, repo, fingerprint: args[0] })) ?? '');
+    else if (mode === 'superseded') console.log((await supersededBy({ api, repo, sha: args[0] })) ?? '');
     else throw new Error(`unknown mode ${mode}`);
   } catch (error) {
     console.error(`beta wasm release guard: ${error.message}`);

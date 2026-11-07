@@ -6,10 +6,14 @@ admission, without the second admission, policy lookup and live-check pair;
 finish, processing and delivery are shared with native frames. Validation keeps
 every such feed on `AuthMode::None` and `TrafficPolicy::AnyText`, so the only
 deadline its message admission can meet is idle expiry, decided once at the
-frame's own `now`. An exhaustion stop at that admission revokes the epoch: its
-traffic check then fails, and under `AnyText` nothing is received. Native-control
+frame's own `now`. An exhaustion stop at that admission revokes the epoch and
+keeps the ordinary re-admission path, including both capacity checks. Native-control
 feeds, binary frames, opens, closes, timers and gated sends keep their existing
 path.
+
+Both paths share receive bookkeeping, including the supervisor's data-silence
+evidence for `Control::Other` and native `Control::Traffic`. Skipping a redundant
+admission must never skip that evidence or refresh it for a revoked epoch.
 
 ## Obligations
 

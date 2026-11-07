@@ -274,5 +274,6 @@ positions and one-way position mode, because cancel-all is intentional.
 | `KRAKEN_SPOT_MAINNET` | `KEY`, `SECRET` (Base64) | krakenspot | Query Funds, Query Open Orders and Trades, Create and Modify Orders, Cancel/Close Orders; XBT/USD ordermin 0.00006, costmin 0.5 USD; fund 20 USD cash |
 
 `binancepm` has no test environment and no profile yet. Whether it runs on
-mainnet or stays unsmoked is an open decision. `binanceinverse` gets its profile
+mainnet or stays unsmoked is an open decision. `binanceoptions` (European
+Options, #2356) has no reviewed profile either and refuses every mode. `binanceinverse` gets its profile
 in a follow-up.

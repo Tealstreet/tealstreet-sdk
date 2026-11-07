@@ -158,6 +158,15 @@ pub fn trading_engine_with(
     options: Options,
     configure: impl FnOnce(&mut Engine<Okx>),
 ) -> Engine<Okx> {
+    trading_engine_at_level(options, configure, "2")
+}
+
+/// A ready one-way private account whose config reports OKX acctLv `level`.
+pub fn trading_engine_at_level(
+    options: Options,
+    configure: impl FnOnce(&mut Engine<Okx>),
+    level: &str,
+) -> Engine<Okx> {
     let mut e = engine(options);
     configure(&mut e);
     e.start(0.0);
@@ -174,7 +183,7 @@ pub fn trading_engine_with(
     reply(
         &mut e,
         a,
-        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        &envelope(&format!(r#"{{"posMode":"net_mode","acctLv":"{level}"}}"#)),
         3.0,
     );
     let mut pending: Vec<_> = prepared(&mut e, 3.0)

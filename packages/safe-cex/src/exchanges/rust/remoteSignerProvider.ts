@@ -7,21 +7,35 @@ import { nanoid } from 'nanoid';
 
 import { deriveRemoteSigningPolicy } from './construction';
 
+const ED25519_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['ed25519']);
 const HMAC_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
 const DOUBLE_SHA256_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['sha256SecretSuffix']);
+const WALLET_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['secp256k1Digest']);
+const SCHNORR_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['schnorrDigest']);
+const STARK_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['starkDigest']);
 /** Families whose remote wire signs `hex(sha256(hex(sha256(toSign)) ‖ material))`. */
 const doubleSha256 = (name: ExchangeName) => name === 'bitunix';
+/** Families whose device re-derives a wallet digest from a structured statement. */
+const hyperliquid = (name: ExchangeName) => name === 'hyperliquid' || name === 'hyperliquidspot';
+/** Families whose device re-derives Schnorr signing words from a statement. */
+const lighter = (name: ExchangeName) => name === 'lighter' || name === 'lighter-robinhood';
+/** One Lighter request: the statement commitment and at most 31 signatures. */
+const LIGHTER_SIGNATURE = 80;
+/** The Stark family: the device rebuilds every digest from a closed `paradex/1` descriptor. */
+const paradex = (name: ExchangeName) => name === 'paradex';
 
 /** Everything this provider signs for a venue; the engine's capability admission
  * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
 export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
-  doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : HMAC_ALGORITHMS;
+  name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'grvt') ? WALLET_ALGORITHMS
+    : lighter(name) ? SCHNORR_ALGORITHMS : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
   credential: string;
   signing: string;
   publicCredential: string;
   passphrase?: string;
+  extra?: { kucoinBroker?: string };
   /** Trusted setup input, consumed into Present-only provider custody. */
   passphraseValue?: string;
 }
@@ -66,7 +80,14 @@ function validRef(value: unknown): value is string {
     && utf8(value).length <= 256;
 }
 
-function mac(value: unknown, encoding: 'hex' | 'base64'): number[] {
+function mac(value: unknown, encoding: 'hex' | 'base64' | 'hex-base64'): number[] {
+  if (encoding === 'hex-base64') {
+    // Exactly the canonical padded base64 of 64 lowercase hex characters.
+    if (typeof value !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(value)) throw refused();
+    const text = atob(value);
+    if (!/^[0-9a-f]{64}$/.test(text) || btoa(text) !== value) throw refused();
+    return mac(text, 'hex');
+  }
   if (encoding === 'base64') {
     // A SHA-256 MAC has 32 bytes: exactly 43 data characters and one '='.
     // Nonzero unused pad bits are not a second spelling of the same MAC.
@@ -217,6 +238,8 @@ function wsMetadata(wire: RemoteSigningPolicy['wire'], payload: string, key: str
  */
 export function createRemoteSignerProvider(options: RemoteSignerProviderOptions): Signer {
   const { exchangeName, remoteSigner, payloadSigner } = options;
+  if (exchangeName === 'grvt' && !remoteSigner) throw refused();
+  const kucoin = exchangeName === 'kucoin';
   const declaration = deriveRemoteSigningPolicy(exchangeName)?.wire;
   const wire = declaration && { ...declaration,
     ...(declaration.secondsSuffix && { secondsSuffix: { ...declaration.secondsSuffix } }) };
@@ -230,7 +253,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
   // Passphrases may be presented with owned signing work, never interpolated.
   const passphrases = new Map<string, number[]>();
   try {
-    if (encoding !== 'hex' && encoding !== 'base64') throw refused();
+    if (encoding !== 'hex' && encoding !== 'base64' && encoding !== 'hex-base64') throw refused();
     if ((wire?.extraData === 'secondsTimestamp') !== (wire?.secondsSuffix !== undefined)) throw refused();
     accountName = remoteSigner?.accountName;
     if (accountName !== undefined && (typeof accountName !== 'string' || accountName.length > 4096)) throw refused();
@@ -238,7 +261,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (!source) continue;
       if (slot !== 'primary' && slot !== 'secondary') throw refused();
       const identity: RemoteSignerIdentity = { credential: source.credential, signing: source.signing,
-        publicCredential: source.publicCredential, ...(source.passphrase === undefined ? {} : { passphrase: source.passphrase }) };
+        publicCredential: source.publicCredential, ...(source.passphrase === undefined ? {} : { passphrase: source.passphrase }),
+        ...(kucoin && source.extra?.kucoinBroker ? { extra: { kucoinBroker: source.extra.kucoinBroker } } : {}) };
       if (!validRef(identity.credential) || !validRef(identity.signing)
         || identity.signing === identity.credential || owned.has(identity.signing) || owned.has(identity.credential)
         || typeof identity.publicCredential !== 'string' || !identity.publicCredential
@@ -248,7 +272,11 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       owned.set(identity.signing, entry);
       owned.set(identity.credential, entry);
       credentials.set(identity.credential, { bytes, identity });
-      if (identity.passphrase !== undefined || source.passphraseValue !== undefined) {
+      if (kucoin) {
+        // These are device-owned refs, never Present material at the origin.
+        if (!remoteSigner || !validRef(identity.passphrase) || owned.has(identity.passphrase)
+          || (identity.extra?.kucoinBroker !== undefined && !validRef(identity.extra.kucoinBroker))) throw refused();
+      } else if (identity.passphrase !== undefined || source.passphraseValue !== undefined) {
         if (!passphraseHeader || !validRef(identity.passphrase) || owned.has(identity.passphrase)
           || typeof source.passphraseValue !== 'string' || !source.passphraseValue) throw refused();
         // Reuse the shared callback-header grammar/value/total bounds. The
@@ -263,6 +291,90 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     for (const key of passphrases.keys()) if (owned.has(key)) throw refused();
     if (!remoteSigner && !payloadSigner) throw refused();
   } catch { throw refused(); }
+
+  /** Backpack has one atomic graph: Present its key, then Ed25519 over exact
+   * native bytes. The device selects its own slot; opaque refs never cross. */
+  const signBackpack = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const [present, sign] = operations;
+    if (present?.kind !== 'present') throw refused();
+    const material = credentials.get(present.key);
+    if (!material) throw refused();
+    if (operations.length === 1) return { values: [material.bytes.slice()], receipt };
+    const entry = sign?.kind === 'sign' ? owned.get(sign.key) : undefined;
+    if (operations.length !== 2 || sign?.kind !== 'sign' || sign.algorithm !== 'ed25519'
+      || !entry || sign.key !== entry.identity.signing || present.key !== entry.identity.credential
+      || !Array.isArray(sign.payload) || sign.payload.length !== 1) throw refused();
+    const part = sign.payload[0];
+    if (part.kind !== 'bytes' || !Array.isArray(part.bytes) || part.bytes.length < 1 || part.bytes.length > MAX_PAYLOAD
+      || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+    const payload = decodeUtf8(Uint8Array.from(part.bytes));
+    const toSign = JSON.stringify({ slot: entry.primary ? 'primary' : 'secondary', payload });
+    utf8(toSign);
+    const id = nanoid();
+    const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({ id, type: 'ws-auth', exchangeName,
+      ...(accountName === undefined ? {} : { accountName }), wsAuth: { toSign, outputFormat: 'backpack-ed25519' } }));
+    if (!record(response) || response.id !== id || (response.error !== undefined && response.error !== '')
+      || typeof response.wsAuthSignature !== 'string') throw refused();
+    utf8(response.wsAuthSignature);
+    const result: unknown = JSON.parse(response.wsAuthSignature);
+    if (!record(result) || Object.keys(result).length !== 2 || result.credential !== entry.identity.publicCredential
+      || typeof result.signature !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(result.signature)) throw refused();
+    const signature = atob(result.signature);
+    if (signature.length !== 64 || btoa(signature) !== result.signature) throw refused();
+    if (signal.aborted) throw canceled();
+    return { values: [material.bytes.slice(), Array.from(signature, (char) => char.charCodeAt(0))], receipt };
+  };
+
+  /** KuCoin's native atomic graph: credential, request MAC, passphrase MAC,
+   * optional broker MAC. Only closed reference relationships cross this wire;
+   * the browser resolves all passphrase/broker material in its own custody. */
+  const signKucoin = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    const [present, request, passphrase, broker] = operations;
+    if (operations.length === 1 && present?.kind === 'present') {
+      const entry = credentials.get(present.key);
+      if (!entry) throw refused();
+      return { values: [entry.bytes.slice()], receipt };
+    }
+    if (!remoteSigner || (operations.length !== 3 && operations.length !== 4)
+      || present?.kind !== 'present' || request?.kind !== 'sign' || passphrase?.kind !== 'sign'
+      || request.algorithm !== 'hmacSha256' || passphrase.algorithm !== 'hmacSha256') throw refused();
+    const entry = owned.get(request.key);
+    if (!entry || request.key !== entry.identity.signing || present.key !== entry.identity.credential
+      || passphrase.key !== request.key || !Array.isArray(passphrase.payload) || passphrase.payload.length !== 1
+      || passphrase.payload[0].kind !== 'credential' || passphrase.payload[0].key !== entry.identity.passphrase) throw refused();
+    const text = (parts: unknown) => {
+      const part = Array.isArray(parts) && parts.length === 1 ? parts[0] : undefined;
+      if (!record(part) || part.kind !== 'bytes' || !Array.isArray(part.bytes) || part.bytes.length > MAX_PAYLOAD
+        || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+      return decodeUtf8(Uint8Array.from(part.bytes));
+    };
+    const payload = text(request.payload);
+    if (!payload) throw refused();
+    let brokerPrefix: string | undefined;
+    if (broker !== undefined) {
+      if (broker.kind !== 'sign' || broker.algorithm !== 'hmacSha256' || !entry.identity.extra?.kucoinBroker
+        || broker.key !== entry.identity.extra.kucoinBroker || !Array.isArray(broker.payload) || broker.payload.length !== 2
+        || broker.payload[1].kind !== 'credential' || broker.payload[1].key !== entry.identity.credential) throw refused();
+      brokerPrefix = text([broker.payload[0]]);
+      if (!brokerPrefix) throw refused();
+    }
+    const toSign = JSON.stringify({ slot: entry.primary ? 'primary' : 'secondary', payload,
+      ...(brokerPrefix === undefined ? {} : { brokerPrefix }) });
+    utf8(toSign);
+    const id = nanoid();
+    const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({ id, type: 'ws-auth', exchangeName,
+      ...(accountName === undefined ? {} : { accountName }), wsAuth: { toSign, outputFormat: 'kucoin-batch' } }));
+    if (!record(response) || response.id !== id || (response.error !== undefined && response.error !== '')
+      || typeof response.wsAuthSignature !== 'string') throw refused();
+    utf8(response.wsAuthSignature);
+    const output: unknown = JSON.parse(response.wsAuthSignature);
+    if (!record(output) || Object.keys(output).length !== 2 || output.credential !== entry.identity.publicCredential
+      || !Array.isArray(output.macs) || output.macs.length !== operations.length - 1) throw refused();
+    const values = [Array.from(utf8(entry.identity.publicCredential)), ...output.macs.map((value) => mac(value, 'base64'))];
+    if (signal.aborted) throw canceled();
+    return { values, receipt };
+  };
 
   /** The one admitted fused shape, in the engine's order: `sha256` over bytes and
    * the signing identity's own credential, `sign sha256SecretSuffix` over exactly
@@ -319,6 +431,154 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     return { values: [Array.from(sha256(preimage)), outer, key.slice()], receipt };
   };
 
+  /** Hyperliquid never sends a bare digest. Startup binds the agent address via
+   * `[publicAddress]`; each action is `[sha256(statement), publicAddress, sign
+   * secp256k1Digest]`, and the device re-derives the digest from the statement.
+   * The engine refuses any signature that does not recover to the bound address.
+   */
+  let boundAddress: number[] | undefined;
+  const hexBytes = (value: unknown, length: number): number[] => {
+    if (typeof value !== 'string' || !new RegExp(`^0x[0-9a-fA-F]{${length * 2}}$`).test(value)) throw refused();
+    return Array.from({ length }, (_, i) => Number.parseInt(value.slice(2 + i * 2, 4 + i * 2), 16));
+  };
+  const askDevice = async (toSign: string,
+    outputFormat: 'hyperliquid-l1' | 'hyperliquid-address' | 'paradex-stark' | 'paradex-public' | 'grvt-order' | 'grvt-address', signal: AbortSignal) => {
+    const id = nanoid();
+    const response = await guarded(signal, remoteSigner, () => remoteSigner!.sign({
+      id,
+      type: 'ws-auth',
+      exchangeName,
+      ...(accountName === undefined ? {} : { accountName }),
+      wsAuth: { toSign, outputFormat },
+    }));
+    if (!record(response) || response.id !== id
+      || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
+    if (signal.aborted) throw canceled();
+    return response.wsAuthSignature;
+  };
+  const signWallet = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const kinds = operations.map((operation) => (operation as { kind?: unknown })?.kind);
+    const keyOf = (operation: unknown) => (record(operation) ? operation.key : undefined);
+    const entry = owned.get(keyOf(operations.at(-1)) as string);
+    if (!entry || !entry.primary || operations.some((operation) => record(operation)
+      && 'key' in operation && operation.key !== entry.identity.signing)) throw refused();
+    if (kinds.length === 1 && kinds[0] === 'publicAddress') {
+      const address = hexBytes(await askDevice(entry.identity.publicCredential, 'hyperliquid-address', signal), 20);
+      // One provider binds one agent; a different device key is never adopted.
+      if (boundAddress && boundAddress.some((byte, index) => byte !== address[index])) throw refused();
+      boundAddress = address;
+      return { values: [address.slice()], receipt };
+    }
+    const [statement, , sign] = operations;
+    if (kinds.join() !== 'sha256,publicAddress,sign' || !boundAddress || sign.kind !== 'sign'
+      || sign.algorithm !== 'secp256k1Digest' || statement.kind !== 'sha256') throw refused();
+    const bytes = (parts: unknown, max: number) => {
+      const part = Array.isArray(parts) && parts.length === 1 ? parts[0] : undefined;
+      if (!record(part) || part.kind !== 'bytes' || !Array.isArray(part.bytes) || part.bytes.length > max
+        || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+      return Uint8Array.from(part.bytes as number[]);
+    };
+    const preimage = bytes(statement.payload, MAX_PAYLOAD);
+    if (bytes(sign.payload, 32).length !== 32) throw refused();
+    const signature = hexBytes(await askDevice(decodeUtf8(preimage), 'hyperliquid-l1', signal), 65);
+    return { values: [Array.from(sha256(preimage)), boundAddress.slice(), signature], receipt };
+  };
+
+  // GRVT session login is Present-only. Orders carry one closed EIP-712
+  // statement commitment, address and signature, resolved atomically on device.
+  const signGrvt = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const [first, address, sign] = operations;
+    if (operations.length === 1 && first?.kind === 'present') {
+      const entry = credentials.get(first.key);
+      if (!entry || !owned.get(first.key)?.primary) throw refused();
+      return { values: [entry.bytes.slice()], receipt };
+    }
+    const entry = sign?.kind === 'sign' ? owned.get(sign.key) : undefined;
+    if (operations.length !== 3 || first?.kind !== 'sha256' || address?.kind !== 'publicAddress'
+      || sign?.kind !== 'sign' || sign.algorithm !== 'secp256k1Digest' || !entry?.primary
+      || sign.key !== entry.identity.signing || address.key !== sign.key) throw refused();
+    const bytes = (parts: unknown, length?: number) => {
+      const part = Array.isArray(parts) && parts.length === 1 ? parts[0] : undefined;
+      if (!record(part) || part.kind !== 'bytes' || !Array.isArray(part.bytes) || part.bytes.length > MAX_PAYLOAD
+        || (length !== undefined && part.bytes.length !== length)
+        || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+      return Uint8Array.from(part.bytes as number[]);
+    };
+    const preimage = bytes(first.payload);
+    bytes(sign.payload, 32);
+    const joined = hexBytes(await askDevice(decodeUtf8(preimage), 'grvt-order', signal), 85);
+    return { values: [Array.from(sha256(preimage)), joined.slice(0, 20), joined.slice(20)], receipt };
+  };
+
+  /** Lighter never sends bare words: `[sha256(statement), sign schnorrDigest x n]`,
+   * one device round trip per request. The device re-derives every signed word
+   * from the statement and answers the n signatures concatenated in order.
+   */
+  const signLighter = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const [statement, ...signs] = operations;
+    if (statement?.kind !== 'sha256' || signs.length < 1) throw refused();
+    const parts = Array.isArray(statement.payload) && statement.payload.length === 1 ? statement.payload[0] : undefined;
+    if (!record(parts) || parts.kind !== 'bytes' || !Array.isArray(parts.bytes) || parts.bytes.length > MAX_PAYLOAD
+      || parts.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+    const preimage = Uint8Array.from(parts.bytes as number[]);
+    const entry = owned.get((signs[0] as { key?: string }).key as string);
+    if (!entry || !entry.primary || signs.some((sign) => sign?.kind !== 'sign' || sign.algorithm !== 'schnorrDigest'
+      || sign.key !== entry.identity.signing)) throw refused();
+    const id = nanoid();
+    const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({
+      id,
+      type: 'ws-auth',
+      exchangeName,
+      ...(accountName === undefined ? {} : { accountName }),
+      wsAuth: { toSign: decodeUtf8(preimage), outputFormat: 'lighter-tx' },
+    }));
+    if (!record(response) || response.id !== id
+      || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
+    if (signal.aborted) throw canceled();
+    const length = signs.length * LIGHTER_SIGNATURE;
+    const answer = response.wsAuthSignature;
+    if (typeof answer !== 'string' || !new RegExp(`^0x[0-9a-fA-F]{${length * 2}}$`).test(answer)) throw refused();
+    const bytes = Array.from({ length }, (_, i) => Number.parseInt(answer.slice(2 + i * 2, 4 + i * 2), 16));
+    const values = [Array.from(sha256(preimage))];
+    for (let i = 0; i < signs.length; i++) values.push(bytes.slice(i * LIGHTER_SIGNATURE, (i + 1) * LIGHTER_SIGNATURE));
+    return { values, receipt };
+  };
+
+  /** Paradex never sends a bare digest either. Startup binds the Stark public key
+   * via `[publicKey starkDigest]`; each write is `[sha256(descriptor), sign
+   * starkDigest x n]`, and the device rebuilds the n digests from the descriptor.
+   * The engine verifies every signature against the bound key and its own hash.
+   */
+  let boundStark: number[] | undefined;
+  const signStark = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const keyOf = (operation: unknown) => (record(operation) ? operation.key : undefined);
+    const entry = owned.get(keyOf(operations.at(-1)) as string);
+    if (!entry || !entry.primary || operations.some((operation) => record(operation)
+      && 'key' in operation && operation.key !== entry.identity.signing)) throw refused();
+    const [first, ...signs] = operations;
+    if (operations.length === 1 && first?.kind === 'publicKey') {
+      if (first.algorithm !== 'starkDigest') throw refused();
+      const key = hexBytes(await askDevice(entry.identity.publicCredential, 'paradex-public', signal), 32);
+      // One provider binds one device key; a different key is never adopted.
+      if (boundStark && boundStark.some((byte, index) => byte !== key[index])) throw refused();
+      boundStark = key;
+      return { values: [key.slice()], receipt };
+    }
+    if (!boundStark || first?.kind !== 'sha256' || signs.length < 1 || signs.length > 10
+      || signs.some((sign) => sign?.kind !== 'sign' || sign.algorithm !== 'starkDigest')) throw refused();
+    const part = Array.isArray(first.payload) && first.payload.length === 1 ? first.payload[0] : undefined;
+    if (!record(part) || part.kind !== 'bytes' || !Array.isArray(part.bytes) || part.bytes.length > MAX_PAYLOAD
+      || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+    const preimage = Uint8Array.from(part.bytes as number[]);
+    const joined = hexBytes(await askDevice(decodeUtf8(preimage), 'paradex-stark', signal), 64 * signs.length);
+    const signatures = signs.map((_, index) => joined.slice(index * 64, index * 64 + 64));
+    return { values: [Array.from(sha256(preimage)), ...signatures], receipt };
+  };
+
   return async (request, { signal }): Promise<RemoteSignerResult> => {
     try {
       if (signal.aborted) throw canceled();
@@ -328,6 +588,12 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (receipt.stampMs !== undefined && receipt.expiryMs !== undefined && receipt.expiryMs <= receipt.stampMs) throw refused();
       if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
       const operations = Array.from(request.operations);
+      if (exchangeName === 'backpack') return await signBackpack(operations, receipt, signal);
+      if (exchangeName === 'grvt') return await signGrvt(operations, receipt, signal);
+      if (kucoin) return await signKucoin(operations, receipt, signal);
+      if (hyperliquid(exchangeName)) return await signWallet(operations, receipt, signal);
+      if (lighter(exchangeName)) return await signLighter(operations, receipt, signal);
+      if (paradex(exchangeName)) return await signStark(operations, receipt, signal);
       if (operations.some((operation) => operation?.kind === 'sha256'
         || (operation?.kind === 'sign' && operation.algorithm === 'sha256SecretSuffix'))) {
         return await signDoubleSha256(operations, receipt, signal);
@@ -402,6 +668,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
             || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
           values.push(mac(response.wsAuthSignature, encoding));
         } else {
+          // The PayloadSigner wire names only raw hex or base64 MAC encodings.
+          if (encoding === 'hex-base64') throw refused();
           const response = await guarded(signal, undefined, () => payloadSigner!.call(item.entry.receiver, {
             exchangeName, key: item.entry.identity.publicCredential, payload: item.payload,
             scheme: 'hmac-sha256', encoding,

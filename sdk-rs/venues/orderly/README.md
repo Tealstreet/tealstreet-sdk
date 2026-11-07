@@ -1,6 +1,6 @@
 # Orderly perpetuals
 
-One venue crate serves Tealstreet DEX, KodiakFi, WOOFi, Mode, SalsaDEX and
+One venue crate serves KodiakFi, WOOFi, Mode, and
 What Exchange through `Options::broker`. Both EVM mainnet and testnet use
 Orderly ED25519 keys; `application_id` is the account ID for private requests.
 The public-only default is Orderly's common WebSocket application ID.

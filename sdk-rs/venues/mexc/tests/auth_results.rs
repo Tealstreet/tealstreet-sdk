@@ -310,3 +310,489 @@ fn independent_depth_queries_never_emit_auth_evidence_with_private_read_credenti
         }
     }
 }
+
+fn assert_refusal(actions: &[Action], kind: safe_cex_engine::ErrorKind, code: i32) {
+    let event = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::AUTH_REJECTED =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("typed key refusal instead of missing-list error");
+    assert!(event.fields.contains(&("kind", kind.as_str().into())));
+    assert!(
+        event
+            .fields
+            .contains(&("venueCode", code.to_string().into()))
+    );
+    assert!(
+        event
+            .fields
+            .contains(&("venueMessage", "Confirming signature failed".into()))
+    );
+    assert!(!event.message.contains("expected list"));
+    assert!(event.message.contains("Confirming signature failed"));
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Http(r)
+        if r.method != safe_cex_engine::Method::Get || r.url.contains("ping"))),
+        "a key refusal grants no write or clock-probe resend"
+    );
+}
+
+#[test]
+fn contract_auth_refusals_keep_typed_fields_on_streamed_account_reads() {
+    use safe_cex_engine::ErrorKind::*;
+    for read in [false, true] {
+        for (code, kind) in [
+            (401, AuthInvalid),
+            (402, AuthExpired),
+            (406, AuthPermission),
+            (511, AuthPermission),
+            (602, AuthInvalid),
+            (701, AuthPermission),
+            (702, AuthPermission),
+            (703, AuthPermission),
+            (704, AuthPermission),
+        ] {
+            let (mut e, a) = started(read);
+            let r = http(&a, "account/assets");
+            let body = format!(
+                r#"{{"success":false,"code":{code},"message":"Confirming signature failed"}}"#
+            );
+            let a = reply(&mut e, &r, 200, &body);
+            assert_refusal(&a, kind, code);
+            assert_eq!(
+                auth(&a),
+                [(
+                    if read {
+                        CredentialSlot::Secondary
+                    } else {
+                        CredentialSlot::Primary
+                    },
+                    AccountReadScope::Balance,
+                    AuthOutcome::Rejected
+                )]
+            );
+            assert!(e.store().balance().total == 0.);
+        }
+    }
+}
+
+#[test]
+fn a_602_refusal_reaches_the_original_caller_once_without_resending() {
+    let (mut e, _) = started(false);
+    e.handle(
+        1000.,
+        Event::Command(safe_cex_engine::Command::FetchAccount { command: 902 }),
+    );
+    let a = drain(&mut e);
+    let r = http(&a, "account/assets");
+    let a = reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"success":false,"code":602,"message":"Confirming signature failed"}"#,
+    );
+    let failed: Vec<_> = a
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: 902,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failed.len(), 1);
+    assert_eq!(
+        failed[0].kind,
+        Some(safe_cex_engine::ErrorKind::AuthInvalid)
+    );
+    assert_eq!(failed[0].venue_code.as_deref(), Some("602"));
+    assert_eq!(
+        failed[0].venue_message.as_deref(),
+        Some("Confirming signature failed")
+    );
+    assert!(!failed[0].message.contains("expected list"));
+    assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        reply(&mut e, &r, 200, r#"{"success":true,"code":0,"data":[]}"#)
+            .iter()
+            .all(|a| !matches!(
+                a,
+                Action::Notice(
+                    Notice::CommandDone { command: 902, .. }
+                        | Notice::CommandFailed { command: 902, .. }
+                )
+            ))
+    );
+}
+
+#[test]
+fn clock_window_513_gets_one_unsigned_probe_and_one_exact_selected_get_replay() {
+    for read in [false, true] {
+        for caller in [false, true] {
+            let (mut e, a) = started(read);
+            let original = if caller {
+                e.handle(
+                    1000.,
+                    Event::Command(safe_cex_engine::Command::FetchAccount { command: 903 }),
+                );
+                http(&drain(&mut e), "account/assets")
+            } else {
+                http(&a, "account/assets")
+            };
+            let a = reply(
+                &mut e,
+                &original,
+                200,
+                r#"{"success":false,"code":513,"message":"Invalid request"}"#,
+            );
+            let clock = http(&a, "/api/v1/contract/ping");
+            assert!(clock.headers.iter().all(|(k, _)| !matches!(
+                k.to_lowercase().as_str(),
+                "apikey" | "request-time" | "signature"
+            )));
+            assert!(clock.body.is_none());
+            assert!(!a.iter().any(|a| matches!(
+                a,
+                Action::Notice(
+                    Notice::CommandFailed { command: 903, .. }
+                        | Notice::CommandDone { command: 903, .. }
+                )
+            )));
+            let a = reply(
+                &mut e,
+                &clock,
+                200,
+                r#"{"success":true,"code":0,"data":301000}"#,
+            );
+            let replay = http(&a, "account/assets");
+            assert_ne!(original.id, replay.id);
+            assert_eq!(original.url, replay.url);
+            assert_eq!(original.method, replay.method);
+            assert_eq!(original.body, replay.body);
+            for header in ["ApiKey", "Recv-Window"] {
+                assert_eq!(
+                    original.headers.iter().find(|(k, _)| *k == header),
+                    replay.headers.iter().find(|(k, _)| *k == header)
+                );
+            }
+            assert!(
+                replay
+                    .headers
+                    .iter()
+                    .any(|(k, v)| *k == "Request-Time" && v == "301000")
+            );
+            let a = reply(
+                &mut e,
+                &replay,
+                200,
+                r#"{"success":false,"code":513,"message":"Invalid request"}"#,
+            );
+            assert!(
+                !a.iter().any(|a| matches!(a, Action::Http(_))),
+                "second 513 cannot loop"
+            );
+            if caller {
+                let failures: Vec<_> = a
+                    .iter()
+                    .filter_map(|a| match a {
+                        Action::Notice(Notice::CommandFailed {
+                            command: 903,
+                            error,
+                        }) => Some(error),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(failures.len(), 1);
+                assert_eq!(failures[0].venue_code.as_deref(), Some("513"));
+                assert_eq!(
+                    failures[0].kind,
+                    Some(safe_cex_engine::ErrorKind::InvalidInput)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn history_clock_refusal_replays_the_same_page_and_finishes_once() {
+    let (mut e, _) = started(false);
+    e.handle(
+        1000.,
+        Event::Command(safe_cex_engine::Command::Query {
+            command: 904,
+            query: safe_cex_engine::Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: Some(2),
+            },
+        }),
+    );
+    let original = http(&drain(&mut e), "order_deals");
+    let a = reply(
+        &mut e,
+        &original,
+        200,
+        r#"{"success":false,"code":513,"message":"Invalid request"}"#,
+    );
+    let clock = http(&a, "/contract/ping");
+    let a = reply(
+        &mut e,
+        &clock,
+        200,
+        r#"{"success":true,"code":0,"data":999000}"#,
+    );
+    let replay = http(&a, "order_deals");
+    assert_eq!(replay.url, original.url);
+    assert!(
+        replay
+            .headers
+            .iter()
+            .any(|(k, v)| *k == "Request-Time" && v == "999000")
+    );
+    let a = reply(
+        &mut e,
+        &replay,
+        200,
+        r#"{"success":true,"code":0,"data":[]}"#,
+    );
+    assert_eq!(
+        a.iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 904, .. })))
+            .count(),
+        1
+    );
+    assert!(!a.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 904, .. })
+    )));
+}
+
+#[test]
+fn malformed_failed_or_expired_clock_samples_never_replay_or_poison_signing() {
+    for body in [
+        r#"{"success":false,"code":602,"message":"Confirming signature failed"}"#,
+        r#"{"success":true,"code":0,"data":0}"#,
+        r#"{"success":true,"code":0,"data":-1}"#,
+        r#"{"success":true,"code":0,"data":9007199254740992}"#,
+        r#"{"success":true,"code":0,"data":999000.5}"#,
+        r#"{"success":true,"code":0,"data":"999000"}"#,
+        r#"{"success":true,"code":0,"data":[]}"#,
+        "<html>gateway failure</html>",
+    ] {
+        let (mut e, _) = started(false);
+        e.handle(
+            1000.,
+            Event::Command(safe_cex_engine::Command::FetchAccount { command: 905 }),
+        );
+        let original = http(&drain(&mut e), "account/assets");
+        let a = reply(&mut e, &original, 200, r#"{"success":false,"code":513}"#);
+        let clock = http(&a, "/contract/ping");
+        let a = reply(&mut e, &clock, 200, body);
+        assert!(!a.iter().any(|a| matches!(a, Action::Http(_))), "{body}");
+        assert_eq!(
+            a.iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 905, .. })
+                ))
+                .count(),
+            1
+        );
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 905, .. })))
+        );
+        e.handle(
+            1000.,
+            Event::Command(safe_cex_engine::Command::FetchAccount { command: 906 }),
+        );
+        let fresh = http(&drain(&mut e), "account/assets");
+        assert!(
+            fresh
+                .headers
+                .iter()
+                .any(|(k, v)| *k == "Request-Time" && v == "1000")
+        );
+    }
+    let (mut e, _) = started(false);
+    e.handle(
+        1000.,
+        Event::Command(safe_cex_engine::Command::FetchAccount { command: 907 }),
+    );
+    let original = http(&drain(&mut e), "account/assets");
+    let a = reply(&mut e, &original, 200, r#"{"success":false,"code":513}"#);
+    let clock = http(&a, "/contract/ping");
+    e.handle(
+        7000.,
+        Event::HttpResponse {
+            request: clock.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"success":true,"code":0,"data":999000}"#,
+            },
+        },
+    );
+    let a = support::prepared(&mut e, 7000.);
+    assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(
+        a.iter()
+            .filter(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { command: 907, .. })
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn clock_transport_failure_stays_network_and_a_failed_replay_stays_auth() {
+    for network in [false, true] {
+        let (mut e, _) = started(false);
+        e.handle(
+            1000.,
+            Event::Command(safe_cex_engine::Command::FetchAccount { command: 908 }),
+        );
+        let original = http(&drain(&mut e), "account/assets");
+        let a = reply(&mut e, &original, 200, r#"{"success":false,"code":513}"#);
+        let clock = http(&a, "/contract/ping");
+        let a = if network {
+            e.handle(
+                1000.,
+                Event::HttpFailed {
+                    request: clock.id,
+                    error: "connection reset",
+                },
+            );
+            drain(&mut e)
+        } else {
+            let a = reply(
+                &mut e,
+                &clock,
+                200,
+                r#"{"success":true,"code":0,"data":301000}"#,
+            );
+            let replay = http(&a, "account/assets");
+            reply(
+                &mut e,
+                &replay,
+                200,
+                r#"{"success":false,"code":602,"message":"Confirming signature failed"}"#,
+            )
+        };
+        let errors: Vec<_> = a
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 908,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].kind,
+            Some(if network {
+                safe_cex_engine::ErrorKind::Network
+            } else {
+                safe_cex_engine::ErrorKind::AuthInvalid
+            })
+        );
+        assert_eq!(
+            errors[0].venue_code.as_deref(),
+            if network { None } else { Some("602") }
+        );
+        assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+
+#[test]
+fn req_time_after_hidden_sleep_is_signed_at_new_dispatch_time() {
+    let (mut e, _) = started(false);
+    e.handle(
+        301000.875,
+        Event::Command(safe_cex_engine::Command::FetchAccount { command: 909 }),
+    );
+    let request = http(&support::prepared(&mut e, 301000.875), "account/assets");
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(k, v)| *k == "Request-Time" && v == "301000")
+    );
+    let signature = safe_cex_crypto::hmac_sha256(
+        b"primary-secret",
+        b"primary-key301000",
+        safe_cex_crypto::Encoding::Hex,
+    );
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(k, v)| *k == "Signature" && v == &signature)
+    );
+}
+
+#[test]
+fn a_success_or_unproven_envelope_cannot_become_a_key_refusal_or_clock_grant() {
+    for body in [
+        r#"{"success":true,"code":602,"message":"Confirming signature failed"}"#,
+        r#"{"code":602,"message":"Confirming signature failed"}"#,
+        r#"{"success":false,"code":602.5,"message":"Confirming signature failed"}"#,
+        r#"{"success":true,"code":513}"#,
+        r#"{"success":false,"code":513,"data":[]}"#,
+    ] {
+        let (mut e, a) = started(false);
+        let original = http(&a, "account/assets");
+        let a = reply(&mut e, &original, 200, body);
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.contains("/contract/ping")))
+        );
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::Event(event))
+            if event.code==safe_cex_engine::log::code::AUTH_REJECTED))
+        );
+    }
+}
+
+#[test]
+fn native_auth_detail_is_bounded_and_never_includes_refusal_data_rows() {
+    let (mut e, _) = started(false);
+    e.handle(
+        1000.,
+        Event::Command(safe_cex_engine::Command::FetchAccount { command: 910 }),
+    );
+    let request = http(&drain(&mut e), "account/assets");
+    let message = "密".repeat(500);
+    let body = format!(
+        r#"{{"success":false,"code":602,"message":"{message}","data":[{{"private":"do-not-publish"}}]}}"#
+    );
+    let a = reply(&mut e, &request, 200, &body);
+    let error = a
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: 910,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .expect("original typed terminal");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+    assert_eq!(error.venue_message.as_ref().unwrap().chars().count(), 128);
+    assert!(!error.message.contains("do-not-publish"));
+    assert!(e.store().orders().is_empty());
+}

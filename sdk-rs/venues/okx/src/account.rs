@@ -21,6 +21,10 @@ const ORDER_KINDS: [&str; 5] = ["", "oco", "conditional", "trigger", "move_order
 const SKIP_LOG_LIMIT: usize = 4_096;
 /// Store-id suffixes one native order row may expand into.
 const ORDER_SUFFIXES: [&str; 4] = ["", "_sl", "_tp", "_tsl"];
+/// The open-order census's read-cover scope: one census reads the whole account.
+const ORDERS_SCOPE: &str = "orders";
+/// A census the stream outran is read again no sooner than this after it began.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.0;
 
 // Match the SDK's decimal arithmetic without reducing native coin precision.
 fn decimal_result(a: f64, b: f64, result: f64) -> f64 {
@@ -85,11 +89,27 @@ fn lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     })
 }
 
+/// `after` pages by the id its endpoint lists: a triggered order on orders-pending
+/// also carries its parent algoId, which is not a position in that list.
+fn page_cursor<'a>(kind: usize, ord_id: &'a str, algo_id: &'a str) -> &'a str {
+    if kind == 0 || algo_id.is_empty() {
+        ord_id
+    } else {
+        algo_id
+    }
+}
+
 fn terminal_state(state: &str) -> bool {
     matches!(
         state,
-        "filled" | "canceled" | "mmp_canceled" | "order_failed" | "effective"
+        "filled" | "canceled" | "mmp_canceled" | "order_failed" | "partially_failed" | "effective"
     )
+}
+
+#[derive(Default)]
+pub struct OrderMetadata {
+    margins: HashMap<String, (f64, String)>,
+    algos: HashMap<String, crate::trading::ObservedAlgo>,
 }
 
 pub enum Request {
@@ -98,6 +118,14 @@ pub enum Request {
         mode_version: u64,
     },
     Leverage {
+        context: Context,
+        symbol: String,
+        inst_id: String,
+        version: u64,
+    },
+    /// A data source's background re-read of a symbol's leverage after a
+    /// frame-fed engine changed it (`refresh_settings`); it answers no command.
+    LeverageRefresh {
         context: Context,
         symbol: String,
         inst_id: String,
@@ -119,6 +147,7 @@ pub enum Request {
         product: usize,
         rows: SnapshotBuilder<String, (Position, RiskValues)>,
         invalid: bool,
+        unlisted: Vec<String>,
     },
     Orders {
         context: Option<Context>,
@@ -130,11 +159,16 @@ pub enum Request {
         kind: usize,
         product: usize,
         rows: SnapshotBuilder<String, Order>,
-        margins: HashMap<String, (f64, String)>,
+        metadata: Box<OrderMetadata>,
         page_count: usize,
         cursor: String,
         cursors: HashSet<String>,
         invalid: bool,
+        /// The earliest release among this census's pages so far.
+        read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+        /// A page answered outside a read: the census proves no cover.
+        read_lost: bool,
+        started: f64,
     },
 }
 
@@ -145,7 +179,7 @@ impl Request {
             Self::Balance { context, .. }
             | Self::Positions { context, .. }
             | Self::Orders { context, .. } => context.as_ref(),
-            Self::Config { .. } | Self::Leverage { .. } => None,
+            Self::Config { .. } | Self::Leverage { .. } | Self::LeverageRefresh { .. } => None,
         }
     }
 
@@ -158,7 +192,7 @@ impl Request {
             | Self::Orders { context, .. } => context
                 .as_ref()
                 .is_some_and(|context| cx.validate_background_read_http_delivery(context).is_ok()),
-            Self::Config { .. } | Self::Leverage { .. } => true,
+            Self::Config { .. } | Self::Leverage { .. } | Self::LeverageRefresh { .. } => true,
         }
     }
 
@@ -190,6 +224,8 @@ pub struct RiskValues {
 }
 struct Join {
     generation: u64,
+    /// Owned rows on a market the catalogue does not list.
+    unlisted: Vec<String>,
     positions: Option<SnapshotBuilder<String, (Position, RiskValues)>>,
     equity: Option<SnapshotBuilder<String, (String, f64)>>,
     position_version: u64,
@@ -201,6 +237,8 @@ pub struct AccountState {
     pub ready: bool,
     configured: bool,
     config_in_flight: bool,
+    /// The first config without a position mode was reported; later reads stay quiet.
+    pos_mode_noted: bool,
     config_read_at: f64,
     pub mode_version: u64,
     pub leverage_versions: HashMap<String, u64>,
@@ -208,14 +246,20 @@ pub struct AccountState {
     unlisted_logged: HashSet<String>,
     /// `position:`/`order:`/`coin:` + identity (empty when unreadable) of skips already logged.
     skip_logged: HashSet<String>,
-    account_level: u8,
+    /// Symbols of this census's rejected rows that could be an uncertain write:
+    /// no stored copy proves them older. Empty text: the row names no market.
+    census_unproven: Vec<String>,
+    /// OKX acctLv (1 spot, 2 spot and futures, 3 multi-currency, 4 portfolio); 0 until read.
+    pub account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
     order_versions: HashMap<String, (u64, f64, bool)>,
     balance_version: u64,
     join: Option<Join>,
+    read_again: bool,
     generation: u64,
     orders_in_flight: bool,
+    source_orders_owed: bool,
     orders_generation: u64,
     risk: HashMap<String, RiskValues>,
     order_leverage: HashMap<String, (f64, String)>,
@@ -235,6 +279,9 @@ pub struct AccountState {
     /// Consecutive 50113 answers to the config read; two in a row reject the key.
     signature_rejections: u8,
     pub startup_rejected: bool,
+    pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
+    census_follow_up: Option<TimerId>,
 }
 impl AccountState {
     pub(crate) fn order_final(&self, id: &str) -> bool {
@@ -244,8 +291,19 @@ impl AccountState {
     }
 }
 
+/// How soon `readPositions` tries again after a read a stream frame overrode.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
+
 impl Okx {
     pub(crate) fn account_after_uncertain_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        // A frame-fed engine's data source reports the outcome in its frames.
+        if cx.frame_fed() {
+            return;
+        }
+        if cx.orders_refresh_pending() && self.account.orders_in_flight {
+            self.account.source_orders_owed = true;
+            return;
+        }
         // A backoff re-ask joins any running read: the seal's own ask already
         // restarted reads, so a running one postdates the write.
         if cx.reconcile_reask() && self.account.orders_in_flight {
@@ -259,14 +317,67 @@ impl Okx {
     }
 
     pub(crate) fn account_after_settings(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.frame_fed() {
+            return;
+        }
         self.account.join = None;
         self.account.generation += 1;
         self.account.revision += 1;
         self.reconcile(cx, false);
     }
 
+    /// Data source: re-read the position mode (config) and the positions'
+    /// leverage after a frame-fed engine changed them.
+    pub(crate) fn account_refresh_settings(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: Option<&str>,
+    ) {
+        if cx.frame_fed() || !self.account.configured {
+            return;
+        }
+        self.account_start(cx);
+        self.account_after_settings(cx);
+        // A flat symbol's leverage is in no position row: read it directly.
+        if let Some(symbol) = symbol {
+            self.refresh_leverage(cx, symbol);
+        }
+    }
+
+    fn refresh_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        let Some(inst_id) = cx.store.market(symbol).map(|m| m.id.clone()) else {
+            return;
+        };
+        let context = match cx.http_context(Scope::Background, read_policy(self.read_credential()))
+        {
+            Ok(context) => context,
+            Err(error) => {
+                cx.notice_error(Level::Warn, code::REQUEST_FAILED, &error.venue_error());
+                return;
+            }
+        };
+        let version = self
+            .account
+            .leverage_versions
+            .get(symbol)
+            .copied()
+            .unwrap_or(0);
+        self.managed_get(
+            cx,
+            context.clone(),
+            &format!("/api/v5/account/leverage-info?instId={inst_id}&mgnMode=cross"),
+            Pending::Account(Request::LeverageRefresh {
+                context,
+                symbol: symbol.into(),
+                inst_id,
+                version,
+            }),
+        );
+    }
+
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none()
+        if cx.frame_fed()
+            || self.credentials.is_none()
             || self.account.config_in_flight
             || self.account.startup_rejected
         {
@@ -279,7 +390,7 @@ impl Okx {
             Ok(context) => context,
             Err(error) => {
                 self.config_unanswered();
-                self.config_failed(cx, &error.venue_error().message);
+                self.config_failed(cx, &error.venue_error());
                 return;
             }
         };
@@ -338,6 +449,7 @@ impl Okx {
             let generation = self.account.generation;
             self.account.join = Some(Join {
                 generation,
+                unlisted: Vec::new(),
                 positions: None,
                 equity: None,
                 position_version: version,
@@ -365,31 +477,54 @@ impl Okx {
                     product: 0,
                     rows: SnapshotBuilder::default(),
                     invalid: false,
+                    unlisted: Vec::new(),
                 },
             );
         }
-        if include_orders && !self.account.orders_in_flight {
-            self.account.orders_in_flight = true;
-            self.account.orders_generation += 1;
-            let generation = self.account.orders_generation;
-            self.orders_page(
-                cx,
-                Request::Orders {
-                    context: None,
-                    generation,
-                    version: self.account.revision,
-                    epoch: cx.order_read_epoch(),
-                    kind: 0,
-                    product: 0,
-                    rows: SnapshotBuilder::default(),
-                    margins: HashMap::new(),
-                    page_count: 0,
-                    cursor: String::new(),
-                    cursors: HashSet::new(),
-                    invalid: false,
-                },
-            );
+        if include_orders {
+            self.census(cx);
         }
+    }
+
+    fn census(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.orders_in_flight {
+            return;
+        }
+        self.account.source_orders_owed = false;
+        self.account.orders_in_flight = true;
+        self.account.orders_generation += 1;
+        self.account.census_unproven.clear();
+        let generation = self.account.orders_generation;
+        self.orders_page(
+            cx,
+            Request::Orders {
+                context: None,
+                generation,
+                version: self.account.revision,
+                epoch: cx.order_read_epoch(),
+                kind: 0,
+                product: 0,
+                rows: SnapshotBuilder::default(),
+                metadata: Box::default(),
+                page_count: 0,
+                cursor: String::new(),
+                cursors: HashSet::new(),
+                invalid: false,
+                read: None,
+                read_lost: false,
+                started: cx.now,
+            },
+        );
+    }
+
+    /// Owe a census after one the stream outran, `CENSUS_FOLLOW_UP_MS` after
+    /// that one started at the earliest.
+    fn census_follow_up(&mut self, cx: &mut Cx<'_, Pending>, started: f64) {
+        if self.account.census_follow_up.is_some() {
+            return;
+        }
+        let wait = (started + CENSUS_FOLLOW_UP_MS - cx.now).max(0.0);
+        self.account.census_follow_up = Some(cx.set_timer(wait));
     }
 
     /// One physical account-cycle page under its own Background Read with the
@@ -409,11 +544,15 @@ impl Okx {
         ) {
             Ok(read) => read,
             Err(BackgroundReadError::Selection(_)) => {
-                self.account_failed(cx, request, "OKX account read requires credentials");
+                self.account_failed(
+                    cx,
+                    request,
+                    VenueError::new("OKX account read requires credentials"),
+                );
                 return;
             }
             Err(BackgroundReadError::Admission(error)) => {
-                self.account_failed(cx, request, &error.read_venue_error().message);
+                self.account_failed(cx, request, error.read_venue_error());
                 return;
             }
         };
@@ -433,7 +572,7 @@ impl Okx {
             |_| Pending::Account(request),
         );
         if let Err((Pending::Account(request), error)) = queued {
-            self.account_failed(cx, request, &error.venue_error().message);
+            self.account_failed(cx, request, error.venue_error());
         }
     }
 
@@ -495,7 +634,9 @@ impl Okx {
                 .as_ref()
                 .is_some_and(|join| join.generation == *generation),
             Request::Orders { generation, .. } => self.account.orders_generation == *generation,
-            Request::Config { .. } | Request::Leverage { .. } => true,
+            Request::Config { .. } | Request::Leverage { .. } | Request::LeverageRefresh { .. } => {
+                true
+            }
         }
     }
 
@@ -528,8 +669,10 @@ impl Okx {
         if !self.account_delivery_current(cx, request) {
             return;
         }
+        let (mut readable_position, mut readable_order) = (None, None);
         match request {
-            Request::Config { .. } | Request::Leverage { .. } => {}
+            Request::Config { .. } | Request::Leverage { .. } | Request::LeverageRefresh { .. } => {
+            }
             Request::Balance {
                 equity,
                 risk_rows,
@@ -565,8 +708,19 @@ impl Okx {
                 product,
                 rows,
                 invalid,
+                unlisted,
                 ..
-            } => match serde_json::from_str::<PositionRow<'_>>(item) {
+            } => match serde_json::from_str::<PositionRow<'_>>(
+                readable_position
+                    .get_or_insert_with(|| {
+                        serde_json::from_str::<PositionRow<'_>>(item)
+                            .is_err()
+                            .then(|| readable_rows(item))
+                            .flatten()
+                    })
+                    .as_deref()
+                    .unwrap_or(item),
+            ) {
                 Ok(p) => {
                     if !self.account_scope(*product, p.inst_id, p.inst_type) {
                         *invalid = true;
@@ -580,6 +734,7 @@ impl Okx {
                             cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "OKX owned position market unavailable; preserving account snapshot");
                         } else {
                             self.unlisted_skipped(cx, p.inst_id);
+                            unlisted.push(p.inst_id.to_owned());
                         }
                         return;
                     }
@@ -605,6 +760,7 @@ impl Okx {
                             *invalid = true;
                         } else {
                             self.unlisted_skipped(cx, inst_id);
+                            unlisted.push(inst_id.to_owned());
                         }
                         return;
                     }
@@ -612,21 +768,28 @@ impl Okx {
                 }
             },
             Request::Orders {
+                kind,
                 product,
                 rows,
-                margins,
+                metadata,
                 page_count,
                 cursor,
                 invalid,
                 ..
-            } => match serde_json::from_str::<OrderRow<'_>>(item) {
+            } => match serde_json::from_str::<OrderRow<'_>>(
+                readable_order
+                    .get_or_insert_with(|| {
+                        serde_json::from_str::<OrderRow<'_>>(item)
+                            .is_err()
+                            .then(|| readable_rows(item))
+                            .flatten()
+                    })
+                    .as_deref()
+                    .unwrap_or(item),
+            ) {
                 Ok(o) => {
                     *page_count += 1;
-                    *cursor = if o.algo_id.is_empty() {
-                        o.ord_id.into()
-                    } else {
-                        o.algo_id.into()
-                    };
+                    *cursor = page_cursor(*kind, o.ord_id, o.algo_id).into();
                     if !self.account_scope(*product, o.inst_id, o.inst_type) {
                         *invalid = true;
                         return;
@@ -634,15 +797,25 @@ impl Okx {
                     if o.inst_id.is_empty()
                         || (cx.store.market_by_id(o.inst_id).is_some() && !valid_order(&o))
                     {
-                        self.reject_order(cx, rows, o.ord_id, o.algo_id);
+                        self.reject_order(cx, rows, o.inst_id, o.ord_id, o.algo_id);
                         return;
                     }
                     if cx.store.market_by_id(o.inst_id).is_none() && !terminal_state(o.state) {
                         self.unlisted_order(cx, o.inst_id, invalid);
                         return;
                     }
-                    for order in self.orders(cx, &o) {
-                        margins.insert(
+                    let orders = self.orders(cx, &o);
+                    // A working row that decodes but maps to no order (an OCO with
+                    // no trigger) keeps its stored legs and proves nothing.
+                    if orders.is_empty() && !terminal_state(o.state) {
+                        self.reject_order(cx, rows, o.inst_id, o.ord_id, o.algo_id);
+                        return;
+                    }
+                    for order in orders {
+                        if let Some(native) = crate::trading::ObservedAlgo::new(&o, &order) {
+                            metadata.algos.insert(order.id.clone(), native);
+                        }
+                        metadata.margins.insert(
                             order.id.clone(),
                             (reserve_leverage(o.lever), self.order_margin_currency(&o)),
                         );
@@ -653,13 +826,9 @@ impl Okx {
                 Err(_) => {
                     *page_count += 1;
                     let row = serde_json::from_str::<RowIdentity>(item).unwrap_or_default();
-                    let id = if row.algo_id.is_empty() {
-                        &row.ord_id
-                    } else {
-                        &row.algo_id
-                    };
+                    let id = page_cursor(*kind, &row.ord_id, &row.algo_id);
                     if !id.is_empty() {
-                        cursor.clone_from(id);
+                        *cursor = id.to_owned();
                     }
                     if !self.account_scope(*product, &row.inst_id, &row.inst_type) {
                         *invalid = true;
@@ -672,7 +841,7 @@ impl Okx {
                         }
                         return;
                     }
-                    self.reject_order(cx, rows, &row.ord_id, &row.algo_id);
+                    self.reject_order(cx, rows, &row.inst_id, &row.ord_id, &row.algo_id);
                 }
             },
         }
@@ -720,6 +889,7 @@ impl Okx {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         rows: &mut SnapshotBuilder<String, Order>,
+        inst_id: &str,
         ord_id: &str,
         algo_id: &str,
     ) {
@@ -727,6 +897,19 @@ impl Okx {
             .into_iter()
             .filter(|id| !id.is_empty())
             .collect();
+        let stored = ids.iter().any(|id| {
+            ORDER_SUFFIXES
+                .iter()
+                .any(|suffix| cx.store.order(&format!("{id}{suffix}")).is_some())
+        });
+        if !stored {
+            if inst_id.is_empty() {
+                self.account.census_unproven.push(String::new());
+            } else if let Some(market) = cx.store.market_by_id(inst_id) {
+                // A market this account cannot trade cannot hold its placement.
+                self.account.census_unproven.push(market.symbol.clone());
+            }
+        }
         let Some(first) = ids.first() else {
             let message = "OKX skipped order row without an id";
             self.log_skip(cx, "order:".into(), Level::Warn, message);
@@ -788,7 +971,7 @@ impl Okx {
         let data = match envelope(response.body) {
             Ok(data) => data,
             Err(e) => {
-                self.account_failed(cx, request, &e);
+                self.account_failed(cx, request, read_error(&response, e));
                 return;
             }
         };
@@ -808,19 +991,49 @@ impl Okx {
                     Err(error) => cx.fail_context(&context, error),
                 };
             }
+            Request::LeverageRefresh {
+                symbol,
+                inst_id,
+                version,
+                ..
+            } => {
+                if let Err(error) = self.leverage_result(cx, data, &symbol, &inst_id, version) {
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+                }
+            }
             Request::Config { mode_version, .. } => {
                 self.account.config_in_flight = false;
+                // A 200 answer that cannot be read will not read better on a retry:
+                // it ends the start visibly instead of backing off forever.
                 let configs = serde_json::from_str::<Vec<Config<'_>>>(data);
-                let Ok(configs) = configs else {
-                    self.config_failed(cx, "malformed OKX config");
+                let Some(config) = configs.ok().and_then(|configs| configs.into_iter().next())
+                else {
+                    self.config_unusable(cx, "OKX account config answered with no readable account".into());
                     return;
                 };
-                let Some(config) = configs
-                    .first()
-                    .filter(|c| matches!(c.pos_mode, "net_mode" | "long_short_mode"))
-                else {
-                    self.config_failed(cx, "missing OKX position mode");
-                    return;
+                let config = match config.pos_mode {
+                    "net_mode" | "long_short_mode" => config,
+                    // Simple (spot) mode accounts report no position mode: they trade one-way.
+                    "" => {
+                        if !std::mem::replace(&mut self.account.pos_mode_noted, true) {
+                            cx.notice(
+                                Level::Warn,
+                                code::CONFIG_INVALID,
+                                format!(
+                                    "OKX account config reports no position mode (acctLv {}); trading it as one-way",
+                                    config.acct_lv
+                                ),
+                            );
+                        }
+                        Config { pos_mode: "net_mode", ..config }
+                    }
+                    other => {
+                        self.config_unusable(
+                            cx,
+                            format!("OKX account reports an unknown position mode '{other}' (acctLv {})", config.acct_lv),
+                        );
+                        return;
+                    }
                 };
                 self.account.config_read_at = cx.now;
                 self.account.startup.succeeded(cx, &());
@@ -854,10 +1067,11 @@ impl Okx {
                 generation,
                 version,
                 equity,
-                risk_rows: 1,
+                risk_rows,
                 invalid: false,
                 ..
-            } => {
+            // No row at all must not hang a start; once loaded it keeps the last snapshot.
+            } if risk_rows == 1 || !cx.store.loaded().balance => {
                 if let Some(join) = &mut self.account.join
                     && join.generation == generation
                 {
@@ -873,6 +1087,7 @@ impl Okx {
                 product,
                 rows,
                 invalid: false,
+                unlisted,
             } => {
                 let product = product + 1;
                 if let Some(kind) = self.instrument_types().get(product) {
@@ -888,6 +1103,7 @@ impl Okx {
                             product,
                             rows,
                             invalid: false,
+                            unlisted,
                         },
                     );
                     return;
@@ -895,6 +1111,7 @@ impl Okx {
                 if let Some(join) = &mut self.account.join
                     && join.generation == generation
                 {
+                    join.unlisted = unlisted;
                     join.positions = Some(rows);
                     join.position_version = version;
                 }
@@ -908,12 +1125,19 @@ impl Okx {
                 mut kind,
                 mut product,
                 rows,
-                margins,
+                metadata,
                 page_count,
                 cursor,
                 mut cursors,
                 invalid: false,
+                mut read,
+                mut read_lost,
+                started,
             } => {
+                match cx.order_read_mark() {
+                    Some(mark) => read = Some(read.map_or(mark, |earliest| earliest.earliest(mark))),
+                    None => read_lost = true,
+                }
                 if page_count >= 100 {
                     if cursor.is_empty() || cursors.len() >= 200 || !cursors.insert(cursor.clone())
                     {
@@ -935,11 +1159,14 @@ impl Okx {
                             kind,
                             product,
                             rows,
-                            margins,
+                            metadata,
                             page_count: 0,
                             cursor,
                             cursors,
                             invalid: false,
+                            read,
+                            read_lost,
+                            started,
                         },
                     );
                     return;
@@ -961,16 +1188,20 @@ impl Okx {
                             kind,
                             product,
                             rows,
-                            margins,
+                            metadata,
                             page_count: 0,
                             cursor: String::new(),
                             cursors: HashSet::new(),
                             invalid: false,
+                            read,
+                            read_lost,
+                            started,
                         },
                     );
                     return;
                 }
                 self.account.orders_in_flight = false;
+                let OrderMetadata { margins, algos } = *metadata;
                 let clean = rows.rejected() == 0;
                 let mapped: Vec<String> = rows
                     .rows()
@@ -1003,24 +1234,71 @@ impl Okx {
                         })
                         .cloned(),
                 );
+                // What this census may replace, decided before any per-order state
+                // moves (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+                let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                    key: ORDERS_SCOPE,
+                    account: &[ORDERS_SCOPE],
+                };
+                let refused = read.filter(|_| !read_lost).and_then(|earliest| {
+                    cx.orders_read_refusals_from(earliest, scope, |_| true, &rows)
+                        .map(|refused| (earliest, refused))
+                });
+                let Some((earliest, refused)) = refused else {
+                    // Refused whole, or unprovable: newer rows already stand, and
+                    // another census follows to prove what they cannot (absences).
+                    self.census_follow_up(cx, started);
+                    return;
+                };
+                if !refused.is_empty() {
+                    self.census_follow_up(cx, started);
+                }
+                let admitted = |id: &str| {
+                    rows.iter()
+                        .find(|row| row.id == id)
+                        .is_some_and(|row| !refused.contains(&row.symbol))
+                };
                 for (id, leverage) in margins {
-                    if !self
-                        .account
-                        .order_versions
-                        .get(&id)
-                        .is_some_and(|(v, _, _)| *v > version)
+                    if admitted(&id)
+                        && !self
+                            .account
+                            .order_versions
+                            .get(&id)
+                            .is_some_and(|(v, _, _)| *v > version)
                     {
                         self.account.order_leverage.insert(id, leverage);
                     }
                 }
-                cx.store.set_orders(rows);
-                // A rejected row may be an uncertain placement; it proves nothing.
-                if clean {
-                    cx.orders_reconciled_since(None, epoch);
+                // A rejected row may be an uncertain placement only if nothing stored proves
+                // it older; that symbol stays fenced, and the rest of the census still counts.
+                let mut unproven = std::mem::take(&mut self.account.census_unproven);
+                // Any rejected row proves the account nothing.
+                let mut cover_unproven = unproven.clone();
+                if !clean {
+                    cover_unproven.push(String::new());
                 }
+                if cx
+                    .commit_orders_read_from(earliest, scope, |_| true, rows, &cover_unproven)
+                    .is_none()
+                {
+                    self.census_follow_up(cx, started);
+                    return;
+                }
+                cx.store.set_orders_loaded();
+                unproven.extend(refused.iter().cloned());
+                cx.orders_reconciled_except(&unproven, epoch);
+                for (id, observed) in algos {
+                    if cx.store.order(&id) == Some(&observed.order)
+                        && !self.account.order_versions.get(&id).is_some_and(|(v, _, _)| *v > version)
+                    {
+                        self.trading.algo_orders.insert(id, observed);
+                    }
+                }
+                self.trading.algo_orders.retain(|id, _| cx.store.order(id)
+                    .is_some_and(|o| matches!(o.status, OrderStatus::Open | OrderStatus::Updating | OrderStatus::Canceling)));
                 self.trading
                     .acknowledged
-                    .retain(|_, order| order.version > version);
+                    .retain(|_, order| order.version > version || refused.contains(&order.symbol));
                 self.account.ready = cx.store.loaded().positions && cx.store.loaded().balance;
                 let ids: HashSet<_> = cx.store.orders().iter().map(|o| o.id.as_str()).collect();
                 self.account
@@ -1031,7 +1309,7 @@ impl Okx {
                 });
                 self.recalculate(cx);
             }
-            other => self.account_failed(cx, other, "malformed OKX account list"),
+            other => self.account_failed(cx, other, VenueError::new("malformed OKX account list")),
         }
     }
 
@@ -1047,6 +1325,7 @@ impl Okx {
         let join = self.account.join.take().expect("join ready");
         let mut positions = Vec::new();
         let builder = join.positions.expect("positions ready");
+        let rejected = builder.rejected() != 0;
         let mapped: Vec<String> = builder
             .rows()
             .iter()
@@ -1116,16 +1395,70 @@ impl Okx {
         self.account.equity_loaded = true;
         self.recalculate(cx);
         self.account.ready = cx.store.loaded().orders && cx.store.loaded().balance;
+        let read = join.generation as u32;
+        if rejected {
+            let error = VenueError::new("OKX positions: a row could not be mapped");
+            self.account.fresh_positions.failed(cx, 0, read, &error);
+        } else if changed.is_empty() {
+            self.account
+                .fresh_positions
+                .committed(cx, 0, read, &join.unlisted);
+        }
+    }
+
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.credentials.is_none() || !self.account.configured || self.account.startup_rejected {
+            let error = VenueError::new("OKX account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.generation as u32 + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.reconcile(cx, false);
+        }
+    }
+
+    /// At once for a waiter the last read predates, else once a stream frame that
+    /// held the read can have passed. Called with the read's page already retired.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        let fresh = &self.account.fresh_positions;
+        if self.account.join.is_some() || !fresh.owed(0) {
+            return;
+        }
+        if fresh.predates(0, self.account.generation as u32) {
+            self.reconcile(cx, false);
+        } else if self.account.fresh_positions_timer.is_none() {
+            self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
     }
 
     pub(crate) fn account_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        error: VenueError,
     ) {
         retire(cx, request.page_context());
         if !self.account_request_current(&request) {
+            return;
+        }
+        // A key the config read passed can still be refused the risk or position read.
+        if matches!(request, Request::Balance { .. } | Request::Positions { .. })
+            && !cx.store.loaded().balance
+            && let Some(code) = error.venue_code.clone()
+            && code != "50113"
+            && let Some(kind) = rest_key_rejection(&code)
+        {
+            let read_key = self.options.read_credentials.is_some();
+            let which = if read_key {
+                "read-only API key"
+            } else {
+                "API key"
+            };
+            let refused = rejection(which, &code, &error.message, kind);
+            self.reject_startup(cx, refused, kind == ErrorKind::AuthInvalid && !read_key);
             return;
         }
         match request {
@@ -1137,32 +1470,52 @@ impl Okx {
                     .is_some_and(|j| j.generation == generation)
                 {
                     self.account.join = None;
+                    let read = generation as u32;
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
                 }
             }
             Request::Orders { .. } => self.account.orders_in_flight = false,
             Request::Config { .. } => {
-                self.config_failed(cx, error);
+                self.config_failed(cx, &error);
                 return;
             }
             Request::Leverage { context, .. } => {
                 let _ = cx.fail_context(&context, error);
                 return;
             }
+            // The hold expires with a warning if the source never confirms.
+            Request::LeverageRefresh { .. } => {
+                cx.notice_error(Level::Warn, code::REQUEST_FAILED, &error);
+                return;
+            }
         }
-        cx.retried_failure("okx.account:852", error);
+        cx.retried_failure_error("okx.account:852", &error);
         if self.account.retry.is_none() {
             self.account.retry = Some(cx.set_timer(5_000.0));
         }
+        self.read_fresh_positions_again(cx);
+    }
+
+    /// A config answer no retry will fix: before the account is configured the start
+    /// fails visibly (it used to retry forever with private reads never sent).
+    fn config_unusable(&mut self, cx: &mut Cx<'_, Pending>, message: String) {
+        if self.account.configured {
+            self.config_failed(cx, &VenueError::new(message));
+            return;
+        }
+        self.account.config_in_flight = false;
+        cx.notice(Level::Error, code::CONFIG_INVALID, &message);
+        cx.startup_failed(VenueError::new(message).kind(ErrorKind::Unsupported));
     }
 
     /// Clearing the in-flight flag lets the backoff timer re-enter account_start.
-    fn config_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+    fn config_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &VenueError) {
         self.account.config_in_flight = false;
         if self.account.configured {
             self.account.config_read_at = cx.now;
-            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+            cx.notice_error(Level::Warn, code::REQUEST_FAILED, error);
         } else {
-            cx.retried_failure("okx.account:841", error);
+            cx.retried_failure_error("okx.account:841", error);
             let pause = std::mem::take(&mut self.account.config_pause_ms);
             self.account.startup.failed_after(cx, (), pause);
         }
@@ -1210,6 +1563,21 @@ impl Okx {
     pub(crate) fn socket_account_is_ready(&self) -> bool {
         self.account.ready
     }
+    pub(crate) fn account_read_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.read_again && self.account.join.is_none() && !self.account.orders_in_flight
+        {
+            self.account.read_again = false;
+            self.account_refresh(cx);
+        }
+        if self.account.source_orders_owed
+            && !self.account.orders_in_flight
+            && self.account.retry.is_none()
+        {
+            self.census(cx);
+        }
+        self.read_fresh_positions_again(cx);
+    }
+
     pub(crate) fn socket_account_ready(&mut self, cx: &mut Cx<'_, Pending>, reopened: bool) {
         if self.account.configured {
             if reopened {
@@ -1218,6 +1586,10 @@ impl Okx {
                 self.account.orders_generation += 1;
                 self.account.orders_in_flight = false;
                 self.account.revision += 1;
+            } else {
+                // A startup read still running may predate the stream: read again after it.
+                self.account.read_again =
+                    self.account.join.is_some() || self.account.orders_in_flight;
             }
             self.account_refresh(cx);
         }
@@ -1234,6 +1606,7 @@ impl Okx {
             return;
         }
         self.account.startup.succeeded(cx, &());
+        self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
         if let Some(timer) = self.account.retry.take() {
             cx.clear_timer(timer);
         }
@@ -1242,11 +1615,7 @@ impl Okx {
                 cx.stop_socket_feed(feed);
             }
         }
-        cx.notice(
-            Level::Error,
-            code::for_startup_error(&error),
-            &error.message,
-        );
+        cx.notice_error(Level::Error, code::for_startup_error(&error), &error);
         cx.startup_failed(error);
         // As Bybit: a refused trading key also stops the host's login loop.
         if trading_key_refused {
@@ -1255,6 +1624,13 @@ impl Okx {
     }
 
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.fresh_positions_timer == Some(timer) {
+            self.account.fresh_positions_timer = None;
+            if self.account.fresh_positions.owed(0) {
+                self.reconcile(cx, false);
+            }
+            return true;
+        }
         if self.account.tick == Some(timer) {
             self.account.tick = Some(cx.set_timer(2_000.0));
             if self.account.configured && cx.now - self.account.config_read_at >= CONFIG_POLL_MS {
@@ -1269,6 +1645,13 @@ impl Okx {
         }
         if self.account.startup.on_timer(timer).is_some() {
             self.account_start(cx);
+            return true;
+        }
+        if self.account.census_follow_up == Some(timer) {
+            self.account.census_follow_up = None;
+            if self.account.configured {
+                self.census(cx);
+            }
             return true;
         }
         if self.account.retry == Some(timer) {
@@ -1687,7 +2070,12 @@ impl Okx {
         };
         match message.arg.channel {
             "orders" | "orders-algo" | "algo-advance" => {
-                let _ = json::each::<OrderRow<'_>>(data.get(), |row| {
+                let readable = serde_json::from_str::<Vec<OrderRow<'_>>>(data.get())
+                    .is_err()
+                    .then(|| readable_rows(data.get()))
+                    .flatten();
+                let rows = readable.as_deref().unwrap_or(data.get());
+                let _ = json::each::<OrderRow<'_>>(rows, |row| {
                     if cx.store.market_by_id(row.inst_id).is_none() {
                         cx.notice(
                             Level::Warn,
@@ -1701,17 +2089,28 @@ impl Okx {
                     }
                     // Finality protects order state, not execution delivery order.
                     self.execution(cx, &row);
-                    let terminal = matches!(
-                        row.state,
-                        "filled" | "canceled" | "mmp_canceled" | "order_failed"
-                    );
+                    let failed = matches!(row.state, "order_failed" | "partially_failed");
+                    let terminal =
+                        failed || matches!(row.state, "filled" | "canceled" | "mmp_canceled");
                     let triggered = row.state == "effective";
-                    let native_id = if row.algo_id.is_empty() {
-                        row.ord_id
-                    } else {
-                        row.algo_id
-                    };
+                    // A triggered order's row carries its parent's algoId but is its own
+                    // order: filed under the parent, the parent's final state would drop it.
+                    let algo_row = matches!(
+                        row.ord_type,
+                        "trigger" | "conditional" | "oco" | "move_order_stop"
+                    );
+                    let native_id = if algo_row { row.algo_id } else { row.ord_id };
                     self.trading.acknowledged.remove(native_id);
+                    if failed && !self.account.order_final(native_id) {
+                        cx.notice(
+                            Level::Error,
+                            code::ORDER_REJECTED,
+                            format!(
+                                "OKX {} order {native_id} on {} failed (state {}, code {})",
+                                row.ord_type, row.inst_id, row.state, row.fail_code
+                            ),
+                        );
+                    }
                     if !terminal
                         && !triggered
                         && self
@@ -1728,6 +2127,16 @@ impl Okx {
                         (self.account.revision, cx.now, terminal || triggered),
                     );
                     for order in self.orders(cx, &row) {
+                        if terminal || triggered {
+                            self.trading.algo_orders.remove(&order.id);
+                        } else if matches!(
+                            row.state,
+                            "live" | "partially_filled" | "partially_effective" | "pause"
+                        ) && let Some(observed) =
+                            crate::trading::ObservedAlgo::new(&row, &order)
+                        {
+                            self.trading.algo_orders.insert(order.id.clone(), observed);
+                        }
                         if terminal || triggered {
                             self.account.order_leverage.remove(&order.id);
                         }
@@ -1764,8 +2173,13 @@ impl Okx {
             }
             "positions" => {
                 let mut valid = false;
+                let readable = serde_json::from_str::<Vec<PositionRow<'_>>>(data.get())
+                    .is_err()
+                    .then(|| readable_rows(data.get()))
+                    .flatten();
+                let rows = readable.as_deref().unwrap_or(data.get());
                 let _ =
-                    json::each::<PositionRow<'_>>(data.get(), |row| {
+                    json::each::<PositionRow<'_>>(rows, |row| {
                         if let Some((p, risk)) = self.position(cx, &row) {
                             valid = true;
                             self.account.revision += 1;
@@ -2079,23 +2493,34 @@ impl Okx {
                 }
             }
             "move_order_stop" => {
-                let spread = num::parse(o.callback_spread);
-                let position = cx.store.positions().iter().find(|p| {
-                    p.symbol == m.symbol && (o.side == "sell") == (p.side == PositionSide::Long)
-                });
-                let movement = position.map_or(num::parse(o.move_trigger_px), |p| {
-                    -(p.entry_price - spread).abs()
-                });
-                let price = num::adjust(
-                    num::parse(o.last) + if o.side == "buy" { -movement } else { movement },
-                    m.precision.price,
-                );
-                legs.push((
-                    OrderType::TrailingStopLoss,
-                    "_tsl",
-                    if price == 0.0 { spread } else { price },
-                    None,
-                ));
+                // moveTriggerPx is OKX's live trigger level, where the line is drawn and
+                // dragged. Unpublished, the stop sits a callback behind where it trails from:
+                // its activePx while activation is pending, else the current last (the
+                // row's own `last` is its placement-time fill price, not today's).
+                let trigger = num::parse(o.move_trigger_px);
+                let base = pending_activation(o.active_px)
+                    .unwrap_or_else(|| cx.store.ticker(&m.symbol).map_or(0.0, |t| t.last));
+                let price = if trigger > 0.0 {
+                    trigger
+                } else if base > 0.0 {
+                    let spread = num::parse(o.callback_spread);
+                    let distance = if spread > 0.0 {
+                        spread
+                    } else {
+                        base * num::parse(o.callback_ratio)
+                    };
+                    num::adjust(
+                        if o.side == "buy" {
+                            base + distance
+                        } else {
+                            base - distance
+                        },
+                        m.precision.price,
+                    )
+                } else {
+                    0.0
+                };
+                legs.push((OrderType::TrailingStopLoss, "_tsl", price, None));
             }
             _ => legs.push((
                 if matches!(o.ord_type, "market" | "optimal_limit_ioc") {
@@ -2229,9 +2654,27 @@ fn valid_order(o: &OrderRow<'_>) -> bool {
                 .is_ok_and(|n| n.is_finite() && n >= 0.0))
 }
 
+/// A failed account read, classified by the OKX table: the native code from
+/// the envelope when there is one, else the HTTP status. The text is unchanged.
+pub(crate) fn read_error(response: &Response<'_>, message: String) -> VenueError {
+    use safe_cex_engine::classify::{self, Released};
+    let envelope = serde_json::from_str::<Envelope<'_>>(response.body).ok();
+    let native = envelope
+        .as_ref()
+        .filter(|envelope| !envelope.code.is_empty() && envelope.code != "0")
+        .map(|envelope| crate::trading::native(envelope.code, envelope.msg));
+    classify::read(
+        &crate::trading::CODES,
+        Released::Response(response),
+        native.as_ref(),
+        message,
+    )
+    .error
+}
+
 /// OKX REST authentication codes that no retry can fix (docs-v5 "Error Code",
 /// 501xx). Timestamp codes 50102/50112 and every other code stay transient.
-fn rest_key_rejection(code: &str) -> Option<ErrorKind> {
+pub(crate) fn rest_key_rejection(code: &str) -> Option<ErrorKind> {
     match code {
         "50100" | "50110" | "50120" => Some(ErrorKind::AuthPermission),
         "50101" | "50103" | "50104" | "50105" | "50111" | "50113" | "50114" | "50119" => {
@@ -2246,7 +2689,7 @@ fn socket_key_rejection(code: &str) -> Option<ErrorKind> {
     matches!(code, "60005" | "60024" | "60032").then_some(ErrorKind::AuthInvalid)
 }
 
-fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError {
+pub(crate) fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError {
     let mut error = VenueError::new(format!("OKX rejected the {which} ({code}): {msg}"))
         .kind(kind)
         .venue_code(code);
@@ -2273,6 +2716,19 @@ fn read_policy(credential: Option<Credential>) -> Policy {
         timeout_ms: 20_000,
         pacing: None,
         retry: RetryPolicy::Never,
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Config { .. } => S::ACCOUNT,
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }
 

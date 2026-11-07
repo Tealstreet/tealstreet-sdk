@@ -106,7 +106,7 @@ Bybit Brazil accounts use the normal global Bybit REST/WS hosts, but Bybit requi
 Current status for beta:
 
 - Functionally implemented in account shape, account creation/editing, sync/runtime fingerprints, REST headers, and Bybit WS connection options.
-- Brazil-marked WS connections now resolve through the CTO-provided header-injecting route at `wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/...`:
+- Brazil-marked WS connections now resolve through the CTO-provided header-injecting route at `wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/...` (a container on the Vultr tunnel hosts, AWS_EXIT step 5b; the hosted exchange server dials the same host):
   - private: `/bybitbra/v5/private`
   - public linear: `/bybitbra/v5/public/linear`
   - public inverse: `/bybitbra/v5/public/inverse`
@@ -173,6 +173,20 @@ grep for `[WS]subscribe:Request not authorized`.
 to the LINEAR socket only, so hosted bybit USDT worked and hosted BTCUSD did
 not — reported as "impossible to use Tealstreet on Bybit's inverse market"
 (2026-10-01) and fixed for inverse and spot the same day.
+
+**Fast Execution timestamp precision change** (Bybit announcement: 2026-11-05
+02:30 UTC): Bybit's `execution.fast` private WS topic changes `creationTime`
+and item `execTime` from millisecond to microsecond precision without changing
+field names or types. The retained TS Bybit sockets do NOT subscribe to
+`execution.fast` today: linear/demo and inverse subscribe to `order` +
+`position`, and spot subscribes to `order` only. So the announcement does not
+change the current private WS fill path. Still, any execution-row mapper or
+future `execution.fast` consumer must normalize timestamps through
+`normalizeBybitExecutionTimestampMs` / `normalizeBybitExecutionTimestampSeconds`
+so 10-digit seconds, 13-digit milliseconds and 16-digit microseconds all land in
+the same internal seconds/ms units. Demo inherits the linear mapper; inverse has
+its own mapper; spot currently has no historical-fill mapper in the retained TS
+adapter.
 
 **On a failed auth the socket sends NOTHING and reconnects** — it does not
 subscribe. Subscribing anyway was tried and is worse: bybit answers a ping on an
@@ -709,6 +723,34 @@ The rate limit system is VIP-level aware and adjusts batch order limits dynamica
 - Income history: 50 per page (the venue's own cap, clamped), max 10 pages safety limit, 1000-record cap (`fetchBybitIncomeHistory` in `bybit.income.ts`)
 - OHLCV: max 1000 candles per request (`bybit.exchange.ts:773`)
 
+### Terminal order history after 2026-11-12
+
+The Bybit Tech Bot API announcement, effective 2026-11-12 (supplied by
+Tealstreet ops), says unfiltered `/v5/order/history` and
+`/v5/spread/order/history` no longer return recent `Cancelled`, `Rejected` or
+`Deactivated` orders. Each status remains queryable explicitly for 24 hours.
+This announcement is not present in the checked v5 changelog. The standard
+history docs list a single string `orderStatus`; the spread history docs do
+not list that request parameter. Neither stack currently calls spread history.
+
+The TS replay reference's `fetchHistoricalOrders` and Rust's shared Bybit
+history walker read the default history plus separate `Cancelled`, `Rejected`
+and `Deactivated` histories. Each status/category/window owns its cursor and
+page budget. Merge by order ID, sort newest first, then apply the caller's
+global limit. Keep the existing seven-day windows; explicit status requests
+do not extend Bybit's terminal-order retention.
+
+Hyro lost-create recovery checks realtime, default history and all three
+explicit terminal statuses before treating the identity as absent. A matched
+cancelled/deactivated order proves acceptance without restoring an open row;
+a matched rejection follows the existing rejection path. A failed filtered
+lookup leaves the outcome unknown and cannot justify a create retry.
+
+See `docs/plans/callers/bybit-order-history-status.md` for the caller census
+and replay coverage. The separate Bybit history gate checks a result whose
+cancelled orders exist only in filtered pages, including duplicate IDs and
+independent reuse of the same cursor token.
+
 ## State Reconciliation
 
 ### Position Merge Strategy (`bybit.exchange.ts:294-334`)
@@ -1165,12 +1207,12 @@ instead of pretending its exchange name is `bybitdemo`:
     endpoint which they'll poll every 30 s and surface revocation
     within 30 s. Preferable to inferring state from `retCode 10003`
     once that lifecycle signal exists.
-  Deferred OAuth/server-held credential design lives in
-  `docs/plans/HYROTRADER_OAUTH_V2.md`; do not implement a browser-held
-  OAuth credential path. Sam's current direction is that OAuth-linked HyroTrader
-  private trading should run through `services/exchange-server` because every
-  private request may need Tealstreet-held signing material. OAuth has no known
-  end-user launch timeline yet.
+    Deferred OAuth/server-held credential design lives in
+    `docs/plans/HYROTRADER_OAUTH_V2.md`; do not implement a browser-held
+    OAuth credential path. Sam's current direction is that OAuth-linked HyroTrader
+    private trading should run through `services/exchange-server` because every
+    private request may need Tealstreet-held signing material. OAuth has no known
+    end-user launch timeline yet.
 - reconciliation is USDT-only (`linear`, `settleCoin=USDT`) because the simulator
   contract does not support Bybit's USDC linear branch
 - order placement sends a generated `orderLinkId` because the simulator requires
@@ -2030,7 +2072,6 @@ Shared consumers must refresh their source then restart provider/accounts throug
 the existing identity-change contract. Hyro retains its USDT perpetual filter
 and normal 10 s ping deadline; 5 s watch wakes never imply an early ping.
 
-
 ## Rust private row admission
 
 Ordinary REST order/position snapshots and WS order/position arrays admit healthy
@@ -2049,7 +2090,6 @@ polling. Strict Hyro handshake/account evidence and financial execution/history
 coverage remain separate. Structural/envelope or paging failures never establish
 authoritative empty exposure.
 
-
 Rust acknowledged leverage writes (including native leverage-not-modified replies)
 advance the existing positions revision before publishing the selected leverage.
 An older in-flight positions join cannot restore stale leverage/settings; it
@@ -2066,3 +2106,18 @@ Rust release code generation for the Bybit crate uses `opt-level = "z"` for
 family WASM size. CI still requires the public CPU/memory gates and complete raw replay
 outputs, including caller identities; the source parsers, handlers and financial
 calculations retain their existing behavior.
+
+## Bounded Rust private startup
+
+After account metadata and catalogue readiness start the private snapshot phase,
+Rust Bybit allows 60 seconds for balance, orders and positions to load. Fresh
+public frames do not extend this bound. A missing section emits one typed
+Timeout startup failure naming the missing sections and the last read failure;
+empty wallet lists never become a fabricated zero balance. Valid zero-valued
+wallet rows and empty orders/positions remain successful snapshots.
+Definitive required-read authentication/permission refusals surface immediately;
+read-permission failures do not deactivate an otherwise usable trading key.
+HyroTrader retains its separate private readiness policy. Suspended browsers
+cannot run timers: an expired bound is observed when the host resumes execution.
+Demo uses `api-demo.bybit.com` and `stream-demo.bybit.com/v5/private`; its public
+stream remains on the ordinary mainnet endpoint.

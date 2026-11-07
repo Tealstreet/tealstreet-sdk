@@ -27,7 +27,11 @@ fn engine(private: bool) -> TestEngine {
         [SYMBOL, UNSAFE]
             .into_iter()
             .map(|symbol| Market {
-                id: symbol.into(),
+                id: if symbol == SYMBOL {
+                    "BTC/USDT:USDT".into()
+                } else {
+                    symbol.into()
+                },
                 symbol: symbol.into(),
                 pretty_symbol: None,
                 base: "BTC".into(),
@@ -244,11 +248,6 @@ fn finite_local_results_keep_exact_native_payloads_errors_and_precedence() {
         (false, fills(None, Some(f64::NAN)), Err(CREDENTIALS)),
         (
             true,
-            fills(None, Some(f64::NAN)),
-            Err("Phemex history requires a known symbol"),
-        ),
-        (
-            true,
             fills(Some(SYMBOL), Some(f64::NAN)),
             Err("Invalid Phemex history time range"),
         ),
@@ -267,11 +266,6 @@ fn finite_local_results_keep_exact_native_payloads_errors_and_precedence() {
             true,
             income(None, Some(0)),
             Err("Invalid Phemex income range or limit"),
-        ),
-        (
-            false,
-            public("UNKNOWN"),
-            Err("Phemex history requires a known symbol"),
         ),
         (
             false,
@@ -461,4 +455,88 @@ fn signed_and_unsigned_managed_dispatch_keep_native_wire() {
         );
         fail_native_at(&mut e, NOW + 1., 606, &request);
     }
+}
+
+#[test]
+fn history_aliases_resolve_to_the_same_listed_contract_before_dispatch() {
+    for alias in [SYMBOL, "btcusdt", "BTC/USDT:USDT", "btc/usdt:usdt"] {
+        for read in [
+            fills(Some(alias), None),
+            Query::OrderHistory {
+                symbol: Some(alias.into()),
+                from_ms: None,
+                to_ms: None,
+                limit: Some(2),
+            },
+            lookup(alias, "native-id"),
+            public(alias),
+        ] {
+            let mut e = engine(true);
+            let request = dispatch(&mut e, 701, read);
+            assert!(request.url.contains("symbol=BTCUSDT"), "{}", request.url);
+        }
+        let mut e = engine(false);
+        assert!(
+            dispatch(&mut e, 701, public(alias))
+                .url
+                .contains("symbol=BTCUSDT")
+        );
+    }
+}
+
+#[test]
+fn missing_delisted_and_inverse_history_symbols_are_typed_and_never_sent() {
+    for symbol in [
+        None,
+        Some(""),
+        Some("DELISTEDUSDT"),
+        Some("BTCUSD"),
+        Some("BTC/USD:BTC"),
+    ] {
+        for read in [
+            fills(symbol, None),
+            Query::OrderHistory {
+                symbol: symbol.map(Into::into),
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        ] {
+            let mut e = engine(true);
+            let actions = query(&mut e, NOW, 702, read);
+            assert_eq!(actions.len(), 1, "no preparation or retry timer");
+            let result = terminal(&actions, 702);
+            let error = result[0].as_ref().unwrap_err();
+            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+            assert_eq!(error.venue_code.as_deref(), Some("unknown-symbol"));
+            assert!(error.message.contains("listed USDT/USDC perpetual"));
+        }
+        for private in [false, true] {
+            let mut e = engine(private);
+            let actions = query(&mut e, NOW, 703, public(symbol.unwrap_or("")));
+            let result = terminal(&actions, 703);
+            assert_eq!(actions.len(), 1);
+            assert_eq!(
+                result[0].as_ref().unwrap_err().kind,
+                Some(ErrorKind::InvalidInput)
+            );
+        }
+    }
+}
+
+#[test]
+fn ambiguous_history_aliases_never_choose_a_contract() {
+    let mut e = engine(true);
+    let first = e.store().market(SYMBOL).unwrap().clone();
+    let mut second = first.clone();
+    second.symbol = "ALTUSDT".into();
+    second.id = first.id.to_ascii_lowercase();
+    e.store_mut().set_markets(vec![first, second]);
+    let actions = query(&mut e, NOW, 704, fills(Some("btc/usdt:usdt"), None));
+    let result = terminal(&actions, 704);
+    assert_eq!(actions.len(), 1);
+    assert_eq!(
+        result[0].as_ref().unwrap_err().kind,
+        Some(ErrorKind::InvalidInput)
+    );
 }

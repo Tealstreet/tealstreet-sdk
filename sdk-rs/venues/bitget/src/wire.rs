@@ -20,6 +20,31 @@ impl<'de> Deserialize<'de> for Number {
     }
 }
 
+#[derive(Default)]
+pub enum ExecutionPrice {
+    #[default]
+    Blank,
+    Value(f64),
+    Invalid,
+}
+
+impl<'de> Deserialize<'de> for ExecutionPrice {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        Ok(
+            if serde_json::from_str::<Cow<'_, str>>(raw.get())
+                .is_ok_and(|text| text.trim().is_empty())
+            {
+                Self::Blank
+            } else if let Ok(Number(Some(value))) = serde_json::from_str::<Number>(raw.get()) {
+                Self::Value(value)
+            } else {
+                Self::Invalid
+            },
+        )
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contract<'a> {
@@ -36,6 +61,8 @@ pub struct Contract<'a> {
     pub size_multiplier: Number,
     #[serde(default)]
     pub min_trade_num: Number,
+    #[serde(default, rename = "minTradeUSDT")]
+    pub min_trade_usdt: Number,
     #[serde(default)]
     pub max_order_qty: Number,
     #[serde(default)]
@@ -141,11 +168,11 @@ impl<'de> Deserialize<'de> for TickerRow<'de> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Argument<'a> {
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "nullable_text")]
     pub channel: Cow<'a, str>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "nullable_text")]
     pub inst_id: Cow<'a, str>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "nullable_text")]
     pub topic: Cow<'a, str>,
 }
 
@@ -153,12 +180,12 @@ pub struct Argument<'a> {
 pub struct Message<'a, T> {
     #[serde(default, borrow)]
     pub arg: Argument<'a>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "nullable_text")]
     pub action: Cow<'a, str>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "nullable_text")]
     pub event: Cow<'a, str>,
 
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "nullable_text")]
     pub msg: Cow<'a, str>,
     pub data: Option<Vec<T>>,
     pub code: Option<Number>,
@@ -177,7 +204,42 @@ pub struct Depth<'a> {
     pub pseq: Option<i64>,
 }
 
-pub type CandleRow = [Number; 7];
+/// The first seven fields of a candle row. The live push appends a USDT volume
+/// as an eighth field, so trailing fields are ignored rather than refused.
+pub struct CandleRow(pub [Number; 7]);
+
+impl std::ops::Deref for CandleRow {
+    type Target = [Number; 7];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for CandleRow {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Row;
+        impl<'de> serde::de::Visitor<'de> for Row {
+            type Value = CandleRow;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a Bitget candle row of at least 7 fields")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<CandleRow, A::Error> {
+                let mut row = [Number::default(); 7];
+                for (index, field) in row.iter_mut().enumerate() {
+                    *field = seq
+                        .next_element()?
+                        .ok_or_else(|| serde::de::Error::invalid_length(index, &self))?;
+                }
+                while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+                Ok(CandleRow(row))
+            }
+        }
+        d.deserialize_seq(Row)
+    }
+}
 
 fn sequence<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
     #[derive(Deserialize)]
@@ -216,6 +278,7 @@ impl<T> Envelope<T> {
 pub enum Identifier<'a> {
     Text(#[serde(borrow)] Cow<'a, str>),
     Integer(u64),
+    Null(()),
 }
 impl Default for Identifier<'_> {
     fn default() -> Self {
@@ -227,31 +290,62 @@ impl Identifier<'_> {
         match self {
             Self::Text(s) => Cow::Borrowed(s),
             Self::Integer(i) => Cow::Owned(i.to_string()),
+            Self::Null(()) => Cow::Borrowed(""),
         }
     }
 }
 
 #[derive(Deserialize, Default)]
 pub struct PositionRow<'a> {
-    #[serde(default, rename = "marginCoin", borrow)]
+    #[serde(
+        default,
+        rename = "marginCoin",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub margin_coin: Cow<'a, str>,
     #[serde(default, rename = "totalFundingFee")]
     pub total_funding_fee: Number,
-    #[serde(default, rename = "symbol", borrow)]
+    #[serde(default, rename = "symbol", borrow, deserialize_with = "nullable_text")]
     pub symbol: Cow<'a, str>,
-    #[serde(default, rename = "instId", borrow)]
+    #[serde(default, rename = "instId", borrow, deserialize_with = "nullable_text")]
     pub inst_id: Cow<'a, str>,
-    #[serde(default, rename = "holdSide", borrow)]
+    #[serde(
+        default,
+        rename = "holdSide",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub hold_side: Cow<'a, str>,
-    #[serde(default, rename = "posSide", borrow)]
+    #[serde(
+        default,
+        rename = "posSide",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub pos_side: Cow<'a, str>,
-    #[serde(default, rename = "side", borrow)]
+    #[serde(default, rename = "side", borrow, deserialize_with = "nullable_text")]
     pub side: Cow<'a, str>,
-    #[serde(default, rename = "posMode", borrow)]
+    #[serde(
+        default,
+        rename = "posMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub pos_mode: Cow<'a, str>,
-    #[serde(default, rename = "holdMode", borrow)]
+    #[serde(
+        default,
+        rename = "holdMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub hold_mode: Cow<'a, str>,
-    #[serde(default, rename = "marginMode", borrow)]
+    #[serde(
+        default,
+        rename = "marginMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub margin_mode: Cow<'a, str>,
     #[serde(default, rename = "total")]
     pub total: Number,
@@ -263,6 +357,8 @@ pub struct PositionRow<'a> {
     pub open_total_pos: Number,
     #[serde(default, rename = "available")]
     pub available: Number,
+    #[serde(default, rename = "locked")]
+    pub locked: Number,
     #[serde(default, rename = "openPriceAvg")]
     pub open_price_avg: Number,
     #[serde(default, rename = "openAvgPrice")]
@@ -325,9 +421,14 @@ pub struct PositionRow<'a> {
 pub struct AccountRow<'a> {
     #[serde(default, rename = "usdtEquity")]
     pub usdt_equity: Number,
-    #[serde(default, rename = "marginCoin", borrow)]
+    #[serde(
+        default,
+        rename = "marginCoin",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub margin_coin: Cow<'a, str>,
-    #[serde(default, rename = "coin", borrow)]
+    #[serde(default, rename = "coin", borrow, deserialize_with = "nullable_text")]
     pub coin: Cow<'a, str>,
     #[serde(default, rename = "unionTotalMargin")]
     pub union_total_margin: Number,
@@ -349,61 +450,140 @@ pub struct AccountRow<'a> {
 
 #[derive(Deserialize, Default)]
 pub struct OrderRow<'a> {
+    #[serde(default, rename = "executePrice")]
+    pub execute_price: ExecutionPrice,
+    #[serde(
+        default,
+        rename = "tpslMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
+    pub tpsl_mode: Cow<'a, str>,
     #[serde(default, rename = "callbackRatio", alias = "rangeRate")]
     pub callback_ratio: Number,
-    #[serde(default, rename = "type", borrow)]
+    #[serde(default, rename = "type", borrow, deserialize_with = "nullable_text")]
     pub strategy_type: Cow<'a, str>,
     #[serde(default, rename = "trailingStopParams")]
     pub trailing_stop_params: Option<TrailingRow>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "nullable_text")]
     pub category: Cow<'a, str>,
-    #[serde(default, rename = "holdMode", borrow)]
+    #[serde(
+        default,
+        rename = "holdMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub hold_mode: Cow<'a, str>,
     #[serde(default, rename = "createdTime")]
     pub created_time: Number,
     #[serde(default, rename = "updatedTime")]
     pub updated_time: Number,
-    #[serde(default, rename = "symbol", borrow)]
+    #[serde(default, rename = "symbol", borrow, deserialize_with = "nullable_text")]
     pub symbol: Cow<'a, str>,
-    #[serde(default, rename = "instId", borrow)]
+    #[serde(default, rename = "instId", borrow, deserialize_with = "nullable_text")]
     pub inst_id: Cow<'a, str>,
-    #[serde(default, rename = "status", borrow)]
+    #[serde(default, rename = "status", borrow, deserialize_with = "nullable_text")]
     pub status: Cow<'a, str>,
-    #[serde(default, rename = "state", borrow)]
+    #[serde(default, rename = "state", borrow, deserialize_with = "nullable_text")]
     pub state: Cow<'a, str>,
-    #[serde(default, rename = "planStatus", borrow)]
+    #[serde(
+        default,
+        rename = "planStatus",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub plan_status: Cow<'a, str>,
-    #[serde(default, rename = "orderStatus", borrow)]
+    #[serde(
+        default,
+        rename = "orderStatus",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub order_status: Cow<'a, str>,
-    #[serde(default, rename = "orderType", borrow)]
+    #[serde(
+        default,
+        rename = "orderType",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub order_type: Cow<'a, str>,
-    #[serde(default, rename = "ordType", borrow)]
+    #[serde(
+        default,
+        rename = "ordType",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub ord_type: Cow<'a, str>,
-    #[serde(default, rename = "planType", borrow)]
+    #[serde(
+        default,
+        rename = "planType",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub plan_type: Cow<'a, str>,
-    #[serde(default, rename = "side", borrow)]
+    #[serde(default, rename = "side", borrow, deserialize_with = "nullable_text")]
     pub side: Cow<'a, str>,
-    #[serde(default, rename = "tradeSide", borrow)]
+    #[serde(
+        default,
+        rename = "tradeSide",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub trade_side: Cow<'a, str>,
-    #[serde(default, rename = "tS", borrow)]
+    #[serde(default, rename = "tS", borrow, deserialize_with = "nullable_text")]
     pub t_s: Cow<'a, str>,
-    #[serde(default, rename = "holdSide", borrow)]
+    #[serde(
+        default,
+        rename = "holdSide",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub hold_side: Cow<'a, str>,
-    #[serde(default, rename = "posSide", borrow)]
+    #[serde(
+        default,
+        rename = "posSide",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub pos_side: Cow<'a, str>,
-    #[serde(default, rename = "posMode", borrow)]
+    #[serde(
+        default,
+        rename = "posMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub pos_mode: Cow<'a, str>,
-    #[serde(default, rename = "force", borrow)]
+    #[serde(default, rename = "force", borrow, deserialize_with = "nullable_text")]
     pub force: Cow<'a, str>,
-    #[serde(default, rename = "timeInForce", borrow)]
+    #[serde(
+        default,
+        rename = "timeInForce",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub time_in_force: Cow<'a, str>,
-    #[serde(default, rename = "tiF", borrow)]
+    #[serde(default, rename = "tiF", borrow, deserialize_with = "nullable_text")]
     pub ti_f: Cow<'a, str>,
-    #[serde(default, rename = "triggerType", borrow)]
+    #[serde(
+        default,
+        rename = "triggerType",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub trigger_type: Cow<'a, str>,
-    #[serde(default, rename = "tpTriggerBy", borrow)]
+    #[serde(
+        default,
+        rename = "tpTriggerBy",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub tp_trigger_by: Cow<'a, str>,
-    #[serde(default, rename = "slTriggerBy", borrow)]
+    #[serde(
+        default,
+        rename = "slTriggerBy",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub sl_trigger_by: Cow<'a, str>,
     #[serde(default, rename = "size")]
     pub size: Number,
@@ -471,17 +651,39 @@ pub struct OrderRow<'a> {
     pub exec_id: Identifier<'a>,
     #[serde(default, rename = "reduceOnly")]
     pub reduce_only: Flag,
+    #[serde(
+        default,
+        rename = "cancelReason",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
+    pub cancel_reason: Cow<'a, str>,
 }
 
 #[derive(Deserialize, Default)]
 pub struct SymbolConfig<'a> {
-    #[serde(default, rename = "symbol", borrow)]
+    #[serde(default, rename = "symbol", borrow, deserialize_with = "nullable_text")]
     pub symbol: Cow<'a, str>,
-    #[serde(default, rename = "category", borrow)]
+    #[serde(
+        default,
+        rename = "category",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub category: Cow<'a, str>,
-    #[serde(default, rename = "marginMode", borrow)]
+    #[serde(
+        default,
+        rename = "marginMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub margin_mode: Cow<'a, str>,
-    #[serde(default, rename = "posMode", borrow)]
+    #[serde(
+        default,
+        rename = "posMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub pos_mode: Cow<'a, str>,
     #[serde(default, rename = "leverage")]
     pub leverage: Number,
@@ -499,7 +701,12 @@ pub struct SymbolConfig<'a> {
 
 #[derive(Deserialize, Default)]
 pub struct UtaSettings<'a> {
-    #[serde(default, rename = "holdMode", borrow)]
+    #[serde(
+        default,
+        rename = "holdMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
     pub hold_mode: Cow<'a, str>,
     #[serde(default, rename = "symbolConfigList", borrow)]
     pub symbol_config_list: Vec<SymbolConfig<'a>>,
@@ -507,7 +714,7 @@ pub struct UtaSettings<'a> {
 
 #[derive(Deserialize, Default)]
 pub struct UtaAsset<'a> {
-    #[serde(default, rename = "coin", borrow)]
+    #[serde(default, rename = "coin", borrow, deserialize_with = "nullable_text")]
     pub coin: Cow<'a, str>,
     #[serde(default, rename = "usdValue")]
     pub usd_value: Number,
@@ -543,18 +750,12 @@ impl<'de> Deserialize<'de> for Flag {
             Bool(bool),
             Text(#[serde(borrow)] Cow<'a, str>),
         }
-        Ok(Self(match Wire::deserialize(d)? {
-            Wire::Bool(v) => v,
-            Wire::Text(v) => matches!(v.as_ref(), "YES" | "yes" | "true"),
+        Ok(Self(match Option::<Wire>::deserialize(d)? {
+            Some(Wire::Bool(v)) => v,
+            Some(Wire::Text(v)) => matches!(v.as_ref(), "YES" | "yes" | "true"),
+            None => false,
         }))
     }
-}
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct PageMeta {
-    pub end_id: Option<String>,
-    pub cursor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -619,6 +820,11 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Rows<T> {
         d.deserialize_seq(RowsVisitor(std::marker::PhantomData))
     }
 }
+/// Bitget sends null for text that does not apply; it reads as absent.
+fn nullable_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Cow<'de, str>, D::Error> {
+    Ok(Option::<Text<'de>>::deserialize(d)?.map_or(Cow::Borrowed(""), |text| text.0))
+}
+
 struct Text<'a>(Cow<'a, str>);
 impl<'de> Deserialize<'de> for Text<'de> {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -820,4 +1026,44 @@ pub struct TrailingRow {
     pub trail_type: String,
     pub pre_order_type: String,
     pub trail_variance: Number,
+}
+
+/// A success whose list is null, which is how Bitget answers an empty one.
+/// A history page with nothing to list: its data, or the list inside it, is null.
+pub fn null_history(body: &str) -> bool {
+    use serde_json::value::RawValue;
+    let Ok(envelope) =
+        serde_json::from_str::<Envelope<std::collections::HashMap<&str, &RawValue>>>(body)
+    else {
+        return false;
+    };
+    envelope.code.0 == Some(0.0)
+        && envelope.data.is_none_or(|lists| {
+            ["fillList", "entrustedList", "list"]
+                .iter()
+                .any(|name| lists.get(name).is_some_and(|list| list.get() == "null"))
+        })
+}
+pub fn null_list(body: &str) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Lists {
+        #[serde(default = "absent")]
+        entrusted_list: Option<IgnoredList>,
+        #[serde(default = "absent")]
+        list: Option<IgnoredList>,
+    }
+    fn absent() -> Option<IgnoredList> {
+        Some(IgnoredList)
+    }
+    struct IgnoredList;
+    impl<'de> Deserialize<'de> for IgnoredList {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            serde::de::IgnoredAny::deserialize(d).map(|_| Self)
+        }
+    }
+    serde_json::from_str::<Envelope<Lists>>(body)
+        .ok()
+        .and_then(|envelope| envelope.data)
+        .is_some_and(|lists| lists.entrusted_list.is_none() || lists.list.is_none())
 }

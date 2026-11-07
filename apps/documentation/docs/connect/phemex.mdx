@@ -12,7 +12,7 @@ hide_table_of_contents: false
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import ThemedImage from '@theme/ThemedImage';
 import WhitelistTroubleshooting from '/img/connect/phemex/whitelist-troubleshooting.png';
-import ApiWhitelist from '/img/connect/bitget/v3/apiwhitelist.png';
+import ProxyFleetIps from '@site/src/components/ProxyFleetIps';
 import ApiTeal from '/img/connect/bitget/v3/api-teal.png';
 import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
 import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
@@ -94,7 +94,10 @@ You can get to this page directly by navigating to **[Phemex API Management](htt
 </div>
 
 - **Name**: You can choose any name you like for this section. It can be helpful to use a name related to Tealstreet in case you have many API keys for different services.
-- Copy the Whitelist IP Addresses supplied by Tealstreet (on the new API key page) and paste them into this field.
+- Copy the current Whitelist IP Addresses supplied by Tealstreet and paste them into this field:
+
+<ProxyFleetIps exchange="phemex" />
+
 - Choose ‘**Read & Trade Permission**’.
 - **Confirm**: Once you have completed the required fields, press Confirm.
 

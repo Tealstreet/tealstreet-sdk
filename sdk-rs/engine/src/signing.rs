@@ -80,6 +80,9 @@ pub struct ExtraKeyPolicy {
     /// Declared decoding of the extra material; authoritative over caller metadata.
     #[serde(default)]
     pub encoding: Option<KeyEncoding>,
+    /// Trim with Rust Unicode White_Space before decoding. Optional blanks are absent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trim: bool,
 }
 
 /// Extra refs never fall back across slots, so there is no fallback variant.
@@ -89,6 +92,8 @@ pub enum ExtraFieldPolicy {
     #[default]
     Optional,
     RequiredForPrivate,
+    /// Secondary only: alias the primary's installed role; never accept own material.
+    AliasPrimary,
 }
 
 /// Trusted setup decoding of supplied key material. Nothing here is inferred.
@@ -120,12 +125,15 @@ pub enum ExtraKey {
     ZklinkSeed,
     /// Polymarket L1 wallet: the raw 32-byte secp256k1 scalar; primary only.
     L1Wallet,
+    /// Optional KuCoin broker attribution HMAC, shared by both credential slots.
+    KucoinBroker,
 }
 impl ExtraKey {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ZklinkSeed => "zklinkSeed",
             Self::L1Wallet => "l1Wallet",
+            Self::KucoinBroker => "kucoinBroker",
         }
     }
     /// The one algorithm a role ref serves, for `Sign` and public operations.
@@ -133,6 +141,7 @@ impl ExtraKey {
         match self {
             Self::ZklinkSeed => Algorithm::ZkLinkContract,
             Self::L1Wallet => Algorithm::Secp256k1Digest,
+            Self::KucoinBroker => Algorithm::HmacSha256,
         }
     }
     /// The L1 wallet derives the session identity, which is primary only.
@@ -172,7 +181,11 @@ impl CredentialSetupPolicy {
             (identities.secondary.as_ref(), self.secondary, false),
         ] {
             let declared = policy.and_then(|policy| policy.extra);
-            if !primary && declared.is_some_and(|declared| declared.key.primary_only()) {
+            if !primary && declared.is_some_and(|declared| declared.key.primary_only())
+                || primary
+                    && declared
+                        .is_some_and(|declared| declared.field == ExtraFieldPolicy::AliasPrimary)
+            {
                 return Err(SignError::InvalidRequest);
             }
             let Some(identity) = identity else { continue };
@@ -184,8 +197,19 @@ impl CredentialSetupPolicy {
                 return Err(SignError::InvalidRequest);
             }
             if let Some(declared) = declared {
+                if let Some(reference) = identity.extra.get(&declared.key)
+                    && (!valid_key_ref(reference)
+                        || declared.field == ExtraFieldPolicy::AliasPrimary
+                            && identities
+                                .primary
+                                .as_ref()
+                                .and_then(|id| id.extra.get(&declared.key))
+                                != Some(reference))
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 let required = match declared.field {
-                    ExtraFieldPolicy::Optional => false,
+                    ExtraFieldPolicy::Optional | ExtraFieldPolicy::AliasPrimary => false,
                     ExtraFieldPolicy::RequiredForPrivate => !(primary && public_data_only),
                 };
                 if required
@@ -244,6 +268,17 @@ impl CredentialSetupPolicy {
                 .as_mut()
                 .expect("existing secondary")
                 .passphrase = passphrase;
+        }
+        if let Some(declared) = self.secondary.and_then(|policy| policy.extra)
+            && declared.field == ExtraFieldPolicy::AliasPrimary
+            && let Some(reference) = identities
+                .primary
+                .as_ref()
+                .and_then(|id| id.extra.get(&declared.key))
+                .cloned()
+            && let Some(secondary) = identities.secondary.as_mut().filter(|id| complete(id))
+        {
+            secondary.extra.entry(declared.key).or_insert(reference);
         }
         // An Optional family accepts only a primary credential-only slot that
         // is otherwise valid; Required (and every secondary) is exactly today.
@@ -1014,7 +1049,12 @@ impl SignRequest {
     }
 }
 
-/// Algorithms with a public form; consumers exist only for these two.
+/// The byte length of `algorithm`'s public key, if it has one.
+pub fn public_key_length(algorithm: Algorithm) -> Option<usize> {
+    public_key_len(algorithm)
+}
+
+/// Algorithms with a public form.
 fn public_key_len(algorithm: Algorithm) -> Option<usize> {
     match algorithm {
         Algorithm::Ed25519 | Algorithm::StarkDigest => Some(32),
@@ -1510,6 +1550,7 @@ mod setup_field_policy_tests {
                     key: ExtraKey::ZklinkSeed,
                     field,
                     encoding: None,
+                    trim: false,
                 }),
                 ..Default::default()
             }),

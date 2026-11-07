@@ -380,7 +380,7 @@ fn released_private_batch_precedes_opening_refresh() {
 #[test]
 fn native_wire_roles_and_first_frame_then_150ms_pacing() {
     let (mut rig, startup) = Rig::with_policy(true, PublicFeedPolicy::Direct);
-    assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Private), .. } if *socket == rig.node)));
+    assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Private), public_topics: true, .. } if *socket == rig.node)));
     assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Public), .. } if Some(*socket) == rig.api)));
     assert_eq!(sent(&rig.open(true), rig.socket(true)), [API_SUB]);
     let at = rig.now;
@@ -420,7 +420,7 @@ fn shared_and_disabled_preserve_private_topics_and_financial_data() {
     for policy in [PublicFeedPolicy::Shared, PublicFeedPolicy::Disabled] {
         let (mut rig, startup) = Rig::with_policy(true, policy);
         assert!(rig.api.is_none());
-        assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Private), .. } if *socket == rig.node)));
+        assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Private), public_topics: false, .. } if *socket == rig.node)));
         let mut trace = rig.open(false);
         trace.extend(rig.advance(rig.now + 450.0));
         assert_eq!(
@@ -863,6 +863,7 @@ impl Venue for Pressure {
                 invalidation: Invalidation::None,
                 subscription_interval_ms: 0.,
                 close_floors: &[],
+                data_silence: None,
             })?;
             self.spare = Some(spare);
             for _ in 0..MAX_FEEDS {

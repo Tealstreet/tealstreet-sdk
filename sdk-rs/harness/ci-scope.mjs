@@ -21,6 +21,7 @@ export const RUST_SCOPE_PATTERNS = Object.freeze([
   '.github/actions/prefetch-cargo/**',
   '.github/actions/install-yarn/**',
   '.github/actions/install-binaryen/**',
+  '.github/actions/fetch-rust-history/**',
 ]);
 
 const patternRegex = pattern => new RegExp(`^${pattern

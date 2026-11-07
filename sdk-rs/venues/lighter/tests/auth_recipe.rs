@@ -330,11 +330,15 @@ fn sign_work(
 
 fn signed_bytes(work: &safe_cex_engine::signing::SignRequest) -> Vec<u8> {
     match &work.operations[..] {
-        [safe_cex_engine::signing::Operation::Sign { payload, .. }] => match &payload[..] {
+        // The statement commitment, then the one signature.
+        [
+            safe_cex_engine::signing::Operation::Sha256 { .. },
+            safe_cex_engine::signing::Operation::Sign { payload, .. },
+        ] => match &payload[..] {
             [safe_cex_engine::signing::PayloadPart::Bytes { bytes }] => bytes.clone(),
             _ => panic!("one byte payload"),
         },
-        _ => panic!("one Sign operation"),
+        _ => panic!("a commitment then one Sign operation"),
     }
 }
 

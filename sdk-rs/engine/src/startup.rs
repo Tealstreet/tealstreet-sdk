@@ -1,6 +1,7 @@
 //! Startup read retry policy, public discovery and private gates alike. Venues
 //! rebuild requests to refresh signatures.
 use crate::log::code;
+pub use crate::startup_causes::Sections;
 use crate::{Cx, Level, TimerId};
 
 struct Read<K> {
@@ -140,6 +141,13 @@ impl PublicRetries {
         minimum_ms: f64,
         error: crate::VenueError,
     ) {
+        cx.startup_read_failure(
+            match read {
+                DiscoveryRead::Markets => Sections::MARKETS,
+                DiscoveryRead::Tickers => Sections::TICKERS,
+            },
+            &error,
+        );
         self.ready(cx);
         let waiting = self.retry.waiting(&read);
         self.retry.failed_after(cx, read, minimum_ms);
@@ -242,6 +250,19 @@ pub fn public_response_error(
 /// Longest honoured `Retry-After`: real IP bans can exceed minutes, but an
 /// absurd or overflowing value must not stall an account indefinitely.
 pub const MAX_RATE_LIMIT_PAUSE_MS: f64 = 3_600_000.0;
+
+/// A refusal from Tealstreet's own edge rather than the venue: a Cloudflare challenge,
+/// our proxy's authorization refusal, or an error page naming our zone. A venue's IP
+/// ban must not be inferred from one, since that would hold startup for its window.
+pub fn from_tealstreet_edge(response: &crate::Response<'_>) -> bool {
+    if response.header("cf-mitigated").is_some() {
+        return true;
+    }
+    let body = response.body.to_ascii_lowercase();
+    body.contains("tealstreet")
+        || body.contains("authorization header is missing")
+        || body.contains("invalid jwt")
+}
 
 /// The pause a rate-limited response asks for: `Retry-After` seconds on a 418
 /// or 429 (capped at an hour), else `default_ms` for those statuses, else none.

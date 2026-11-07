@@ -5,6 +5,7 @@ mod identity;
 mod limits;
 pub mod sign;
 mod trading;
+mod venue_state;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
@@ -13,12 +14,16 @@ use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, Position, PositionSide, Precision, Ticker,
 };
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketId, TimerId,
-    Venue, VenueError,
+use safe_cex_engine::socket::{Config, Timeout};
+use safe_cex_engine::socket_lifecycle::{
+    AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, FeedId, FeedPolicy, Interest,
+    Invalidation, LifecycleEvent, RetireReason, SocketCapabilities, SocketError, TrafficPolicy,
 };
-use std::collections::{HashMap, HashSet};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    Store, SubscriptionTopic, TimerId, Venue, VenueError,
+};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use wire::*;
 
 fn revalue_position(position: &mut Position, price: f64) {
@@ -45,6 +50,9 @@ pub struct Options {
     pub api_key_index: Option<String>,
     pub integrator_account_index: Option<u64>,
     pub stop_slippage_pct: f64,
+    /// The host sends this account's sockets through Tealstreet's WS route, where
+    /// read-only promotion does not apply: legacy promoted the direct route only.
+    pub ws_routed: bool,
 }
 safe_cex_crypto::redacted_debug!(Options);
 
@@ -62,9 +70,11 @@ impl Default for Options {
             api_key_index: None,
             integrator_account_index: None,
             stop_slippage_pct: 1.0,
+            ws_routed: false,
         }
     }
 }
+type TickerSeed = (String, Ticker, Option<(f64, f64)>);
 pub enum Pending {
     Account {
         context: Context,
@@ -87,7 +97,7 @@ pub enum Pending {
     },
     Tickers {
         context: Context,
-        rows: Vec<(String, Ticker)>,
+        rows: Vec<TickerSeed>,
         failed: bool,
         revision: u64,
     },
@@ -117,27 +127,76 @@ pub struct MarketMeta {
     pub initial_margin_fraction: f64,
     pub maintenance_margin_fraction: f64,
     pub initial_last_price: f64,
+    /// The leverage the venue applies until the account sets one: its default
+    /// fraction, which can sit far below the maximum (robinhood: 2x of 20x).
+    pub default_leverage: Option<f64>,
 }
+const TICKER_TOPICS_PER_SECOND: usize = 2;
+/// One managed feed; the engine owns its epochs, deadlines, pings and backoff.
+#[derive(Default)]
 struct Connection {
+    feed: Option<FeedId>,
+    /// The current epoch's socket, from connect until retirement.
     socket: Option<SocketId>,
     open: bool,
-    supervisor: Supervisor,
+    /// Retired: only the engine's Reconnect (never, once stopped) connects it again.
+    parked: bool,
+    /// Lighter answers a restricted IP read-only on `?readonly=true`; it never reverts.
+    read_only: bool,
+    /// Read-only, legacy pinged every 20 s: every other engine ping is skipped.
+    ping_skipped: bool,
+    /// Public only: when it opened, whether it carried a message, and failed connects.
+    connected_at: f64,
+    received: bool,
+    failures: u32,
 }
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            supervisor: Supervisor::new(Config {
-                connect_timeout_ms: 120_000.0,
-                idle_timeout_ms: 120_000.0,
-                ping_interval_ms: Some(10_000.0),
-                backoff_base_ms: 1_000.0,
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
-        }
+impl Connection {
+    /// Neither connected nor waiting for the engine's retry.
+    fn idle(&self) -> bool {
+        self.socket.is_none() && !self.parked
     }
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Channel {
+    Public,
+    Private,
+}
+/// The legacy supervisors' timings: a 10 s ping, a 1 s to 16 s backoff, and
+/// connect and silence bounds of two minutes (public) or three (private).
+fn feed_policy(channel: Channel) -> FeedPolicy {
+    let (role, bound) = match channel {
+        Channel::Public => (SocketChannel::Public, 120_000.0),
+        Channel::Private => (SocketChannel::Private, 180_000.0),
+    };
+    FeedPolicy {
+        role,
+        supervision: Config {
+            connect_timeout_ms: bound,
+            idle_timeout_ms: bound,
+            ping_interval_ms: Some(10_000.0),
+            backoff_base_ms: 1_000.0,
+            backoff_cap_ms: 16_000.0,
+            ..Config::default()
+        },
+        // The private subscriptions carry their own auth token; no feed logs in.
+        auth: AuthMode::None,
+        recovery: AuthRecovery::Reconnect,
+        permanent_refusal_group: None,
+        traffic: TrafficPolicy::AnyText,
+        controls: ControlPolicy::None,
+        invalidation: Invalidation::Required,
+        subscription_interval_ms: 0.0,
+        // 1013 (try again later) waits 30 s on both feeds, as the TS onClose overrides do.
+        close_floors: &[(1013, 30_000.0)],
+        data_silence: None,
+    }
+}
+fn socket_failed(cx: &mut Cx<'_, Pending>, error: SocketError) {
+    cx.notice(
+        safe_cex_engine::Level::Error,
+        code::SUBSCRIPTION_REJECTED,
+        format!("Lighter socket admission failed: {error:?}"),
+    );
 }
 #[derive(Default)]
 struct DepthState {
@@ -160,7 +219,16 @@ struct CandleState {
     last_received: f64,
     in_flight: bool,
 }
+/// The channel every book subscribe, unsubscribe and repair names.
+fn book_channel(store: &Store, symbol: &str) -> Option<String> {
+    Some(format!("order_book/{}", store.market(symbol)?.id))
+}
+/// The channel every candle subscribe, unsubscribe and repair names.
+fn candle_channel(store: &Store, symbol: &str, interval: Interval) -> Option<String> {
+    Some(format!("candle/{}/{interval}", store.market(symbol)?.id))
+}
 pub struct Lighter {
+    protection: trading::protection::ProtectionState,
     options: Options,
     account: account::Account,
     trading: trading::Trading,
@@ -177,6 +245,10 @@ pub struct Lighter {
     ticker_revision: u64,
     ticker_sources: HashMap<String, u64>,
     ticker_in_flight: bool,
+    ticker_topics: std::collections::VecDeque<String>,
+    /// Ticker channels paced onto the open public feed so far.
+    ticker_live: Vec<String>,
+    ticker_pace: Option<TimerId>,
     startup: safe_cex_engine::startup::Backoff<bool>,
     poll: Option<TimerId>,
 }
@@ -186,8 +258,25 @@ fn supported(interval: Interval) -> bool {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1)
 }
 impl Lighter {
+    /// What the venue applies to `market` until the account sets a leverage.
+    pub(crate) fn default_leverage(&self, market: &Market) -> f64 {
+        self.metadata
+            .get(&market.symbol)
+            .and_then(|meta| meta.default_leverage)
+            .and_then(|default| {
+                // Fallible: a malformed catalogue row (min above max) must not panic.
+                safe_cex_engine::num::clamp_leverage(
+                    default,
+                    market.limits.leverage.min,
+                    market.limits.leverage.max,
+                )
+                .ok()
+            })
+            .unwrap_or(market.limits.leverage.max)
+    }
     pub fn new(options: Options) -> Self {
         Self {
+            protection: Default::default(),
             options,
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -202,6 +291,9 @@ impl Lighter {
             ticker_revision: 0,
             ticker_sources: HashMap::new(),
             ticker_in_flight: false,
+            ticker_topics: Default::default(),
+            ticker_live: Vec::new(),
+            ticker_pace: None,
             startup: Default::default(),
             poll: None,
         }
@@ -215,10 +307,39 @@ impl Lighter {
         }
     }
     fn chain_id(&self) -> u32 {
-        match (self.options.robinhood, self.options.testnet) {
-            (_, true) => 300,
-            (true, false) => 466_324,
-            (false, false) => 304,
+        sign::chain_id(self.options.robinhood, self.options.testnet)
+    }
+    /// Legacy lighter.ws-public.ts: a connect that failed, closed early without a
+    /// message, or closed as restricted counts; two on the direct route go read-only.
+    fn note_public_close(&mut self, cx: &mut Cx<'_, Pending>, code: u16) {
+        let public = &mut self.public;
+        let early = public.open && !public.received && cx.now - public.connected_at <= 12_000.0;
+        let failed = !public.open || early || matches!(code, 1006 | 1008 | 1011 | 1013);
+        public.failures = if failed {
+            public.failures + 1
+        } else if code == 1000 {
+            0
+        } else {
+            public.failures.saturating_sub(1)
+        };
+        if failed && public.failures >= 2 && !public.read_only && !self.options.ws_routed {
+            public.read_only = true;
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::WS_RECONNECT,
+                format!(
+                    "Lighter public WS switching to readonly direct route after {} direct-route failures",
+                    public.failures
+                ),
+            );
+        }
+    }
+    /// Legacy's degraded mode: Lighter answers a restricted IP read-only on this query.
+    fn socket_url(&self, read_only: bool) -> String {
+        if read_only {
+            format!("{}?readonly=true", self.ws_url())
+        } else {
+            self.ws_url().into()
         }
     }
     fn ws_url(&self) -> &'static str {
@@ -284,38 +405,121 @@ impl Lighter {
             }
         }
     }
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public.supervisor.connecting(cx);
+    fn connection(&mut self, channel: Channel) -> &mut Connection {
+        match channel {
+            Channel::Public => &mut self.public,
+            Channel::Private => &mut self.account.connection.stream,
         }
-        self.public.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(self.ws_url())
-                    .channel(safe_cex_engine::SocketChannel::Public),
-            ),
-        );
-        self.public.open = false;
     }
-    fn topic(&self, cx: &mut Cx<'_, Pending>, op: &str, channel: &str) {
-        if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
-            #[derive(serde::Serialize)]
-            struct Subscription<'a> {
-                #[serde(rename = "type")]
-                kind: &'a str,
-                channel: &'a str,
+    fn connection_ref(&self, channel: Channel) -> &Connection {
+        match channel {
+            Channel::Public => &self.public,
+            Channel::Private => &self.account.connection.stream,
+        }
+    }
+    fn channel_of_feed(&self, feed: FeedId) -> Option<Channel> {
+        [Channel::Public, Channel::Private]
+            .into_iter()
+            .find(|&channel| self.connection_ref(channel).feed == Some(feed))
+    }
+    fn open_feed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+        // Suppressed public feeds never register, so they never churn retries.
+        if channel == Channel::Public && cx.public_feed_policy() != PublicFeedPolicy::Direct {
+            return;
+        }
+        let read_only = self.connection_ref(channel).read_only;
+        let feed = match self.connection_ref(channel).feed {
+            Some(feed) => feed,
+            None => match cx.register_socket_feed(feed_policy(channel)) {
+                Ok(feed) => {
+                    self.connection(channel).feed = Some(feed);
+                    feed
+                }
+                Err(error) => return socket_failed(cx, error),
+            },
+        };
+        if self.connection_ref(channel).parked || cx.socket_epoch(feed).is_some() {
+            return;
+        }
+        let url = self.socket_url(read_only);
+        match cx.connect_socket(feed, safe_cex_engine::SocketSpec::new(url)) {
+            Ok(epoch) => {
+                let connection = self.connection(channel);
+                connection.socket = Some(epoch.socket());
+                connection.open = false;
             }
-            cx.send(
-                socket,
-                serde_json::to_string(&Subscription { kind: op, channel }).unwrap(),
-            );
+            Err(error) => socket_failed(cx, error),
+        }
+    }
+    /// Retire the channel's live epoch; the engine then backs off and reconnects.
+    fn retire(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+        if let Some(feed) = self.connection_ref(channel).feed {
+            cx.retire_socket(feed, RetireReason::Closed);
+        }
+    }
+    /// The public feed's desired channels; the engine replays them on every
+    /// open and sends only the changes while connected.
+    fn public_interests(&self, cx: &Cx<'_, Pending>) -> Vec<Interest> {
+        let mut channels = vec!["market_stats/all".to_owned()];
+        let mut seen = BTreeSet::new();
+        for (symbol, state) in &self.books {
+            if state.subscribers > 0
+                && let Some(channel) = book_channel(cx.store, symbol)
+            {
+                channels.push(channel);
+            }
+        }
+        for ((symbol, interval), state) in &self.candles {
+            if state.subscribers > 0
+                && let (Some(market), Some(channel)) = (
+                    cx.store.market(symbol),
+                    candle_channel(cx.store, symbol, *interval),
+                )
+            {
+                channels.push(channel);
+                if !self.options.public_data_only && seen.insert(market.id.clone()) {
+                    channels.push(format!("trade/{}", market.id));
+                }
+            }
+        }
+        channels.extend(self.ticker_live.iter().cloned());
+        channels.into_iter().map(Interest::from_wire_args).collect()
+    }
+    fn sync_interests(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(feed) = self.public.feed else {
+            return;
+        };
+        let interests = self.public_interests(cx);
+        if let Err(error) = cx.set_socket_interests(feed, interests) {
+            socket_failed(cx, error);
+        }
+    }
+    /// The venue closes a socket sending too many messages (30009): at most
+    /// 120 ticker subscribes a minute, leaving room for the rest of its traffic.
+    fn pace_ticker_topics(&mut self, cx: &mut Cx<'_, Pending>) {
+        let paced = TICKER_TOPICS_PER_SECOND.min(self.ticker_topics.len());
+        if paced == 0 {
+            return;
+        }
+        self.ticker_live.extend(self.ticker_topics.drain(..paced));
+        self.sync_interests(cx);
+        if !self.ticker_topics.is_empty() {
+            self.ticker_pace = Some(cx.set_timer(1_000.0));
+        }
+    }
+    /// Native unsubscribe then subscribe of one unchanged book channel.
+    fn resubscribe_book(&mut self, cx: &mut Cx<'_, Pending>, channel: String) {
+        if let Some(feed) = self.public.feed
+            && let Err(error) = cx.repair_socket_interests(feed, vec![channel])
+        {
+            socket_failed(cx, error);
         }
     }
     fn ticker_seed(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.ticker_in_flight || self.startup.waiting(&false) {
             return;
         }
-        let Ok(context) = cx.http_context(
+        let Ok(context) = cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -371,7 +575,7 @@ impl Lighter {
         if state.in_flight || cx.now < state.rest_retry_at {
             return;
         }
-        let Ok(context) = cx.http_context(
+        let Ok(context) = cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -434,7 +638,7 @@ impl Lighter {
             };
             context
         } else {
-            match cx.http_context(Scope::Background, policy) {
+            match cx.http_live_context(Scope::Background, policy) {
                 Ok(context) => context,
                 Err(_) => {
                     if let Some(state) = self
@@ -462,7 +666,7 @@ impl Lighter {
                 return Err("Invalid candle time range".to_owned());
             }
             let count = limit.filter(|n| *n > 0).unwrap_or(500).min(1500);
-            let end = to.unwrap_or(cx.now);
+            let end = to.unwrap_or(cx.protocol_now());
             let start = if limit.is_none() {
                 from.unwrap_or(end - duration * f64::from(count))
             } else {
@@ -522,6 +726,7 @@ impl Lighter {
         let Some(symbol) = symbol.map(str::to_owned) else {
             return;
         };
+        self.observe_mark(&symbol, stats.mark_price, cx.now);
         self.ticker_revision += 1;
         self.ticker_sources
             .insert(symbol.clone(), self.ticker_revision);
@@ -634,9 +839,8 @@ impl Lighter {
                 state.nonce = None;
                 state.book.clear();
                 cx.book_changed(symbol);
-                let id = cx.store.market(symbol).unwrap().id.clone();
-                self.topic(cx, "unsubscribe", &format!("order_book/{id}"));
-                self.topic(cx, "subscribe", &format!("order_book/{id}"));
+                let channel = book_channel(cx.store, symbol).unwrap();
+                self.resubscribe_book(cx, channel);
                 return;
             }
         } else {
@@ -718,6 +922,53 @@ impl Lighter {
             }
         }
     }
+    fn public_opened(&mut self, cx: &mut Cx<'_, Pending>, feed: FeedId) {
+        self.public.connected_at = cx.now;
+        self.public.received = false;
+        self.sync_interests(cx);
+        if let Err(error) = cx.send_after_socket_interests(feed, r#"{"type":"ping"}"#.into()) {
+            socket_failed(cx, error);
+        }
+        // Displayed symbols first: the full list takes about a minute at this pace.
+        let mut markets: Vec<_> = cx.store.markets().iter().collect();
+        markets.sort_by_key(|market| !self.books.contains_key(&market.symbol));
+        self.ticker_topics = markets
+            .iter()
+            .map(|market| format!("ticker/{}", market.id))
+            .collect();
+        self.pace_ticker_topics(cx);
+        let symbols: Vec<_> = self
+            .books
+            .iter()
+            .filter_map(|(symbol, state)| {
+                (state.subscribers > 0 && cx.store.market(symbol).is_some())
+                    .then_some(symbol.clone())
+            })
+            .collect();
+        for symbol in symbols {
+            self.depth_seed(cx, &symbol);
+        }
+        self.ticker_seed(cx);
+    }
+    fn public_retired(&mut self, cx: &mut Cx<'_, Pending>) {
+        // A reopened feed paces its tickers again rather than replaying them at once.
+        self.ticker_topics.clear();
+        self.ticker_live.clear();
+        self.sync_interests(cx);
+        for (symbol, state) in &mut self.books {
+            state.waiting = true;
+            state.revision += 1;
+            state.nonce = None;
+            state.book.clear();
+            cx.book_changed(symbol);
+        }
+        let symbols: Vec<_> = self.books.keys().cloned().collect();
+        for symbol in symbols {
+            if self.books[&symbol].subscribers > 0 {
+                self.depth_seed(cx, &symbol);
+            }
+        }
+    }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Identity(request) => self.identity_failed(cx, request, error),
@@ -768,6 +1019,28 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::Account { .. } => safe_cex_engine::HttpReadClass::Reconciliation,
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
+
+    /// A repair re-sends the topic's book or candle channel; a book resubscribe
+    /// answers with a full snapshot, which replaces the book.
+    fn subscription_interest(
+        &self,
+        store: &Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        let channel = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                candle_channel(store, symbol, *interval)
+            }
+            SubscriptionTopic::OrderBook { symbol } => book_channel(store, symbol),
+        }?;
+        Some((self.public.feed?, channel))
+    }
     fn on_http_owner_retired_preflight(
         &mut self,
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
@@ -787,6 +1060,11 @@ impl Venue for Lighter {
         self.refresh_account(cx);
         self.reconcile_orders(cx);
     }
+    // Every orders read is the one account-wide census, which lands through
+    // `commit_orders_read_from` or owes a follow-up census that does.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,
@@ -802,8 +1080,40 @@ impl Venue for Lighter {
         }
         safe_cex_engine::request_context::ReconciliationData::new(String::new())
     }
+    fn http_release_veto(
+        &self,
+        store: &Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.protective_release_veto(store, pending, release.time.raw_ms)
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
+    }
+    /// `None` until the account lookup or a tier read has something to carry.
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        let state = venue_state::VenueState {
+            account_index: self.account.account_index,
+            tier: self.limits_tier_code(),
+        };
+        (state != venue_state::VenueState::default()).then(|| state.encode())
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
+        let Some(state) = venue_state::VenueState::decode(bytes) else {
+            cx.venue_state_unreadable("Unreadable Lighter venue state from the data source");
+            return;
+        };
+        if let Some(account) = state.account_index {
+            self.apply_account_index(cx, account);
+        }
+        self.apply_limits_tier_code(state.tier);
+    }
+    /// Data source: re-read the account snapshot, which carries each market's
+    /// leverage and margin type. Never a write; the tier is the source's own
+    /// write (a frame-fed engine refuses it), so it needs no refresh.
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        self.refresh_account(cx);
     }
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -811,8 +1121,18 @@ impl Venue for Lighter {
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             account_tier: true,
             account: safe_cex_engine::AccountLookup::Query,
+            fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn guard_order_mutations(&self) -> bool {
         true
@@ -827,8 +1147,21 @@ impl Venue for Lighter {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account { request, .. } => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn on_http_preflight_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -871,44 +1204,9 @@ impl Venue for Lighter {
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.markets(cx, false);
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account_open(cx, socket) {
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = true;
-        self.public.supervisor.opened(cx);
-        self.topic(cx, "subscribe", "market_stats/all");
-        for market in cx.store.markets().to_vec() {
-            self.topic(cx, "subscribe", &format!("ticker/{}", market.id));
-        }
-        let symbols: Vec<_> = self
-            .books
-            .iter()
-            .filter_map(|(symbol, state)| {
-                (state.subscribers > 0 && cx.store.market(symbol).is_some())
-                    .then_some(symbol.clone())
-            })
-            .collect();
-        for symbol in symbols {
-            let id = cx.store.market(&symbol).unwrap().id.clone();
-            self.topic(cx, "subscribe", &format!("order_book/{id}"));
-            self.depth_seed(cx, &symbol);
-        }
-        for ((symbol, interval), s) in &self.candles {
-            if s.subscribers > 0 {
-                let id = cx.store.market(symbol).unwrap().id.clone();
-                self.topic(cx, "subscribe", &format!("candle/{id}/{interval}"));
-                if !self.options.public_data_only {
-                    self.topic(cx, "subscribe", &format!("trade/{id}"));
-                }
-            }
-        }
-        cx.send(socket, r#"{"type":"ping"}"#);
-        self.ticker_seed(cx);
-    }
+    // Both feeds are engine-managed: opens, closes and liveness arrive as socket events.
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
+    /// The engine delivers only frames of an open, current, unexpired epoch.
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account_message(cx, socket, text) {
             return;
@@ -916,7 +1214,7 @@ impl Venue for Lighter {
         if self.public.socket != Some(socket) || !self.public.open {
             return;
         }
-        self.public.supervisor.received(cx.now);
+        self.public.received = true;
         let Ok(frame) = serde_json::from_str::<Envelope<'_>>(text) else {
             return;
         };
@@ -1026,29 +1324,137 @@ impl Venue for Lighter {
             _ => {}
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.account_close(cx, socket, _code) {
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.socket = None;
-        self.public.open = false;
-        for (symbol, state) in &mut self.books {
-            state.waiting = true;
-            state.revision += 1;
-            state.nonce = None;
-            state.book.clear();
-            cx.book_changed(symbol);
-        }
-        self.public.supervisor.retry(cx);
-        let symbols: Vec<_> = self.books.keys().cloned().collect();
-        for symbol in symbols {
-            if self.books[&symbol].subscribers > 0 {
-                self.depth_seed(cx, &symbol);
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+
+    fn managed_sockets() -> bool {
+        true
+    }
+
+    fn socket_capabilities() -> SocketCapabilities {
+        // No Lighter work waits on a subscription release; continuations compile out.
+        SocketCapabilities { handoff: false }
+    }
+
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        let feed = match &event {
+            LifecycleEvent::Opened(epoch)
+            | LifecycleEvent::Ready { epoch, .. }
+            | LifecycleEvent::Authenticated { epoch, .. }
+            | LifecycleEvent::AuthFailure { epoch, .. }
+            | LifecycleEvent::Retired { epoch, .. }
+            | LifecycleEvent::Ping(epoch)
+            | LifecycleEvent::RetryLogin(epoch) => epoch.feed(),
+            LifecycleEvent::Reconnect(feed)
+            | LifecycleEvent::InterestsCommitted { feed, .. }
+            | LifecycleEvent::InterestsRefused { feed, .. } => *feed,
+        };
+        let Some(channel) = self.channel_of_feed(feed) else {
+            return Err(SocketError::Stale);
+        };
+        match event {
+            LifecycleEvent::Opened(epoch) => {
+                let connection = self.connection(channel);
+                connection.socket = Some(epoch.socket());
+                connection.open = true;
+                match channel {
+                    Channel::Public => self.public_opened(cx, feed),
+                    Channel::Private => self.account_open(cx, epoch.socket()),
+                }
             }
+            LifecycleEvent::Ping(epoch) => match channel {
+                Channel::Public => cx.send(epoch.socket(), r#"{"type":"ping"}"#),
+                Channel::Private => {
+                    let stream = &mut self.account.connection.stream;
+                    stream.ping_skipped = stream.read_only && !stream.ping_skipped;
+                    if !stream.ping_skipped {
+                        self.private_heartbeat(cx, epoch.socket());
+                    }
+                }
+            },
+            LifecycleEvent::Reconnect(_) => {
+                self.connection(channel).parked = false;
+                self.open_feed(cx, channel);
+            }
+            LifecycleEvent::Retired {
+                reason, close_code, ..
+            } => {
+                // Legacy counted refused and early-closed connects toward read-only; a
+                // connect or idle timeout reads as 1006, as its supervisors closed one.
+                // A silent reconnect is the engine's repair, never Lighter refusing us.
+                if matches!(
+                    reason,
+                    RetireReason::Closed | RetireReason::Timeout(Timeout::Connect | Timeout::Idle)
+                ) {
+                    let code = close_code.unwrap_or(1006);
+                    match channel {
+                        Channel::Public => self.note_public_close(cx, code),
+                        Channel::Private => self.note_private_close(cx, code),
+                    }
+                }
+                let connection = self.connection(channel);
+                connection.socket = None;
+                connection.open = false;
+                connection.parked = true;
+                match channel {
+                    Channel::Public => self.public_retired(cx),
+                    Channel::Private => self.account_retired(cx),
+                }
+                let message = match reason {
+                    RetireReason::Timeout(Timeout::Idle) => {
+                        "Lighter socket closed (idle timeout); reconnecting"
+                    }
+                    RetireReason::Timeout(_) => "Lighter socket timed out; reconnecting",
+                    RetireReason::Authentication => {
+                        "Lighter socket authentication failed; reconnecting"
+                    }
+                    RetireReason::Closed => "Lighter socket closed; reconnecting",
+                    RetireReason::Stopped => "Lighter socket stopped",
+                    RetireReason::RouteExhausted => "Lighter socket refused on every route",
+                    RetireReason::RouteRefused => "Lighter socket route refused; trying another",
+                };
+                cx.notice(safe_cex_engine::Level::Warn, code::WS_DISCONNECTED, message);
+            }
+            LifecycleEvent::InterestsRefused { error, .. } => socket_failed(cx, error),
+            _ => {}
         }
+        Ok(())
+    }
+
+    /// One `{"type","channel"}` frame per channel, as Lighter accepts them.
+    fn encode_socket_interests(
+        &self,
+        _store: &safe_cex_engine::Store,
+        _feed: FeedId,
+        subscribe: bool,
+        interests: &[Interest],
+        emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+    ) -> Result<(), SocketError> {
+        #[derive(serde::Serialize)]
+        struct Subscription<'a> {
+            #[serde(rename = "type")]
+            kind: &'a str,
+            channel: &'a str,
+        }
+        let kind = if subscribe {
+            "subscribe"
+        } else {
+            "unsubscribe"
+        };
+        for interest in interests {
+            emit(EncodedBatch {
+                text: serde_json::to_string(&Subscription {
+                    kind,
+                    channel: &interest.wire_args,
+                })
+                .map_err(|_| SocketError::InvalidInterest)?,
+                covered_keys: vec![interest.key.clone()],
+            })?;
+        }
+        Ok(())
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
@@ -1129,6 +1535,10 @@ impl Venue for Lighter {
                                 initial_margin_fraction: fraction / 10000.0,
                                 maintenance_margin_fraction: m.maintenance_margin_fraction
                                     / 10000.0,
+                                default_leverage: m
+                                    .default_initial_margin_fraction
+                                    .filter(|default| *default > 0.0)
+                                    .map(|default| 10_000.0 / default),
                             },
                         );
                         rows.push(Market {
@@ -1231,7 +1641,11 @@ impl Venue for Lighter {
                             if let Some(v) = stats.daily_price_change {
                                 ticker.percentage = v;
                             }
-                            rows.push((symbol.into(), ticker));
+                            rows.push((
+                                symbol.into(),
+                                ticker,
+                                stats.mark_price.map(|v| (v, cx.now)),
+                            ));
                         } else {
                             *failed = true;
                             safe_cex_engine::startup::skipped_row(cx);
@@ -1342,9 +1756,17 @@ impl Venue for Lighter {
                 );
                 cx.store.set_markets(rows);
                 let _ = cx.finish_http_context(&context);
+                // Frame-fed engines load only the market catalogue: no ticker
+                // seed, socket or poll; their data source streams the rest.
+                if cx.frame_fed() {
+                    self.account_start(cx);
+                    return;
+                }
                 self.ticker_seed(cx);
                 self.account_start(cx);
-                self.connect(cx);
+                if self.public.idle() {
+                    self.open_feed(cx, Channel::Public);
+                }
                 self.poll = Some(cx.set_timer(2_000.0));
             }
             Pending::Tickers {
@@ -1361,9 +1783,15 @@ impl Venue for Lighter {
                     return;
                 }
                 self.startup.succeeded(cx, &false);
-                for (symbol, ticker) in rows {
+                let genuine = !failed
+                    && (200..300).contains(&response.status)
+                    && trading::protection::accepted_envelope(response.body);
+                for (symbol, ticker, mark) in rows {
                     if self.ticker_sources.get(&symbol).copied().unwrap_or(0) <= revision {
                         cx.store.update_ticker(&symbol, |t| *t = ticker);
+                        if genuine && let Some((value, at)) = mark {
+                            self.observe_mark(&symbol, Some(value), at);
+                        }
                     }
                 }
             }
@@ -1449,7 +1877,7 @@ impl Venue for Lighter {
                     );
                     return;
                 }
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 if command.is_some() {
                     {
                         let result: Result<String, String> =
@@ -1514,7 +1942,9 @@ impl Venue for Lighter {
             Pending::Trade(request) => self.trade_error(cx, request, error),
             Pending::Account { context, request } => {
                 let _ = cx.finish_http_context(&context);
+                self.account.read_error = Some(error.clone());
                 self.account_failed(cx, request, &error.message);
+                self.account.read_error = None;
             }
             Pending::History(request) => self.history_transport_failed(cx, request, error),
             Pending::Tier { plan, .. } => {
@@ -1530,13 +1960,13 @@ impl Venue for Lighter {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(request) => self.identity_rejected(cx, request, error),
             other => self.on_sign_error(cx, other, error),
-        }
+        });
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(request) => self.identity_rejected(cx, request, error),
             Pending::Trade(request) => self.trade_error(cx, request, error),
             Pending::Account { context, request } => {
@@ -1569,10 +1999,15 @@ impl Venue for Lighter {
                 }
             }
             pending => self.public_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_trades(cx);
+        if self.ticker_pace == Some(timer) {
+            self.ticker_pace = None;
+            self.pace_ticker_topics(cx);
+            return;
+        }
         if let Some(markets) = self.startup.on_timer(timer) {
             if markets {
                 self.markets(cx, false);
@@ -1583,24 +2018,6 @@ impl Venue for Lighter {
         }
         if self.account_timer(cx, timer) || self.trade_timer(cx, timer) {
             return;
-        }
-        match self.public.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => {}
-            Tick::Reconnect => return self.connect(cx),
-            Tick::Ping => {
-                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-                    cx.send(s, r#"{"type":"ping"}"#);
-                }
-                return;
-            }
-            Tick::TimedOut(_) => {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006);
-                }
-                return;
-            }
-            Tick::Handled => return,
         }
         if self.poll == Some(timer) {
             self.poll = Some(cx.set_timer(2_000.0));
@@ -1665,10 +2082,14 @@ impl Venue for Lighter {
         command: safe_cex_engine::CommandId,
         action: safe_cex_engine::VenueAction,
     ) {
+        if matches!(action, safe_cex_engine::VenueAction::ReadPositions) {
+            self.read_positions(cx);
+            return;
+        }
         self.tier_action(cx, command, action);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        let refresh = self.restore_retired_trades();
+        let refresh = self.restore_retired_trades(cx.frame_fed());
         self.command(cx, command);
         if refresh {
             self.refresh_account(cx);
@@ -1696,6 +2117,14 @@ impl Lighter {
                     );
                     return;
                 }
+                // A symbol opened while the paced list is still going goes next.
+                if let Some(market) = cx.store.market(&symbol) {
+                    let topic = format!("ticker/{}", market.id);
+                    if let Some(index) = self.ticker_topics.iter().position(|t| *t == topic) {
+                        self.ticker_topics.remove(index);
+                        self.ticker_topics.push_front(topic);
+                    }
+                }
                 let state = self.books.entry(symbol.clone()).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
@@ -1703,8 +2132,8 @@ impl Lighter {
                     state.generation = self.subscription_generation;
                     state.waiting = true;
                     state.last_received = cx.now;
-                    if let Some(market) = cx.store.market(&symbol) {
-                        self.topic(cx, "subscribe", &format!("order_book/{}", market.id));
+                    if cx.store.market(&symbol).is_some() {
+                        self.sync_interests(cx);
                         self.depth_seed(cx, &symbol);
                     }
                 }
@@ -1713,10 +2142,8 @@ impl Lighter {
                 if let Some(s) = self.books.get_mut(&symbol) {
                     s.subscribers = s.subscribers.saturating_sub(1);
                     if s.subscribers == 0 {
-                        if let Some(market) = cx.store.market(&symbol) {
-                            self.topic(cx, "unsubscribe", &format!("order_book/{}", market.id));
-                        }
                         self.books.remove(&symbol);
+                        self.sync_interests(cx);
                     }
                 }
             }
@@ -1729,32 +2156,24 @@ impl Lighter {
                     );
                     return;
                 }
-                let Some(m) = cx.store.market(&symbol) else {
+                if cx.store.market(&symbol).is_none() {
                     return;
-                };
-                let id = m.id.clone();
+                }
                 let state = self.candles.entry((symbol.clone(), interval)).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
                     self.subscription_generation = self.subscription_generation.wrapping_add(1);
                     state.generation = self.subscription_generation;
                     state.last_received = cx.now;
-                    self.topic(cx, "subscribe", &format!("candle/{id}/{interval}"));
-                    if !self.options.public_data_only {
-                        self.topic(cx, "subscribe", &format!("trade/{id}"));
-                    }
+                    self.sync_interests(cx);
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
                 if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     s.subscribers = s.subscribers.saturating_sub(1);
                     if s.subscribers == 0 {
-                        let id = cx.store.market(&symbol).unwrap().id.clone();
-                        self.topic(cx, "unsubscribe", &format!("candle/{id}/{interval}"));
                         self.candles.remove(&(symbol.clone(), interval));
-                        if !self.candles.keys().any(|(s, _)| *s == symbol) {
-                            self.topic(cx, "unsubscribe", &format!("trade/{id}"));
-                        }
+                        self.sync_interests(cx);
                     }
                 }
             }

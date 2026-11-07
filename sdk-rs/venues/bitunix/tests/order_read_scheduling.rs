@@ -379,3 +379,92 @@ fn exhausted_order_authority_settles_owned_preflight_once_before_any_write() {
             Action::Notice(Notice::CommandDone { command: done, .. }) if *done == command)));
     }
 }
+
+/// Startup with every account read unanswered and the private socket not yet open.
+fn connecting() -> (TestEngine, SocketId, Vec<HttpRequest>) {
+    let mut e = support::engine(support::Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        ..support::Options::default()
+    });
+    e.start(0.0);
+    let mut private = None;
+    let mut reads = Vec::new();
+    loop {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.0);
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            match action {
+                Action::WsConnect { socket, url, .. } if url.contains("/private/") => {
+                    private = Some(socket)
+                }
+                Action::Http(r) if r.url.ends_with("/trading_pairs") => reply(&mut e, r.id, PAIRS),
+                Action::Http(r) if r.url.ends_with("/tickers") => reply(&mut e, r.id, TICKERS),
+                Action::Http(r) => reads.push(r),
+                _ => {}
+            }
+        }
+    }
+    (e, private.expect("private socket"), reads)
+}
+fn take_read(reads: &mut Vec<HttpRequest>, path: &str) -> HttpRequest {
+    let i = reads
+        .iter()
+        .position(|r| r.url.contains(path))
+        .unwrap_or_else(|| panic!("missing {path}"));
+    reads.remove(i)
+}
+fn http(actions: Vec<Action>) -> Vec<HttpRequest> {
+    actions
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_private_open_before_the_first_positions_rereads_them_after_they_settle() {
+    let (mut e, socket, mut reads) = connecting();
+    assert!(!e.store().loaded().positions);
+    let positions = take_read(&mut reads, "get_pending_positions");
+    let orders = take_read(&mut reads, "/trade/get_pending_orders");
+    e.handle(0.0, Event::WsOpened { socket });
+    assert!(
+        !http(safe_cex_engine::test_support::prepared_now(&mut e))
+            .iter()
+            .any(|r| r.url.contains("get_pending")),
+        "reads in flight at the open are only marked"
+    );
+    let mut timers = Vec::new();
+    let mut settle = |e: &mut TestEngine, request, body| {
+        reply(e, request, body);
+        let actions = safe_cex_engine::test_support::prepared_now(e);
+        let mut issued = Vec::new();
+        for action in actions {
+            match action {
+                Action::SetTimer { timer, at_ms } if at_ms <= 1000.0 => timers.push((timer, at_ms)),
+                Action::Http(r) => issued.push(r),
+                _ => {}
+            }
+        }
+        issued
+    };
+    let mut issued = settle(&mut e, positions.id, POSITIONS);
+    let tpsl = take_read(&mut issued, "/tpsl/");
+    settle(&mut e, orders.id, ORDERS);
+    settle(&mut e, tpsl.id, TPSL);
+    assert!(e.store().loaded().positions);
+    let mut again = Vec::new();
+    for (timer, at) in timers {
+        e.handle(at, Event::TimerFired { timer });
+        again.extend(http(safe_cex_engine::test_support::prepared_actions(
+            &mut e, at,
+        )));
+    }
+    take_read(&mut again, "get_pending_positions");
+    take_read(&mut again, "/trade/get_pending_orders");
+}

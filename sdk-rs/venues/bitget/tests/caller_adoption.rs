@@ -410,10 +410,14 @@ fn candle_failures_keep_text_kind_and_outcome() {
         assert_eq!(failed.len(), 1, "command {command}: one terminal");
         let error = failed[0].as_ref().expect_err(&text);
         assert_eq!(error.message, text, "command {command}");
-        assert_eq!(
-            error.kind, None,
-            "command {command}: untyped native failure"
-        );
+        // A venue answer takes the table's kind (beta classification); the
+        // malformed, unsupported and transport cases stay untyped.
+        let kind = match command {
+            2 => Some(safe_cex_engine::ErrorKind::VenueUnavailable),
+            3 => Some(safe_cex_engine::ErrorKind::AuthInvalid),
+            _ => None,
+        };
+        assert_eq!(error.kind, kind, "command {command}");
         assert_eq!(error.outcome, None, "command {command}");
         assert!(
             !h.command_errors.iter().any(|(c, _)| *c == command),

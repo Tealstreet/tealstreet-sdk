@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { setImmediate } from 'node:timers/promises';
+import { crc32 } from 'node:zlib';
 import { test } from 'node:test';
 import { authenticatedBundle, evidenceEndCheck } from './cpu-ci.mjs';
 import { CPU_COHORT_STEPS, createGithubReader } from './cpu-cohort.mjs';
@@ -13,6 +14,19 @@ const completed = (name, start, end, conclusion = 'success') => ({ name,
   status: 'completed', conclusion, started_at: at(start), completed_at: at(end) });
 const pending = name => ({ name, status: 'pending', conclusion: null,
   started_at: null, completed_at: null });
+
+/** One stored (uncompressed) member: the smallest archive the strict ZIP reader accepts. */
+function storedZip(name, text) {
+  const file = Buffer.from(name), data = Buffer.from(text), checksum = crc32(data);
+  const local = Buffer.alloc(30), header = Buffer.alloc(46), end = Buffer.alloc(22);
+  local.writeUInt32LE(0x04034b50); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x800, 6);
+  local.writeUInt32LE(checksum, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(file.length, 26);
+  header.writeUInt32LE(0x02014b50); header.writeUInt16LE(20, 4); header.writeUInt16LE(20, 6); header.writeUInt16LE(0x800, 8);
+  header.writeUInt32LE(checksum, 16); header.writeUInt32LE(data.length, 20); header.writeUInt32LE(data.length, 24); header.writeUInt16LE(file.length, 28);
+  const central = Buffer.concat([header, file]), offset = local.length + file.length + data.length;
+  end.writeUInt32LE(0x06054b50); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10); end.writeUInt32LE(central.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([local, file, data, central, end]);
+}
 
 function fixture(observations, { corruptDigest = false, refuseJobs = false,
   extraProducers = [], mutateJobs = () => {} } = {}) {
@@ -27,7 +41,7 @@ function fixture(observations, { corruptDigest = false, refuseJobs = false,
       completed('Public steady replay', 5, 15),
       completed(CPU_COHORT_STEPS.strict, 20, 25),
     ] };
-  const bytes = Buffer.from('bounded metadata authority control');
+  const bytes = storedZip('control.txt', 'bounded producer authority control');
   const digest = createHash('sha256').update(bytes).digest('hex');
   const meta = { id: 700, name: 'strict-replay-bitget', expired: false,
     size_in_bytes: bytes.length, digest: `sha256:${corruptDigest ? 'b'.repeat(64) : digest}`,
@@ -60,10 +74,10 @@ function fixture(observations, { corruptDigest = false, refuseJobs = false,
       assert.ok(index >= 0, 'unknown physical producer'); calls.logs++;
       return log(artifacts[index]);
     },
-    getArtifactBytes: async () => { calls.downloads++; throw new Error('unexpected ZIP read in metadata-only control'); },
+    getArtifactBytes: async () => { calls.downloads++; return bytes; },
   } };
   const readSuite = suite => authenticatedBundle(context, run.id, `strict-replay-${suite}`,
-    `Rust / replay measurement (${suite})`, CPU_COHORT_STEPS.strict, checkout, true);
+    `Rust / replay measurement (${suite})`, CPU_COHORT_STEPS.strict, checkout);
   const read = () => readSuite('bitget');
   return { read, readSuite, context, calls, jobs, run };
 }
@@ -117,7 +131,7 @@ test('working control: terminal original producer binds without a metadata poll'
   assert.equal(result.receipt.attempt, 1);
   assert.equal(value.calls.jobs, 1);
   assert.equal(value.context.bindings.length, 1);
-  assert.equal(value.calls.downloads, 0);
+  assert.equal(value.calls.downloads, 1, 'the archive is downloaded once and digest-checked');
 });
 
 test('empty-inventory original: a successful producer waits for its step list to materialize', async t => {
@@ -167,8 +181,8 @@ for (const [name, mutate, expected] of [
   assert.equal(value.context.bundles.size, 0);
 });
 
-test('empty-inventory original: one refresh materializes all 32 original producers for later bindings', async t => {
-  assert.equal(CPU_REMEASURE_SUITES.length, 32);
+test('empty-inventory original: one refresh materializes all 31 original producers for later bindings', async t => {
+  assert.equal(CPU_REMEASURE_SUITES.length, 31);
   const value = fixture([() => {}], {
     extraProducers: CPU_REMEASURE_SUITES.filter(suite => suite !== 'bitget'),
     mutateJobs: (rows, read) => { if (read === 0) for (const row of rows) row.steps = []; },
@@ -179,8 +193,8 @@ test('empty-inventory original: one refresh materializes all 32 original produce
   assert.ifError(result.error);
   assert.equal(value.calls.jobs, 2, 'one complete refresh serves all later producers');
   assert.equal(value.context.producerStepRefreshes, 1);
-  assert.equal(value.context.bindings.length, 32);
-  assert.equal(value.context.bundles.size, 32);
+  assert.equal(value.context.bindings.length, 31);
+  assert.equal(value.context.bundles.size, 31);
   assert.ok(value.context.bindings.every(binding => binding.job.steps.length === 3));
 });
 
@@ -209,7 +223,7 @@ for (const [name, mutate, expected] of [
 
 test('working control: corrupt upload digest is still refused', async () => {
   const value = fixture([() => {}], { corruptDigest: true });
-  await assert.rejects(value.read, /upload digest belongs to different bytes/);
+  await assert.rejects(value.read, /artifact ZIP bytes differ/);
   assert.equal(value.context.bindings.length, 0);
   assert.equal(value.context.bundles.size, 0);
 });
@@ -316,6 +330,42 @@ test('refresh control: completed/null waits, while an unrelated skipped step is 
   assert.equal(value.calls.jobs, 2);
 });
 
+// Run 41856524698: the plan listed binance's producer seconds after it ended. Every step,
+// Complete job included, was terminal, yet the job record still read in_progress/null.
+const lagging = job => { job.status = 'in_progress'; job.conclusion = null; job.completed_at = null; };
+
+for (const [shape, lag] of [['in_progress/null', lagging], ['completed/null', job => { job.conclusion = null; }]])
+test(`refresh control: a ${shape} job record lagging its terminal steps waits for the same producer`, async t => {
+  const value = fixture([lag, () => {}]);
+  const result = await settle(t, value.read);
+  assert.ifError(result.error);
+  assert.equal(value.calls.jobs, 2, 'must refresh the lagging job record');
+  assert.deepEqual(result.value.job, value.jobs[1]);
+  assert.deepEqual(value.context.bindings[0].job, value.jobs[1]);
+});
+
+test('refresh control: a job record that never settles exhausts the shared bounded wait', async t => {
+  const value = fixture([lagging]);
+  const result = await settle(t, value.read);
+  assert.match(result.error?.message ?? '', /producer job not terminal after 20 refreshes: run 1000, job 100 .*\[in_progress\/null\]/);
+  assert.equal(value.calls.jobs, 21);
+  assert.equal(value.context.bindings.length, 0);
+});
+
+for (const conclusion of ['failure', 'cancelled', 'skipped', 'timed_out']) test(`working control: a completed ${conclusion} producer is refused without a refresh`, async () => {
+  const value = fixture([job => { job.conclusion = conclusion; }, () => {}]);
+  await assert.rejects(value.read, /measurement not successful original physical attempt1/);
+  assert.equal(value.calls.jobs, 1);
+  assert.equal(value.context.bindings.length, 0);
+});
+
+test('working control: a settled job record cannot change identity after its lag', async t => {
+  const value = fixture([lagging, job => { job.runner_id++; }]);
+  const result = await settle(t, value.read);
+  assert.match(result.error?.message ?? '', /physical identity changed/);
+  assert.equal(value.context.bindings.length, 0);
+});
+
 test('refresh control: all distinct raw API observations remain retained', async t => {
   const value = fixture([job => { job.steps[2] = pending(CPU_COHORT_STEPS.strict); }, () => {}]);
   const upstream = value.context.reader;
@@ -325,6 +375,7 @@ test('refresh control: all distinct raw API observations remain retained', async
     if (path.includes('/jobs?')) return Response.json({ total_count: 1, jobs: await upstream.listJobs() });
     if (path.includes('/artifacts?')) return Response.json({ total_count: 1, artifacts: await upstream.listArtifacts() });
     if (path.endsWith('/actions/jobs/100/logs')) return new Response(await upstream.getLog(100));
+    if (path.endsWith('/actions/artifacts/700/zip')) return new Response(await upstream.getArtifactBytes());
     throw new Error(`unexpected evidence request ${path}`);
   } });
   value.context.reader = reader;
@@ -358,7 +409,7 @@ for (const [shape, mutate] of [
 
 test('ruled workflow budget: every producer-binding job retains twelve extra minutes', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  for (const [job, minimum] of [['cpu-plan', 32], ['cpu-second', 42], ['cpu-certify', 42], ['cpu-final', 5]]) {
+  for (const [job, minimum] of [['cpu-plan', 32], ['cpu-certify', 42], ['cpu-final', 5]]) {
     const block = workflow.split(`\n  ${job}:\n`)[1]?.split(/\n  [a-z][\w-]*:\n/)[0];
     assert.ok(block, `missing job ${job}`);
     const timeout = /^    timeout-minutes: (\d+)$/m.exec(block);

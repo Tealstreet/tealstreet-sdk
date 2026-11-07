@@ -4,6 +4,51 @@ use safe_cex_venue_bingx::Bingx;
 mod support;
 use support::Options;
 const NOW: f64 = 1000.0;
+
+#[test]
+fn identity_rate_limit_precedes_the_balance_list_and_preserves_retry_after() {
+    for (status, headers, body, expected) in [
+        (200, "", r#"{"code":100410,"msg":"请稍后重试"}"#, 300_000.0),
+        (
+            200,
+            "",
+            r#"{"code":100410,"msg":"请稍后重试; unblocked after 0000000091000","data":{}}"#,
+            90_000.0,
+        ),
+        (429, "Retry-After: 120", "Too Many Requests", 120_000.0),
+    ] {
+        let mut e = engine(false, false);
+        let before = e.store().balance().clone();
+        let r = request(&mut e);
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers,
+                    body,
+                },
+            },
+        );
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let failures = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 42, error }) => Some(error),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(
+            failures[0].kind,
+            Some(safe_cex_engine::ErrorKind::RateLimited)
+        );
+        assert_eq!(failures[0].retry_after_ms, Some(expected));
+        assert!(!failures[0].message.contains("response is invalid"));
+        assert_eq!(e.store().balance(), &before);
+    }
+}
 fn engine(read: bool, public: bool) -> Engine<Bingx> {
     let mut e = support::engine(Options {
         key: Some("primary-key".into()),

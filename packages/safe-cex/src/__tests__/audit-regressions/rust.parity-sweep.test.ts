@@ -5,6 +5,9 @@ import type { ExchangeName, ExchangeOptions, Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
+
 import { mapBinanceHistoricalOrder } from '../reference/binance/binance.order-history';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { OKXExchange } from '../reference/okx/okx.exchange';

@@ -301,7 +301,7 @@ fn spot_books_subscribe_all_tiers_and_append_only_worse_levels() {
         .drain_plain()
         .filter(|a| matches!(a, Action::WsSend { .. }))
         .count();
-    assert_eq!(subscriptions, 5);
+    assert_eq!(subscriptions, 6, "five depth tiers and the pair's trades");
     support::message(
         &mut e,
         s,
@@ -589,6 +589,27 @@ fn placed() -> (Engine<Hyperliquid>, SocketId) {
     (e, s)
 }
 #[test]
+fn an_order_the_store_has_lost_is_cancelled_by_its_id_and_symbol() {
+    let (mut e, _) = placed();
+    let symbol = e.store().order("101").unwrap().symbol.clone();
+    e.store_mut().remove_orders(&["101"]);
+    e.handle(
+        5000.0,
+        Event::Command(Command::CancelOrdersWithSymbols {
+            command: 2,
+            orders: vec![safe_cex_engine::model::CancelOrderRef {
+                id: "101".into(),
+                symbol,
+            }],
+        }),
+    );
+    let r = take_http(&mut e);
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(p["action"]["cancels"][0]["a"], 10001);
+    assert_eq!(p["action"]["cancels"][0]["o"], 101);
+}
+
+#[test]
 fn cancel_uses_the_same_shifted_native_asset_id_and_removes_acknowledged_order() {
     let (mut e, _) = placed();
     assert!(e.store().order("101").is_some());
@@ -619,10 +640,12 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
         Event::Command(Command::AmendOrder {
             command: 2,
             id: "101".into(),
-            price: Some(0.00095),
+            price: Some(0.002),
             amount: Some(6000.0),
         }),
     );
+    let read = take_http(&mut e);
+    support::answer_order_status(&mut e, &read);
     let r = take_http(&mut e);
     acknowledge(
         &mut e,
@@ -646,7 +669,7 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
     let w = &p["action"]["orders"][0];
     assert_eq!(w["a"], 10001);
     assert_eq!(w["s"], "6000");
-    assert_eq!(w["p"], "0.00095");
+    assert_eq!(w["p"], "0.002");
     assert_ne!(w["c"], "0x00000000000000000000000000000001");
 }
 #[test]
@@ -657,10 +680,12 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
         Event::Command(Command::AmendOrder {
             command: 2,
             id: "101".into(),
-            price: Some(0.00095),
+            price: Some(0.002),
             amount: None,
         }),
     );
+    let read = take_http(&mut e);
+    support::answer_order_status(&mut e, &read);
     let r = take_http(&mut e);
     let fill = r#"{"channel":"userFills","data":{"isSnapshot":false,"fills":[{"coin":"@1","side":"B","px":"0.000937","sz":"1","time":5001,"tid":9,"oid":101}]}}"#;
     support::message(&mut e, s, 5001.0, fill);
@@ -804,6 +829,7 @@ fn spot_book_protocol_uses_native_endpoint_and_only_documented_precision_values(
                 None
             }
         })
+        .filter(|m| m["subscription"]["type"] == "l2Book")
         .collect::<Vec<_>>();
     assert_eq!(messages.len(), 5);
     assert_eq!(
@@ -908,6 +934,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
                     None
                 }
             })
+            .filter(|m| m["subscription"]["type"] == "l2Book")
             .collect::<Vec<_>>();
         assert_eq!(messages.len(), 5);
         assert!(messages.iter().all(|m| m["subscription"]["coin"] == coin));
@@ -1709,7 +1736,7 @@ mod owned_nonpageable {
         assert!(marker.message.contains("INCOMPLETE"));
         assert!(marker.message.contains("Hyperliquid spot"));
         assert!(
-            matches!(marker.fields.as_slice(), [("command", Value::Num(owner))] if *owner == f64::from(command))
+            matches!(marker.fields.as_slice(), [("command", Value::Num(owner)), ("reason", Value::Str(reason))] if *owner == f64::from(command) && reason == "noNativeRead")
         );
     }
 
@@ -1832,4 +1859,101 @@ mod owned_nonpageable {
         assert!(result.get("definitive").is_none());
         assert_eq!(e.store().orders(), &[cached]);
     }
+}
+#[test]
+fn spot_native_tier_with_a_wide_top_gap_keeps_its_tier() {
+    let (mut e, s) = ready(false);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    e.drain_plain().for_each(drop);
+    // Coarse tier: every price a multiple of 10 ticks.
+    support::message(
+        &mut e,
+        s,
+        2100.0,
+        r#"{"channel":"l2Book","data":{"coin":"PURR/USDC","time":2100,"levels":[[{"px":"0.2","sz":"20"},{"px":"0.1999","sz":"30"},{"px":"0.1998","sz":"30"}],[{"px":"0.21","sz":"40"},{"px":"0.2101","sz":"50"},{"px":"0.2102","sz":"50"}]]}}"#,
+    );
+    // Native tier with a 5-tick top gap; the gap alone would read as the coarse tier.
+    support::message(
+        &mut e,
+        s,
+        2200.0,
+        r#"{"channel":"l2Book","data":{"coin":"PURR/USDC","time":2200,"levels":[[{"px":"0.2","sz":"2"},{"px":"0.19995","sz":"3"},{"px":"0.19993","sz":"3"}],[{"px":"0.21","sz":"4"},{"px":"0.21005","sz":"5"},{"px":"0.21007","sz":"5"}]]}}"#,
+    );
+    let book = e
+        .venue()
+        .books()
+        .find(|(s, _)| *s == "PURR/USDC")
+        .unwrap()
+        .1;
+    // Both tiers kept: three native levels plus the two deeper coarse levels.
+    assert_eq!(book.bids().len(), 5);
+    assert_eq!(book.asks().len(), 5);
+}
+
+#[test]
+fn a_watched_spot_pair_takes_last_from_trades_and_mid_price_from_mids() {
+    let (mut e, s) = ready(false);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    assert!(e.drain_plain().any(|a| matches!(a, Action::WsSend { text, .. }
+        if text == r#"{"method":"subscribe","subscription":{"type":"trades","coin":"PURR/USDC"}}"#)));
+    support::message(
+        &mut e,
+        s,
+        2100.0,
+        r#"{"channel":"trades","data":[{"coin":"PURR/USDC","side":"A","px":"0.215","sz":"10","time":2100,"hash":"0x0","tid":1}]}"#,
+    );
+    support::message(
+        &mut e,
+        s,
+        2200.0,
+        r#"{"channel":"allMids","data":{"mids":{"PURR/USDC":"0.22"}}}"#,
+    );
+    let ticker = e.store().ticker("PURR/USDC").unwrap();
+    assert_eq!((ticker.last, ticker.mid_price), (0.215, Some(0.22)));
+}
+
+#[test]
+fn a_trade_print_does_not_move_a_spot_market_order_price() {
+    let (mut e, s) = ready(true);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    support::message(
+        &mut e,
+        s,
+        2100.0,
+        r#"{"channel":"trades","data":[{"coin":"PURR/USDC","side":"B","px":"0.3","sz":"10","time":2100,"hash":"0x0","tid":1}]}"#,
+    );
+    assert_eq!(e.store().ticker("PURR/USDC").unwrap().last, 0.3);
+    e.drain_plain().for_each(drop);
+    let mut o = order("PURR/USDC");
+    o.kind = OrderType::Market;
+    o.amount = 10.0;
+    o.price = None;
+    e.handle(
+        3000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![o],
+        }),
+    );
+    let r = take_http(&mut e);
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        p["action"]["orders"][0]["p"], "0.21973",
+        "mid 0.209265 + 5%"
+    );
 }

@@ -193,3 +193,195 @@ fn owned_position_outside_partial_catalogue_cannot_clear_a_snapshot() {
             Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let (mut e, info, _, _) = pending_with(CATALOGUE);
+    e.handle(
+        1.0,
+        Event::HttpResponse {
+            request: info.id,
+            response: Response {
+                status: 401,
+                headers: "",
+                body: r#"{"success":false,"code":-1001,"message":"bad key"}"#,
+            },
+        },
+    );
+    assert!(e.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}
+
+#[test]
+fn account_http_failures_keep_kind_status_and_code_without_response_bodies() {
+    use safe_cex_engine::{ErrorKind, Notice};
+    for (status, code, expected, auth) in [
+        (404, Some(-1006), ErrorKind::Unsupported, false),
+        (429, Some(-1003), ErrorKind::RateLimited, false),
+        (503, Some(-1000), ErrorKind::VenueUnavailable, false),
+        (500, Some(-1002), ErrorKind::VenueUnavailable, false),
+        (408, None, ErrorKind::Timeout, false),
+        (400, Some(-1005), ErrorKind::Rejected, false),
+        (200, Some(-1005), ErrorKind::Rejected, false),
+        (401, Some(-1001), ErrorKind::AuthInvalid, true),
+        (401, Some(-1002), ErrorKind::AuthInvalid, true),
+        (401, None, ErrorKind::AuthInvalid, true),
+        (403, None, ErrorKind::AuthPermission, true),
+        (400, Some(-1001), ErrorKind::AuthInvalid, true),
+        (200, Some(-1002), ErrorKind::AuthInvalid, true),
+        (404, Some(-1002), ErrorKind::Unsupported, false),
+        (429, Some(-1002), ErrorKind::RateLimited, false),
+        (200, None, ErrorKind::Internal, false),
+    ] {
+        let (mut engine, info, _, _) = pending_with(CATALOGUE);
+        let loaded_before = engine.store().loaded();
+        let balance_before = engine.store().balance().clone();
+        let body = serde_json::json!({
+            "success": false,
+            "code": code,
+            "message": "private-response-marker",
+        })
+        .to_string();
+        engine.handle(
+            1.0,
+            Event::HttpResponse {
+                request: info.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let event = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(Notice::Event(event))
+                    if event.message.starts_with("WOO ")
+                        && event.fields.iter().any(|(key, _)| *key == "kind") =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("typed account failure for HTTP {status}, code {code:?}"));
+        assert!(
+            event.fields.iter().any(|(key, value)| *key == "kind"
+                && value == &safe_cex_engine::log::Value::from(expected.as_str())),
+            "HTTP {status}, code {code:?}: {event:?}"
+        );
+        assert!(event.message.contains(&format!("HTTP {status}")));
+        assert_eq!(
+            event.code == safe_cex_engine::log::code::AUTH_REJECTED,
+            auth
+        );
+        assert_eq!(
+            event.fields.iter().any(|(key, _)| *key == "venueCode"),
+            code.is_some()
+        );
+        if let Some(code) = code {
+            assert!(event.message.contains(&format!("WOO code {code}")));
+            assert!(event.fields.iter().any(|(key, value)| *key == "venueCode"
+                && value == &safe_cex_engine::log::Value::from(code.to_string())));
+        }
+        assert!(!event.message.contains("private-response-marker"));
+        assert!(!format!("{:?}", event.fields).contains("private-response-marker"));
+        assert_eq!(
+            event.message.contains("refused the API key"),
+            expected == ErrorKind::AuthInvalid
+        );
+        assert_eq!(
+            actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::StartupFailed { error, .. }) if error.kind == Some(expected))),
+            auth
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Notice(Notice::Deactivate)))
+        );
+        assert_eq!(engine.store().loaded(), loaded_before);
+        assert_eq!(*engine.store().balance(), balance_before);
+        assert!(engine.store().orders().is_empty());
+    }
+}
+
+#[test]
+fn account_network_failure_is_typed_without_echoing_transport_text() {
+    use safe_cex_engine::Notice;
+    let (mut engine, info, _, _) = pending_with(CATALOGUE);
+    engine.handle(
+        1.0,
+        Event::HttpFailed {
+            request: info.id,
+            error: "private-transport-marker",
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let event = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.message.starts_with("WOO ") => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("account-owned network failure");
+    assert!(event.fields.iter().any(
+        |(key, value)| *key == "kind" && value == &safe_cex_engine::log::Value::from("network")
+    ));
+    assert_eq!(event.code, safe_cex_engine::log::code::REQUEST_FAILED);
+    assert!(!event.message.contains("private-transport-marker"));
+    assert!(!event.message.contains("API key"));
+    assert!(!event.fields.iter().any(|(key, _)| *key == "venueCode"));
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::StartupFailed { .. }) | Action::Notice(Notice::Deactivate)
+    )));
+}
+
+#[test]
+fn malformed_account_response_keeps_status_without_echoing_the_body() {
+    use safe_cex_engine::{ErrorKind, Notice};
+    for (status, kind) in [
+        (200, ErrorKind::Internal),
+        (502, ErrorKind::VenueUnavailable),
+    ] {
+        let (mut engine, request, _, _) = pending_with(CATALOGUE);
+        let before = engine.store().positions().to_vec();
+        engine.handle(
+            1.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: "<html>private-response-marker</html>",
+                },
+            },
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let event = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(Notice::Event(event)) if event.message.starts_with("WOO ") => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .expect("typed malformed response");
+        assert!(event.message.contains(&format!("HTTP {status}")));
+        assert!(!event.message.contains("private-response-marker"));
+        assert!(event.fields.iter().any(|(key, value)| *key == "kind"
+            && value == &safe_cex_engine::log::Value::from(kind.as_str())));
+        assert!(!event.fields.iter().any(|(key, _)| *key == "venueCode"));
+        assert_eq!(engine.store().positions(), before);
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::StartupFailed { .. }) | Action::Notice(Notice::Deactivate)
+        )));
+    }
+}

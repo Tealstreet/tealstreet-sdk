@@ -167,36 +167,83 @@ fn empty_page_finishes_even_with_repeated_cursor_and_nonempty_cycle_fails() {
 }
 
 #[test]
-fn malformed_rows_lists_and_business_failures_never_become_partial_success() {
-    let mut invalid = Vec::new();
-    for (field, value) in [
-        ("amount", json!("NaN")),
-        ("fee", json!("oops")),
-        ("ts", json!("0")),
-        ("id", json!("")),
-        ("type", json!("")),
-        ("coin", json!("")),
+fn malformed_rows_fail_once_with_closed_decode_reason_without_partial_results() {
+    for (field, value, reason) in [
+        ("amount", json!("NaN"), "economics"),
+        ("fee", json!("oops"), "fee"),
+        ("ts", json!("0"), "timestamp"),
+        ("id", json!(""), "identity"),
+        ("type", json!(""), "rowShape"),
+        ("coin", json!(""), "rowShape"),
     ] {
         let mut row = bill("1", "TRANSFER_IN", "1", "0");
         row[field] = value;
-        invalid.push(json!({"code":"00000","data":{"list":[row],"cursor":""}}).to_string());
+        let mut h = uta();
+        query(&mut h, None, None);
+        // A valid row before the refusal must not escape as partial success.
+        page(
+            &mut h,
+            json!([bill("staged", "TRANSFER_IN", "1", "0"), row]),
+            "",
+        );
+        let terminals: Vec<_> = h.done.iter().filter(|(id, _)| *id == 42).collect();
+        assert_eq!(terminals.len(), 1, "{field}");
+        assert!(terminals[0].1.is_err(), "{field}");
+        assert_eq!(h.failures.len(), 1, "{field}");
+        let error = serde_json::to_value(&h.failures[0]).unwrap();
+        assert_eq!(error["kind"], "internal", "{field}");
+        assert_eq!(error["causeCode"], "HISTORY_DECODE", "{field}");
+        assert_eq!(
+            error["historyDecode"],
+            json!({"schema":"bitgetUtaIncome","reason":reason}),
+            "{field}"
+        );
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.url.contains("/financial-records")),
+            "{field}"
+        );
+        assert!(
+            h.timers.iter().all(|(_, at)| *at != h.now + 250.0),
+            "unexpected row retry: {field}"
+        );
     }
-    invalid.extend([
-        r#"{"code":"00000","data":{}}"#.into(),
-        r#"{"code":"00000","data":{"list":null}}"#.into(),
-        r#"{"code":"00000","data":{"list":[],"cursor":{}}}"#.into(),
-        r#"{"code":"429","msg":"rate limited","data":null}"#.into(),
-    ]);
-    for body in invalid {
+}
+
+#[test]
+fn malformed_lists_and_business_failures_keep_bounded_retries_without_partial_success() {
+    for body in [
+        r#"{"code":"00000","data":{}}"#,
+        r#"{"code":"00000","data":{"list":[],"cursor":{}}}"#,
+        r#"{"code":"429","msg":"rate limited","data":null}"#,
+    ] {
         let mut h = uta();
         query(&mut h, None, None);
         for retry in 0..4 {
-            h.respond("/financial-records", 200, &body);
+            h.respond("/financial-records", 200, body);
             if retry < 3 {
+                assert!(
+                    h.done.iter().all(|(id, _)| *id != 42),
+                    "early terminal: {body}"
+                );
                 h.timer_after(250.0 * f64::from(retry + 1));
+                assert!(
+                    h.requests
+                        .iter()
+                        .any(|r| r.url.contains("/financial-records")),
+                    "missing retry: {body}"
+                );
             }
         }
-        assert!(failed(&h), "accepted {body}");
+        let terminals: Vec<_> = h.done.iter().filter(|(id, _)| *id == 42).collect();
+        assert_eq!(terminals.len(), 1, "{body}");
+        assert!(terminals[0].1.is_err(), "accepted {body}");
+        assert_eq!(h.failures.len(), 1, "{body}");
+        assert!(
+            h.failures[0].history_decode.is_none(),
+            "envelope is not row proof: {body}"
+        );
     }
 }
 
@@ -347,5 +394,21 @@ fn late_uta_signal_promotes_income_and_failed_later_page_discards_partial_result
             .iter()
             .filter(|(id, _)| *id == 42)
             .all(|(_, r)| r.is_err())
+    );
+}
+
+#[test]
+fn a_null_list_with_a_null_cursor_is_an_empty_last_page() {
+    let mut h = uta();
+    query(&mut h, None, None);
+    h.respond(
+        "/financial-records",
+        200,
+        r#"{"code":"00000","data":{"list":null,"cursor":null}}"#,
+    );
+    assert!(
+        h.done.iter().any(|(id, r)| *id == 42 && r.is_ok()),
+        "the end-of-pages marker failed the query: {:?}",
+        h.done
     );
 }

@@ -3,7 +3,7 @@ mod support;
 use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Engine, HttpRequest};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
-use support::{META, kind, reply};
+use support::{META, STATE, kind, reply};
 
 const AGENT: &str = "0x1111111111111111111111111111111111111111";
 const MASTER: &str = "0x2222222222222222222222222222222222222222";
@@ -12,17 +12,25 @@ const VAULT: &str = "0x3333333333333333333333333333333333333333";
 fn startup(options: Options) -> (Engine<Hyperliquid>, Vec<HttpRequest>) {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(options));
     engine.start(1000.);
+    let requests = drain_startup(&mut engine);
+    (engine, requests)
+}
+fn drain_startup(engine: &mut Engine<Hyperliquid>) -> Vec<HttpRequest> {
     let mut requests = Vec::new();
     for _ in 0..8 {
-        let actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
+        let actions: Vec<_> = prepared_now(engine).into_iter().collect();
         if actions.is_empty() {
-            return (engine, requests);
+            return requests;
         }
         for action in actions {
             if let Action::Http(request) = action {
                 match kind(&request).as_str() {
-                    "metaAndAssetCtxs" => reply(&mut engine, &request, 200, META),
-                    "perpDexs" => reply(&mut engine, &request, 200, "[null]"),
+                    "metaAndAssetCtxs" => reply(engine, &request, 200, META),
+                    "perpDexs" => reply(engine, &request, 200, "[null]"),
+                    "userAbstraction" => reply(engine, &request, 200, r#""disabled""#),
+                    "clearinghouseState" => reply(engine, &request, 200, STATE),
+                    "frontendOpenOrders" => reply(engine, &request, 200, "[]"),
+                    "maxBuilderFee" => reply(engine, &request, 200, "30"),
                     _ => requests.push(request),
                 }
             }
@@ -121,12 +129,9 @@ fn empty_or_missing_application_id_resolves_the_agent_before_requesting_fees() {
             200,
             &format!(r#"{{"role":"agent","data":{{"user":"{MASTER}"}}}}"#),
         );
-        let fees = prepared_now(&mut engine)
+        let fees = drain_startup(&mut engine)
             .into_iter()
-            .find_map(|action| match action {
-                Action::Http(request) if kind(&request) == "userFees" => Some(request),
-                _ => None,
-            })
+            .find(|request| kind(request) == "userFees")
             .expect("resolved trading account fees");
         assert_eq!(subject(&fees), MASTER);
     }

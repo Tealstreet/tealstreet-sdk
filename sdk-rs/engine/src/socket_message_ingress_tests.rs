@@ -24,6 +24,7 @@ fn policy(controls: ControlPolicy, auth: AuthMode, traffic: TrafficPolicy) -> Fe
         invalidation: Invalidation::None,
         subscription_interval_ms: 0.,
         close_floors: &[],
+        data_silence: None,
     }
 }
 
@@ -289,6 +290,62 @@ fn every_control_free_frame_refreshes_the_idle_deadline() {
     assert_eq!(h.delivered().len(), 6);
     assert!(h.closed.is_empty());
     assert_eq!(h.engine.venue.control_calls.get(), 0);
+}
+
+#[test]
+fn admitted_data_keeps_silence_evidence_for_control_free_and_native_frames() {
+    let cases = [
+        (ControlPolicy::None, Control::Other),
+        (ControlPolicy::Native, Control::Other),
+    ];
+    #[cfg(feature = "socket-native-timing")]
+    let cases = cases
+        .into_iter()
+        .chain([(ControlPolicy::Native, Control::Traffic)]);
+    for (controls, control) in cases {
+        let mut declared = policy(controls, AuthMode::None, TrafficPolicy::AnyText);
+        declared.data_silence = Some(crate::socket_lifecycle::DataSilence {
+            after_ms: 60_000.,
+            streams: &["tick."],
+        });
+        let mut h = Harness::new(declared);
+        let socket = h.open(0.);
+        let feed = h.engine.venue.feed.unwrap();
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut h.engine.store,
+                io: &mut h.engine.io,
+            };
+            cx.set_socket_interests(feed, vec![Interest::from_wire_args("tick.BTC")])
+                .unwrap();
+        }
+        h.engine.process_socket_work(0.);
+        h.collect();
+        assert_eq!(
+            h.engine.io.core.socket_driver.data_silent_for(feed, 1_000.),
+            Some(1_000.)
+        );
+        h.engine.venue.script.borrow_mut().push_back(control);
+        h.frame(1_000., socket, "tick.BTC 100");
+        assert_eq!(
+            h.engine.io.core.socket_driver.data_silent_for(feed, 4_000.),
+            Some(3_000.),
+            "{controls:?}"
+        );
+        // The next frame arrives exactly at idle expiry and cannot refresh data.
+        h.frame(1_000. + IDLE, socket, "late");
+        assert_eq!(h.delivered(), ["tick.BTC 100"]);
+        assert_eq!(h.closed, [socket]);
+        assert_eq!(
+            h.engine
+                .io
+                .core
+                .socket_driver
+                .data_silent_for(feed, 1_000. + IDLE),
+            None
+        );
+    }
 }
 
 /// Interest work already queued when a frame arrives is processed before the

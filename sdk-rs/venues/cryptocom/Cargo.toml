@@ -14,4 +14,5 @@ serde_json.workspace = true
 workspace = true
 
 [dev-dependencies]
-safe-cex-engine = { workspace = true, features = ["test-support"] }
+# Exercise the shipped engine feature union in private HTTP response controls.
+safe-cex-engine = { workspace = true, features = ["test-support", "serial-plans", "session-bearer"] }

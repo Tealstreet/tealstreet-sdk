@@ -24,6 +24,10 @@ native units; only remaining and position display sizes use the TS price-based
 8-decimal conversion. Collateral uses each market's base coin and preserves the
 per-coin balance map through worker frames.
 
+An empty inverse catalogue keeps its terminal `venueUnavailable` startup failure
+and emits the same cause as an error-level `request.failed` event for UI consumers.
+It does not retry discovery or change the selected API product.
+
 UTA bills use v3 `financial-records`, retaining raw signed amount and fee metadata
 without assuming trade rows are gross PnL. Classic trailing modifies through
 `modify-plan-order`; UTA trailing uses `type=trailing_stop` and native distance
@@ -31,6 +35,19 @@ parameters. Size-only edits preserve original callback parameters and activation
 basis. Unsupported external opening, ambiguous exposure, limit-execution or
 index-triggered trailing configurations remain visible and cancelable; edits
 fail before canceling them.
+
+Classic TP/SL cancellation uses `/api/v2/mix/order/cancel-plan-order` with
+`orderIdList: [{ orderId }]`, just like trailing stops. Whole-position TP/SL
+retain `pos_profit`/`pos_loss`; sized orders retain `profit_plan`/`loss_plan`.
+A top-level `orderId` does not address an individual Classic plan cancellation.
+A matching native ID or a client-only acknowledgement matching the known order's
+client ID proves cancellation; conflicting native IDs do not fall back to client
+IDs. Empty or unrelated success lists leave it visible and fail the command.
+Retained placement routes keep the same bounded ID list and client identity
+before private updates arrive. Documented `moving_plan` rows remain visible as
+trailing orders and retain that type for cancellation; `track_plan` and `track`
+retain their existing mapping. UTA
+continues using `/api/v3/trade/cancel-strategy-order` with a single `orderId`.
 
 Documented native regressions and private tapes cover these engine paths; the TS
 implementation below remains the replay reference for its supported overlap.
@@ -66,9 +83,9 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   documented `tpslMode: "full"` shape.
 - Private WS uses `wss://ws.bitget.com/v3/ws/private` and subscribes with
   `{ instType: "UTA", topic: "account" | "position" | "order" }`.
-  Its proxied routes are the v3 equivalents of Classic's: ws-proxy
-  `/bitget/v3/private` and the relay upstream `ws.bitget.com/v3/ws/private`
-  (routing `privateUta`, resolved as `wsPrivateUta`). See "Private WS egress".
+  Its proxied route is the v3 equivalent of Classic's: the relay upstream
+  `ws.bitget.com/v3/ws/private` (routing `privateUta`, resolved as
+  `wsPrivateUta`). See "Private WS egress".
 
 Account-type detection is eager during validation/startup and lazy on private
 methods that choose between Classic v2 and UTA v3. The lazy path shares one
@@ -177,7 +194,8 @@ The `start()` method (`bitget.exchange.ts:144-191`) initializes in this **strict
 7. **`tick()`** -- first polling cycle: fetches positions (every tick), balance (every 2nd tick)
 8. **`fetchOrders()`** -- Classic fetches all three order types sequentially;
    UTA fetches v3 unfilled normal orders only:
-   - `fetchNormalOrders()` (limit/market orders, paginated)
+   - `fetchNormalOrders()` (limit/market orders, paginated separately for
+     `status=live` and `status=partially_filled`)
    - `fetchAlgoOrders()` (TP/SL, paginated with `planType: 'profit_loss'`)
    - `fetchTrailingStopOrders()` (trailing stops, paginated with `planType: 'track_plan'`)
 9. Store updated with `orders`, sets `loaded.orders = true`
@@ -256,7 +274,7 @@ below. UTA routing is gated by `usesUtaRouting` (`isUta && supportsUtaRouting &&
 | `PLACE_ORDER`               | `/api/v2/mix/order/place-order`         | Place single order (not used; batch is preferred)  |
 | `BATCH_ORDERS`              | `/api/v2/mix/order/batch-place-order`   | Place batch orders (up to 50 per symbol)           |
 | `UPDATE_ORDER`              | `/api/v2/mix/order/modify-order`        | Modify a normal order                              |
-| `ORDERS`                    | `/api/v2/mix/order/orders-pending`      | Fetch pending normal orders (paginated, limit 200) |
+| `ORDERS`                    | `/api/v2/mix/order/orders-pending`      | Fetch pending normal orders (paginated, limit 100) |
 | `ORDER_HISTORY`             | `/api/v2/mix/order/orders-history`      | Fetch historical filled orders                     |
 | `CANCEL_ORDERS`             | `/api/v2/mix/order/batch-cancel-orders` | Batch cancel normal orders                         |
 | `CANCEL_ALL_ORDERS`         | `/api/v2/mix/order/cancel-all-orders`   | Cancel all orders                                  |
@@ -321,8 +339,8 @@ The implementation uses **four WebSocket connections** simultaneously:
 
 ### 4. Private WebSocket (`bitget.ws-private.ts`)
 
-- **Classic URL**: `wss://ws.bitget.com/v2/ws/private` direct; a proxied account dials ws-proxy `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`, then the relay
-- **UTA URL**: `wss://ws.bitget.com/v3/ws/private` direct; proxied: ws-proxy `.../bitget/v3/private`, then the relay
+- **Classic URL**: `wss://ws.bitget.com/v2/ws/private` direct; a proxied account dials the relay `wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss://ws.bitget.com/v2/ws/private` (the exchange server: ws-proxy `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`, then the relay)
+- **UTA URL**: `wss://ws.bitget.com/v3/ws/private` direct; proxied: the relay to `ws.bitget.com/v3/ws/private` (the exchange server: ws-proxy `.../bitget/v3/private`, then the relay)
 
 #### Private WS egress (Bitget checks the key's bound IP)
 
@@ -334,12 +352,20 @@ container's IPs are never on a key's whitelist.
 
 Routing (`routingTable.ts`) is OKX's pattern: `private`/`privateUta` are
 `proxyConditional` to ws-proxy (`python/ws-proxy`, egress `54.255.57.166`, which
-the add-account form asks Bitget users to bind via `exchangesRequireWsIp`) with a
+legacy's add-account form asks Bitget users to bind via `exchangesRequireWsIp`;
+master's form no longer does, AWS_EXIT.md 3e) with a
 `relayUpstream` and `relayWhenTunnelled`, so the tradetunnel relay — egressing
 from the private proxy fleet, i.e. the account's REST IPs — is offered even to a
 proxied account. Bitget does NOT gate the relay on `WS_RELAY_PRIVATE`.
 
+**Since AWS_EXIT step 3e the browser build has no ws-proxy**: its `host` and
+`fallback` ARE the relay url (`BROWSER_WS_HOSTS`), so a proxied socket offers the
+relay twice and a direct one walks direct → relay. The ws-proxy-first chain above
+runs in no runtime since the hosted exchange server's AWS pin was removed
+(AWS_EXIT step 4); only `bitget.private-ws-egress.test.ts` still exercises it.
+
 `bitget.ws-private.ts` walks the chain with `WsDirectFallback`:
+
 - **40018 (or 40024, restricted location) before login** → `rejectCurrent()` and switch to the next route at once;
   reported (once) only when every route is refused, and then it stops
   switching routes (the socket may still reconnect to the last one).
@@ -355,8 +381,10 @@ proxied account. Bitget does NOT gate the relay on `WS_RELAY_PRIVATE`.
 Infra this depends on: ws-proxy's `bitget/v2/private` + `bitget/v3/private`
 routes; tradetunnel `RELAY_ALLOWED_UPSTREAMS` including `ws.bitget.com/v2/ws/private`
 and `/v3/ws/private` (live `kubectl` env + `terraform/{tokyo,singapore}`); the
-private fleet's `stream_bitget_backend` (already present). Bitget's HOW egress is
-Tokyo, so the relay dials `fsjnpy143pbz.jp`.
+private fleet's `stream_bitget_backend` (already present). The browser build's
+relay dials `fsjnpy143pbz-tyo`; the exchange server's dials `fsjnpy143pbz.jp`
+(Bitget's HOW egress is Tokyo).
+
 - **Authentication**: Required before subscribing (login op)
 - **Channels subscribed**:
   - `account` with `coin: 'default'` - Balance/account updates
@@ -773,7 +801,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 12. **`alwaysCalculateUnrealizedPnlFromLastPrice: true`**: The frontend calculates unrealized PnL from last price rather than trusting the exchange-provided value.
 
-13. **Pagination**: Normal orders, algo orders, and trailing stop orders all use cursor-based pagination with `idLessThan` and `endId`, limited to 200 per page with a safety cap of 20 iterations.
+13. **Pagination and empty pages**: Classic normal orders, algo orders, and trailing stop orders all use cursor-based pagination with `idLessThan` and `endId`, limited to 100 per page with a safety cap of 20 iterations. For Classic normal orders, fetch both `status=live` and `status=partially_filled`; Bitget's default regular pending-order query does not prove partially-filled orders absent. Treat both `entrustedList: null` and `entrustedList: []` as empty pages for these successful pending-order endpoints.
 
 14. **Commented-out leverage fetching**: `fetchCurrentLeverage()` and `fetchLeverageBrackets()` are fully implemented but commented out (`bitget.exchange.ts:593-667`). Leverage is instead obtained from position data.
 
@@ -964,7 +992,6 @@ account timers and retires the private socket; a refused trading key also emits
 `Deactivate`. A 418/429 sets `rest_paused_until` from `Retry-After`, else 30 s,
 and the probe retry waits out that window; transport failures keep plain backoff.
 
-
 ## Rust private WS row recovery
 
 Ordinary order/position arrays decode rows independently. Valid Classic/UTA peers
@@ -985,7 +1012,6 @@ Read-only recovery uses the existing coalesced timers and busy/pause handling;
 malformed-only or foreign-only traffic does not claim useful financial liveness.
 The financial fill channel, auth, signing and write-retry policy are unchanged.
 
-
 ## Rust dispatch signer checkpoint
 
 The draft native migration stages private HTTP and Classic/UTA login with shared
@@ -1001,7 +1027,6 @@ cannot promote an unconfirmed Classic account. Earlier accepted writes, native40
 and original rollback diagnostics retain existing outcome semantics. Hosted
 admission is described below. No secret restoration or venue-local signing
 fallback is permitted.
-
 
 ## Rust hosted and remote signing
 

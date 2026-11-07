@@ -269,6 +269,9 @@ pub fn candle(row: &[Number], rest: bool) -> Option<Candle> {
     })
 }
 
+/// The request IP is not in the API key's whitelist.
+pub(crate) const IP_REFUSED: &str = "400006";
+
 /// Refused before any request was sent.
 pub(crate) fn not_sent(message: impl Into<String>) -> safe_cex_engine::VenueError {
     safe_cex_engine::VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
@@ -297,6 +300,10 @@ pub(crate) fn write_failure(
         Some(e) if !e.msg.is_empty() => error.venue_message(e.msg),
         _ => error,
     };
+    // 400006: the request IP is not in the API key's whitelist, at any 4xx or 2xx.
+    if status < 500 && status != 408 && envelope.as_ref().is_some_and(|e| e.code == IP_REFUSED) {
+        return error.outcome(Outcome::Rejected).ip_whitelist_refused();
+    }
     match status {
         200..=299 => {}
         401 => return rejected(error, ErrorKind::AuthInvalid),

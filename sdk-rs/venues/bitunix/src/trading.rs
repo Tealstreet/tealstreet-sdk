@@ -14,6 +14,7 @@ use safe_cex_engine::request_context::{
     PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
 };
 use safe_cex_engine::signing::Identity as SigningIdentity;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, Cx, ErrorKind, Method, Outcome, Response, VenueError, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -22,6 +23,7 @@ const BATCH: &str = "/api/v1/futures/trade/batch_order";
 const TPSL: &str = "/api/v1/futures/tpsl/place_order";
 const FULL_TPSL: &str = "/api/v1/futures/tpsl/position/place_order";
 const CANCEL: &str = "/api/v1/futures/trade/cancel_orders";
+const CANCEL_ALL: &str = "/api/v1/futures/trade/cancel_all_orders";
 const CANCEL_TPSL: &str = "/api/v1/futures/tpsl/cancel_order";
 const AMEND: &str = "/api/v1/futures/trade/modify_order";
 const AMEND_TPSL: &str = "/api/v1/futures/tpsl/modify_order";
@@ -118,6 +120,10 @@ enum Call {
         ids: Vec<String>,
         require_ack: bool,
     },
+    /// Reaches orders the store has not seen; their rows follow from the stream.
+    CancelSymbol {
+        symbol: String,
+    },
     ReconcileReplacement {
         parent: String,
         id: String,
@@ -170,6 +176,10 @@ struct Job {
     restore: Vec<OrderStatus>,
     recover: Option<Vec<PlaceOrderOpts>>,
     created: Vec<String>,
+    /// The leg re-placed after its two-leg TP/SL was cancelled: id, symbol, side and kind.
+    kept: Option<(String, String, OrderSide, OrderType)>,
+    /// The kept leg's placement went out, so a failure leaves the position without it.
+    kept_sent: bool,
 }
 struct Prepare {
     orders: Vec<PlaceOrderOpts>,
@@ -260,9 +270,21 @@ fn ack_identity(raw: &str, allow_client: bool) -> Result<(Option<String>, bool),
         #[serde(borrow, default = "empty_id")]
         client_id: &'a serde_json::value::RawValue,
     }
-    let row: Identity<'_> = serde_json::from_str(raw).map_err(|e| e.to_string())?;
-    let order = serde_json::from_str::<Str<'_>>(row.order_id.get());
-    let client = serde_json::from_str::<Str<'_>>(row.client_id.get());
+    // A partial TP/SL answers with a one-row array; every real row carries a null clientId.
+    let first = if raw.trim_start().starts_with('[') {
+        let rows: Vec<&serde_json::value::RawValue> =
+            serde_json::from_str(raw).map_err(|e| e.to_string())?;
+        rows.first().map_or("{}", |row| row.get())
+    } else {
+        raw
+    };
+    let row: Identity<'_> = serde_json::from_str(first).map_err(|e| e.to_string())?;
+    let text = |raw: &'_ serde_json::value::RawValue| {
+        serde_json::from_str::<Option<Str<'_>>>(raw.get())
+            .map(|id| id.map_or_else(String::new, |id| id.into_owned()))
+    };
+    let order = text(row.order_id);
+    let client = text(row.client_id);
     let malformed = order.is_err()
         || client.is_err()
         || order
@@ -271,20 +293,11 @@ fn ack_identity(raw: &str, allow_client: bool) -> Result<(Option<String>, bool),
         || client
             .as_ref()
             .is_ok_and(|id| !id.is_empty() && id.trim().is_empty());
-    let id = order
-        .ok()
-        .filter(|id| !id.trim().is_empty())
-        .map(|id| id.into_owned())
-        .or_else(|| {
-            allow_client
-                .then(|| {
-                    client
-                        .ok()
-                        .filter(|id| !id.trim().is_empty())
-                        .map(|id| id.into_owned())
-                })
-                .flatten()
-        });
+    let id = order.ok().filter(|id| !id.trim().is_empty()).or_else(|| {
+        allow_client
+            .then(|| client.ok().filter(|id| !id.trim().is_empty()))
+            .flatten()
+    });
     Ok((id, malformed))
 }
 fn stop(t: Option<StopTriggerType>) -> &'static str {
@@ -536,7 +549,23 @@ impl BitunixFutures {
                     .filter(|o| o.symbol == symbol && o.status == OrderStatus::Open)
                     .map(|o| o.id.clone())
                     .collect();
-                self.plan_cancel(cx, &ids)
+                self.plan_cancel(cx, &ids).map(|mut job| {
+                    if !symbol.is_empty() {
+                        let payload = Payload {
+                            symbol: Some(symbol.clone()),
+                            ..Default::default()
+                        };
+                        job.steps.push_back(Step {
+                            path: CANCEL_ALL,
+                            body: text(&payload),
+                            call: Call::CancelSymbol {
+                                symbol: symbol.clone(),
+                            },
+                            delay: 0.0,
+                        });
+                    }
+                    job
+                })
             }
             Command::AmendOrder {
                 id, price, amount, ..
@@ -787,7 +816,10 @@ impl BitunixFutures {
                         .account
                         .native
                         .get(&row.id)
-                        .is_some_and(|n| !n.attached && n.position_id == position_id)
+                        // Only the position's own full leg pairs; a partial stop keeps its size.
+                        .is_some_and(|n| {
+                            !n.attached && n.full_position && n.position_id == position_id
+                        })
                     {
                         if row.kind == OrderType::StopLoss {
                             p.sl_price = Some(num::format(row.price));
@@ -835,12 +867,13 @@ impl BitunixFutures {
             p.sl_stop_type = Some(stop(o.sl_trigger_type));
             p.sl_order_type = Some("MARKET".into());
         }
-        let sizes = split_quantities(
-            amount,
-            m.precision.amount,
-            m.limits.amount.min,
-            m.limits.amount.max,
-        )?;
+        // A MARKET order (a Nuke close included) answers to maxMarketOrderVolume.
+        let maximum = self
+            .market_maxima
+            .get(&o.symbol)
+            .filter(|_| o.kind == OrderType::Market)
+            .map_or(m.limits.amount.max, |max| *max);
+        let sizes = split_quantities(amount, m.precision.amount, m.limits.amount.min, maximum)?;
         if o.client_order_id.is_some() && sizes.len() != 1 {
             return Err("Bitunix clientOrderId cannot be split".into());
         }
@@ -1015,6 +1048,7 @@ impl BitunixFutures {
         let mut seen = HashSet::new();
         let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
         let mut replacements = vec![];
+        let mut kept_steps = vec![];
         for id in ids {
             let o = cx.store.order(id).ok_or_else(|| {
                 format!("Bitunix order {id} not found; cancellation requires a reconciled order")
@@ -1077,11 +1111,31 @@ impl BitunixFutures {
                     path: CANCEL_TPSL,
                     body: text(&p),
                     call: Call::Cancel {
-                        ids: affected,
+                        ids: affected.clone(),
                         require_ack: false,
                     },
                     delay: 0.0,
                 });
+                // One order carries both legs, and no write drops just one: the
+                // cancel takes both, so the leg the caller kept goes back at its size.
+                for kept in cx.store.orders().iter().filter(|r| {
+                    affected.contains(&r.id)
+                        && !selected.contains(r.id.as_str())
+                        && r.status == OrderStatus::Open
+                        && matches!(r.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                }) {
+                    let (path, p) = self.kept_leg(cx, kept)?;
+                    job.kept = Some((kept.id.clone(), kept.symbol.clone(), kept.side, kept.kind));
+                    kept_steps.push(Step {
+                        path,
+                        body: text(&p),
+                        call: Call::Place {
+                            clients: Vec::new(),
+                            batch: false,
+                        },
+                        delay: 0.0,
+                    });
+                }
             } else {
                 if let Some((_, rows)) = regular.iter_mut().find(|(s, _)| s == &o.symbol) {
                     rows.push(n.raw_id.clone());
@@ -1127,6 +1181,7 @@ impl BitunixFutures {
                 delay: 0.0,
             });
         }
+        job.steps.extend(kept_steps);
         for (parent, p) in replacements {
             job.steps.push_back(Step {
                 path: "/api/v1/futures/trade/get_order_detail",
@@ -1141,6 +1196,49 @@ impl BitunixFutures {
             });
         }
         Ok(job)
+    }
+    /// The surviving leg of a two-leg TP/SL as its own placement, without the other leg.
+    fn kept_leg(
+        &self,
+        cx: &Cx<'_, Pending>,
+        kept: &Order,
+    ) -> Result<(&'static str, Payload), String> {
+        let o = PlaceOrderOpts {
+            symbol: kept.symbol.clone(),
+            kind: kept.kind,
+            side: kept.side,
+            amount: kept.amount.max(0.0),
+            price: Some(kept.price),
+            trigger_price: None,
+            reduce_only: Some(true),
+            trigger_type: kept.trigger_type,
+            sl_trigger_type: kept.trigger_type,
+            tp_trigger_type: kept.trigger_type,
+            max_slippage_pct: None,
+            stop_loss: None,
+            take_profit: None,
+            time_in_force: None,
+            client_order_id: None,
+            close: None,
+            stp_mode: None,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
+        };
+        let (path, mut p) = self
+            .payloads(cx, &o)?
+            .into_iter()
+            .next()
+            .ok_or("Bitunix kept TP/SL leg has no placement")?;
+        // A full leg pairs with the store's other full leg, which is the one being cancelled.
+        if kept.kind == OrderType::StopLoss {
+            (p.tp_price, p.tp_stop_type, p.tp_qty) = (None, None, None);
+            (p.tp_order_type, p.tp_order_price) = (None, None);
+        } else {
+            (p.sl_price, p.sl_stop_type, p.sl_qty) = (None, None, None);
+            (p.sl_order_type, p.sl_order_price) = (None, None);
+        }
+        Ok((path, p))
     }
     fn replacement(
         &self,
@@ -1206,6 +1304,23 @@ impl BitunixFutures {
             None
         };
         let full = n.full_position || o.amount == 0.0;
+        // A LIMIT-executed TP/SL rests its limit at the old trigger: moving the trigger alone
+        // would leave a stop that fires and then rests unfilled.
+        if let Some(leg) = leg
+            && price.is_some_and(|price| price != o.price)
+            && (if leg == "tp" {
+                &n.tp_execution
+            } else {
+                &n.sl_execution
+            })
+            .eq_ignore_ascii_case("LIMIT")
+        {
+            return Err(format!(
+                "Your {} {} was not changed: its LIMIT execution would keep the old limit price; cancel it and place a new one",
+                o.symbol,
+                if leg == "tp" { "take profit" } else { "stop" }
+            ));
+        }
         if (attached || full) && amount.is_some() {
             return Err(
                 "Bitunix full-position or attached TP/SL quantity cannot be amended".into(),
@@ -1249,8 +1364,11 @@ impl BitunixFutures {
                                         && r.status == OrderStatus::Open
                                 })
                                 .find(|r| {
+                                    // Only a full-position pair shares one modify; a separate
+                                    // order on the position would be copied onto this one.
                                     self.account.native.get(&r.id).is_some_and(|meta| {
-                                        !meta.attached
+                                        full && meta.full_position
+                                            && !meta.attached
                                             && !n.position_id.is_empty()
                                             && meta.position_id == n.position_id
                                     })
@@ -1427,6 +1545,20 @@ impl BitunixFutures {
         let Some(mut step) = live.job.steps.pop_front() else {
             return self.finish(cx, command);
         };
+        if let Some((id, ..)) = &live.job.kept
+            && matches!(step.call, Call::Place { .. })
+        {
+            // A leg that filled while its sibling was cancelled has nothing left to protect.
+            if cx
+                .store
+                .order(id)
+                .is_some_and(|o| o.status == OrderStatus::Closed)
+            {
+                live.job.kept = None;
+                return self.advance(cx, command);
+            }
+            live.job.kept_sent = true;
+        }
         // Native's gap between batch chunks: the Plan timer issues the call.
         if step.delay > 0.0
             && let Some(plan) = live.plan.clone()
@@ -1635,7 +1767,27 @@ impl BitunixFutures {
         self.reread_held(cx);
     }
     /// Fails the job under its owner; the journal projects the outcome.
-    fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, error: VenueError) {
+    /// Names the lost leg once its re-place went out and failed.
+    fn kept_gone(&mut self, command: u32, error: &mut VenueError) {
+        let Some(job) = self
+            .trading
+            .live
+            .get_mut(&command)
+            .map(|live| &mut live.job)
+        else {
+            return;
+        };
+        if !job.kept_sent {
+            return;
+        }
+        if let Some((_, symbol, side, kind)) = job.kept.take() {
+            let unknown = error.outcome == Some(Outcome::Unknown);
+            let gone = safe_cex_engine::error::stop_gone_text(&symbol, side, kind, unknown);
+            error.message = format!("{gone}: {}", error.message);
+        }
+    }
+    fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, mut error: VenueError) {
+        self.kept_gone(command, &mut error);
         let Some(live) = self.take_live(command) else {
             return;
         };
@@ -1717,6 +1869,7 @@ impl BitunixFutures {
         self.account.reask = reask;
         if !reask {
             self.account.paid = [None, None];
+            self.account.paid_unproven.clear();
         }
         for (slot, axis) in [(0, Axis::Orders), (1, Axis::Tpsl)] {
             if !reask || self.account.owed[slot].is_some() {
@@ -1748,8 +1901,9 @@ impl BitunixFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: VenueError,
+        mut error: VenueError,
     ) {
+        self.kept_gone(request.command, &mut error);
         // Never released: a settings scope ends with the job.
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.settings_released = false;
@@ -1788,6 +1942,17 @@ impl BitunixFutures {
         cx.store.invalidate_order_snapshots();
         let data = match error::response_data(&response, true) {
             Ok(data) => data,
+            // A stale TP/SL: filled or canceled already. The reconcile below settles which.
+            Err(error)
+                if request.step.path == CANCEL_TPSL
+                    && error.venue_code.as_deref() == Some("20007") =>
+            {
+                "null"
+            }
+            // Its documented answer carries only the code, which already read 0 here.
+            Err(error) if request.step.path == CANCEL_ALL && error.message == error::NO_DATA => {
+                "null"
+            }
             Err(error) => return self.write_refused(cx, request, &response, error),
         };
         let accepted = match &request.step.call {
@@ -1800,7 +1965,17 @@ impl BitunixFutures {
                 batch: true,
             } => self.batch_answer(cx, &request, data, clients.len()),
             Call::Cancel { ids, require_ack } => {
-                self.cancel_answer(cx, &request, data, ids, *require_ack)
+                self.cancel_answer(cx, &request, data, ids, *require_ack, false)
+            }
+            Call::CancelSymbol { symbol } => {
+                let ids: Vec<_> = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| o.symbol == *symbol)
+                    .map(|o| o.id.clone())
+                    .collect();
+                self.cancel_answer(cx, &request, data, &ids, false, true)
             }
             Call::Amend {
                 id, parent, leg, ..
@@ -1906,13 +2081,28 @@ impl BitunixFutures {
             code: NativeCode::Int(code),
             message: "",
         });
+        let mut error = error;
+        self.kept_gone(command, &mut error);
         let mut refused = false;
-        let grant = match cx.classify_write(
-            &request.context,
-            &codes::BITUNIX,
-            native.as_ref(),
-            error.message.clone(),
-        ) {
+        // Live: a batch answered 20003 with its orders resting. Only 10007's signature refusal,
+        // which the venue resends past, proves a batch sent nothing.
+        let batch_unproven = matches!(request.step.call, Call::Place { batch: true, .. })
+            && code.is_some_and(|code| code != 10007);
+        if batch_unproven {
+            error = error.outcome(Outcome::Unknown);
+        }
+        let classified = if batch_unproven {
+            Err(())
+        } else {
+            cx.classify_write(
+                &request.context,
+                &codes::BITUNIX,
+                native.as_ref(),
+                error.message.clone(),
+            )
+            .map_err(|_| ())
+        };
+        let grant = match classified {
             Ok(fact) => {
                 refused = fact.verdict().is_refusal();
                 cx.http_write_fact(
@@ -1960,7 +2150,7 @@ impl BitunixFutures {
             live.current = Some((request.slot.clone(), request.context.clone()));
         }
         if definitive
-            && message.contains("position does not exist")
+            && message.contains("not exist")
             && request.step.single_place()
             && let Some(orders) = self
                 .trading
@@ -2001,6 +2191,22 @@ impl BitunixFutures {
                 leg,
             } = &request.step.call
         {
+            // The re-place carries reduceOnly, and the private channel omits it: a flag the
+            // venue never reported nor this session set could reopen a closing order.
+            // Native modify_order carries no reduceOnly, so only this fallback is gated.
+            if !self
+                .account
+                .native
+                .get(parent)
+                .is_some_and(|meta| meta.reduce_reconciled)
+            {
+                let mut refusal = VenueError::new(format!(
+                    "Your TP/SL edit was not applied: Bitunix could not modify order {parent} in place, and re-placing it needs its reduce-only state, which is not reconciled yet; nothing was canceled"
+                ))
+                .outcome(Outcome::Rejected);
+                refusal.presents = true;
+                return self.end(cx, command, refusal);
+            }
             // Native fallback: cancel, prove the cancel final, then replace.
             let symbol = p.symbol.clone().unwrap_or_default();
             let ids: Vec<_> = cx
@@ -2213,7 +2419,7 @@ impl BitunixFutures {
         let message = if messages.is_empty() {
             "Bitunix batch response has incomplete order acknowledgements".to_owned()
         } else {
-            messages.join("; ")
+            messages.join_with("; ")
         };
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.job.ids.extend(ids.iter().cloned());
@@ -2246,6 +2452,7 @@ impl BitunixFutures {
         data: &str,
         ids: &[String],
         require_ack: bool,
+        sweep: bool,
     ) -> Result<(), Option<VenueError>> {
         #[derive(Deserialize, Default)]
         #[serde(rename_all = "camelCase")]
@@ -2291,7 +2498,7 @@ impl BitunixFutures {
             Ok(rows) => (rows, true),
             Err(_) => (Vec::new(), false),
         };
-        let succeeded: HashSet<String> = successes
+        let echoed: Vec<String> = successes
             .iter()
             .filter_map(|raw| match ack_identity(raw.get(), false) {
                 Ok((Some(id), false)) if serde_json::from_str::<Item<'_>>(raw.get()).is_ok() => {
@@ -2300,6 +2507,7 @@ impl BitunixFutures {
                 _ => None,
             })
             .collect();
+        let succeeded: HashSet<&String> = echoed.iter().collect();
         let failures: Vec<_> = rejected
             .iter()
             .filter_map(|raw| serde_json::from_str::<Item<'_>>(raw.get()).ok())
@@ -2309,8 +2517,9 @@ impl BitunixFutures {
             || successes.len() != succeeded.len()
             || failures.len() != rejected.len();
         // Native: a clean code-0 answer cancels every target unless an ACK is
-        // required; otherwise only the echoed IDs are proven.
-        let all = !require_ack && !malformed && rejected.is_empty();
+        // required; otherwise only the echoed IDs are proven. A sweep's targets are its rows.
+        let clean = !require_ack && !malformed && rejected.is_empty();
+        let all = clean && !sweep;
         let mut canceled = Vec::new();
         for id in ids {
             if all || succeeded.contains(&raw_id(id)) {
@@ -2322,10 +2531,14 @@ impl BitunixFutures {
                 });
             }
         }
-        if all {
+        if clean {
             return Self::record(cx, request, Ok(canceled));
         }
-        let raws: Vec<_> = canceled.iter().map(raw_id).collect();
+        let raws: Vec<_> = if sweep {
+            echoed
+        } else {
+            canceled.iter().map(raw_id).collect()
+        };
         let mut items: Vec<_> = raws.iter().map(|id| BatchItem::Accepted(id)).collect();
         items.extend(failures.iter().map(|f| {
             BatchItem::Native(Native {
@@ -2336,13 +2549,15 @@ impl BitunixFutures {
         if malformed {
             items.push(BatchItem::Accepted(""));
         }
+        // A sweep has no caller list to count against: its rows are the answer.
+        let expected = if sweep { items.len() } else { ids.len() };
         let message = failures
             .iter()
             .map(|f| {
                 if f.error_msg.is_empty() {
                     format!("Bitunix cancel failed for {}", f.order_id)
                 } else {
-                    f.error_msg.to_string()
+                    format!("Bitunix cancel failed for {}: {}", f.order_id, f.error_msg)
                 }
             })
             .collect::<Vec<_>>();
@@ -2352,12 +2567,12 @@ impl BitunixFutures {
         } else if message.is_empty() {
             "Malformed Bitunix cancellation acknowledgement".to_owned()
         } else {
-            message.join("; ")
+            message.join_with("; ")
         };
         match cx.http_write_batch(
             &request.context,
             &codes::BITUNIX,
-            ids.len(),
+            expected,
             &items,
             message,
             None,
@@ -2384,7 +2599,7 @@ impl BitunixFutures {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Ack<'a> {
-            #[serde(borrow, default, alias = "id")]
+            #[serde(borrow, default, alias = "id", deserialize_with = "crate::wire::text")]
             order_id: Str<'a>,
         }
         let accepted = match serde_json::from_str::<Ack<'_>>(data) {
@@ -2455,8 +2670,9 @@ impl BitunixFutures {
                 .store
                 .market(&row.symbol)
                 .ok_or("Bitunix market missing")?;
+            // The parent filled before its cancel: its TP/SL went live with the old triggers.
             if status == "FILLED" {
-                return Ok(None);
+                return Err(filled_before_edit(&row.symbol, leg.is_some()));
             }
             if row.qty.0 <= 0.0
                 || row.trade_qty.0 < 0.0
@@ -2474,7 +2690,7 @@ impl BitunixFutures {
                 return Err("Bitunix canceled quantity is not reconciled".into());
             }
             if remaining == 0.0 {
-                return Ok(None);
+                return Err(filled_before_edit(&row.symbol, leg.is_some()));
             }
             let mut p = (**payload).clone();
             p.qty = Some(num::format(remaining));
@@ -2508,7 +2724,12 @@ impl BitunixFutures {
                 }
                 self.advance(cx, command);
             }
-            Err(message) => self.end(cx, command, VenueError::new(message)),
+            Err(message) => {
+                // A filled parent says why the edit was not applied, not the first leg's refusal.
+                let mut error = VenueError::new(message.clone());
+                error.presents = message.contains(FILLED_BEFORE_EDIT);
+                self.end(cx, command, error)
+            }
         }
     }
 }
@@ -2543,6 +2764,17 @@ fn affected_ids(cx: &Cx<'_, Pending>, n: &NativeOrder) -> Vec<String> {
         .filter(|o| o.id == n.raw_id || o.id.starts_with(&format!("{}__", n.raw_id)))
         .map(|o| o.id.clone())
         .collect()
+}
+const FILLED_BEFORE_EDIT: &str = "order filled before its";
+/// An amend fallback whose canceled parent had filled: the edit was never applied.
+fn filled_before_edit(symbol: &str, leg: bool) -> String {
+    if leg {
+        format!(
+            "Your {symbol} {FILLED_BEFORE_EDIT} TP/SL edit; its TP/SL keep the old triggers. Check them in Open Orders"
+        )
+    } else {
+        format!("Your {symbol} {FILLED_BEFORE_EDIT} edit; the edit was not applied")
+    }
 }
 fn append_protection(
     p: &mut Payload,
@@ -2655,5 +2887,37 @@ mod serial_auth_tests {
             assert_eq!(call.attempts, attempts);
             assert_eq!(call.timeout_ms, CALL_MS);
         }
+    }
+}
+
+#[cfg(test)]
+mod real_ack_tests {
+    use super::ack_identity;
+
+    #[test]
+    fn real_bitunix_acks_with_null_client_ids_are_accepted() {
+        for (raw, id) in [
+            (
+                r#"{"orderId":"2116901515347927040","clientId":null}"#,
+                "2116901515347927040",
+            ),
+            (
+                r#"{"orderId":"6851989027826864077","clientId":null}"#,
+                "6851989027826864077",
+            ),
+            (
+                r#"[{"orderId":"5158509051432141703","clientId":null}]"#,
+                "5158509051432141703",
+            ),
+        ] {
+            assert_eq!(
+                ack_identity(raw, true).unwrap(),
+                (Some(id.to_owned()), false)
+            );
+        }
+        assert_eq!(
+            ack_identity(r#"{"orderId":null,"clientId":null}"#, true).unwrap(),
+            (None, false)
+        );
     }
 }

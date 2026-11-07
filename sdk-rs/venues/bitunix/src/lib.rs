@@ -51,6 +51,7 @@ pub enum Pending {
     Markets {
         context: Context,
         rows: Vec<Market>,
+        market_maxima: HashMap<String, f64>,
         invalid: bool,
     },
     Tickers {
@@ -152,6 +153,8 @@ pub struct BitunixFutures {
     candles: HashSet<(String, Interval)>,
     discovery: PublicRetries,
     funding_times: HashMap<String, f64>,
+    /// `maxMarketOrderVolume` by symbol; absent or zero falls back to the limit maximum.
+    market_maxima: HashMap<String, f64>,
 }
 impl BitunixFutures {
     pub fn new(options: Options) -> Self {
@@ -175,6 +178,7 @@ impl BitunixFutures {
             candles: HashSet::new(),
             discovery: PublicRetries::default(),
             funding_times: HashMap::new(),
+            market_maxima: HashMap::new(),
         }
     }
     fn read_policy() -> Policy {
@@ -200,7 +204,12 @@ impl BitunixFutures {
         self.public_seed(cx, DiscoveryRead::Tickers);
     }
     fn public_seed(&mut self, cx: &mut Cx<'_, Pending>, read: DiscoveryRead) {
-        let context = match cx.http_context(Scope::Background, Self::read_policy()) {
+        let issue = if matches!(read, DiscoveryRead::Tickers) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, Self::read_policy()) {
             Ok(context) => context,
             Err(error) => {
                 self.public_failed(cx, read, error.venue_error(), 0.0);
@@ -213,6 +222,7 @@ impl BitunixFutures {
                 Pending::Markets {
                     context: context.clone(),
                     rows: Vec::new(),
+                    market_maxima: HashMap::new(),
                     invalid: false,
                 },
             ),
@@ -313,7 +323,9 @@ impl BitunixFutures {
                 return;
             }
             other => {
+                self.account.read_error = Some(error.clone());
                 self.on_request_failed(cx, other, &error.message);
+                self.account.read_error = None;
                 return;
             }
         };
@@ -345,6 +357,13 @@ impl BitunixFutures {
                 45_000.0
             },
             ping_interval_ms: Some(15_000.0),
+            auth_timeout_ms: matches!(feed, Feed::Private).then_some(LOGIN_ANSWER_MS),
+            // The venue closes private sockets at 22-30 s; a socket that long is no fault to back off.
+            stable_ms: if matches!(feed, Feed::Private) {
+                10_000.0
+            } else {
+                Config::default().stable_ms
+            },
             ..Config::default()
         });
         supervisor.connecting(cx);
@@ -497,6 +516,12 @@ impl BitunixFutures {
         Ok(())
     }
 }
+const LOGIN_ANSWER_MS: f64 = 10_000.0;
+/// Bitunix ignores a bare op; only this form draws a reply.
+fn private_ping(now: f64) -> String {
+    let seconds = (now / 1_000.0) as u64;
+    format!(r#"{{"op":"ping","ping":{seconds}}}"#)
+}
 fn topic_frame(topic: &str, subscribe: bool) -> String {
     format!(
         r#"{{"event":"{}","params":{{"channel":"{topic}"}}}}"#,
@@ -540,6 +565,9 @@ impl Venue for BitunixFutures {
     }
     // reconcile_uncertain starts the regular and tpsl census reads at once.
     fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         true
     }
     /// One mutation per order for its whole job, continuations included.
@@ -586,11 +614,34 @@ impl Venue for BitunixFutures {
         self.account_auth(pending, response, store)
     }
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Private(request)
+                if request.after.is_none()
+                    && matches!(
+                        request.custody,
+                        None | Some(account::ReadCustody::Background(_))
+                    ) =>
+            {
+                match request.axis {
+                    account::Axis::Balance => S::BALANCE,
+                    account::Axis::Positions => S::POSITIONS,
+                    account::Axis::Orders | account::Axis::Tpsl => S::ORDERS,
+                }
+            }
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             closed_positions: true,
             position_history: safe_cex_engine::PositionHistory::Bitunix,
             closed_position_format: safe_cex_engine::ClosedPositionFormat::Bitunix,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -601,6 +652,7 @@ impl Venue for BitunixFutures {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,
@@ -676,19 +728,25 @@ impl Venue for BitunixFutures {
             }
         }
         if matches!(s.feed, Feed::Private) {
-            cx.send(socket, r#"{"op":"ping"}"#);
+            cx.send(socket, private_ping(cx.protocol_now()));
+            self.account.login_answered = false;
+            self.account.private_live = false;
             self.login(cx, socket);
-            if cx.store.loaded().positions {
-                for axis in [
-                    account::Axis::Balance,
-                    account::Axis::Positions,
-                    account::Axis::Orders,
-                ] {
-                    self.read_axis(cx, axis);
-                }
+            // Events before this open were never delivered, the first open included. A read
+            // in flight may predate it: it is marked dirty and re-read once answered. A
+            // positions answer reads TP/SL.
+            for axis in [
+                account::Axis::Balance,
+                account::Axis::Positions,
+                account::Axis::Orders,
+            ] {
+                self.read_axis(cx, axis);
             }
         } else {
-            cx.send(socket, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
+            cx.send(
+                socket,
+                format!(r#"{{"ping":{}}}"#, num::format(cx.protocol_now())),
+            );
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
@@ -704,7 +762,8 @@ impl Venue for BitunixFutures {
         match serde_json::from_str::<Message<'_>>(text) {
             Ok(m) => {
                 if matches!(s.feed, Feed::Private) {
-                    if m.op == "pong" {
+                    // Bitunix answers {"op":"ping","pong":<ts>,"ping":<ts>}.
+                    if m.op == "pong" || (m.op == "ping" && m.pong) {
                         s.pong_observed = true;
                     }
                     self.private_message(cx, socket, &m);
@@ -738,52 +797,58 @@ impl Venue for BitunixFutures {
         match pending {
             Pending::Private(read) => self.account_item(cx, read, item),
             Pending::History(read) => self.history_item(cx, read, item),
-            Pending::Markets { rows, invalid, .. } => {
-                match serde_json::from_str::<Pair<'_>>(item) {
-                    Ok(m) => {
-                        if m.symbol_status == "OPEN"
-                            && m.quote == "USDT"
-                            && m.is_api_supported.as_ref().is_none_or(Supported::allowed)
-                        {
-                            rows.push(Market {
-                                id: format!("{}/{}", m.base, m.quote),
-                                symbol: m.symbol.into_owned(),
-                                base: m.base.into_owned(),
-                                quote: m.quote.into_owned(),
-                                active: true,
-                                precision: Precision {
-                                    amount: 10f64.powi(m.base_precision.0 as i32).recip(),
-                                    price: 10f64.powi(m.quote_precision.0 as i32).recip(),
-                                },
-                                limits: Limits {
-                                    amount: MinMax {
-                                        min: 0.0,
-                                        max: m.max_limit_order_volume.0,
-                                    },
-                                    leverage: MinMax {
-                                        min: 1.0,
-                                        max: 100.0,
-                                    },
-                                    price: None,
-                                },
-                                pretty_symbol: None,
-                                contract_size: None,
-                                is_expiring: None,
-                                is_inverse: None,
-                                is_spot: None,
-                                is_perpetual: None,
-                                is_read_only: None,
-                                taker_fee: None,
-                                maker_fee: None,
-                            });
+            Pending::Markets {
+                rows,
+                market_maxima,
+                invalid,
+                ..
+            } => match serde_json::from_str::<Pair<'_>>(item) {
+                Ok(m) => {
+                    if m.symbol_status == "OPEN"
+                        && m.quote == "USDT"
+                        && m.is_api_supported.as_ref().is_none_or(Supported::allowed)
+                    {
+                        if let Some(max) = m.max_market_order_volume.filter(|max| max.0 > 0.0) {
+                            market_maxima.insert(m.symbol.to_string(), max.0);
                         }
-                    }
-                    Err(_) => {
-                        *invalid = true;
-                        safe_cex_engine::startup::skipped_row(cx);
+                        rows.push(Market {
+                            id: format!("{}/{}", m.base, m.quote),
+                            symbol: m.symbol.into_owned(),
+                            base: m.base.into_owned(),
+                            quote: m.quote.into_owned(),
+                            active: true,
+                            precision: Precision {
+                                amount: 10f64.powi(m.base_precision.0 as i32).recip(),
+                                price: 10f64.powi(m.quote_precision.0 as i32).recip(),
+                            },
+                            limits: Limits {
+                                amount: MinMax {
+                                    min: 0.0,
+                                    max: m.max_limit_order_volume.0,
+                                },
+                                leverage: MinMax {
+                                    min: 1.0,
+                                    max: 100.0,
+                                },
+                                price: None,
+                            },
+                            pretty_symbol: None,
+                            contract_size: None,
+                            is_expiring: None,
+                            is_inverse: None,
+                            is_spot: None,
+                            is_perpetual: None,
+                            is_read_only: None,
+                            taker_fee: None,
+                            maker_fee: None,
+                        });
                     }
                 }
-            }
+                Err(_) => {
+                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
+            },
             Pending::Tickers { rows, invalid, .. } => match serde_json::from_str::<Daily<'_>>(item)
             {
                 Ok(t) => {
@@ -897,10 +962,14 @@ impl Venue for BitunixFutures {
         }
         match pending {
             Pending::Markets {
-                context, mut rows, ..
+                context,
+                mut rows,
+                market_maxima,
+                ..
             } if !rows.is_empty() => {
                 rows.shrink_to_fit();
                 cx.store.set_markets(rows);
+                self.market_maxima = market_maxima;
                 if cx.finish_http_context(&context).is_err() {
                     return;
                 }
@@ -1054,17 +1123,24 @@ impl Venue for BitunixFutures {
             );
         }
     }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
+    }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         self.public_typed_failed(cx, pending, error);
     }
     /// A provider refusal never released the request: a write is NotSent,
     /// and a read keeps its native failure path.
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_error(cx, request, error),
             Pending::History(read) => self.history_sign_failed(cx, read, &error.message),
             pending => self.public_typed_failed(cx, pending, error),
-        }
+        });
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
         pending.release(cx);
@@ -1140,14 +1216,25 @@ impl Venue for BitunixFutures {
                     s.pong_observed = false;
                 }
                 SocketTick::TimedOut(_) => {
+                    if matches!(s.feed, Feed::Private) && !self.account.login_answered {
+                        // Silence is no refusal: auth.rejected would move the key to the refused path.
+                        cx.notice(
+                            Level::Warn,
+                            code::STREAM_UNAVAILABLE,
+                            "Bitunix did not answer the private socket login; reconnecting",
+                        );
+                    }
                     cx.close(s.id);
                     self.retire(cx, i, true);
                 }
                 SocketTick::Ping if s.active && s.opened => {
                     if matches!(s.feed, Feed::Private) {
-                        cx.send(s.id, r#"{"op":"ping"}"#);
+                        cx.send(s.id, private_ping(cx.protocol_now()));
                     } else {
-                        cx.send(s.id, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
+                        cx.send(
+                            s.id,
+                            format!(r#"{{"ping":{}}}"#, num::format(cx.protocol_now())),
+                        );
                     }
                 }
                 _ => {}
@@ -1237,7 +1324,7 @@ impl Venue for BitunixFutures {
                 };
                 let explicit_limit = limit;
                 let limit = limit.unwrap_or(200).clamp(1, 200);
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let derived = end - duration * f64::from(limit);
                 let start = if explicit_limit.is_some() {
                     derived
@@ -1272,5 +1359,56 @@ impl Venue for BitunixFutures {
                 .filter(|(_, b)| b.initialized)
                 .map(|(s, b)| (s.as_str(), &b.levels)),
         )
+    }
+}
+
+#[cfg(test)]
+mod startup_cause_tests {
+    use super::*;
+
+    fn pending(axis: account::Axis, after: Option<u32>) -> Pending {
+        Pending::Private(account::Read {
+            custody: None,
+            axis,
+            after,
+            generation: 0,
+            balance_write_revision: 0,
+            position_write_revision: 0,
+            order_token: None,
+            serial: 0,
+            positions: vec![],
+            position_rejected: Default::default(),
+            position_admitted: vec![],
+            identities: vec![],
+            orders: vec![],
+            order_rejected: Default::default(),
+            order_accepted: Default::default(),
+            order_newer: Default::default(),
+            native: vec![],
+            invalid: false,
+            baselines: vec![],
+            reconcile: false,
+            epoch: 0,
+        })
+    }
+
+    #[test]
+    fn command_prerequisites_do_not_supply_startup_causes() {
+        use safe_cex_engine::startup::Sections as S;
+        for (axis, expected) in [
+            (account::Axis::Balance, S::BALANCE),
+            (account::Axis::Positions, S::POSITIONS),
+            (account::Axis::Orders, S::ORDERS),
+            (account::Axis::Tpsl, S::ORDERS),
+        ] {
+            assert_eq!(
+                BitunixFutures::startup_reads(&pending(axis, None)),
+                expected
+            );
+            assert_eq!(
+                BitunixFutures::startup_reads(&pending(axis, Some(1))),
+                S::NONE
+            );
+        }
     }
 }

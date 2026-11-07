@@ -6,6 +6,7 @@ use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     CommandId, Cx, ErrorKind, Method, Outcome, Query, Response, VenueError, json::ArrayAt,
@@ -72,7 +73,31 @@ pub struct Request {
     fallback: bool,
     lookup_history: bool,
     lookup_complete: bool,
+    /// The venue answered for this client ID with an order it never placed, or one it cannot tell.
+    lookup_refused: bool,
+    lookup_unconfirmed: bool,
     open_complete: bool,
+}
+/// What a lookup row says about placement: a refusal, or a terminal row with nothing
+/// filled and no reason, is not evidence the order was placed.
+enum Placement {
+    Placed,
+    Refused,
+    Unconfirmed,
+}
+fn placement(row: &crate::account::NativeOrder) -> Placement {
+    if matches!(row.status.as_str(), "REJECTED" | "EXPIRED") {
+        return Placement::Refused;
+    }
+    let terminal = matches!(row.status.as_str(), "CLOSED" | "CANCELED");
+    if !terminal || row.size != row.remaining_size {
+        return Placement::Placed;
+    }
+    match row.cancel_reason.as_str() {
+        "USER_CANCELED" => Placement::Placed,
+        "" => Placement::Unconfirmed,
+        _ => Placement::Refused,
+    }
 }
 impl Request {
     /// Admit the delivered page through its own leg; a stale leg admits nothing
@@ -121,6 +146,9 @@ fn stall_message(reason: Stall) -> String {
 fn encode_rows(rows: &[Output]) -> Result<String, VenueError> {
     serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string()))
 }
+fn nullable_flags<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    Ok(Option::<Vec<String>>::deserialize(d)?.unwrap_or_default())
+}
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct Row {
@@ -142,6 +170,7 @@ struct Row {
     realized_funding: String,
     liquidity: String,
     cancel_reason: String,
+    #[serde(deserialize_with = "nullable_flags")]
     flags: Vec<String>,
     #[serde(deserialize_with = "scalar")]
     created_at: String,
@@ -421,6 +450,8 @@ impl History {
             fallback: false,
             lookup_history: false,
             lookup_complete: false,
+            lookup_refused: false,
+            lookup_unconfirmed: false,
             open_complete: false,
         };
         self.issue(cx, account, request);
@@ -465,7 +496,7 @@ impl History {
                 to_ms,
                 ..
             } => {
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 (
                     "/fills",
                     symbol.as_deref(),
@@ -522,7 +553,7 @@ impl History {
         if let Some(cursor) = request.history.cursor() {
             params.push(format!("cursor={}", encode(cursor)));
         }
-        let path = format!("{path}?{}", params.join("&"));
+        let path = format!("{path}?{}", params.join_with("&"));
         let leg = match cx.http_leg_context(request.history.root(), read_policy()) {
             Ok(leg) => leg,
             Err(error) => {
@@ -562,7 +593,11 @@ impl History {
                 && page.fresh(row.id.clone())
             {
                 if let Ok(order) = crate::account::map_order(&row) {
-                    page.stage(Output::Lookup(order));
+                    match placement(&row) {
+                        Placement::Placed => page.stage(Output::Lookup(order)),
+                        Placement::Refused => request.lookup_refused = true,
+                        Placement::Unconfirmed => request.lookup_unconfirmed = true,
+                    }
                 } else {
                     request.valid = false;
                 }
@@ -841,6 +876,12 @@ impl History {
         }
         let kept = request.history.accepted_len() + request.history.staged_len();
         let (enough, bounded) = match &request.query {
+            // A window with no limit walks to its start; no default may stop it.
+            Query::Fills {
+                limit: None,
+                from_ms: Some(_),
+                ..
+            } => (false, false),
             Query::Fills { limit, .. } => {
                 (kept >= limit.unwrap_or(100).clamp(1, 500) as usize, true)
             }
@@ -883,10 +924,34 @@ impl History {
             }
             CursorStep::Done => {}
         }
+        // The aggregate fallback reads one page; a full one cannot prove a no-limit window.
+        let full_fallback = request.fallback
+            && request.raw_rows >= 100
+            && matches!(
+                request.query,
+                Query::Fills {
+                    limit: None,
+                    from_ms: Some(_),
+                    ..
+                }
+            );
+        if full_fallback {
+            self.finish(
+                cx,
+                request,
+                Err(VenueError::new("Paradex fill fallback read one full page")),
+            );
+            return;
+        }
         self.finish(cx, request, Ok(()));
     }
     fn finish(&self, cx: &mut Cx<'_, Pending>, request: Request, result: Result<(), VenueError>) {
         let limit = match request.query {
+            Query::Fills {
+                limit: None,
+                from_ms: Some(_),
+                ..
+            } => None,
             Query::Fills { limit, .. } | Query::PublicTrades { limit, .. } => {
                 Some(limit.unwrap_or(100).clamp(1, 500) as usize)
             }
@@ -897,7 +962,8 @@ impl History {
         };
         let lookup = matches!(request.query, Query::OrderByClientId { .. });
         let sort = !matches!(request.query, Query::PublicTrades { .. });
-        let definitive = request.lookup_complete;
+        let definitive =
+            request.lookup_refused || (request.lookup_complete && !request.lookup_unconfirmed);
         let _ = request.history.finish_with(cx, result, move |mut rows| {
             if lookup {
                 #[derive(Serialize)]

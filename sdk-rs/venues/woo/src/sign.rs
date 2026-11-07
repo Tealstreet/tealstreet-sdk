@@ -1,5 +1,6 @@
 //! Route-specific signing over exactly the bytes sent to WOO.
 use safe_cex_crypto::{Encoding, hmac_sha256};
+use safe_cex_engine::text::JoinWith;
 pub use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
 
@@ -11,7 +12,7 @@ pub fn query(params: &[(String, String)], sorted: bool) -> String {
     rows.into_iter()
         .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 pub fn signature(secret: &str, text: &str) -> String {
     hmac_sha256(secret.as_bytes(), text.as_bytes(), Encoding::Hex)

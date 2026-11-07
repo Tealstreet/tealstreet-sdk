@@ -360,7 +360,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
           // IP whitelisting error
           if (json.code === 1008) {
             this.parent.emitAndLogError(
-              'GRVT IP is not whitelisted. Please re-add your API key with correct IP whitelisting (18.176.98.246).',
+              'GRVT IP is not whitelisted. Please re-add your API key and whitelist every Tealstreet IP listed in the API key form.',
             );
           } else {
             this.parent.emitAndLogError(`GRVT error (code=${json.code})`);

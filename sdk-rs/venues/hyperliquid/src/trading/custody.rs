@@ -1,4 +1,6 @@
 //! Native FIFO planning carries genuine engine owners; only their callbacks can issue work.
+#[cfg(test)]
+mod tests;
 use super::*;
 use safe_cex_engine::CredentialSlot;
 use safe_cex_engine::credential_selection::CredentialRole;
@@ -25,12 +27,22 @@ fn call() -> SerialCall {
 }
 pub(super) struct Custody {
     preflight: Preflight,
+    // Captured once from the genuine caller receipt, before queue or read waits.
+    intent_deadline: f64,
+    intent_timer: Option<TimerId>,
+    intent_expired: bool,
     plan: Option<Plan>,
     slot: Option<Slot>,
     context: Option<Context>,
     ready: bool,
     wait: Option<ConditionWait>,
 }
+impl Custody {
+    pub(super) fn owner(&self) -> safe_cex_engine::request_context::Owner {
+        self.preflight.owner()
+    }
+}
+
 impl Hyperliquid {
     pub(crate) fn sealed_agent(&self) -> Option<String> {
         let (_, identity) = self.credentials.select(CredentialRole::Mutation).ok()?;
@@ -72,6 +84,25 @@ impl Hyperliquid {
             cx.refuse_command(Operation::Mutation, error.venue_error());
             return;
         }
+        let remaining = match cx.command_wait() {
+            Some(safe_cex_engine::CommandWait::Remaining(ms)) => ms,
+            Some(safe_cex_engine::CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Mutation);
+                return;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Mutation);
+                return;
+            }
+        };
+        let remaining = if job.amend_source.is_some() {
+            remaining.min(AMEND_READ_MS as u32)
+        } else {
+            remaining
+        };
+        let intent_deadline = cx.now + f64::from(remaining);
+        // Read continuations and final cancel Claim copy this one captured bound.
+        job.amend_deadline = job.amend_source.as_ref().map(|_| intent_deadline);
         let preflight = match cx.begin_preflight(PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
             read_credential: None,
@@ -81,12 +112,17 @@ impl Hyperliquid {
             Err(_) => return,
         };
         let ready = self.trading.active.is_none() && self.trading.queue.is_empty();
+        let intent_timer = cx.set_timer(f64::from(remaining));
         if !ready && let Err(error) = cx.park_preflight_for(&preflight, None) {
+            cx.clear_timer(intent_timer);
             let _ = cx.fail_preflight(&preflight, error.venue_error());
             return;
         }
         job.custody = Some(Custody {
             preflight,
+            intent_deadline,
+            intent_timer: Some(intent_timer),
+            intent_expired: false,
             plan: None,
             slot: None,
             context: None,
@@ -98,7 +134,7 @@ impl Hyperliquid {
     }
     pub(crate) fn trade_preflight_ready(&mut self, cx: &mut Cx<'_, Pending>, owner: &Preflight) {
         if self.trading.active.is_none() {
-            self.trading.active = self.trading.queue.pop_front();
+            self.trading.active = self.take_next_trade();
         }
         let Some(custody) = self
             .trading
@@ -145,6 +181,15 @@ impl Hyperliquid {
         self.pump_trades(cx);
     }
     pub(super) fn trade_entry_ready(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        if self.trading.active.as_ref().is_some_and(|job| {
+            !job.effective
+                && job.custody.as_ref().is_some_and(|custody| {
+                    custody.intent_expired || cx.now >= custody.intent_deadline
+                })
+        }) {
+            self.finish_trade(cx, Err(intent_expired()));
+            return false;
+        }
         let custody = self
             .trading
             .active
@@ -168,6 +213,13 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
     ) -> Result<(), VenueError> {
+        let job = self.trading.active.as_ref().unwrap();
+        if !job.effective {
+            let remaining = (job.custody.as_ref().unwrap().intent_deadline - cx.now).floor();
+            if remaining < 1. || job.custody.as_ref().unwrap().intent_expired {
+                return Err(intent_expired());
+            }
+        }
         let custody = self
             .trading
             .active
@@ -225,7 +277,8 @@ impl Hyperliquid {
             identity,
             claim,
             action,
-            self.options.vault.clone(),
+            // As legacy, an empty saved vault is no vault.
+            self.options.vault.clone().filter(|vault| !vault.is_empty()),
             self.options.testnet,
         )
         .map_err(|e| e.venue_error())?;
@@ -275,8 +328,10 @@ impl Hyperliquid {
         }
         let plan = custody.plan.as_ref().unwrap().clone();
         let slot = custody.slot.as_ref().unwrap().clone();
-        let context = cx
-            .plan_leg_context_with_intent(
+        let context = if matches!(effect, Effect::Cancel(_)) && job.protection.is_some() {
+            cx.plan_protection_cancel_leg_context(&plan, &slot)
+        } else {
+            cx.plan_leg_context_with_intent(
                 &plan,
                 &slot,
                 match &effect {
@@ -295,17 +350,26 @@ impl Hyperliquid {
                     _ => safe_cex_engine::classify::Intent::Place,
                 },
             )
-            .map_err(|e| e.venue_error())?;
+        }
+        .map_err(|e| e.venue_error())?;
         custody.context = Some(context.clone());
         let committed_effect = effect.clone();
         let command = job.command;
+        let intent_deadline = (!job.effective).then_some(custody.intent_deadline);
+        let cancel_deadline = if matches!(&effect, Effect::Cancel(_)) {
+            job.amend_deadline
+        } else {
+            None
+        };
         self.publish_trade_receipts(cx, command, &committed_effect);
         let pending = Pending::Trade(Request {
+            cancel_deadline,
             command,
             effect,
             plan,
             context: context.clone(),
             order_reply,
+            intent_deadline,
         });
         match cx.request_signed_managed(
             context,
@@ -343,10 +407,16 @@ impl Hyperliquid {
         result: Result<String, VenueError>,
     ) {
         let custody = job.custody.as_ref().unwrap();
+        if let Some(timer) = custody.intent_timer {
+            cx.clear_timer(timer);
+        }
         if let Some(plan) = &custody.plan {
             match result {
                 Err(error) => {
-                    let _ = cx.fail_plan(plan, error);
+                    let _ = match &job.stop_note {
+                        Some(note) => cx.fail_plan_noted(plan, error, note),
+                        None => cx.fail_plan(plan, error),
+                    };
                 }
                 Ok(data) => {
                     if let (Some(slot), Some(context)) = (&custody.slot, &custody.context)
@@ -365,14 +435,64 @@ impl Hyperliquid {
             };
         }
     }
+    pub(crate) fn check_trade_intent(
+        &self,
+        request: &Request,
+        now: f64,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        request.check_intent_deadline(now)?;
+        if request.intent_deadline.is_some()
+            && self.trading.active.as_ref().is_some_and(|job| {
+                job.command == request.command
+                    && job.custody.as_ref().is_some_and(|custody| {
+                        custody.context.as_ref() == Some(&request.context) && custody.intent_expired
+                    })
+            })
+        {
+            return Err(safe_cex_engine::request_context::Error::TimedOut);
+        }
+        Ok(())
+    }
+    pub(super) fn expire_trade_intent(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if let Some(index) = self.trading.queue.iter().position(|job| {
+            job.custody
+                .as_ref()
+                .is_some_and(|custody| custody.intent_timer == Some(timer))
+        }) {
+            let mut job = self.trading.queue.remove(index).unwrap();
+            job.custody.as_mut().unwrap().intent_timer = None;
+            self.finish_trade_owner(cx, &job, Err(intent_expired()));
+            return true;
+        }
+        let Some(job) = self.trading.active.as_mut().filter(|job| {
+            job.custody
+                .as_ref()
+                .is_some_and(|custody| custody.intent_timer == Some(timer))
+        }) else {
+            return false;
+        };
+        let custody = job.custody.as_mut().unwrap();
+        custody.intent_timer = None;
+        custody.intent_expired = true;
+        if !job.effective && !self.trading.inflight {
+            self.finish_trade(cx, Err(intent_expired()));
+        }
+        true
+    }
     pub(crate) fn trade_owner_retired(
         &mut self,
         retired: &HttpOwnerRetirement,
     ) -> Option<Preflight> {
-        self.trading.queue.retain(|job| {
-            !job.custody
+        self.trading.queue.retain_mut(|job| {
+            let retired = job
+                .custody
                 .as_ref()
-                .is_some_and(|c| retired.matches_preflight(&c.preflight))
+                .is_some_and(|c| retired.matches_preflight(&c.preflight));
+            if retired && let Some(timer) = job.custody.as_mut().and_then(|c| c.intent_timer.take())
+            {
+                self.trading.retired_intent_timers.push(timer);
+            }
+            !retired
         });
         if self
             .trading
@@ -381,12 +501,22 @@ impl Hyperliquid {
             .and_then(|job| job.custody.as_ref())
             .is_some_and(|c| retired.matches_preflight(&c.preflight))
         {
+            if let Some(timer) = self
+                .trading
+                .active
+                .as_mut()
+                .and_then(|job| job.custody.as_mut())
+                .and_then(|c| c.intent_timer.take())
+            {
+                self.trading.retired_intent_timers.push(timer);
+            }
             self.trading.active = None;
             self.trading.inflight = false;
             self.trading.builder_wait = None;
+            self.trading.amend_wait = None;
         }
         if self.trading.active.is_none() {
-            self.trading.active = self.trading.queue.pop_front();
+            self.trading.active = self.take_next_trade();
         }
         self.trading
             .active
@@ -395,22 +525,74 @@ impl Hyperliquid {
             .filter(|c| c.plan.is_none())
             .map(|c| c.preflight.clone())
     }
+    pub(super) fn clear_retired_intent_timers(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Retirement has no Cx authority; clear its timers at the next trading or timer turn.
+        for timer in self.trading.retired_intent_timers.drain(..) {
+            cx.clear_timer(timer);
+        }
+    }
 }
 
 const NATIVE_ERROR: safe_cex_engine::classify::CodeTable = safe_cex_engine::classify::CodeTable {
-    rows: &[],
+    rows: &[
+        refusal(WALLET_MISSING, ErrorKind::AuthInvalid),
+        refusal(
+            "Cannot switch leverage type with open position.",
+            ErrorKind::Rejected,
+        ),
+        refusal(SCHEDULE_VOLUME, ErrorKind::Rejected),
+    ],
     success: &[],
     unlisted: safe_cex_engine::classify::Verdict::Unknown(None),
     status: &[],
 };
+const WALLET_MISSING: &str = "User or API Wallet does not exist.";
+const SCHEDULE_VOLUME: &str = "Cannot set scheduled cancel time until enough volume traded";
+const POST_ONLY: &str = "Post only order would have immediately matched";
+const fn refusal(message: &'static str, kind: ErrorKind) -> safe_cex_engine::classify::Row {
+    safe_cex_engine::classify::Row {
+        key: safe_cex_engine::classify::Key::Message(message),
+        verdict: safe_cex_engine::classify::Verdict::Refused(kind),
+        only: None,
+    }
+}
+const fn place_refusal(message: &'static str) -> safe_cex_engine::classify::Row {
+    safe_cex_engine::classify::Row {
+        key: safe_cex_engine::classify::Key::Message(message),
+        verdict: safe_cex_engine::classify::Verdict::Refused(ErrorKind::Rejected),
+        only: Some(safe_cex_engine::classify::Intent::Place),
+    }
+}
+/// The fixed text of a venue message: it appends " asset=N" and embeds live values.
+fn table_message(message: &str) -> &str {
+    let message = message
+        .split_once(" asset=")
+        .map_or(message, |(text, _)| text);
+    for fixed in [POST_ONLY, SCHEDULE_VOLUME] {
+        if message.starts_with(fixed) {
+            return fixed;
+        }
+    }
+    if message.starts_with("User or API Wallet ") && message.ends_with(" does not exist.") {
+        return WALLET_MISSING;
+    }
+    message
+}
 // Official Error responses / PerpMargin is a definite per-row rejection.
 // https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses
 const BATCH: safe_cex_engine::classify::CodeTable = safe_cex_engine::classify::CodeTable {
-    rows: &[safe_cex_engine::classify::Row {
-        key: safe_cex_engine::classify::Key::Message("Insufficient margin to place order."),
-        verdict: safe_cex_engine::classify::Verdict::Refused(ErrorKind::Rejected),
-        only: Some(safe_cex_engine::classify::Intent::Place),
-    }],
+    rows: &[
+        place_refusal("Insufficient margin to place order."),
+        place_refusal("Post only order would have immediately matched"),
+        place_refusal("Reduce only order would increase position."),
+        place_refusal("Order must have minimum value of $10."),
+        place_refusal("Order could not immediately match against any resting orders."),
+        place_refusal("Order has invalid price."),
+        place_refusal("Order has invalid size."),
+        place_refusal("Order has zero size."),
+        place_refusal("Builder fee has not been approved."),
+        place_refusal("Reduce-only is invalid for spot trading."),
+    ],
     success: &[],
     unlisted: safe_cex_engine::classify::Verdict::Unknown(Some(ErrorKind::Rejected)),
     status: &[],
@@ -492,11 +674,18 @@ impl Hyperliquid {
     ) -> Result<(), safe_cex_engine::request_context::Error> {
         let native = safe_cex_engine::classify::Native {
             code: safe_cex_engine::classify::NativeCode::None,
-            message: native_message.unwrap_or(&error.message),
+            message: table_message(native_message.unwrap_or(&error.message)),
         };
         cx.http_write_failure(
             &request.context,
-            &NATIVE_ERROR,
+            if !error.uncertain
+                && (self.protective_replacement_active()
+                    && known_protective_refusal(&error.message))
+            {
+                &PROTECTIVE_REFUSAL
+            } else {
+                &NATIVE_ERROR
+            },
             Some(&native),
             error.message.clone(),
             None,
@@ -540,7 +729,7 @@ impl Hyperliquid {
             && statuses
                 .iter()
                 .skip(1)
-                .any(|status| matches!(status, Status::Text(text) if text == "waitingForFill"))
+                .any(|status| matches!(status, Status::Text(text) if deferred_child(text)))
         {
             return self.report_attached_order(cx, request, statuses, message);
         }
@@ -563,7 +752,7 @@ impl Hyperliquid {
                 Status::Error { error } if !(idempotent_cancel && only_terminal_cancel(error)) => {
                     BatchItem::Native(Native {
                         code: NativeCode::None,
-                        message: error,
+                        message: table_message(error),
                     })
                 }
                 Status::Text(text) => match &request.effect {
@@ -582,7 +771,7 @@ impl Hyperliquid {
             .collect();
         cx.http_write_batch(
             &request.context,
-            &BATCH,
+            if statuses.iter().all(|s| matches!(s, Status::Error { .. })) && (self.protective_replacement_active() && statuses.iter().all(|s| matches!(s, Status::Error { error } if known_protective_refusal(error)))) { &PROTECTIVE_REFUSAL } else { &BATCH },
             statuses.len(),
             &items,
             if message.is_empty() && statuses.iter().any(|status| matches!(status, Status::Text(_))) {
@@ -615,13 +804,13 @@ impl Hyperliquid {
         for (index, status) in statuses.iter().enumerate() {
             let error = match status {
                 Status::Error { error } => error.as_str(),
-                Status::Text(text) if index > 0 && text == "waitingForFill" => continue,
+                Status::Text(text) if index > 0 && deferred_child(text) => continue,
                 Status::Text(_) => "Unknown Hyperliquid order status",
                 _ => continue,
             };
             let native = Native {
                 code: NativeCode::None,
-                message: error,
+                message: table_message(error),
             };
             let fact = cx.classify_write(
                 &request.context,
@@ -646,4 +835,27 @@ impl Hyperliquid {
         };
         cx.http_write_fact(&request.context, fact, None).map(drop)
     }
+}
+
+/// A child still waiting on its parent: an unfilled parent's child says
+/// waitingForFill, a filled parent's says waitingForTrigger.
+fn deferred_child(text: &str) -> bool {
+    text == "waitingForFill" || text == "waitingForTrigger"
+}
+
+const PROTECTIVE_REFUSAL: safe_cex_engine::classify::CodeTable =
+    safe_cex_engine::classify::CodeTable {
+        rows: &[],
+        success: &[],
+        status: &[],
+        unlisted: safe_cex_engine::classify::Verdict::Refused(ErrorKind::Rejected),
+    };
+pub(super) fn known_protective_refusal(message: &str) -> bool {
+    let message = table_message(message);
+    matches!(
+        message,
+        "Invalid TP/SL price." | "Price must be divisible by tick size."
+    ) || BATCH.rows.iter().any(
+        |row| matches!(row.key, safe_cex_engine::classify::Key::Message(text) if text == message),
+    )
 }

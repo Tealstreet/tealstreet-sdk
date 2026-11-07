@@ -81,13 +81,21 @@ fn header<'a>(request: &'a safe_cex_engine::HttpRequest, name: &str) -> Option<&
 /// The read is sent with the current Bearer and, unanswered, ends at its own
 /// 20 s window as a read failure with no financial outcome.
 fn ends_at_its_window(command: Command, id: u32, path: &str) {
+    let budget = match &command {
+        Command::Query {
+            query: Query::OrderHistory { .. },
+            ..
+        } => 20_000.,
+        Command::FetchLeverage { .. } => 20_000.,
+        _ => panic!("unexpected private read kind"),
+    };
     let mut h = private();
     let from = h.actions.len();
     h.command(command);
     let request = h.take(path);
     assert_eq!(header(&request, "Authorization"), Some("Bearer jwt"));
-    let timer = window(&h, from, 20_000.).expect("the private read has no deadline");
-    h.now += 20_000.;
+    let timer = window(&h, from, budget).expect("the private read has no deadline");
+    h.now += budget;
     h.e.handle(h.now, Event::TimerFired { timer });
     h.collect();
     let error = failed(&h, id).expect("the private read never ended");
@@ -125,7 +133,7 @@ fn a_later_history_page_that_never_answers_ends_at_the_walk_window() {
     let from = h.actions.len();
     h.command(order_history(82));
     let first = h.take("/orders-history");
-    let deadline = h.now + 20_000.;
+    let deadline = h.now + 25_000.;
     window(&h, from, 20_000.).expect("the history walk has no deadline");
     h.now += 5_000.;
     let page = h.actions.len();
@@ -154,4 +162,33 @@ fn a_leverage_read_that_never_answers_fails_at_its_window() {
 #[test]
 fn an_auth_refusal_fails_a_waiting_leverage_read_typed() {
     auth_refusal_fails_it_typed(fetch_leverage(85), 85, "/account/margin");
+}
+
+#[test]
+fn a_refused_auth_ends_the_start_with_the_reason() {
+    let mut h = Harness::keyed(
+        Options {
+            paradex_address: Some("0x0123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Options::default()
+        },
+        STARK_KEY,
+    );
+    h.reply("/markets", MARKETS);
+    h.reply("summary", TICKERS);
+    h.reply(
+        "/system/config",
+        r#"{"starknet_chain_id":"PRIVATE_SN_PARACLEAR_MAINNET"}"#,
+    );
+    let auth = h.take("/auth/");
+    h.actions.clear();
+    h.respond(
+        auth,
+        401,
+        r#"{"error":"INVALID_SIGNATURE","message":"bad"}"#,
+    );
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        safe_cex_engine::Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
 }

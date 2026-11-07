@@ -4,6 +4,9 @@ use crate::{Options, Pending};
 use safe_cex_engine::request_context::{Context, Error, HttpAction, Preparation};
 use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, HttpRequest, Venue, VenueError};
 
+// Setting reads issued before discovery loads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
+
 struct Fixture {
     inner: TxFlow,
     pressure: bool,
@@ -306,7 +309,11 @@ fn released_network_and_timeout_retire_without_a_mutation_outcome() {
     for timeout in [false, true] {
         let mut e = engine(false, 1000.);
         let r = released(&mut e, 1000.);
-        let now = if timeout { 21_000. } else { 1001. };
+        let now = if timeout {
+            DISCOVERY_DEADLINE_MS + 1000.
+        } else {
+            1001.
+        };
         if timeout {
             response(&mut e, &r, now, "{");
         } else {

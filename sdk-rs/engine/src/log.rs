@@ -31,13 +31,39 @@ impl Level {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Str(String),
     Num(f64),
     Bool(bool),
     /// A field whose value must never leave the engine.
     Redacted,
+    /// Closed engine vocabulary, encoded as the same JSON string without allocation.
+    StaticStr(&'static str),
+}
+
+impl Value {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Str(text) => Some(text),
+            Self::StaticStr(text) => Some(text),
+            _ => None,
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Str(a), Self::Str(b)) => a == b,
+            (Self::StaticStr(a), Self::StaticStr(b)) => a == b,
+            (Self::StaticStr(a), Self::Str(b)) | (Self::Str(b), Self::StaticStr(a)) => *a == b,
+            (Self::Num(a), Self::Num(b)) => a == b,
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Redacted, Self::Redacted) => true,
+            _ => false,
+        }
+    }
 }
 
 /// Wraps a sensitive value so only its presence reaches a notice.
@@ -124,8 +150,9 @@ pub struct LogEvent {
 /// on a declared socket role, HTTP failures, and auth failures it sees
 /// (`deactivate`, and auth-kind startup or command failures); venues emit the
 /// rest through `Cx::event`. Venues tag every credential rejection
-/// `auth.rejected`: one engine event counts at most one auth failure, however
-/// many of these paths report it.
+/// `auth.rejected`, and `Cx::retried_failure_error` does the same for a private
+/// read the venue refused with an auth kind: one engine event counts at most one
+/// auth failure, however many of these paths report it.
 pub mod code {
     pub const WS_CLOSED: &str = "ws.closed";
     pub const WS_RECONNECT: &str = "ws.reconnect";
@@ -137,6 +164,17 @@ pub mod code {
     pub const SNAPSHOT_DISCARDED: &str = "snapshot.discarded";
     /// Counted once per report: one skipped row, or one summary of several.
     pub const ROW_SKIPPED: &str = "row.skipped";
+    /// Frame-fed: a confirmed settings write now outlasts the data source until it agrees.
+    pub const SETTINGS_HELD: &str = "settings.held";
+    /// Frame-fed: uncertain writes on `symbols` (comma-separated; empty: the
+    /// account) wait for the data source's orders read; ask for one
+    /// (`refreshAccountOrders`) once `liftAfterMs` has passed.
+    pub const ORDERS_HELD: &str = "orders.held";
+    /// Frame-fed: ask `refreshAccountOrders` once for an Unknown cancel;
+    /// `symbols` is comma-separated, empty for the account. This is no fence.
+    pub const ORDERS_REFRESH: &str = "orders.refresh";
+    /// Frame-fed: the data source never agreed with a held setting; its value now applies.
+    pub const SETTINGS_HOLD_EXPIRED: &str = "settings.hold_expired";
 
     /// A replyless command diagnostic; attributed commands use CommandError.
     pub const COMMAND_FAILED: &str = "command.failed";
@@ -154,12 +192,18 @@ pub mod code {
     // Not counted. Hosts and apps match these codes, never message text.
     /// A socket dropped and the venue is reconnecting it.
     pub const WS_DISCONNECTED: &str = "ws.disconnected";
+    /// A public socket has not opened in 20 s; a browser sees a refused upgrade only as this.
+    pub const PUBLIC_FEED_UNAVAILABLE: &str = "ws.public_unavailable";
     /// A private or user-data stream could not be established or kept alive.
     pub const STREAM_UNAVAILABLE: &str = "stream.unavailable";
     /// A frame or response could not be decoded and was ignored.
     pub const STREAM_MALFORMED: &str = "stream.malformed";
     /// The venue refused a subscription, or one would exceed its limits.
     pub const SUBSCRIPTION_REJECTED: &str = "subscription.rejected";
+    /// A repair ran: its topic, whether it resubscribed or reconnected, and the feed's last data.
+    pub const SUBSCRIPTION_REPAIRED: &str = "subscription.repaired";
+    /// The subscriptions one account's socket holds, against a venue's per-IP cap.
+    pub const SUBSCRIPTION_COUNT: &str = "subscription.count";
     /// A REST read failed; the venue retries on its own schedule.
     pub const REQUEST_FAILED: &str = "request.failed";
     /// Reads are paused after the venue limited them.
@@ -228,5 +272,22 @@ impl Health {
             _ => return,
         };
         *counter = counter.saturating_add(1);
+    }
+}
+
+#[cfg(test)]
+mod value_tests {
+    use super::Value;
+
+    #[test]
+    fn static_and_owned_strings_have_equal_text_value() {
+        assert_eq!(
+            Value::StaticStr("neverStarted"),
+            Value::from("neverStarted")
+        );
+        assert_eq!(Value::from("timeout"), Value::StaticStr("timeout"));
+        assert_ne!(Value::StaticStr("started"), Value::StaticStr("failed"));
+        assert_ne!(Value::StaticStr("1"), Value::Num(1.));
+        assert_ne!(Value::Num(f64::NAN), Value::Num(f64::NAN));
     }
 }

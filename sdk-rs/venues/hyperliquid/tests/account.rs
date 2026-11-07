@@ -1050,3 +1050,258 @@ fn unified_spot_state_publishes_spot_holdings_as_coins() {
     // Valued at mark (100), as collateral is, not the mid that allMids moved to 110.
     assert_eq!(btc.notional, 50.0);
 }
+
+#[test]
+fn a_real_trigger_row_with_a_null_tif_stays_visible() {
+    let (mut e, s) = ready("disabled");
+    let row = r#"{"coin":"BTC","oid":77,"side":"A","limitPx":"1920.0","triggerPx":"1929.0","isTrigger":true,"isPositionTpsl":false,"reduceOnly":true,"orderType":"Stop Market","origSz":"0.005","sz":"0.005","tif":null,"cloid":null,"timestamp":1793547192000}"#;
+    let (_, _) = reconnect(&mut e, s, 40000.0);
+    let requests = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let orders = format!("[{row}]");
+    for r in requests {
+        let body = if kind(&r) == "frontendOpenOrders" {
+            orders.as_str()
+        } else {
+            STATE
+        };
+        e.handle(
+            40001.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+    let order = e.store().order("77").expect("the stop shows");
+    assert_eq!(order.kind, safe_cex_engine::model::OrderType::StopLoss);
+    assert_eq!(order.amount, 0.005);
+}
+
+#[test]
+fn a_triggered_stop_does_not_show_price_zero() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":78,"side":"A","limitPx":"88.5","triggerPx":"0.0","orderType":"Stop Market","origSz":"1","sz":"1","tif":"Gtc"},"status":"triggered"}]}"#,
+    );
+    assert_eq!(e.store().order("78").unwrap().price, 88.5);
+}
+
+#[test]
+fn a_fill_arms_an_order_read_because_partial_fills_send_no_update() {
+    let (mut e, s) = ready("disabled");
+    e.drain_actions().for_each(drop);
+    message(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"userFills","data":{"user":"0x14791697260e4c9a71f18484c9f997b308e59325","fills":[{"coin":"BTC","px":"90","sz":"0.1","side":"B","time":2000,"startPosition":"0","dir":"Open Long","closedPnl":"0","hash":"0x0","oid":9,"crossed":true,"fee":"0","tid":5,"feeToken":"USDC"}]}}"#,
+    );
+    let armed = e
+        .drain_actions()
+        .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if at_ms < 3001.0));
+    assert!(armed);
+}
+
+// Live, ZRO: 160 closing in five partial fills; the feed froze at 49.3 and later frames omit the coin.
+#[test]
+fn a_state_frame_that_omits_a_coin_closes_its_position() {
+    let (mut e, s) = ready("disabled");
+    let frame = |time: u64, rows: &str| {
+        format!(
+            r#"{{"channel":"clearinghouseState","data":{{"user":"x","dex":"","clearinghouseState":{{"assetPositions":[{rows}],"marginSummary":{{"accountValue":"1000","totalMarginUsed":"0","totalNtlPos":"0","totalRawUsd":"1000"}},"withdrawable":"1000","time":{time}}}}}}}"#
+        )
+    };
+    let row = |coin: &str, szi: &str| {
+        format!(
+            r#"{{"position":{{"coin":"{coin}","szi":"{szi}","entryPx":"100","positionValue":"100","unrealizedPnl":"0","liquidationPx":null,"marginUsed":"1","leverage":{{"type":"cross","value":10}}}}}}"#
+        )
+    };
+    let both = format!("{},{}", row("BTC", "49.3"), row("ETH", "2"));
+    message(&mut e, s, 3000.0, &frame(3000, &both));
+    assert!(
+        e.store()
+            .positions()
+            .iter()
+            .any(|p| p.symbol == "BTC-PERP" && p.contracts == 49.3)
+    );
+    message(&mut e, s, 4000.0, &frame(4000, &row("ETH", "2")));
+    let symbols: Vec<_> = e
+        .store()
+        .positions()
+        .iter()
+        .map(|p| p.symbol.as_str())
+        .collect();
+    assert_eq!(symbols, ["ETH-PERP"]);
+}
+
+#[test]
+fn failed_hip3_orders_retry_after_peer_scope_loaded_and_honor_retry_after() {
+    let (mut e, socket) = ready_with_dex("disabled", true);
+    assert!(e.store().loaded().orders);
+    let (_socket, _) = reconnect(&mut e, socket, 2000.0);
+    let mut requests = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut failed = false;
+    let mut retained = Vec::new();
+    for _ in 0..20 {
+        for request in requests {
+            let body: serde_json::Value =
+                serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            if kind(&request) == "frontendOpenOrders" && body["dex"] == "xyz" {
+                failed = true;
+                e.handle(
+                    3000.0,
+                    Event::HttpResponse {
+                        request: request.id,
+                        response: safe_cex_engine::Response {
+                            status: 429,
+                            headers: "Retry-After: 12\r\n",
+                            body: "Too many requests",
+                        },
+                    },
+                );
+            } else if kind(&request) == "frontendOpenOrders" {
+                reply(&mut e, &request, 200, "[]");
+            } else if kind(&request) == "clearinghouseState" {
+                reply(&mut e, &request, 200, STATE);
+            }
+        }
+        requests = Vec::new();
+        for action in prepared_now(&mut e) {
+            if let Action::Http(request) = action {
+                requests.push(request);
+            } else {
+                retained.push(action);
+            }
+        }
+        if requests.is_empty() {
+            break;
+        }
+    }
+    assert!(failed, "the failed read must belong to the HIP-3 scope");
+    let actions = retained;
+    let timer = actions
+        .into_iter()
+        .find_map(|action| {
+            if let Action::SetTimer { timer, at_ms } = action {
+                (at_ms == 15_000.0).then_some(timer)
+            } else {
+                None
+            }
+        })
+        .expect("an already-loaded peer scope cannot suppress the 12-second retry");
+    e.handle(15_000.0, Event::TimerFired { timer });
+    let retried = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|action| {
+            if let Action::Http(request) = action {
+                Some(request)
+            } else {
+                None
+            }
+        })
+        .find(|request| kind(request) == "frontendOpenOrders")
+        .expect("the failed orders scope must be retried");
+    let body: serde_json::Value = serde_json::from_str(retried.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["dex"], "xyz");
+    reply(&mut e, &retried, 200, "[]");
+    assert!(e.store().loaded().orders);
+}
+
+#[test]
+fn public_startup_diagnostics_never_report_private_order_reads() {
+    use safe_cex_engine::Venue;
+    use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+    let venue = Hyperliquid::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    let (ready, _) = ready("disabled");
+    let mut store = safe_cex_engine::Store::default();
+    store.set_markets(ready.store().markets().to_vec());
+    assert!(!store.loaded().orders);
+    assert!(
+        venue
+            .startup_diagnostics(&store)
+            .contains(&("stage", "tickers".into()))
+    );
+}
+
+#[test]
+fn startup_watchdog_exposes_stage_original_deadline_and_rate_limit_count() {
+    let (mut e, socket) = ready("disabled");
+    e.set_account_startup(true);
+    let (_socket, _) = reconnect(&mut e, socket, 2000.0);
+    for action in prepared_now(&mut e) {
+        if let Action::Http(request) = action {
+            if kind(&request) == "frontendOpenOrders" {
+                reply(&mut e, &request, 429, "Too many requests");
+            } else if kind(&request) == "clearinghouseState" {
+                reply(&mut e, &request, 200, STATE);
+            }
+        }
+    }
+    e.store_mut().reset_account();
+    e.store_mut().set_balance(Default::default());
+    e.store_mut().set_positions(vec![]);
+    prepared_now(&mut e);
+    e.handle(61_000.0, Event::PollScaleChanged { scale: 1.0 });
+    let notice = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "startup.incomplete" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("the startup watchdog must report the unloaded orders section");
+    assert!(
+        notice
+            .fields
+            .contains(&("stage", "frontendOpenOrders".into()))
+    );
+    assert!(notice.fields.contains(&("elapsedMs", 60_000.0.into())));
+    assert!(notice.fields.contains(&("deadlineMs", 60_000.0.into())));
+    assert!(notice.fields.contains(&("readTimeoutMs", 20_000.0.into())));
+    assert!(notice.fields.contains(&("http429Count", 1.0.into())));
+    e.handle(361_000.0, Event::PollScaleChanged { scale: 1.0 });
+    let repeated = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "startup.incomplete" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("a repeated notice must retain the original startup deadline");
+    assert!(repeated.fields.contains(&("elapsedMs", 360_000.0.into())));
+    assert!(repeated.fields.contains(&("deadlineMs", 60_000.0.into())));
+}

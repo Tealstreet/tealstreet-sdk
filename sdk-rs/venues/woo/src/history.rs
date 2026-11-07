@@ -8,6 +8,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Step};
 use safe_cex_engine::request_context::Operation;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError, num};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -439,7 +440,7 @@ fn side(raw: &str) -> Option<(&'static str, &'static str)> {
         .replace('_', " ")
         .split_whitespace()
         .collect::<Vec<_>>()
-        .join(" ");
+        .join_with(" ");
     Some(match value.as_str() {
         "BUY" => ("buy", "both"),
         "SELL" => ("sell", "both"),
@@ -569,13 +570,22 @@ impl Woo {
             Self::fail_local_history(cx, "Invalid WOO history symbol, range or limit");
             return;
         }
-        let complete = route == Route::Income && from.is_some() && to.is_some() && limit.is_none();
-        let limit = limit.unwrap_or(if route == Route::Orders || complete {
-            100_000
-        } else {
-            500
-        }) as usize;
-        let window = (from, to.or(from.map(|_| cx.now)));
+        // A window with no limit walks to its start; no default may stop it.
+        let open_window = from.is_some() && limit.is_none();
+        let complete = route == Route::Income && open_window;
+        let limit = limit.map_or(
+            if complete {
+                100_000
+            } else if open_window {
+                usize::MAX
+            } else if route == Route::Orders {
+                100_000
+            } else {
+                500
+            },
+            |limit| limit as usize,
+        );
+        let window = (from, to.or(from.map(|_| cx.protocol_now())));
         if window.0.zip(window.1).is_some_and(|(a, b)| a > b) {
             Self::fail_local_history(cx, "Invalid WOO history range");
             return;
@@ -725,7 +735,7 @@ impl Woo {
                 .into_iter()
                 .map(|(k, v)| format!("{k}={v}"))
                 .collect::<Vec<_>>()
-                .join("&");
+                .join_with("&");
             cx.request_streamed(
                 Method::Get,
                 format!("{}{path}?{query}", self.rest),

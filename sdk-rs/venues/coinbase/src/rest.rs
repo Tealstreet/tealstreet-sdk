@@ -3,6 +3,28 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::{Cx, Method, RequestRoute, TimerId, Venue};
 use std::collections::VecDeque;
 
+/// Existing Coinbase REST HTTP emission boundary.
+pub(crate) fn emit<P>(
+    cx: &mut Cx<'_, P>,
+    method: Method,
+    url: String,
+    headers: Vec<(&'static str, String)>,
+    body: Option<String>,
+    pending: P,
+) -> safe_cex_engine::RequestId {
+    struct Packet<P> {
+        method: Method,
+        body: Option<String>,
+        pending: P,
+    }
+    let request = Packet {
+        method,
+        body,
+        pending,
+    };
+    cx.request(request.method, url, headers, request.body, request.pending)
+}
+
 struct Outbound {
     method: Method,
     path: String,
@@ -94,7 +116,7 @@ impl Coinbase {
             credentials
                 .ok_or_else(|| "Coinbase credentials unavailable".to_owned())
                 .and_then(|credentials| {
-                    credentials.headers(request.method, &request.path, cx.now, |bytes| {
+                    credentials.headers(request.method, &request.path, cx.protocol_now(), |bytes| {
                         cx.fill_signing_entropy(bytes)
                     })
                 })
@@ -123,7 +145,14 @@ impl Coinbase {
         } else {
             format!("https://api.coinbase.com{}", request.path)
         };
-        let id = cx.request(request.method, url, headers, request.body, request.pending);
+        let id = emit(
+            cx,
+            request.method,
+            url,
+            headers,
+            request.body,
+            request.pending,
+        );
         if primary_route {
             cx.route_request(id, RequestRoute::Primary);
         }

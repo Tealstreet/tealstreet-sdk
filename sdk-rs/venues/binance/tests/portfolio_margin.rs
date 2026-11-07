@@ -10,7 +10,7 @@ use support::Harness;
 const POSITION_RISK: &str = r#"[{"entryPrice":"95000.0","leverage":"20","markPrice":"96000.0","maxNotionalValue":"6000000.0","positionAmt":"0.010","notional":"960.0","symbol":"BTCUSDT","unRealizedProfit":"10.0","liquidationPrice":"80000.5","positionSide":"BOTH","updateTime":1720736417660}]"#;
 const BALANCE: &str = r#"[{"asset":"USDT","totalWalletBalance":"1000.0","crossMarginAsset":"0","crossMarginBorrowed":"0","crossMarginFree":"900.0","crossMarginInterest":"0","crossMarginLocked":"0","umWalletBalance":"1000.0","umUnrealizedPNL":"10.0","cmWalletBalance":"0","cmUnrealizedPNL":"0","updateTime":0,"negativeBalance":"0"},{"asset":"BNB","totalWalletBalance":"5","crossMarginFree":"5","umUnrealizedPNL":"0"}]"#;
 const OPEN_ORDERS: &str = r#"[{"avgPrice":"0.00000","clientOrderId":"x-s3vFFRQpresting","cumQuote":"0","executedQty":"0","orderId":1917641,"origQty":"0.40","origType":"LIMIT","price":"90000","reduceOnly":false,"side":"BUY","positionSide":"BOTH","status":"NEW","symbol":"BTCUSDT","time":1579276756075,"timeInForce":"GTC","type":"LIMIT","updateTime":1579276756075,"selfTradePreventionMode":"NONE","goodTillDate":0}]"#;
-const OPEN_CONDITIONAL: &str = r#"[{"newClientStrategyId":"abc","strategyId":123445,"strategyStatus":"NEW","strategyType":"TAKE_PROFIT_MARKET","origQty":"0.010","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","stopPrice":"99000","symbol":"BTCUSDT","bookTime":1566818724710,"updateTime":1566818724722,"timeInForce":"GTC","workingType":"MARK_PRICE","priceProtect":false}]"#;
+const OPEN_CONDITIONAL: &str = r#"[{"clientAlgoId":"abc","algoId":123445,"algoStatus":"NEW","orderType":"TAKE_PROFIT_MARKET","quantity":"0.010","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","triggerPrice":"99000","symbol":"BTCUSDT","bookTime":1566818724710,"updateTime":1566818724722,"timeInForce":"GTC","workingType":"MARK_PRICE","priceProtect":false}]"#;
 
 fn ready() -> Harness {
     ready_with(OPEN_ORDERS)
@@ -41,11 +41,12 @@ fn ready_with(open_orders: &str) -> Harness {
     h.respond("/papi/v1/um/positionRisk", 200, POSITION_RISK);
     h.respond("/papi/v1/balance", 200, BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, open_orders);
-    h.respond("/papi/v1/um/conditional/openOrders", 200, OPEN_CONDITIONAL);
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, OPEN_CONDITIONAL);
     for path in ["/public/ws", "/market/ws", "/pm/ws"] {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
     }
+    h.answer_open_position_read();
     h
 }
 
@@ -166,7 +167,7 @@ fn orders_go_one_at_a_time_and_report_their_client_ids() {
 }
 
 #[test]
-fn a_full_position_stop_is_a_conditional_order_for_the_position_size() {
+fn a_full_position_stop_uses_the_algo_close_position_contract() {
     let mut h = ready();
     let mut stop = limit(0.0, 85000.0);
     stop.kind = OrderType::StopLoss;
@@ -176,23 +177,24 @@ fn a_full_position_stop_is_a_conditional_order_for_the_position_size() {
         command: 2,
         orders: vec![stop],
     }));
-    let request = h.take("/papi/v1/um/conditional/order");
+    let request = h.take("/papi/v1/um/algo/order");
+    assert_eq!(param(&request.url, "type").as_deref(), Some("STOP_MARKET"));
     assert_eq!(
-        param(&request.url, "strategyType").as_deref(),
-        Some("STOP_MARKET")
+        param(&request.url, "triggerPrice").as_deref(),
+        Some("85000")
     );
-    assert_eq!(param(&request.url, "stopPrice").as_deref(), Some("85000"));
-    assert_eq!(param(&request.url, "quantity").as_deref(), Some("0.01"));
-    assert_eq!(param(&request.url, "reduceOnly").as_deref(), Some("true"));
-    assert_eq!(param(&request.url, "closePosition"), None);
-    assert_eq!(param(&request.url, "algoType"), None);
-    let id = param(&request.url, "newClientStrategyId").expect("cancellable by its strategy id");
-    h.reply(
-        request.id,
-        200,
-        "",
-        r#"{"strategyId":1,"strategyStatus":"NEW"}"#,
+    assert_eq!(param(&request.url, "quantity"), None);
+    assert_eq!(param(&request.url, "reduceOnly"), None);
+    assert_eq!(
+        param(&request.url, "closePosition").as_deref(),
+        Some("true")
     );
+    assert_eq!(
+        param(&request.url, "algoType").as_deref(),
+        Some("CONDITIONAL")
+    );
+    let id = param(&request.url, "clientAlgoId").expect("cancellable by its algo id");
+    h.reply(request.id, 200, "", r#"{"algoId":1,"algoStatus":"NEW"}"#);
     assert_eq!(h.result(2), Some(&Ok(format!(r#"["{id}"]"#))));
 }
 
@@ -216,7 +218,7 @@ fn close_flag_with_explicit_amount_preserves_pm_stop_size() {
                     command: 5,
                     orders: vec![stop],
                 }));
-                let request = h.take("/papi/v1/um/conditional/order");
+                let request = h.take("/papi/v1/um/algo/order");
                 assert_eq!(request.method, Method::Post);
                 assert_eq!(
                     param(&request.url, "quantity").as_deref(),
@@ -254,12 +256,12 @@ fn explicit_pm_stop_size_does_not_cancel_an_existing_full_stop() {
         command: 6,
         orders: vec![stop],
     }));
-    assert_eq!(h.take("/papi/v1/um/conditional/order").method, Method::Post);
+    assert_eq!(h.take("/papi/v1/um/algo/order").method, Method::Post);
     assert_eq!(h.engine.store().order(&existing.id), Some(&existing));
 }
 
 #[test]
-fn cancels_by_client_id_and_cancel_all_covers_conditional_orders() {
+fn cancels_regular_by_client_and_algo_by_native_id_and_cancel_all_covers_both() {
     let mut h = ready();
     h.event(Event::Command(Command::CancelOrders {
         command: 3,
@@ -272,12 +274,10 @@ fn cancels_by_client_id_and_cancel_all_covers_conditional_orders() {
         Some("x-s3vFFRQpresting")
     );
     h.reply(regular.id, 200, "", r#"{"symbol":"BTCUSDT","orderId":1917641,"clientOrderId":"x-s3vFFRQpresting","origQty":"0.40","executedQty":"0","status":"CANCELED"}"#);
-    let conditional = h.take("/papi/v1/um/conditional/order");
-    assert_eq!(
-        param(&conditional.url, "newClientStrategyId").as_deref(),
-        Some("abc")
-    );
-    h.reply(conditional.id, 200, "", r#"{"symbol":"BTCUSDT","strategyId":123445,"newClientStrategyId":"abc","strategyStatus":"CANCELED"}"#);
+    let conditional = h.take("/papi/v1/um/algo/order");
+    assert_eq!(param(&conditional.url, "algoId").as_deref(), Some("123445"));
+    h.reply(conditional.id, 200, "", r#"{"complete":true}"#);
+    h.pm_cancel_proof(123445, "abc", "BTCUSDT");
     assert_eq!(
         h.engine.store().order("abc").unwrap().status,
         OrderStatus::Canceled
@@ -289,7 +289,7 @@ fn cancels_by_client_id_and_cancel_all_covers_conditional_orders() {
     }));
     assert!(h.has_request("/papi/v1/um/allOpenOrders"));
     assert!(
-        h.has_request("/papi/v1/um/conditional/allOpenOrders"),
+        h.has_request("/papi/v1/um/algo/allOpenOrders"),
         "TS skipped this one"
     );
 }
@@ -332,8 +332,8 @@ fn pm_strategy_receipt_uses_final_renamed_identity_before_write() {
         command: 92,
         orders: vec![stop],
     }));
-    let request = h.take("/papi/v1/um/conditional/order");
-    let id = param(&request.url, "newClientStrategyId").unwrap();
+    let request = h.take("/papi/v1/um/algo/order");
+    let id = param(&request.url, "clientAlgoId").unwrap();
     assert_eq!(
         h.progress,
         vec![(
@@ -373,21 +373,21 @@ fn unproven_pm_ids_require_the_native_client_identity_echo() {
                 orders: vec![input],
             }));
             let request = h.take(if algo {
-                "/papi/v1/um/conditional/order"
+                "/papi/v1/um/algo/order"
             } else {
                 "/papi/v1/um/order"
             });
             let expected = param(
                 &request.url,
                 if algo {
-                    "newClientStrategyId"
+                    "clientAlgoId"
                 } else {
                     "newClientOrderId"
                 },
             )
             .unwrap();
             let (native, field) = if algo {
-                ("strategyId", "newClientStrategyId")
+                ("algoId", "clientAlgoId")
             } else {
                 ("orderId", "clientOrderId")
             };
@@ -416,4 +416,162 @@ fn unproven_pm_ids_require_the_native_client_identity_echo() {
     for (algo, echo, ids, expected) in observations {
         assert_eq!(ids, expected, "algo={algo} echo={echo}");
     }
+}
+
+fn pm_stop_setup() -> Harness {
+    ready_with(&OPEN_ORDERS.replace(r#""type":"LIMIT""#, r#""type":"STOP""#))
+}
+fn pm_amend_stays_refused(h: &mut Harness) {
+    // A buy stop above the price stands, so the venue's own stop-limit refusal decides.
+    h.engine.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 85_000.;
+        ticker.last = 85_000.;
+    });
+    h.event(Event::Command(Command::AmendOrder {
+        command: 990,
+        id: "x-s3vFFRQpresting".into(),
+        price: Some(91000.),
+        amount: None,
+    }));
+    assert!(
+        !h.requests.iter().any(|r| r.method != Method::Get),
+        "invalid row must not remove stop-limit protection: {:?}",
+        h.paths()
+    );
+    assert!(
+        h.failures
+            .iter()
+            .any(|(id, e)| *id == 990 && e.kind == Some(safe_cex_engine::ErrorKind::Unsupported)),
+        "{:?}",
+        h.failures
+    );
+}
+#[test]
+fn pm_native_limit_stop_refusal_control() {
+    let mut h = pm_stop_setup();
+    pm_amend_stays_refused(&mut h);
+}
+#[test]
+fn pm_rejected_numeric_row_cannot_change_retained_stop_metadata() {
+    let mut h = pm_stop_setup();
+    h.advance(10000.);
+    h.respond(
+        "/papi/v1/um/openOrders",
+        200,
+        &OPEN_ORDERS.replace(r#""origQty":"0.40""#, r#""origQty":"NaN""#),
+    );
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, OPEN_CONDITIONAL);
+    assert_eq!(
+        h.engine.store().order("x-s3vFFRQpresting").unwrap().kind,
+        OrderType::StopLoss
+    );
+    pm_amend_stays_refused(&mut h);
+}
+
+const PM_TRAILING: &str = r#"[{"clientAlgoId":"trail","algoId":777,"algoStatus":"NEW","orderType":"TRAILING_STOP_MARKET","quantity":"0.010","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","triggerPrice":"98","symbol":"BTCUSDT","activatePrice":"103","callbackRate":"1.5","bookTime":1,"updateTime":1,"timeInForce":"GTC","workingType":"CONTRACT_PRICE","priceProtect":false}]"#;
+
+fn trailing(price: f64) -> PlaceOrderOpts {
+    let mut order = limit(0.01, price);
+    order.kind = OrderType::TrailingStopLoss;
+    order.side = OrderSide::Sell;
+    order.reduce_only = Some(true);
+    order
+}
+
+#[test]
+fn a_pm_trailing_stop_is_reduce_only_inside_the_10_percent_callback_range() {
+    let mut h = ready();
+    h.requests.clear();
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 31,
+        orders: vec![trailing(89.0)],
+    }));
+    assert!(
+        h.requests.iter().all(|r| r.method == Method::Get),
+        "{:?}",
+        h.paths()
+    );
+    let refused = h.result(31).unwrap().as_ref().unwrap_err();
+    assert!(refused.contains("0.1%-10% callback range"), "{refused}");
+
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 32,
+        orders: vec![trailing(98.0)],
+    }));
+    let sent = h.take("/papi/v1/um/algo/order");
+    assert_eq!(
+        param(&sent.url, "type").as_deref(),
+        Some("TRAILING_STOP_MARKET")
+    );
+    assert_eq!(param(&sent.url, "callbackRate").as_deref(), Some("2"));
+    assert_eq!(param(&sent.url, "reduceOnly").as_deref(), Some("true"));
+}
+
+#[test]
+fn a_refused_pm_trailing_replacement_puts_back_the_native_rate_and_activation_price() {
+    let mut h = Harness::started(Options {
+        key: Some("api-key".into()),
+        secret: Some("secret".into()),
+        portfolio_margin: true,
+        ..Options::default()
+    });
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond(
+        "/papi/v1/um/leverageBracket",
+        200,
+        r#"[{"symbol":"BTCUSDT","brackets":[{"bracket":1,"initialLeverage":125}]}]"#,
+    );
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    h.respond("/papi/v1/listenKey", 200, r#"{"listenKey":"pmkey"}"#);
+    h.respond(
+        "/papi/v1/um/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/papi/v1/um/positionRisk", 200, POSITION_RISK);
+    h.respond("/papi/v1/balance", 200, BALANCE);
+    h.respond("/papi/v1/um/openOrders", 200, "[]");
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, PM_TRAILING);
+    for path in ["/public/ws", "/market/ws", "/pm/ws"] {
+        let socket = h.socket(path).unwrap();
+        h.event(Event::WsOpened { socket });
+    }
+    h.answer_open_position_read();
+    h.requests.clear();
+    h.event(Event::Command(Command::AmendOrder {
+        command: 33,
+        id: "trail".into(),
+        price: Some(97.0),
+        amount: None,
+    }));
+    let cancel = h.take("/papi/v1/um/algo/order");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(cancel.id, 200, "", r#"{"complete":true}"#);
+    h.pm_cancel_proof(777, "trail", "BTCUSDT");
+    let replacement = h.take("/papi/v1/um/algo/order");
+    assert_eq!(
+        param(&replacement.url, "callbackRate").as_deref(),
+        Some("3")
+    );
+    assert_eq!(
+        param(&replacement.url, "reduceOnly").as_deref(),
+        Some("true")
+    );
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let put_back = h.take("/papi/v1/um/algo/order");
+    assert_eq!(put_back.method, Method::Post);
+    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+    assert_eq!(
+        param(&put_back.url, "activatePrice").as_deref(),
+        Some("103")
+    );
+    assert_eq!(param(&put_back.url, "activationPrice"), None);
+    assert_eq!(param(&put_back.url, "reduceOnly").as_deref(), Some("true"));
 }

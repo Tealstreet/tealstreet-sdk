@@ -22,7 +22,7 @@ fn account_bootstrap_resolves_identity_and_separates_settings() {
 }
 #[test]
 fn private_stream_subscribes_to_base_and_authenticated_orders() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let sent = e
         .drain_actions()
@@ -42,7 +42,7 @@ fn private_stream_subscribes_to_base_and_authenticated_orders() {
 }
 #[test]
 fn stale_account_snapshot_preserves_newer_position_close() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let held = requests(&mut e);
     message(
@@ -84,7 +84,7 @@ fn a_zero_size_stream_row_closes_both_long_and_short_net_positions() {
 }
 #[test]
 fn stale_order_snapshot_cannot_resurrect_a_stream_cancel() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let held = requests(&mut e);
     message(
@@ -154,7 +154,7 @@ fn reconnect_history_is_not_a_new_execution() {
 }
 #[test]
 fn failed_scoped_orders_keep_every_last_known_good_order() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let held = requests(&mut e);
     let all = held
@@ -195,7 +195,7 @@ fn failed_scoped_orders_keep_every_last_known_good_order() {
 }
 #[test]
 fn failed_account_reads_preserve_balance_positions_and_settings() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     let balance = e.store().balance().clone();
     let positions = e.store().positions().to_vec();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
@@ -253,7 +253,7 @@ fn successful_but_missing_or_malformed_private_lists_never_clear_state() {
         r#"{"code":"500","orders":[]}"#,
         r#"{"code":{},"orders":[]}"#,
     ] {
-        let (mut e, s) = ready();
+        let (mut e, s) = ready_unopened();
         e.handle(NOW + 1.0, Event::WsOpened { socket: s });
         let r = requests(&mut e)
             .into_iter()
@@ -269,7 +269,7 @@ fn wrong_principal_or_incomplete_account_snapshots_preserve_state() {
         r#"{"code":200,"accounts":[{"index":9,"total_asset_value":"0","available_balance":"0","positions":[]}]}"#,
         r#"{"code":200,"accounts":[{"index":718895}]}"#,
     ] {
-        let (mut e, s) = ready();
+        let (mut e, s) = ready_unopened();
         e.handle(NOW + 1.0, Event::WsOpened { socket: s });
         let r = requests(&mut e)
             .into_iter()
@@ -444,7 +444,7 @@ fn transaction_time_microseconds_prevents_late_position_and_order_regression() {
 }
 #[test]
 fn active_order_stream_does_not_starve_the_serialized_rest_balance() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let snapshot = requests(&mut e)
         .into_iter()
@@ -561,7 +561,7 @@ fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
 #[test]
 fn unmapped_owned_position_is_skipped_and_holds_balance_but_zero_rows_remain_legitimate() {
     for quantity in ["2", "0"] {
-        let (mut e, socket) = ready();
+        let (mut e, socket) = ready_unopened();
         let positions = e.store().positions().to_vec();
         let balance = e.store().balance().clone();
         e.handle(NOW + 1., Event::WsOpened { socket });
@@ -595,7 +595,7 @@ fn unmapped_owned_position_is_skipped_and_holds_balance_but_zero_rows_remain_leg
 #[test]
 fn unmapped_working_order_is_skipped_with_a_warning_and_terminal_unknown_rows_are_ignored() {
     for status in ["open", "canceled", "filled"] {
-        let (mut e, socket) = ready();
+        let (mut e, socket) = ready_unopened();
         let previous = e.store().orders().to_vec();
         e.handle(NOW + 1., Event::WsOpened { socket });
         let request = requests(&mut e)
@@ -1060,7 +1060,7 @@ fn a_socket_drop_after_pings_without_payloads_backfills_from_the_last_payload() 
 }
 #[test]
 fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
-    let (mut e, s) = ready();
+    let (mut e, mut s) = ready();
     let order = |id: u32, market: u32, kind: &str, price: &str| {
         format!(
             r#"{{"order_index":"{id}","market_id":{market},"status":"open","type":"{kind}","time_in_force":1,"is_ask":false,"initial_base_amount":"2","filled_base_amount":"0","remaining_base_amount":"2","price":"{price}"}}"#
@@ -1071,17 +1071,19 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
             r#"{{"market_id":{market},"position":"{size}","sign":1,"avg_entry_price":"100","unrealized_pnl":"0","initial_margin_fraction":1000,"margin_mode":0,"liquidation_price":"50"}}"#
         )
     };
-    let resync = |e: &mut safe_cex_engine::Engine<_>,
-                  now: f64,
-                  orders: &[String],
-                  positions: &[String]| {
-        e.handle(now, Event::WsOpened { socket: s });
+    // Each resync is a real reconnect; replies land when its socket opens.
+    let mut resync = |e: &mut safe_cex_engine::Engine<_>,
+                      now: f64,
+                      orders: &[String],
+                      positions: &[String]| {
+        let (socket, now) = reopen(e, s, now);
+        s = socket;
         let orders = format!(r#"{{"code":200,"orders":[{}]}}"#, orders.join(","));
         let account = format!(
             r#"{{"code":200,"accounts":[{{"index":718895,"collateral":"1000","total_asset_value":"1000","available_balance":"900","positions":[{}]}}]}}"#,
             positions.join(",")
         );
-        for r in requests(e) {
+        for r in requests_at(e, now) {
             let body = if r.url.contains("ActiveOrders") {
                 &orders
             } else {
@@ -1114,7 +1116,7 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     assert_eq!(e.store().positions().len(), 2);
     let logs = resync(
         &mut e,
-        NOW + 2.0,
+        NOW + 60_000.0,
         &[
             order(42, 1, "limit", "91"),
             order(43, 2, "limit", "bad"),
@@ -1153,7 +1155,7 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     );
     resync(
         &mut e,
-        NOW + 3.0,
+        NOW + 120_000.0,
         &[order(42, 1, "limit", "91")],
         &[position(1, "3")],
     );
@@ -1163,7 +1165,7 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
 }
 #[test]
 fn unknown_snapshot_order_type_is_never_invented_as_a_limit() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let r = requests(&mut e)
         .into_iter()
@@ -1187,7 +1189,7 @@ fn spot_rows_in_private_snapshots_are_skipped_silently_and_perp_rows_commit() {
         r#""order_book_details":["#,
         r#""order_book_details":[{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1"},"#,
     );
-    let (mut e, s) = ready_with_meta(options(), &meta);
+    let (mut e, s) = ready_unopened_meta(options(), &meta);
     assert!(e.store().market("ETH/USDC").is_none());
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let spot_order = r#"{"order_index":"77","market_id":2048,"status":"open","type":"limit","time_in_force":1,"is_ask":false,"initial_base_amount":"1","remaining_base_amount":"1","price":"10"}"#;
@@ -1264,14 +1266,14 @@ fn twap_and_liquidation_orders_map_alike_from_the_stream_and_rest() {
             Some(OrderType::Limit),
             "{kind}"
         );
-        e.handle(NOW + 2.0, Event::WsOpened { socket: s });
-        let r = requests(&mut e)
+        let (_, opened) = reopen(&mut e, s, NOW + 2.0);
+        let r = requests_at(&mut e, opened)
             .into_iter()
             .find(|r| r.url.contains("ActiveOrders"))
             .unwrap();
         reply_at(
             &mut e,
-            NOW + 3.0,
+            opened,
             &r,
             200,
             &format!(
@@ -1291,7 +1293,7 @@ fn twap_and_liquidation_orders_map_alike_from_the_stream_and_rest() {
 }
 #[test]
 fn skipped_position_row_with_only_a_market_id_keeps_the_stored_copy() {
-    let (mut e, socket) = ready();
+    let (mut e, socket) = ready_unopened();
     let mut market = e.store().market("ETH").unwrap().clone();
     market.id = "999".into();
     market.symbol = "SOL".into();
@@ -1330,7 +1332,7 @@ fn skipped_position_rows_keep_the_balance_updating() {
             None,
         ),
     ] {
-        let (mut e, socket) = ready();
+        let (mut e, socket) = ready_unopened();
         assert_eq!(e.store().balance().free, 900.0);
         e.handle(NOW + 1., Event::WsOpened { socket });
         let request = requests(&mut e)
@@ -1414,4 +1416,333 @@ fn exhausted_backfill_is_account_scoped_without_a_query_owner() {
             | Action::SetTimer { .. }
     )));
     assert_eq!(e.take_frame(NOW + 5200.0).map_or(0, fill_count), 0);
+}
+
+/// Legacy notifies from the stream only, for an event under 5s old and more
+/// than 5s after connecting, and never for the user's own cancel.
+#[test]
+fn a_rejected_order_reports_its_reason_once_from_the_stream() {
+    let (mut e, s) = ready();
+    let row = |id: &str, status: &str, extra: &str, time: f64| {
+        format!(
+            r#"{{"channel":"account_all_orders:718895","timestamp":{},"orders":{{"1":[{{"order_index":"{id}","market_id":1,"type":"limit","time_in_force":"post-only","status":"{status}","initial_base_amount":"1","price":"120"{extra}}}]}}}}"#,
+            time as u64
+        )
+    };
+    let notices = |e: &mut safe_cex_engine::Engine<safe_cex_venue_lighter::Lighter>| {
+        e.drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == "order.rejected" =>
+                {
+                    Some((event.level, event.message))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let cases = [
+        // Within 5s of connecting: not reported, as legacy.
+        ("60", "canceled-post-only", "", NOW + 1_000.0, None),
+        (
+            "61",
+            "canceled-post-only",
+            "",
+            NOW + 10_000.0,
+            Some("Post-only order would execute immediately as taker; not placed."),
+        ),
+        (
+            "62",
+            "canceled-reduce-only",
+            "",
+            NOW + 11_000.0,
+            Some("canceled-reduce-only"),
+        ),
+        (
+            "63",
+            "canceled",
+            r#","cancel_reason":"MARGIN""#,
+            NOW + 12_000.0,
+            Some("MARGIN"),
+        ),
+        (
+            "64",
+            "canceled",
+            r#","cancelReason":"USER_CANCELED""#,
+            NOW + 13_000.0,
+            None,
+        ),
+        ("65", "canceled", "", NOW + 14_000.0, None),
+        (
+            "66",
+            "filled",
+            r#","cancel_reason":"MARGIN""#,
+            NOW + 15_000.0,
+            None,
+        ),
+        ("67", "open", "", NOW + 16_000.0, None),
+        (
+            "69",
+            "canceled-post-only",
+            r#","cancel_reason":"USER_CANCELED""#,
+            NOW + 16_500.0,
+            None,
+        ),
+    ];
+    for (id, status, extra, now, expected) in cases {
+        notices(&mut e);
+        message(&mut e, s, now, &row(id, status, extra, now));
+        let seen = notices(&mut e);
+        assert_eq!(
+            seen,
+            expected
+                .map(|m| vec![(safe_cex_engine::Level::Error, m.to_string())])
+                .unwrap_or_default(),
+            "{id} {status}"
+        );
+    }
+    // The same terminal row again, and a stale event, report nothing.
+    let now = NOW + 17_000.0;
+    message(&mut e, s, now, &row("61", "canceled-post-only", "", now));
+    assert!(notices(&mut e).is_empty());
+    message(
+        &mut e,
+        s,
+        now,
+        &row("68", "canceled-post-only", "", now - 6_000.0),
+    );
+    assert!(notices(&mut e).is_empty());
+}
+
+const ADDRESS: &str = "0xb01cd2000000000000000000000000000000dba0";
+
+/// Starts to the first account lookup, answering the public reads.
+fn to_lookup(
+    options: support::Options,
+) -> (
+    safe_cex_engine::Engine<safe_cex_venue_lighter::Lighter>,
+    Vec<Action>,
+) {
+    let mut e = engine(options);
+    e.start(NOW);
+    for _ in 0..12 {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let lookup = actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/account?")));
+        if lookup {
+            return (e, actions);
+        }
+        for action in actions {
+            if let Action::Http(r) = action {
+                let body = if r.url.contains("orderBook") {
+                    META
+                } else {
+                    r#"{"code":200,"order_book_stats":[]}"#
+                };
+                reply(&mut e, &r, 200, body);
+            }
+        }
+    }
+    panic!("no account lookup");
+}
+
+fn account_requests(actions: &[Action]) -> Vec<safe_cex_engine::HttpRequest> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.url.contains("/api/v1/account") || r.url.contains("L1") => {
+                Some(r.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_failed_address_lookup_never_adopts_the_api_key_index_and_retries() {
+    let mut options = options();
+    options.application_id = Some(ADDRESS.into());
+    options.api_key_index = Some("4".into());
+    let (mut e, mut actions) = to_lookup(options);
+    let mut seen = vec![];
+    let mut timer = None;
+    for _ in 0..6 {
+        for r in account_requests(&actions) {
+            seen.push(r.url.clone());
+            reply(&mut e, &r, 503, "unavailable");
+        }
+        actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        timer = timer.or(actions.iter().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (*at_ms - NOW - 5_000.0).abs() < 1_000.0 => {
+                Some(*timer)
+            }
+            _ => None,
+        }));
+    }
+    assert!(seen.iter().all(|u| !u.contains("by=index")), "{seen:?}");
+    assert!(e.store().balance().total == 0.0);
+    e.handle(
+        NOW + 5_000.0,
+        Event::TimerFired {
+            timer: timer.expect("a retry"),
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 5_000.0);
+    assert!(!account_requests(&actions).is_empty());
+}
+
+#[test]
+fn a_real_account_row_with_both_index_names_resolves() {
+    let (mut e, actions) = to_lookup(options());
+    let r = account_requests(&actions).remove(0);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":200,"total":1,"accounts":[{"code":0,"account_type":0,"index":718895,"account_index":718895,"available_balance":"1","collateral":"1","positions":[]}]}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("accountActiveOrders"))),
+        "the lookup resolved and reads began"
+    );
+}
+
+#[test]
+fn a_real_rest_order_row_shows() {
+    let (mut e, s) = ready_unopened();
+    let row = r#"{"order_index":2533274198957701,"client_order_index":179354719285865,"order_id":"2533274198957701","client_order_id":"179354719285865","market_index":1,"market_symbol":"ETH","market_kind":"perps","initial_base_amount":"10","price":"1.125370","remaining_base_amount":"10","is_ask":false,"filled_base_amount":"0","side":"","type":"limit","time_in_force":"good-till-time","reduce_only":false,"trigger_price":"0.000000","status":"open","trigger_status":"na","timestamp":1793547192,"created_at":1793547192,"updated_at":1793547192,"transaction_time":1793547193162492,"order_version":0}"#;
+    e.handle(NOW + 1.0, Event::WsOpened { socket: s });
+    for r in requests(&mut e) {
+        if r.url.contains("/account?") {
+            reply_at(&mut e, NOW + 3.0, &r, 200, ACCOUNT);
+        } else {
+            let body = format!(r#"{{"code":200,"orders":[{row}]}}"#);
+            reply_at(&mut e, NOW + 3.0, &r, 200, &body);
+        }
+    }
+    let order = e
+        .store()
+        .order("2533274198957701")
+        .expect("the order shows");
+    assert_eq!(order.amount, 10.0);
+    assert_eq!(order.client_order_id.as_deref(), Some("179354719285865"));
+}
+
+// L1: a placement returns its client index; the store keys the row by the native one.
+#[test]
+fn an_amend_by_the_returned_client_index_finds_the_order() {
+    let (mut e, s) = ready_unopened();
+    let row = r#"{"order_index":2533274198957701,"client_order_index":179354719285865,"order_id":"2533274198957701","client_order_id":"179354719285865","market_index":1,"market_symbol":"ETH","market_kind":"perps","initial_base_amount":"10","price":"1.125370","remaining_base_amount":"10","is_ask":false,"filled_base_amount":"0","side":"","type":"limit","time_in_force":"good-till-time","reduce_only":false,"trigger_price":"0.000000","status":"open","trigger_status":"na","timestamp":1793547192,"created_at":1793547192,"updated_at":1793547192,"transaction_time":1793547193162492,"order_version":0}"#;
+    e.handle(NOW + 1.0, Event::WsOpened { socket: s });
+    for r in requests(&mut e) {
+        if r.url.contains("/account?") {
+            reply_at(&mut e, NOW + 3.0, &r, 200, ACCOUNT);
+        } else {
+            let body = format!(r#"{{"code":200,"orders":[{row}]}}"#);
+            reply_at(&mut e, NOW + 3.0, &r, 200, &body);
+        }
+    }
+    assert!(e.store().order("2533274198957701").is_some());
+    e.handle(
+        NOW + 4.0,
+        Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 91,
+            id: "179354719285865".into(),
+            price: Some(1.2),
+            amount: None,
+        }),
+    );
+    let failed = e.drain_actions().any(|a| {
+        matches!(a, Action::Notice(safe_cex_engine::Notice::CommandFailed { error, .. })
+            if error.message.contains("not found"))
+    });
+    assert!(!failed);
+}
+
+// Live: a verification page during start left the engine waiting past 150 s with no retry.
+#[test]
+fn a_405_page_on_the_account_lookup_retries() {
+    let mut options = options();
+    options.application_id = Some(ADDRESS.into());
+    options.api_key_index = Some("4".into());
+    let (mut e, mut actions) = to_lookup(options);
+    let mut retried = false;
+    for _ in 0..6 {
+        for r in account_requests(&actions) {
+            reply(&mut e, &r, 405, "<html>Human Verification</html>");
+        }
+        actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        retried |= actions.iter().any(
+            |a| matches!(a, Action::SetTimer { at_ms, .. } if (*at_ms - NOW - 5_000.0).abs() < 1_000.0),
+        );
+    }
+    assert!(retried);
+}
+
+#[test]
+fn post_only_crossing_has_a_plain_message_and_retains_rejection_classification() {
+    // Native account_all_orders status: CanceledOrder_PostOnly in Lighter's order schema.
+    for extra in [
+        "",
+        r#","cancel_reason":"canceled-post-only""#,
+        r#","cancelReason":"canceled-post-only""#,
+    ] {
+        let (mut e, socket) = ready();
+        e.drain_actions().for_each(drop);
+        let now = NOW + 10_000.0;
+        let payload = format!(
+            r#"{{"channel":"account_all_orders:718895","timestamp":{},"orders":{{"1":[{{"order_index":"61","market_id":1,"type":"limit","time_in_force":"post-only","status":"canceled-post-only","initial_base_amount":"1","remaining_base_amount":"1","price":"120"{extra}}}]}}}}"#,
+            now as u64
+        );
+        message(&mut e, socket, now, &payload);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let errors: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == "order.rejected" =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{actions:?}");
+        let error = errors[0];
+        assert_eq!(error.level, safe_cex_engine::Level::Error);
+        assert_eq!(
+            error.message,
+            "Post-only order would execute immediately as taker; not placed."
+        );
+        assert!(error.fields.contains(&("kind", "rejected".into())));
+        assert!(
+            error
+                .fields
+                .contains(&("venueMessage", "canceled-post-only".into()))
+        );
+        assert!(e.store().order("61").is_none());
+        assert!(e.store().order("42").is_some());
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        message(&mut e, socket, now, &payload);
+        assert!(!e.drain_actions().any(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "order.rejected")));
+    }
+}
+
+#[test]
+fn unsigned_account_snapshot_has_a_twenty_second_reconciliation_budget() {
+    let (mut e, socket) = ready_unopened();
+    e.handle(NOW, Event::WsOpened { socket });
+    let held = requests(&mut e);
+    let account = held.iter().find(|r| r.url.contains("/account?")).unwrap();
+    assert_eq!(account.timeout_ms, Some(20_000));
+    assert_eq!(
+        e.http_read_class(account.id),
+        safe_cex_engine::HttpReadClass::Reconciliation
+    );
 }

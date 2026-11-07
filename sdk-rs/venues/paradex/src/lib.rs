@@ -8,8 +8,10 @@ mod public;
 mod sbe;
 pub mod sign;
 mod trading;
+mod venue_state;
 mod wire;
 
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue, book::Book};
 
 #[derive(Clone, Default)]
@@ -88,7 +90,47 @@ impl Paradex {
 }
 
 impl Venue for Paradex {
+    fn http_plans() -> bool {
+        false
+    }
+
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::Account(
+                account::Request::Margins { .. }
+                | account::Request::Positions { .. }
+                | account::Request::Balance { .. }
+                | account::Request::Orders { .. },
+            ) => safe_cex_engine::HttpReadClass::Reconciliation,
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
+
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Public(request) => request.startup_sections(),
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
+    /// A host-answered provider binds its Stark public key before start; a
+    /// trusted local provider keeps the key it sealed at setup.
+    fn public_key_setup(
+        &self,
+    ) -> Option<(
+        safe_cex_engine::AddressSetupSlots,
+        safe_cex_engine::signing::Algorithm,
+    )> {
+        self.options.credentials.as_ref().map(|_| {
+            (
+                safe_cex_engine::AddressSetupSlots::Primary,
+                safe_cex_engine::signing::Algorithm::StarkDigest,
+            )
+        })
+    }
     /// Only `/auth` is credential evidence: a 401/403 is a definitive refusal,
     /// and a 2xx carrying a JWT is acceptance.
     fn account_auth_outcome(
@@ -117,14 +159,57 @@ impl Venue for Paradex {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account: safe_cex_engine::AccountLookup::Query,
             order_book_query: true,
+            fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    // Every orders read commits its cover (`commit_orders_plan`).
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.account.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);
     }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        // Paradex reads every market's margin config at once.
+        self.account.refresh_settings(cx);
+    }
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.account.export_venue_state())
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        if let Err(error) = self.account.apply_venue_state(state) {
+            cx.venue_state_unreadable(error);
+        }
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.prune_native(cx.store);
+    }
     // reconcile_uncertain starts an order read dispatched after the write.
     fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         true
     }
     // Private reads bind the account's JWT Session; the engine copies the Bearer
@@ -268,7 +353,7 @@ impl Venue for Paradex {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::BookQuery(context) => {
                 let _ = cx.fail_context(&context, error);
             }
@@ -285,7 +370,7 @@ impl Venue for Paradex {
                 self.failures(cx);
             }
             other => self.on_sign_failed(cx, other, &error.message),
-        }
+        });
     }
     fn on_http_preparation_failed(
         &mut self,
@@ -294,7 +379,7 @@ impl Venue for Paradex {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Public(request) if request.is_command_candle() => {
                 request.reject_command_candle(cx, error);
                 self.failures(cx);
@@ -304,7 +389,7 @@ impl Venue for Paradex {
                 self.failures(cx);
             }
             other => self.on_sign_error(cx, other, error),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,
@@ -329,14 +414,20 @@ impl Venue for Paradex {
                 self.poll_candles_failed(cx, request, error);
                 self.failures(cx);
             }
-            other => self.on_request_failed(cx, other, &error.message),
+            other => {
+                self.account.positions_error = Some(error.clone());
+                self.on_request_failed(cx, other, &error.message);
+                self.account.positions_error = None;
+            }
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.account.handles_timer(timer) {
-            self.account.on_timer(cx, timer);
-        } else {
-            self.public_timer(cx, timer);
+        if !self.trading.on_timer(cx, &mut self.account, timer) {
+            if self.account.handles_timer(timer) {
+                self.account.on_timer(cx, timer);
+            } else {
+                self.public_timer(cx, timer);
+            }
         }
         self.failures(cx);
     }
@@ -483,7 +574,7 @@ fn success(response: Response<'_>) -> Result<(), String> {
         return Err(if details.is_empty() {
             context
         } else {
-            let detail: String = details.join(": ").chars().take(512).collect();
+            let detail: String = details.join_with(": ").chars().take(512).collect();
             format!("{context}: {detail}")
         });
     }
