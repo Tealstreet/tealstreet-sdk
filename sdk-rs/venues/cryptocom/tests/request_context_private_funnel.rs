@@ -1748,3 +1748,81 @@ fn released_ambiguous_refusal_codes_preserve_the_placement_fence() {
         }
     }
 }
+
+#[test]
+fn engine_ambiguity_429_signature_code_cannot_resend() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::CancelSymbolOrders {
+        command: OWNER,
+        symbol: "BTCUSD-PERP".into(),
+    }));
+    let r = h.http("private/cancel-all-orders");
+    h.actions.clear();
+    h.event(Event::HttpResponse {
+        request: r.id,
+        response: Response {
+            status: 429,
+            headers: "",
+            body: r#"{"code":40101,"message":"bad signature"}"#,
+        },
+    });
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("private/cancel-all-orders")))
+    );
+    pace(&mut h);
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::Unknown));
+}
+#[test]
+fn engine_ambiguity_408_rate_body_stays_unknown() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::CancelSymbolOrders {
+        command: OWNER,
+        symbol: "BTCUSD-PERP".into(),
+    }));
+    let r = h.http("private/cancel-all-orders");
+    h.actions.clear();
+    h.event(Event::HttpResponse {
+        request: r.id,
+        response: Response {
+            status: 408,
+            headers: "",
+            body: r#"{"code":42901,"message":"rate limited"}"#,
+        },
+    });
+    pace(&mut h);
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::Unknown));
+}
+#[test]
+fn engine_ambiguity_503_rate_body_stays_unknown() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::CancelSymbolOrders {
+        command: OWNER,
+        symbol: "BTCUSD-PERP".into(),
+    }));
+    let r = h.http("private/cancel-all-orders");
+    h.actions.clear();
+    h.event(Event::HttpResponse {
+        request: r.id,
+        response: Response {
+            status: 503,
+            headers: "",
+            body: r#"{"code":42901,"message":"rate limited"}"#,
+        },
+    });
+    pace(&mut h);
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::Unknown));
+}

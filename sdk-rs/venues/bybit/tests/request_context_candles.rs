@@ -260,7 +260,10 @@ fn a_rate_limited_kline_read_holds_later_reads_until_bybits_reset() {
     let mut h = ready();
     candles(&mut h, 60, "BTCUSDT", Interval::M1);
     let kline = h.take("/v5/market/kline");
-    let reset = format!("x-bapi-limit-reset-timestamp: {}\r\n", h.now + 15_000.);
+    let reset = format!(
+        "x-bapi-limit-reset-timestamp: {}\r\n",
+        h.engine.signing_clock(h.now).0 + 15_000.
+    );
     refuse_with(&mut h, kline.id, &reset, TOO_MANY);
     let error = failure(&h, 60);
     assert_eq!(error.kind, Some(ErrorKind::RateLimited));

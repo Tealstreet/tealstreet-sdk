@@ -905,7 +905,7 @@ impl Backpack {
                 params: [&'static str; 2],
                 signature: [String; 4],
             }
-            let signature = c.ws_auth(cx.now);
+            let signature = c.ws_auth(cx.protocol_now());
             cx.send(
                 socket,
                 serde_json::to_string(&Subscribe {

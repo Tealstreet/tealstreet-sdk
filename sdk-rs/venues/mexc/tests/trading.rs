@@ -3052,7 +3052,7 @@ fn protective_rate_limit_on_replacement_or_put_back_is_unknown_without_protectio
                 .unwrap();
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
             assert!(error.protection.is_none());
-            assert!(error.message.contains("status is unknown"), "{error:?}");
+            assert!(error.message.contains("is unknown"), "{error:?}");
             assert!(error.message.contains("Open Orders") && error.message.contains("position"));
             assert!(!error.message.contains("both refused"));
         }
@@ -3098,7 +3098,7 @@ fn protective_native_rate_limit_is_unknown_without_not_changed_or_cancel() {
             .unwrap();
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(error.protection.is_none());
-        assert!(error.message.contains("status is unknown"), "{error:?}");
+        assert!(error.message.contains("is unknown"), "{error:?}");
         assert!(
             error.message.contains("Open Orders") && error.message.contains("position"),
             "{error:?}"

@@ -23,7 +23,10 @@ fn option_seed_envelope_limit_preserves_reset_headers_and_retries_after_reset() 
         .position(|r| r.url.contains("tickers") && r.url.contains("baseCoin=BTC"))
         .unwrap();
     let request = h.requests.remove(index);
-    let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 60_000.0);
+    let headers = format!(
+        "X-Bapi-Limit-Reset-Timestamp: {}",
+        h.engine.signing_clock(h.now).0 + 60_000.0
+    );
     h.event(Event::HttpResponse {
         request: request.id,
         response: safe_cex_engine::Response {

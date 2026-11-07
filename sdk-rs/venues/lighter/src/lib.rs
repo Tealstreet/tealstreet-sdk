@@ -666,7 +666,7 @@ impl Lighter {
                 return Err("Invalid candle time range".to_owned());
             }
             let count = limit.filter(|n| *n > 0).unwrap_or(500).min(1500);
-            let end = to.unwrap_or(cx.now);
+            let end = to.unwrap_or(cx.protocol_now());
             let start = if limit.is_none() {
                 from.unwrap_or(end - duration * f64::from(count))
             } else {

@@ -257,40 +257,50 @@ pub fn verdict(
     released: Released<'_>,
     native: Option<&Native<'_>>,
 ) -> Verdict {
-    verdict_for_delivery(table, intent, released, native, false)
-}
-
-fn verdict_for_delivery(
-    table: &CodeTable,
-    intent: Intent,
-    released: Released<'_>,
-    native: Option<&Native<'_>>,
-    status_exempt: bool,
-) -> Verdict {
     let response = match released {
         Released::Transport => return Verdict::Unknown(Some(ErrorKind::Network)),
         Released::Response(response) => response,
     };
-    if !status_exempt && let Some(verdict) = unproven_status(response) {
+    if let Some(verdict) = unproven_status(response, intent) {
         return verdict;
     }
     // A code-less envelope that matches no message row is no native evidence.
     let native = native
         .filter(|native| native.code != NativeCode::None || table.row(native, intent).is_some());
     if let Some(native) = native {
-        return table.verdict(native, intent);
+        return write_verdict(table.verdict(native, intent), intent, released);
     }
-    match table.status_verdict(response.status) {
+    let verdict = match table.status_verdict(response.status) {
         Some(verdict) if !(200..300).contains(&response.status) => scoped(verdict, intent),
         _ => Verdict::Unknown(status_kind(response)),
-    }
+    };
+    write_verdict(verdict, intent, released)
 }
 
-/// Rule 3, shared with the managed-write guard: 408 and 5xx prove nothing.
-fn unproven_status(response: &Response<'_>) -> Option<Verdict> {
+/// Reads retain their native 429 retry policy; released writes prove nothing.
+fn unproven_status(response: &Response<'_>, intent: Intent) -> Option<Verdict> {
+    if intent == Intent::Read && response.status == 429 {
+        return None;
+    }
     match crate::request_context::ResponseProof::from_status(response.status) {
         crate::request_context::ResponseProof::Unproven(kind) => Some(Verdict::Unknown(Some(kind))),
         crate::request_context::ResponseProof::NativeCodec => None,
+    }
+}
+
+fn write_verdict(verdict: Verdict, intent: Intent, released: Released<'_>) -> Verdict {
+    if intent == Intent::Read {
+        return verdict;
+    }
+    if let Released::Response(response) = released
+        && let Some(unproven) = unproven_status(response, intent)
+    {
+        return unproven;
+    }
+    if verdict.kind() == Some(ErrorKind::RateLimited) {
+        Verdict::Unknown(Some(ErrorKind::RateLimited))
+    } else {
+        verdict
     }
 }
 
@@ -312,6 +322,7 @@ pub fn error(
     native: Option<&Native<'_>>,
     message: impl Into<String>,
 ) -> VenueError {
+    let verdict = write_verdict(verdict, intent, released);
     let mut error = VenueError::new(message);
     error.kind = verdict.kind();
     if intent != Intent::Read {
@@ -386,18 +397,7 @@ pub fn fact(
     native: Option<&Native<'_>>,
     message: impl Into<String>,
 ) -> Fact {
-    fact_for_delivery(table, intent, released, native, message, false)
-}
-
-pub(crate) fn fact_for_delivery(
-    table: &CodeTable,
-    intent: Intent,
-    released: Released<'_>,
-    native: Option<&Native<'_>>,
-    message: impl Into<String>,
-    status_exempt: bool,
-) -> Fact {
-    let verdict = verdict_for_delivery(table, intent, released, native, status_exempt);
+    let verdict = verdict(table, intent, released, native);
     Fact {
         verdict,
         error: error(verdict, intent, released, native, message),
@@ -505,7 +505,7 @@ pub(crate) fn batch(
         return Err(crate::request_context::Error::Invalid);
     }
     let released = Released::Response(response);
-    if let Some(verdict) = unproven_status(response) {
+    if let Some(verdict) = unproven_status(response, intent) {
         let error = self::error(verdict, intent, released, None, message);
         return Ok(WriteResult::Failed(error));
     }
@@ -533,10 +533,12 @@ pub(crate) fn batch(
         .enumerate()
         .filter_map(|(index, item)| match item {
             BatchItem::Accepted(_) => None,
-            BatchItem::Native(native) => match table.verdict(native, intent) {
-                Verdict::Satisfied(_) => None,
-                verdict => Some((index, native, verdict)),
-            },
+            BatchItem::Native(native) => {
+                match write_verdict(table.verdict(native, intent), intent, released) {
+                    Verdict::Satisfied(_) => None,
+                    verdict => Some((index, native, verdict)),
+                }
+            }
         });
     let Some(first) = failures.next() else {
         return Ok(WriteResult::Accepted { order_ids: ids });

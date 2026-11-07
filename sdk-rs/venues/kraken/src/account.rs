@@ -466,7 +466,7 @@ impl Kraken {
             self.signer.as_mut()
         }
         .ok_or("Kraken signing credentials unavailable")?
-        .nonce(cx.now)?;
+        .nonce(cx.protocol_now())?;
         let signer = if read {
             self.read_signer.as_ref()
         } else {

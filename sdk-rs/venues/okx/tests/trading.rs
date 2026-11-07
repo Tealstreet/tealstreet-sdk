@@ -1822,7 +1822,7 @@ fn trading_failures_are_classified_without_changing_their_text() {
         (
             r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
             Some(ErrorKind::RateLimited),
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some("50011"),
         ),
         (

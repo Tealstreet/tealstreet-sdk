@@ -1557,7 +1557,7 @@ fn trading_failures_are_classified_without_changing_their_text() {
             429,
             "{}",
             Some(ErrorKind::RateLimited),
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
         ),
         (
             200,
