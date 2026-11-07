@@ -2100,22 +2100,47 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "woo")]
-        "woo" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "woo" => {
+            if [&options.key, &options.secret]
+                .iter()
+                .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "WOO credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut identities = options.signing.take().unwrap_or_default();
+            // An incomplete local primary still denotes a public-only account.
+            identities.primary = identities.primary.filter(|identity| {
+                !identity.credential.0.is_empty()
+                    && identity.signing_ref().is_ok_and(|key| !key.0.is_empty())
+            });
+            for identity in [&identities.primary, &identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 Woo::new(WooOptions {
-                    read_credentials: options.read_credentials.take(),
+                    credentials: identities.primary.clone(),
+                    read_signing: identities.secondary.clone(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     application_id: options.application_id.take(),
+                    ..Default::default()
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bybit")]
         "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())

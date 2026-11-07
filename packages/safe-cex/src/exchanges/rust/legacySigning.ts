@@ -52,6 +52,52 @@ export const finishPhemexRequest = (
   }),
 });
 
+/** WOO V1 signs sorted form bytes; V3 signs timestamp, method, path/query and JSON.
+ * Preserve an already serialized native/replayed body rather than JSON-quote it.
+ */
+const WOO_BROKER_IDS = { livenet: 'ab82cb09-cfec-4473-80a3-b740779d0644', testnet: 'e708a644-9ce5-46c6-b50c-74b15f62d8ca' } as const;
+export const prepareWooRequest = (config: InternalAxiosRequestConfig, stampMs: number, testnet = false) => {
+  const method = config.method?.toUpperCase() || 'GET';
+  const v1 = config.url?.includes('/v1/') === true;
+  const mutation = ['POST', 'PUT', 'DELETE'].includes(method);
+  const next = { ...config, method };
+  if (method === 'POST' && next.data && typeof next.data === 'object' && !Array.isArray(next.data)) {
+    const field = config.url === '/v1/order' ? 'broker_id' : config.url === '/v3/algo/order' ? 'brokerId' : undefined;
+    if (field) next.data = { ...next.data, [field]: WOO_BROKER_IDS[testnet ? 'testnet' : 'livenet'] };
+  }
+  let payload: string;
+  if (v1) {
+    const form = typeof next.data === 'string' ? next.data : qs.stringify(next.data || next.params || {}, {
+      arrayFormat: 'repeat', sort: (a, b) => a.localeCompare(b),
+    });
+    if (mutation) {
+      next.data = form;
+      delete next.params;
+    } else if (form) {
+      next.url = `${next.url}?${form}`;
+      delete next.params;
+    }
+    const query = !mutation && !form ? next.url?.split('?')[1] ?? '' : form;
+    payload = `${query}|${stampMs}`;
+  } else {
+    if (config.params) {
+      next.url = `${next.url}?${qs.stringify(config.params)}`;
+      delete next.params;
+    }
+    const body = typeof next.data === 'string' ? next.data : next.data ? JSON.stringify(next.data) : '';
+    payload = `${stampMs}${method}${next.url ?? ''}${body}`;
+  }
+  return { config: next, stampMs, payload, contentType: v1 && mutation ? 'application/x-www-form-urlencoded' : undefined };
+};
+
+export const finishWooRequest = (prepared: ReturnType<typeof prepareWooRequest>, key: string, signature: string): InternalAxiosRequestConfig => ({
+  ...prepared.config,
+  headers: new AxiosHeaders({ ...prepared.config.headers,
+    ...(prepared.contentType ? { 'Content-Type': prepared.contentType } : {}),
+    'x-api-key': key, 'x-api-timestamp': prepared.stampMs, 'x-api-signature': signature,
+  }),
+});
+
 /** The surviving hosted wire adapter uses standalone codecs, never a TS venue.
  * It cannot fall back to options.secret: the callback always uses owned refs.
  */
@@ -70,12 +116,13 @@ export const signHostedHttp = async (
   const bitunix = name === 'bitunix';
   const bingx = name === 'bingx';
   const phemex = name === 'phemex';
+  const woo = name === 'woo';
   const blofin = name === 'blofin';
-  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster)
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster && !woo)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
   // The legacy Bitget and Phemex interceptors sign every request once credentials exist.
-  const unsigned = phemex ? false : binance ? isBinancePublicSigningRequest(name, request.config.url)
+  const unsigned = woo ? request.config.url?.includes('/public/') === true : phemex ? false : binance ? isBinancePublicSigningRequest(name, request.config.url)
     : okx ? isOkxUnsignedSigningRequest(request.config.url)
     : aster ? isAsterDEXPublicEndpoint(request.config.url)
       : bitunix ? isBitunixUnsignedRequest(request.config.url)
@@ -129,7 +176,7 @@ export const signHostedHttp = async (
       'X-BX-APIKEY': credential,
       'X-SOURCE-KEY': 'Tealstreet',
       'Content-Type': 'application/json, charset=utf-8',
-    } : phemex ? {} : blofin ? {
+    } : woo ? { 'cache-control': 'no-cache' } : phemex ? {} : blofin ? {
       'Content-Type': 'application/json',
     } : binance ? {
       'X-MBX-APIKEY': credential,
@@ -167,6 +214,12 @@ export const signHostedHttp = async (
     const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
     if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
     return finishBitunixRequest(prepared, credential, output.signature);
+  } : woo ? async (config) => {
+    if (config.url?.includes('/public/') || !credential) return config;
+    const prepared = prepareWooRequest(config, now(), options.testnet);
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+    return finishWooRequest(prepared, credential, output.signature);
   } : phemex ? async (config) => {
     if (!credential) return config;
     const prepared = preparePhemexRequest(config, now());

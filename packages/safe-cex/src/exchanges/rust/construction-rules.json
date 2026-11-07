@@ -4,6 +4,7 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "woo": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": false, "protectedHeaders": ["x-api-key", "x-api-signature", "x-api-timestamp"]}},
     "backpack": {"bridge": {"readCredentials": "publicRead"}},
     "cryptocom": {"bridge": {"dispatchSigning": true, "readCredentials": "validateOnly"}},
     "bitrue": {"bridge": {"dispatchSigning": true}},

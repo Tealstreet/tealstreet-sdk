@@ -4,6 +4,7 @@ mod history;
 mod identity;
 mod seed_read;
 mod sign;
+pub use sign::dispatch as dispatch_signing;
 mod socket_codec;
 mod trading;
 mod wire;
@@ -22,6 +23,8 @@ use wire::*;
 
 #[derive(Clone, Default)]
 pub struct Options {
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
+    pub read_signing: Option<safe_cex_engine::signing::Identity>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
@@ -162,6 +165,31 @@ impl Woo {
                 None,
                 pending,
             ));
+        }
+        if self.options.public_data_only {
+            return Err("WOO private requests require credentials".into());
+        }
+        if let Some(primary) = &self.options.credentials {
+            let identity = if method == Method::Get {
+                self.options.read_signing.as_ref().unwrap_or(primary)
+            } else {
+                primary
+            };
+            identity
+                .validate()
+                .map_err(|_| "Invalid WOO signing identity")?;
+            let recipe = sign::dispatch::Http::new(
+                identity.clone(),
+                self.rest,
+                method,
+                path.into(),
+                params,
+                body,
+            );
+            let (url, headers, body) = recipe.unsigned();
+            let request = cx.request(method, url, headers, body, pending);
+            cx.sign_http(request, Box::new(recipe));
+            return Ok(request);
         }
         let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) else {
             return Err("WOO private requests require credentials".into());
@@ -913,6 +941,22 @@ impl Venue for Woo {
             self.on_request_failed(cx, pending, &error.message);
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
+            Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
+            Pending::Identity(command) => cx.fail(command, error),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, error);
+                self.account_read_again(cx);
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        });
+    }
     fn on_http_preparation_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1104,3 +1148,6 @@ fn reread_partial<P>(
 
 #[cfg(test)]
 mod secondary_tests;
+
+#[cfg(test)]
+mod hosted_tests;

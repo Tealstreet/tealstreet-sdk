@@ -750,6 +750,14 @@ impl Woo {
         let c = &mut self.account.connection;
         c.open = true;
         c.ping_at = cx.now;
+        if let Some(identity) = &self.options.credentials {
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(crate::sign::dispatch::WsAuth::new(identity.clone(), socket)),
+            );
+            return true;
+        }
         let Some(text) = crate::sign::websocket_auth(&self.options, cx.now) else {
             return true;
         };

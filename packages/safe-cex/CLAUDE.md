@@ -9,7 +9,7 @@ Historical Rust-adapter fixtures mock only beta admission through
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, and
-Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
+Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override. Robinhood is admitted through the existing Lighter
 family and remote-signing policy; its preview/production visibility flags are unchanged.
 Rust option-query capabilities remain false until the loaded native record
@@ -185,6 +185,13 @@ revision; provider text and partial results are not returned on failure.
 A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
 its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
 The BingX native checkpoint keeps hosted admission disabled until those gates.
+WOO local and RemoteSigner accounts share provider-owned dispatch signing for all
+V1/V3 private REST calls and private WS auth. V1 signs sorted form/query bytes plus
+`|timestamp`; V3 signs timestamp, method, path/query and the exact body. Replayed
+serialized bodies are preserved. WOO has no signing nonce or wire recvWindow.
+PayloadSigner remains refused because its legacy private lifecycle has no such
+mode; RemoteSigner cannot fall back to it or to local material. Before-dispatch
+signing failures are `notSent`; dispatched ambiguous writes remain `Unknown`.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
