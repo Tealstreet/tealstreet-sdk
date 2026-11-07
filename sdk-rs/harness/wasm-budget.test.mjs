@@ -665,7 +665,6 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
 test('#3150 merged-tree caps retain the approved exact boundaries', () => {
   for (const [venue, cap] of [
     ['apexomni', 2_024_448],
-    ['backpack', 1_948_672],
     ['bingx', 2_085_888],
     ['bitrue', 1_851_392],
     ['blofin', 2_001_920],
@@ -728,4 +727,15 @@ test('#3191 run 42249705679 retains measured Paradex headroom', () => {
   assert.equal(wasmBudgetError(measured, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'paradex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'paradex'), /exceeds/);
+});
+
+
+test('#3229 Backpack hosted signing (run 42352281022, job 128343086016) retains CI headroom', () => {
+  const measured = 1_994_139;
+  const cap = measured + 10 * 1024;
+  const current = WASM_VENUE_OVERRIDES.backpack;
+  assert.ok(current >= cap, 'Backpack retains CI size plus 10 KiB');
+  assert.equal(wasmBudgetError(measured, 'venue', 'backpack'), undefined);
+  assert.equal(wasmBudgetError(current, 'venue', 'backpack'), undefined);
+  assert.match(wasmBudgetError(current + 1, 'venue', 'backpack'), /exceeds/);
 });
