@@ -188,6 +188,7 @@ class VirtualClock {
       this.server = null;
       this.client = null;
       this.offsetMs = 0;
+      this.notifyTimeSync();
       return;
     }
     // A browser worker (no `window`) keeps the offset the main thread pushes or a

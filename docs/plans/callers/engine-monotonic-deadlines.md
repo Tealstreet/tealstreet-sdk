@@ -19,7 +19,8 @@ API changes request ownership, deadlines or retry authority; stale pre-release
 signing follows the existing revision checks. The host refuses old WASM packages
 without this clock API. Explicit injected/replay transports keep their original
 clock contract and receive no SDK clock updates. Native server scheduling is
-unchanged.
+unchanged. Node SDK engines receive the existing OS-clock refresh through the
+same protocol-time notification, with no venue-time polling.
 
 SDK journal bounds and local scheduled-cancel validation retain synchronized
 UTC, independently of scheduling time. Frame timestamps remain epoch-shaped;

@@ -284,6 +284,24 @@ describe('virtualClock', () => {
     });
   });
 
+  it('publishes the existing Node OS-clock refresh to protocol-clock subscribers without venue I/O', async () => {
+    runtime.node = true;
+    const observed = vi.fn();
+    const unsubscribe = virtualClock.subscribeToTimeSync(observed);
+    try {
+      await virtualClock.syncClientServerTime();
+      expect(observed).toHaveBeenLastCalledWith(Date.now());
+      vi.setSystemTime(Date.now() + 162 * 86_400_000);
+      await virtualClock.syncClientServerTime();
+      expect(observed).toHaveBeenCalledTimes(2);
+      expect(observed).toHaveBeenLastCalledWith(Date.now());
+      expect(axios.get).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      runtime.node = false;
+    }
+  });
+
   it('waits for the first host sync in a browser worker, with one notification', async () => {
     const originalWindow = global.window;
     (global as any).window = undefined;
