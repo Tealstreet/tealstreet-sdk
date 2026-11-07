@@ -59,3 +59,24 @@ fn a_malformed_aggregate_suffix_keeps_the_whole_frame_atomic() {
     );
     assert_eq!(engine.store().ticker("BTC-USDC").unwrap().mark, 65001.);
 }
+
+#[test]
+fn reordered_context_envelopes_keep_null_blank_and_escaped_numbers() {
+    for (raw, expected) in [
+        ("null", 65001.0_f64),
+        (r#""""#, 0.0),
+        (r#""-0""#, -0.0),
+        (r#""\u0031.25""#, 1.25),
+    ] {
+        let (mut engine, _, api) = support::ready();
+        let text = format!(
+            r#"{{"data":{{"coin":"1","ctx":{{"markPx":{raw}}}}},"channel":"activeAssetCtx"}}"#
+        );
+        support::message(&mut engine, api, 4000., &text);
+        assert_eq!(
+            engine.store().ticker("BTC-USDC").unwrap().mark.to_bits(),
+            expected.to_bits(),
+            "{text}"
+        );
+    }
+}

@@ -1,80 +1,15 @@
 //! TxFlow's public envelopes and streamed market records.
-use safe_cex_engine::de::number_or_zero;
+use safe_cex_engine::de::{number_or_zero, optional_number_or_blank};
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision};
 use serde::Deserialize;
 use std::borrow::Cow;
 
-/// Finite public decimals use NaN internally for absence. This keeps the wire
-/// records compact; decoded NaN/infinity still reject the whole row.
-#[derive(Clone, Copy)]
-pub struct OptionalNumber<const BLANK_ZERO: bool = true>(f64);
-impl<const BLANK_ZERO: bool> Default for OptionalNumber<BLANK_ZERO> {
-    fn default() -> Self {
-        Self(f64::NAN)
-    }
-}
-impl<const BLANK_ZERO: bool> OptionalNumber<BLANK_ZERO> {
-    #[inline(always)]
-    pub fn get(self) -> Option<f64> {
-        (!self.0.is_nan()).then_some(self.0)
-    }
-    #[inline(always)]
-    pub fn is_some(self) -> bool {
-        !self.0.is_nan()
-    }
-    #[inline(always)]
-    pub fn is_some_and(self, predicate: impl FnOnce(f64) -> bool) -> bool {
-        self.get().is_some_and(predicate)
-    }
-    #[inline(always)]
-    pub fn filter(self, predicate: impl FnOnce(&f64) -> bool) -> Option<f64> {
-        self.get().filter(predicate)
-    }
-}
-impl<'de, const BLANK_ZERO: bool> Deserialize<'de> for OptionalNumber<BLANK_ZERO> {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct Visitor<const ZERO: bool>;
-        impl<'de, const ZERO: bool> serde::de::Visitor<'de> for Visitor<ZERO> {
-            type Value = OptionalNumber<ZERO>;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("a finite number or numeric string")
-            }
-            fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Self::Value, E> {
-                if value.is_finite() {
-                    Ok(OptionalNumber(value))
-                } else {
-                    Err(E::custom("invalid number"))
-                }
-            }
-            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
-                Ok(OptionalNumber(value as f64))
-            }
-            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
-                Ok(OptionalNumber(value as f64))
-            }
-            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Self::Value, E> {
-                if text.is_empty() {
-                    return Ok(OptionalNumber(if ZERO { 0.0 } else { f64::NAN }));
-                }
-                safe_cex_engine::num::parse_decimal(text)
-                    .map(OptionalNumber)
-                    .ok_or_else(|| E::custom("invalid number"))
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-                Ok(OptionalNumber::default())
-            }
-            fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-                self.visit_unit()
-            }
-            fn visit_some<D: serde::Deserializer<'de>>(
-                self,
-                d: D,
-            ) -> Result<Self::Value, D::Error> {
-                d.deserialize_any(self)
-            }
-        }
-        d.deserialize_any(Visitor::<BLANK_ZERO>)
-    }
+/// Live overlay fields: null or missing leaves the field untouched, blank reads
+/// as 0, malformed rejects the row.
+fn optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    struct Zero(#[serde(deserialize_with = "number_or_zero")] f64);
+    Ok(Option::<Zero>::deserialize(d)?.map(|n| n.0))
 }
 
 #[derive(Deserialize)]
@@ -238,24 +173,24 @@ impl Instrument {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Context {
-    #[serde(default)]
-    pub funding: OptionalNumber,
-    #[serde(default)]
-    pub mark_px: OptionalNumber,
-    #[serde(default)]
-    pub oracle_px: OptionalNumber,
-    #[serde(default)]
-    pub open_interest: OptionalNumber,
-    #[serde(default)]
-    pub mid_px: OptionalNumber,
-    #[serde(default)]
-    pub last_price: OptionalNumber,
-    #[serde(default)]
-    pub prev_day_px: OptionalNumber,
-    #[serde(default)]
-    pub day_ntl_vlm: OptionalNumber<false>,
-    #[serde(default)]
-    pub day_base_vlm: OptionalNumber<false>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub funding: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub mark_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub oracle_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub open_interest: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub mid_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub last_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub prev_day_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
+    pub day_ntl_vlm: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
+    pub day_base_vlm: Option<f64>,
     #[serde(default)]
     pub next_funding_time: Option<f64>,
 }
@@ -275,20 +210,20 @@ pub struct Contexts<'a> {
 pub struct TickerRow {
     #[serde(default)]
     pub instrument_id: u32,
-    #[serde(default)]
-    pub last_price: OptionalNumber,
-    #[serde(default)]
-    pub prev_day_px: OptionalNumber,
-    #[serde(default)]
-    pub mark_px: OptionalNumber,
-    #[serde(default)]
-    pub oracle_px: OptionalNumber,
-    #[serde(default)]
-    pub open_interest: OptionalNumber,
-    #[serde(default)]
-    pub day_ntl_vlm: OptionalNumber,
-    #[serde(default)]
-    pub coin_vlm: OptionalNumber,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub last_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub prev_day_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub mark_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub oracle_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub open_interest: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub day_ntl_vlm: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub coin_vlm: Option<f64>,
     #[serde(default)]
     pub node_ctx: Option<Context>,
 }
@@ -340,82 +275,6 @@ impl CandleRow<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn public_wire_records_keep_compact_optional_decimals() {
-        assert_eq!(std::mem::size_of::<OptionalNumber>(), 8);
-        assert!(std::mem::size_of::<Context>() <= 88);
-        assert!(std::mem::size_of::<ContextFrame<'_>>() <= 112);
-        assert!(std::mem::size_of::<TickerRow>() <= 160);
-    }
-
-    #[test]
-    fn compact_decimals_match_the_original_policies_and_float_bits() {
-        fn previous<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-            #[derive(Deserialize)]
-            struct Zero(#[serde(deserialize_with = "number_or_zero")] f64);
-            Ok(Option::<Zero>::deserialize(d)?.map(|n| n.0))
-        }
-        #[derive(Deserialize)]
-        struct BeforeZero(#[serde(deserialize_with = "previous")] Option<f64>);
-        #[derive(Deserialize)]
-        struct BeforeBlank(
-            #[serde(deserialize_with = "safe_cex_engine::de::optional_number_or_blank")]
-            Option<f64>,
-        );
-        let mut inputs: Vec<String> = [
-            "null",
-            "0",
-            "-0.0",
-            "1.25",
-            r#""""#,
-            r#"" ""#,
-            r#""-0""#,
-            r#""1.25""#,
-            r#""\u0031.25""#,
-            r#"" 1.25 ""#,
-            r#""1e-12""#,
-            r#""99999999999999999999.125""#,
-            r#""NaN""#,
-            r#""inf""#,
-            r#""malformed""#,
-            "true",
-            "[]",
-            "{}",
-            "1e400",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-        let mut bits = 0x1234_5678_9abc_def0u64;
-        for _ in 0..1024 {
-            bits ^= bits << 13;
-            bits ^= bits >> 7;
-            bits ^= bits << 17;
-            let value = f64::from_bits(bits);
-            if value.is_finite() {
-                inputs.push(format!(r#""{value:.17e}""#));
-            }
-        }
-        for value in inputs {
-            let zero = serde_json::from_str::<BeforeZero>(&value)
-                .map(|v| v.0.map(f64::to_bits))
-                .map_err(|e| e.to_string());
-            let compact = serde_json::from_str::<OptionalNumber>(&value)
-                .map(|v| v.get().map(f64::to_bits))
-                .map_err(|e| e.to_string());
-            assert_eq!(compact, zero, "zero: {value}");
-            let blank = serde_json::from_str::<BeforeBlank>(&value)
-                .map(|v| v.0.map(f64::to_bits))
-                .map_err(|e| e.to_string());
-            let compact = serde_json::from_str::<OptionalNumber<false>>(&value)
-                .map(|v| v.get().map(f64::to_bits))
-                .map_err(|e| e.to_string());
-            assert_eq!(compact, blank, "blank: {value}");
-        }
-        assert!(Context::default().mark_px.get().is_none());
-        assert!(Context::default().day_ntl_vlm.get().is_none());
-    }
 
     #[test]
     fn public_decimal_forms_keep_finite_and_null_contracts() {

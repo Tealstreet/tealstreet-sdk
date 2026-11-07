@@ -334,16 +334,16 @@ impl TxFlow {
             }
     }
     fn context_update(t: &mut Ticker, c: Context) {
-        if let Some(mark) = c.mark_px.get() {
+        if let Some(mark) = c.mark_px {
             t.mark = mark;
         }
-        if let Some(index) = c.oracle_px.get() {
+        if let Some(index) = c.oracle_px {
             t.index = index;
         }
-        if let Some(open_interest) = c.open_interest.get() {
+        if let Some(open_interest) = c.open_interest {
             t.open_interest = open_interest * t.mark;
         }
-        if let Some(funding) = c.funding.get() {
+        if let Some(funding) = c.funding {
             t.funding_rate = funding / 100.0;
         }
         if let Some(next) = c.next_funding_time {
@@ -358,10 +358,10 @@ impl TxFlow {
         if let Some(previous) = c.prev_day_px.filter(|n| *n > 0.0) {
             t.percentage = (t.last - previous) / previous * 100.0;
         }
-        if let Some(volume) = c.day_base_vlm.get() {
+        if let Some(volume) = c.day_base_vlm {
             t.volume = volume;
         }
-        if let Some(volume) = c.day_ntl_vlm.get() {
+        if let Some(volume) = c.day_ntl_vlm {
             t.quote_volume = volume;
         }
     }
@@ -378,16 +378,16 @@ impl TxFlow {
         mask | row.node_ctx.as_ref().map_or(0, Self::context_mask)
     }
     fn ticker_update(t: &mut Ticker, row: TickerRow, seed: bool) {
-        if let Some(last) = row.last_price.get() {
+        if let Some(last) = row.last_price {
             t.last = last;
         }
-        if let Some(volume) = row.coin_vlm.get() {
+        if let Some(volume) = row.coin_vlm {
             t.volume = volume;
         }
-        if let Some(volume) = row.day_ntl_vlm.get() {
+        if let Some(volume) = row.day_ntl_vlm {
             t.quote_volume = volume;
         }
-        if let Some(previous) = row.prev_day_px.get() {
+        if let Some(previous) = row.prev_day_px {
             t.percentage = if previous > 0.0 {
                 (t.last - previous) / previous * 100.0
             } else {
@@ -395,13 +395,13 @@ impl TxFlow {
             };
         }
         if seed {
-            if let Some(mark) = row.mark_px.get() {
+            if let Some(mark) = row.mark_px {
                 t.mark = mark;
             }
-            if let Some(index) = row.oracle_px.get() {
+            if let Some(index) = row.oracle_px {
                 t.index = index;
             }
-            if let Some(open_interest) = row.open_interest.get() {
+            if let Some(open_interest) = row.open_interest {
                 t.open_interest = open_interest * t.mark;
             }
         }
