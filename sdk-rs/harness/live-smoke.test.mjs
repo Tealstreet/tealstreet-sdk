@@ -50,6 +50,29 @@ test('a real fraction of a step still rounds in the requested direction', () => 
   assert.equal(above.amount, 0.10000001);
 });
 
+test('unresolvable price ticks refuse before live sizing', () => {
+  // The old result was 9.0000000000002, over four ticks above the floor target.
+  assert.throws(() => smokeOrder({ ...market, precisionPrice: 1e-14 },
+    { bids: [10.00000000000017], asks: [10.1] }, { minNotional: 0, notionalKnown: true }),
+  /unrepresentable-market-step/);
+});
+
+test('unresolvable amount steps refuse before live sizing', () => {
+  // The old result was 9.0000000000001, over five lots below the minimum.
+  assert.throws(() => smokeOrder({ ...market, precisionPrice: 0.01,
+    precisionAmount: 1e-14, minAmount: 9.000000000000151 },
+  { bids: [1], asks: [1.1] }, { minNotional: 0, notionalKnown: true }),
+  /unrepresentable-market-step/);
+});
+
+test('decimal normalization cannot silently move an order across ticks', () => {
+  // Its relative noise band is under half a tick, but 14-digit rounding moves
+  // the selected multiple by several ticks; both checks are necessary.
+  assert.throws(() => smokeOrder({ ...market, precisionPrice: 1e-14 },
+    { bids: [1.500000000000175], asks: [1.6] }, { minNotional: 0, notionalKnown: true }),
+  /unrepresentable-market-step/);
+});
+
 test('inverse minimum notional uses quote contracts', () => {
   assert.equal(smokeOrder({ ...market, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.INVERSE,
     precisionAmount: 1, minAmount: 1, contractSize: 10 }, book, { minNotional: 21, notionalKnown: true }).amount, 3);

@@ -21,13 +21,17 @@ const positive = (value) => Number.isFinite(value) && value > 0;
 class SmokeFailure extends Error {}
 const fail = (code) => { throw new SmokeFailure(code); };
 const snap = (value) => Number(value.toPrecision(14));
-// Snap only float noise (a few ULPs of the step count) to the nearest multiple:
-// a fixed 1e-10 is below one ULP past ~1e6 steps, and a wider band moves real fractions.
+// Float noise must span less than half a step, and decimal cleanup must
+// preserve the selected multiple. Unrepresentable precision refuses sizing.
 const units = (value, step, ceil = false) => {
   const count = value / step, nearest = Math.round(count);
-  const whole = Math.abs(count - nearest) <= 16 * Number.EPSILON * Math.max(1, Math.abs(count)) ? nearest :
+  const tolerance = 16 * Number.EPSILON * Math.max(1, Math.abs(count));
+  if (!Number.isFinite(count) || tolerance >= 0.5) fail('unrepresentable-market-step');
+  const whole = Math.abs(count - nearest) <= tolerance ? nearest :
     ceil ? Math.ceil(count) : Math.floor(count);
-  return snap(whole * step);
+  const rounded = snap(whole * step);
+  if (Math.abs(rounded / step - whole) > tolerance) fail('unrepresentable-market-step');
+  return rounded;
 };
 
 export function accountSnapshot(buffer) {

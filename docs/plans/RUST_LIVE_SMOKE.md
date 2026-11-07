@@ -283,6 +283,8 @@ is `quantity * contractSize`, independent of the resting price. Missing or
 ambiguous sizing metadata refuses the run; the fixed 100 USD cap still applies.
 Fine-tick prices and amounts tolerate float noise relative to their step count,
 while a real fraction of a step still floors prices and ceils minimum amounts.
+Sizing refuses with `unrepresentable-market-step` when float noise spans half a
+step or decimal cleanup would move the selected multiple to a different step.
 
 `binancepm` has no test environment and no profile yet. Whether it runs on
 mainnet or stays unsmoked is an open decision. `binanceoptions` (European
