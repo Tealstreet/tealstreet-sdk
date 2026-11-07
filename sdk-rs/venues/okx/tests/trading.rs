@@ -20,6 +20,60 @@ fn place(
 }
 
 #[test]
+fn ambiguous_http_signature_response_never_resends_a_released_create() {
+    use safe_cex_engine::{Method, Outcome, Response};
+
+    for status in [429, 408, 500, 503] {
+        let mut e = trading_engine();
+        let out = place(
+            &mut e,
+            vec![order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#,
+            )],
+        );
+        let writes: Vec<_> = out
+            .iter()
+            .filter_map(|action| match action {
+                Action::Http(request) if request.method != Method::Get => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(writes.len(), 1, "one physically released create");
+        e.handle(
+            6.0,
+            Event::HttpResponse {
+                request: writes[0].id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#,
+                },
+            },
+        );
+        let mut after = prepared(&mut e, 6.0);
+        after.extend(fire_armed(&mut e, &after.clone(), 30_000.0));
+        assert!(
+            !after.iter().any(
+                |action| matches!(action, Action::Http(request) if request.method != Method::Get)
+            ),
+            "HTTP {status} must not resend the create: {after:?}"
+        );
+        let terminal = terminals(&after, 1);
+        assert_eq!(terminal.len(), 1, "HTTP {status}: one terminal");
+        assert_eq!(
+            terminal[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        assert!(
+            after.iter().any(
+                |action| matches!(action, Action::Http(request) if request.method == Method::Get)
+            ),
+            "HTTP {status}: reconcile by reading back"
+        );
+    }
+}
+
+#[test]
 fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
     let mut e = trading_engine();
     let a = place(
