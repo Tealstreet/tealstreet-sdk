@@ -35,6 +35,8 @@ production registry construction rejects raw material after setup. There is no
 raw-key fallback from a provider failure. WOO signs timestamp-only freshness,
 with no nonce or wire recvWindow. Held attempts re-sign after protocol clock
 correction; invalid receipts/results never publish transport.
+Local REST/WS signatures and provider dispatch use protocol UTC; scheduling time
+continues to drive deadlines and timers after host-clock corrections.
 
 Hosted RemoteSigner uses the existing bounded signing capture/provider harness.
 PayloadSigner remains refused. `tests/fixtures/hosted-signing.json` pins every

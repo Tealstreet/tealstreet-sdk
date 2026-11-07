@@ -206,20 +206,7 @@ impl Woo {
                 body,
             }
         } else {
-            let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) else {
-                return Err("WOO private requests require credentials".into());
-            };
-            if self.options.public_data_only || key.is_empty() || secret.is_empty() {
-                return Err("WOO private requests require credentials".into());
-            }
-            let read = self
-                .options
-                .read_credentials
-                .as_ref()
-                .filter(|_| method == Method::Get);
-            let key = read.map_or(key.as_str(), |r| r.key.as_str());
-            let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
-            sign::request(key, secret, cx.now, method, path, &params, body)
+            self.local_signed_wire(cx.protocol_now(), method, path, params, body)?
         };
         let path = request.path;
         let url = if path.starts_with("https://") {
@@ -232,6 +219,31 @@ impl Woo {
             selection.sign(cx, id, Box::new(recipe));
         }
         Ok(id)
+    }
+    /// Raw-options compatibility only; provider failures never enter this path.
+    fn local_signed_wire(
+        &self,
+        utc: f64,
+        method: Method,
+        path: &str,
+        params: Vec<(String, String)>,
+        body: Option<String>,
+    ) -> Result<sign::Signed, String> {
+        let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) else {
+            return Err("WOO private requests require credentials".into());
+        };
+        if self.options.public_data_only || key.is_empty() || secret.is_empty() {
+            return Err("WOO private requests require credentials".into());
+        }
+        let read = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get);
+        let key = read.map_or(key.as_str(), |r| r.key.as_str());
+        let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
+        let request = sign::request(key, secret, utc, method, path, &params, body);
+        Ok(request)
     }
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
@@ -552,7 +564,8 @@ impl Woo {
         }
         let size = limit.unwrap_or(500).clamp(1, 1000);
         let ms = interval.ms();
-        let recent = (((cx.now / ms).floor() * ms - to.unwrap_or(0.0)).abs() / ms) < 100.0;
+        let recent =
+            (((cx.protocol_now() / ms).floor() * ms - to.unwrap_or(0.0)).abs() / ms) < 100.0;
         let (mut url, at) = if recent {
             (
                 format!(

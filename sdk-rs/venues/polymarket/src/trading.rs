@@ -257,7 +257,10 @@ impl Polymarket {
             return Err("Polymarket contract signatures require a funder".into());
         }
         let signer = sign::order_signer(key, maker, signer_type)?;
-        if !cx.now.is_finite() || cx.now < 0.0 || cx.now > 9_007_199_254_740_991.0 {
+        if !cx.protocol_now().is_finite()
+            || cx.protocol_now() < 0.0
+            || cx.protocol_now() > 9_007_199_254_740_991.0
+        {
             return Err("Invalid Polymarket order timestamp".into());
         }
         let mut salt = 0u64;
@@ -282,7 +285,7 @@ impl Polymarket {
             taker_amount: placement.taker_amount.clone(),
             side: u8::from(placement.options.side == OrderSide::Sell),
             signature_type: signer_type,
-            timestamp: (cx.now.floor() as u64).to_string(),
+            timestamp: (cx.protocol_now().floor() as u64).to_string(),
             metadata: [0; 32],
             builder: [0; 32],
         };

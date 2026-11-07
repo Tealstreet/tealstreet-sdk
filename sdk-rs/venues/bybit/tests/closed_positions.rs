@@ -111,7 +111,7 @@ fn account_wide_rows_walk_newest_window_first_and_pass_through_verbatim() {
 fn omitted_bounds_read_the_last_seven_days_like_ts() {
     let mut h = startup(Variant::Linear, true);
     fetch(&mut h, 2, None, None, None);
-    let now = h.now;
+    let now = h.engine.signing_clock(h.now).0;
     // Seven days is one millisecond wider than a Bybit window, so TS splits it too.
     let request = h.take("/v5/position/closed-pnl");
     assert!(

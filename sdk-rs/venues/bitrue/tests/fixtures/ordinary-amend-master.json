@@ -124,7 +124,8 @@
       "code": -1111,
       "error": {
         "kind": "rateLimited",
-        "message": "Bitrue HTTP 429: {\"code\":\"-1111\",\"msg\":\"ordinary pin\"}; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "message": "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+        "outcome": "unknown",
         "partial": {
           "orderIds": [
             "2334151155877155281"
@@ -138,7 +139,7 @@
       "code": -1111,
       "error": {
         "kind": "venueUnavailable",
-        "message": "HTTP response does not prove the write outcome",
+        "message": "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders",
         "outcome": "unknown",
         "partial": {
           "orderIds": [

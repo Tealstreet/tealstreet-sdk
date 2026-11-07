@@ -146,6 +146,26 @@ fn ordinary_and_protective_dispatch_are_byte_identical_to_local_key_controls() {
         assert_eq!(provider.requests.lock().unwrap().len(), 1);
     }
 }
+
+#[test]
+fn local_and_hosted_writes_use_protocol_utc_instead_of_scheduling_time() {
+    for protective in [false, true] {
+        let (mut local, _) = engine(false, false);
+        let (mut delegated, _) = engine(true, false);
+        for engine in [&mut local, &mut delegated] {
+            assert!(engine.sync_host_time(NOW, NOW + 60_000.));
+        }
+        let expected = request(&place(&mut local, protective));
+        let actual = request(&place(&mut delegated, protective));
+        assert_eq!(actual.headers, expected.headers);
+        assert_eq!(actual.body, expected.body);
+        assert!(
+            actual
+                .headers
+                .contains(&("x-api-timestamp", "1700000060000".into()))
+        );
+    }
+}
 #[test]
 fn signer_failure_is_not_sent_and_does_not_fall_back_to_local_material() {
     for protective in [false, true] {
@@ -160,18 +180,29 @@ fn signer_failure_is_not_sent_and_does_not_fall_back_to_local_material() {
 #[test]
 fn ambiguous_dispatched_writes_keep_unknown_and_are_never_replayed() {
     for protective in [false, true] {
-        for malformed in [false, true] {
+        for response in [
+            None,
+            Some((503, "<html>")),
+            Some((
+                429,
+                r#"{"success":false,"code":-1003,"message":"fixture rate limit"}"#,
+            )),
+            Some((
+                200,
+                r#"{"success":false,"code":-1003,"message":"fixture rate limit"}"#,
+            )),
+        ] {
             let (mut engine, provider) = engine(true, false);
             let r = request(&place(&mut engine, protective));
             engine.handle(
                 NOW + 10.,
-                if malformed {
+                if let Some((status, body)) = response {
                     Event::HttpResponse {
                         request: r.id,
                         response: Response {
-                            status: 503,
+                            status,
                             headers: "",
-                            body: "<html>",
+                            body,
                         },
                     }
                 } else {
@@ -183,6 +214,13 @@ fn ambiguous_dispatched_writes_keep_unknown_and_are_never_replayed() {
             );
             let actions: Vec<_> = engine.drain_actions().collect();
             assert_eq!(error(&actions).outcome, Some(Outcome::Unknown));
+            if response.is_some_and(|(_, body)| body.contains("-1003")) {
+                assert_eq!(
+                    error(&actions).kind,
+                    Some(safe_cex_engine::ErrorKind::RateLimited)
+                );
+                assert_eq!(error(&actions).venue_code.as_deref(), Some("-1003"));
+            }
             assert!(
                 !actions
                     .iter()

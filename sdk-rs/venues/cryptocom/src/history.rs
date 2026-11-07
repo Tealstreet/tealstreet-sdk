@@ -279,7 +279,7 @@ impl Cryptocom {
             let _ = cx.fail_context(&context, "Crypto.com credentials are required");
             return;
         }
-        let to = to_ms.unwrap_or(cx.now);
+        let to = to_ms.unwrap_or(cx.protocol_now());
         let from = from_ms.unwrap_or(to - 86_400_000.0);
         if !from.is_finite() || !to.is_finite() || from < 0.0 || to < from {
             let Ok(context) = cx.admit_http_command(crate::read_policy()) else {

@@ -288,7 +288,13 @@ fn only_documented_correlated_errors_prove_refusal() {
         let id = send(&mut t);
         let failure = t.response(id,200,&json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":"fixture","data":{"reason":"fixture"}}}).to_string()).unwrap_err();
         assert_eq!(failure.code, Some(code));
-        assert_eq!(failure.verdict, Verdict::Refused(kind));
+        // send() releases private/buy: rate limiting cannot prove a write was refused.
+        let expected = if code == 10028 {
+            Verdict::Unknown(Some(kind))
+        } else {
+            Verdict::Refused(kind)
+        };
+        assert_eq!(failure.verdict, expected);
     }
     for body in [
         r#"{"jsonrpc":"2.0","id":2,"error":{"code":10009,"message":"not_enough_funds"}}"#,
