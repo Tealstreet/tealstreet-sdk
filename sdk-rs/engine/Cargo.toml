@@ -78,3 +78,7 @@ zeroize.workspace = true
 
 [lints]
 workspace = true
+
+[[example]]
+name = "managed_frame_profile"
+required-features = ["managed-sockets"]
