@@ -33,6 +33,11 @@ since such reads need not cause an engine SETTINGS frame. Recovery snapshots
 carry a copied leverage map after flushing pending SETTINGS. Cached rails with
 missing, nonfinite or nonpositive sides are unknown, not market maxima.
 
+TICKER_OBSERVATIONS optionally carries source receipt times for last/mark/index,
+independent of value deltas. Preserve them in ticker `observedAt`, including
+worker object updates; neither snapshot receipt nor shared-feed polling advances
+them. A missing section preserves the legacy producer's timestamp behavior.
+
 A failed book or account section must not suppress independent valid sections.
 Rejecting a book batch invalidates its baselines until fresh full books arrive;
 rejecting an envelope invalidates indexed identities until fresh MARKETS arrive.

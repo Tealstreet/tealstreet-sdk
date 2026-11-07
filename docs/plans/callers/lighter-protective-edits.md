@@ -51,6 +51,11 @@ retain explicit “check Open Orders” wording; the engine continues to own the
 original write fact and aggregate command outcome. Unguarded classifications
 and their existing controls are unchanged.
 
+After an ordinary single write's permitted nonce-21104 retry, a native
+23000/23100 response presents its unknown/Open Orders guidance instead of the
+earlier nonce refusal. The journal still projects the outcome and retains the
+write evidence; presentation cannot authorize another resend or put-back.
+
 VENUE_STATE remains the same 11-byte version 1 (account index and tier). Native
 provenance and mark receipts are not exported as fake frame-local evidence.
 Frame-fed protective price edits refuse `reference stale`; ordinary orders,
@@ -74,6 +79,14 @@ prices from the new trigger's slippage band. Stop-limits retain their original
 user limit. It cannot change side, type, reduce-only, TIF or expiry. Price-only edits
 retain the original venue amount. A stale/missing mark or any source/position
 change vetoes the final managed Claim. Frame-fed edits still refuse stale.
+
+Market-stop edits recover their effective slippage percentage from the accepted
+original native execution bound and trigger. Both guarded replacements and tx17
+apply that percentage to the new trigger using the existing placement rounding.
+This preserves the venue-rounded band; the original unrounded caller percentage
+is not retained. Wrong-side or greater-than-50% bounds refuse before any write
+with an unsupported-original-bound message; the user must re-place it. Ordinary
+placement is unchanged; stop-limits continue to preserve their explicit limit.
 
 Stop-limit edits refuse before any write if the kept sell limit exceeds the new
 trigger or the kept buy limit is below it; equality is allowed. The user must

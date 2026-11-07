@@ -64,9 +64,7 @@ Rust; Binance's REST seed alone would freeze its quote tools. The protocol test
 replays actual recorded Binance socket traffic and requires changed tool quotes.
 Historical MCP WASM fixtures explicitly mock beta admission to retain their
 protocol assertions for OUT reference venues; production admits no TS adapter.
-Keep native REST timers active as well as sockets:
-BreakoutProp has no stream and its tools depend on periodic reconciliation.
-A real native protocol regression requires changed quotes after its REST poll.
+Keep native REST timers active as well as sockets for periodic reconciliation.
 History UTC mapping preserves the SDK's non-enumerable incompleteness marker.
 For known partial history, tool text JSON is `{ requestId, rows, completeness:
 { incomplete: true } }`, using the owning JSON-RPC request ID. Unflagged

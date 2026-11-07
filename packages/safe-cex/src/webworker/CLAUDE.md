@@ -7,6 +7,12 @@ bridges store snapshots back via `postMessage`. Entry point:
 instance plus its `DefaultStore`, and pushes throttled store
 snapshots to the main thread on every `store.notify()`.
 
+## Worker lifecycle logs
+
+`ExchangeWorker.log` sends the emitter argument array `[JSON text, severity]`,
+serializing its level, message and context. A standalone object is coerced to
+`[object Object]` by existing main-thread log consumers; `warn` maps to `warning`.
+
 ## History result completeness
 
 Successful `callMethod:done` replies include optional `data.completeness:
@@ -41,6 +47,11 @@ to every local worker; `store.webworker.ts` applies it before exchange routing.
 Do not make each exchange worker call the public endpoint: one tab may have
 many accounts, and foreground/page-show handling already forces a fresh
 main-thread sync after sleep.
+
+The initial worker clock startup waits up to 30 s for that push. The engine
+then uses an epoch-shaped monotonic scheduling clock, while later pushes update
+protocol timestamps only. Worker startup elapsed telemetry also uses
+`performance.now()` at both ends, independent of system/venue clock corrections.
 
 ## The `exchangeWorkers` registry is keyed by accountName — single-tenant only
 

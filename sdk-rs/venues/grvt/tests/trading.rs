@@ -1,3 +1,5 @@
+#[path = "support/hosted_parity.rs"]
+mod hosted_parity;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId, TimerId,
@@ -35,16 +37,46 @@ fn boot_capturing_public(
     builders: Option<&str>,
     open_orders: &str,
 ) -> (Engine<Grvt>, SocketId, Option<HttpRequest>, SocketId) {
+    boot_capturing_public_mode(catalog, builders, open_orders, true)
+}
+fn boot_capturing_public_mode(
+    catalog: &str,
+    builders: Option<&str>,
+    open_orders: &str,
+    hosted: bool,
+) -> (Engine<Grvt>, SocketId, Option<HttpRequest>, SocketId) {
+    boot_capturing_public_route(catalog, builders, open_orders, hosted, true)
+}
+fn boot_capturing_public_session(
+    catalog: &str,
+    builders: Option<&str>,
+    open_orders: &str,
+    session_proxy: bool,
+) -> (Engine<Grvt>, SocketId, Option<HttpRequest>, SocketId) {
+    boot_capturing_public_route(catalog, builders, open_orders, false, session_proxy)
+}
+fn boot_capturing_public_route(
+    catalog: &str,
+    builders: Option<&str>,
+    open_orders: &str,
+    hosted: bool,
+    session_proxy: bool,
+) -> (Engine<Grvt>, SocketId, Option<HttpRequest>, SocketId) {
     let mut private_socket = None;
     let mut public_socket = None;
     let mut held = None;
-    let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
+    let options = Options {
         key: Some("grvt-test-key".into()),
         secret: Some(format!("0x{}", "01".repeat(32))),
         trading_account_id: Some("9007199254740993".into()),
-        session_proxy: true,
+        session_proxy,
         ..Options::default()
-    }));
+    };
+    let mut e = if hosted {
+        hosted_parity::engine(options)
+    } else {
+        safe_cex_engine::test_support::seeded_engine(Grvt::new(options))
+    };
     e.start(NOW);
     let mut pending: VecDeque<_> = drain(&mut e)
         .filter_map(|a| {
@@ -2862,6 +2894,324 @@ fn protective_429_on_replacement_or_put_back_stays_unknown_without_retry_or_prot
             assert!(error.protection.is_none());
             assert!(error.message.contains("unknown") && error.message.contains("Open Orders"));
             assert!(!error.message.contains("both refused"));
+        }
+    }
+}
+
+#[test]
+fn hosted_ordinary_and_protective_packets_are_byte_identical_to_legacy_local_custody() {
+    for protective in [false, true] {
+        let mut requests = vec![];
+        for hosted in [false, true] {
+            let (mut engine, _, _, _) =
+                boot_capturing_public_mode(CATALOG, Some(AUTHORIZED), OPEN_ORDERS, hosted);
+            let mut order = opts();
+            if protective {
+                order.kind = OrderType::StopLoss;
+                order.client_order_id = None;
+                order.trigger_price = Some(90.);
+                order.reduce_only = Some(true);
+            }
+            let request = http(
+                command(
+                    &mut engine,
+                    Command::PlaceOrders {
+                        command: 902,
+                        orders: vec![order],
+                    },
+                ),
+                "create_order",
+            );
+            requests.push((request.method, request.url, request.headers, request.body));
+        }
+        assert_eq!(
+            requests[0], requests[1],
+            "full signed ordinary/protective wire bytes"
+        );
+    }
+}
+
+#[test]
+fn ambiguous_write_auth_errors_never_relogin_or_send_another_create() {
+    assert_ambiguous_write_auth_errors(false);
+}
+
+#[test]
+fn hosted_ambiguous_write_auth_errors_never_relogin_or_send_another_create() {
+    assert_ambiguous_write_auth_errors(true);
+}
+
+fn assert_ambiguous_write_auth_errors(hosted: bool) {
+    let mut observed = Vec::new();
+    for session_proxy in [false, true] {
+        for status in [429, 408, 500, 503, 600, u16::MAX] {
+            let (mut engine, _, _, _) = boot_capturing_public_route(
+                CATALOG,
+                Some(AUTHORIZED),
+                OPEN_ORDERS,
+                hosted,
+                session_proxy,
+            );
+            let create = http(
+                command(
+                    &mut engine,
+                    Command::PlaceOrders {
+                        command: 902,
+                        orders: vec![opts()],
+                    },
+                ),
+                "create_order",
+            );
+            let actions = reply(
+                &mut engine,
+                &create,
+                status,
+                r#"{"c":1000,"m":"uncertain session refusal"}"#,
+            );
+            let login = actions.iter().find_map(|action| match action {
+                Action::Http(request) if request.url.ends_with("auth/api_key/login") => {
+                    Some(request)
+                }
+                _ => None,
+            });
+            let mut replayed = 0;
+            if let Some(login) = login {
+                engine.handle(NOW + 4., Event::HttpResponse {
+                    request: login.id,
+                    response: Response {
+                        status: 200,
+                        headers: "Set-Cookie: gravity=test-session; Path=/\nX-Grvt-Account-Id: test-account",
+                        body: r#"{"sub_account_id":"9007199254740993"}"#,
+                    },
+                });
+                replayed = drain(&mut engine)
+                    .filter(|action| {
+                        matches!(action,
+                            Action::Http(request) if request.url.ends_with("create_order")
+                        )
+                    })
+                    .count();
+            }
+            let outcome = actions.iter().find_map(|action| match action {
+                Action::Notice(Notice::CommandFailed {
+                    command: 902,
+                    error,
+                }) => error.outcome,
+                _ => None,
+            });
+            observed.push((session_proxy, status, login.is_some(), replayed, outcome));
+        }
+    }
+    for (proxy, status, login, replayed, outcome) in observed {
+        assert!(
+            !login,
+            "proxy={proxy} HTTP {status}: ambiguous write requested reauthentication ({replayed} additional creates)"
+        );
+        assert_eq!(replayed, 0, "proxy={proxy} HTTP {status}");
+        assert_eq!(
+            outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "proxy={proxy} HTTP {status}"
+        );
+    }
+}
+
+#[test]
+fn ambiguous_write_native_errors_remain_unknown_on_both_session_routes() {
+    assert_ambiguous_write_native_errors(false);
+}
+
+#[test]
+fn hosted_ambiguous_write_native_errors_remain_unknown_on_both_session_routes() {
+    assert_ambiguous_write_native_errors(true);
+}
+
+fn assert_ambiguous_write_native_errors(hosted: bool) {
+    for session_proxy in [false, true] {
+        for status in [429, 408, 500, 503, 600, u16::MAX] {
+            let (mut engine, _, _, _) = boot_capturing_public_route(
+                CATALOG,
+                Some(AUTHORIZED),
+                OPEN_ORDERS,
+                hosted,
+                session_proxy,
+            );
+            let create = http(
+                command(
+                    &mut engine,
+                    Command::PlaceOrders {
+                        command: 902,
+                        orders: vec![opts()],
+                    },
+                ),
+                "create_order",
+            );
+            let actions = reply(
+                &mut engine,
+                &create,
+                status,
+                r#"{"c":1001,"m":"native error under an ambiguous status"}"#,
+            );
+            assert_eq!(
+                failure(&actions).outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "proxy={session_proxy} HTTP {status}"
+            );
+            assert!(!actions.iter().any(|action| matches!(action,
+                Action::Http(request) if request.url.ends_with("create_order") || request.url.ends_with("auth/api_key/login")
+            )));
+        }
+    }
+}
+
+#[test]
+fn ambiguous_read_auth_errors_keep_the_existing_session_retry() {
+    for session_proxy in [false, true] {
+        for status in [429, 408, 503] {
+            let (mut engine, _, _, _) = boot_capturing_public_session(
+                CATALOG,
+                Some(AUTHORIZED),
+                OPEN_ORDERS,
+                session_proxy,
+            );
+            let read = http(
+                command(
+                    &mut engine,
+                    Command::CancelSymbolOrders {
+                        command: 903,
+                        symbol: "BTC_USDT_PERP".into(),
+                    },
+                ),
+                "open_orders",
+            );
+            let login = http(
+                reply(
+                    &mut engine,
+                    &read,
+                    status,
+                    r#"{"c":1000,"m":"session expired"}"#,
+                ),
+                "auth/api_key/login",
+            );
+            engine.handle(NOW + 4., Event::HttpResponse {
+                request: login.id,
+                response: Response {
+                    status: 200,
+                    headers: "Set-Cookie: gravity=test-session; Path=/\nX-Grvt-Account-Id: test-account",
+                    body: r#"{"sub_account_id":"9007199254740993"}"#,
+                },
+            });
+            let actions: Vec<_> = drain(&mut engine).collect();
+            let reads: Vec<_> = actions
+                .iter()
+                .filter_map(|action| match action {
+                    Action::Http(request) if request.url.ends_with("open_orders") => Some(request),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(reads.len(), 1, "proxy={session_proxy} HTTP {status}");
+            assert_eq!(reads[0].body, read.body);
+            assert!(!actions.iter().any(|action| matches!(action,
+                Action::Http(request) if request.url.ends_with("cancel_order") || request.url.ends_with("create_order")
+            )));
+        }
+    }
+}
+
+#[test]
+fn ambiguous_cancel_and_setting_errors_never_refresh_or_replay() {
+    assert_ambiguous_cancel_and_setting_errors(false);
+}
+
+#[test]
+fn hosted_ambiguous_cancel_and_setting_errors_never_refresh_or_replay() {
+    assert_ambiguous_cancel_and_setting_errors(true);
+}
+
+fn assert_ambiguous_cancel_and_setting_errors(hosted: bool) {
+    for session_proxy in [false, true] {
+        for status in [429, 408, 503] {
+            for native_code in [1000, 1001] {
+                for path in ["cancel_order", "set_initial_leverage"] {
+                    let (mut engine, _, _, _) = boot_capturing_public_route(
+                        CATALOG,
+                        Some(AUTHORIZED),
+                        OPEN_ORDERS,
+                        hosted,
+                        session_proxy,
+                    );
+                    let request = if path == "cancel_order" {
+                        Command::CancelOrders {
+                            command: 904,
+                            ids: vec!["42".into()],
+                        }
+                    } else {
+                        Command::SetLeverage {
+                            command: 904,
+                            symbol: "BTC_USDT_PERP".into(),
+                            leverage: 20.,
+                            side: None,
+                        }
+                    };
+                    let write = http(command(&mut engine, request), path);
+                    let actions = reply(
+                        &mut engine,
+                        &write,
+                        status,
+                        &format!(r#"{{"c":{native_code},"m":"unproven write"}}"#),
+                    );
+                    assert_eq!(
+                        failure(&actions).outcome,
+                        Some(safe_cex_engine::Outcome::Unknown),
+                        "{path} proxy={session_proxy} HTTP {status} code={native_code}"
+                    );
+                    assert!(!actions.iter().any(|action| matches!(action,
+                        Action::Http(request) if request.url.ends_with(path) || request.url.ends_with("auth/api_key/login")
+                    )));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn ambiguous_read_native_errors_keep_the_existing_outcome() {
+    for session_proxy in [false, true] {
+        for (status, expected) in [
+            (429, safe_cex_engine::Outcome::Rejected),
+            (408, safe_cex_engine::Outcome::Rejected),
+            (503, safe_cex_engine::Outcome::Unknown),
+        ] {
+            let (mut engine, _, _, _) = boot_capturing_public_session(
+                CATALOG,
+                Some(AUTHORIZED),
+                OPEN_ORDERS,
+                session_proxy,
+            );
+            let read = http(
+                command(
+                    &mut engine,
+                    Command::CancelSymbolOrders {
+                        command: 905,
+                        symbol: "BTC_USDT_PERP".into(),
+                    },
+                ),
+                "open_orders",
+            );
+            let actions = reply(
+                &mut engine,
+                &read,
+                status,
+                r#"{"c":1001,"m":"controlled read refusal"}"#,
+            );
+            assert_eq!(
+                failure(&actions).outcome,
+                Some(expected),
+                "proxy={session_proxy} HTTP {status}"
+            );
+            assert!(!actions.iter().any(|action| matches!(action,
+                Action::Http(request) if request.url.ends_with("cancel_order") || request.url.ends_with("create_order")
+            )));
         }
     }
 }

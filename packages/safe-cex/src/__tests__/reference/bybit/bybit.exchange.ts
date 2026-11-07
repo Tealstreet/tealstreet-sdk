@@ -1,10 +1,10 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
+import type { BybitPlaceOrderOpts } from '../../../exchanges/bybit/bybit.order-params';
+import type { ClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import type { Store } from '../../../store/store.interface';
 import type { AccountGreeks, ExchangeName, OptionChainQuery, OptionChainRow } from '../../../types';
-import type { ClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import type { BybitIncomeContext } from './bybit.income';
-import type { BybitPlaceOrderOpts } from '../../../exchanges/bybit/bybit.order-params';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
@@ -17,6 +17,32 @@ import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange } from '../../../exchanges/base';
+import { mapBybitClosedPnl } from '../../../exchanges/bybit/bybit.closed-pnl';
+import { isBybitInverseSymbol, positionUpnlInQuote } from '../../../exchanges/bybit/bybit.inverse';
+import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from '../../../exchanges/bybit/bybit.order-params';
+import { BYBIT_BRAZIL_SITE_ID } from '../../../exchanges/bybit/bybit.site';
+import {
+  BASE_URL,
+  BASE_WS_URL,
+  BybitApiKeyInfo,
+  DEMO_URL,
+  DEMO_WS_URL,
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  INTERVAL,
+  ORDER_HISTORY_MAX_WINDOW_MS,
+  ORDER_SIDE,
+  ORDER_STATUS,
+  ORDER_TIME_IN_FORCE,
+  ORDER_TIME_IN_FORCE_OUTBOUND,
+  ORDER_TRIGGER_TYPE,
+  ORDER_TYPE,
+  POSITION_SIDE,
+  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
+} from '../../../exchanges/bybit/bybit.types';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { aggregateBybitClosedPnl } from '../../../journal/bybit.position-adapter';
 import {
   Balance,
@@ -61,13 +87,10 @@ import { adjust, subtract } from '../../../utils/safe-math';
 import { splitTimeRange } from '../../../utils/splitTimeRange';
 import { isUnknownOutcome } from '../../../utils/unknownSendOutcome';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { createAPI } from './bybit.api';
-import { mapBybitClosedPnl } from '../../../exchanges/bybit/bybit.closed-pnl';
+import { normalizeBybitExecutionTimestampMs, normalizeBybitExecutionTimestampSeconds } from './bybit.execution-time';
 import { bybitFeeOverlay } from './bybit.fee-overlay';
 import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange } from './bybit.income';
-import { isBybitInverseSymbol, positionUpnlInQuote } from '../../../exchanges/bybit/bybit.inverse';
 import {
   buildOptionChain,
   isBybitOptionSymbol,
@@ -77,35 +100,9 @@ import {
   mapBybitOptionTicker,
   optionExpiries,
 } from './bybit.options';
-import { mapBybitHistoricalOrder } from './bybit.order-history';
-import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from '../../../exchanges/bybit/bybit.order-params';
+import { BYBIT_TERMINAL_ORDER_STATUSES, mapBybitHistoricalOrder } from './bybit.order-history';
 import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLevel } from './bybit.rateLimits';
 import { getBybitResponseMeta } from './bybit.response';
-import { BYBIT_BRAZIL_SITE_ID } from '../../../exchanges/bybit/bybit.site';
-import {
-  normalizeBybitExecutionTimestampMs,
-  normalizeBybitExecutionTimestampSeconds,
-} from './bybit.execution-time';
-import {
-  BASE_URL,
-  BASE_WS_URL,
-  BybitApiKeyInfo,
-  DEMO_URL,
-  DEMO_WS_URL,
-  ENDPOINTS,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  INTERVAL,
-  ORDER_HISTORY_MAX_WINDOW_MS,
-  ORDER_SIDE,
-  ORDER_STATUS,
-  ORDER_TIME_IN_FORCE,
-  ORDER_TIME_IN_FORCE_OUTBOUND,
-  ORDER_TRIGGER_TYPE,
-  ORDER_TYPE,
-  POSITION_SIDE,
-  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
-} from '../../../exchanges/bybit/bybit.types';
 import { BybitPrivateWebsocket } from './bybit.ws-private';
 import { BybitPublicWebsocket } from './bybit.ws-public';
 import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFromPositions';
@@ -2494,9 +2491,13 @@ export class BybitExchange extends BaseExchange {
         : this.inverseEnabled()
           ? ['linear', 'inverse']
           : ['linear'];
-      const queries = categories.flatMap((category) => windows.map((window) => ({ category, window })));
+      const queries = categories.flatMap((category) =>
+        [undefined, ...BYBIT_TERMINAL_ORDER_STATUSES].flatMap((orderStatus) =>
+          windows.map((window) => ({ category, orderStatus, window })),
+        ),
+      );
 
-      for (const { category, window } of queries) {
+      for (const { category, orderStatus, window } of queries) {
         let cursor: string | undefined = undefined;
         for (page = 0; page < MAX_PAGES; page += 1) {
           // `params` is annotated rather than inferred: `cursor` feeds into it and is then
@@ -2504,6 +2505,7 @@ export class BybitExchange extends BaseExchange {
           // type into the request makes `data` circular (TS7022).
           const params: Record<string, any> = omitUndefined({
             category,
+            orderStatus,
             symbol: opts?.symbol,
             startTime: window.startTime,
             endTime: window.endTime,
@@ -3400,9 +3402,7 @@ export class BybitExchange extends BaseExchange {
         this.emitAndLogError(data.retMsg);
         throw new Error(data.retMsg);
       }
-      const foundErr = data.retExtInfo?.list.find(
-        (l: any) => l.code !== 0 && !this.isAlreadyGoneCancelMessage(l.msg),
-      );
+      const foundErr = data.retExtInfo?.list.find((l: any) => l.code !== 0 && !this.isAlreadyGoneCancelMessage(l.msg));
       if (foundErr) {
         this.emitAndLogError(foundErr.msg);
         throw new Error(foundErr.msg);

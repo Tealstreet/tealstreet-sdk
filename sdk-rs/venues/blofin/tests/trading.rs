@@ -27,6 +27,155 @@ fn only_reconcile_pending(h: &Harness) {
 fn seed_order(h: &mut Harness, id: &str, extra: &str) {
     h.ws(&format!(r#"{{"arg":{{"channel":"orders"}},"data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"{id}","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"{extra}}}]}}"#));
 }
+
+#[test]
+fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
+    for (status, response) in [
+        (429, "{}"),
+        (429, r#"{"code":"152401","msg":"Invalid signature"}"#),
+        (200, r#"{"code":"429","msg":"Too Many Requests"}"#),
+        (
+            200,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","code":"429","msg":"Too Many Requests"}]}"#,
+        ),
+        (408, r#"{"code":"152401","msg":"Invalid signature"}"#),
+        (500, r#"{"code":"152401","msg":"Invalid signature"}"#),
+        (503, r#"{"code":"152401","msg":"Invalid signature"}"#),
+    ] {
+        for operation in [
+            "create",
+            "protective-create",
+            "amend",
+            "amend-replacement",
+            "cancel",
+            "protective-amend",
+            "protective-cancel",
+            "setting",
+        ] {
+            let mut h = Harness::new();
+            h.open_private();
+            h.seed();
+            seed_order(&mut h, "12", "");
+            h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","state":"live"}]}"#);
+            let protective =
+                h.e.store()
+                    .orders()
+                    .iter()
+                    .find(|o| o.kind == safe_cex_engine::model::OrderType::TakeProfit)
+                    .unwrap()
+                    .id
+                    .clone();
+            let (command, path) = match operation {
+                "create" | "protective-create" => {
+                    let kind = if operation == "create" {
+                        "market"
+                    } else {
+                        "stop_market"
+                    };
+                    let orders = serde_json::from_value(serde_json::json!([{"symbol":"BTCUSDT","type":kind,"side":"sell","amount":1,"price":55000,"reduceOnly":true}])).unwrap();
+                    (
+                        Command::PlaceOrders { command: 7, orders },
+                        if operation == "create" {
+                            "batch-orders"
+                        } else {
+                            "order-tpsl"
+                        },
+                    )
+                }
+                "amend" | "amend-replacement" | "protective-amend" => (
+                    Command::AmendOrder {
+                        command: 7,
+                        id: if operation.starts_with("amend") {
+                            "12".into()
+                        } else {
+                            protective.clone()
+                        },
+                        price: Some(66000.0),
+                        amount: None,
+                    },
+                    if operation.starts_with("amend") {
+                        "cancel-batch-orders"
+                    } else {
+                        "amend-tpsl"
+                    },
+                ),
+                "cancel" | "protective-cancel" => (
+                    Command::CancelOrders {
+                        command: 7,
+                        ids: vec![if operation == "cancel" {
+                            "12".into()
+                        } else {
+                            protective.clone()
+                        }],
+                    },
+                    if operation == "cancel" {
+                        "cancel-batch-orders"
+                    } else {
+                        "cancel-tpsl"
+                    },
+                ),
+                _ => (
+                    Command::SetLeverage {
+                        command: 7,
+                        symbol: "BTCUSDT".into(),
+                        leverage: 30.0,
+                        side: None,
+                    },
+                    "set-leverage",
+                ),
+            };
+            h.handle(1.0, Event::Command(command));
+            h.collect();
+            let mut request = h.take(path);
+            if operation == "amend-replacement" {
+                h.respond(
+                    request,
+                    r#"{"code":"0","data":[{"orderId":"12","code":"0"}]}"#,
+                );
+                let (timer, at) = h
+                    .actions
+                    .iter()
+                    .rev()
+                    .find_map(|a| match a {
+                        Action::SetTimer { timer, at_ms } if *at_ms == h.now + 350.0 => {
+                            Some((*timer, *at_ms))
+                        }
+                        _ => None,
+                    })
+                    .unwrap();
+                h.handle(at, Event::TimerFired { timer });
+                h.collect();
+                h.reply("order-detail", r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"0"}}"#);
+                request = h.take("batch-orders");
+            }
+            h.respond_status(request, status, response);
+            assert_eq!(h.failures.len(), 1, "{operation} {status}");
+            let error = &h.failures[0];
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "{operation} {status}: {error:?}"
+            );
+            assert_eq!(error.protection, None);
+            assert!(
+                error.message.to_lowercase().contains("unknown"),
+                "{operation} {status}: {error:?}"
+            );
+            assert!(
+                error.message.contains("Check Open Orders"),
+                "{operation} {status}: {error:?}"
+            );
+            assert!(!error.message.contains("refused"), "{error:?}");
+            assert!(!error.message.contains("no stop"), "{error:?}");
+            assert!(
+                h.pending
+                    .iter()
+                    .all(|r| r.method == safe_cex_engine::Method::Get),
+                "no resend or put-back: {operation}"
+            );
+        }
+    }
+}
 #[test]
 fn bybit_execution_controls_reject_entire_batch_before_writes() {
     for (field, value) in [
@@ -1557,7 +1706,7 @@ fn trading_failures_are_classified_without_changing_their_text() {
             429,
             "{}",
             Some(ErrorKind::RateLimited),
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
         ),
         (
             200,

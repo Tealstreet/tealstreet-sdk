@@ -750,7 +750,15 @@ impl Woo {
         let c = &mut self.account.connection;
         c.open = true;
         c.ping_at = cx.now;
-        let Some(text) = crate::sign::websocket_auth(&self.options, cx.now) else {
+        if let Some(identity) = &self.options.credentials {
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(crate::sign::dispatch::WsAuth::new(identity.clone(), socket)),
+            );
+            return true;
+        }
+        let Some(text) = crate::sign::websocket_auth(&self.options, cx.protocol_now()) else {
             return true;
         };
         cx.send(socket, text);
@@ -1991,5 +1999,17 @@ impl Woo {
             return true;
         }
         false
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Info { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }

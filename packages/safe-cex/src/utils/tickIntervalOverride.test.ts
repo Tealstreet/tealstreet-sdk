@@ -13,9 +13,9 @@ describe('tick interval override', () => {
 
   it('notifies engine pollers after updates and removes disposed listeners', () => {
     const observed: number[] = [];
-    const stop = subscribeTickIntervalMultipliers(() => observed.push(getTickIntervalMultiplier('breakoutprop')));
+    const stop = subscribeTickIntervalMultipliers(() => observed.push(getTickIntervalMultiplier('bybit')));
     setTickIntervalMultipliers({ '*': 4 });
-    setTickIntervalMultipliers({ '*': 4, breakoutprop: 2 });
+    setTickIntervalMultipliers({ '*': 4, bybit: 2 });
     setTickIntervalMultipliers(undefined);
     stop();
     setTickIntervalMultipliers({ '*': 3 });

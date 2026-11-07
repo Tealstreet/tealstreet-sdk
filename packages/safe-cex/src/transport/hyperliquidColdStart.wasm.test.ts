@@ -2,6 +2,7 @@
 import type { EngineEvent, HttpPacket, Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { setImmediate } from 'node:timers';
+import { deflateRawSync } from 'node:zlib';
 
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -163,7 +164,17 @@ it.each([0, 8000])(
               body = {
                 status: 'order',
                 order: {
-                  order: { coin: 'BTC', oid: 9, side: 'A', limitPx: '80', origSz: '1', sz: '1' },
+                  order: {
+                    coin: 'BTC',
+                    oid: 9,
+                    side: 'A',
+                    limitPx: '80',
+                    origSz: '1',
+                    sz: '1',
+                    orderType: 'Stop Market',
+                    triggerPx: '80',
+                    reduceOnly: true,
+                  },
                   status: 'open',
                 },
               };
@@ -198,9 +209,14 @@ it.each([0, 8000])(
           };
           deliveries[account] = deliver;
           let publicTimer: ReturnType<typeof setTimeout>;
+          const markFrame = {
+            channel: 'fastAssetCtxs',
+            data: deflateRawSync(JSON.stringify({ BTC: { midPx: '100', markPx: '100' } })).toString('base64'),
+          };
           const publicPulse = () => {
             if (closed) return;
             deliver({ channel: 'allMids', data: { mids: { BTC: '100' } } });
+            deliver(markFrame);
             publicTimer = setTimeout(publicPulse, 5000);
           };
           queueMicrotask(() => {

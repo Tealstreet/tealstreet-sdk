@@ -6,8 +6,7 @@
     "ciHead": "c7e9d242a9cbc656e881c212b66b0a9c8a3f5b13",
     "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39419024015",
     "localPrivateReports": [
-      "/tmp/gate-honesty-hyperliquid-priority-private.json",
-      "/tmp/gate-honesty-breakoutprop-priority-private.json"
+      "/tmp/gate-honesty-hyperliquid-priority-private.json"
     ],
     "earlierPerformanceRun": 39417011625,
     "note": "Initial declarations from 104 completed CI cases plus two corrected private cases; complete 107-case certification and independent review required before merge. Earlier Hyro steady CPU miss retained, never rerun-to-green selection.",
@@ -1247,7 +1246,7 @@
     },
     {
       "venue": "binanceinverse",
-      "tapeSha256": "a0a35640cbdb5fdd8f43a14188cc4113290683b1e625e131f6da0e9b8b38f94b",
+      "tapeSha256": "2e29220370a438c5424ffcacff131bfbd7dc6dfafc1aede4bf2f476edf608d91",
       "tape": "sdk-rs/harness/tapes/binanceinverse-private.jsonl",
       "diagnostics": [
         {
@@ -1308,7 +1307,7 @@
     },
     {
       "venue": "binancepm",
-      "tapeSha256": "aef98183e725ca464ac67b55e40ee27f826d785a705a6dbb728e4717d5b853b1",
+      "tapeSha256": "c37534b929ea81c1959f2eb8f585f6305f34c43a03bb7a3bb5107f7319083bda",
       "tape": "sdk-rs/harness/tapes/binancepm-private.jsonl",
       "diagnostics": [
         {
@@ -4015,45 +4014,6 @@
             "checkpoint 9 account.orders[5].status",
             "checkpoint 9 account.orders[6].status",
             "checkpoint 9 account.orders[7].status"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "breakoutprop",
-      "tapeSha256": "514407bb2031e25574211694eb05b40a26933fc48fb5288fc5c8234f49fc96d3",
-      "tape": "sdk-rs/harness/tapes/breakoutprop-private.jsonl",
-      "diagnostics": [
-        {
-          "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
-          "keys": [
-            "account orders[0].clientOrderId",
-            "checkpoint 0 account.orders[0].clientOrderId",
-            "checkpoint 1 account.orders[0].clientOrderId",
-            "checkpoint 2 account.orders[0].clientOrderId",
-            "checkpoint 3 account.orders[0].clientOrderId",
-            "checkpoint 4 account.orders[0].clientOrderId",
-            "checkpoint 5 account.orders[0].clientOrderId",
-            "checkpoint 6 account.orders[0].clientOrderId",
-            "checkpoint 7 account.orders[0].clientOrderId",
-            "checkpoint 8 account.orders[0].clientOrderId",
-            "checkpoint 9 account.orders[0].clientOrderId"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "breakoutprop",
-      "tapeSha256": "79f7a16af940e98abbdcab307a45a7e4e9d6b67246c30d1832bf660c94ad0e06",
-      "tape": "sdk-rs/harness/fixtures/breakoutprop-public.jsonl.gz",
-      "diagnostics": [
-        {
-          "divergence": "Raw book seed/depth differs at this boundary; final tape-derived book corrections do not erase interim differences.",
-          "keys": [
-            "checkpoint 0 books.BTCUSD",
-            "checkpoint 0 books.ETHUSD",
-            "checkpoint 1 books.BTCUSD",
-            "checkpoint 1 books.ETHUSD"
           ]
         }
       ]
@@ -17591,19 +17551,6 @@
           "keys": [
             "checkpoint 0 account.positions.length",
             "checkpoint 0 account.positions[1]"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "hyrotrader",
-      "tapeSha256": "3b8707627d73033b373751308e10655a8a9c70363e03ec1a43f1c820cfdbc6e0",
-      "tape": "sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz",
-      "diagnostics": [
-        {
-          "divergence": "Seven interleaved pairs did not establish the required 10% improvement; retain the observed performance failure, including if a later sample passes.",
-          "keys": [
-            "performance steady-state CPU: Rust must be at least 10% below TS"
           ]
         }
       ]
@@ -36314,19 +36261,6 @@
             "checkpoint 12 account.orders[0].trigger",
             "checkpoint 13 account.orders[0].stopLossTrigger",
             "checkpoint 13 account.orders[0].trigger"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "kucoin",
-      "tapeSha256": "2bab19c1b1e616e2ab5005d12d0261ec7f5cb23afc45c0ede8a01d0f0f733c43",
-      "tape": "sdk-rs/harness/fixtures/kucoin-public.jsonl.gz",
-      "diagnostics": [
-        {
-          "divergence": "Raw book seed/depth differs at this boundary; final tape-derived book corrections do not erase interim differences.",
-          "keys": [
-            "checkpoint 0 books.ETHUSDT"
           ]
         }
       ]

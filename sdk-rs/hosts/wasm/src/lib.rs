@@ -17,7 +17,6 @@ mod hosted_operations;
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -39,7 +38,7 @@ mod hosted_operations;
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{
@@ -96,6 +95,9 @@ trait AnyEngine {
         &mut self,
         algorithms: Option<Vec<safe_cex_engine::signing::Algorithm>>,
     ) -> Result<(), safe_cex_engine::VenueError>;
+    fn sync_host_time(&mut self, _now: f64, _utc: f64) -> bool {
+        false
+    }
     fn prepare_dispatch(&mut self, now: f64);
     fn set_entropy(
         &mut self,
@@ -248,6 +250,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
     ) -> Result<(), safe_cex_engine::VenueError> {
         self.set_signer(None)?;
         self.set_host_algorithms(algorithms)
+    }
+    fn sync_host_time(&mut self, now: f64, utc: f64) -> bool {
+        Engine::sync_host_time(self, now, utc)
     }
     fn prepare_dispatch(&mut self, now: f64) {
         Engine::prepare_dispatch(self, now);
@@ -511,7 +516,8 @@ impl serde::Serialize for Fields<'_> {
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for (key, value) in self.0 {
             match value {
-                Value::Str(text) => map.serialize_entry(key, text)?,
+                Value::Str(text) => map.serialize_entry(key, text.as_str())?,
+                Value::StaticStr(text) => map.serialize_entry(key, *text)?,
                 // JSON has no non-finite numbers.
                 Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
                 Value::Num(_) => map.serialize_entry(key, &())?,
@@ -651,13 +657,16 @@ pub fn wasm_memory_bytes() -> f64 {
 
 /// Resolve construction choices without constructing an engine or performing I/O.
 #[wasm_bindgen(js_name = resolveConstruction)]
-pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, JsError> {
+pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, js_sys::Error> {
     if !safe_cex_venues::supported(venue) {
-        return Err(JsError::new(&format!("unsupported venue: {venue}")));
+        return Err(construction_error(safe_cex_venues::unsupported_venue(
+            venue,
+        )));
     }
-    let options: safe_cex_venues::EngineOptions =
-        serde_json::from_str(options_json).map_err(|_| JsError::new("Invalid engine options"))?;
-    Ok(serde_json::to_string(&options.construction(venue))?)
+    let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
+        .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
+    serde_json::to_string(&options.construction(venue))
+        .map_err(|error| js_sys::Error::new(&error.to_string()))
 }
 
 fn entropy_configuration_error() -> safe_cex_engine::VenueError {
@@ -950,7 +959,6 @@ impl WasmEngine {
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
-        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "polymarket",
@@ -1050,6 +1058,10 @@ impl WasmEngine {
                         #[cfg(not(feature = "lighter"))]
                         api_key_index: None,
                         paradex_address: options.paradex_address.clone(),
+                        #[cfg(feature = "grvt")]
+                        grvt_trading_account_id: options.grvt_trading_account_id.clone(),
+                        #[cfg(not(feature = "grvt"))]
+                        grvt_trading_account_id: None,
                     };
                     (venue.to_owned(), identities, account)
                 })
@@ -1307,6 +1319,12 @@ impl WasmEngine {
                 .filter(|at| at.is_finite())
                 .map_or_else(|| "null".to_owned(), |at| at.to_string())
         )
+    }
+
+    /// Host UTC is protocol time only; every deadline keeps the stable host clock.
+    #[wasm_bindgen(js_name = syncHostTime)]
+    pub fn sync_host_time(&mut self, now: f64, utc: f64) -> bool {
+        self.inner.sync_host_time(now, utc)
     }
 
     pub fn start(&mut self, now: f64) -> String {
@@ -2150,7 +2168,6 @@ mod tests {
         feature = "bitrue",
         feature = "bitunix",
         feature = "blofin",
-        feature = "breakoutprop",
         feature = "bybit",
         feature = "coinbase",
         feature = "cryptocom",
@@ -2182,7 +2199,6 @@ mod tests {
             "coinbasespot",
             "apexomni",
             "asterdex",
-            "breakoutprop",
             "binance",
             "binancespot",
             "binanceinverse",
@@ -2225,8 +2241,6 @@ mod tests {
         let engine_options = |venue: &str, extra: &str| {
             let endpoints = if venue == "txflow" {
                 r#","testnet":true"#
-            } else if venue == "breakoutprop" {
-                r#","key":"user","secret":"password""#
             } else if venue == "hyrotrader" {
                 r#","endpoints":{"rest":"https://hyro.test","publicWs":"wss://hyro.test/public","privateWs":"wss://hyro.test/private"}"#
             } else {
@@ -2237,7 +2251,6 @@ mod tests {
         for venue in venues {
             let no_history = any(
                 &[
-                    "breakoutprop",
                     "hyperliquidspot",
                     "krakenspot",
                     "binancespot",
@@ -2339,14 +2352,7 @@ mod tests {
                     ),
                 fills_by_order_id: venue == "grvt",
                 cancel_all: if any(
-                    &[
-                        "polymarket",
-                        "breakoutprop",
-                        "woo",
-                        "grvt",
-                        "kucoin",
-                        "kucoinspot",
-                    ],
+                    &["polymarket", "woo", "grvt", "kucoin", "kucoinspot"],
                     venue,
                 ) || any(&ORDERLY, venue)
                 {
@@ -2408,7 +2414,6 @@ mod tests {
                 max_leverage: match venue {
                     "bitrue" => MaxLeverage::Query,
                     "polymarket" => MaxLeverage::Rails,
-                    "breakoutprop" => MaxLeverage::Unsupported,
                     _ => MaxLeverage::Market,
                 },
                 account_leverage: any(&ORDERLY, venue),
@@ -2523,7 +2528,7 @@ mod tests {
                 finite_history_bounds: any(&["coinbase", "coinbasespot"], venue),
                 reject_order_history_filters: any(&["coinbase", "coinbasespot", "txflow"], venue)
                     || any(&ORDERLY, venue),
-                public_catalogue_validation: venue == "breakoutprop",
+                public_catalogue_validation: false,
                 isolated_book_subscriptions: venue == "asterdex",
                 inverse_closed_positions: venue == "bybitinverse",
                 nuke_account_cancel: any(
@@ -2963,6 +2968,21 @@ mod tests {
         fn account_snapshot(&mut self, _now: f64) -> &[u8] {
             &[]
         }
+    }
+
+    #[test]
+    fn static_startup_fields_encode_identically_to_owned_strings() {
+        let borrowed = [
+            ("state", Value::StaticStr("neverStarted")),
+            ("kind", Value::StaticStr("timeout")),
+        ];
+        let owned = [
+            ("state", Value::from("neverStarted")),
+            ("kind", Value::from("timeout")),
+        ];
+        let expected = r#"{"state":"neverStarted","kind":"timeout"}"#;
+        assert_eq!(serde_json::to_string(&Fields(&borrowed)).unwrap(), expected);
+        assert_eq!(serde_json::to_string(&Fields(&owned)).unwrap(), expected);
     }
 
     #[test]

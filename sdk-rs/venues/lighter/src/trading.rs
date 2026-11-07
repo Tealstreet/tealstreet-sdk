@@ -505,6 +505,23 @@ impl Lighter {
                     }
                 };
                 let kind = old.kind;
+                let original = self
+                    .protection
+                    .originals
+                    .get(&old.id)
+                    .filter(|original| original.observed == old);
+                let max_slippage_pct = original.and_then(protection::Original::market_slippage_pct);
+                if original.is_some_and(|original| matches!(original.native.order_type, 2 | 4))
+                    && max_slippage_pct.is_none()
+                {
+                    refuse(
+                        cx,
+                        not_sent(
+                            "Lighter stop not changed: original slippage bound unsupported; re-place it",
+                        ),
+                    );
+                    return;
+                }
                 let opts = PlaceOrderOpts {
                     symbol: old.symbol.clone(),
                     kind,
@@ -521,7 +538,7 @@ impl Lighter {
                     sl_trigger_type: None,
                     client_order_id: None,
                     close: old.close,
-                    max_slippage_pct: None,
+                    max_slippage_pct,
                     stp_mode: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,
@@ -1270,7 +1287,7 @@ impl Lighter {
                             a.account_index.integer() == Some(builder.account_index)
                                 && a.approval_expiry
                                     .integer()
-                                    .is_some_and(|expiry| expiry as f64 > cx.now)
+                                    .is_some_and(|expiry| expiry as f64 > cx.protocol_now())
                                 && a.max_perps_maker_fee
                                     .as_ref()
                                     .and_then(Number::integer)
@@ -1427,9 +1444,10 @@ impl Lighter {
                     self.trading.next_nonce.invalidate();
                     // The sequencer may still accept individual transactions of a refused batch.
                     let guarded = self.trading.active.as_ref().unwrap().protection.is_some();
-                    let unknown = (guarded
-                        && (matches!(response.status, 405 | 408 | 429)
-                            || matches!(code, Some(23000 | 23100))))
+                    // Native rate codes prove no refusal, even for an ordinary
+                    // single transaction in HTTP 200. Weaken before journaling.
+                    let unknown = (guarded && matches!(response.status, 405 | 408 | 429))
+                        || matches!(code, Some(23000 | 23100))
                         || response.status >= 500
                         || (submission.grouped && (response.status == 408 || code == Some(21104)))
                         || code.is_none()
@@ -1466,7 +1484,13 @@ impl Lighter {
                         message.push_str("; ");
                         message.push_str(RATE_MESSAGE);
                     }
+                    if matches!(code, Some(23000 | 23100)) {
+                        message.push_str(". The outcome is unknown. Check Open Orders");
+                    }
                     let mut error = VenueError::new(message);
+                    // Native rate uncertainty must supersede an earlier nonce
+                    // refusal's words; the journal still owns outcome and effects.
+                    error.presents = matches!(code, Some(23000 | 23100));
                     if matches!(submission.effect, Effect::Modify) {
                         error.message = if unknown {
                             format!(
@@ -1489,7 +1513,7 @@ impl Lighter {
                         Some(code) if !explained => {
                             error.venue_code(code.to_string()).outcome(Outcome::Unknown)
                         }
-                        // Lighter's numeric codes on a sub-500 answer are explicit refusals.
+                        // Other numeric codes on a sub-500 answer are explicit refusals.
                         Some(code) => error
                             .venue_code(code.to_string())
                             .kind(if rate_limited {
@@ -1772,6 +1796,11 @@ impl Lighter {
             && let Some(old) = &job.amend
         {
             let unknown = error.outcome == Some(Outcome::Unknown);
+            // The protective plan presents Unknown with an Open Orders check.
+            // An unproven replacement must not acquire a no-stop message.
+            if unknown && job.protection.is_some() {
+                return error;
+            }
             let gone = if matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit) {
                 safe_cex_engine::error::stop_gone_text(&old.symbol, old.side, old.kind, unknown)
             } else {
@@ -2228,7 +2257,7 @@ fn documented_place_refusal(code: u64) -> bool {
             | 21601 | 21602 | 21605 | 21613 | 21618 | 21631 | 21632 | 21638
             | 21701..=21706 | 21710..=21712 | 21717..=21723 | 21727 | 21729
             | 21733..=21735 | 21738..=21741 | 21743..=21745 | 21747 | 21748 | 21752
-            | 23000 | 23100 | 52001 | 52002 | 62007..=62009
+            | 52001 | 52002 | 62007..=62009
     )
 }
 fn uncertain(message: impl Into<String>) -> VenueError {

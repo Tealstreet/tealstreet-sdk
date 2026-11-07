@@ -36,6 +36,7 @@ pub mod public_feed;
 pub mod read_scheduler;
 #[cfg(feature = "repair-mutations")]
 pub mod repair;
+pub mod request_budget;
 pub mod request_context;
 pub mod resource_ids;
 pub mod selected_read;
@@ -59,6 +60,7 @@ mod socket_driver;
 #[cfg(feature = "managed-sockets")]
 pub mod socket_lifecycle;
 pub mod startup;
+mod startup_causes;
 pub mod store;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

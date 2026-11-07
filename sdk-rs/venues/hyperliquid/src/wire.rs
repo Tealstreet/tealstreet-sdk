@@ -130,6 +130,14 @@ impl CandleRow<'_> {
     }
 }
 #[derive(Deserialize)]
+pub struct TradeRow<'a> {
+    #[serde(borrow)]
+    pub coin: Cow<'a, str>,
+    #[serde(deserialize_with = "number")]
+    pub px: f64,
+    pub time: f64,
+}
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FastCtx {
     #[serde(default, deserialize_with = "optional_number")]
@@ -276,6 +284,8 @@ pub struct OrderRow<'a> {
     pub tif: Cow<'a, str>,
     #[serde(default)]
     pub is_trigger: bool,
+    #[serde(default)]
+    pub is_position_tpsl: Option<bool>,
     #[serde(default)]
     pub timestamp: f64,
 }

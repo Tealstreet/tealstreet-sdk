@@ -35,6 +35,23 @@ fn always_journaled(code: Option<&str>) -> bool {
     )
 }
 
+/// Only these bounded per-account/per-failure events need their fields in Loki.
+/// Reuse the browser notice encoder: JSON escapes native messages and field values.
+fn bitget_journal_line(
+    label: &str,
+    level: &str,
+    code: Option<&str>,
+    message: &str,
+    encode: &impl Fn(&str) -> Arc<str>,
+) -> Option<String> {
+    let code =
+        code.filter(|code| matches!(*code, "bitget.account.mode" | "bitget.close.diagnostic"))?;
+    Some(format!(
+        "safe-cex {level} {code} [{label}]: {}",
+        encode(message)
+    ))
+}
+
 /// `safe-cex warn hosted.start_failed [user account venue]: kind=… venue_code=… signing_mode=… message="…"`:
 /// fields an alert can match on. The message is the venue's refusal, cut to 200 characters.
 fn start_failure_line(label: &str, signing_mode: Option<&str>, error: &VenueError) -> String {
@@ -114,6 +131,18 @@ impl ServerConfig {
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
+/// A registry construction refusal keeps its classification: an unsupported
+/// (e.g. retired, still-saved) venue is `Unsupported`, and the `VenueError`
+/// itself rides as the source, so its kind and outcome survive this boundary.
+#[cfg(feature = "venues")]
+fn construction_refusal(error: safe_cex_engine::VenueError) -> io::Error {
+    let kind = match error.kind {
+        Some(safe_cex_engine::ErrorKind::Unsupported) => io::ErrorKind::Unsupported,
+        _ => io::ErrorKind::InvalidInput,
+    };
+    io::Error::new(kind, error)
 }
 
 #[derive(Clone)]
@@ -218,7 +247,7 @@ impl FrameServer {
         } else {
             safe_cex_venues::build(venue, options, Some(crate::production_entropy()), register)
         };
-        result.map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
+        result.map_err(construction_refusal)?
     }
 
     /// Tokens grant full access to one preconfigured account. They must be
@@ -433,7 +462,7 @@ pub fn spawn_venue_account<T: Transport + 'static>(
         }
         None => safe_cex_venues::build(venue, options, entropy, spawn),
     };
-    result.map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
+    result.map_err(construction_refusal)?
 }
 
 /// Why `AccountHandle::input` refused a client message; `notice` is the
@@ -985,7 +1014,13 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     error,
                     read_refusal,
                 } => {
-                    self.note_start_failure(&error);
+                    let engine = &self.host.engine;
+                    let unloaded = first_unloaded(
+                        engine.store().loaded(),
+                        engine.public_feed_policy() != safe_cex_engine::PublicFeedPolicy::Disabled,
+                        engine.account_startup(),
+                    );
+                    self.note_start_failure(&error, unloaded, read_refusal);
                     let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     if text.len() > self.config.max_frame_bytes {
                         // Late peers replay this notice, so keep a deliverable failure.
@@ -1132,7 +1167,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
 
     /// A Hosted account's start failure, one line per account per MIRROR_EVERY, also
     /// handed to the host's error sink (`report`).
-    fn note_start_failure(&mut self, error: &VenueError) {
+    fn note_start_failure(
+        &mut self,
+        error: &VenueError,
+        unloaded: Option<&'static str>,
+        refused: bool,
+    ) {
         let Some(label) = self.config.log_label.as_deref() else {
             return;
         };
@@ -1156,6 +1196,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
             error_kind: error.kind.map(|kind| kind.as_str()),
             venue_code: error.venue_code.as_deref(),
             venue: None,
+            startup_unloaded: unloaded,
+            startup_refused: Some(refused),
         });
     }
 
@@ -1171,6 +1213,13 @@ impl<V: Venue, T: Transport> Account<V, T> {
         code: Option<&str>,
     ) {
         let label = self.config.log_label.as_deref().unwrap_or("-");
+        let structured =
+            if let Some(line) = bitget_journal_line(label, level, code, message, &encode) {
+                eprintln!("{line}");
+                true
+            } else {
+                false
+            };
         // Each repair says whether it resubscribed or reconnected; the server rate-limits
         // repairs per account and topic already, so every one reaches the journal.
         if always_journaled(code) {
@@ -1180,7 +1229,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             );
         }
         if self.peers.is_empty() {
-            if warn {
+            if warn && !structured {
                 eprintln!(
                     "safe-cex {level} {} [{label}]: {message}",
                     code.unwrap_or("log")
@@ -1190,7 +1239,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
         }
         // The browser gets every notice, but the journal needs warnings too: a venue
         // retrying forever logged nowhere the server could alert on.
-        if warn {
+        if warn && !structured {
             let code = code.unwrap_or("log");
             let now = std::time::Instant::now();
             match self.mirrored.get_mut(code) {
@@ -1734,6 +1783,25 @@ enum ServerNotice<'a> {
     },
 }
 
+/// The first startup section not yet loaded, in the engine's own order and
+/// requirements (`watch_startup`): what had not loaded when a start failed.
+fn first_unloaded(
+    loaded: safe_cex_engine::model::Loaded,
+    tickers: bool,
+    account: bool,
+) -> Option<&'static str> {
+    [
+        ("markets", loaded.markets, true),
+        ("tickers", loaded.tickers, tickers),
+        ("balance", loaded.balance, account),
+        ("orders", loaded.orders, account),
+        ("positions", loaded.positions, account),
+    ]
+    .into_iter()
+    .find(|(_, done, required)| *required && !done)
+    .map(|(name, ..)| name)
+}
+
 struct NoticeFields<'a>(&'a [(&'static str, Value)]);
 
 impl NoticeFields<'_> {
@@ -1748,7 +1816,8 @@ impl Serialize for NoticeFields<'_> {
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for (key, value) in self.0 {
             match value {
-                Value::Str(text) => map.serialize_entry(key, text)?,
+                Value::Str(text) => map.serialize_entry(key, text.as_str())?,
+                Value::StaticStr(text) => map.serialize_entry(key, *text)?,
                 Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
                 Value::Num(_) => map.serialize_entry(key, &())?,
                 Value::Bool(flag) => map.serialize_entry(key, flag)?,
@@ -2028,6 +2097,146 @@ fn valid_symbol(symbol: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{Events, HostEvent};
+
+    #[test]
+    fn a_start_failure_names_the_first_section_not_yet_loaded() {
+        use safe_cex_engine::model::Loaded;
+        let loaded = |markets, tickers, balance, orders, positions| Loaded {
+            markets,
+            tickers,
+            balance,
+            orders,
+            positions,
+        };
+        assert_eq!(
+            first_unloaded(Loaded::default(), true, true),
+            Some("markets")
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, false, false, false, false), true, true),
+            Some("tickers")
+        );
+        // A disabled public feed never waits for tickers; a public-only engine never for the account.
+        assert_eq!(
+            first_unloaded(loaded(true, false, false, true, false), false, true),
+            Some("balance")
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, true, true, true, false), true, true),
+            Some("positions")
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, true, false, false, false), true, false),
+            None
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, true, true, true, true), true, true),
+            None
+        );
+    }
+
+    #[test]
+    fn bitget_diagnostics_journal_the_original_structured_fields_once() {
+        for (level, code) in [
+            ("info", "bitget.account.mode"),
+            ("warn", "bitget.close.diagnostic"),
+        ] {
+            let encoded = std::cell::Cell::new(0);
+            let fields = vec![
+                ("accountMode", Value::from("uta")),
+                ("requestedSize", Value::from("0.6")),
+                ("nativeCode", Value::from("040757")),
+                ("nativeMsg", Value::from("native\n\"msg\"")),
+            ];
+            let encode = |message: &str| {
+                encoded.set(encoded.get() + 1);
+                encode_notice(ServerNotice::Event {
+                    level,
+                    code,
+                    message,
+                    fields: NoticeFields(&fields),
+                })
+            };
+            let line =
+                bitget_journal_line("fixture-tag", level, Some(code), "native\nmessage", &encode)
+                    .unwrap();
+            assert_eq!(encoded.get(), 1);
+            assert_eq!(
+                line.lines().count(),
+                1,
+                "native text must remain JSON-escaped"
+            );
+            let value: serde_json::Value =
+                serde_json::from_str(line.split_once(": ").unwrap().1).unwrap();
+            assert_eq!(value["fields"]["nativeCode"], "040757");
+            assert_eq!(value["fields"]["nativeMsg"], "native\n\"msg\"");
+            assert_eq!(value["fields"]["requestedSize"], "0.6");
+            assert_eq!(value["fields"]["accountMode"], "uta");
+            assert_eq!(value["message"], "native\nmessage");
+            assert_eq!(value["code"], code);
+            // The bool returned by this actual journal path suppresses both old warn mirrors.
+            assert!(
+                bitget_journal_line(
+                    "fixture-tag",
+                    level,
+                    Some("request.failed"),
+                    "unchanged",
+                    &encode
+                )
+                .is_none()
+            );
+            assert_eq!(encoded.get(), 1);
+        }
+    }
+
+    #[test]
+    fn bitget_diagnostics_route_once_with_or_without_a_browser_peer() {
+        for attached in [false, true] {
+            for (level, code) in [
+                ("info", "bitget.account.mode"),
+                ("warn", "bitget.close.diagnostic"),
+            ] {
+                let mut actor = stub_account(8192);
+                let mut receiver = attached.then(|| peer(&mut actor, 1).0);
+                let encodes = std::cell::Cell::new(0);
+                let fields = vec![
+                    ("accountMode", Value::from("uta")),
+                    ("nativeMsg", Value::from("native\nmessage")),
+                ];
+                actor.route_log(
+                    None,
+                    level,
+                    level == "warn",
+                    |message| {
+                        encodes.set(encodes.get() + 1);
+                        encode_notice(ServerNotice::Event {
+                            level,
+                            code,
+                            message,
+                            fields: NoticeFields(&fields),
+                        })
+                    },
+                    "fixture",
+                    Some(code),
+                );
+                // One journal encoding; an attached peer gets exactly one further wire encoding.
+                assert_eq!(encodes.get(), if attached { 2 } else { 1 });
+                assert!(
+                    !actor.mirrored.contains_key(code),
+                    "no second legacy warning mirror"
+                );
+                if let Some(receiver) = &mut receiver {
+                    let Outgoing::Text(text) = receiver.try_recv().unwrap() else {
+                        panic!("event notice");
+                    };
+                    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    assert_eq!(json["fields"]["accountMode"], "uta");
+                    assert_eq!(json["fields"]["nativeMsg"], "native\nmessage");
+                    assert!(receiver.try_recv().is_err(), "one browser event only");
+                }
+            }
+        }
+    }
 
     #[test]
     fn every_subscription_repair_outcome_reaches_the_journal() {
@@ -2980,6 +3189,27 @@ mod tests {
     }
 
     #[test]
+    fn static_startup_fields_encode_identically_to_owned_strings() {
+        let borrowed = [
+            ("state", Value::StaticStr("neverStarted")),
+            ("kind", Value::StaticStr("timeout")),
+        ];
+        let owned = [
+            ("state", Value::from("neverStarted")),
+            ("kind", Value::from("timeout")),
+        ];
+        let expected = r#"{"state":"neverStarted","kind":"timeout"}"#;
+        assert_eq!(
+            serde_json::to_string(&NoticeFields(&borrowed)).unwrap(),
+            expected
+        );
+        assert_eq!(
+            serde_json::to_string(&NoticeFields(&owned)).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
     fn oversized_notices_are_replaced_for_that_message_only() {
         let mut actor = stub_account(256);
         let (mut a, a_canceled) = peer(&mut actor, 1);
@@ -3594,20 +3824,37 @@ mod tests {
                         Arc::new(signer),
                     )
                     .unwrap();
-                for (venue, options, message) in [
-                    ("nope", "{}", "unsupported venue: nope"),
-                    (
+                // Retired venues stay saved on accounts: they keep the typed
+                // unsupported/notSent refusal through this boundary.
+                for venue in ["nope", "bitmex", "bitmextestnet"] {
+                    for options in ["{}", r#"{"key":"k","secret":"s"}"#] {
+                        let error = server
+                            .add_venue("b", "token-b", venue, options, NoTransport)
+                            .unwrap_err();
+                        assert_unsupported_venue(&error, venue);
+                        let error = spawn_venue_account(
+                            venue,
+                            options,
+                            NoTransport,
+                            None,
+                            ServerConfig::default(),
+                        )
+                        .err()
+                        .expect("spawn is refused");
+                        assert_unsupported_venue(&error, venue);
+                    }
+                }
+                let error = server
+                    .add_venue(
+                        "b",
+                        "token-b",
                         "weex",
                         r#"{"key":"k","secret":"s"}"#,
-                        "Invalid local signer setup",
-                    ),
-                ] {
-                    let error = server
-                        .add_venue("b", "token-b", venue, options, NoTransport)
-                        .unwrap_err();
-                    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-                    assert_eq!(error.to_string(), message);
-                }
+                        NoTransport,
+                    )
+                    .unwrap_err();
+                assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+                assert_eq!(error.to_string(), "Invalid local signer setup");
                 assert!(
                     server
                         .add_venue("b", "token-b", "binance", "not json", NoTransport)
@@ -3615,6 +3862,26 @@ mod tests {
                 );
             })
             .await;
+    }
+
+    #[cfg(feature = "venues")]
+    fn assert_unsupported_venue(error: &io::Error, venue: &str) {
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported, "{venue}");
+        assert_eq!(error.to_string(), format!("unsupported venue: {venue}"));
+        let detail = error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<safe_cex_engine::VenueError>())
+            .expect("the registry refusal rides as the source");
+        assert_eq!(
+            detail.kind,
+            Some(safe_cex_engine::ErrorKind::Unsupported),
+            "{venue}"
+        );
+        assert_eq!(
+            detail.outcome,
+            Some(safe_cex_engine::Outcome::NotSent),
+            "{venue}"
+        );
     }
 
     #[tokio::test]

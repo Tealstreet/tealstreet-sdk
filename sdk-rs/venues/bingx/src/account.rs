@@ -1290,7 +1290,7 @@ impl Account {
                 );
                 self.fresh_key(cx, credentials);
             } else {
-                let typed = read_refusal(&response, cx.now);
+                let typed = read_refusal(&response, cx.protocol_now());
                 self.request_failed(cx, request, &error, typed.as_ref(), credentials);
             }
             return;
@@ -2380,6 +2380,18 @@ pub(crate) fn metadata_error(
         error
     } else {
         error.outcome(safe_cex_engine::Outcome::NotSent)
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::OpenOrders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }
 

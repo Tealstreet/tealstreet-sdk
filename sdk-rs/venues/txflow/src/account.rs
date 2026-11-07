@@ -357,7 +357,7 @@ impl TxFlow {
             return;
         }
         self.account.started = true;
-        self.account.startup_at = cx.now.floor().max(0.0);
+        self.account.startup_at = cx.protocol_now().floor().max(0.0);
         cx.store.set_hedged(false);
         self.account_refresh(cx);
         self.account.refresh_timer = Some(cx.set_poll_timer(5000.0));
@@ -1356,6 +1356,17 @@ impl TxFlow {
         }
         self.account.inflight.remove(key);
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::State { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }
 

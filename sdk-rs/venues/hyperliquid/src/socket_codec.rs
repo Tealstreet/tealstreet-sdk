@@ -7,6 +7,13 @@ use safe_cex_engine::socket_lifecycle::{
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+// Diagnostic identity within this runtime; never used for socket or write authority.
+pub(super) fn next_repair_boot_sequence() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 const PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 30_000.;
 const MAX_PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 300_000.;
 /// Mids and asset contexts tick every second; half a minute without them is a dead
@@ -397,6 +404,51 @@ impl Hyperliquid {
         interests
     }
 
+    pub(super) fn unnamed_candle_repair(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        let SubscriptionTopic::Candles { symbol, interval } = topic else {
+            return None;
+        };
+        let known = cx.store.market(symbol).is_some();
+        let discovery = if self.discovery_settled() && (self.spot || self.perps_published) {
+            "complete"
+        } else {
+            "pending"
+        };
+        let reason = if !known {
+            "unknown-market"
+        } else if self.connection.feed.is_some() {
+            // Registered topics keep the existing refusal retry and unsubscribed
+            // behavior; readiness attribution only explains an unnamed stream.
+            return None;
+        } else if !self.candles.contains_key(&(symbol.clone(), *interval)) {
+            "not-subscribed"
+        } else if self.connection.feed_refused {
+            "feed-refused"
+        } else {
+            "feed-not-started"
+        };
+        let attribution = format!(
+            "{reason} (engineBoot={},symbolKnown={known},catalogueSize={},discovery={discovery},feedRegistered={})",
+            self.repair_boot_sequence,
+            cx.store.markets().len(),
+            self.connection.feed.is_some()
+        );
+        if reason == "feed-not-started" {
+            cx.notice(
+                safe_cex_engine::Level::Debug,
+                code::SUBSCRIPTION_DEFERRED,
+                format!("{topic} repair deferred: {attribution}"),
+            );
+            Some(Ok(()))
+        } else {
+            Some(Err(attribution))
+        }
+    }
+
     pub(super) fn socket_refused(cx: &mut Cx<'_, Pending>, error: SocketError) {
         cx.notice(
             safe_cex_engine::Level::Error,
@@ -439,6 +491,17 @@ impl Hyperliquid {
                 )));
             }
         }
+        // One trades stream per watched coin, shared by its books and charts.
+        for symbol in self.watched_symbols() {
+            if let Some(market) = store.market(symbol) {
+                interests.push(Interest::from_wire_args(public_topic(
+                    "trades",
+                    Some(&market.id),
+                    None,
+                    None,
+                )));
+            }
+        }
         if !self.connection.refused.is_empty() {
             interests.retain(|interest| !self.connection.refused.contains(interest.key.as_ref()));
         }
@@ -474,6 +537,13 @@ impl Hyperliquid {
         }
         for (_, key) in self.topic_interests(store, topic) {
             self.connection.refused.remove(&key);
+        }
+        // The coin's trades stream is retried with the book or chart that watches it.
+        let (SubscriptionTopic::OrderBook { symbol } | SubscriptionTopic::Candles { symbol, .. }) =
+            topic;
+        if let Some(market) = store.market(symbol) {
+            let trades = public_topic("trades", Some(&market.id), None, None);
+            self.connection.refused.remove(&trades);
         }
     }
 
@@ -631,7 +701,7 @@ impl Hyperliquid {
         let feed = if let Some(feed) = self.connection.feed {
             feed
         } else {
-            let feed = cx.register_socket_feed(FeedPolicy {
+            let registered = cx.register_socket_feed(FeedPolicy {
                 role: if self.options.public_data_only {
                     safe_cex_engine::SocketChannel::Public
                 } else {
@@ -657,7 +727,15 @@ impl Hyperliquid {
                     after_ms: PUBLIC_SILENCE_MS,
                     streams: PUBLIC_STREAMS,
                 }),
-            })?;
+            });
+            let feed = match registered {
+                Ok(feed) => feed,
+                Err(error) => {
+                    self.connection.feed_refused = true;
+                    return Err(error);
+                }
+            };
+            self.connection.feed_refused = false;
             self.connection.feed = Some(feed);
             feed
         };
@@ -762,6 +840,8 @@ impl Hyperliquid {
                 }
                 self.clear_private_snapshot_watch(cx);
                 self.connection.open = false;
+                // A reconnect resumes the mid as last until its first trade.
+                self.trade_last.clear();
                 // A new socket tries every topic again; a repeat refusal is reported again.
                 self.connection.refused.clear();
                 self.connection.unanswered.borrow_mut().clear();
@@ -810,8 +890,13 @@ impl Hyperliquid {
                 let value: EncodedTopic<'_> = serde_json::from_str(&interest.wire_args)
                     .map_err(|_| SocketError::InvalidInterest)?;
                 let figures = value.subscription.figures.unwrap_or(0);
-                let book_order = 2 * usize::from(value.subscription.kind == "bbo")
-                    + usize::from(value.subscription.fast);
+                // Within a coin: depth (slow, then fast), then bbo, then trades.
+                let book_order = if value.subscription.kind == "trades" {
+                    3
+                } else {
+                    2 * usize::from(value.subscription.kind == "bbo")
+                        + usize::from(value.subscription.fast)
+                };
                 Ok((
                     interest,
                     ranks
@@ -848,5 +933,97 @@ impl Hyperliquid {
                 });
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod repair_readiness_tests {
+    use super::*;
+    use safe_cex_engine::test_support::{ProbeVenue, seeded_engine};
+    use safe_cex_engine::{Action, Notice, Venue};
+
+    #[test]
+    fn a_refused_feed_registration_keeps_later_candle_repairs_visible() {
+        let venue = Hyperliquid::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        });
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            cx.store.set_markets(vec![Market {
+                id: "HYPE".into(),
+                symbol: "HYPE-PERP".into(),
+                pretty_symbol: None,
+                base: "HYPE".into(),
+                quote: "USDC".into(),
+                active: true,
+                precision: Precision {
+                    amount: 1.,
+                    price: 1.,
+                },
+                limits: Limits {
+                    amount: MinMax {
+                        min: 1.,
+                        max: 1000.,
+                    },
+                    leverage: MinMax { min: 1., max: 50. },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: None,
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            }]);
+            venue.candles.insert(("HYPE-PERP".into(), Interval::H4), 1);
+            let policy = FeedPolicy {
+                role: safe_cex_engine::SocketChannel::Public,
+                supervision: Config::default(),
+                auth: AuthMode::None,
+                recovery: AuthRecovery::Reconnect,
+                permanent_refusal_group: None,
+                traffic: TrafficPolicy::AnyText,
+                controls: ControlPolicy::None,
+                invalidation: Invalidation::Required,
+                subscription_interval_ms: 0.,
+                close_floors: &[],
+                data_silence: None,
+            };
+            for _ in 0..safe_cex_engine::socket_lifecycle::MAX_FEEDS {
+                cx.register_socket_feed(policy.clone()).unwrap();
+            }
+            venue.start_socket(cx);
+            assert!(venue.connection.feed.is_none());
+            for _ in 0..2 {
+                let reason = venue
+                    .repair_subscription(
+                        cx,
+                        &SubscriptionTopic::Candles {
+                            symbol: "HYPE-PERP".into(),
+                            interval: Interval::H4,
+                        },
+                    )
+                    .unwrap()
+                    .unwrap_err();
+                assert!(reason.starts_with("feed-refused"), "{reason}");
+                assert!(reason.contains("symbolKnown=true"), "{reason}");
+            }
+        }));
+        engine.set_log_level(safe_cex_engine::Level::Debug);
+        engine.start(1000.);
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let events: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) => Some(event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 1, "{actions:?}");
+        assert_eq!(events[0].level, safe_cex_engine::Level::Error);
+        assert!(events[0].message.contains("Capacity"));
+        assert_eq!(actions.len(), 1, "no new IO or repair timer: {actions:?}");
     }
 }

@@ -161,10 +161,13 @@ fn cancel_ack_requires_exact_unfilled_terminal_target_before_replacement() {
 fn guarded_rate_and_uncertain_replacement_never_put_back_or_resend() {
     for (status, body) in [
         (429, r#"{"code":23000,"message":"throttle"}"#),
+        (429, r#"{"code":21104,"message":"invalid nonce"}"#),
         (405, r#"{"code":21104,"message":"invalid nonce"}"#),
         (200, r#"{"code":23000,"message":"throttle"}"#),
+        (200, r#"{"code":23100,"message":"throttle"}"#),
         (408, r#"{"code":21104,"message":"invalid nonce"}"#),
         (500, r#"{"code":21702,"message":"refused"}"#),
+        (503, r#"{"code":21702,"message":"refused"}"#),
         (200, "bad json"),
     ] {
         let (mut e, _, mut t) = boot();
@@ -173,6 +176,22 @@ fn guarded_rate_and_uncertain_replacement_never_put_back_or_resend() {
         let out = advance(&mut e, &mut t, NOW + 1000.0);
         assert!(!out.iter().any(|a|matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))),"{status}: {out:?}");
         assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.outcome==Some(Outcome::Unknown)&&error.protection.is_none())),"{out:?}");
+        let error = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        let message = error.message.to_ascii_lowercase();
+        assert!(
+            message.contains("unknown") && message.contains("check open orders"),
+            "{error:?}"
+        );
+        assert!(
+            !message.contains("refused") && !message.contains("no stop"),
+            "{error:?}"
+        );
     }
 }
 fn tx(r: &HttpRequest) -> Value {
@@ -693,6 +712,174 @@ fn new_type(r: &HttpRequest) -> u64 {
         .parse()
         .unwrap()
 }
+#[test]
+fn market_stop_edits_preserve_the_native_orders_slippage_on_both_paths() {
+    for robinhood in [false, true] {
+        for native_modify in [false, true] {
+            for (kind, ask, old_trigger, bound, new_trigger, expected_price) in [
+                (2, true, 80., 76., 70., 6650),
+                (2, false, 120., 126., 130., 13650),
+                (4, true, 120., 114., 110., 10450),
+                (4, false, 80., 84., 90., 9450),
+                (2, true, 80., 80., 70., 7000),
+                (2, false, 120., 120., 130., 13000),
+                (2, true, 80., 40., 70., 3500),
+                (2, false, 120., 180., 130., 19500),
+                (2, true, 80., 78.99, 70., 6912),
+                (2, false, 120., 121.01, 130., 13109),
+            ] {
+                let (mut e, feeds, mut timers) = ready_feeds(
+                    Options {
+                        robinhood,
+                        testnet: true,
+                        stop_slippage_pct: 2.,
+                        ..options()
+                    },
+                    true,
+                );
+                let mut row = original();
+                row["type"] = json!(kind);
+                row["is_ask"] = json!(ask);
+                row["trigger_status"] = json!(if native_modify {
+                    "mark-price"
+                } else {
+                    "untriggered"
+                });
+                row["trigger_price"] = json!(old_trigger.to_string());
+                row["price"] = json!(bound.to_string());
+                e.store_mut().update_positions(|p| {
+                    p.side = if ask {
+                        safe_cex_engine::model::PositionSide::Long
+                    } else {
+                        safe_cex_engine::model::PositionSide::Short
+                    }
+                });
+                message(
+                    &mut e,
+                    feeds.private,
+                    NOW,
+                    &json!({"channel":"account_all_orders","orders":[row.clone()]}).to_string(),
+                );
+                mark(&mut e, &feeds, NOW, json!({"mark_price":"100"}));
+                drain_at(&mut e, &mut vec![], NOW);
+                e.handle(
+                    NOW,
+                    Event::Command(Command::AmendOrder {
+                        command: 8,
+                        id: "42".into(),
+                        price: Some(new_trigger),
+                        amount: None,
+                    }),
+                );
+                if robinhood && !native_modify {
+                    let tier = request(&mut e, NOW, "accountLimits");
+                    reply_at(
+                        &mut e,
+                        NOW,
+                        &tier,
+                        200,
+                        r#"{"code":200,"user_tier_name":"plus"}"#,
+                    );
+                    let approval = request(&mut e, NOW, "/account?");
+                    reply_at(&mut e, NOW, &approval, 200, &json!({"code":200,"accounts":[{"approved_integrators":[{"account_index":47296,"approval_expiry":NOW as u64+100_000,"max_perps_taker_fee":300,"max_perps_maker_fee":0}]}]}).to_string());
+                }
+                let nonce = request(&mut e, NOW, "nextNonce");
+                reply_at(&mut e, NOW, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+                let mut send = request(&mut e, NOW, "sendTx");
+                if native_modify {
+                    assert_eq!(new_type(&send), 17);
+                } else {
+                    assert_eq!(new_type(&send), 15);
+                    let read = proof(&mut e, &mut timers, &send);
+                    row["status"] = json!("canceled");
+                    reply_at(
+                        &mut e,
+                        NOW + 100.,
+                        &read,
+                        200,
+                        &json!({"code":200,"orders":[row]}).to_string(),
+                    );
+                    send = request(&mut e, NOW + 100., "sendTx");
+                    assert_eq!(new_type(&send), 14);
+                }
+                let wire = tx(&send);
+                assert_eq!(
+                    wire["Price"], expected_price,
+                    "RH={robinhood}, modify={native_modify}, kind={kind}, ask={ask}, bound={bound}"
+                );
+                assert_eq!(wire["TriggerPrice"], (new_trigger * 100.) as u64);
+                assert_eq!(wire["BaseAmount"], 2000);
+            }
+        }
+    }
+}
+
+#[test]
+fn unsupported_original_slippage_refuses_before_any_write_and_keeps_the_stop() {
+    for robinhood in [false, true] {
+        for native_modify in [false, true] {
+            for (ask, trigger, bound, new_trigger) in [
+                (true, 80., 81., 70.),
+                (false, 120., 119., 130.),
+                (true, 80., 39.99, 70.),
+                (false, 120., 180.01, 130.),
+            ] {
+                let (mut e, feeds, _) = ready_feeds(
+                    Options {
+                        robinhood,
+                        testnet: true,
+                        stop_slippage_pct: 2.,
+                        ..options()
+                    },
+                    true,
+                );
+                let mut row = original();
+                row["is_ask"] = json!(ask);
+                row["trigger_status"] = json!(if native_modify {
+                    "mark-price"
+                } else {
+                    "untriggered"
+                });
+                row["trigger_price"] = json!(trigger.to_string());
+                row["price"] = json!(bound.to_string());
+                e.store_mut().update_positions(|p| {
+                    p.side = if ask {
+                        safe_cex_engine::model::PositionSide::Long
+                    } else {
+                        safe_cex_engine::model::PositionSide::Short
+                    }
+                });
+                message(
+                    &mut e,
+                    feeds.private,
+                    NOW,
+                    &json!({"channel":"account_all_orders","orders":[row]}).to_string(),
+                );
+                mark(&mut e, &feeds, NOW, json!({"mark_price":"100"}));
+                drain_at(&mut e, &mut vec![], NOW);
+                let old = e.store().order("42").unwrap().clone();
+                e.handle(
+                    NOW,
+                    Event::Command(Command::AmendOrder {
+                        command: 8,
+                        id: "42".into(),
+                        price: Some(new_trigger),
+                        amount: None,
+                    }),
+                );
+                let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+                assert!(
+                    !out.iter().any(|a| matches!(a, Action::Http(_))),
+                    "RH={robinhood}, modify={native_modify}, ask={ask}, bound={bound}: {out:?}"
+                );
+                assert_eq!(e.store().order("42"), Some(&old));
+                assert_eq!(old.status, safe_cex_engine::model::OrderStatus::Open);
+                assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(Outcome::NotSent) && error.message == "Lighter stop not changed: original slippage bound unsupported; re-place it")), "{out:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn stop_limits_with_non_executable_kept_limits_refuse_before_any_write() {
     for (kind, ask, old_trigger, limit, new_trigger) in [

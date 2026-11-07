@@ -202,7 +202,12 @@ impl Skipped {
 
 impl Cryptocom {
     fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        let context = match cx.http_context(Scope::Background, read_policy()) {
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, read_policy()) {
             Ok(context) => context,
             Err(_) => {
                 self.discovery.failed(cx, tickers);
@@ -318,7 +323,7 @@ impl Cryptocom {
                     self.message_id,
                     quoted(method),
                     serde_json::to_string(chunk).unwrap(),
-                    cx.now as u64
+                    cx.protocol_now() as u64
                 ),
             );
         }
@@ -496,12 +501,12 @@ impl Cryptocom {
                 }
                 let mut candles = Vec::new();
                 json::each::<CandleRow>(message.data.get(), |row| candles.push(row.candle()))?;
-                safe_cex_engine::model::sort_candles_by_time(&mut candles);
-                // A subscription's first answer carries history: only its newest row is live.
+                // The first answer is history, including its newest row. Only subsequent
+                // pushes belong on the live path; REST supplies requested history.
                 if self.candles_live.insert(message.subscription.to_owned()) {
-                    let newest = candles.pop();
-                    candles = newest.into_iter().collect();
+                    return Ok(());
                 }
+                safe_cex_engine::model::sort_candles_by_time(&mut candles);
                 for candle in candles {
                     cx.candle(symbol, timeframe, candle);
                 }
@@ -586,19 +591,22 @@ impl Venue for Cryptocom {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         topic: &SubscriptionTopic,
     ) -> Option<Result<(), String>> {
         Some(self.repair(cx, topic))
-    }
-    fn status_exempt_refusal(
-        &self,
-        pending: &Pending,
-        response: safe_cex_engine::Response<'_>,
-    ) -> bool {
-        matches!(pending, Pending::Trade(request) if request.refused_by_body(response.body))
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(Err(error)) = self.options.secondary_validation {
@@ -1062,7 +1070,7 @@ impl Venue for Cryptocom {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(request) => self.identity_reject(cx, request, error),
             Pending::History(request) => self.history_reject(cx, request, error),
             Pending::Trade(request) => self.trade_reject(cx, request, error),
@@ -1077,7 +1085,7 @@ impl Venue for Cryptocom {
                 let _ = cx.fail_context(&context, error);
             }
             pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

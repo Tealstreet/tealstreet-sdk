@@ -108,7 +108,8 @@ function managedHttp(action) {
       && (!Object.hasOwn(action, 'signing') || u32(action.signing));
   }
   if (action.phase === 'prepare') {
-    if (!closed(action, ['op', 'phase', 'preparation', 'intent', 'packet'])
+    if (!closed(action, ['op', 'phase', 'preparation', 'intent', 'packet'], ['requestClass'])
+      || (Object.hasOwn(action, 'requestClass') && (!Number.isInteger(action.requestClass) || action.requestClass < 0 || action.requestClass > 4))
       || !['public', 'primary', 'secondary'].includes(action.intent)) return false;
   } else if (action.phase === 'bind') {
     if (!closed(action, ['op', 'phase', 'preparation', 'permit', 'packet'])) return false;
@@ -228,7 +229,6 @@ export function constructionProfiles(venue) {
     secret: `0x01${randomBytes(31).toString('hex')}`,
     applicationId: `0x${randomBytes(20).toString('hex')}`,
   });
-  if (venue === 'breakoutprop') Object.assign(base, { key: 'user', secret: 'password' });
   if (venue === 'hyrotrader') base.endpoints = {
     rest: 'https://hyro.test', publicWs: 'wss://hyro.test/public', privateWs: 'wss://hyro.test/private',
   };

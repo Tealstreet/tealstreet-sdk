@@ -1587,6 +1587,8 @@ impl AsterDex {
                 time_in_force: o.f.clone(),
                 client_order_id: o.c.clone(),
                 position_side: o.ps.clone(),
+                price_rate: None,
+                activate_price: None,
             },
             flags,
         );
@@ -1878,4 +1880,16 @@ struct LegacyAsset<'a> {
     f: Cow<'a, str>,
     #[serde(borrow)]
     l: Cow<'a, str>,
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
 }

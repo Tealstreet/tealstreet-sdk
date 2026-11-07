@@ -134,7 +134,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     try {
       const reply = await routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1', headers: {} });
       expect(new TextDecoder().decode(reply.body as Uint8Array)).toBe(body);
-      expect(report).toHaveBeenCalledExactlyOnceWith({ egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
+      expect(report).toHaveBeenCalledExactlyOnceWith({ retCode: 10006, egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
       expect(mocks.adapter).toHaveBeenCalledTimes(1);
       report.mockImplementation(() => { throw new Error('listener'); });
       await expect(routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?symbol=ETHUSDT&interval=1', headers: {} })).resolves.toMatchObject({ status: 200 });
@@ -517,31 +517,6 @@ describe('engine HTTP routing at the raw transport boundary', () => {
       url: `${PRIVATE_PROXY_JP}/https://api.mexc.com/api/v1/private/order/list/open_orders`,
       headers: { Authorization: 'venue-session', 'Tealstreet-Authorization': 'Bearer proxy-jwt' },
     });
-  });
-
-  it.each([
-    ['direct', false, false],
-    ['proxy', true, false],
-    ['HOW', true, true],
-  ] as const)('preserves Breakout DXAPI session authorization through %s routing', async (_label, tealstreetProxy, tealstreetTunnel) => {
-    const raw = makeRaw();
-    const url = 'https://breakout.prosp.devexperts.com/dxsca-web/accounts/default%3A00002/portfolio';
-    const input = { method: 'GET', url, headers: { Authorization: 'DXAPI documented-session' } };
-    const opts = options({ tealstreetProxy, tealstreetTunnel });
-    const routed = createEngineTransport('breakoutprop', opts, raw);
-    try {
-      await routed.request(input);
-      const delivered = tealstreetTunnel ? mocks.adapter.mock.lastCall![0] : raw.request.mock.lastCall![0];
-      const headers = tealstreetTunnel ? delivered.headers.toJSON() : delivered.headers;
-      expect(headers.Authorization).toBe('DXAPI documented-session');
-      expect(headers['Tealstreet-Authorization']).toBe(tealstreetProxy && !tealstreetTunnel ? 'Bearer proxy-jwt' : undefined);
-      expect(headers['Coinbase-Authorization']).toBeUndefined();
-      const plan = resolveEngineRoutingPlan('breakoutprop', opts, 'https://breakout.prosp.devexperts.com');
-      expect(plan.http.authorizationHeader).toBe('Tealstreet-Authorization');
-      expect(plan.http.authorize).toBe(tealstreetProxy && !tealstreetTunnel);
-      expect(plan.http.mode).toBe(tealstreetTunnel ? 'how' : 'direct');
-      if (tealstreetTunnel) expect(raw.request).not.toHaveBeenCalled();
-    } finally { routed.dispose!(); }
   });
 
   it('fails closed if a tunnel adapter returns parsed JSON', async () => {

@@ -728,3 +728,107 @@ fn genuine_missing_key_mode_commands_terminalize_once_without_waiting() {
         )));
     }
 }
+
+#[test]
+fn managed_closing_stop_keeps_secondary_inspection_and_primary_mutation() {
+    fn release(
+        engine: &mut TestEngine,
+        at: f64,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+    ) -> HttpRequest {
+        use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+        let (preparation, request, actual) = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        intent,
+                        ..
+                    } => Some((preparation, request, intent)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("actual managed preparation");
+        assert_eq!(actual, intent);
+        engine.http_prepared(
+            at,
+            preparation,
+            Prepared {
+                id: request.id.0,
+                expires_at: None,
+            },
+        );
+        let (permit, request) = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => Some((permit, request)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("actual signed binding");
+        assert!(matches!(
+            engine.claim_http(at, permit),
+            Ok(Claim::Released(_))
+        ));
+        request
+    }
+    let (mut engine, socket, reads) = private_started_with(secondary_options());
+    for request in reads {
+        let body = if request.url.contains("open_positions") {
+            r#"{"success":true,"code":0,"data":[{"positionId":"pos","symbol":"BTC_USDT","positionType":1,"holdVol":60,"holdAvgPrice":60000,"leverage":7,"openType":1}]}"#
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#
+        };
+        support::response(&mut engine, &request, body);
+    }
+    let row = r#"{"id":"closing","symbol":"BTC_USDT","side":4,"orderType":5,"vol":60,"dealVol":0,"price":0,"triggerPrice":55000,"triggerType":2,"trend":2,"state":1,"leverage":7,"openType":1,"executeCycle":2,"positionMode":1,"reduceOnly":true,"priceProtect":0,"stopLossPrice":0,"takeProfitPrice":0,"lossTrend":1,"profitTrend":1}"#;
+    support::ws(
+        &mut engine,
+        socket,
+        &format!(r#"{{"channel":"push.personal.plan.order","data":{row}}}"#),
+    );
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        300.,
+        Event::Command(Command::AmendOrder {
+            command: 104,
+            id: "closing".into(),
+            price: Some(54000.),
+            amount: None,
+        }),
+    );
+    let read = release(
+        &mut engine,
+        300.,
+        safe_cex_engine::request_context::RoutingIntent::Secondary,
+    );
+    assert!(
+        read.url
+            .starts_with("https://api.mexc.com/api/v1/private/planorder/list/orders?")
+    );
+    assert_eq!(header(&read, "ApiKey"), "read-key");
+    respond(
+        &mut engine,
+        &read,
+        310.,
+        &format!(r#"{{"success":true,"code":0,"data":[{row}]}}"#),
+    );
+    let native = release(
+        &mut engine,
+        310.,
+        safe_cex_engine::request_context::RoutingIntent::Primary,
+    );
+    assert!(native.url.ends_with("/planorder/change_price"));
+    assert_eq!(header(&native, "ApiKey"), "replay-key");
+    assert_eq!(header(&native, "Request-Time"), "310");
+    let body: serde_json::Value = serde_json::from_str(native.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["orderId"], "closing");
+    assert_eq!(body["triggerPrice"], "54000");
+}

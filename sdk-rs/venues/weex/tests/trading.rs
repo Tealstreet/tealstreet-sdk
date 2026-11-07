@@ -106,6 +106,129 @@ fn opts(id: &str) -> PlaceOrderOpts {
         implied_volatility: None,
     }
 }
+
+#[test]
+fn dispatched_ambiguity_covers_ordinary_and_protective_writes() {
+    use safe_cex_engine::Outcome;
+    for (status, text) in [
+        (429, "{}"),
+        (429, r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#),
+        (200, r#"{"code":"429","msg":"Too many requests"}"#),
+        (408, r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#),
+        (500, r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#),
+        (503, r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#),
+    ] {
+        for operation in ["create", "amend", "amend-replacement", "cancel", "setting"] {
+            for protective in [false, true] {
+                if protective && matches!(operation, "setting" | "amend-replacement") {
+                    continue;
+                }
+                let mut e = engine();
+                let kind = if protective {
+                    OrderType::StopLoss
+                } else {
+                    OrderType::Limit
+                };
+                e.store_mut().upsert_order(order("1", kind));
+                let mut input = opts(if protective { "" } else { "ambiguity" });
+                input.kind = kind;
+                input.side = OrderSide::Sell;
+                input.price = Some(if protective { 58000.0 } else { 60000.0 });
+                input.reduce_only = Some(protective);
+                let cmd = match operation {
+                    "create" => Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![input],
+                    },
+                    "cancel" => Command::CancelOrders {
+                        command: 1,
+                        ids: vec!["1".into()],
+                    },
+                    "setting" => Command::SetLeverage {
+                        command: 1,
+                        symbol: "BTCUSDT".into(),
+                        leverage: 30.0,
+                        side: None,
+                    },
+                    _ => Command::AmendOrder {
+                        command: 1,
+                        id: "1".into(),
+                        price: Some(60000.0),
+                        amount: None,
+                    },
+                };
+                let actions = command(&mut e, cmd);
+                let mut requests = writes(&actions);
+                assert_eq!(requests.len(), 1, "{operation} protective={protective}");
+                let mut request = requests.pop().unwrap();
+                if operation == "amend-replacement" {
+                    let actions =
+                        response(&mut e, &request, json!([{"orderId":"1","success":true}]));
+                    let mut requests = writes(&actions);
+                    assert_eq!(requests.len(), 1, "replacement protective={protective}");
+                    request = requests.pop().unwrap();
+                }
+                e.handle(
+                    1002.0,
+                    Event::HttpResponse {
+                        request: request.id,
+                        response: Response {
+                            status,
+                            headers: "",
+                            body: text,
+                        },
+                    },
+                );
+                let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1002.0);
+                let error = failure(&actions);
+                assert_eq!(
+                    error.outcome,
+                    Some(Outcome::Unknown),
+                    "{operation} protective={protective} {status}: {error:?}"
+                );
+                assert_eq!(error.protection, None);
+                assert!(
+                    error.message.to_lowercase().contains("unknown"),
+                    "{operation} {status}: {error:?}"
+                );
+                assert!(
+                    error.message.contains("Check Open Orders"),
+                    "{operation} {status}: {error:?}"
+                );
+                assert!(!error.message.contains("refused"), "{error:?}");
+                assert!(!error.message.contains("no stop"), "{error:?}");
+                assert!(writes(&actions).is_empty(), "no resend or put-back");
+            }
+        }
+    }
+}
+
+#[test]
+fn dispatched_ambiguity_native_rate_row_says_unknown() {
+    let mut e = engine();
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![opts("rate-row")],
+        },
+    );
+    let request = writes(&actions).pop().unwrap();
+    let client = body(&request)["batchOrders"][0]["newClientOrderId"].clone();
+    let actions = response(
+        &mut e,
+        &request,
+        json!([{"clientOrderId":client,"success":false,"errorCode":"429","errorMessage":"Too many requests"}]),
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        error.message.to_lowercase().contains("unknown"),
+        "{error:?}"
+    );
+    assert!(error.message.contains("Check Open Orders"), "{error:?}");
+    assert!(writes(&actions).is_empty());
+}
 fn order(id: &str, kind: OrderType) -> Order {
     Order {
         id: id.into(),
@@ -1829,10 +1952,10 @@ fn write_failures_are_classified_without_changing_their_text() {
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
         let error = failure(&actions);
-        if status == 502 {
+        if matches!(status, 429 | 502) {
             assert_eq!(
                 error.message,
-                "HTTP response does not prove the write outcome"
+                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
         } else {
             assert_eq!(error.message, format!("HTTP {status}: {body}"));

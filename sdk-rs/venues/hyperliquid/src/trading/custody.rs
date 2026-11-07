@@ -1,4 +1,6 @@
 //! Native FIFO planning carries genuine engine owners; only their callbacks can issue work.
+#[cfg(test)]
+mod tests;
 use super::*;
 use safe_cex_engine::CredentialSlot;
 use safe_cex_engine::credential_selection::CredentialRole;
@@ -89,11 +91,7 @@ impl Hyperliquid {
                 return;
             }
             None => {
-                cx.refuse_command(
-                    Operation::Mutation,
-                    not_sent("Hyperliquid command has no caller deadline")
-                        .kind(ErrorKind::Internal),
-                );
+                let _ = cx.reject_unstamped_command(Operation::Mutation);
                 return;
             }
         };
@@ -330,8 +328,10 @@ impl Hyperliquid {
         }
         let plan = custody.plan.as_ref().unwrap().clone();
         let slot = custody.slot.as_ref().unwrap().clone();
-        let context = cx
-            .plan_leg_context_with_intent(
+        let context = if matches!(effect, Effect::Cancel(_)) && job.protection.is_some() {
+            cx.plan_protection_cancel_leg_context(&plan, &slot)
+        } else {
+            cx.plan_leg_context_with_intent(
                 &plan,
                 &slot,
                 match &effect {
@@ -350,7 +350,8 @@ impl Hyperliquid {
                     _ => safe_cex_engine::classify::Intent::Place,
                 },
             )
-            .map_err(|e| e.venue_error())?;
+        }
+        .map_err(|e| e.venue_error())?;
         custody.context = Some(context.clone());
         let committed_effect = effect.clone();
         let command = job.command;
@@ -482,10 +483,16 @@ impl Hyperliquid {
         &mut self,
         retired: &HttpOwnerRetirement,
     ) -> Option<Preflight> {
-        self.trading.queue.retain(|job| {
-            !job.custody
+        self.trading.queue.retain_mut(|job| {
+            let retired = job
+                .custody
                 .as_ref()
-                .is_some_and(|c| retired.matches_preflight(&c.preflight))
+                .is_some_and(|c| retired.matches_preflight(&c.preflight));
+            if retired && let Some(timer) = job.custody.as_mut().and_then(|c| c.intent_timer.take())
+            {
+                self.trading.retired_intent_timers.push(timer);
+            }
+            !retired
         });
         if self
             .trading
@@ -494,6 +501,15 @@ impl Hyperliquid {
             .and_then(|job| job.custody.as_ref())
             .is_some_and(|c| retired.matches_preflight(&c.preflight))
         {
+            if let Some(timer) = self
+                .trading
+                .active
+                .as_mut()
+                .and_then(|job| job.custody.as_mut())
+                .and_then(|c| c.intent_timer.take())
+            {
+                self.trading.retired_intent_timers.push(timer);
+            }
             self.trading.active = None;
             self.trading.inflight = false;
             self.trading.builder_wait = None;
@@ -508,6 +524,12 @@ impl Hyperliquid {
             .and_then(|job| job.custody.as_ref())
             .filter(|c| c.plan.is_none())
             .map(|c| c.preflight.clone())
+    }
+    pub(super) fn clear_retired_intent_timers(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Retirement has no Cx authority; clear its timers at the next trading or timer turn.
+        for timer in self.trading.retired_intent_timers.drain(..) {
+            cx.clear_timer(timer);
+        }
     }
 }
 
@@ -656,7 +678,14 @@ impl Hyperliquid {
         };
         cx.http_write_failure(
             &request.context,
-            &NATIVE_ERROR,
+            if !error.uncertain
+                && (self.protective_replacement_active()
+                    && known_protective_refusal(&error.message))
+            {
+                &PROTECTIVE_REFUSAL
+            } else {
+                &NATIVE_ERROR
+            },
             Some(&native),
             error.message.clone(),
             None,
@@ -742,7 +771,7 @@ impl Hyperliquid {
             .collect();
         cx.http_write_batch(
             &request.context,
-            &BATCH,
+            if statuses.iter().all(|s| matches!(s, Status::Error { .. })) && (self.protective_replacement_active() && statuses.iter().all(|s| matches!(s, Status::Error { error } if known_protective_refusal(error)))) { &PROTECTIVE_REFUSAL } else { &BATCH },
             statuses.len(),
             &items,
             if message.is_empty() && statuses.iter().any(|status| matches!(status, Status::Text(_))) {
@@ -812,4 +841,21 @@ impl Hyperliquid {
 /// waitingForFill, a filled parent's says waitingForTrigger.
 fn deferred_child(text: &str) -> bool {
     text == "waitingForFill" || text == "waitingForTrigger"
+}
+
+const PROTECTIVE_REFUSAL: safe_cex_engine::classify::CodeTable =
+    safe_cex_engine::classify::CodeTable {
+        rows: &[],
+        success: &[],
+        status: &[],
+        unlisted: safe_cex_engine::classify::Verdict::Refused(ErrorKind::Rejected),
+    };
+pub(super) fn known_protective_refusal(message: &str) -> bool {
+    let message = table_message(message);
+    matches!(
+        message,
+        "Invalid TP/SL price." | "Price must be divisible by tick size."
+    ) || BATCH.rows.iter().any(
+        |row| matches!(row.key, safe_cex_engine::classify::Key::Message(text) if text == message),
+    )
 }

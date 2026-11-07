@@ -113,7 +113,6 @@ pub enum HttpReadClass {
     Normal = 0,
     Critical = 1,
     Bulk = 2,
-    #[cfg(feature = "address-nonce")]
     Reconciliation = 3,
 }
 
@@ -827,7 +826,22 @@ impl Command {
             | Self::SetPositionMode { .. }
             | Self::SetStpMode { .. } => Intent::Setting,
             Self::Venue { .. } => Intent::Place,
-            _ => Intent::Read,
+            Self::FetchOptionChain { .. }
+            | Self::FetchOptionExpiries { .. }
+            | Self::FetchAccountGreeks { .. }
+            | Self::SetTickerSymbols { .. }
+            | Self::SubscribeOrderBook { .. }
+            | Self::UnsubscribeOrderBook { .. }
+            | Self::SubscribeCandles { .. }
+            | Self::UnsubscribeCandles { .. }
+            | Self::RepairSubscription(_)
+            | Self::FetchStpMode { .. }
+            | Self::FetchAccount { .. }
+            | Self::FetchOrderBook { .. }
+            | Self::FetchLeverage { .. }
+            | Self::FetchMaxLeverage { .. }
+            | Self::Query { .. }
+            | Self::FetchCandles { .. } => Intent::Read,
         }
     }
 
@@ -856,6 +870,31 @@ impl Command {
             | Self::Venue { command, .. } => Some(*command),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod command_intent_tests {
+    use super::Command;
+    use crate::classify::Intent;
+
+    #[test]
+    fn fetching_leverage_is_a_read() {
+        let command = Command::FetchLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+        };
+        assert_eq!(command.write_intent(), Intent::Read);
+    }
+
+    #[test]
+    fn changing_margin_type_is_a_setting_write() {
+        let command = Command::SetMarginType {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        };
+        assert_eq!(command.write_intent(), Intent::Setting);
     }
 }
 
@@ -1045,6 +1084,7 @@ struct ReadAuth {
 }
 
 struct PendingHttp<P> {
+    startup: crate::startup::Sections,
     value: P,
     auth: Option<ReadAuth>,
 }
@@ -1866,6 +1906,8 @@ impl OrdersRefresh {
 }
 
 struct IoCore {
+    startup_causes: crate::startup_causes::Causes,
+    startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
     address_setup: address_nonce_setup::AddressNonceSetup,
     nonce_unscheduled: bool,
@@ -1877,6 +1919,9 @@ struct IoCore {
     /// `V::http_mutation_barriers()`, copied by `Engine::new` for admission in `Cx`.
     #[cfg(feature = "http-mutation-barriers")]
     mutation_barriers_declared: bool,
+    /// `V::http_plans()`, copied by `Engine::new` for Preflight admission in `Cx`.
+    #[cfg(feature = "http-plans")]
+    http_plans_declared: bool,
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     #[cfg(feature = "http-plans")]
@@ -1888,8 +1933,6 @@ struct IoCore {
     http_write_reply: Option<(u16, String)>,
     #[cfg(feature = "repair-mutations")]
     repairs: repair_core::Repairs,
-    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-    http_status_exempt: Option<RequestId>,
     // Reconcile reads the engine owes the venue, one per uncertain seal: the
     // symbols (`None` = all) and the earliest time to ask.
     #[cfg(feature = "order-locks")]
@@ -2147,6 +2190,7 @@ impl IoCore {
 
 struct Io<P> {
     core: IoCore,
+    startup_reads: fn(&P) -> crate::startup::Sections,
     /// Managed close, installed by `Engine::new` only for venues that declare
     /// managed sockets, so other venues never reference the managed retire path.
     #[cfg(feature = "managed-sockets")]
@@ -2173,16 +2217,18 @@ impl Default for IoCore {
             managed_sockets_declared: false,
             #[cfg(feature = "http-mutation-barriers")]
             mutation_barriers_declared: false,
+            #[cfg(feature = "http-plans")]
+            http_plans_declared: true,
             request_contexts: Default::default(),
             http_delivery: None,
             #[cfg(feature = "http-plans")]
             http_history_failure: None,
+            startup_causes: Default::default(),
+            startup_delivery: Default::default(),
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
             #[cfg(feature = "repair-mutations")]
             repairs: Default::default(),
-            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-            http_status_exempt: None,
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             #[cfg(feature = "order-locks")]
@@ -2337,6 +2383,12 @@ pub(crate) struct CoreCx<'a> {
 }
 
 impl<P> Io<P> {
+    fn startup_issued(&mut self, pending: &P) -> crate::startup::Sections {
+        let sections = (self.startup_reads)(pending);
+        self.core.startup_causes.started(sections);
+        sections
+    }
+
     #[inline]
     fn core_io(&mut self) -> CoreIo<'_> {
         CoreIo {
@@ -2421,6 +2473,7 @@ impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
             core: IoCore::default(),
+            startup_reads: |_| crate::startup::Sections::NONE,
             #[cfg(feature = "managed-sockets")]
             managed_close: None,
             pending: Default::default(),
@@ -2794,6 +2847,7 @@ impl<P> Cx<'_, P> {
         body: Option<String>,
         pending: P,
     ) -> RequestId {
+        let startup = self.io.startup_issued(&pending);
         let id = RequestId(self.io.next());
         #[cfg(feature = "order-locks")]
         {
@@ -2813,6 +2867,7 @@ impl<P> Cx<'_, P> {
         self.io.pending.insert(
             id,
             PendingHttp {
+                startup,
                 value: pending,
                 auth: None,
             },
@@ -3142,6 +3197,76 @@ impl<P> Cx<'_, P> {
     #[inline]
     pub fn command_error(&mut self, command: CommandId, message: impl Into<String>) {
         self.core().command_error(command, message)
+    }
+
+    /// A native startup failure with explicit section membership; no error text is retained.
+    pub fn startup_read_failure(&mut self, sections: crate::startup::Sections, error: &VenueError) {
+        if self.io.core.startup_delivery.sections == sections {
+            self.io.core.startup_causes.failed(
+                &mut self.io.core.startup_delivery,
+                error,
+                error.outcome == Some(crate::Outcome::NotSent),
+            );
+        } else {
+            self.io.core.startup_causes.failed(
+                &mut crate::startup_causes::Delivery::new(sections, None),
+                error,
+                error.outcome == Some(crate::Outcome::NotSent),
+            );
+        }
+    }
+
+    /// A declared startup read denied before an HTTP request could be issued.
+    pub fn startup_admission_refused(
+        &mut self,
+        sections: crate::startup::Sections,
+        error: &VenueError,
+    ) {
+        self.io.core.startup_causes.failed(
+            &mut crate::startup_causes::Delivery::new(sections, None),
+            error,
+            true,
+        );
+    }
+
+    fn with_startup_delivery<R>(
+        &mut self,
+        sections: crate::startup::Sections,
+        callback: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = std::mem::replace(
+            &mut self.io.core.startup_delivery,
+            crate::startup_causes::Delivery::new(sections, None),
+        );
+        let result = callback(self);
+        self.io.core.startup_delivery = previous;
+        result
+    }
+
+    /// Keep a child read's local failure handling and logging separate from its parent callback.
+    pub fn with_startup_request<R>(
+        &mut self,
+        pending: P,
+        callback: impl FnOnce(&mut Self, P) -> R,
+    ) -> R {
+        let sections = (self.io.startup_reads)(&pending);
+        self.with_startup_delivery(sections, |cx| callback(cx, pending))
+    }
+
+    /// Scope a pre-send failure, including its native cleanup and legacy failure notices.
+    pub fn with_startup_request_failure<R>(
+        &mut self,
+        pending: P,
+        error: VenueError,
+        callback: impl FnOnce(&mut Self, P, VenueError) -> R,
+    ) -> R {
+        self.with_startup_request(pending, |cx, pending| {
+            cx.io
+                .core
+                .startup_causes
+                .failed(&mut cx.io.core.startup_delivery, &error, true);
+            callback(cx, pending, error)
+        })
     }
 
     /// A private read the venue refused over the key, before the account
@@ -3614,7 +3739,7 @@ impl crate::engine::CoreCx<'_> {
         let mut message = message.into();
         if level >= Level::Warn {
             let kind = fields.iter().find_map(|(name, value)| match (name, value) {
-                (&"kind", Value::Str(kind)) => auth_kind(kind),
+                (&"kind", value) => value.as_str().and_then(auth_kind),
                 _ => None,
             });
             if let Some((hinted, named)) = crate::error::ip_whitelist_text(&message, kind) {
@@ -3627,6 +3752,26 @@ impl crate::engine::CoreCx<'_> {
                     fields.push(("kind", ErrorKind::AuthPermission.as_str().into()));
                 }
             }
+        }
+        if matches!(
+            code,
+            log_code::REQUEST_FAILED | log_code::AUTH_REJECTED | log_code::STARTUP_DEGRADED
+        ) {
+            let mut error = VenueError::new("");
+            for (key, value) in &fields {
+                if let Some(value) = value.as_str() {
+                    if *key == "kind" {
+                        error.kind = crate::startup_causes::error_kind(value);
+                    }
+                    if *key == "venueCode" {
+                        error.venue_code = crate::startup_causes::venue_code(value);
+                    }
+                }
+            }
+            self.io
+                .core
+                .startup_causes
+                .failed(&mut self.io.core.startup_delivery, &error, false);
         }
         // A rejection often also arrives as an auth-kind failure or `deactivate`.
         if code == log_code::AUTH_REJECTED {
@@ -3931,12 +4076,6 @@ pub trait Venue {
     fn public_key_setup(&self) -> Option<(AddressSetupSlots, crate::signing::Algorithm)> {
         None
     }
-    /// A fully parsed native refusal may exempt this delivery from unproven
-    /// HTTP status handling. The default keeps the strict shared policy.
-    fn status_exempt_refusal(&self, _pending: &Self::Pending, _response: Response<'_>) -> bool {
-        false
-    }
-
     /// Read-only native evidence from an unproven managed mutation envelope.
     /// Exact SDK identity namespaces must be validated by the native codec.
     fn unproven_http_evidence(
@@ -3944,6 +4083,16 @@ pub trait Venue {
         _pending: &Self::Pending,
         _response: Response<'_>,
         _evidence: &mut crate::request_context::UnprovenEvidence,
+    ) {
+    }
+
+    /// Rate-limit bookkeeping for a validated delivery, before its Unknown seal.
+    /// No Cx: this cannot send, publish financial rows or complete a command.
+    fn observe_unproven_http_response(
+        &mut self,
+        _now: f64,
+        _pending: &Self::Pending,
+        _response: Response<'_>,
     ) {
     }
 
@@ -4078,6 +4227,17 @@ pub trait Venue {
         false
     }
 
+    /// Whether this venue may open HTTP Preflights (and so Plans). Engine<V> reads
+    /// it statically: a venue declaring false compiles the per-event Plan sweeps
+    /// out and cannot open a Preflight. Plan adopters keep the default.
+    #[inline]
+    fn http_plans() -> bool
+    where
+        Self: Sized,
+    {
+        true
+    }
+
     /// The venue's one FIFO release domain, if any. Its group must be registered
     /// in `http_pacing`; the engine stamps it onto every member Context.
     #[cfg(feature = "release-domains")]
@@ -4140,7 +4300,9 @@ pub trait Venue {
         _reason: crate::request_context::Error,
         error: VenueError,
     ) {
-        self.on_sign_error(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_sign_error(cx, pending, error);
+        });
     }
 
     /// Reconcile writes whose outcome is unknown: issue a fresh order read for
@@ -4327,7 +4489,9 @@ pub trait Venue {
         pending: Self::Pending,
         error: VenueError,
     ) {
-        self.on_sign_failed(cx, pending, &error.message);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_sign_failed(cx, pending, &error.message);
+        });
     }
     /// Delegated signing failed before an HTTP write could reach the venue.
     fn on_sign_failed(
@@ -4415,9 +4579,10 @@ pub trait Venue {
             .into_iter()
             .collect()
     }
-    /// `Command::RepairSubscription` for a venue that owns its sockets: re-send
-    /// the native unsubscribe then subscribe for `topic`, intent unchanged.
-    /// `None` means unsupported; `Some(Err)` names why this repair was refused.
+    /// Repair an unmanaged or withdrawn managed topic, or defer/explain an
+    /// unnamed managed topic.
+    /// Intent stays unchanged. `None` uses the engine's default refusal;
+    /// `Some(Err)` names why this repair was refused.
     fn repair_subscription(
         &mut self,
         _cx: &mut Cx<'_, Self::Pending>,
@@ -4505,6 +4670,15 @@ pub trait Venue {
     ) {
         self.on_request_failed(cx, pending, &error.message);
     }
+    /// Exact native startup-set membership, sampled at issuance, never inferred
+    /// from a URL or a missing section. Commands and metadata return NONE.
+    fn startup_reads(_pending: &Self::Pending) -> crate::startup::Sections
+    where
+        Self: Sized,
+    {
+        crate::startup::Sections::NONE
+    }
+
     /// Optional public stage facts for the nonterminal startup watchdog.
     fn startup_diagnostics(&self, _store: &Store) -> Vec<(&'static str, Value)> {
         Vec::new()
@@ -4551,7 +4725,7 @@ const STARTUP_REPEAT_MS: f64 = 300_000.0;
 fn watch_startup<P>(
     cx: &mut Cx<'_, P>,
     account: bool,
-    started_at: f64,
+    started_at: Option<f64>,
     mut fields: Vec<(&'static str, Value)>,
 ) -> bool {
     let loaded = cx.store.loaded();
@@ -4575,12 +4749,14 @@ fn watch_startup<P>(
     } else {
         Level::Error
     };
-    let elapsed = cx.now - started_at;
-    // Invalid transport clocks cannot introduce nonfinite diagnostic fields.
-    if cx.now.is_finite() && elapsed.is_finite() {
-        fields.push(("elapsedMs", elapsed.max(0.0).into()));
-        fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
+    if let Some(started_at) = started_at {
+        let elapsed = cx.now - started_at;
+        if started_at.is_finite() && cx.now.is_finite() && elapsed.is_finite() && elapsed >= 0.0 {
+            fields.push(("elapsedMs", elapsed.into()));
+        }
     }
+    fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
+    cx.io.core.startup_causes.fields(&missing, &mut fields);
     cx.event(
         level,
         log_code::STARTUP_INCOMPLETE,
@@ -4601,7 +4777,7 @@ pub struct Engine<V: Venue> {
     started: bool,
     /// Checked on handled events, so it adds no timer of its own.
     startup_watch_at: Option<f64>,
-    startup_started_at: f64,
+    startup_started_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
     #[cfg(feature = "order-locks")]
@@ -4647,60 +4823,118 @@ struct BookBaseline {
     book: Book,
 }
 
+/// The venue's declarations `Engine::new` needs, read once so the rest of
+/// construction compiles once for every venue.
+struct CoreSpec<'a> {
+    quantity_units: crate::QuantityUnits,
+    http_pacing: &'a [crate::request_context::Pacing],
+    http_pacing_sets: &'a [crate::request_context::PacingSet],
+    nonce_unscheduled: bool,
+    #[cfg(feature = "order-locks")]
+    fence_uncertain_placements: bool,
+    #[cfg(feature = "release-domains")]
+    release_domain: Option<crate::request_context::ReleaseDomain>,
+    #[cfg(feature = "dispatch-nonce")]
+    dispatch_nonce: bool,
+    #[cfg(feature = "http-mutation-barriers")]
+    http_mutation_barriers: bool,
+    #[cfg(feature = "http-plans")]
+    http_plans: bool,
+    #[cfg(feature = "managed-sockets")]
+    managed_sockets: bool,
+    #[cfg(feature = "managed-sockets")]
+    socket_capabilities: crate::socket_lifecycle::SocketCapabilities,
+}
+
+/// The venue-independent half of `Engine::new`: validated pacing, store and I/O core.
+fn new_core(
+    entropy: Option<crate::entropy::Entropy>,
+    spec: CoreSpec<'_>,
+) -> Result<(Store, IoCore), VenueError> {
+    let entropy = entropy.ok_or_else(|| {
+        VenueError::new("Engine entropy providers are required").kind(ErrorKind::InvalidInput)
+    })?;
+    let mut store = Store::default();
+    store.set_quantity_units(spec.quantity_units);
+    let http_pacing =
+        crate::request_context::SendPacing::with_sets(spec.http_pacing, spec.http_pacing_sets)
+            .map_err(|_| {
+                VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput)
+            })?;
+    #[cfg(feature = "order-locks")]
+    let order_locks =
+        crate::order_locks::OrderLocks::fencing_placements(spec.fence_uncertain_placements);
+    #[cfg(feature = "release-domains")]
+    let release_domain = spec.release_domain;
+    #[cfg(feature = "release-domains")]
+    if let Some(domain) = release_domain {
+        release_domain::validate(domain, &http_pacing).map_err(|_| {
+            VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
+        })?;
+    }
+    #[cfg(feature = "release-domains")]
+    let (domain_queue, domain_held) = release_domain::reserve(release_domain.is_some())
+        .map_err(|_| VenueError::new("HTTP release domain capacity unavailable"))?;
+    let core = IoCore {
+        entropy: Some(entropy),
+        http_pacing,
+        #[cfg(feature = "release-domains")]
+        release_domain,
+        #[cfg(feature = "release-domains")]
+        domain_queue,
+        #[cfg(feature = "release-domains")]
+        domain_held,
+        nonce_unscheduled: spec.nonce_unscheduled,
+        #[cfg(feature = "dispatch-nonce")]
+        nonce_enabled: spec.dispatch_nonce,
+        #[cfg(feature = "http-mutation-barriers")]
+        mutation_barriers_declared: spec.http_mutation_barriers,
+        #[cfg(feature = "http-plans")]
+        http_plans_declared: spec.http_plans,
+        #[cfg(feature = "managed-sockets")]
+        managed_sockets_declared: spec.managed_sockets,
+        #[cfg(feature = "managed-sockets")]
+        socket_capabilities: spec.socket_capabilities,
+        #[cfg(feature = "order-locks")]
+        order_locks,
+        ..IoCore::default()
+    };
+    Ok((store, core))
+}
+
 impl<V: Venue> Engine<V> {
     pub fn new(venue: V, entropy: Option<crate::entropy::Entropy>) -> Result<Self, VenueError> {
-        let entropy = entropy.ok_or_else(|| {
-            VenueError::new("Engine entropy providers are required").kind(ErrorKind::InvalidInput)
-        })?;
-        let mut store = Store::default();
-        store.set_quantity_units(venue.capabilities().quantity_units);
-        let http_pacing = crate::request_context::SendPacing::with_sets(
-            venue.http_pacing(),
-            venue.http_pacing_sets(),
-        )
-        .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
         let http_release = V::http_release();
-        #[cfg(feature = "order-locks")]
-        let order_locks =
-            crate::order_locks::OrderLocks::fencing_placements(venue.fence_uncertain_placements());
-        #[cfg(feature = "release-domains")]
-        let release_domain = V::http_release_domain();
-        #[cfg(feature = "release-domains")]
-        if let Some(domain) = release_domain {
-            release_domain::validate(domain, &http_pacing).map_err(|_| {
-                VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
-            })?;
-        }
-        #[cfg(feature = "release-domains")]
-        let (domain_queue, domain_held) = release_domain::reserve(release_domain.is_some())
-            .map_err(|_| VenueError::new("HTTP release domain capacity unavailable"))?;
+        let (store, core) = new_core(
+            entropy,
+            CoreSpec {
+                quantity_units: venue.capabilities().quantity_units,
+                http_pacing: venue.http_pacing(),
+                http_pacing_sets: venue.http_pacing_sets(),
+                nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
+                #[cfg(feature = "order-locks")]
+                fence_uncertain_placements: venue.fence_uncertain_placements(),
+                #[cfg(feature = "release-domains")]
+                release_domain: V::http_release_domain(),
+                #[cfg(feature = "dispatch-nonce")]
+                dispatch_nonce: V::dispatch_nonce(),
+                #[cfg(feature = "http-mutation-barriers")]
+                http_mutation_barriers: V::http_mutation_barriers(),
+                #[cfg(feature = "http-plans")]
+                http_plans: V::http_plans(),
+                #[cfg(feature = "managed-sockets")]
+                managed_sockets: V::managed_sockets(),
+                #[cfg(feature = "managed-sockets")]
+                socket_capabilities: V::socket_capabilities(),
+            },
+        )?;
         Ok(Self {
             venue,
             http_release,
             store,
             io: Io {
-                core: IoCore {
-                    entropy: Some(entropy),
-                    http_pacing,
-                    #[cfg(feature = "release-domains")]
-                    release_domain,
-                    #[cfg(feature = "release-domains")]
-                    domain_queue,
-                    #[cfg(feature = "release-domains")]
-                    domain_held,
-                    nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
-                    #[cfg(feature = "dispatch-nonce")]
-                    nonce_enabled: V::dispatch_nonce(),
-                    #[cfg(feature = "http-mutation-barriers")]
-                    mutation_barriers_declared: V::http_mutation_barriers(),
-                    #[cfg(feature = "managed-sockets")]
-                    managed_sockets_declared: V::managed_sockets(),
-                    #[cfg(feature = "managed-sockets")]
-                    socket_capabilities: V::socket_capabilities(),
-                    #[cfg(feature = "order-locks")]
-                    order_locks,
-                    ..IoCore::default()
-                },
+                core,
+                startup_reads: V::startup_reads,
                 #[cfg(feature = "managed-sockets")]
                 managed_close: V::managed_sockets().then_some(
                     Cx::<V::Pending>::managed_close
@@ -4710,7 +4944,7 @@ impl<V: Venue> Engine<V> {
             },
             started: false,
             startup_watch_at: None,
-            startup_started_at: 0.0,
+            startup_started_at: None,
             ack_timer: None,
             #[cfg(feature = "order-locks")]
             reconcile_timer: None,
@@ -4850,6 +5084,14 @@ impl<V: Venue> Engine<V> {
         )
     }
 
+    /// Synchronize protocol UTC without moving scheduling time. Small host updates
+    /// preserve venue calibration; a >1 s host discontinuity invalidates its old
+    /// baseline (e.g. suspend). Host deadlines stay on `host_now`.
+    pub fn sync_host_time(&mut self, host_now: f64, utc_now: f64) -> bool {
+        self.assert_live();
+        self.io.core.protocol_clock.observe_host(host_now, utc_now)
+    }
+
     /// Host configuration is immutable once startup begins.
     pub fn set_entropy(&mut self, fill: crate::entropy::Fill) -> Result<(), VenueError> {
         if self.started {
@@ -4887,6 +5129,8 @@ impl<V: Venue> Engine<V> {
             return Err("public feed policy must be configured before startup");
         }
         self.io.core.public_feed_policy = policy;
+        self.store.export_ticker_observations =
+            policy == PublicFeedPolicy::Shared || !self.account_startup;
         Ok(())
     }
 
@@ -5103,6 +5347,14 @@ impl<V: Venue> Engine<V> {
     /// for an account that can sign, matching the SDK's readiness rule.
     pub fn set_account_startup(&mut self, account: bool) {
         self.account_startup = account;
+        self.store.export_ticker_observations =
+            !account || self.public_feed_policy() == PublicFeedPolicy::Shared;
+    }
+
+    /// Whether startup expects the account sections (`set_account_startup`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn account_startup(&self) -> bool {
+        self.account_startup
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -5349,7 +5601,7 @@ impl<V: Venue> Engine<V> {
         self.process_socket_work(now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
-        self.startup_started_at = now;
+        self.startup_started_at = now.is_finite().then_some(now);
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
         self.flush_http_owner_retirements();
@@ -5651,6 +5903,20 @@ impl<V: Venue> Engine<V> {
         if let Some(delivery) = delivery.as_ref() {
             self.io.core.request_contexts.enter_delivery(delivery);
         }
+        let sections = request
+            .and_then(|id| self.io.pending.get(&id))
+            .map_or(crate::startup::Sections::NONE, |p| p.startup);
+        let status = match &event {
+            Event::HttpResponse { response, .. } => Some(response.status),
+            Event::HttpStart { status, .. } => Some(*status),
+            _ => request
+                .and_then(|id| self.io.core.incoming.get(&id))
+                .map(|r| r.status),
+        };
+        let previous_startup = std::mem::replace(
+            &mut self.io.core.startup_delivery,
+            crate::startup_causes::Delivery::new(sections, status),
+        );
         let previous = std::mem::replace(&mut self.io.core.http_delivery, delivery.clone());
         #[cfg(feature = "managed-sockets")]
         let socket_message = self.io.core.socket_message.take();
@@ -5662,6 +5928,7 @@ impl<V: Venue> Engine<V> {
             _ => None,
         });
         self.handle_event_scoped(now, event, physical_timeout);
+        self.io.core.startup_delivery = previous_startup;
         #[cfg(feature = "repair-mutations")]
         self.end_repair_data(previous_data);
         #[cfg(feature = "http-plans")]
@@ -5933,6 +6200,11 @@ impl<V: Venue> Engine<V> {
                     cx.io.core.health.count(log_code::HTTP_FAILED);
                     let kind = cx.io.core.http_failure_kind;
                     let make_failure = || VenueError::new(error).kind(kind);
+                    cx.io.core.startup_causes.failed(
+                        &mut cx.io.core.startup_delivery,
+                        &make_failure(),
+                        false,
+                    );
                     #[cfg(feature = "http-plans")]
                     {
                         use request_context_registry::ReleasedReadFailure;
@@ -5992,7 +6264,10 @@ impl<V: Venue> Engine<V> {
                 }
                 .write_intent();
                 cx.io.core.request_contexts.dispatch = Some((command, intent));
+                cx.io.core.request_contexts.dispatch_class =
+                    crate::request_budget::RequestClass::venue_action(&action);
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.core.request_contexts.dispatch_class = Default::default();
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
@@ -6160,7 +6435,10 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.request_contexts.dispatch = command
                     .completion_id()
                     .map(|id| (id, command.write_intent()));
+                cx.io.core.request_contexts.dispatch_class =
+                    crate::request_budget::RequestClass::command(&command);
                 self.venue.on_command(&mut cx, command);
+                cx.io.core.request_contexts.dispatch_class = Default::default();
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
@@ -6204,7 +6482,17 @@ impl<V: Venue> Engine<V> {
         if V::managed_sockets() {
             let interests = self.venue.subscription_interests(&self.store, topic);
             if interests.is_empty() {
-                return Err("the venue cannot name its stream for this topic".into());
+                let mut cx = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                };
+                return self
+                    .venue
+                    .repair_subscription(&mut cx, topic)
+                    .unwrap_or_else(|| {
+                        Err("the venue cannot name its stream for this topic".into())
+                    });
             }
             // An optional stream that is not live is skipped; the rest still repair.
             let mut by_feed: Vec<(crate::socket_lifecycle::FeedId, Vec<String>)> = Vec::new();
@@ -6311,7 +6599,9 @@ impl<V: Venue> Engine<V> {
 
     fn finish_event_scope(&mut self, now: f64) {
         #[cfg(feature = "http-plans")]
-        self.io.core.request_contexts.end_preflight_admission();
+        if V::http_plans() {
+            self.io.core.request_contexts.end_preflight_admission();
+        }
         self.io.core.request_contexts.end_plan_admission();
         self.flush_bearer_fences(now);
         self.flush_http_owner_retirements();
@@ -6609,6 +6899,21 @@ impl<V: Venue> Engine<V> {
             return;
         };
         self.count_http_status(incoming.status);
+        if incoming.status >= 400 {
+            let kind = match incoming.status {
+                401 => ErrorKind::AuthInvalid,
+                403 => ErrorKind::AuthPermission,
+                408 | 504 => ErrorKind::Timeout,
+                418 | 429 => ErrorKind::RateLimited,
+                _ => ErrorKind::VenueUnavailable,
+            };
+            self.io.core.startup_causes.failed(
+                &mut self.io.core.startup_delivery,
+                &VenueError::new("").kind(kind),
+                false,
+            );
+        }
+
         let mut cx = Cx {
             now,
             store: &mut self.store,
@@ -6619,6 +6924,11 @@ impl<V: Venue> Engine<V> {
         if let Some(splitter) = &incoming.splitter {
             let outside = splitter.outside();
             if !splitter.finished() {
+                cx.io.core.startup_causes.failed(
+                    &mut cx.io.core.startup_delivery,
+                    &VenueError::new("").kind(ErrorKind::Internal),
+                    false,
+                );
                 let body = splitter.envelope();
                 if serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok() {
                     let response = Response {
@@ -6667,6 +6977,11 @@ impl<V: Venue> Engine<V> {
                 Ok(body) => body,
                 Err(_) => {
                     let make_failure = || malformed_body("stream envelope is not UTF-8");
+                    cx.io.core.startup_causes.failed(
+                        &mut cx.io.core.startup_delivery,
+                        &make_failure(),
+                        false,
+                    );
                     cx.with_owned_read_failure(make_failure, |cx| {
                         self.venue.on_http_failed(cx, pending.value, make_failure());
                     });
@@ -6770,8 +7085,15 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.order_read_tokens.remove(&http.id);
                 cx.io.core.streams.remove(&http.id);
                 if let Some(pending) = cx.io.pending.remove(&http.id) {
-                    self.venue
-                        .on_sign_error(&mut cx, pending.value, error.venue_error());
+                    cx.with_startup_delivery(pending.startup, |cx| {
+                        let error = error.venue_error();
+                        cx.io.core.startup_causes.failed(
+                            &mut cx.io.core.startup_delivery,
+                            &error,
+                            true,
+                        );
+                        self.venue.on_sign_error(cx, pending.value, error);
+                    });
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
@@ -6900,6 +7222,11 @@ impl<V: Venue> Engine<V> {
     /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
+        // A venue without Preflights has no Plan state: the plan-less tail.
+        if !V::http_plans() {
+            self.flush_bearer_fences(now);
+            return;
+        }
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         self.flush_keyless_session_roots(now);
         if self.io.core.request_contexts.has_plans() {
@@ -6980,6 +7307,9 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "http-plans")]
     fn expire_plan_timer(&mut self, now: f64, event: &Event<'_>) -> bool {
+        if !V::http_plans() {
+            return false;
+        }
         let Event::TimerFired { timer } = event else {
             return false;
         };
@@ -6998,6 +7328,10 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "http-plans")]
     fn flush_http_owner_retirements(&mut self) {
+        if !V::http_plans() {
+            self.assert_live();
+            return;
+        }
         self.io.core.request_contexts.end_plan_admission();
         self.assert_live();
         if self.io.core.request_contexts.has_retirements() {
@@ -7073,6 +7407,7 @@ impl<V: Venue> Engine<V> {
     ) {
         self.assert_live();
         self.flush_http_owner_retirements();
+        self.apply_account_read_budgets(self.io.core.dispatch_now, emitted);
         for action in self.io.core.actions.split_off(emitted).into_iter().rev() {
             queued.push_front(action);
         }
@@ -7081,6 +7416,7 @@ impl<V: Venue> Engine<V> {
     #[inline(always)]
     fn dispatch_actions(&mut self, now: f64) {
         self.assert_live();
+        self.apply_account_read_budgets(now, 0);
         if self.io.core.actions.is_empty()
             && self.io.core.signing_admission.is_empty()
             && self.io.core.signing.is_empty()
@@ -7809,27 +8145,19 @@ fn copy_shared_tickers(
     store: &mut Store,
     shared: &HashMap<String, crate::public_feed::PublicTicker>,
 ) {
-    let mut missing = Vec::new();
+    let mut added = false;
     for ticker in shared.values() {
-        if store.ticker(&ticker.symbol).is_none()
-            && let Some(market) = store.market(&ticker.symbol)
-        {
-            missing.push(crate::model::Ticker {
-                id: market.id.clone(),
-                symbol: market.symbol.clone(),
-                ..Default::default()
-            });
+        if store.ticker(&ticker.symbol).is_none() && store.ensure_ticker(&ticker.symbol).is_some() {
+            added = true;
         }
     }
-    if !missing.is_empty() {
-        let mut tickers = store.tickers().to_vec();
-        tickers.extend(missing);
-        store.set_tickers(tickers);
+    if added {
+        store.set_loaded(|loaded| loaded.tickers = true);
     }
     // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
     for ticker in shared.values() {
         if store.market(&ticker.symbol).is_some() {
-            store.update_ticker(&ticker.symbol, |target| ticker.apply(target));
+            store.apply_shared_ticker(ticker);
         }
     }
 }
@@ -7974,8 +8302,12 @@ fn push_event(
     }
     event.message = crate::log::cap(event.message);
     for (_, value) in &mut event.fields {
-        if let Value::Str(text) = value {
-            *text = crate::log::cap(std::mem::take(text));
+        match value {
+            Value::Str(text) => *text = crate::log::cap(std::mem::take(text)),
+            Value::StaticStr(text) if text.len() > crate::log::MAX_LOG_BYTES => {
+                *value = Value::Str(crate::log::cap((*text).to_owned()));
+            }
+            _ => {}
         }
     }
     actions.push(Action::Notice(Notice::Event(event)));
@@ -10902,6 +11234,73 @@ mod startup_watch_tests {
     }
 
     #[test]
+    fn startup_elapsed_is_absent_without_a_valid_start_mark() {
+        for start in [None, Some(f64::NAN), Some(f64::INFINITY), Some(2_000.0)] {
+            let mut engine = crate::test_support::seeded_engine(Idle);
+            engine.start(0.0);
+            engine.startup_started_at = start;
+            engine.startup_watch_at = Some(1_000.0);
+            engine.handle(1_000.0, Event::PollScaleChanged { scale: 1.0 });
+            let event = engine
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::Event(e)) if e.code == log_code::STARTUP_INCOMPLETE => {
+                        Some(e)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert!(!event.fields.iter().any(|(name, _)| *name == "elapsedMs"));
+            assert!(
+                event
+                    .fields
+                    .contains(&("deadlineMs", STARTUP_WATCH_MS.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn startup_watch_reports_only_missing_required_section_causes() {
+        let mut engine = crate::test_support::seeded_engine(Idle);
+        engine.set_account_startup(true);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.store_mut().set_balance(Default::default());
+        engine.handle(STARTUP_WATCH_MS, Event::PollScaleChanged { scale: 1.0 });
+        let event = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::Event(e)) if e.code == log_code::STARTUP_INCOMPLETE => {
+                    Some(e)
+                }
+                _ => None,
+            })
+            .unwrap();
+        for section in [
+            "startupTickersState",
+            "startupOrdersState",
+            "startupPositionsState",
+        ] {
+            assert!(
+                event.fields.contains(&(section, "neverStarted".into())),
+                "{section}: {:?}",
+                event.fields
+            );
+        }
+        assert!(
+            !event
+                .fields
+                .iter()
+                .any(|(key, _)| key.starts_with("startupMarkets")
+                    || key.starts_with("startupBalance"))
+        );
+        assert_eq!(
+            event.message,
+            "Startup incomplete: still waiting for tickers, orders, positions"
+        );
+    }
+
+    #[test]
     fn unloaded_startup_is_reported_until_every_section_loads() {
         let mut engine = crate::test_support::seeded_engine(Idle);
         engine.set_account_startup(true);
@@ -11548,3 +11947,7 @@ mod orders_refresh_tests;
 #[cfg(test)]
 #[path = "retried_read_diagnostic_tests.rs"]
 mod retried_read_diagnostic_tests;
+
+#[cfg(test)]
+#[path = "startup_cause_tests.rs"]
+mod startup_cause_tests;

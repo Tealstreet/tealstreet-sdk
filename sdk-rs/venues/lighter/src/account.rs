@@ -1148,7 +1148,7 @@ impl Lighter {
         self.subscribe_private(cx, socket);
         cx.send(
             socket,
-            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
+            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.protocol_now()),
         );
         self.refresh_account(cx);
         self.refresh_orders(cx);
@@ -1226,7 +1226,7 @@ impl Lighter {
         }
         cx.send(
             socket,
-            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
+            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.protocol_now()),
         );
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -2608,7 +2608,7 @@ impl Lighter {
         if frame.kind == "ping" {
             cx.send(
                 socket,
-                format!(r#"{{"type":"pong","timestamp":{}}}"#, cx.now),
+                format!(r#"{{"type":"pong","timestamp":{}}}"#, cx.protocol_now()),
             );
             return true;
         }
@@ -2955,5 +2955,18 @@ fn snapshot_read_error(response: &Response<'_>, ok: bool) -> VenueError {
         error.kind(ErrorKind::RateLimited)
     } else {
         error
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Limits { .. } => S::ACCOUNT,
+            Self::Lookup { .. } => S::ACCOUNT,
+            Self::Snapshot { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }

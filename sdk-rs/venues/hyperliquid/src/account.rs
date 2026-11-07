@@ -1489,12 +1489,16 @@ impl Hyperliquid {
                     .and_then(|lookup| lookup.order)
                     .ok_or_else(|| "the order read was unreadable".to_owned());
                 match read {
-                    Ok(row) => self.amend_source_read(
-                        cx,
-                        &id,
-                        amend,
-                        Ok((row.status.as_ref(), row.order.orig_sz, row.order.sz)),
-                    ),
+                    Ok(row) => {
+                        let captured = self.capture_protective_source(cx, &id, &row.order);
+                        self.amend_source_read(
+                            cx,
+                            &id,
+                            amend,
+                            captured
+                                .map(|()| (row.status.as_ref(), row.order.orig_sz, row.order.sz)),
+                        );
+                    }
                     Err(error) => self.amend_source_read(cx, &id, amend, Err(error)),
                 }
             }
@@ -2466,11 +2470,17 @@ impl Hyperliquid {
             .positions()
             .iter()
             .map(|p| {
+                // The mid, as when `last` was always the mid; a trade print moves neither.
                 cx.store
                     .ticker(&p.symbol)
-                    .filter(|t| t.last > 0.0 && p.entry_price > 0.0)
-                    .map_or(p.unrealized_pnl, |t| {
-                        (t.last - p.entry_price)
+                    .and_then(|t| {
+                        [t.mid_price.unwrap_or(0.0), t.last]
+                            .into_iter()
+                            .find(|price| price.is_finite() && *price > 0.0)
+                    })
+                    .filter(|_| p.entry_price > 0.0)
+                    .map_or(p.unrealized_pnl, |price| {
+                        (price - p.entry_price)
                             * p.contracts
                             * if p.side == PositionSide::Long {
                                 1.0
@@ -2964,7 +2974,13 @@ impl Hyperliquid {
             }
             self.account.suppressed.insert(id.clone(), cx.now);
             cx.store.remove_orders(&[&id]);
-            if let Some(c) = row.cloid {
+            if let Some(c) = row.cloid
+                && self
+                    .account
+                    .records
+                    .get(c.as_ref())
+                    .is_none_or(|record| record.order.id.is_empty() || record.order.id == id)
+            {
                 self.account.records.remove(c.as_ref());
             }
             return;
@@ -2990,10 +3006,18 @@ impl Hyperliquid {
             .and_then(|c| self.account.records.get(c))
             .cloned();
         if let Some(record) = record {
-            order.kind = record.order.kind;
-            order.price = record.order.price;
+            let native_fields = row.order_type == "Limit"
+                || (row.trigger_px.is_some()
+                    && matches!(
+                        row.order_type.as_ref(),
+                        "Stop Market" | "Stop Limit" | "Take Profit Market" | "Take Profit Limit"
+                    ));
+            if !native_fields {
+                order.kind = record.order.kind;
+                order.price = record.order.price;
+            }
             order.reduce_only = record.order.reduce_only;
-            order.time_in_force = record.order.time_in_force;
+            order.time_in_force = order.time_in_force.or(record.order.time_in_force);
             self.account
                 .preplacements
                 .retain(|p| p.order.client_order_id != order.client_order_id);
@@ -3404,6 +3428,20 @@ fn every_dex_clean(names: &[String], clean: &HashMap<String, u64>) -> Option<u64
     names.iter().try_fold(*main, |oldest, name| {
         clean.get(name).map(|epoch| oldest.min(*epoch))
     })
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Role => S::ACCOUNT,
+            Self::Mode => S::ACCOUNT,
+            Self::State { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            Self::Spot { .. } => S::BALANCE,
+            _ => S::NONE,
+        }
+    }
 }
 
 #[cfg(test)]

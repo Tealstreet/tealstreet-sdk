@@ -257,14 +257,16 @@ test('a native deadline cancellation names the exact pending endpoint without si
   const failures = [];
   r.host.handlers.onEvent = (event) => failures.push(event);
   const request = { ...packet, method: 'GET', url: 'https://api.bybit.com/v5/market/instruments-info?apiKey=SECRET&signature=SECRET#SECRET' };
-  r.host.execute({ ...prepare, packet: request });
+  r.host.execute({ ...prepare, requestClass: 0, packet: request });
   r.at(1000);
   r.host.run(JSON.stringify([
     { op: 'event', level: 'error', code: 'request.failed', message: 'HTTP request timed out', fields: { httpTimeoutRequest: '7' } }, cancel,
   ]));
   r.host.execute(cancel);
   assert.equal(failures.filter((event) => event.code === 'http.request_failed').length, 1);
-  assert.deepEqual(failures[0].fields, { method: 'GET', path: '/v5/market/instruments-info', kind: 'timeout', phase: 'preparing' });
+  assert.deepEqual(failures[0].fields, { method: 'GET', path: '/v5/market/instruments-info', kind: 'timeout', phase: 'preparing', requestClass: 'discovery', budgetMs: 1000, elapsedMs: 1000 });
+  assert.match(failures[0].message, /class=discovery budget=1000ms elapsed=1000ms/);
+  assert.match(failures[1].message, /class=discovery budget=1000ms elapsed=1000ms/);
   assert.doesNotMatch(JSON.stringify(failures), /SECRET|api\.bybit|signature|apiKey/);
   r.host.dispose();
 });
@@ -320,6 +322,23 @@ test('late provider answers and broken diagnostic observers cannot alter cleanup
   r.host.dispose();
 });
 
+for (const [code, label] of ['discovery', 'orderRead', 'orderWrite', 'history', 'read'].entries()) {
+  test(`copies compact class ${code} (${label}) into preparation without changing the signed packet`, async () => {
+    let seen, bound;
+    const r = rig(async request => {
+      seen = request;
+      return { bind(packet) { bound = packet; return { ready: () => true, dispatch: () => new Promise(() => {}) }; } };
+    });
+    r.host.execute({ ...prepare, requestClass: code }); await tick();
+    assert.equal(seen.requestClass, label);
+    assert.equal(seen.timeoutMs, 1000);
+    assert.equal(bound.url, packet.url);
+    assert.equal(bound.body, packet.body);
+    assert.equal(bound.requestClass, undefined);
+    r.host.dispose();
+  });
+}
+
 
 for (const [nativeClass, expected] of [[undefined, 'normal'], [0, 'normal'], [1, 'critical'], [2, 'bulk'], [3, 'reconciliation'], [99, 'normal']]) {
   test(`managed preparation carries the closed native read class ${nativeClass}`, async () => {
@@ -343,4 +362,26 @@ for (const [nativeClass, expected] of [[undefined, 'normal'], [0, 'normal'], [1,
     assert.equal(r.events.filter(([kind]) => kind === 'claim').length, 1);
     r.host.dispose();
   });
+}
+
+// Pin both complete ABIs together: admission priority never selects a deadline.
+for (const [priorityCode, readClass] of ['normal', 'critical', 'bulk', 'reconciliation'].entries()) {
+  for (const [budgetCode, requestClass] of ['discovery', 'orderRead', 'orderWrite', 'history', 'read'].entries()) {
+    test(`admission ${priorityCode}=${readClass} and deadline ${budgetCode}=${requestClass} retain independent codes`, async () => {
+      let seen, bound;
+      const r = rig(request => {
+        seen = request;
+        return { bind(packet) { bound = packet; return { ready: () => true, dispatch: () => new Promise(() => {}) }; } };
+      });
+      r.host.engine.httpReadClass = id => { assert.equal(id, 7); return priorityCode; };
+      r.host.execute({ ...prepare, requestClass: budgetCode }); await tick();
+      assert.equal(seen.readClass, readClass);
+      assert.equal(bound.readClass, readClass);
+      assert.equal(seen.requestClass, requestClass);
+      assert.equal(seen.timeoutMs, packet.timeoutMs);
+      assert.equal(bound.body, packet.body);
+      assert.equal(bound.requestClass, undefined);
+      r.host.dispose();
+    });
+  }
 }

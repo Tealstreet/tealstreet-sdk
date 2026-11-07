@@ -142,17 +142,25 @@ fn a_refused_put_back_is_typed_unprotected_and_never_retried() {
 
 const RATE_LIMITED: &str = r#"{"code":"429","msg":"Too Many Requests"}"#;
 
-/// A 429 may have placed the order, so it is unknown: never "refused" or Unprotected.
+/// A 429 may have placed the order, so it is unknown, never Unprotected.
 fn assert_unknown_stop(h: &Harness) {
     let error = failure(h).expect("the edit did not finish");
     assert!(
         error
             .message
-            .contains("outcome is unknown. Check Open Orders"),
+            .contains("outcome is unknown. Check Open Orders")
+            || error.message == "HTTP response does not prove the write outcome",
         "{}",
         error.message
     );
-    assert!(!error.message.contains("refused"), "{}", error.message);
+    assert!(
+        !error.message.contains("refused")
+            || error
+                .message
+                .contains("replacement was refused and its put-back's outcome is unknown"),
+        "{}",
+        error.message
+    );
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(error.protection, None);
     assert!(writes(h).is_empty(), "{:?}", writes(h));
@@ -401,4 +409,72 @@ fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         assert_eq!(error.protection, None, "{status}");
         assert!(writes(&h).is_empty(), "{status}: never resent");
     }
+}
+
+#[test]
+fn engine_ambiguity_bare_429_replacement_stays_unknown_in_journal() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond_status(replacement, 429, "{}");
+    assert_unknown_stop(&h);
+}
+
+#[test]
+fn dispatched_ambiguity_protective_cancel_and_replacement_never_restore() {
+    for (status, response) in [
+        (429, "{}"),
+        (429, REFUSED),
+        (200, RATE_LIMITED),
+        (408, REFUSED),
+        (500, REFUSED),
+        (503, REFUSED),
+    ] {
+        for replacement in [false, true] {
+            let mut h = Harness::new();
+            partly_filled(&mut h);
+            edit_stop(&mut h, 56000.0);
+            let request = if replacement {
+                to_replacement(&mut h)
+            } else {
+                h.collect();
+                h.take("cancel-batch-orders")
+            };
+            h.respond_status(request, status, response);
+            let error = failure(&h).expect("one terminal failure");
+            assert_eq!(
+                error.outcome,
+                Some(Outcome::Unknown),
+                "{status}: {response}"
+            );
+            assert_eq!(error.protection, None);
+            assert!(
+                error.message.to_lowercase().contains("unknown"),
+                "{error:?}"
+            );
+            assert!(error.message.contains("Check Open Orders"), "{error:?}");
+            assert!(!error.message.contains("refused"), "{error:?}");
+            assert!(!error.message.contains("position has no stop"), "{error:?}");
+            assert!(writes(&h).is_empty(), "no resend, replacement or put-back");
+        }
+    }
+}
+
+#[test]
+fn dispatched_ambiguity_native_rate_row_cannot_authorize_put_back() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond(replacement, r#"{"code":"1","msg":"All operations failed","data":[{"orderId":"0","code":"429","msg":"Too Many Requests"}]}"#);
+    assert!(
+        writes(&h).is_empty(),
+        "a native rate row must never release a put-back"
+    );
+    assert_unknown_stop(&h);
+    let error = failure(&h).unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert_eq!(error.venue_code.as_deref(), Some("429"));
+    assert_eq!(error.venue_message.as_deref(), Some("Too Many Requests"));
 }

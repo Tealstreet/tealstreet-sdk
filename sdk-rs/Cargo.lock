@@ -4090,6 +4090,7 @@ dependencies = [
  "base64 0.22.1",
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venues",
  "serde",
  "serde_json",
  "zeroize",
@@ -4157,17 +4158,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "safe-cex-venue-breakoutprop"
-version = "0.1.0"
-dependencies = [
- "safe-cex-crypto",
- "safe-cex-engine",
- "serde",
- "serde_json",
- "time",
-]
-
-[[package]]
 name = "safe-cex-venue-bybit"
 version = "0.1.0"
 dependencies = [
@@ -4209,6 +4199,7 @@ dependencies = [
  "alloy-signer-local",
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venues",
  "serde",
  "serde_json",
 ]
@@ -4247,6 +4238,7 @@ version = "0.1.0"
 dependencies = [
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venues",
  "serde",
  "serde_json",
 ]
@@ -4377,7 +4369,6 @@ dependencies = [
  "safe-cex-venue-bitrue",
  "safe-cex-venue-bitunix",
  "safe-cex-venue-blofin",
- "safe-cex-venue-breakoutprop",
  "safe-cex-venue-bybit",
  "safe-cex-venue-coinbase",
  "safe-cex-venue-cryptocom",

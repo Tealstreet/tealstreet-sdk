@@ -21,6 +21,7 @@ import {
   HiddenTimerLateness,
   maximumTimerLateness,
 } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
+import { budgetDiagnostic, requestBudgetMs, requestClass } from '@tealstreet/http-over-websocket/src/requestBudget';
 import { stripDiagnosticUrlQueries } from '@tealstreet/http-over-websocket/src/diagnosticUrl';
 import {
   onTunnelFailing,
@@ -34,7 +35,7 @@ import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/b
 import { SECONDARY_READ_KEYS_ENABLED } from '../secondaryReadKeys';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { sharedBinanceCatalogue } from './binanceCatalogue';
-import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
+import { observeBybitPublicRateLimit } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { HttpTiming, httpTimingKind, httpTimingStage, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
@@ -627,7 +628,12 @@ const httpTransport = (
       [request.signal, controller.signal, reroute.abandon].filter((s): s is AbortSignal => s !== undefined),
     );
     const started = reroute.rerouted?.startedAt ?? Date.now();
-    const deadlineMs = Math.max(1, request.timeoutMs ?? 20_000);
+    const kind = requestClass(request.method, request.url, request.requestClass);
+    const deadlineMs = requestBudgetMs(kind, request.timeoutMs);
+    const timeoutError = () => Object.assign(new HttpPreparationError('timedOut'), {
+      message: `HTTP request timed out (${budgetDiagnostic(kind, deadlineMs, Date.now() - started)})`,
+      requestClass: kind, budgetMs: deadlineMs, elapsedMs: Math.max(0, Date.now() - started),
+    });
     const remaining = () => Math.max(0, deadlineMs - (Date.now() - started));
     let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
     let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
@@ -679,7 +685,7 @@ const httpTransport = (
     };
     const timer = setTimeout(() => {
       settleDeadline(true);
-      controller.abort(new HttpPreparationError('timedOut'));
+      controller.abort(timeoutError());
     }, remaining());
     signal.addEventListener('abort', onAbort, { once: true });
     const cancel = () => {
@@ -691,7 +697,7 @@ const httpTransport = (
     const active = () => {
       signal.throwIfAborted();
       if (disposed) throw new Error('Engine transport disposed');
-      if (remaining() <= 0) throw new HttpPreparationError('timedOut');
+      if (remaining() <= 0) throw timeoutError();
     };
     const beforeRelease = <T>(operation: () => T): T => {
       try {
@@ -703,7 +709,7 @@ const httpTransport = (
         cancel();
         if (error instanceof TradeTunnelTimeoutError) proxyAuthorization?.failed(relayFailed(exchange, error));
         if (intent !== undefined && error instanceof TradeTunnelTimeoutError)
-          throw new HttpPreparationError('timedOut');
+          throw timeoutError();
         throw error;
       }
     };
@@ -769,6 +775,7 @@ const httpTransport = (
       const hostHeaders = AxiosHeaders.from(venueHeaders(exchange, options));
       const config = {
         method: request.method,
+        requestClass: kind,
         url: target,
         baseURL: request.url,
         headers: AxiosHeaders.from({ ...request.headers, ...venueHeaders(exchange, options) }),
@@ -784,7 +791,7 @@ const httpTransport = (
           signal,
         );
       signal.throwIfAborted();
-      if (remaining() <= 0) throw new HttpPreparationError('timedOut');
+      if (remaining() <= 0) throw timeoutError();
       if (
         signed &&
         (request.url !== signed.url ||
@@ -975,7 +982,7 @@ const httpTransport = (
           if (cached) {
             ready = cacheFresh;
             send = () => {
-              if (!cacheFresh()) throw new HttpPreparationError('timedOut');
+              if (!cacheFresh()) throw timeoutError();
               return Promise.resolve(cached);
             };
           } else if (tunnelAdapter) {
@@ -988,16 +995,6 @@ const httpTransport = (
                 : withProxyTokenProvider(proxyTokenProvider, () => tunnelAdapter(finalConfig));
               return untilAborted(response, signal).then((value) => {
                 if (typeof value.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
-                if (onBybitPublicRateLimit && (intent === undefined || intent === 'public')) {
-                  const notice = bybitPublicRateLimitNotice(packet, value.data, value.headers);
-                  if (notice) {
-                    try {
-                      onBybitPublicRateLimit(notice);
-                    } catch {
-                      /* Telemetry cannot fail the request. */
-                    }
-                  }
-                }
                 return {
                   status: value.status,
                   headers: responseHeaders(value.headers),
@@ -1117,7 +1114,7 @@ const httpTransport = (
                     }
                     return catalogueRead && !cached ? untilAborted(catalogueRead.complete(value), signal) : value;
                   })
-                  .then(wrap)
+                  .then((value) => wrap(observeBybitPublicRateLimit(packet, value, onBybitPublicRateLimit)))
                   .catch((error) => {
                     const report = (): never => {
                       // No answer through the relay, and nobody called it off: the relay is down.
@@ -1153,7 +1150,7 @@ const httpTransport = (
       // The relay never prepared it, and nobody called it off: the relay is down.
       if (tunnelAdapter && !prepared && !disposed && !request.signal?.aborted && !reroute.abandon?.aborted)
         proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
-      if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw new HttpPreparationError('timedOut');
+      if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw timeoutError();
       throw error;
     }
   };
@@ -1328,7 +1325,7 @@ export const createEngineTransport = (
     '',
     undefined,
     undefined,
-    undefined,
+    onBybitPublicRateLimit,
     infoFacts,
   );
   const publicCorsProxy = provider.publicCorsProxy();
@@ -1342,7 +1339,7 @@ export const createEngineTransport = (
         publicCorsProxy,
         undefined,
         undefined,
-        undefined,
+        onBybitPublicRateLimit,
         infoFacts,
       )
     : undefined;

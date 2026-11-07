@@ -114,11 +114,19 @@ fn command(e: &mut Engine<PhemexPerpetuals>, c: Command) -> Vec<Action> {
 }
 
 fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
+    engine_with_socket_policy(mode, safe_cex_engine::PublicFeedPolicy::Direct)
+}
+
+fn engine_with_socket_policy(
+    mode: &str,
+    policy: safe_cex_engine::PublicFeedPolicy,
+) -> (Engine<PhemexPerpetuals>, SocketId) {
     let mut e = support::prepared_engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
     });
+    e.set_public_feed_policy(policy).unwrap();
     e.start(0.);
     let a: Vec<_> = e.drain_actions().collect();
     let mut a = raw(&mut e, &requests(&a)[0], PRODUCTS);
@@ -2238,7 +2246,10 @@ fn non_success_write_keeps_typed_native_diagnostics_without_proving_rejection() 
             "HTTP {status}"
         );
         assert_eq!(error.outcome, Some(Outcome::Unknown), "HTTP {status}");
-        assert_eq!(error.retry_after_ms, (status == 429).then_some(2000.));
+        assert_eq!(
+            error.retry_after_ms,
+            (matches!(status, 408 | 429) || status >= 500).then_some(2000.)
+        );
         assert!(writes(&a).is_empty());
         assert!(e.store().order("unproven-id").is_none());
         assert_eq!(
@@ -4447,7 +4458,7 @@ fn ordinary_replacement_text_matches_master() {
         let expected = if status == 200 {
             "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order is gone: it was canceled and its replacement refused"
         } else {
-            "HTTP response does not prove the write outcome"
+            "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
         };
         assert_eq!(error.message, expected);
         assert_eq!(error.legacy_text(), expected);
@@ -4580,4 +4591,52 @@ fn ordinary_pause_before_cancel_still_says_the_mutation_was_not_sent() {
     );
     assert_eq!(failure(&a).protection, None);
     assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+}
+
+#[test]
+fn fresh_local_mark_allows_a_protective_edit_despite_old_shared_source_provenance() {
+    let (mut e, _) = engine_with_socket_policy("OneWay", safe_cex_engine::PublicFeedPolicy::Shared);
+    let mut stop = order("old");
+    stop.kind = OrderType::StopLoss;
+    stop.reduce_only = true;
+    stop.side = OrderSide::Sell;
+    stop.trigger_type = Some(StopTriggerType::MarkPrice);
+    stop.price = 68000.;
+    e.store_mut().upsert_order(stop);
+    protected_long(&mut e);
+    e.apply_public_feed(
+        20_000.,
+        serde_json::from_str(
+            r#"{"tickers":[{"symbol":"BTCUSDT","mark":69001,"observedAt":[null,1000,null]}]}"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    e.handle(
+        20_000.,
+        Event::Command(Command::AmendOrder {
+            command: 10,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let sent = writes(&actions);
+    assert_eq!(
+        sent.len(),
+        1,
+        "a fresh local mark permits the guarded cancel: {actions:?}"
+    );
+    assert_eq!(sent[0].method, Method::Delete);
+    assert_eq!(
+        e.store()
+            .reference_seen_at("BTCUSDT", StopTriggerType::MarkPrice),
+        Some(20_000.)
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }

@@ -84,6 +84,7 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { FrameApplier, FrameApplyError } from '../store/frameApplier';
 import { ExchangeEmitter } from './exchangeEmitter';
 import { claimWriteTiming, emitWriteTiming, TIMED_WRITE_METHODS } from '../writeTiming';
+import { startupDiagnosticTags } from './rust/startupDiagnostics';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -2051,10 +2052,14 @@ export class BaseExchange implements Exchange {
     let formattedMsg;
     let errorObject: Error | undefined;
     let sentryContext: any = {};
-    const sentryTags =
-      structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
+    const sentryTags = {
+      ...(structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
         ? structuredExtraData.sentryTags
-        : {};
+        : {}),
+      ...(structuredExtraData.engineEvent?.code === 'startup.incomplete'
+        ? startupDiagnosticTags(structuredExtraData.engineEvent)
+        : {}),
+    };
     const sentryExtra =
       structuredExtraData.sentryExtra && typeof structuredExtraData.sentryExtra === 'object'
         ? structuredExtraData.sentryExtra
@@ -2462,6 +2467,10 @@ export class BaseExchange implements Exchange {
       }
       case 'kraken-challenge':
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
+      case 'backpack-ed25519':
+      case 'grvt-order':
+      case 'grvt-address':
+      case 'kucoin-batch':
       case 'hyperliquid-l1':
       case 'hyperliquid-address':
       case 'lighter-tx':

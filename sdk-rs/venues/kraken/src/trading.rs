@@ -1130,7 +1130,15 @@ fn classified_failure(
         });
     let released = Released::Response(response);
     let verdict = classify::verdict(&ERROR_CODES, intent, released, native.as_ref());
-    classify::error(verdict, intent, released, native.as_ref(), message)
+    let mut error = classify::error(verdict, intent, released, native.as_ref(), message);
+    if intent != Intent::Read
+        && error.outcome == Some(Outcome::Unknown)
+        && (matches!(response.status, 408 | 429 | 500..)
+            || error.kind == Some(ErrorKind::RateLimited))
+    {
+        error.message = "Kraken write outcome is unknown. Check Open Orders".into();
+    }
+    error
 }
 
 /// A send/edit/cancel status that is not success. Only Kraken's documented

@@ -25,22 +25,21 @@ hosted-wallet = ["dispatch-signing", "safe-cex-venues/hosted-wallet"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing", "hosted-signing"]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
-grvt = ["safe-cex-venues/grvt", "text-ingress"]
+grvt = ["safe-cex-venues/grvt", "text-ingress", "dispatch-signing", "hosted-wallet"]
 polymarket = ["safe-cex-venues/polymarket", "text-ingress", "safe-cex-engine/command-polymarket"]
 coinbase = ["safe-cex-venues/coinbase", "text-ingress"]
-# Polling-only builds isolate the startup subscription decoder.
+# The combined build isolates the startup subscription decoder.
 cold-subscriptions = []
-breakoutprop = ["safe-cex-venues/breakoutprop", "text-ingress", "cold-subscriptions"]
 paradex = ["safe-cex-venues/paradex", "sign-meta", "dispatch-signing", "address-nonce", "hosted-wallet"]
 apexomni = ["safe-cex-venues/apexomni", "text-ingress", "safe-cex-engine/command-apexomni", "dispatch-signing"]
 txflow = ["safe-cex-venues/txflow", "text-ingress"]
 kraken = ["safe-cex-venues/kraken", "text-ingress", "sign-meta"]
 asterdex = ["safe-cex-venues/asterdex", "text-ingress", "safe-cex-engine/command-asterdex", "dispatch-signing", "hosted-signing", "address-nonce"]
 lighter = ["safe-cex-venues/lighter", "text-ingress", "dispatch-signing", "hosted-wallet"]
-woo = ["safe-cex-venues/woo", "text-ingress"]
+woo = ["safe-cex-venues/woo", "text-ingress", "dispatch-signing", "hosted-signing"]
 bitrue = ["safe-cex-venues/bitrue", "text-ingress", "dispatch-signing"]
 bitget = ["safe-cex-venues/bitget", "text-ingress", "dispatch-signing", "hosted-signing"]
-backpack = ["safe-cex-venues/backpack", "text-ingress"]
+backpack = ["safe-cex-venues/backpack", "text-ingress", "dispatch-signing", "hosted-signing"]
 blofin = ["safe-cex-venues/blofin", "text-ingress", "dispatch-signing", "hosted-signing"]
 mexc = ["safe-cex-venues/mexc", "text-ingress", "dispatch-signing"]
 bingx = ["safe-cex-venues/bingx", "text-ingress", "dispatch-signing", "hosted-signing"]
@@ -48,8 +47,8 @@ weex = ["safe-cex-venues/weex", "text-ingress", "dispatch-signing"]
 phemex = ["safe-cex-venues/phemex", "text-ingress", "dispatch-signing", "hosted-signing"]
 default = [
     "algos-exec",
+    "cold-subscriptions",
     "bitunix",
-    "breakoutprop",
     "grvt",
     "polymarket",
     "coinbase",
@@ -79,7 +78,7 @@ default = [
 ]
 cryptocom = ["safe-cex-venues/cryptocom", "text-ingress", "dispatch-signing"]
 binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing", "hosted-signing", "safe-cex-algos?/product-semantics"]
-kucoin = ["safe-cex-venues/kucoin", "dispatch-signing", "text-ingress"]
+kucoin = ["safe-cex-venues/kucoin", "dispatch-signing", "text-ingress", "hosted-signing"]
 kucoinspot = ["safe-cex-venues/kucoinspot", "dispatch-signing", "text-ingress", "safe-cex-engine/command-kucoinspot"]
 bybit = ["safe-cex-venues/bybit", "text-ingress", "dispatch-signing", "hosted-signing", "safe-cex-algos?/product-semantics"]
 hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress", "dispatch-signing", "address-nonce", "hosted-wallet"]
