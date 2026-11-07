@@ -7,6 +7,7 @@ import axios, { AxiosHeaders } from 'axios';
 import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
+import { finishBackpackRequest, prepareBackpackRequest } from './backpackHostedSigning';
 import { signHttpCapture } from '../../utils/signHttpCapture';
 import { uuid } from '../../utils/uuid';
 import { createAsterDEXV1RequestInterceptor, isAsterDEXPublicEndpoint } from '../asterdex/asterdex.signing';
@@ -63,6 +64,21 @@ export const signHostedHttp = async (
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
+  if (name === 'backpack') {
+    const xhr = axios.create({ paramsSerializer: { serialize: (params) => qs.stringify(params, { arrayFormat: 'repeat' }) },
+      headers: { 'X-Broker-Id': '1200', 'Content-Type': 'application/json' } });
+    xhr.interceptors.request.use(async (config) => {
+      const clock = host.hostedSigningClock();
+      const prepared = prepareBackpackRequest(config, clock.stampMs, options.extra?.recvWindow);
+      if (!prepared) { markSkipRemoteSigning(config); return config; }
+      if (!primaryComplete) throw new Error('Signing credential is unavailable');
+      const output = await host.hostedSigning({ kind: 'http', ...clock,
+        payload: JSON.stringify({ slot: 'primary', payload: prepared.payload }) });
+      if (!output.credential || !output.signature) throw new Error('Signing result is unavailable');
+      return finishBackpackRequest(prepared, output.credential, output.signature);
+    });
+    return signHttpCapture(xhr, request);
+  }
   // Other dispatch families have no request codec here.
   const aster = name === 'asterdex';
   const okx = OKX.has(name);
@@ -202,7 +218,7 @@ export const signHostedWsAuth = async (
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
   if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64'
-    && outputFormat !== 'bitunix-double-sha256')
+    && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519')
     return { id: request.id, error: 'Unsupported WS auth output format' };
   const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
   if (!output.signature) throw new Error('Signing result is unavailable');

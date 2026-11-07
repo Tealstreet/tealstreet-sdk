@@ -6,8 +6,13 @@ use safe_cex_engine::signing::{
 use safe_cex_engine::signing_policy::{RemoteSigningPolicy, SignatureEncoding};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "backpack")]
+mod backpack;
+
 #[derive(Clone, Copy, Deserialize)]
 pub enum OutputFormat {
+    #[serde(rename = "backpack-ed25519")]
+    BackpackEd25519,
     #[serde(rename = "hex")]
     Hex,
     #[serde(rename = "base64")]
@@ -141,6 +146,10 @@ impl<'de> Deserialize<'de> for Input {
 /// Formatting metadata remains bound to its one capture token.
 #[derive(Clone, Copy)]
 pub enum OutputKind {
+    #[cfg(feature = "backpack")]
+    Backpack {
+        ws: bool,
+    },
     Credential,
     Http(RemoteSigningPolicy),
     /// Bitunix HTTP: the double-SHA256 work, with the MAC as its last value.
@@ -283,6 +292,7 @@ fn family(venue: &str) -> bool {
         || bitget
         || (cfg!(feature = "bingx") && venue == "bingx")
         || (cfg!(feature = "blofin") && venue == "blofin")
+        || (cfg!(feature = "backpack") && venue == "backpack")
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
@@ -293,6 +303,39 @@ pub fn prepare(
     identities: &Identities,
     input: Input,
 ) -> Result<(SignRequest, OutputKind), SignError> {
+    #[cfg(feature = "backpack")]
+    if venue == "backpack" {
+        match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => {
+                return backpack::prepare(
+                    identities,
+                    payload,
+                    SignReceipt {
+                        stamp_ms: Some(stamp_ms),
+                        ..Default::default()
+                    },
+                    false,
+                );
+            }
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::BackpackEd25519,
+            } => return backpack::prepare(identities, to_sign, SignReceipt::default(), true),
+            Input::WsAuth { .. } => return Err(SignError::Unsupported),
+            Input::Credential {} => {}
+        }
+    }
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::BackpackEd25519,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
     let identity = identities.primary.as_ref().ok_or(SignError::Unavailable)?;
     identity.validate().map_err(|_| SignError::InvalidRequest)?;
     let context = Context {
@@ -375,6 +418,10 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    #[cfg(feature = "backpack")]
+    if let OutputKind::Backpack { ws } = kind {
+        return backpack::finish(ws, result);
+    }
     let (expected, mac_index) = kind.layout();
     if result.values.len() != expected {
         return Err(SignError::InvalidResult);
@@ -415,6 +462,9 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         return Err(SignError::InvalidResult);
     }
     let signature = match kind {
+        #[cfg(feature = "backpack")]
+        OutputKind::Backpack { .. } => unreachable!(),
+        OutputKind::WsAuth(OutputFormat::BackpackEd25519) => return Err(SignError::Unsupported),
         OutputKind::Credential => unreachable!(),
         OutputKind::Http(policy) | OutputKind::DoubleSha256Http(policy) => {
             match policy.signature_encoding {
@@ -818,6 +868,7 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    OutputFormat::BackpackEd25519 => "backpack-ed25519",
                     OutputFormat::Hex => "hex",
                     OutputFormat::Base64 => "base64",
                     OutputFormat::Base64Hex => "hex-base64",

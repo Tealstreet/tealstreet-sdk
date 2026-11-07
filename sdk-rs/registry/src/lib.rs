@@ -340,7 +340,7 @@ fn orderly_rules(options: &EngineOptions) -> Result<(), VenueError> {
 #[cfg(feature = "asterdex")]
 const ASTERDEX_MAIN_WALLET_REQUIRED: &str = "Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with your login wallet — do not replace the main wallet with the API/vault wallet.";
 
-/// Backpack's provider copy of the configured key and Ed25519 seed (option B).
+/// Backpack's trusted native compatibility setup; the caller consumes raw input.
 /// A probe signature refuses a malformed or non-32-byte seed before startup.
 #[cfg(feature = "backpack")]
 struct BackpackSignerSetup {
@@ -360,7 +360,7 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     });
     // Declared PublicRead keeps a valid read key signing in public-only mode,
     // with no primary ever built or probed (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md).
-    // Backpack's own provider (dual custody) applies the one shared rule.
+    // Backpack's compatibility setup applies the same declared PublicRead rule.
     let read_policy = construction::read_credentials_policy("backpack");
     let primary_allowed = !public_read_excludes_primary(read_policy, options.public_data_only);
     if options.public_data_only && read_policy != construction::ReadCredentialsPolicy::PublicRead {
@@ -723,6 +723,31 @@ pub fn prepare_local_signer_for(
         payload_signing_rules(venue, options, false)?;
         return lighter_setup::native(options, signer_setup_policy_for(venue, options));
     }
+    #[cfg(feature = "backpack")]
+    if venue == "backpack" {
+        // Preserve native legacy validation precedence while consuming both seeds
+        // before the venue exists. JSON-capsule and external setup already own refs.
+        let setup = backpack_provider(options)?;
+        if let Some(Err(safe_cex_venue_backpack::sign::ReadCredentialsError::Configuration(
+            message,
+        ))) = setup.read_status
+        {
+            return Err(invalid(message));
+        }
+        options.backpack_read_status = setup.read_status;
+        for value in [&mut options.key, &mut options.secret] {
+            safe_cex_crypto::secrets::erase(value);
+        }
+        if let Some(mut read) = options.read_credentials.take() {
+            read.erase_secrets();
+        }
+        return Ok((
+            setup.provider.unwrap_or_else(|| {
+                std::sync::Arc::new(safe_cex_crypto::signer::LocalSigner::new())
+            }),
+            setup.identities,
+        ));
+    }
     let policy = signer_setup_policy_for(venue, options);
     let read_policy = construction::read_credentials_policy(venue);
     prepare_local_signer_with_policy(options, policy, public_data_only, read_policy)
@@ -1011,6 +1036,33 @@ fn admit_json_setup(
         &identities,
         public_data_only,
     )?;
+    #[cfg(feature = "backpack")]
+    if venue == "backpack" {
+        // Match legacy trusted setup's seed-width refusal before startup I/O.
+        for identity in [&identities.primary, &identities.secondary]
+            .into_iter()
+            .flatten()
+        {
+            let work = safe_cex_engine::signing::SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![safe_cex_engine::signing::Operation::Sign {
+                    algorithm: safe_cex_engine::signing::Algorithm::Ed25519,
+                    key: identity
+                        .signing_ref()
+                        .map_err(|_| invalid("Invalid Backpack signer setup"))?
+                        .clone(),
+                    payload: vec![safe_cex_engine::signing::PayloadPart::Bytes {
+                        bytes: Vec::new(),
+                    }],
+                }],
+            };
+            provider
+                .sign_ready(&work)
+                .ok_or_else(|| invalid("Invalid Backpack signer setup"))?
+                .map_err(|_| invalid("Backpack Ed25519 seed must be 32 bytes"))?;
+        }
+    }
     #[cfg(feature = "apexomni")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::ApexOmni) {
         return apexomni_admit(provider, identities);
@@ -1216,8 +1268,11 @@ pub fn build<T: Visit>(
             && options.signing.is_none()
         {
             let (provider, identities) = prepare_local_signer_for(venue, &mut options)?;
+            let empty_backpack = venue == "backpack"
+                && identities.primary.is_none()
+                && identities.secondary.is_none();
             options.signing = Some(identities);
-            Some(provider)
+            if empty_backpack { None } else { Some(provider) }
         } else {
             None
         };
@@ -1869,25 +1924,34 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "backpack")]
         "backpack" => {
-            // Transitional dual custody (RUST_BACKPACK_SIGNER_ADMISSION.md, option
-            // B): managed trading signs through this provider, while unadopted
-            // account reads and private WS auth keep the raw fields. Remove before master.
-            let setup = backpack_provider(&options)?;
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Backpack credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid(
+                    "Backpack signing refs require an installed provider",
+                ));
+            }
             let mut engine = Engine::new(
                 Backpack::new(BackpackOptions {
-                    identity: setup.identities.primary.clone(),
-                    read_identity: setup.identities.secondary.clone(),
-                    read_credentials_status: setup.read_status,
-                    read_credentials: options.read_credentials.take(),
+                    identity: identities.primary.clone(),
+                    read_identity: identities.secondary.clone(),
+                    read_credentials_status: options.backpack_read_status,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     recv_window: options.recv_window.take(),
+                    ..Default::default()
                 }),
                 entropy,
             )?;
-            engine.set_signer(setup.provider)?;
-            engine.set_identities(setup.identities)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "blofin")]
@@ -2386,6 +2450,11 @@ pub struct EngineOptions {
     /// of the material (`ReadCredentials::status`); None when no read key.
     #[serde(default)]
     pub read_credentials_valid: Option<bool>,
+    /// Trusted Backpack compatibility setup retains validation only, never material.
+    #[cfg(feature = "backpack")]
+    #[serde(skip)]
+    pub backpack_read_status:
+        Option<Result<(), safe_cex_venue_backpack::sign::ReadCredentialsError>>,
     #[cfg(feature = "blofin")]
     #[serde(default)]
     pub broker_attribution: bool,

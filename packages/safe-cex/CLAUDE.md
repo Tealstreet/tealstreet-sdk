@@ -8,7 +8,8 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, and
+Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
+Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override. Robinhood is admitted through the existing Lighter
 family and remote-signing policy; its preview/production visibility flags are unchanged.
@@ -207,6 +208,13 @@ WS and credential captures retain default deny.
 The delegated provider initializes UTF-8 codecs only when provider work begins.
 Importing the native registry before its host installs TextEncoder/TextDecoder
 must remain supported; signing and frame I/O require those runtime codecs.
+
+Backpack's `backpack-ed25519` device codec resolves `[Present, Sign Ed25519]`
+atomically for the selected primary/secondary slot. Registry engines hold only
+provider refs; private startup and WS use them without raw credentials. Private
+PayloadSigner remains refused. The direct native raw-options compatibility API
+retains its previous WS path. The caller document above owns parity and hold
+requirements; betaVenues.ts keeps its existing refusal wording.
 
 The beta registry always selects Rust in SDK factories and `ExchangeWorker`;
 `ExchangeOptions.engine` remains an accepted compatibility input only.

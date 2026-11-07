@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 
 import { deriveRemoteSigningPolicy } from './construction';
 
+const ED25519_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['ed25519']);
 const HMAC_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
 const DOUBLE_SHA256_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['sha256SecretSuffix']);
 const WALLET_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['secp256k1Digest']);
@@ -26,7 +27,7 @@ const paradex = (name: ExchangeName) => name === 'paradex';
 /** Everything this provider signs for a venue; the engine's capability admission
  * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
 export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
-  doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : hyperliquid(name) ? WALLET_ALGORITHMS
+  name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : hyperliquid(name) ? WALLET_ALGORITHMS
     : lighter(name) ? SCHNORR_ALGORITHMS : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
@@ -283,6 +284,40 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     if (!remoteSigner && !payloadSigner) throw refused();
   } catch { throw refused(); }
 
+  /** Backpack has one atomic graph: Present its key, then Ed25519 over exact
+   * native bytes. The device selects its own slot; opaque refs never cross. */
+  const signBackpack = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const [present, sign] = operations;
+    if (present?.kind !== 'present') throw refused();
+    const material = credentials.get(present.key);
+    if (!material) throw refused();
+    if (operations.length === 1) return { values: [material.bytes.slice()], receipt };
+    const entry = sign?.kind === 'sign' ? owned.get(sign.key) : undefined;
+    if (operations.length !== 2 || sign?.kind !== 'sign' || sign.algorithm !== 'ed25519'
+      || !entry || sign.key !== entry.identity.signing || present.key !== entry.identity.credential
+      || !Array.isArray(sign.payload) || sign.payload.length !== 1) throw refused();
+    const part = sign.payload[0];
+    if (part.kind !== 'bytes' || !Array.isArray(part.bytes) || part.bytes.length < 1 || part.bytes.length > MAX_PAYLOAD
+      || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+    const payload = decodeUtf8(Uint8Array.from(part.bytes));
+    const toSign = JSON.stringify({ slot: entry.primary ? 'primary' : 'secondary', payload });
+    utf8(toSign);
+    const id = nanoid();
+    const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({ id, type: 'ws-auth', exchangeName,
+      ...(accountName === undefined ? {} : { accountName }), wsAuth: { toSign, outputFormat: 'backpack-ed25519' } }));
+    if (!record(response) || response.id !== id || (response.error !== undefined && response.error !== '')
+      || typeof response.wsAuthSignature !== 'string') throw refused();
+    utf8(response.wsAuthSignature);
+    const result: unknown = JSON.parse(response.wsAuthSignature);
+    if (!record(result) || Object.keys(result).length !== 2 || result.credential !== entry.identity.publicCredential
+      || typeof result.signature !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(result.signature)) throw refused();
+    const signature = atob(result.signature);
+    if (signature.length !== 64 || btoa(signature) !== result.signature) throw refused();
+    if (signal.aborted) throw canceled();
+    return { values: [material.bytes.slice(), Array.from(signature, (char) => char.charCodeAt(0))], receipt };
+  };
+
   /** The one admitted fused shape, in the engine's order: `sha256` over bytes and
    * the signing identity's own credential, `sign sha256SecretSuffix` over exactly
    * `result{0, hex}`, then `present` of that credential. Anything else refuses.
@@ -468,6 +503,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (receipt.stampMs !== undefined && receipt.expiryMs !== undefined && receipt.expiryMs <= receipt.stampMs) throw refused();
       if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
       const operations = Array.from(request.operations);
+      if (exchangeName === 'backpack') return await signBackpack(operations, receipt, signal);
       if (hyperliquid(exchangeName)) return await signWallet(operations, receipt, signal);
       if (lighter(exchangeName)) return await signLighter(operations, receipt, signal);
       if (paradex(exchangeName)) return await signStark(operations, receipt, signal);

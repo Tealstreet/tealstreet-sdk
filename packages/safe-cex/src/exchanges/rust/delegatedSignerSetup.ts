@@ -68,6 +68,11 @@ export class DelegatedSignerSetup {
     if (secondaryRequested && !secondary) invalid('Rust engine secondary delegated signing requires a nonempty public key');
     const presence = { key: primary !== undefined, secret: Boolean(remoteSigner || payloadSigner) };
     const publicDataOnly = derivePublicMode(name, options, undefined, presence).publicDataOnly;
+    if (name === 'backpack' && this.usesPayloadSigner && !publicDataOnly) {
+      const message = 'Backpack requires RemoteSigner Ed25519 custody';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
+    const primaryDropped = setupPolicy.readCredentials === 'publicRead' && publicDataOnly;
     const primaryPassphrase = resolveSetupPassphrase('primary', primary !== undefined, options.passphrase,
       options.passphrase, setupPolicy.primary, publicDataOnly);
     const secondaryPassphrase = resolveSetupPassphrase('secondary', secondary !== undefined, options.secondary_passphrase,
@@ -84,7 +89,7 @@ export class DelegatedSignerSetup {
       ...(passphrase === undefined ? {} : { passphrase }),
     });
     const identities: SigningIdentities = Object.freeze({
-      ...(primary === undefined ? {} : { primary: identity(primaryMetadata?.stableId, primaryPassphraseRef) }),
+      ...(primary === undefined || primaryDropped ? {} : { primary: identity(primaryMetadata?.stableId, primaryPassphraseRef) }),
       ...(secondary === undefined ? {} : { secondary: identity(secondaryMetadata?.stableId, secondaryPassphraseRef) }),
     });
     try {

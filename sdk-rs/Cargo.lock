@@ -4090,6 +4090,7 @@ dependencies = [
  "base64 0.22.1",
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venues",
  "serde",
  "serde_json",
  "zeroize",
