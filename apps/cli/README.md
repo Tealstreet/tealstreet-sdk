@@ -206,6 +206,12 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
   `src/log-classify.ts` (keepalive pings, reconnect chatter, balance dumps) are
   kept out of the terminal — they still hit `~/.tealstreet/cli.log`. Add new
   noisy prefixes there, not in `logger.ts`.
+- **Routine reconnects are diagnostic.** ReconnectingWebSocket and HOW output
+  stays in `cli.log`; URL providers, queries, credentials and frame bodies are
+  omitted. Repeated failures and exhausted retries still surface as errors.
+  Node/Bun relays use native ping/pong (15 s ping, 45 s receive silence) without
+  adding application frames to the exchange pipe. Bybit retains its 10 s JSON
+  ping and 20 s silence recovery; HOW retains its 5 s ping and 25 s recovery.
 - **Everything else prints _above_ the prompt** via `writeAbovePrompt`
   (readline-aware), so async output never corrupts what the user is typing.
 - **Glyphs go through `src/console-glyphs.ts`.** On a legacy Windows console

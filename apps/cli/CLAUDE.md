@@ -421,7 +421,7 @@ delegated to the client over WebSocket.
 | `console.debug()`                  | No                                                                    | Only when `DEBUG=1`/`true`³        |
 | `print()` / `originalConsoleLog()` | Yes (no rate limit, no suppression)                                   | No                                 |
 
-¹ Lines matching **operational** patterns (`[trackLastReceived]`, `[BaseReconnectingWebSocket]`, `[HOW] Latency`, ping/keepalive noise, balance dumps) are suppressed from the terminal (file only) — they were corrupting the readline prompt. The pattern list + the shared severity taxonomy (`operational`/`info`/`warn`/`error`/`critical`) live in `src/log-classify.ts` (`OPERATIONAL_PATTERNS`, `classifyLog`); `logger.ts:shouldSuppressLog` delegates to `isOperational()`. Add new noisy prefixes there, not in `logger.ts`.
+¹ Lines matching **operational** patterns (`[trackLastReceived]`, `[BaseReconnectingWebSocket]`, `[ReconnectingWebSocket]`, `RWS>`, `[HOWWebSocket]`, `[HOW] Latency`, ping/keepalive noise, balance dumps) are suppressed from the terminal (file only) — they were corrupting the readline prompt. The pattern list + the shared severity taxonomy (`operational`/`info`/`warn`/`error`/`critical`) live in `src/log-classify.ts` (`OPERATIONAL_PATTERNS`, `classifyLog`); `logger.ts:shouldSuppressLog` delegates to `isOperational()`. Add new noisy prefixes there, not in `logger.ts`.
 
 ² Non-`print` terminal output goes through `writeAbovePrompt` (readline-aware redraw) so async lines don't shred the input buffer; `console.warn`/`console.error` (and lines the taxonomy classifies `critical`) additionally call `setStatus` to mirror the latest notable event on the pinned **top alert bar** (`src/status-line.ts`). The always-on **bottom footer** (`src/footer.ts`) is the other pinned surface — both over one shared scroll region (`src/scroll-region.ts`). See the "Output surfaces" row of the doc-sync table.
 
@@ -443,6 +443,13 @@ that prefix operational so it lands in `~/.tealstreet/cli.log` without printing
 above the prompt. There is no separate network-debug file. Headers are omitted,
 sensitive keys are redacted, URLs keep query-key names but not query values,
 and large payloads are truncated.
+
+Routine HOW closes and transport errors use info diagnostics; repeated failures
+are reported once per retry streak and exhausted retries remain errors. URL
+providers are resolved only by the dial attempt; reconnect logs never stringify
+functions, queries, credentials, protocols or outgoing frames. Node/Bun relay
+keepalive is native ping/pong at 15 s with a 45 s receive silence bound, separate
+from Bybit's 10 s JSON ping/20 s silence and HOW's 5 s RPC ping/25 s silence.
 
 **Convention:** Use `logger.*` for operational details (file only). Use `print()` for user-facing status lines (terminal only).
 

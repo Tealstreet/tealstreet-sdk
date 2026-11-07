@@ -16,6 +16,7 @@ members = [
     "safe-cex-num",
     "safe-cex-types",
     "venues/*",
+    "venues/txflow/public-wire",
 ]
 # A bare `cargo build|test` never unifies the candle-cache serde_json features
 # into the port; those crates build only with `-p`.
@@ -28,6 +29,7 @@ default-members = [
     "hosts/wasm",
     "registry",
     "venues/*",
+    "venues/txflow/public-wire",
 ]
 
 [workspace.package]

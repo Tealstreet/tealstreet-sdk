@@ -77,6 +77,19 @@ not create a second network log file, omits headers, redacts sensitive keys,
 preserves URL query-key names without query values, and truncates large
 payloads.
 
+Routine ReconnectingWebSocket and HOW reconnect diagnostics stay in `cli.log`,
+without a red error or a prompt line. URLs contain only their origin and path;
+URL-provider functions, query strings, credentials and outgoing frames are not
+logged. Repeated connection failures and exhausted retries still show an error,
+as do authentication failures and uncertain order outcomes.
+
+The Node/Bun relay sends native WebSocket pings every 15 seconds and reconnects
+after 45 seconds without incoming traffic or a pong. These control frames never
+enter the exchange's application stream. Bybit's engine separately sends its
+JSON ping every 10 seconds on public and private sockets; its 20-second receive
+silence deadline still recovers a stalled upstream. HOW keeps its existing
+5-second RPC ping and 25-second silence recovery.
+
 The `operational` / `info` / `warn` / `error` / `critical` taxonomy lives in
 `apps/cli/src/log-classify.ts`; routing in `apps/cli/src/logger.ts`. View the
 full log with the `logs` / `log` command, or tail `~/.tealstreet/cli.log`
