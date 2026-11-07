@@ -79,7 +79,8 @@ pub use engine::{
     HttpRequest, MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PollTimerBounds, Query,
     ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SigningTarget, SocketChannel,
     SocketContext, SocketId, SocketSpec, SubscriptionTopic, TimerId, Venue, VenueAction,
-    WebSocketWrite, WebSocketWriteBinding, unsupported_venue_action,
+    WebSocketCommit, WebSocketHandoff, WebSocketWrite, WebSocketWriteBinding,
+    unsupported_venue_action,
 };
 pub use error::{
     BuilderAuthorization, BuilderAuthorizationReason, ErrorCause, ErrorKind, Outcome, Partial,

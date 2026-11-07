@@ -11,6 +11,24 @@ pub(super) fn outbound(packet: Box<HttpAction>) -> Action {
     }
 }
 
+pub use crate::request_context::WebSocketCommit;
+
+/// Physical handoff after admission. Revalidate the connection, then call
+/// `commit` with a callback that attempts the frame exactly once. No venue
+/// callback runs inside `commit`; false handoff leaves the attempt NotSent.
+pub trait WebSocketHandoff {
+    fn send(&mut self, socket: SocketId, text: String, commit: &mut WebSocketCommit<'_>) -> bool;
+}
+
+impl<F> WebSocketHandoff for F
+where
+    F: FnMut(SocketId, String, &mut WebSocketCommit<'_>) -> bool,
+{
+    fn send(&mut self, socket: SocketId, text: String, commit: &mut WebSocketCommit<'_>) -> bool {
+        self(socket, text, commit)
+    }
+}
+
 /// Opaque bound mutation. A host checks readiness, then consumes this with
 /// `Engine::claim_websocket_write` immediately before its socket send.
 #[derive(Debug)]
@@ -310,12 +328,13 @@ impl<V: Venue> Engine<V> {
             .flatten()
     }
 
-    /// Final single-use mutation claim, immediately before physical socket send.
+    /// Reserve admission, then commit only through the synchronous physical handoff.
     pub fn claim_websocket_write(
         &mut self,
         now: f64,
         binding: WebSocketWriteBinding,
-    ) -> Result<(SocketId, String), Error> {
+        handoff: &mut dyn WebSocketHandoff,
+    ) -> Result<(), Error> {
         self.assert_live();
         let socket = match self.websocket_write_socket(&binding) {
             Some(socket) => socket,
@@ -344,8 +363,10 @@ impl<V: Venue> Engine<V> {
             crate::signing_dispatch::wipe(&mut Action::Http(request));
             return Err(Error::Revoked);
         }
-        let result = match self.claim_http(now, permit) {
-            Ok(Claim::Released(_)) => return Ok((socket, request.body.take().unwrap_or_default())),
+        let result = match self.claim_http_with_handoff(now, permit, &mut |commit| {
+            handoff.send(socket, request.body.take().unwrap_or_default(), commit)
+        }) {
+            Ok(Claim::Released(_)) => return Ok(()),
             Ok(Claim::WaitUntil(_)) => {
                 self.http_preparation_failed(
                     now,

@@ -1562,3 +1562,39 @@ fn reserved_journal_never_grows_leg_backing_for_generic_registration_or_replacem
         ));
     }
 }
+
+#[test]
+fn refused_physical_handoff_consumes_no_release_or_pacing() {
+    let group = Pacing {
+        group: 991,
+        minimum_gap_ms: 100.,
+    };
+    let mut pacing = SendPacing::new(&[group]).unwrap();
+    let mut refused = lifecycle(901, Some(group));
+    let permit = ready(&mut refused);
+    let mut callbacks = 0;
+    let result = refused.claim_with_handoff(
+        permit,
+        clock(1.),
+        &mut pacing,
+        &mut |_| {
+            callbacks += 1;
+            Ok(Admission::Unscheduled)
+        },
+        &mut |commit| {
+            assert!(!commit(&mut || false));
+            assert!(!commit(&mut || panic!("reservation cannot be replayed")));
+            false
+        },
+    );
+    assert_eq!(result, Err(Error::Revoked));
+    assert_eq!(callbacks, 1);
+    assert!(refused.release().is_none());
+    assert!(!refused.accepts_response());
+    let mut next = lifecycle(902, Some(group));
+    let permit = ready(&mut next);
+    assert!(matches!(
+        claim(&mut next, permit, 1., &mut pacing),
+        Ok(Claim::Released(_))
+    ));
+}

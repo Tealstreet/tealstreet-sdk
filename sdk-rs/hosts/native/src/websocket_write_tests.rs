@@ -6,12 +6,17 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::{Cx, HttpRequest, Response, SocketChannel, SocketSpec};
 use std::sync::{Arc, Mutex};
 
+type WriterSlot = Arc<Mutex<Option<Arc<dyn WebSocketWriter>>>>;
+
 #[derive(Default)]
 struct Probe {
     socket: Option<SocketId>,
     url: Option<String>,
     deny: bool,
     panic_release: bool,
+    retire_writer: Option<WriterSlot>,
+    actual_releases: usize,
+    retire_after_release: bool,
     releases: usize,
 }
 impl Venue for Probe {
@@ -51,6 +56,11 @@ impl Venue for Probe {
     fn http_release() -> safe_cex_engine::HttpRelease<Self> {
         safe_cex_engine::HttpRelease::Mutable(|this, _, _| {
             this.releases += 1;
+            if !this.retire_after_release
+                && let Some(writer) = &this.retire_writer
+            {
+                writer.lock().unwrap().as_ref().unwrap().retire();
+            }
             assert!(!this.panic_release, "venue release panic");
             Ok(if this.deny {
                 Admission::Denied
@@ -58,6 +68,23 @@ impl Venue for Probe {
                 Admission::Unscheduled
             })
         })
+    }
+    fn on_signing_release(
+        &mut self,
+        _: safe_cex_engine::SigningTarget<'_, Context>,
+        _: safe_cex_engine::SigningRelease,
+    ) {
+        self.actual_releases += 1;
+        if self.retire_after_release {
+            self.retire_writer
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .retire();
+        }
     }
     fn on_http_preparation_failed(
         &mut self,
@@ -99,16 +126,27 @@ impl WebSocketWriter for CapturedWriter {
     fn try_write(
         &self,
         _: RequestId,
-        claim: &mut dyn FnMut() -> Option<String>,
+        claim: &mut dyn FnMut(&mut dyn safe_cex_engine::WebSocketHandoff),
     ) -> Result<(), WebSocketWriteError> {
         if self.busy {
             return Err(WebSocketWriteError::NotReady);
         }
-        if let Some(text) = claim() {
-            self.sent.lock().unwrap().push(text);
-            if self.send_error {
-                return Err(WebSocketWriteError::Send("physical write failed".into()));
-            }
+        let mut sent = false;
+        claim(&mut |_: SocketId,
+                    text: String,
+                    commit: &mut safe_cex_engine::WebSocketCommit<'_>| {
+            let mut text = Some(text);
+            commit(&mut || {
+                let Some(text) = text.take() else {
+                    return false;
+                };
+                self.sent.lock().unwrap().push(text);
+                sent = true;
+                true
+            })
+        });
+        if sent && self.send_error {
+            return Err(WebSocketWriteError::Send("physical write failed".into()));
         }
         Ok(())
     }
@@ -366,4 +404,113 @@ async fn release_panic_does_not_break_host_stop() {
         "writer retirement panicked on its poisoned mutex after the expected venue panic"
     );
     let _ = server.await;
+}
+
+struct ReentrantTransport {
+    writer: WriterSlot,
+    inner: NetworkTransport,
+}
+impl Transport for ReentrantTransport {
+    fn connect(
+        &self,
+        socket: SocketId,
+        url: String,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
+        self.inner.connect(socket, url, events)
+    }
+    fn connect_socket(
+        &self,
+        binary: bool,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        channel: Option<SocketChannel>,
+        context: Option<safe_cex_engine::SocketContext>,
+        events: Events,
+    ) -> SocketConnection {
+        let connection = self
+            .inner
+            .connect_socket(binary, socket, url, headers, channel, context, events);
+        *self.writer.lock().unwrap() = connection.writer.clone();
+        connection
+    }
+    fn request(&self, _: HttpRequest, _: Events) {
+        panic!("unexpected HTTP");
+    }
+}
+async fn retiring_claim(retire: &str) -> (bool, usize, Vec<Notice>) {
+    use futures_util::StreamExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        tokio::time::timeout(Duration::from_millis(200), ws.next()).await
+    });
+    let slot = Arc::new(Mutex::new(None));
+    let engine = safe_cex_engine::test_support::seeded_engine(Probe {
+        url: Some(format!("ws://{address}")),
+        retire_writer: (retire != "never").then(|| slot.clone()),
+        retire_after_release: retire == "observer",
+        ..Probe::default()
+    });
+    let mut host = Host::new(
+        engine,
+        ReentrantTransport {
+            writer: slot,
+            inner: NetworkTransport::new(),
+        },
+    );
+    host.clock = || 0.;
+    host.engine.start(0.);
+    host.execute(&mut |_| {});
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(2), host.inbox.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let opened = matches!(event, HostEvent::WsOpened(_));
+        host.dispatch(event);
+        if opened {
+            break;
+        }
+    }
+    host.engine.handle(
+        0.,
+        Event::Command(Command::SetLeverage {
+            command: 71,
+            symbol: "BTC".into(),
+            leverage: 2.,
+            side: None,
+        }),
+    );
+    let mut notices = Vec::new();
+    host.execute(&mut |notice| notices.push(notice));
+    let received = server.await.unwrap();
+    let sent = matches!(received,Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) if text.as_str()=="setting");
+    (sent, host.engine.venue().actual_releases, notices)
+}
+#[tokio::test(flavor = "current_thread")]
+async fn open_writer_commits_one_release() {
+    let (sent, releases, notices) = retiring_claim("never").await;
+    assert!(sent, "{notices:?}");
+    assert_eq!(releases, 1);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn retired_during_release_is_not_sent_without_commit() {
+    let (sent, releases, notices) = retiring_claim("admission").await;
+    assert!(!sent, "retired writer sent a frame: {notices:?}");
+    assert_eq!(
+        releases, 0,
+        "no physical frame was handed off, but the engine claim was consumed: {notices:?}"
+    );
+    assert!(notices.iter().any(|notice| matches!(notice, Notice::CommandFailed {command:71,error} if error.outcome == Some(safe_cex_engine::Outcome::NotSent))), "{notices:?}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn signing_release_observer_reenters_after_physical_handoff() {
+    let (sent, releases, notices) = retiring_claim("observer").await;
+    assert!(sent, "observer ran before physical handoff: {notices:?}");
+    assert_eq!(releases, 1);
 }

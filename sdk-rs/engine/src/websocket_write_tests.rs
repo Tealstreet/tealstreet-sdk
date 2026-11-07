@@ -45,7 +45,7 @@ fn websocket_write_claim_before_handshake_is_not_sent() {
         .drain_actions()
         .find_map(WebSocketWriteBinding::from_action)
         .expect("bound write on a connecting socket");
-    assert!(engine.claim_websocket_write(0., binding).is_err());
+    assert!(engine.claim_websocket_write(0., binding, &mut |_, _, _: &mut crate::WebSocketCommit<'_>| panic!("must not hand off")).is_err());
     assert!(engine.venue.releases.is_empty());
     assert!(engine.http_release(request).is_none());
     assert_eq!(engine.venue.failures.len(), 1);
@@ -105,10 +105,12 @@ fn release_websocket_actions(
                 ..
             } => {
                 let binding = WebSocketWriteBinding::from_action(action).expect("typed binding");
-                engine
-                    .claim_websocket_write(now, binding)
-                    .ok()
-                    .map(|(socket, text)| Action::WsSend { socket, text })
+                let mut frame = None;
+                let _ = engine.claim_websocket_write(now, binding, &mut |socket, text, commit: &mut crate::WebSocketCommit<'_>| {
+                    let mut text = Some(text);
+                    commit(&mut || { frame = Some(Action::WsSend {socket, text:text.take().expect("one handoff")}); true })
+                });
+                frame
             }
             action => Some(action),
         })
@@ -432,7 +434,7 @@ fn websocket_write_cannot_borrow_a_read_only_http_permit() {
     .unwrap();
     assert_eq!(engine.websocket_write_socket(&binding), None);
     assert_eq!(
-        engine.claim_websocket_write(0., binding),
+        engine.claim_websocket_write(0., binding, &mut |_, _, _: &mut crate::WebSocketCommit<'_>| panic!("must not hand off")),
         Err(Error::Revoked)
     );
     assert!(engine.venue.releases.is_empty());
@@ -517,4 +519,22 @@ fn websocket_write_signing_recipe_cannot_replace_the_authorized_socket() {
     );
     assert!(engine.venue.releases.is_empty());
     assert_eq!(engine.venue.failures.len(), 1);
+}
+
+
+#[test]
+fn websocket_write_cannot_commit_through_http_claim() {
+    let (mut engine, context, socket)=websocket_fixture(false);
+    let request=queue_websocket_write(&mut engine,&context,socket,false);
+    let permit=engine.drain_actions().find_map(|action| match action {
+        Action::SignedOutbound {attempt:RequestId(0),outbound} => match *outbound {
+            Action::ManagedHttp(packet) => match *packet { HttpAction::Bind {permit,..}=>Some(permit), _=>None },
+            _=>None,
+        },
+        _=>None,
+    }).expect("bound socket permit");
+    assert_eq!(engine.claim_http(0.,permit),Err(Error::Revoked));
+    assert!(engine.http_release(request).is_none());
+    assert!(engine.venue.releases.is_empty());
+    assert_eq!(engine.venue.failures[0].1,Some(crate::Outcome::NotSent));
 }

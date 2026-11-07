@@ -82,15 +82,14 @@ impl<V: Venue, T: Transport> Host<V, T> {
         };
         let mut binding = Some(binding);
         let mut released = false;
-        let result = writer.try_write(request, &mut || {
-            let binding = binding.take()?;
-            self.engine
-                .claim_websocket_write((self.clock)(), binding)
-                .ok()
-                .map(|(_, text)| {
-                    released = true;
-                    text
-                })
+        let result = writer.try_write(request, &mut |handoff| {
+            let Some(binding) = binding.take() else {
+                return;
+            };
+            released = self
+                .engine
+                .claim_websocket_write((self.clock)(), binding, handoff)
+                .is_ok();
         });
         if binding.is_some() {
             self.engine.http_preparation_failed(

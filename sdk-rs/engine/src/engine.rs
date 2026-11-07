@@ -1112,7 +1112,9 @@ mod execution_cx;
 mod execution_cx_tests;
 pub use command_entry::{CommandWait, DEFAULT_COMMAND_WAIT_MS, MAX_COMMAND_WAIT_MS};
 pub use execution_cx::{ExecutionHandle, Joined, Window};
-pub use http_lifecycle::{WebSocketWrite, WebSocketWriteBinding};
+pub use http_lifecycle::{
+    WebSocketCommit, WebSocketHandoff, WebSocketWrite, WebSocketWriteBinding,
+};
 
 /// A delivered response whose bytes the engine cannot hand to a codec. The
 /// venue answered, so this is never transport loss.

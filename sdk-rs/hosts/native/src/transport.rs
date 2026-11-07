@@ -21,14 +21,14 @@ mod http;
 mod websocket;
 pub use http::{BoundHttp, HttpPrepareError, HttpPrepareFuture, PreparedHttp};
 
-/// Check readiness, call `claim` at most once without socket-state locks, then
-/// revalidate and hand off synchronously without an async queue or yield.
-/// Post-claim failures may have sent bytes; async flush failures report HttpFailed.
+/// Run admission unlocked, then revalidate the socket and commit around start_send.
+/// Refused handoffs stay NotSent; accepted frames never enter an async staging queue.
+/// Uncertain send/flush failures report HttpFailed after release commit.
 pub trait WebSocketWriter: Send + Sync {
     fn try_write(
         &self,
         request: safe_cex_engine::RequestId,
-        claim: &mut dyn FnMut() -> Option<String>,
+        claim: &mut dyn FnMut(&mut dyn safe_cex_engine::WebSocketHandoff),
     ) -> Result<(), WebSocketWriteError>;
 
     /// Revoke this connection's typed handoff when its host closes it.

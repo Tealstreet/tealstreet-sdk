@@ -171,11 +171,71 @@ impl NetworkWriter {
     }
 }
 
+struct NetworkHandoff<'a> {
+    writer: &'a NetworkWriter,
+    epoch: u64,
+    result: Option<Result<(), WebSocketWriteError>>,
+}
+impl safe_cex_engine::WebSocketHandoff for NetworkHandoff<'_> {
+    fn send(
+        &mut self,
+        socket: SocketId,
+        text: String,
+        commit: &mut safe_cex_engine::WebSocketCommit<'_>,
+    ) -> bool {
+        if self.result.is_some() {
+            return false;
+        }
+        // IO guards may re-enter too; evaluate them before taking either lock.
+        let allowed = io_allowed(&self.writer.guard);
+        let result = (|| {
+            if !allowed || socket != self.writer.socket {
+                return Err(WebSocketWriteError::NotReady);
+            }
+            let mut slot = self
+                .writer
+                .state
+                .socket
+                .try_lock()
+                .map_err(|_| WebSocketWriteError::NotReady)?;
+            if !slot.ready || slot.retired || slot.epoch != self.epoch {
+                return Err(WebSocketWriteError::NotReady);
+            }
+            let socket = slot.socket.as_mut().ok_or(WebSocketWriteError::NotReady)?;
+            let mut cx = Context::from_waker(std::task::Waker::noop());
+            if !matches!(
+                Pin::new(&mut *socket).poll_ready(&mut cx),
+                Poll::Ready(Ok(()))
+            ) {
+                return Err(WebSocketWriteError::NotReady);
+            }
+            let mut frame = Some(Message::text(text));
+            let mut sent = None;
+            commit(&mut || {
+                let Some(frame) = frame.take() else {
+                    return false;
+                };
+                let result = match Pin::new(&mut *socket).start_send(frame) {
+                    Err(Error::WriteBufferFull(_)) => Err(WebSocketWriteError::NotReady),
+                    result => result.map_err(|error| WebSocketWriteError::Send(error.to_string())),
+                };
+                let accepted = !matches!(result, Err(WebSocketWriteError::NotReady));
+                sent = Some(result);
+                accepted
+            });
+            sent.unwrap_or(Err(WebSocketWriteError::NotReady))
+        })();
+        let accepted = !matches!(result, Err(WebSocketWriteError::NotReady));
+        self.result = Some(result);
+        accepted
+    }
+}
+
 impl WebSocketWriter for NetworkWriter {
     fn try_write(
         &self,
         request: RequestId,
-        claim: &mut dyn FnMut() -> Option<String>,
+        claim: &mut dyn FnMut(&mut dyn safe_cex_engine::WebSocketHandoff),
     ) -> Result<(), WebSocketWriteError> {
         if !io_allowed(&self.guard) {
             return Err(WebSocketWriteError::NotReady);
@@ -200,43 +260,21 @@ impl WebSocketWriter for NetworkWriter {
             }
             slot.epoch
         };
-        // Release hooks may re-enter or retire this socket. Keep only the write
-        // permit across the callback, never the socket-state mutex.
-        let Some(text) = claim() else {
+        // Admission callbacks run unlocked; the handoff revalidates the socket
+        // and commits the reservation only around the actual start_send.
+        let mut handoff = NetworkHandoff {
+            writer: self,
+            epoch,
+            result: None,
+        };
+        claim(&mut handoff);
+        let Some(result) = handoff.result else {
             return Ok(());
         };
-        let allowed = io_allowed(&self.guard);
-        // Revalidate after all callbacks, with no async hop or queued frame.
-        let result = (|| {
-            if !allowed {
-                return Err("account IO authority expired during WebSocket claim".into());
-            }
-            let mut slot = self
-                .state
-                .socket
-                .try_lock()
-                .map_err(|_| "socket writer unavailable after WebSocket claim".to_owned())?;
-            if !slot.ready || slot.retired || slot.epoch != epoch {
-                return Err("socket changed during WebSocket claim; no frame sent".into());
-            }
-            let socket = slot
-                .socket
-                .as_mut()
-                .ok_or_else(|| "socket closed during WebSocket claim".to_owned())?;
-            if !matches!(
-                Pin::new(&mut *socket).poll_ready(&mut cx),
-                Poll::Ready(Ok(()))
-            ) {
-                return Err("socket not ready after WebSocket claim".into());
-            }
-            Pin::new(socket)
-                .start_send(Message::text(text))
-                .map_err(|error| error.to_string())
-        })();
         if let Err(error) = result {
             self.retire();
             let _ = self.events.send(HostEvent::WsClosed(self.socket, 1006));
-            return Err(WebSocketWriteError::Send(error));
+            return Err(error);
         }
         let writer = self.clone();
         tokio::spawn(async move {
@@ -276,14 +314,20 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::{mpsc, oneshot};
 
-    async fn writer_fixture() -> (
+    type Fixture = (
         NetworkWriter,
         Driver,
         Arc<AtomicBool>,
         mpsc::UnboundedReceiver<HostEvent>,
         mpsc::UnboundedReceiver<Message>,
         oneshot::Sender<()>,
-    ) {
+    );
+    async fn writer_fixture() -> Fixture {
+        writer_fixture_with_config(None).await
+    }
+    async fn writer_fixture_with_config(
+        config: Option<tokio_tungstenite::tungstenite::protocol::WebSocketConfig>,
+    ) -> Fixture {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let (messages, received) = mpsc::unbounded_channel();
@@ -304,9 +348,10 @@ mod tests {
                 }
             }
         });
-        let (socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
-            .await
-            .unwrap();
+        let (socket, _) =
+            tokio_tungstenite::connect_async_with_config(format!("ws://{address}"), config, false)
+                .await
+                .unwrap();
         let (events, replies) = mpsc::unbounded_channel();
         let allowed = Arc::new(AtomicBool::new(true));
         let gate = allowed.clone();
@@ -320,10 +365,22 @@ mod tests {
         (writer, driver, allowed, replies, received, close)
     }
 
+    fn try_frame(
+        writer: &NetworkWriter,
+        request: RequestId,
+        claim: &mut dyn FnMut() -> Option<String>,
+    ) -> Result<(), WebSocketWriteError> {
+        writer.try_write(request, &mut |handoff| {
+            if let Some(text) = claim() {
+                handoff.send(writer.socket, text, &mut |send| send());
+            }
+        })
+    }
+
     fn refuses_without_claim(writer: &NetworkWriter) {
         let mut claims = 0;
         assert!(matches!(
-            writer.try_write(RequestId(1), &mut || {
+            try_frame(writer, RequestId(1), &mut || {
                 claims += 1;
                 Some("must-not-send".into())
             }),
@@ -333,22 +390,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn physical_writer_buffer_refusal_does_not_commit() {
+        let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+            .write_buffer_size(0)
+            .max_write_buffer_size(1);
+        let (writer, _driver, _allowed, _events, mut received, _close) =
+            writer_fixture_with_config(Some(config)).await;
+        writer.enable_writes();
+        let mut commits = 0;
+        let result = writer.try_write(RequestId(8), &mut |handoff| {
+            handoff.send(writer.socket, "must-not-send".into(), &mut |send| {
+                if !send() {
+                    return false;
+                }
+                commits += 1;
+                true
+            });
+        });
+        assert!(matches!(result, Err(WebSocketWriteError::NotReady)));
+        assert_eq!(commits, 0);
+        assert!(!matches!(
+            tokio::time::timeout(Duration::from_millis(20), received.recv()).await,
+            Ok(Some(Message::Text(_)))
+        ));
+    }
+
+    #[tokio::test]
     async fn physical_writer_claim_can_reenter_socket_without_deadlocking() {
         let (writer, _driver, _allowed, _events, mut received, _close) = writer_fixture().await;
         writer.enable_writes();
         let mut claims = 0;
-        writer
-            .try_write(RequestId(3), &mut || {
-                assert!(
-                    writer.state.socket.try_lock().is_ok(),
-                    "release callback would deadlock re-entering the socket"
-                );
-                writer.enable_writes();
-                refuses_without_claim(&writer);
-                claims += 1;
-                Some("reentrant".into())
-            })
-            .unwrap();
+        try_frame(&writer, RequestId(3), &mut || {
+            assert!(
+                writer.state.socket.try_lock().is_ok(),
+                "release callback would deadlock re-entering the socket"
+            );
+            writer.enable_writes();
+            refuses_without_claim(&writer);
+            claims += 1;
+            Some("reentrant".into())
+        })
+        .unwrap();
         assert_eq!(claims, 1);
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(2), received.recv())
@@ -364,7 +446,7 @@ mod tests {
         let (writer, driver, _allowed, _events, mut received, _close) = writer_fixture().await;
         writer.enable_writes();
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = writer.try_write(RequestId(4), &mut || panic!("venue release panic"));
+            let _ = try_frame(&writer, RequestId(4), &mut || panic!("venue release panic"));
         }));
         assert!(panic.is_err());
         writer.retire();
@@ -393,7 +475,7 @@ mod tests {
             let mut driver = Some(driver);
             writer.enable_writes();
             let mut claims = 0;
-            let result = writer.try_write(RequestId(5), &mut || {
+            let result = try_frame(&writer, RequestId(5), &mut || {
                 assert!(
                     writer.state.socket.try_lock().is_ok(),
                     "{change}: callback lock"
@@ -416,7 +498,7 @@ mod tests {
                 assert!(result.is_ok());
             } else {
                 assert!(
-                    matches!(result, Err(WebSocketWriteError::Send(_))),
+                    matches!(result, Err(WebSocketWriteError::NotReady)),
                     "{change}: {result:?}"
                 );
             }
@@ -450,9 +532,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        writer
-            .try_write(RequestId(6), &mut || Some("guarded".into()))
-            .unwrap();
+        try_frame(&writer, RequestId(6), &mut || Some("guarded".into())).unwrap();
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(2), received.recv())
                 .await
@@ -498,9 +578,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        writer
-            .try_write(RequestId(2), &mut || Some("control".into()))
-            .unwrap();
+        try_frame(&writer, RequestId(2), &mut || Some("control".into())).unwrap();
         let frame = tokio::time::timeout(Duration::from_secs(2), received.recv())
             .await
             .unwrap()
@@ -519,12 +597,11 @@ mod tests {
         let (writer, _driver, allowed, mut events, _received, _close) = writer_fixture().await;
         writer.enable_writes();
         let mut claims = 0;
-        writer
-            .try_write(RequestId(7), &mut || {
-                claims += 1;
-                Some("setting".into())
-            })
-            .unwrap();
+        try_frame(&writer, RequestId(7), &mut || {
+            claims += 1;
+            Some("setting".into())
+        })
+        .unwrap();
         assert_eq!(claims, 1);
         // The physical writer accepted the frame, but authority is lost before
         // its async flush. Completion must report an uncertain send.

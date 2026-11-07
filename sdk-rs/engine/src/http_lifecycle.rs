@@ -10,7 +10,9 @@ use crate::request_context::{
 
 #[path = "websocket_write.rs"]
 mod websocket_write;
-pub use websocket_write::{WebSocketWrite, WebSocketWriteBinding};
+pub use websocket_write::{
+    WebSocketCommit, WebSocketHandoff, WebSocketWrite, WebSocketWriteBinding,
+};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "http_read_budget_tests.rs"]
@@ -132,6 +134,12 @@ fn sign_role(
 enum ClaimAdmission<'a> {
     Mutable(&'a mut dyn FnMut(&HttpRelease) -> Result<crate::request_context::Admission, Error>),
     NonceUnscheduled(&'a mut dyn FnMut(&HttpRelease) -> Result<(), Error>),
+}
+
+#[cfg(feature = "dispatch-nonce")]
+struct ClaimObservation<'a> {
+    signing_release: &'a mut Option<crate::SigningRelease>,
+    nonce_stale: &'a mut bool,
 }
 
 pub(super) struct Managed {
@@ -396,9 +404,13 @@ impl Managed {
         time: ReleaseTime,
         pacing: &mut crate::request_context::SendPacing,
         mut admission: ClaimAdmission<'_>,
-        signing_release: &mut Option<crate::SigningRelease>,
-        nonce_stale: &mut bool,
+        observation: ClaimObservation<'_>,
+        handoff: &mut crate::request_context::ClaimHandoff<'_>,
     ) -> Result<Claim, Error> {
+        let ClaimObservation {
+            signing_release,
+            nonce_stale,
+        } = observation;
         let nonce = self
             .recipe
             .as_ref()
@@ -431,17 +443,33 @@ impl Managed {
                             Err(reason) => Err(reason),
                             Ok((observation, ready, release)) => {
                                 *signing_release = Some(observation);
-                                let committed = nonce.commit_release(|| {
-                                    self.lifecycle.commit_claim(ready, pacing);
+                                let mut ready = Some(ready);
+                                let mut result = Err(Error::Revoked);
+                                handoff(&mut |send| {
+                                    let Some(ready) = ready.take() else {
+                                        return false;
+                                    };
+                                    let mut refused = false;
+                                    let committed = nonce.commit_release(|| {
+                                        if !send() {
+                                            refused = true;
+                                            return false;
+                                        }
+                                        self.lifecycle.commit_claim(ready, pacing);
+                                        true
+                                    });
+                                    result = match committed {
+                                        Ok(true) => Ok(Claim::Released(release)),
+                                        Ok(false) if refused => Err(Error::Revoked),
+                                        Ok(false) => {
+                                            *nonce_stale = true;
+                                            Err(Error::Stale)
+                                        }
+                                        Err(_) => Err(Error::State),
+                                    };
+                                    result.is_ok()
                                 });
-                                match committed {
-                                    Ok(true) => Ok(Claim::Released(release)),
-                                    Ok(false) => {
-                                        *nonce_stale = true;
-                                        Err(Error::Stale)
-                                    }
-                                    Err(_) => Err(Error::State),
-                                }
+                                result
                             }
                         }
                     }
@@ -449,17 +477,23 @@ impl Managed {
                 }
             }
             (true, None) | (false, Some(_)) => Err(Error::State),
-            (false, None) => self.lifecycle.claim(permit, time, pacing, &mut |release| {
-                *signing_release =
-                    Some(crate::SigningRelease::new(release.signature, release.time)?);
-                match &mut admission {
-                    ClaimAdmission::Mutable(admit) => admit(release),
-                    ClaimAdmission::NonceUnscheduled(admit) => {
-                        admit(release)?;
-                        Ok(crate::request_context::Admission::Unscheduled)
+            (false, None) => self.lifecycle.claim_with_handoff(
+                permit,
+                time,
+                pacing,
+                &mut |release| {
+                    *signing_release =
+                        Some(crate::SigningRelease::new(release.signature, release.time)?);
+                    match &mut admission {
+                        ClaimAdmission::Mutable(admit) => admit(release),
+                        ClaimAdmission::NonceUnscheduled(admit) => {
+                            admit(release)?;
+                            Ok(crate::request_context::Admission::Unscheduled)
+                        }
                     }
-                }
-            }),
+                },
+                handoff,
+            ),
         }
     }
 }
@@ -2168,6 +2202,34 @@ impl<V: Venue> Engine<V> {
     /// its transport API on Released, with no intervening await or actor hop.
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
+        if let Some(managed) = self
+            .io
+            .core
+            .managed_http
+            .get(&permit.attempt().request)
+            .filter(|managed| managed.websocket.is_some())
+        {
+            if !managed.lifecycle.is_current_permit(permit) {
+                return Err(Error::Revoked);
+            }
+            let preparation = managed.lifecycle.preparation();
+            self.http_preparation_failed(
+                now,
+                preparation,
+                Error::Revoked,
+                VenueError::new("WebSocket writes require a physical socket handoff"),
+            );
+            return Err(Error::Revoked);
+        }
+        self.claim_http_with_handoff(now, permit, &mut |commit| commit(&mut || true))
+    }
+
+    fn claim_http_with_handoff(
+        &mut self,
+        now: f64,
+        permit: Permit,
+        handoff: &mut crate::request_context::ClaimHandoff<'_>,
+    ) -> Result<Claim, Error> {
         #[cfg(feature = "http-mutation-barriers")]
         if self
             .io
@@ -2312,8 +2374,11 @@ impl<V: Venue> Engine<V> {
                         check_release(&self.venue, &pending.value, release)?;
                         admit(&mut self.venue, &mut pending.value, release)
                     }),
-                    &mut signing_release,
-                    &mut nonce_stale,
+                    ClaimObservation {
+                        signing_release: &mut signing_release,
+                        nonce_stale: &mut nonce_stale,
+                    },
+                    handoff,
                 ),
                 super::HttpRelease::NonceUnscheduled(admit) => managed.claim(
                     permit,
@@ -2323,15 +2388,18 @@ impl<V: Venue> Engine<V> {
                         check_release(&self.venue, &pending.value, release)?;
                         admit(&self.venue, &pending.value, release)
                     }),
-                    &mut signing_release,
-                    &mut nonce_stale,
+                    ClaimObservation {
+                        signing_release: &mut signing_release,
+                        nonce_stale: &mut nonce_stale,
+                    },
+                    handoff,
                 ),
             }
         } else if managed.has_nonce_state() {
             nonce_capability_failure = true;
             Err(Error::State)
         } else {
-            managed.lifecycle.claim(
+            managed.lifecycle.claim_with_handoff(
                 permit,
                 time,
                 &mut self.io.core.http_pacing,
@@ -2350,11 +2418,12 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 },
+                handoff,
             )
         };
         #[cfg(not(feature = "dispatch-nonce"))]
         let result = {
-            managed.lifecycle.claim(
+            managed.lifecycle.claim_with_handoff(
                 permit,
                 time,
                 &mut self.io.core.http_pacing,
@@ -2373,6 +2442,7 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 },
+                handoff,
             )
         };
         if let Ok(Claim::Released(release)) = result {

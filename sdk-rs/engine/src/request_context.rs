@@ -899,6 +899,10 @@ pub enum Claim {
     WaitUntil(f64),
 }
 
+/// Commit a reserved write only if its synchronous physical handoff accepts it.
+pub type WebSocketCommit<'a> = dyn FnMut(&mut dyn FnMut() -> bool) -> bool + 'a;
+pub(crate) type ClaimHandoff<'a> = dyn FnMut(&mut WebSocketCommit<'_>) -> bool + 'a;
+
 #[path = "request_context_group_protocol.rs"]
 mod group_protocol;
 pub use group_protocol::{GroupClaim, GroupPacket, GroupPermit, GroupRelease};
@@ -1080,6 +1084,19 @@ impl Lifecycle {
         pacing: &mut SendPacing,
         admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
     ) -> Result<Claim, Error> {
+        self.claim_with_handoff(permit, time, pacing, admit, &mut |commit| {
+            commit(&mut || true)
+        })
+    }
+
+    pub(crate) fn claim_with_handoff(
+        &mut self,
+        permit: Permit,
+        time: ReleaseTime,
+        pacing: &mut SendPacing,
+        admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
+        handoff: &mut ClaimHandoff<'_>,
+    ) -> Result<Claim, Error> {
         let draft = match self.prepare_claim(permit, time, pacing)? {
             group_lifecycle::ClaimPreparation::WaitUntil(at) => return Ok(Claim::WaitUntil(at)),
             group_lifecycle::ClaimPreparation::Ready(draft) => draft,
@@ -1091,7 +1108,25 @@ impl Lifecycle {
                 return Err(error);
             }
         };
-        Ok(Claim::Released(self.commit_claim(ready, pacing)))
+        let mut ready = Some(ready);
+        let mut released = None;
+        handoff(&mut |send| {
+            let Some(ready) = ready.take() else {
+                return false;
+            };
+            if !send() {
+                return false;
+            }
+            released = Some(self.commit_claim(ready, pacing));
+            true
+        });
+        match released {
+            Some(release) => Ok(Claim::Released(release)),
+            None => {
+                self.state = State::Settled(None);
+                Err(Error::Revoked)
+            }
+        }
     }
 
     /// Reprepare after stale route/signature metadata; the old permit becomes
