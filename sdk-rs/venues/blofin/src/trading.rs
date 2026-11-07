@@ -2882,9 +2882,18 @@ impl Blofin {
                         Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
                         _ => (&*reply.code, &*reply.msg),
                     };
+                    let native = native(code, message);
                     let error =
-                        setting_failure(request.step.path, response.status, Some((code, message)));
-                    record_failed(cx, context, Some(native(code, message)), &error.message);
+                        if matches!(CODES.verdict(&native, Intent::Setting), Verdict::Unknown(_)) {
+                            unknown(UNKNOWN_WRITE)
+                        } else {
+                            setting_failure(
+                                request.step.path,
+                                response.status,
+                                Some((code, message)),
+                            )
+                        };
+                    record_failed(cx, context, Some(native), &error.message);
                     return Err(error);
                 }
                 let accepted = WriteFact::Accepted { order_ids: vec![] };

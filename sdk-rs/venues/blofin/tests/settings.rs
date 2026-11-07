@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Command, Event, HttpRequest, Method};
+use safe_cex_engine::{Command, Event, HttpRequest, Method, Outcome};
 use support::*;
 
 fn settings() -> [(Command, &'static str, &'static str); 3] {
@@ -41,6 +41,74 @@ fn issue(h: &mut Harness, command: Command, path: &str) -> HttpRequest {
     h.take(path)
 }
 
+fn assert_unknown_setting(command: Command, path: &str, response: &str) {
+    let mut h = Harness::new();
+    h.seed();
+    let before = h.e.store().setting("BTCUSDT").unwrap().clone();
+    let request = issue(&mut h, command, path);
+    assert_eq!(request.method, Method::Post);
+    h.respond(request, response);
+    let [error] = h.failures.as_slice() else {
+        panic!("{path}: expected one terminal failure: {:?}", h.failures);
+    };
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{path}: {error:?}");
+    let text = error.legacy_text();
+    assert!(text.contains("unknown"), "{path}: {text}");
+    assert!(text.contains("Check Open Orders"), "{path}: {text}");
+    assert!(!text.contains("rejected"), "{path}: {text}");
+    let after = h.e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(after.leverage, before.leverage);
+    assert_eq!(after.buy_leverage, before.buy_leverage);
+    assert_eq!(after.sell_leverage, before.sell_leverage);
+    assert_eq!(after.margin_type, before.margin_type);
+    assert!(!h.e.store().hedged());
+    assert!(!h.pending.iter().any(|r| r.method == Method::Post));
+}
+
+#[test]
+fn blank_code_leverage_response_requires_uncertainty_guidance() {
+    let (command, _, path) = settings().into_iter().next().unwrap();
+    assert_unknown_setting(
+        command,
+        path,
+        r#"{"code":"","msg":"internal failure","data":[]}"#,
+    );
+}
+
+#[test]
+fn blank_code_margin_mode_response_requires_uncertainty_guidance() {
+    let (command, _, path) = settings().into_iter().nth(1).unwrap();
+    assert_unknown_setting(
+        command,
+        path,
+        r#"{"code":"","msg":"internal failure","data":[]}"#,
+    );
+}
+
+#[test]
+fn blank_code_position_mode_response_requires_uncertainty_guidance() {
+    let (command, _, path) = settings().into_iter().nth(2).unwrap();
+    assert_unknown_setting(
+        command,
+        path,
+        r#"{"code":"","msg":"internal failure","data":[]}"#,
+    );
+}
+
+#[test]
+fn missing_and_unproven_native_setting_codes_keep_uncertainty_guidance() {
+    for response in [
+        r#"{"msg":"internal failure","data":[]}"#,
+        r#"{"code":"103013","msg":"internal failure","data":[]}"#,
+        r#"{"code":"999999","msg":"internal failure","data":[]}"#,
+        r#"{"code":"0","data":[{"code":"103013","msg":"internal failure"}]}"#,
+    ] {
+        for (command, _, path) in settings() {
+            assert_unknown_setting(command, path, response);
+        }
+    }
+}
+
 #[test]
 fn native_setting_refusals_name_the_setting_and_retain_the_actual_code_and_message() {
     for nested in [false, true] {
@@ -64,6 +132,8 @@ fn native_setting_refusals_name_the_setting_and_retain_the_actual_code_and_messa
             };
             assert_eq!(error.venue_code.as_deref(), Some(code), "{error:?}");
             assert_eq!(error.venue_message.as_deref(), Some(message), "{error:?}");
+            assert_eq!(error.outcome, Some(Outcome::Rejected), "{error:?}");
+            assert!(!error.legacy_text().contains("unknown"), "{error:?}");
             assert!(
                 error
                     .message

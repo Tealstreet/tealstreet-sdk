@@ -32,3 +32,9 @@ same uncertainty guidance while retaining their native diagnostic evidence.
 Only documented native refusal codes can authorize put-back; no synthetic text
 marker is accepted from the wire. Blank, missing, and malformed write replies
 remain unknown and direct the caller to Check Open Orders.
+
+Leverage, margin-mode and position-mode writes use the same uncertainty guidance
+when a native setting response proves neither success nor refusal, including a
+blank code in HTTP 200. They retain native diagnostics, leave local settings
+unchanged and never resend the POST. Documented setting refusals still name the
+setting and its actual code/message.
