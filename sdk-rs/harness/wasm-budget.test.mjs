@@ -998,3 +998,14 @@ test('#3221 run 42393607294 artifact 13582294491 retains measured Woo headroom',
   assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
   assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
 });
+
+test('#3277 TxFlow public decode (run 42407352871, job 128508214838) retains CI headroom', () => {
+  const measured = 1_896_742;
+  const minimumCap = 1_907_712;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const current = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(current >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(current, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(current + 1, 'venue', 'txflow'), /exceeds/);
+});
