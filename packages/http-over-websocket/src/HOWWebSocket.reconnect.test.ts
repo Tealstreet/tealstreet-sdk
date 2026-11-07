@@ -541,7 +541,7 @@ describe('HOWWebSocket reconnect recovery (real socket stack, fake tunnel)', () 
     });
     expect(['connecting', 'retry-scheduled']).toContain(neverOpened.error().readiness.socketPhase);
     expect(String(neverOpened.error().message)).toMatch(
-      /^HTTP tunnel was not ready within 30 s: \S+ \(waiting for the socket to open; socket (connecting|retry-scheduled) for \d+ s, lane 443\)$/,
+      /^HTTP tunnel was not ready within 30 s \(class=discovery budget=90000ms elapsed=30000ms\): \S+ \(waiting for the socket to open; socket (connecting|retry-scheduled) for \d+ s, lane 443\)$/,
     );
 
     // The pending dial finally opens, to a tunnel that never answers rpc.auth.

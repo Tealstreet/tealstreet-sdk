@@ -32,6 +32,7 @@ impl ContextRegistry {
         let previous = self.commands.insert(
             command,
             CommandOwner {
+                request_class: crate::request_budget::RequestClass::OrderWrite,
                 generation,
                 phase: CommandPhase::LocalSetting,
                 last_deadline: now,

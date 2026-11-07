@@ -33,6 +33,13 @@ fn cancel_unknown(h: &mut Harness) {
         200,
         r#"{"code":"00000","data":{"successList":[],"failureList":[]}}"#,
     );
+    // The in-job confirming read fails, so the census below owns the answer.
+    let confirm = h.take("orderId=target");
+    assert!(
+        confirm.url.contains("/orders-plan-pending?")
+            && confirm.url.contains("planType=profit_loss")
+    );
+    h.reply(confirm.id, 503, "unavailable");
     assert_eq!(h.failures.last().unwrap().outcome, Some(Outcome::Unknown));
     assert_eq!(
         h.engine.store().order("target").unwrap().status,

@@ -7,6 +7,12 @@ bridges store snapshots back via `postMessage`. Entry point:
 instance plus its `DefaultStore`, and pushes throttled store
 snapshots to the main thread on every `store.notify()`.
 
+## Worker lifecycle logs
+
+`ExchangeWorker.log` sends the emitter argument array `[JSON text, severity]`,
+serializing its level, message and context. A standalone object is coerced to
+`[object Object]` by existing main-thread log consumers; `warn` maps to `warning`.
+
 ## History result completeness
 
 Successful `callMethod:done` replies include optional `data.completeness:

@@ -1,4 +1,6 @@
+import { warnAboutClockSkew } from './clock-skew-warning';
 import chalk from 'chalk';
+import { terminalText } from './console-glyphs';
 import type { CLIPlatformAdapter, ExchangeLike, ExchangeAccountConfig } from '@tealstreet/cli-core';
 import {
   getAccount as getAccountFromConfig,
@@ -94,7 +96,9 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
       captureBuffer.push(text);
     } else {
       // Under --json, stdout holds only the result document.
-      writeAbovePrompt(() => (isStdoutReservedForJson() ? originalConsoleError : originalConsoleLog)(text));
+      writeAbovePrompt(() =>
+        (isStdoutReservedForJson() ? originalConsoleError : originalConsoleLog)(terminalText(text)),
+      );
     }
   };
 
@@ -102,7 +106,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     if (captureBuffer !== null) {
       captureBuffer.push(text);
     } else {
-      writeAbovePrompt(() => originalConsoleError(text));
+      writeAbovePrompt(() => originalConsoleError(terminalText(text)));
     }
   };
 
@@ -110,7 +114,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     if (captureBuffer !== null) {
       captureBuffer.push(text);
     } else {
-      writeAbovePrompt(() => originalConsoleWarn(text));
+      writeAbovePrompt(() => originalConsoleWarn(terminalText(text)));
     }
   };
 
@@ -240,6 +244,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
       // including tealstreetProxy, tealstreetTunnel, proxyRegion, etc.
       const createExchangeFromAccount = await getCreateExchangeFromAccount();
       const exchange = await createExchangeFromAccount(account);
+      exchange.on('clock-advice', warnAboutClockSkew);
       return exchange as ExchangeLike;
     },
 

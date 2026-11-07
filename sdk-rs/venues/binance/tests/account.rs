@@ -1280,9 +1280,16 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         (
             400,
             r#"{"code":-5022,"msg":"Due to the order could not be executed as maker, the Post Only order will be rejected."}"#,
-            Some(ErrorKind::InvalidInput),
+            Some(ErrorKind::Rejected),
             Outcome::Rejected,
             Some("-5022"),
+        ),
+        (
+            400,
+            r#"{"code":-5021,"msg":"Due to the order could not be filled immediately, the FOK order has been rejected."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Rejected,
+            Some("-5021"),
         ),
         (
             400,
@@ -1828,7 +1835,9 @@ fn a_hung_listen_key_create_is_bounded_and_backs_off() {
     h.advance(1.0);
     assert_eq!(
         h.errors,
-        ["Binance user data stream unavailable: network error: HTTP request timed out"]
+        [
+            "Binance user data stream unavailable: network error: HTTP request timed out (class=orderWrite budget=20000ms elapsed=20000ms)"
+        ]
     );
     h.take("/fapi/v1/listenKey");
     h.advance(5_000.0);

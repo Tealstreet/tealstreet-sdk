@@ -107,6 +107,38 @@ fn classic_null_lists_commit_and_the_stop_shows() {
     assert!(h.engine.store().order("1500798416221888512").is_some());
 }
 
+#[test]
+fn classic_market_stop_with_blank_execution_can_be_modified_as_market() {
+    let mut h = Harness::private_started();
+    h.respond("/account/settings", 200, NOT_UTA);
+    h.respond("/all-position", 200, POSITION);
+    h.respond("/account/accounts", 200, ACCOUNT);
+    h.respond("/orders-pending", 200, NULL_ENTRUSTED);
+    h.respond(
+        "planType=profit_loss",
+        200,
+        &format!(r#"{{"code":"00000","data":{{"entrustedList":[{CLASSIC_STOP}],"endId":""}}}}"#),
+    );
+    h.respond("planType=track_plan", 200, NULL_ENTRUSTED);
+    h.engine.store_mut().update_ticker("BTCUSDT", |t| {
+        t.last = 1.2;
+        t.mark = 1.2;
+    });
+    h.command(Command::AmendOrder {
+        command: 71,
+        id: "1500798416221888512".into(),
+        price: Some(1.1),
+        amount: None,
+    });
+    assert!(h.failures.is_empty(), "{:?}", h.failures);
+    let request = h.take("/modify-tpsl-order");
+    let payload = body(&request);
+    assert_eq!(payload["executePrice"], "0");
+    assert_eq!(payload["triggerPrice"], "1.1");
+    assert_eq!(payload["triggerType"], "mark_price");
+    assert!(!h.requests.iter().any(|r| r.url.contains("cancel")));
+}
+
 // (2) and (5): the row is read, and its amend closes the long instead of opening a short.
 #[test]
 fn uta_hedge_close_with_nulls_is_kept_and_its_amend_stays_a_close() {
@@ -278,6 +310,16 @@ fn classic_cancel_plan_empty_success_does_not_mark_canceled() {
         "/cancel-plan-order",
         200,
         r#"{"code":"00000","data":{"successList":[],"failureList":[]}}"#,
+    );
+    assert_ne!(
+        h.engine.store().order("77").map(|o| o.status),
+        Some(OrderStatus::Canceled)
+    );
+    // The confirming read still lists it.
+    h.respond(
+        "orderId=77",
+        200,
+        r#"{"code":"00000","data":{"entrustedList":[{"orderId":"77","symbol":"BTCUSDT","planType":"loss_plan","planStatus":"live"}],"endId":"77"}}"#,
     );
     assert_ne!(
         h.engine.store().order("77").map(|o| o.status),
