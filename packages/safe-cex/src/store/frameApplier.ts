@@ -532,7 +532,7 @@ export class FrameApplier {
                       }),
                 },
               }),
-            liquidationPrice: finite(positions.liquidationPrice[i]) ?? null,
+            liquidationPrice: positions.liquidationPrice[i] > 0 ? (finite(positions.liquidationPrice[i]) ?? null) : null,
             ...(mode !== undefined && { positionMode: mode }),
             ...(enums.marginType !== undefined && { marginType: enums.marginType as MarginType }),
             ...(finite(positions.realizedPnl[i]) !== undefined && { realizedPnl: positions.realizedPnl[i] }),

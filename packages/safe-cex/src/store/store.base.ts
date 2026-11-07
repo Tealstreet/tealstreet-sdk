@@ -872,7 +872,7 @@ export class DefaultStore implements Store {
       notional: 0,
       unrealizedPnl: 0,
       contracts: 0,
-      liquidationPrice: 0,
+      liquidationPrice: null,
       marginSize: 0,
       info: undefined,
       extra: undefined,

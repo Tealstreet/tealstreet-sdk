@@ -88,12 +88,12 @@ it('keeps liquidation unknown while normalizing other display fields and preserv
   expect(order).not.toHaveProperty('stopLoss');
 });
 
-it('keeps finite values, including a reported zero', () => {
+it('keeps positive liquidation prices and other finite values', () => {
   const store = new DefaultStore();
-  new FrameApplier(store).apply(frame({ leverage: 12.5, liquidationPrice: 0, unrealizedPnl: -3.25 }));
+  new FrameApplier(store).apply(frame({ leverage: 12.5, liquidationPrice: 67.8, unrealizedPnl: -3.25 }));
   expect(store.positions[0]).toMatchObject({
     leverage: 12.5,
-    liquidationPrice: 0,
+    liquidationPrice: 67.8,
     unrealizedPnl: -3.25,
     contracts: 0.025,
   });
@@ -131,21 +131,27 @@ it('keeps finite settings leverage, with a finite side overriding a non-finite t
   expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 10, sellLeverage: 10 });
 });
 
-it.each([NaN, Infinity, -Infinity])('exposes an unknown native liquidation price as null (%s)', (liquidationPrice) => {
-  const store = new DefaultStore();
-  const applier = new FrameApplier(store);
-  applier.apply(frame({ leverage: 5, liquidationPrice: 67.8, unrealizedPnl: 0 }));
-  expect(store.positions[0].liquidationPrice).toBe(67.8);
-  applier.apply(frame({ leverage: 5, liquidationPrice, unrealizedPnl: 0 }));
-  expect(store.positions[0].liquidationPrice).toBeNull();
-  expect(JSON.parse(JSON.stringify(store.positions[0])).liquidationPrice).toBeNull();
-});
+it.each([NaN, Infinity, -Infinity, 0, -0, -1])(
+  'exposes an unusable native liquidation price as null (%s)',
+  (liquidationPrice) => {
+    const store = new DefaultStore();
+    const applier = new FrameApplier(store);
+    applier.apply(frame({ leverage: 5, liquidationPrice: 67.8, unrealizedPnl: 0 }));
+    expect(store.positions[0].liquidationPrice).toBe(67.8);
+    applier.apply(frame({ leverage: 5, liquidationPrice, unrealizedPnl: 0 }));
+    expect(store.positions[0].liquidationPrice).toBeNull();
+    expect(JSON.parse(JSON.stringify(store.positions[0])).liquidationPrice).toBeNull();
+  },
+);
 
-it('preserves unknown liquidation through the packed frame decoder and store serialization', () => {
-  const packed = inverseUnitsFrame({ positions: true, inverse: false, positionLiquidationPrice: NaN });
-  expect(packed.positions()!.liquidationPrice[0]).toBeNaN();
-  const store = new DefaultStore();
-  new FrameApplier(store).apply(packed);
-  expect(store.positions[0].liquidationPrice).toBeNull();
-  expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
-});
+it.each([NaN, Infinity, -Infinity, 0, -0, -1])(
+  'preserves unknown liquidation through packed frames and serialization (%s)',
+  (liquidationPrice) => {
+    const packed = inverseUnitsFrame({ positions: true, inverse: false, positionLiquidationPrice: liquidationPrice });
+    expect(packed.positions()!.liquidationPrice[0]).toBe(liquidationPrice);
+    const store = new DefaultStore();
+    new FrameApplier(store).apply(packed);
+    expect(store.positions[0].liquidationPrice).toBeNull();
+    expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
+  },
+);

@@ -279,6 +279,25 @@ impl Stamp<'_> {
         }
     }
 }
+// Unusable liquidation metadata must not discard an otherwise valid position update.
+fn optional_liquidation_price<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum LiquidationPrice {
+        Number(
+            #[serde(deserialize_with = "safe_cex_engine::de::lenient_optional_number")] Option<f64>,
+        ),
+        Unusable(serde::de::IgnoredAny),
+    }
+
+    Ok(match LiquidationPrice::deserialize(deserializer)? {
+        LiquidationPrice::Number(value) => value,
+        LiquidationPrice::Unusable(_) => None,
+    })
+}
+
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PositionWire<'a> {
@@ -299,7 +318,7 @@ struct PositionWire<'a> {
     #[serde(
         default,
         alias = "liquidation_threshold",
-        deserialize_with = "safe_cex_engine::de::lenient_optional_number"
+        deserialize_with = "optional_liquidation_price"
     )]
     liquidation_price: Option<f64>,
     #[serde(default, deserialize_with = "wire::optional_number")]

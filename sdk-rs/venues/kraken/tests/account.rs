@@ -1761,6 +1761,12 @@ fn websocket_unknown_liquidation_does_not_discard_or_zero_the_position() {
             r#","liquidation_threshold":-0.0"#,
             r#","liquidation_threshold":-1"#,
             r#","liquidation_threshold":"-1""#,
+            r#","liquidation_threshold":true"#,
+            r#","liquidation_threshold":false"#,
+            r#","liquidation_threshold":{}"#,
+            r#","liquidation_threshold":[]"#,
+            r#","liquidation_threshold":{"unusable":[true,{"nested":"value"}]}"#,
+            r#","liquidation_threshold":[{"nested":[1,2,3]},false]"#,
         ] {
             let (mut e, socket) = ready();
             message(&mut e, socket, NOW, POSITION);
