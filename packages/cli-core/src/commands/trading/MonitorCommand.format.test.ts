@@ -62,6 +62,38 @@ const market = (amount: number, contractSize: number, base: string) =>
 const doge = market(0.01, 1000, 'DOGE');
 
 describe('size column', () => {
+  it.each([false, true])('retains DefaultStore market precision in ps (all=%s)', async (all) => {
+    const m = market(0.000001, 1, 'BTC');
+    const position = {
+      symbol: m.symbol, side: PositionSide.Long, contracts: 0.000006, entryPrice: 100000,
+      notional: 0.6, unrealizedPnl: 0, leverage: 1,
+    } as Position;
+    const store = new DefaultStore();
+    store.update({ markets: [m], positions: [position] });
+    const exchange = { store } as ExchangeLike;
+    const print = vi.fn();
+    const adapter = { print } as unknown as CLIPlatformAdapter;
+    expect(cells(formatPositionsTable(exchange))).toContain('0.000006');
+
+    await new PositionsCommand().execute({ raw: 'ps', args: { _: ['ps'], all }, symbol: m.symbol, exchange, adapter });
+
+    expect(cells(print.mock.calls.flat(2).join('\n'))).toContain('0.000006');
+  });
+
+  it('keeps tiny inverse base sizes visible in order and position tables', () => {
+    const m = { ...market(1, 1, 'BTC'), isInverse: true };
+    const position = { symbol: m.symbol, side: PositionSide.Long, contracts: 0.00001, entryPrice: 100000, notional: 1 };
+    const order = { id: 'inverse', symbol: m.symbol, status: OrderStatus.Open, type: OrderType.Limit, amount: 1, remaining: 0.00001 };
+    const store = new DefaultStore();
+    store.update({ markets: [m], positions: [position as Position], orders: [order as Order] });
+    const exchange = { store } as ExchangeLike;
+
+    expect(cells(formatPositionsTable(exchange))).toContain('0.00001');
+    expect(cells(formatOrdersTable(exchange))).toContain('0.00001');
+    expect(cells(formatMultiAccountPositionsTable([{ accountName: 'acct', exchange }]))).toContain('0.00001');
+    expect(cells(formatMultiAccountOrdersTable([{ accountName: 'acct', exchange }]))).toContain('0.00001');
+  });
+
   // OKX reports `amount` in contracts and `remaining` in base.
   it.each([
     { name: 'DOGE', market: doge, amount: 0.4, remaining: 400, expected: '400' },

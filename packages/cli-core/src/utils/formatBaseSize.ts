@@ -8,6 +8,9 @@ import { formatSizeCompact } from '@tealstreet/utils/src/formatting';
  * inverse lots do not, because their base value changes with price.
  */
 export function formatBaseSize(size: number, market?: Market | null): string {
+  if (market?.isInverse && Math.abs(size) < 1) {
+    return Math.abs(size).toLocaleString('en-US', { useGrouping: false, maximumSignificantDigits: 8 });
+  }
   const baseStep =
     market && !market.isInverse ? multiply(market.precision.amount, market.contractSize ?? 1) : undefined;
   return formatSizeCompact(Math.abs(size), baseStep);
