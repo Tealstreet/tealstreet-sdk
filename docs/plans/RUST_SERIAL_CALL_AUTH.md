@@ -28,7 +28,9 @@ Session auth. Existing unsigned prerequisite Reads keep their declared behavior.
   login Session. Without session-bearer it refuses Invalid before IDs.
 - `begin_preflight_with_session` retains its existing three-argument admission
   downstream. It may now admit a root with a write credential; reads remain
-  credential-free. Complete, owned and barrier Plan routes still refuse it.
+  credential-free. Complete, owned and barrier Plan routes still refuse it. The
+  one exception is `admit_session_plan`: an independent Mutation Plan whose calls
+  each declare their auth (RUST_SESSION_INDEPENDENT_PLANS).
 
 For an Empty credential-free Session, retain the existing explicit private
 egress and refuse any Some write credential. For a credential-bearing login

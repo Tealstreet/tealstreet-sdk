@@ -7,6 +7,7 @@ import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positi
 import { amountPrecisionOf } from '../../utils/marketPrecision';
 import { resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
+import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
 
 /**
  * Base class for trading commands with utility methods for size/price processing
@@ -92,6 +93,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
    *        when no `%bal`/`%pos` suffix is present. Entry commands
    *        (`buy`, non-reduce `chase`) pass `'balance'`; exit commands
    *        (`close`, reduce-only `stop`/`chase`) pass `'position'`.
+   * @param price resolved order price; omitted for market-price sizing.
    */
   protected parseSizeAndConvertIfUsd(
     exchange: ExchangeLike,
@@ -100,6 +102,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
     allowPercentage = false,
     side?: PositionSide,
     defaultPercentScope: 'position' | 'balance' = 'position',
+    price?: number,
   ): number {
     const trimmed = size.trim();
 
@@ -157,16 +160,19 @@ export abstract class TradingBaseCommand extends BaseCommand {
         const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
         return adjust(notional / contractSize, amountPrecisionOf(market));
       }
-      const ticker = exchange.store?.tickers?.find((t) => t.symbol === symbol);
-      if (!ticker?.last) {
+      const conversionPrice =
+        price === undefined
+          ? exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last
+          : prepareCliAmendPrice(exchange, symbol, price);
+      if (!conversionPrice) {
         throw new Error(`Price not available for ${symbol}`);
       }
       // See notionalToSize — linear venues can still carry a ctVal (OKX).
-      return adjust(baseToNativeContracts(market, notional / ticker.last), amountPrecisionOf(market));
+      return adjust(baseToNativeContracts(market, notional / conversionPrice), amountPrecisionOf(market));
     }
 
     if (this.looksLikeSize(trimmed)) {
-      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed));
+      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed), price);
     }
 
     throw new Error(`Invalid size "${size}". Use $1000, 1000$, or NN% (or NN%bal / NN%pos).`);
@@ -197,7 +203,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * populate `contractSize` in their `fetchMarkets` mapping so this
    * formula stays correct without per-exchange branches here.
    */
-  protected notionalToSize(exchange: ExchangeLike, symbol: string, notional: number): number {
+  protected notionalToSize(exchange: ExchangeLike, symbol: string, notional: number, price?: number): number {
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
     const amountPrecision = amountPrecisionOf(market);
 
@@ -206,14 +212,18 @@ export abstract class TradingBaseCommand extends BaseCommand {
       return adjust(notional / contractSize, amountPrecision);
     }
 
-    const lastPrice = exchange.store?.tickers?.find((ticker) => ticker.symbol === symbol)?.last;
-    if (!lastPrice) {
+    // Use the same validated tick-rounded price that order preparation sends.
+    const conversionPrice =
+      price === undefined
+        ? exchange.store?.tickers?.find((ticker) => ticker.symbol === symbol)?.last
+        : prepareCliAmendPrice(exchange, symbol, price);
+    if (!conversionPrice) {
       throw new Error('Price data is not available yet for a symbol');
     }
     // Linear is NOT always 1 contract = 1 base coin — OKX publishes a real ctVal
     // on its linear swaps (1000 DOGE, 0.01 BTC), so the base amount has to be
     // divided by it to get the native contract count.
-    const baseAmount = notional / lastPrice;
+    const baseAmount = notional / conversionPrice;
     return adjust(baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount), amountPrecision);
   }
 
@@ -357,13 +367,13 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * Returns 0 when price is unavailable so the budget gate fails open
    * rather than mis-counting.
    */
-  protected sizeToNotional(exchange: ExchangeLike, symbol: string, amount: number): number {
+  protected sizeToNotional(exchange: ExchangeLike, symbol: string, amount: number, orderPrice?: number): number {
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
     if (market?.isInverse) {
       const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
       return Math.abs(amount) * contractSize;
     }
-    const price = exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
+    const price = orderPrice ?? exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
     if (!price) return 0;
     // The inverse of `baseToNativeContracts`: a linear contract (OKX, BloFin) is `contractSize` base.
     const contractSize = market?.contractSize && market.contractSize > 0 ? market.contractSize : 1;
@@ -380,13 +390,20 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * orders (skip reduce-only). Throws on breach — callers catch and
    * surface as a command error.
    */
-  protected checkBudget(ctx: CommandContext, exchange: ExchangeLike, symbol: string, amount: number): number {
+  protected checkBudget(
+    ctx: CommandContext,
+    exchange: ExchangeLike,
+    symbol: string,
+    amount: number,
+    orderPrice?: number,
+    pendingNotional = 0,
+  ): number {
     const store = ctx.preprocessStore;
     const cap = store?.getBudget();
     if (!store || !cap || cap <= 0) return 0;
-    const notional = this.sizeToNotional(exchange, symbol, amount);
+    const notional = this.sizeToNotional(exchange, symbol, amount, orderPrice);
     if (notional <= 0) return 0; // can't price → don't gate (fail open)
-    const spent = store.getBudgetSpent();
+    const spent = store.getBudgetSpent() + pendingNotional;
     if (spent + notional > cap) {
       throw new Error(
         `budget: $${spent.toFixed(2)} spent + $${notional.toFixed(2)} this order exceeds the $${cap.toFixed(2)} cap. ` +

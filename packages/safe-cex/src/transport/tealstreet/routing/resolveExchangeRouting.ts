@@ -18,6 +18,8 @@ export interface RoutingOptions {
   // lighter's WS proxy is gated by this separate flag, NOT tealstreetProxy.
   tealstreetWsRoute?: boolean;
   testnet?: boolean;
+  applicationId?: string;
+  tealstreetTunnel?: boolean;
 }
 
 // Reproduces getPrivateProxy: grvt's 'tiny' pool always wins; otherwise
@@ -75,11 +77,21 @@ const resolveWsKind = (strategy: WsStrategy, o: RoutingOptions): ResolvedWs => {
 export const resolveExchangeRouting = (exchange: ExchangeName, o: RoutingOptions = {}): ResolvedRouting => {
   const spec = getRoutingTable()[exchange];
   const howEgress = spec.howEgress === 'regionConditional' ? (o.proxyRegion === 'JA' ? 'jp' : 'sg') : spec.howEgress;
+  // WOO checks the bound IP on login, including accounts whose REST uses HOW.
+  const wsOptions = exchange === 'woo' && o.tealstreetTunnel ? { ...o, tealstreetProxy: true } : o;
+  const wsPrivate = resolveWs(spec.ws?.private, wsOptions, howEgress);
+  if (exchange === 'woo' && wsPrivate.host) {
+    const relay = new URL(wsPrivate.host);
+    const upstream = relay.searchParams.get('ts-relay');
+    if (!upstream) throw new Error('WOO private relay upstream is missing');
+    relay.searchParams.set('ts-relay', `${upstream}${o.applicationId ?? 'undefined'}`);
+    wsPrivate.host = relay.toString();
+  }
   return {
     restProxyHost: o.tealstreetProxy ? getPrivateProxyHost(resolveRestPool(spec.restPool, o.proxyRegion)) : '',
     howEgress,
     wsPublic: resolveWs(spec.ws?.public, o, howEgress),
-    wsPrivate: resolveWs(spec.ws?.private, o, howEgress),
+    wsPrivate,
     wsBusiness: resolveWs(spec.ws?.business, o, howEgress),
     ...(spec.ws?.privateUta ? { wsPrivateUta: resolveWs(spec.ws.privateUta, o, howEgress) } : {}),
   };
