@@ -32,7 +32,7 @@ export const cleanCandles = <TCandle extends { timestamp: number }>(candles: TCa
  * separate exchange. Without it, testnet candles and live candles collide in
  * one entry and the chart can render the wrong market's history. This affects
  * every venue offering the testnet checkbox (binance, binancepm, hyperliquid,
- * grvt, bitmex, paradex, asterdex, ...), not just one.
+ * grvt, paradex, asterdex, ...), not just one.
  *
  * Live keys keep their existing shape, so no cached entry is invalidated by
  * introducing this; only testnet accounts get a new namespace.
