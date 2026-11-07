@@ -608,13 +608,6 @@ impl Venue for Cryptocom {
     ) -> Option<Result<(), String>> {
         Some(self.repair(cx, topic))
     }
-    fn status_exempt_refusal(
-        &self,
-        pending: &Pending,
-        response: safe_cex_engine::Response<'_>,
-    ) -> bool {
-        matches!(pending, Pending::Trade(request) if request.refused_by_body(response.body))
-    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(Err(error)) = self.options.secondary_validation {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);

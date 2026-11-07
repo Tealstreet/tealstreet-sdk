@@ -44,7 +44,7 @@ impl Request {
         self.plan.protection.is_some()
     }
     pub(crate) fn failed_outcome(&self, response: &Response<'_>) -> Outcome {
-        if response.status == 429 && self.is_protective() && !self.is_read() {
+        if !self.is_read() && matches!(response.status, 408 | 429 | 500..) {
             Outcome::Unknown
         } else {
             crate::wire::write_outcome(response)
