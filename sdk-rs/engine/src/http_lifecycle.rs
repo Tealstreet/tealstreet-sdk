@@ -8,6 +8,10 @@ use crate::request_context::{
     SessionPlacement,
 };
 
+#[path = "websocket_write.rs"]
+mod websocket_write;
+pub use websocket_write::{WebSocketWrite, WebSocketWriteBinding};
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "http_read_budget_tests.rs"]
 mod read_budget_tests;
@@ -131,6 +135,7 @@ enum ClaimAdmission<'a> {
 }
 
 pub(super) struct Managed {
+    pub(super) websocket: Option<SocketId>,
     lifecycle: Lifecycle,
     original: HttpRequest,
     pub(super) timer: TimerId,
@@ -1153,6 +1158,7 @@ impl crate::engine::CoreCx<'_> {
         self.io.core.managed_http.insert(
             request,
             Managed {
+                websocket: None,
                 lifecycle,
                 original: http.clone(),
                 timer,
@@ -1720,7 +1726,12 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 }
-                let bind = crate::engine::IoCore::http_bind(token, permit, request);
+                let bind = crate::engine::IoCore::http_bind(
+                    token,
+                    permit,
+                    request,
+                    managed.websocket.is_some(),
+                );
                 // Const-folded: an undeclared venue compiles the domain hold out.
                 #[cfg(feature = "release-domains")]
                 let bind = if V::http_release_domain().is_some() {
@@ -3055,16 +3066,31 @@ impl crate::engine::IoCore {
             member.permit = Some(permit);
             return None;
         }
-        Some(Self::http_bind(token, permit, packet))
+        Some(Self::http_bind(
+            token,
+            permit,
+            packet,
+            managed.websocket.is_some(),
+        ))
     }
 
     #[inline(never)]
-    fn http_bind(token: Preparation, permit: Permit, packet: HttpRequest) -> Action {
-        Action::ManagedHttp(Box::new(HttpAction::Bind {
+    fn http_bind(
+        token: Preparation,
+        permit: Permit,
+        packet: HttpRequest,
+        websocket: bool,
+    ) -> Action {
+        let action = Box::new(HttpAction::Bind {
             preparation: token,
             permit,
             request: packet,
-        }))
+        });
+        if websocket {
+            websocket_write::outbound(action)
+        } else {
+            Action::ManagedHttp(action)
+        }
     }
 
     // Return refusals to the generic caller before it delivers any venue hook.
@@ -3139,14 +3165,18 @@ impl crate::engine::IoCore {
         }
         let mut http = managed.original.clone();
         http.timeout_ms = Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
-        self.actions
-            .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
-                #[cfg(target_arch = "wasm32")]
-                request_class: managed.lifecycle.request_class() as u8,
-                preparation: managed.lifecycle.preparation(),
-                intent: managed.intent,
-                request: http,
-            })));
+        let action = Box::new(HttpAction::Prepare {
+            #[cfg(target_arch = "wasm32")]
+            request_class: managed.lifecycle.request_class() as u8,
+            preparation: managed.lifecycle.preparation(),
+            intent: managed.intent,
+            request: http,
+        });
+        self.actions.push(if managed.websocket.is_some() {
+            websocket_write::outbound(action)
+        } else {
+            Action::ManagedHttp(action)
+        });
         Ok(())
     }
 
@@ -3424,6 +3454,39 @@ mod tests {
 
     #[derive(Debug)]
     struct Pending(Context);
+
+    include!("websocket_write_tests.rs");
+
+    #[test]
+    fn read_only_context_cannot_construct_a_websocket_write() {
+        let mut engine = crate::test_support::seeded_engine(Probe::default());
+        engine.start(0.);
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        let socket =
+            cx.connect(SocketSpec::new("wss://venue.test/orders").channel(SocketChannel::Business));
+        cx.io.core.actions.clear();
+        let context = cx
+            .http_context(
+                Scope::Command(71),
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 1_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            cx.websocket_write(context, socket, "order".into()),
+            Err(Error::Invalid)
+        ));
+        assert!(cx.io.core.actions.is_empty());
+    }
     #[derive(Clone, Copy, Debug)]
     enum EffectFact {
         Missing,

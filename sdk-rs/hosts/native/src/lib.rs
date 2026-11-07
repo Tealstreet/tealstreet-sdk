@@ -12,6 +12,8 @@ mod routing;
 mod server;
 mod socket_health;
 mod transport;
+#[cfg(test)]
+mod websocket_write_tests;
 
 pub use routing::resolve;
 pub use routing::{
@@ -186,7 +188,8 @@ impl<V: Venue, T: Transport> Drop for SetupRunOwner<V, T> {
 }
 
 impl<V: Venue, T: Transport> Host<V, T> {
-    pub fn new(engine: Engine<V>, transport: T) -> Self {
+    pub fn new(mut engine: Engine<V>, transport: T) -> Self {
+        engine.enable_websocket_write_host();
         let (events, inbox) = mpsc::unbounded_channel();
         Self {
             engine,
@@ -603,8 +606,10 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 Action::ManagedHttp(action) => {
                     self.turn(|host| host.execute_managed_http(*action));
                 }
-                Action::SignedOutbound { .. } => {
-                    unreachable!("engine drain unwraps signed outbound")
+                action @ Action::SignedOutbound { .. } => {
+                    let binding = safe_cex_engine::WebSocketWriteBinding::from_action(action)
+                        .expect("engine drain unwraps ordinary signing; only typed writes remain");
+                    self.turn(|host| host.execute_websocket_write(binding));
                 }
                 Action::RetireAddressSetup { .. } => {
                     self.terminal = Some(

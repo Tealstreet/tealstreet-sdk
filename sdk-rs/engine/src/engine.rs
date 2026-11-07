@@ -484,7 +484,8 @@ pub enum Action {
     },
     Http(HttpRequest),
     ManagedHttp(Box<crate::request_context::HttpAction>),
-    /// Internal outbound queue wrapper; always unwrapped/validated by drain.
+    /// Shared outbound envelope. Drain unwraps nonzero signing attempts;
+    /// zero carries a `WebSocketWriteBinding` for the host's final write claim.
     SignedOutbound {
         attempt: RequestId,
         outbound: Box<Action>,
@@ -1111,6 +1112,7 @@ mod execution_cx;
 mod execution_cx_tests;
 pub use command_entry::{CommandWait, DEFAULT_COMMAND_WAIT_MS, MAX_COMMAND_WAIT_MS};
 pub use execution_cx::{ExecutionHandle, Joined, Window};
+pub use http_lifecycle::{WebSocketWrite, WebSocketWriteBinding};
 
 /// A delivered response whose bytes the engine cannot hand to a codec. The
 /// venue answered, so this is never transport loss.
@@ -1906,6 +1908,7 @@ impl OrdersRefresh {
 }
 
 struct IoCore {
+    websocket_write_host: bool,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2210,6 +2213,7 @@ impl Default for IoCore {
     #[inline]
     fn default() -> Self {
         Self {
+            websocket_write_host: false,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,
@@ -2792,6 +2796,9 @@ impl<P> Cx<'_, P> {
         self.stage_signed(index, outbound, step);
     }
 
+    /// Control traffic only (subscriptions, authentication and heartbeats).
+    /// Order and setting mutations must use `websocket_write` and
+    /// `send_websocket_write`, including when the wire protocol signs them.
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
         if !self.managed_send_allowed(socket) {
             return;
@@ -2931,6 +2938,7 @@ impl<P> Cx<'_, P> {
     }
 
     /// WS authentication uses the same deadline/freshness/generation service.
+    /// Mutations use `send_websocket_write` with a signing recipe instead.
     pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
         if !self.managed_send_allowed(socket) {
             return;
@@ -7447,7 +7455,20 @@ impl<V: Venue> Engine<V> {
                 if !live {
                     continue;
                 }
+                let Some(action) = self.dispatch_websocket_write_action(now, action) else {
+                    self.queue_dispatch_callback_actions(&mut queued, emitted);
+                    continue;
+                };
+                self.queue_dispatch_callback_actions(&mut queued, emitted);
                 match action {
+                    action @ Action::SignedOutbound {
+                        attempt: RequestId(0),
+                        ..
+                    } => {
+                        // Reserved mutation marker: the host still owes its
+                        // synchronous write claim immediately before sending.
+                        self.io.core.actions.push(action);
+                    }
                     Action::SignedOutbound { attempt, outbound } => {
                         match self.io.core.signing.release(
                             attempt,
