@@ -51,9 +51,6 @@ family_args() {
   if [[ $family == asterdex ]]; then
     # Venue crate at "s": the family's size budget, within its CPU gate.
     build_args+=(--config 'profile.release.package.safe-cex-venue-asterdex.opt-level="s"')
-  elif [[ $family == txflow ]]; then
-    # Keep typed public decoding within the CPU gate without raising the family cap.
-    build_args+=(--config 'profile.release.package.safe-cex-venue-txflow.opt-level="s"')
   elif [[ $family == woo ]]; then
     # Keep WOO ticker decoding throughput within the fixed CPU and size gates.
     build_args+=(--config 'profile.release.package.safe-cex-venue-woo.opt-level=3')
