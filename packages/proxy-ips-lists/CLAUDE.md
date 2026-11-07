@@ -20,7 +20,7 @@ Private proxy IP addresses database organized by region.
   Tokyo K8s NAT gateway used by WS tunnel outbound connections (legacy only;
   master's GRVT socket leaves through the Vultr fleet). Web account
   setup code must include it separately for exchange/region flows whose user
-  API-key allowlist must cover the Tokyo tunnel egress (originally BitMEX JA; BitMEX retired 2026-10).
+  API-key allowlist must cover the Tokyo tunnel egress.
   The display helper resolves a configured default region when the form has
   not selected one yet, so the original region's addresses are not dropped.
 - The former Frankfurt private proxy pool was retired in July 2026. Do not add
