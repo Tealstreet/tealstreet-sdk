@@ -177,6 +177,21 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
         "trailing_stop" => OrderType::TrailingStopLoss,
         _ => return Err("drb unsupported order type".into()),
     };
+    // Starbase executes API market orders as internal limits. Only the two
+    // documented original types restore market intent; trigger order types
+    // keep their conditional identity even when this metadata is present.
+    let original_market = match v.get("original_order_type") {
+        None => false,
+        Some(Value::String(original)) if matches!(original.as_str(), "market" | "market_limit") => {
+            true
+        }
+        _ => return Err("drb unsupported original order type".into()),
+    };
+    let kind = if kind == OrderType::Limit && original_market {
+        OrderType::Market
+    } else {
+        kind
+    };
     let amount = unsigned(&v, "amount")?;
     let filled = unsigned(&v, "filled_amount")?;
     if filled > amount {

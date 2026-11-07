@@ -133,3 +133,15 @@ Offline protocol fixtures follow the [technical migration guide](https://docs.cd
 [OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json),
 and [AsyncAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-asyncapi.json).
 No live private authentication, account request, or order is part of validation.
+
+Private read failures retain S0's classified kind and native error fields in
+command failures and startup diagnostics. Rejected credentials terminate the
+startup through `startup_read_refused` and stop further gateway authentication
+attempts; transient network/rate failures retain their classification. Expired
+sessions on an already-loaded account can refresh. This read-error projection
+provides no write resend authority.
+
+Order decoding validates the optional `original_order_type` against the native
+`market`/`market_limit` enum. When the gateway represents one of these orders as
+an internal limit, both live state and history retain the original market type;
+ordinary limits and conditional stop/take/trailing types keep their own type.

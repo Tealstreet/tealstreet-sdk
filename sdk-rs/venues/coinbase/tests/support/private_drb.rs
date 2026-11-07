@@ -744,3 +744,206 @@ fn shared_http_session_keeps_its_engine_identity_across_fresh_cdp_refresh() {
     assert_eq!(r.e.venue().drb_http_session().unwrap().owner(), owner);
     assert!(r.e.venue().private_drb.bearer_revision > revision);
 }
+
+impl Rig {
+    fn rpc_error(&mut self, request: HttpRequest, code: i64, message: &str) {
+        let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        self.reply(
+            request,
+            json!({"jsonrpc":"2.0","id":body["id"],"error":{"code":code,"message":message}}),
+        );
+        self.collect();
+    }
+    fn command_error(&self, id: u32) -> &VenueError {
+        self.actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error })
+                    if *command == id =>
+                {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .expect("typed command failure")
+    }
+}
+#[test]
+fn native_auth_refusal_reports_typed_startup_failure_and_never_retries() {
+    let mut r = Rig::new(false);
+    r.select_intx();
+    let request = r.request();
+    r.rpc_error(request, 10000, "authorization_required");
+    let error = r
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::StartupFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("native auth refusal must retain the engine startup refusal");
+    assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(error.venue_code.as_deref(), Some("10000"));
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("authorization_required")
+    );
+    for _ in 0..20 {
+        r.collect();
+        if r.timers.is_empty() {
+            break;
+        }
+        r.timers.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (at, timer) = r.timers.remove(0);
+        r.now = r.now.max(at);
+        r.e.handle(r.now, Event::TimerFired { timer });
+    }
+    r.collect();
+    assert!(
+        r.http.is_empty(),
+        "a refused key must not retry authentication"
+    );
+    assert_eq!(
+        r.actions
+            .iter()
+            .filter(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            ))
+            .count(),
+        1
+    );
+}
+#[test]
+fn native_history_rate_limit_preserves_kind_code_and_native_message() {
+    let mut r = Rig::ready();
+    r.query(safe_cex_engine::Query::Fills {
+        symbol: None,
+        order_id: None,
+        from_ms: None,
+        to_ms: None,
+        limit: Some(10),
+    });
+    let request = r.request();
+    r.rpc_error(request, 10028, "too_many_requests");
+    let error = r.command_error(77);
+    assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+    assert_eq!(error.venue_code.as_deref(), Some("10028"));
+    assert_eq!(error.venue_message.as_deref(), Some("too_many_requests"));
+    assert_eq!(
+        error.outcome, None,
+        "a Read classification grants no write retry authority"
+    );
+}
+#[test]
+fn history_transport_failure_preserves_network_classification() {
+    let mut r = Rig::ready();
+    r.query(safe_cex_engine::Query::Fills {
+        symbol: None,
+        order_id: None,
+        from_ms: None,
+        to_ms: None,
+        limit: Some(10),
+    });
+    let request = r.request();
+    r.e.handle(
+        r.now,
+        Event::HttpFailed {
+            request: request.id,
+            error: "offline fixture connection lost",
+        },
+    );
+    r.collect();
+    let error = r.command_error(77);
+    assert_eq!(error.kind, Some(ErrorKind::Network));
+    assert_eq!(error.venue_code, None);
+    assert_eq!(error.outcome, None);
+}
+#[test]
+fn documented_original_order_types_preserve_market_intent_and_conditional_types() {
+    // OpenAPI original_order_type is optional and closed to market/market_limit.
+    // Cross every documented native order type with both original variants.
+    for native in [
+        "limit",
+        "market",
+        "market_limit",
+        "stop_limit",
+        "stop_market",
+        "take_limit",
+        "take_market",
+        "trailing_stop",
+    ] {
+        for original in [None, Some("market"), Some("market_limit")] {
+            let mut row = order_row();
+            row["order_type"] = json!(native);
+            if let Some(original) = original {
+                row["original_order_type"] = json!(original);
+            }
+            let conditional = matches!(
+                native,
+                "stop_limit" | "stop_market" | "take_limit" | "take_market" | "trailing_stop"
+            );
+            if conditional {
+                row["trigger_price"] = json!(55000.);
+                row["trigger"] = json!("mark_price");
+            }
+            let expected = match native {
+                "limit" if original.is_none() => OrderType::Limit,
+                "limit" | "market" | "market_limit" => OrderType::Market,
+                "stop_limit" | "stop_market" => OrderType::StopLoss,
+                "take_limit" | "take_market" => OrderType::TakeProfit,
+                "trailing_stop" => OrderType::TrailingStopLoss,
+                _ => unreachable!(),
+            };
+            let mapped = order(row).unwrap();
+            assert_eq!(mapped.kind, expected, "{native} / {original:?}");
+            assert_eq!(mapped.trigger_type.is_some(), conditional);
+        }
+    }
+    for original in [
+        json!("limit"),
+        json!("stop_market"),
+        json!("unknown"),
+        json!(42),
+        Value::Null,
+    ] {
+        let mut row = order_row();
+        row["original_order_type"] = original;
+        assert!(
+            order(row).is_err(),
+            "unknown original types cannot fall back to Limit"
+        );
+    }
+}
+#[test]
+fn live_internal_limits_display_original_market_type() {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    let mut row = order_row();
+    row["original_order_type"] = json!("market");
+    row["last_update_timestamp"] = json!(1700000002000u64);
+    r.notification(socket, CHANNELS[0], json!({"orders":[row]}));
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().kind,
+        OrderType::Market
+    );
+}
+#[test]
+fn historical_internal_limits_display_original_market_type() {
+    let mut r = Rig::ready();
+    r.query(safe_cex_engine::Query::OrderHistory {
+        symbol: None,
+        from_ms: None,
+        to_ms: None,
+        limit: Some(1),
+    });
+    let request = r.request();
+    assert!(request.url.ends_with("get_order_history_by_currency"));
+    let mut row = order_row();
+    row["original_order_type"] = json!("market");
+    row["order_state"] = json!("filled");
+    row["filled_amount"] = row["amount"].clone();
+    r.rpc(request, json!({"orders":[row],"continuation":null}));
+    r.collect();
+    assert_eq!(r.command_result(77).unwrap()[0]["type"], "market");
+}
