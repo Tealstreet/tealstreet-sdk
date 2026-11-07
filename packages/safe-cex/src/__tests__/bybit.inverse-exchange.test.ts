@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from './reference/bybit/bybit.exchange';
-import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
-import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
 import { DefaultStore } from '../store/store.base';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
 import { OrderSide, OrderType } from '../types';
+import { BybitExchange } from './reference/bybit/bybit.exchange';
+import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
+import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
 
 const marketRow = (symbol: string, quoteCoin: string, settleCoin: string, qtyStep: string) => ({
   symbol,
@@ -77,10 +77,12 @@ describe('Bybit inverse contracts on the bybit connection', () => {
       live.push(exchange);
       vi.spyOn(exchange as any, 'fetchFees').mockResolvedValue([]);
       routeGets(exchange, {
-        [`${ENDPOINTS.MARKETS}:inverse`]: [{
-          ...inverseRow,
-          lotSizeFilter: { ...inverseRow.lotSizeFilter, maxMktOrderQty: marketCap },
-        }],
+        [`${ENDPOINTS.MARKETS}:inverse`]: [
+          {
+            ...inverseRow,
+            lotSizeFilter: { ...inverseRow.lotSizeFilter, maxMktOrderQty: marketCap },
+          },
+        ],
       });
       const [market] = await exchange.fetchMarkets();
       expect(market.isInverse).toBe(true);
@@ -93,10 +95,12 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     async (marketCap) => {
       const { exchange } = create(false);
       routeGets(exchange, {
-        [`${ENDPOINTS.MARKETS}:linear`]: [{
-          ...linearRow,
-          lotSizeFilter: { ...linearRow.lotSizeFilter, maxMktOrderQty: marketCap },
-        }],
+        [`${ENDPOINTS.MARKETS}:linear`]: [
+          {
+            ...linearRow,
+            lotSizeFilter: { ...linearRow.lotSizeFilter, maxMktOrderQty: marketCap },
+          },
+        ],
       });
       const [market] = await exchange.fetchMarkets();
       expect(market.limits.amount.max).toBe(marketCap === '40' ? 40 : 1000000);
@@ -338,7 +342,10 @@ describe('Bybit inverse contracts on the bybit connection', () => {
 
     await exchange.fetchHistoricalOrders();
     await exchange.fetchIncomeHistory();
-    expect(categoriesAsked(get, ENDPOINTS.USER_ORDERS)).toEqual(['linear', 'inverse']);
+    expect(categoriesAsked(get, ENDPOINTS.USER_ORDERS)).toEqual([
+      ...Array(4).fill('linear'),
+      ...Array(4).fill('inverse'),
+    ]);
     expect(categoriesAsked(get, ENDPOINTS.TRANSACTION_LOG)).toEqual(['linear', 'inverse']);
   });
 
