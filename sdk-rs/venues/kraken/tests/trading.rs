@@ -1809,6 +1809,7 @@ fn dispatched_write_ambiguity_matrix() {
         (500, r#"{"result":"error","error":"authenticationError"}"#),
         (599, r#"{"result":"error","error":"authenticationError"}"#),
         (400, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+        (404, r#"{"result":"error","error":"apiLimitExceeded"}"#),
     ] {
         for operation in [
             "create",

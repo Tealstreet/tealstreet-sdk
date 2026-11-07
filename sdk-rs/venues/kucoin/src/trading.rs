@@ -1135,6 +1135,7 @@ impl Kucoin {
             return;
         }
         if status == 404
+            && !envelope.as_ref().is_ok_and(|row| row.code == "429000")
             && let Call::Cancel {
                 id,
                 fallback: false,

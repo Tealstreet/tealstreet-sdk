@@ -43,8 +43,9 @@ and native `429000` rate limits, as `Outcome::Unknown`. The write-only classifie
 weakens these failures before job settlement, including after an accepted cancel
 or placement. User text directs reconciliation through Open Orders; these replies
 cannot authorize a resend or a protective put-back. The ordinary Futures `400005`
-signature retry excludes these ambiguous write statuses. Protective replacement
-text states uncertainty without claiming the position has no stop. Managed
-protective writes retain the engine's unproven-fact boundary. Private reads and
+signature retry excludes these ambiguous write statuses. A native rate limit on
+HTTP 404 cannot authorize the ordinary cancel's order-family fallback. Protective
+replacement text states uncertainty without claiming the position has no stop.
+Managed protective writes retain the engine's unproven-fact boundary. Private reads and
 documented definitive refusals on non-ambiguous responses keep their existing
 classification.

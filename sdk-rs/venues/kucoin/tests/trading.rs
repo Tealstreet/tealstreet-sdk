@@ -3085,6 +3085,7 @@ fn dispatched_write_ambiguity_matrix() {
         (503, r#"{"code":"400005","msg":"signature refused"}"#),
         (599, r#"{"code":"400005","msg":"signature refused"}"#),
         (400, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+        (404, r#"{"code":"429000","msg":"Too Many Requests"}"#),
     ] {
         for operation in [
             "create",
