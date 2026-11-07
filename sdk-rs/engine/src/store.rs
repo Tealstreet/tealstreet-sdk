@@ -1633,15 +1633,10 @@ impl Store {
             );
         }
         w.u32s(orders.iter().map(|order| {
-            order.extra.as_ref().map_or(0, |extra| {
-                extra
-                    .tp_trigger_type
-                    .map_or(0, |trigger| trigger as u32 + 1)
-                    | (extra
-                        .sl_trigger_type
-                        .map_or(0, |trigger| trigger as u32 + 1)
-                        << 8)
-            })
+            order
+                .extra
+                .as_ref()
+                .map_or(0, crate::model::order_trigger_word::encode)
         }));
         for order in orders {
             let symbol = w.string(&order.symbol);

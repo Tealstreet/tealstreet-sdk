@@ -1489,12 +1489,16 @@ impl Hyperliquid {
                     .and_then(|lookup| lookup.order)
                     .ok_or_else(|| "the order read was unreadable".to_owned());
                 match read {
-                    Ok(row) => self.amend_source_read(
-                        cx,
-                        &id,
-                        amend,
-                        Ok((row.status.as_ref(), row.order.orig_sz, row.order.sz)),
-                    ),
+                    Ok(row) => {
+                        let captured = self.capture_protective_source(cx, &id, &row.order);
+                        self.amend_source_read(
+                            cx,
+                            &id,
+                            amend,
+                            captured
+                                .map(|()| (row.status.as_ref(), row.order.orig_sz, row.order.sz)),
+                        );
+                    }
                     Err(error) => self.amend_source_read(cx, &id, amend, Err(error)),
                 }
             }
@@ -2970,7 +2974,13 @@ impl Hyperliquid {
             }
             self.account.suppressed.insert(id.clone(), cx.now);
             cx.store.remove_orders(&[&id]);
-            if let Some(c) = row.cloid {
+            if let Some(c) = row.cloid
+                && self
+                    .account
+                    .records
+                    .get(c.as_ref())
+                    .is_none_or(|record| record.order.id.is_empty() || record.order.id == id)
+            {
                 self.account.records.remove(c.as_ref());
             }
             return;
@@ -2996,10 +3006,18 @@ impl Hyperliquid {
             .and_then(|c| self.account.records.get(c))
             .cloned();
         if let Some(record) = record {
-            order.kind = record.order.kind;
-            order.price = record.order.price;
+            let native_fields = row.order_type == "Limit"
+                || (row.trigger_px.is_some()
+                    && matches!(
+                        row.order_type.as_ref(),
+                        "Stop Market" | "Stop Limit" | "Take Profit Market" | "Take Profit Limit"
+                    ));
+            if !native_fields {
+                order.kind = record.order.kind;
+                order.price = record.order.price;
+            }
             order.reduce_only = record.order.reduce_only;
-            order.time_in_force = record.order.time_in_force;
+            order.time_in_force = order.time_in_force.or(record.order.time_in_force);
             self.account
                 .preplacements
                 .retain(|p| p.order.client_order_id != order.client_order_id);
