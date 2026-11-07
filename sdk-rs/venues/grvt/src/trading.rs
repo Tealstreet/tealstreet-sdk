@@ -37,6 +37,9 @@ pub struct Request {
     step: Step,
 }
 impl Request {
+    pub(crate) fn signing(&self) -> Option<std::sync::Arc<crate::provider::FrozenOrder>> {
+        self.step.signing.clone()
+    }
     pub(crate) fn is_protective(&self) -> bool {
         self.plan.protection.is_some()
     }
@@ -106,6 +109,7 @@ struct Step {
     path: &'static str,
     body: String,
     effect: Effect,
+    signing: Option<std::sync::Arc<crate::provider::FrozenOrder>>,
 }
 enum Effect {
     Place(Box<Order>),
@@ -537,6 +541,7 @@ impl Grvt {
         for target in &read.targets {
             affected.push(target.id.clone());
             steps.push(Step {
+                signing: None,
                 path: CANCEL,
                 body: self.identity(target)?,
                 effect: Effect::CancelExact(target.clone()),
@@ -765,12 +770,15 @@ impl Grvt {
         let subaccount_int = subaccount
             .parse::<u64>()
             .map_err(|_| "Invalid GRVT uint64 trading account")?;
-        let secret = self
-            .options
-            .secret
-            .as_deref()
-            .ok_or("GRVT private key is required for signing")?;
-        let signer = sign::signer_address(secret)?;
+        let secret = self.options.secret.as_deref();
+        let signer = if self.signing.is_some() {
+            self.options
+                .signer_address
+                .clone()
+                .ok_or("GRVT signer address is unavailable")?
+        } else {
+            sign::signer_address(secret.ok_or("GRVT private key is required for signing")?)?
+        };
         match self.account.builder {
             BuilderState::Authorized => {}
             BuilderState::CapTooLow(raw) => {
@@ -906,24 +914,28 @@ impl Grvt {
             limit_price: native_price,
             is_buying: opts.side == OrderSide::Buy,
         }];
-        let signed = sign::sign_order(
-            &sign::Order {
-                sub_account_id: subaccount_int,
-                is_market,
-                time_in_force: tif_code,
-                post_only,
-                reduce_only: opts.reduce_only.unwrap_or(false),
-                legs: &signed_legs,
-                builder: Some(sign::BuilderFee {
-                    address: sign::parse_address(builder)?,
-                    fee: sign::builder_fee("0.03")?,
-                }),
-                nonce: n,
-                expiration: expiry,
-            },
-            secret,
-            self.options.testnet,
-        )?;
+        let signed = if self.signing.is_none() {
+            Some(sign::sign_order(
+                &sign::Order {
+                    sub_account_id: subaccount_int,
+                    is_market,
+                    time_in_force: tif_code,
+                    post_only,
+                    reduce_only: opts.reduce_only.unwrap_or(false),
+                    legs: &signed_legs,
+                    builder: Some(sign::BuilderFee {
+                        address: sign::parse_address(builder)?,
+                        fee: sign::builder_fee("0.03")?,
+                    }),
+                    nonce: n,
+                    expiration: expiry,
+                },
+                secret.ok_or("GRVT private key is required for signing")?,
+                self.options.testnet,
+            )?)
+        } else {
+            None
+        };
         let mut trigger_type = None;
         let mut trigger_price = price;
         let trigger = if conditional {
@@ -962,39 +974,74 @@ impl Grvt {
         let create_time = (cx.protocol_now() as u64)
             .checked_mul(1_000_000)
             .ok_or("GRVT create time overflow")?;
-        let body = serde_json::to_string(&Create {
-            o: Placement {
-                sa: subaccount.to_owned(),
-                im: is_market,
-                ti,
-                po: post_only,
-                ro: opts.reduce_only.unwrap_or(false),
-                l: [Leg {
-                    i: market.id.clone(),
-                    s: amount.to_string(),
-                    lp: (!is_market).then(|| price.to_string()),
-                    ib: opts.side == OrderSide::Buy,
-                }],
-                s: Signature {
-                    s: signer,
-                    r: signed.r,
-                    s1: signed.s,
-                    v: signed.v,
-                    e: expiry.to_string(),
-                    n,
-                    ci: if self.options.testnet { "326" } else { "325" },
+        let signing = if self.signing.is_some() {
+            Some(std::sync::Arc::new(
+                crate::provider::FrozenOrder::new(
+                    crate::provider::OrderFields {
+                        subaccount: subaccount.to_owned(),
+                        instrument: market.id.clone(),
+                        asset_id: sign::parse_asset_id(&info.hash)?,
+                        base_decimals: decimals,
+                        amount: amount.to_string(),
+                        limit_price: (!is_market).then(|| price.to_string()),
+                        buying: opts.side == OrderSide::Buy,
+                        time_in_force: tif,
+                        reduce_only: opts.reduce_only.unwrap_or(false),
+                        nonce: n,
+                        expiration_ns: expiry,
+                        client_id: client.clone(),
+                        created_ns: create_time,
+                        trigger: trigger.clone(),
+                    },
+                    self.options.testnet,
+                )
+                .map_err(|_| "Invalid GRVT frozen order")?,
+            ))
+        } else {
+            None
+        };
+        let body = if let Some(signed) = signed {
+            serde_json::to_string(&Create {
+                o: Placement {
+                    sa: subaccount.to_owned(),
+                    im: is_market,
+                    ti,
+                    po: post_only,
+                    ro: opts.reduce_only.unwrap_or(false),
+                    l: [Leg {
+                        i: market.id.clone(),
+                        s: amount.to_string(),
+                        lp: (!is_market).then(|| price.to_string()),
+                        ib: opts.side == OrderSide::Buy,
+                    }],
+                    s: Signature {
+                        s: signer.clone(),
+                        r: signed.r,
+                        s1: signed.s,
+                        v: signed.v,
+                        e: expiry.to_string(),
+                        n,
+                        ci: if self.options.testnet { "326" } else { "325" },
+                    },
+                    m: Metadata {
+                        co: client.clone(),
+                        ct: create_time.to_string(),
+                        t: trigger,
+                    },
+                    b: builder,
+                    bf: "0.03",
                 },
-                m: Metadata {
-                    co: client.clone(),
-                    ct: create_time.to_string(),
-                    t: trigger,
-                },
-                b: builder,
-                bf: "0.03",
-            },
-        })
-        .map_err(|e| e.to_string())?;
+            })
+            .map_err(|e| e.to_string())?
+        } else {
+            signing
+                .as_ref()
+                .expect("installed frozen order")
+                .preview(signer)
+                .map_err(|_| "Invalid GRVT preview")?
+        };
         Ok(Step {
+            signing,
             path: CREATE,
             body,
             effect: Effect::Place(Box::new(Order {
@@ -1098,6 +1145,7 @@ impl Grvt {
                     let target = self.target(order)?;
                     plan.affected.push(id.clone());
                     plan.steps.push_back(Step {
+                        signing: None,
                         path: CANCEL,
                         body: self.identity(&target)?,
                         effect: Effect::Cancel(id),
@@ -1122,6 +1170,7 @@ impl Grvt {
                             .map(|o| o.id.clone()),
                     );
                     plan.steps.push_back(Step {
+                        signing: None,
                         path: CANCEL_ALL,
                         body,
                         effect: Effect::CancelSymbol(symbol),
@@ -1132,6 +1181,7 @@ impl Grvt {
                         .market(&symbol)
                         .ok_or("Unknown GRVT cancellation market")?;
                     plan.steps.push_back(Step {
+                        signing: None,
                         path: OPEN,
                         body,
                         effect: Effect::ReadSymbol(Box::new(CancelRead {
@@ -1179,6 +1229,7 @@ impl Grvt {
                 }
                 self.guard_amend(cx, &target)?;
                 plan.steps.push_back(Step {
+                    signing: None,
                     path: GET,
                     body: self.identity(&target)?,
                     effect: Effect::Inspect(Box::new(Amend {
@@ -1208,6 +1259,7 @@ impl Grvt {
                     l: String,
                 }
                 plan.steps.push_back(Step {
+                    signing: None,
                     path: LEVERAGE,
                     body: serde_json::to_string(&Set {
                         sa: self.trade_account()?,
@@ -1793,11 +1845,13 @@ impl Grvt {
                     request.plan.guard = Some(target.clone());
                     request.plan.affected.push(target.id.clone());
                     request.plan.steps.push_back(Step {
+                        signing: None,
                         path: CANCEL,
                         body: self.identity(&target)?,
                         effect: Effect::Cancel(target.id.clone()),
                     });
                     request.plan.steps.push_back(Step {
+                        signing: None,
                         path: GET,
                         body: self.identity(&target)?,
                         effect: Effect::Verify(target),

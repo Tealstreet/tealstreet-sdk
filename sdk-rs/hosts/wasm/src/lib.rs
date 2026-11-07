@@ -1057,6 +1057,10 @@ impl WasmEngine {
                         #[cfg(not(feature = "lighter"))]
                         api_key_index: None,
                         paradex_address: options.paradex_address.clone(),
+                        #[cfg(feature = "grvt")]
+                        grvt_trading_account_id: options.grvt_trading_account_id.clone(),
+                        #[cfg(not(feature = "grvt"))]
+                        grvt_trading_account_id: None,
                     };
                     (venue.to_owned(), identities, account)
                 })
