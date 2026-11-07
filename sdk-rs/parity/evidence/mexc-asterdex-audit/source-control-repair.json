@@ -1,7 +1,0 @@
-{
-  "rejected_input_sha": "9415fc16f8480661f55816ee10f660fa44f584bd",
-  "receipt": "measured-9415fc16f8/controls.json",
-  "profile": "mexc-fetchTickers",
-  "finding": "Control selector for => { matched the top-level method arrow and nested reducer arrow (2 instead of1), so its failure is setup rejection, not the named scheduling assertion. Original batch accepted=false; all logs retained. Fix selects the full AST-selected declaration prefix through its first arrow body; a later fresh SHA must prove the exact immediate-callback assertion. Fourteen other profiles matched their named assertions in the initial batch, but final accepted receipt must cover all15 at its new input.",
-  "production_mutated": false
-}

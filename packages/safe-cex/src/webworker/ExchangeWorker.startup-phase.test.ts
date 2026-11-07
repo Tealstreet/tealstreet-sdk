@@ -15,13 +15,15 @@ import { DefaultStore } from '../store/store.base';
 
 const loaderMock = vi.fn();
 const startMock = vi.fn();
+const onMock = vi.fn();
 
 class FakeExchange {
   store: DefaultStore;
   isDisposed = false;
   start = startMock;
-  on = vi.fn();
+  on = onMock;
   disablePublicWebsockets = vi.fn();
+  dispose = vi.fn();
 
   // Mirrors the real signature: the worker hands its own store to the exchange,
   // and `_setupExchangeEventListeners` subscribes to `exchange.store`. Creating
@@ -76,6 +78,20 @@ describe('ExchangeWorker startup phase tagging', () => {
     expect(phaseOf(messages)).toBe('startup');
   });
 
+  it('tags a start() that disposed its own exchange, as a refused key does', async () => {
+    loaderMock.mockImplementation(async () => FakeExchange);
+    const { messages, worker } = createWorker();
+    startMock.mockImplementation(function (this: FakeExchange) {
+      this.isDisposed = true;
+      return Promise.reject(new Error('Invalid API-key, IP, or permissions for action'));
+    });
+
+    await expect(worker.start()).resolves.toBe(false);
+
+    expect(phaseOf(messages)).toBe('startup');
+    expect(errorPayloads(messages)[0].data[0]).toContain('Invalid API-key');
+  });
+
   // The venue's own message is the only thing the web-side family classifier
   // can see; "Error starting exchange" lives in the log message arg. Both must
   // survive together or the phase cannot be cross-referenced with the cause.
@@ -109,7 +125,7 @@ describe('ExchangeWorker startup phase tagging', () => {
     await expect(worker.start()).resolves.toBe(false);
 
     expect(phaseOf(messages)).toBe('startup');
-    expect(errorPayloads(messages)[0].data[0]).toContain('Unknown exchange');
+    expect(errorPayloads(messages)[0].data[0]).toContain('not-a-venue is unsupported in this build');
   });
 
   it('does not tag a successful startup', async () => {
@@ -120,5 +136,87 @@ describe('ExchangeWorker startup phase tagging', () => {
     await worker.start();
 
     expect(errorPayloads(messages)).toHaveLength(0);
+  });
+});
+
+it('forwards coded diagnostics and legacy metadata only from the current worker generation', async () => {
+  loaderMock.mockResolvedValue(FakeExchange);
+  startMock.mockResolvedValue(undefined);
+  onMock.mockClear();
+  const { messages, worker } = createWorker();
+  await worker.start();
+  const event = { code: 'auth.rejected', level: 'error', message: 'new refusal', fields: { source: 'private' } };
+  const listener = onMock.mock.calls.find(([name]) => name === 'engine-event')?.[1];
+  expect(listener).toBeTypeOf('function');
+  listener(event);
+  expect(messages.filter((message) => message.op === 'engine-event')).toEqual([{ op: 'engine-event', data: [event] }]);
+  const errorListener = onMock.mock.calls.find(([name]) => name === 'error')![1];
+  errorListener(event.message, { engineEvent: event });
+  expect(errorPayloads(messages).at(-1).data).toEqual([event.message, { engineEvent: event }]);
+  // A restart invalidates callbacks held by the old exchange.
+  await worker.start();
+  listener(event);
+  expect(messages.filter((message) => message.op === 'engine-event')).toHaveLength(1);
+});
+
+describe('ExchangeWorker start that keeps timing out', () => {
+  const timedOut = (retries: number) => {
+    const { messages, worker } = createWorker();
+    Object.assign(worker, { _startTimedOut: true, _startRetries: retries });
+    return { messages, retried: vi.useFakeTimers() && worker.retryTimedOutStart() };
+  };
+
+  it('forces its retry notice past the not-yet-connected toast gate', () => {
+    const { messages, retried } = timedOut(0);
+    vi.useRealTimers();
+    expect(retried).toBe(true);
+    const warning = messages.find((m) => m.op === 'warning');
+    expect(warning.data[0]).toContain('retrying');
+    expect(warning.data[1]).toEqual({ forceToast: true });
+  });
+
+  it('says so, forced, when the retries are spent', () => {
+    const { messages, retried } = timedOut(4);
+    vi.useRealTimers();
+    expect(retried).toBe(false);
+    const error = errorPayloads(messages)[0];
+    expect(error.data[0]).toContain('did not finish loading');
+    expect(error.data[1]).toEqual({ forceToast: true });
+  });
+});
+
+describe('ExchangeWorker on public data only', () => {
+  it('runs no postprocessor that would publish its unread account rows as real', () => {
+    const ctx = { postMessage: vi.fn() };
+    const worker = new ExchangeWorker(ctx as any, 'a', 'bybit' as any, { publicDataOnly: true } as any, {} as any, {} as any, 's') as any;
+    const account = { readsAccountData: true, process: vi.fn() };
+    const market = { process: vi.fn() };
+    worker._postprocessors = [account, market];
+    try {
+      worker._storeUpdate({});
+    } catch {
+      // Only the postprocessor loop is under test.
+    }
+    expect(account.process).not.toHaveBeenCalled();
+    expect(market.process).toHaveBeenCalled();
+  });
+});
+
+describe('ExchangeWorker when the engine deactivates', () => {
+  it('hands the page the refusal, so it can run on public data', async () => {
+    const handlers: Record<string, (...args: any[]) => void> = {};
+    onMock.mockImplementation((event: string, handler: (...args: any[]) => void) => {
+      handlers[event] = handler;
+    });
+    loaderMock.mockResolvedValue(FakeExchange);
+    startMock.mockImplementation(() => new Promise(() => undefined));
+    const { messages, worker } = createWorker();
+    void worker.start();
+    await vi.waitFor(() => expect(handlers.deactivate).toBeDefined());
+    handlers.deactivate('Api credential is invalid');
+    expect(messages.find((m) => m.op === 'deactivate-status')).toMatchObject({
+      data: true,
+      refusal: 'Api credential is invalid',
+    });
   });
 });

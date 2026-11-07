@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:19:10.798Z",
+  "endpoint": "/api/v5/market/candles?instId=BTC-USDT-SWAP&bar=7x",
+  "http_status": 200,
+  "body": "{\"code\":\"51000\",\"data\":[],\"msg\":\"Parameter bar error\"}",
+  "expect": {
+    "kind": null,
+    "outcome": null,
+    "path": "read"
+  }
+}

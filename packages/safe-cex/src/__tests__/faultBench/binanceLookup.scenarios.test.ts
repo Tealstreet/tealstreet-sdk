@@ -2,7 +2,7 @@ import type { Market } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderStatus } from '../../types';
 import { createFakeVenue } from './fakeVenue';

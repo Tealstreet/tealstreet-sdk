@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BinancePrivateWebsocket } from '../exchanges/phemex/phemex.ws-private';
+import { BinancePrivateWebsocket } from './reference/phemex/phemex.ws-private';
 import { OrderSide, OrderStatus, OrderType } from '../types';
 
 type MockStore = {
@@ -168,7 +168,7 @@ describe('Phemex private websocket reconciliation', () => {
     expect(store.addOrUpdatePositions).toHaveBeenCalledWith([parsedPosition]);
   });
 
-  it('debounces REST sync and explicitly reconciles terminal order symbols', async () => {
+  it('debounces REST sync and explicitly reconciles terminal orders with unknown position side', async () => {
     const { ws, store, parent } = createContext();
     const payload = JSON.stringify({
       type: 'incremental',

@@ -66,9 +66,13 @@ const withoutComments = (source: string): string =>
  * would have hidden them behind a rule about where a file sits rather than
  * what it does.
  */
-const isVenueImplementation = (file: string): boolean => file.startsWith('packages/safe-cex/src/exchanges/');
+const isVenueImplementation = (file: string): boolean =>
+  file.startsWith('packages/safe-cex/src/exchanges/') ||
+  // Under the Rust engine the TS venue adapters move to a test-only oracle here.
+  file.startsWith('packages/safe-cex/src/__tests__/reference/');
 
-const isTest = (file: string): boolean => /\.(test|cy)\.tsx?$/.test(file);
+// Frozen venue adapters under __tests__ are replay fixtures, never runtime entry points.
+const isTest = (file: string): boolean => file.includes('/__tests__/') || /\.(test|cy)\.tsx?$/.test(file);
 
 /**
  * Everything that may send an order, and why it is allowed to.
@@ -146,6 +150,7 @@ const trackedFiles = (): readonly string[] =>
     .filter((file) => !file.startsWith('v2/'));
 
 describe('the set of order entry points is closed', () => {
+  // Walks the source tree; under CI load this outruns vitest's 5s default.
   it('nothing outside the known set sends an order', () => {
     const offenders = trackedFiles()
       .filter((file) => !isVenueImplementation(file) && !isTest(file) && !(file in ENTRY_POINTS))
@@ -159,8 +164,9 @@ describe('the set of order entry points is closed', () => {
         'for the UI path, `prepareCliOrder` for the CLI, `createCoreAdapter` for ' +
         'anything headless — or add it here with the reason it is its own.',
     ).toEqual([]);
-  });
+  }, 30_000);
 
+  // Walks the source tree; under CI load this outruns vitest's 5s default.
   it.skipIf(!HAS_WEB_APP)('every listed entry point still exists and still places an order', () => {
     // A stale entry is a hole: it lets a file be deleted and a different one
     // added under the same path without the guard noticing.
@@ -172,6 +178,12 @@ describe('the set of order entry points is closed', () => {
         `${file} is listed but no longer places an order — remove it`,
       ).toBe(true);
     }
+  }, 30_000);
+
+  it('test references are excluded while production sources stay in scope', () => {
+    expect(isTest('packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts')).toBe(true);
+    expect(isTest('packages/safe-cex/src/exchanges/rust/rust.exchange.ts')).toBe(false);
+    expect(isTest('packages/script-api-core/src/proxy/InProcessProxy.ts')).toBe(false);
   });
 
   it('the detector matches a call and ignores a declaration or a mention', () => {

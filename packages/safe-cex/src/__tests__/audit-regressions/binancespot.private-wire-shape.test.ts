@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { BinanceSpotExchange } from '../../exchanges/binance/binancespot.exchange';
-import { BinancePrivateWebsocket } from '../../exchanges/binance/binancespot.ws-private';
+import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
+import { BinancePrivateWebsocket } from '../reference/binance/binancespot.ws-private';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 

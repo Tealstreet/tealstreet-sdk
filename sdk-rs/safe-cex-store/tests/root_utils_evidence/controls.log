@@ -1,7 +1,0 @@
-baseline_sha 5962ef88f6f6564bad22ae6bcb9a7633d80fcbc7
-config compiled exit=101: ROOT-UTILS config native constant identity
-broker compiled exit=101: ROOT-UTILS broker fallback identity
-telemetry compiled exit=101: ROOT-UTILS telemetry native failure propagation
-RUST RESTORED exit=0 4/4
-source-unit executed exit=1: ROOT-UTILS source event name observable lone unit
-SOURCE RESTORED exit=0; stopped after control 4

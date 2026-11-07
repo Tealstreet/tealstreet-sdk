@@ -1,4 +1,11 @@
-import { CallableMethodsInWorker } from '../../exchanges/base';
+import type { WriteMarks } from '../../writeTiming';
+
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
+import { serializeCommandError } from '../../commandOutcome';
+import { CallableMethodsInWorker, WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
+import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
+import { historyCompletenessOf } from '../../historyCompleteness';
+import { runWithWriteTiming, WriteTiming } from '../../writeTiming';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 import { ThrottleManager } from './ThrottleManager';
@@ -18,37 +25,66 @@ export class CallMethodHandler extends BaseHandler {
     );
   }
 
-  handleCallMethod = async (requestId: string, method: CallableMethodsInWorker, args: any[]) => {
+  private replySuccess = (requestId: string, result: unknown, timing?: WriteTiming) => {
+    const completeness = historyCompletenessOf(result);
+    this._ctx.postMessage({
+      op: 'callMethod:done',
+      data: {
+        requestId,
+        result,
+        success: true,
+        ...(completeness ? { completeness } : {}),
+        ...(timing ? { timing: timing.marks } : {}),
+      },
+    });
+  };
+
+  private unsupportedMethod = (method: string) => {
+    const message = `${this._exchange.name} does not support ${method}`;
+    return new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+  };
+
+  handleCallMethod = async (
+    requestId: string,
+    method: CallableMethodsInWorker | (typeof WORKER_OPTIONAL_METHODS)[number],
+    args: any[],
+    marks?: WriteMarks,
+  ) => {
     let result: any = null;
+    // The caller's write timing: the exchange stamps the engine stages and the caller emits.
+    const timing = marks ? new WriteTiming(method, { ...marks }) : undefined;
+    timing?.mark('received');
     if (logging) {
       console.log('Calling method', method);
     }
     try {
+      // Mirrors forward every metadata refresh; the worker keeps coalescing them.
+      if (method === 'updateSymbolMetadata') {
+        this.symbolMetadataThrottler.call(...(args as Parameters<typeof this._exchange.updateSymbolMetadata>));
+        this.replySuccess(requestId, null);
+        return;
+      }
+      if ([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].includes(method as never)) {
+        const call = (this._exchange as unknown as Record<string, unknown>)[method];
+        if (typeof call !== 'function') throw this.unsupportedMethod(method);
+        const start = () => (call as (...callArgs: unknown[]) => Promise<unknown>)(...args);
+        result = await (timing ? runWithWriteTiming(timing, start) : start());
+        if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
+        this.replySuccess(requestId, result, timing);
+        return;
+      }
       switch (method) {
-        case 'setLeverage':
-          result = await this._exchange.setLeverage(...(args as Parameters<typeof this._exchange.setLeverage>));
-          break;
         case 'scheduleCancel':
           result = await this._exchange.scheduleCancel(...(args as Parameters<typeof this._exchange.scheduleCancel>));
-          break;
-        case 'updateSymbolMetadata':
-          this.symbolMetadataThrottler.call(...(args as Parameters<typeof this._exchange.updateSymbolMetadata>));
-          break;
-        case 'changeMarginType':
-          result = await this._exchange.changeMarginType(
-            ...(args as Parameters<typeof this._exchange.changeMarginType>),
-          );
-          break;
-        case 'changePositionMode':
-          result = await this._exchange.changePositionMode(
-            ...(args as Parameters<typeof this._exchange.changePositionMode>),
-          );
           break;
         case 'fetchLastLogsFromWebsockets':
           result = this._exchange.fetchLastLogsFromWebsockets();
           break;
         case 'fetchAndSetPrivateSnapshot':
           result = await this._exchange.fetchAndSetPrivateSnapshot();
+          break;
+        case 'fetchEngineSnapshot':
+          result = await this._exchange.fetchEngineSnapshot();
           break;
         case 'reconnect':
           this._exchange.reconnect();
@@ -96,32 +132,18 @@ export class CallMethodHandler extends BaseHandler {
           );
           break;
         default:
-          console.error('Unknown method', method);
-          this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, success: false } });
-          return;
+          throw this.unsupportedMethod(method);
       }
       if (logging) {
         console.log('Method called', method, result);
       }
-      this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, result, success: true } });
+      this.replySuccess(requestId, result);
     } catch (e: any) {
       console.error('Error calling method', e);
-      // Serialize error with all properties including custom ones like 'code'
-      const serializedError =
-        e instanceof Error
-          ? {
-              message: e.message,
-              name: e.name,
-              stack: e.stack,
-              // Preserve custom properties like 'code' from exchange errors
-              ...('code' in e && { code: (e as Error & { code: unknown }).code }),
-            }
-          : {
-              message: String(e),
-            };
+      const serializedError = serializeCommandError(e);
       this._ctx.postMessage({
         op: 'callMethod:done',
-        data: { requestId, success: false, result: serializedError },
+        data: { requestId, success: false, result: serializedError, ...(timing ? { timing: timing.marks } : {}) },
       });
     }
   };
@@ -129,10 +151,15 @@ export class CallMethodHandler extends BaseHandler {
   handle(payload: StoreWorkerPayload): void {
     switch (payload.op) {
       case 'callMethod':
-        const { requestId, method, args }: { requestId: string; method: CallableMethodsInWorker; args: any[] } = {
+        const {
+          requestId,
+          method,
+          args,
+          timing,
+        }: { requestId: string; method: CallableMethodsInWorker; args: any[]; timing?: WriteMarks } = {
           ...payload.data,
         };
-        this.handleCallMethod(requestId, method, args);
+        this.handleCallMethod(requestId, method, args, timing);
         break;
     }
   }

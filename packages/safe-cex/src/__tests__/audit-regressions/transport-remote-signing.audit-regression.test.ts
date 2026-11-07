@@ -76,6 +76,7 @@ describe('transport remote-signing adapter invariant', () => {
     expect(response.data).toEqual({ ok: true });
   });
 
+  // Walks the source tree; under CI load this outruns vitest's 5s default.
   it('forbids exchange factories from replacing the outer adapter directly', () => {
     const exchangesDirectory = resolve(process.cwd(), 'src/exchanges');
     const offenders = exchangeApiFiles(exchangesDirectory)
@@ -83,8 +84,9 @@ describe('transport remote-signing adapter invariant', () => {
       .map((file) => file.slice(exchangesDirectory.length + 1));
 
     expect(offenders).toEqual([]);
-  });
+  }, 30_000);
 
+  // Walks the source tree; under CI load this outruns vitest's 5s default.
   it('forbids hand-rolled exchange-tree sockets to TradeTunnel hosts', () => {
     const exchangesDirectory = resolve(process.cwd(), 'src/exchanges');
     const offenders = exchangeRuntimeFiles(exchangesDirectory)
@@ -92,5 +94,5 @@ describe('transport remote-signing adapter invariant', () => {
       .map((file) => file.slice(exchangesDirectory.length + 1));
 
     expect(offenders).toEqual([]);
-  });
+  }, 30_000);
 });

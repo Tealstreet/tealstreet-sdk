@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BYBIT_BRAZIL_SITE_ID } from '../exchanges/bybit/bybit.site';
-import { BybitInverseExchange } from '../exchanges/bybit/bybitinverse.exchange';
+import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
 import { OrderSide, OrderType } from '../types';
 
 const createInverseExchange = () => {

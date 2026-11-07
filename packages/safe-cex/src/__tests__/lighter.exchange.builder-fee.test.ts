@@ -6,7 +6,7 @@ import {
   LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE,
   LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE,
 } from '../exchanges/lighter/lighter.account-tier';
-import { LighterExchange } from '../exchanges/lighter/lighter.exchange';
+import { LighterExchange } from './reference/lighter/lighter.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderTimeInForce, OrderType } from '../types';
 
@@ -26,14 +26,14 @@ vi.mock('@tealstreet/lighter-sdk', () => ({
   CandlestickApi: class {},
 }));
 
-vi.mock('../exchanges/lighter/lighter.api', () => ({
+vi.mock('./reference/lighter/lighter.api', () => ({
   createLighterSDKClient: vi.fn(() => ({
     get: vi.fn(),
     sendRawTx: vi.fn(),
   })),
 }));
 
-vi.mock('../exchanges/lighter/lighter.ws-public', () => ({
+vi.mock('./reference/lighter/lighter.ws-public', () => ({
   LighterPublicWebsocket: class {
     connectAndSubscribe = vi.fn();
     listenOHLCV = vi.fn();
@@ -42,7 +42,7 @@ vi.mock('../exchanges/lighter/lighter.ws-public', () => ({
   },
 }));
 
-vi.mock('../exchanges/lighter/lighter.ws-private', () => ({
+vi.mock('./reference/lighter/lighter.ws-private', () => ({
   LighterPrivateWebsocket: class {
     connectAndSubscribe = vi.fn();
     throttleFetchOrders = vi.fn();

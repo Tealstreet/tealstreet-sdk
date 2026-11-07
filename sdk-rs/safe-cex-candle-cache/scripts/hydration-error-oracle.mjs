@@ -14,6 +14,7 @@ try {
     let reject;
     let reads = 0;
     const observed = [];
+    const completionOrder = [];
     const backend = {
       loadAllChunks: async () => {
         reads++;
@@ -27,7 +28,8 @@ try {
     const candle = { timestamp: 1699999800000, open: 1, high: 2, low: 0, close: 1, volume: 1 };
     const make = cacheKey => cache.fetch({ cacheKey, interval: '5m', fromMs: candle.timestamp,
       toMs: candle.timestamp, limit: 1, nowMs: candle.timestamp + 300000, fetcher: async () => [candle] });
-    const first = make('first'); const queued = make('queued');
+    const first = make('first').then(value => { completionOrder.push('first'); return value; });
+    const queued = make('queued').then(value => { completionOrder.push('queued'); return value; });
     await flush();
     if (late) {
       assert.equal(reads, 1);
@@ -39,6 +41,7 @@ try {
     assert.deepEqual(await first, [candle]);
     assert.deepEqual(await queued, [candle]);
     assert.equal(reads, 2, 'failed hydration must release the cap');
+    assert.deepEqual(completionOrder, ['first', 'queued'], 'caller settlement order changed');
     assert.deepEqual(observed, [], 'TS unexpectedly added a hydration diagnostic');
     assert.equal(diagnostics, 0, 'TS unexpectedly reported hydration rejection');
     timers.clear();

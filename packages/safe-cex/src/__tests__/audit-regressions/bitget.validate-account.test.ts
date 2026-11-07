@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from '../../exchanges/bitget/bitget.api';
-import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { createAPI } from '../reference/bitget/bitget.api';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
 

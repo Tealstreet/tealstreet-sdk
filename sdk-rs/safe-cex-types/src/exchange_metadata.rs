@@ -2,7 +2,7 @@
 #[path = "exchange_metadata_generated.rs"]
 mod generated;
 use crate::object_map::JsObjectMap;
-pub use generated::{ExchangeFeatures, ExchangeMetadata};
+pub use generated::{ExchangeFeatures, ExchangeMetadata, ExchangeMetadataOrderAmendment};
 use indexmap::IndexMap;
 use serde::Deserialize;
 use std::sync::OnceLock;

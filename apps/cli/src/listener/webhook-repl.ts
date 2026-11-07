@@ -4,14 +4,15 @@
 import type { StandalonePlatformAdapter } from '../platform-adapter';
 import { isRemoteExecEnabled } from './config';
 import { getWebhookRelay } from './webhook-relay';
+import { BRAND } from '../brand';
 
 function relayOrExplain(adapter: StandalonePlatformAdapter) {
   const relay = getWebhookRelay();
   if (relay) return relay;
   if (!isRemoteExecEnabled()) {
-    adapter.printError('Webhooks are off: listener.remoteExec is false in ~/.tealstreet/config.json.');
+    adapter.printError(`Webhooks are off: listener.remoteExec is false in ~/${BRAND.configDirName}/config.json.`);
   } else {
-    adapter.printError('Webhooks are off: listener.enabled is false in ~/.tealstreet/config.json.');
+    adapter.printError(`Webhooks are off: listener.enabled is false in ~/${BRAND.configDirName}/config.json.`);
   }
   return null;
 }

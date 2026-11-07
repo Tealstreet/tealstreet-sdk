@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:03:10.357Z",
+  "endpoint": "/v5/market/instruments-info?category=badcategory",
+  "http_status": 200,
+  "body": "{\"retCode\":10001,\"retMsg\":\"Illegal category\",\"result\":{\"category\":\"\",\"list\":[],\"nextPageCursor\":\"\"},\"retExtInfo\":{},\"time\":1793152990370}",
+  "expect": {
+    "kind": "invalidInput",
+    "outcome": null,
+    "path": "read"
+  }
+}

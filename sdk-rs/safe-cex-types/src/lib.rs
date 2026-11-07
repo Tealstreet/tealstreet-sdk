@@ -2,10 +2,16 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod model_field;
+pub use model_field::ModelField;
+mod info_record;
+pub use info_record::STORE_RECORD;
 pub mod query_value;
 pub mod retained_json;
+pub mod store_access;
 pub mod telemetry;
 pub use query_value::QueryValue;
+pub use store_access::{StoreReadError, StoreReadPhase};
 pub mod validation_error;
 pub use validation_error::AccountValidationError;
 
@@ -16,6 +22,44 @@ where
     T: Deserialize<'de>,
 {
     T::deserialize(deserializer).map(Some)
+}
+
+/// Typed account extension consumed by the Polymarket source constructor.
+/// Unlike the venue's retained UTF-16 record, this uses the shared account
+/// UTF-8 string boundary. signerType retains source numeric values verbatim.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExchangeOptionsPolymarket {
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub api_key: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub api_secret: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub api_passphrase: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub signer_type: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub funder_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -174,6 +218,40 @@ pub struct OptionGreeks {
 pub struct MarketPrecision {
     pub amount: f64,
     pub price: f64,
+    // Runtime properties emitted by maintained venue mappers (outside the TS declaration).
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(skip)]
+    pub base: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(skip)]
+    pub quote: Option<f64>,
+}
+
+/// A numeric runtime property whose source mapper may retain numeric text.
+/// Arithmetic consumers explicitly apply JavaScript Number conversion in num.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NumericValue {
+    Number(f64),
+    Text(String),
+}
+impl From<f64> for NumericValue {
+    fn from(value: f64) -> Self {
+        Self::Number(value)
+    }
+}
+impl From<String> for NumericValue {
+    fn from(value: String) -> Self {
+        Self::Text(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -181,7 +259,8 @@ pub struct MarketPrecision {
 #[ts(optional_fields)]
 pub struct MarketLimitsAmount {
     pub min: f64,
-    pub max: f64,
+    #[ts(type = "number")]
+    pub max: NumericValue,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -197,6 +276,13 @@ pub struct MarketLimitsLeverage {
 #[ts(optional_fields)]
 pub struct MarketLimitsPrice {
     pub min: f64,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(skip)]
+    pub max: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -214,19 +300,89 @@ pub struct MarketLimits {
     )]
     #[ts(inline)]
     pub price: Option<MarketLimitsPrice>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct Market {
-    pub id: String,
-    pub symbol: String,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
         skip_serializing_if = "Option::is_none"
     )]
+    #[ts(skip)]
+    pub cost: Option<MarketLimitsLeverage>,
+}
+
+/// Runtime fee object constructed by venue market mappers.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MarketFees {
+    pub maker: f64,
+    pub taker: f64,
+}
+
+/// Extra properties constructed by venue TypeScript at runtime, beyond Market's declaration.
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketRuntime {
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub kind: Option<String>,
+    #[serde(
+        rename = "spot",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub spot: Option<bool>,
+    #[serde(
+        rename = "swap",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub swap: Option<bool>,
+    #[serde(
+        rename = "future",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub future: Option<bool>,
+    #[serde(
+        rename = "contract",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub contract: Option<bool>,
+    #[serde(
+        rename = "linear",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub linear: Option<bool>,
+    #[serde(
+        rename = "inverse",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub inverse: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fees: Option<MarketFees>,
+}
+
+#[derive(Debug, Clone, PartialEq, TS)]
+#[ts(optional_fields, rename_all = "camelCase")]
+pub struct Market {
+    pub id: String,
+    pub symbol: String,
+
     pub pretty_symbol: Option<String>,
     pub base: String,
     pub quote: String,
@@ -235,67 +391,30 @@ pub struct Market {
     pub precision: MarketPrecision,
     #[ts(inline)]
     pub limits: MarketLimits,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     pub option: Option<OptionTerms>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     pub contract_size: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     pub is_expiring: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     pub is_inverse: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     pub is_spot: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     pub is_perpetual: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     pub is_read_only: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "crate::retained_json::deserialize_present_retained_json",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     #[ts(type = "any", optional)]
-    pub info: Option<serde_json::Value>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    pub info: Option<crate::retained_json::RetainedJsonInput>,
+
     pub taker_fee: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     pub maker_fee: Option<f64>,
+    /// Runtime venue properties; serialized at the Market object's top level.
+    #[ts(skip)]
+    pub runtime: MarketRuntime,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -358,91 +477,51 @@ pub struct OrderExtra {
     pub chaser_max_attempts: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, TS)]
+#[ts(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct Order {
     pub id: String,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub parent_id: Option<String>,
-    pub status: OrderStatus,
+    #[ts(as = "Option<String>")]
+    pub parent_id: ModelField<String>,
+    #[ts(as = "OrderStatus")]
+    pub status: ModelField<OrderStatus>,
     pub symbol: String,
-    pub r#type: OrderType,
-    pub side: OrderSide,
-    pub price: f64,
+    #[ts(as = "OrderType")]
+    pub r#type: ModelField<OrderType>,
+    #[ts(as = "OrderSide")]
+    pub side: ModelField<OrderSide>,
+    #[ts(as = "f64")]
+    pub price: ModelField<f64>,
     pub amount: f64,
     pub filled: f64,
     pub remaining: f64,
-    pub reduce_only: bool,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub close: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "crate::retained_json::deserialize_present_retained_json",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[ts(as = "bool")]
+    pub reduce_only: ModelField<bool>,
+    #[ts(as = "Option<bool>")]
+    pub close: ModelField<bool>,
     #[ts(type = "any", optional)]
-    pub info: Option<serde_json::Value>,
+    pub info: ModelField<crate::retained_json::RetainedJsonInput>,
     // The venue client order ID where the adapter maps it to the top level
     // (Hyperliquid's cloid): `info` is stripped before a worker posts the store.
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub client_order_id: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub time_in_force: Option<OrderTimeInForce>,
+    #[ts(as = "Option<String>")]
+    pub client_order_id: ModelField<String>,
+    #[ts(as = "Option<OrderTimeInForce>")]
+    pub time_in_force: ModelField<OrderTimeInForce>,
     pub last_update: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub trigger_type: Option<OrderStopTriggerType>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub tp_trigger_type: Option<OrderStopTriggerType>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub sl_trigger_type: Option<OrderStopTriggerType>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub take_profit: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub stop_loss: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[ts(as = "Option<OrderStopTriggerType>")]
+    pub trigger_type: ModelField<OrderStopTriggerType>,
+    #[ts(as = "Option<OrderStopTriggerType>")]
+    pub tp_trigger_type: ModelField<OrderStopTriggerType>,
+    #[ts(as = "Option<OrderStopTriggerType>")]
+    pub sl_trigger_type: ModelField<OrderStopTriggerType>,
+    #[ts(as = "Option<f64>")]
+    pub take_profit: ModelField<f64>,
+    #[ts(as = "Option<f64>")]
+    pub stop_loss: ModelField<f64>,
     #[ts(inline)]
-    pub extra: Option<OrderExtra>,
+    #[ts(as = "Option<OrderExtra>")]
+    pub extra: ModelField<OrderExtra>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -475,70 +554,38 @@ pub struct PositionExtra {
     pub unrealized_pnl_native: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, TS)]
+#[ts(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct Position {
     pub id: String,
     pub symbol: String,
-    pub side: PositionSide,
+    #[ts(as = "PositionSide")]
+    pub side: ModelField<PositionSide>,
     pub entry_price: f64,
     pub notional: f64,
     pub leverage: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub margin_type: Option<MarginType>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub position_mode: Option<PositionMode>,
+    #[ts(as = "Option<MarginType>")]
+    pub margin_type: ModelField<MarginType>,
+    #[ts(as = "Option<PositionMode>")]
+    pub position_mode: ModelField<PositionMode>,
     pub unrealized_pnl: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub realized_pnl: Option<f64>,
+    #[ts(as = "Option<f64>")]
+    pub realized_pnl: ModelField<f64>,
     pub contracts: f64,
     pub liquidation_price: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub margin_size: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "crate::retained_json::deserialize_present_retained_json",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[ts(as = "Option<f64>")]
+    pub margin_size: ModelField<f64>,
     #[ts(type = "any", optional)]
-    pub info: Option<serde_json::Value>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    pub info: ModelField<crate::retained_json::RetainedJsonInput>,
     #[ts(inline)]
-    pub extra: Option<PositionExtra>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub last_update: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[ts(as = "Option<PositionExtra>")]
+    pub extra: ModelField<PositionExtra>,
+    #[ts(as = "Option<f64>")]
+    pub last_update: ModelField<f64>,
     #[ts(inline)]
-    pub option: Option<PositionOption>,
+    #[ts(as = "Option<PositionOption>")]
+    pub option: ModelField<PositionOption>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -553,40 +600,49 @@ pub struct CoinBalance {
     pub notional: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
+/// A currency row preserves the shape returned by its source venue. Crypto.com
+/// REST returns available/locked rather than the statically declared Balance.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum CurrencyBalance {
+    Declared(Balance),
+    AvailableLocked { available: f64, locked: f64 },
+}
+
+impl CurrencyBalance {
+    /// Read a declared Balance row without normalizing other source shapes.
+    pub fn as_balance(&self) -> Option<&Balance> {
+        match self {
+            Self::Declared(balance) => Some(balance),
+            Self::AvailableLocked { .. } => None,
+        }
+    }
+}
+impl From<Balance> for CurrencyBalance {
+    fn from(balance: Balance) -> Self {
+        Self::Declared(balance)
+    }
+}
+#[derive(Debug, Clone, PartialEq, TS)]
+#[ts(optional_fields, rename_all = "camelCase")]
 pub struct Balance {
     pub used: f64,
     pub free: f64,
     pub total: f64,
     pub upnl: f64,
-    #[serde(
-        default,
-        deserialize_with = "crate::retained_json::deserialize_present_retained_json",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     #[ts(type = "any", optional)]
-    pub info: Option<serde_json::Value>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    pub info: Option<crate::retained_json::RetainedJsonInput>,
+
     #[ts(type = "{ [currency: string]: Balance }", optional)]
-    pub currencies: Option<crate::object_map::JsObjectMap<Balance>>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    pub currencies: Option<crate::object_map::JsObjectMap<crate::CurrencyBalance>>,
+
     #[ts(type = "{ [coin: string]: CoinBalance }", optional)]
     pub coins: Option<crate::object_map::JsObjectMap<CoinBalance>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
+#[derive(Debug, Clone, PartialEq, TS)]
+#[ts(optional_fields, rename_all = "camelCase")]
 pub struct Ticker {
     pub id: String,
     pub symbol: String,
@@ -594,12 +650,10 @@ pub struct Ticker {
     pub ask: f64,
     pub last: f64,
     pub mark: f64,
-    pub index: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    // WOO publishes null for a real market with no index price.
+    #[ts(as = "f64")]
+    pub index: Option<f64>,
+
     pub mid_price: Option<f64>,
     pub percentage: f64,
     pub open_interest: f64,
@@ -609,20 +663,11 @@ pub struct Ticker {
     pub quote_volume: f64,
     // Runtime extra emitted by Paradex fetchTickers from virtualClock.getCurrentTimeMs().
     // The generated TypeScript remains the source declaration projection.
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
     #[ts(skip)]
     pub timestamp: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "crate::retained_json::deserialize_present_retained_json",
-        skip_serializing_if = "Option::is_none"
-    )]
+
     #[ts(type = "any", optional)]
-    pub info: Option<serde_json::Value>,
+    pub info: Option<crate::retained_json::RetainedJsonInput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -1020,7 +1065,9 @@ pub struct HistoricalTradeOptions {
 #[ts(optional_fields)]
 pub struct OHLCVOptions {
     pub symbol: String,
-    pub interval: Timeframe,
+    // The TS declaration is narrower than the source worker's runtime interval domain.
+    #[ts(as = "Timeframe")]
+    pub interval: AnyTimeframe,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -1375,6 +1422,10 @@ pub enum ExchangeName {
     Backpack,
     #[serde(rename = "binance")]
     Binance,
+    #[serde(rename = "binanceinverse")]
+    Binanceinverse,
+    #[serde(rename = "binanceoptions")]
+    Binanceoptions,
     #[serde(rename = "binancespot")]
     Binancespot,
     #[serde(rename = "binancepm")]
@@ -1393,8 +1444,6 @@ pub enum ExchangeName {
     Bitunix,
     #[serde(rename = "blofin")]
     Blofin,
-    #[serde(rename = "breakoutprop")]
-    Breakoutprop,
     #[serde(rename = "bybit")]
     Bybit,
     #[serde(rename = "bybitdemo")]
@@ -1441,10 +1490,6 @@ pub enum ExchangeName {
     Kodiakfi,
     #[serde(rename = "mode")]
     Mode,
-    #[serde(rename = "salsadex")]
-    Salsadex,
-    #[serde(rename = "tealstreet-dex")]
-    TealstreetDex,
     #[serde(rename = "txflow")]
     Txflow,
     #[serde(rename = "what")]
@@ -1688,6 +1733,14 @@ pub struct ExchangeAccountConfig {
     )]
     pub proxy_region: Option<String>,
     /// @ts-mutable
+    #[serde(rename = "hyrotraderDemo")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub hyrotrader_demo: Option<bool>,
+    /// @ts-mutable
     #[serde(rename = "useExtensionDirect")]
     #[serde(
         default,
@@ -1899,6 +1952,15 @@ pub struct ExchangeOptionsExtraKucoinBroker {
     pub verify: Option<bool>,
 }
 
+/// @ts-union
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+pub enum ExchangeOptionsExtraHyrotraderMode {
+    #[serde(rename = "demo")]
+    Demo,
+    #[serde(rename = "production")]
+    Production,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(optional_fields)]
 pub struct ExchangeOptionsExtra {
@@ -1976,6 +2038,15 @@ pub struct ExchangeOptionsExtra {
         skip_serializing_if = "Option::is_none"
     )]
     pub lighter_stop_slippage_pct: Option<f64>,
+    /// @ts-mutable
+    #[serde(rename = "hyrotraderMode")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
     /// @ts-mutable
     #[serde(rename = "kucoinBroker")]
     #[serde(
@@ -2281,6 +2352,15 @@ pub struct ExchangeOptions {
     )]
     #[ts(inline)]
     pub extra: Option<ExchangeOptionsExtra>,
+    /// Runtime extension read by Polymarket through its source `opts as any`.
+    #[serde(rename = "polymarket")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(skip)]
+    pub polymarket: Option<crate::ExchangeOptionsPolymarket>,
     #[serde(rename = "remoteSigner")]
     #[serde(
         default,
@@ -3013,7 +3093,8 @@ pub struct OrderRiskProfile {
     /// @ts-mutable
     pub rolling_unrealized_pnl: f64,
     /// @ts-mutable
-    pub order_line_pos_side: PositionSide,
+    #[ts(as = "PositionSide")]
+    pub order_line_pos_side: ModelField<PositionSide>,
     /// @ts-mutable
     pub position_size: f64,
     /// @ts-mutable
@@ -3029,7 +3110,7 @@ impl Serialize for OrderRiskProfile {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
         let mut row = serializer.serialize_struct(
-            "OrderRiskProfile",
+            crate::model_field::MODEL_RECORD,
             5 + usize::from(self.is_looking_like_a_full_stop.is_some())
                 + usize::from(self.order_line_text.is_some())
                 + usize::from(self.fee.is_some()),
@@ -3040,7 +3121,8 @@ impl Serialize for OrderRiskProfile {
         row.serialize_field("orderPnl", &self.order_pnl)?;
         row.serialize_field("totalRealizedPnl", &self.total_realized_pnl)?;
         row.serialize_field("rollingUnrealizedPnl", &self.rolling_unrealized_pnl)?;
-        row.serialize_field("orderLinePosSide", &self.order_line_pos_side)?;
+        self.order_line_pos_side
+            .serialize_field(&mut row, "orderLinePosSide")?;
         if let Some(value) = &self.order_line_text {
             row.serialize_field("orderLineText", value)?;
         }
@@ -3091,22 +3173,23 @@ mod strict_codecs {
         UpdateOrderOptsUpdateVariant1, ValidateAccountResult,
     };
     use super::{
-        AccountValidationError, Balance, ClosedPnlEntryContracts, ClosedPnlEntryEntryPrice,
-        ClosedPnlEntryExitPrice, ClosedPnlEntryFees, ClosedPnlEntryLeverage,
-        ClosedPnlEntryNotional, ClosedPnlEntryUnrealizedPnl, CoinBalance, DataProvenance,
-        ExchangeAccountConfigBybitSiteId, ExchangeAccountConfigHealthStatus, ExchangeName,
-        ExchangeOptionsAuth, ExchangeOptionsBybitSiteId, ExchangeOptionsExternalPublicData,
-        ExchangeOptionsExternalPublicDataVariant0Type,
+        AccountValidationError, AnyTimeframe, Balance, ClosedPnlEntryContracts,
+        ClosedPnlEntryEntryPrice, ClosedPnlEntryExitPrice, ClosedPnlEntryFees,
+        ClosedPnlEntryLeverage, ClosedPnlEntryNotional, ClosedPnlEntryUnrealizedPnl, CoinBalance,
+        DataProvenance, ExchangeAccountConfigBybitSiteId, ExchangeAccountConfigHealthStatus,
+        ExchangeName, ExchangeOptionsAuth, ExchangeOptionsBybitSiteId,
+        ExchangeOptionsExternalPublicData, ExchangeOptionsExternalPublicDataVariant0Type,
         ExchangeOptionsExternalPublicDataVariant1Type, ExchangeOptionsExtra,
-        ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraKucoinBroker,
-        ExchangeOptionsExtraLighterBuilderFeeMode, ExchangeOptionsHyperliquidBuilder,
-        ExchangeOptionsTuning, ExecutionPositionSide, IncomeCategory, MarginType, MarketLimits,
-        MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice, MarketPrecision, OptionGreeks,
-        OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, Order, OrderBookOrders,
-        OrderExtra, OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType,
-        OrderTimeInForce, OrderType, PayloadSignerCapability, PositionExtra, PositionMode,
-        PositionOption, PositionSide, PublicDataSourceCapability, RemoteSignerCapability,
-        Timeframe, TransportCapability, True, UpdateOrderOptsUpdate, deserialize_present,
+        ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraHyrotraderMode,
+        ExchangeOptionsExtraKucoinBroker, ExchangeOptionsExtraLighterBuilderFeeMode,
+        ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, ExecutionPositionSide,
+        IncomeCategory, MarginType, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage,
+        MarketLimitsPrice, MarketPrecision, ModelField, OptionGreeks, OptionRight, OptionTerms,
+        OptionTermsSettlement, OptionTermsStyle, Order, OrderBookOrders, OrderExtra,
+        OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
+        OrderType, PayloadSignerCapability, PositionExtra, PositionMode, PositionOption,
+        PositionSide, PublicDataSourceCapability, RemoteSignerCapability, Timeframe,
+        TransportCapability, True, UpdateOrderOptsUpdate, deserialize_present,
     };
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::OrderStatus")]
@@ -3293,11 +3376,101 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::MarketFees")]
+    struct WireMarketFees {
+        maker: f64,
+        taker: f64,
+    }
+    impl<'de> serde::Deserialize<'de> for super::MarketFees {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireMarketFees::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::MarketRuntime")]
+    #[serde(rename_all = "camelCase")]
+    struct WireMarketRuntime {
+        #[serde(
+            rename = "type",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        kind: Option<String>,
+        #[serde(
+            rename = "spot",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        spot: Option<bool>,
+        #[serde(
+            rename = "swap",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        swap: Option<bool>,
+        #[serde(
+            rename = "future",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        future: Option<bool>,
+        #[serde(
+            rename = "contract",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        contract: Option<bool>,
+        #[serde(
+            rename = "linear",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        linear: Option<bool>,
+        #[serde(
+            rename = "inverse",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        inverse: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        fees: Option<super::MarketFees>,
+    }
+    impl<'de> serde::Deserialize<'de> for super::MarketRuntime {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireMarketRuntime::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::MarketPrecision")]
     #[serde(rename_all = "camelCase")]
     struct WireMarketPrecision {
         amount: f64,
         price: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        base: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        quote: Option<f64>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::MarketPrecision {
@@ -3311,7 +3484,7 @@ mod strict_codecs {
     #[serde(rename_all = "camelCase")]
     struct WireMarketLimitsAmount {
         min: f64,
-        max: f64,
+        max: super::NumericValue,
     }
 
     impl<'de> serde::Deserialize<'de> for super::MarketLimitsAmount {
@@ -3346,6 +3519,12 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         price: Option<MarketLimitsPrice>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        cost: Option<MarketLimitsLeverage>,
     }
 
     #[derive(serde::Deserialize)]
@@ -3353,6 +3532,12 @@ mod strict_codecs {
     #[serde(rename_all = "camelCase")]
     struct WireMarketLimitsPrice {
         min: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        max: Option<f64>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::MarketLimitsPrice {
@@ -3533,10 +3718,10 @@ mod strict_codecs {
         is_read_only: Option<bool>,
         #[serde(
             default,
-            deserialize_with = "crate::retained_json::deserialize_present_retained_json",
+            deserialize_with = "crate::retained_json::deserialize_present_retained_info",
             skip_serializing_if = "Option::is_none"
         )]
-        info: Option<serde_json::Value>,
+        info: Option<crate::retained_json::RetainedJsonInput>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",
@@ -3549,11 +3734,26 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         maker_fee: Option<f64>,
+        #[serde(flatten)]
+        runtime: super::MarketRuntime,
     }
 
     impl<'de> serde::Deserialize<'de> for super::Market {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireMarket::deserialize(crate::strict_decode::object(deserializer))
+            struct InfoVisitor;
+            impl<'de> serde::de::Visitor<'de> for InfoVisitor {
+                type Value = super::Market;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a Market record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    d: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WireMarket::deserialize(crate::strict_decode::object(d))
+                }
+            }
+            deserializer.deserialize_newtype_struct(crate::model_field::INFO_RECORD, InfoVisitor)
         }
     }
 
@@ -3628,87 +3828,70 @@ mod strict_codecs {
     #[serde(rename_all = "camelCase")]
     struct WireOrder {
         id: String,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        parent_id: Option<String>,
-        status: OrderStatus,
+        #[serde(default)]
+        parent_id: ModelField<String>,
+        #[serde(default)]
+        status: ModelField<OrderStatus>,
         symbol: String,
-        r#type: OrderType,
-        side: OrderSide,
-        price: f64,
+        #[serde(default)]
+        r#type: ModelField<OrderType>,
+        #[serde(default)]
+        side: ModelField<OrderSide>,
+        #[serde(default)]
+        price: ModelField<f64>,
         amount: f64,
         filled: f64,
         remaining: f64,
-        reduce_only: bool,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        close: Option<bool>,
-        #[serde(
-            default,
-            deserialize_with = "crate::retained_json::deserialize_present_retained_json",
-            skip_serializing_if = "Option::is_none"
-        )]
-        info: Option<serde_json::Value>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        client_order_id: Option<String>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        time_in_force: Option<OrderTimeInForce>,
+        #[serde(default)]
+        reduce_only: ModelField<bool>,
+        #[serde(default)]
+        close: ModelField<bool>,
+        #[serde(default, deserialize_with = "crate::model_field::deserialize_info")]
+        info: ModelField<crate::retained_json::RetainedJsonInput>,
+        #[serde(default)]
+        client_order_id: ModelField<String>,
+        #[serde(default)]
+        time_in_force: ModelField<OrderTimeInForce>,
         last_update: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        trigger_type: Option<OrderStopTriggerType>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        tp_trigger_type: Option<OrderStopTriggerType>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        sl_trigger_type: Option<OrderStopTriggerType>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        take_profit: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        stop_loss: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        extra: Option<OrderExtra>,
+        #[serde(default)]
+        trigger_type: ModelField<OrderStopTriggerType>,
+        #[serde(default)]
+        tp_trigger_type: ModelField<OrderStopTriggerType>,
+        #[serde(default)]
+        sl_trigger_type: ModelField<OrderStopTriggerType>,
+        #[serde(default)]
+        take_profit: ModelField<f64>,
+        #[serde(default)]
+        stop_loss: ModelField<f64>,
+        #[serde(default)]
+        extra: ModelField<OrderExtra>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::Order {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireOrder::deserialize(crate::strict_decode::object(deserializer))
+            struct RecordVisitor;
+            impl<'de> serde::de::Visitor<'de> for RecordVisitor {
+                type Value = super::Order;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a model record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    decoder: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WireOrder::deserialize(crate::strict_decode::object(decoder))
+                }
+                // Map-forwarding decoders (flatten/MapAccessDeserializer) skip the hint.
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    map: A,
+                ) -> Result<Self::Value, A::Error> {
+                    WireOrder::deserialize(crate::strict_decode::object(
+                        serde::de::value::MapAccessDeserializer::new(map),
+                    ))
+                }
+            }
+            deserializer.deserialize_newtype_struct(crate::model_field::MODEL_RECORD, RecordVisitor)
         }
     }
 
@@ -3742,66 +3925,57 @@ mod strict_codecs {
     struct WirePosition {
         id: String,
         symbol: String,
-        side: PositionSide,
+        #[serde(default)]
+        side: ModelField<PositionSide>,
         entry_price: f64,
         notional: f64,
         leverage: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        margin_type: Option<MarginType>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        position_mode: Option<PositionMode>,
+        #[serde(default)]
+        margin_type: ModelField<MarginType>,
+        #[serde(default)]
+        position_mode: ModelField<PositionMode>,
         unrealized_pnl: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        realized_pnl: Option<f64>,
+        #[serde(default)]
+        realized_pnl: ModelField<f64>,
         contracts: f64,
         liquidation_price: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        margin_size: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "crate::retained_json::deserialize_present_retained_json",
-            skip_serializing_if = "Option::is_none"
-        )]
-        info: Option<serde_json::Value>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        extra: Option<PositionExtra>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        last_update: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        option: Option<PositionOption>,
+        #[serde(default)]
+        margin_size: ModelField<f64>,
+        #[serde(default, deserialize_with = "crate::model_field::deserialize_info")]
+        info: ModelField<crate::retained_json::RetainedJsonInput>,
+        #[serde(default)]
+        extra: ModelField<PositionExtra>,
+        #[serde(default)]
+        last_update: ModelField<f64>,
+        #[serde(default)]
+        option: ModelField<PositionOption>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::Position {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WirePosition::deserialize(crate::strict_decode::object(deserializer))
+            struct RecordVisitor;
+            impl<'de> serde::de::Visitor<'de> for RecordVisitor {
+                type Value = super::Position;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a model record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    decoder: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WirePosition::deserialize(crate::strict_decode::object(decoder))
+                }
+                // Map-forwarding decoders (flatten/MapAccessDeserializer) skip the hint.
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    map: A,
+                ) -> Result<Self::Value, A::Error> {
+                    WirePosition::deserialize(crate::strict_decode::object(
+                        serde::de::value::MapAccessDeserializer::new(map),
+                    ))
+                }
+            }
+            deserializer.deserialize_newtype_struct(crate::model_field::MODEL_RECORD, RecordVisitor)
         }
     }
 
@@ -3821,6 +3995,33 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
+    struct AvailableLockedBalance {
+        available: f64,
+        locked: f64,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::CurrencyBalance {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let input = crate::retained_json::RetainedJsonInput::deserialize(deserializer)?;
+            if !input.is_object() {
+                return Err(serde::de::Error::custom(
+                    "CurrencyBalance must be an object",
+                ));
+            }
+            if let Ok(balance) = input.clone().decode_native::<super::Balance>(false) {
+                return Ok(Self::Declared(balance));
+            }
+            let value = input
+                .decode_native::<AvailableLockedBalance>(false)
+                .map_err(serde::de::Error::custom)?;
+            Ok(Self::AvailableLocked {
+                available: value.available,
+                locked: value.locked,
+            })
+        }
+    }
+
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::Balance")]
     #[serde(rename_all = "camelCase")]
     struct WireBalance {
@@ -3830,16 +4031,16 @@ mod strict_codecs {
         upnl: f64,
         #[serde(
             default,
-            deserialize_with = "crate::retained_json::deserialize_present_retained_json",
+            deserialize_with = "crate::retained_json::deserialize_present_retained_info",
             skip_serializing_if = "Option::is_none"
         )]
-        info: Option<serde_json::Value>,
+        info: Option<crate::retained_json::RetainedJsonInput>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",
             skip_serializing_if = "Option::is_none"
         )]
-        currencies: Option<crate::object_map::JsObjectMap<Balance>>,
+        currencies: Option<crate::object_map::JsObjectMap<crate::CurrencyBalance>>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",
@@ -3850,7 +4051,20 @@ mod strict_codecs {
 
     impl<'de> serde::Deserialize<'de> for super::Balance {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireBalance::deserialize(crate::strict_decode::object(deserializer))
+            struct InfoVisitor;
+            impl<'de> serde::de::Visitor<'de> for InfoVisitor {
+                type Value = super::Balance;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a Balance record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    d: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WireBalance::deserialize(crate::strict_decode::object(d))
+                }
+            }
+            deserializer.deserialize_newtype_struct(crate::model_field::INFO_RECORD, InfoVisitor)
         }
     }
 
@@ -3864,7 +4078,8 @@ mod strict_codecs {
         ask: f64,
         last: f64,
         mark: f64,
-        index: f64,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        index: Option<f64>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",
@@ -3885,15 +4100,28 @@ mod strict_codecs {
         timestamp: Option<f64>,
         #[serde(
             default,
-            deserialize_with = "crate::retained_json::deserialize_present_retained_json",
+            deserialize_with = "crate::retained_json::deserialize_present_retained_info",
             skip_serializing_if = "Option::is_none"
         )]
-        info: Option<serde_json::Value>,
+        info: Option<crate::retained_json::RetainedJsonInput>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::Ticker {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireTicker::deserialize(crate::strict_decode::object(deserializer))
+            struct InfoVisitor;
+            impl<'de> serde::de::Visitor<'de> for InfoVisitor {
+                type Value = super::Ticker;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a Ticker record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    d: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WireTicker::deserialize(crate::strict_decode::object(d))
+                }
+            }
+            deserializer.deserialize_newtype_struct(crate::model_field::INFO_RECORD, InfoVisitor)
         }
     }
 
@@ -4355,7 +4583,7 @@ mod strict_codecs {
     #[serde(rename_all = "camelCase")]
     struct WireOHLCVOptions {
         symbol: String,
-        interval: Timeframe,
+        interval: AnyTimeframe,
         #[serde(
             default,
             deserialize_with = "deserialize_present",
@@ -4766,6 +4994,10 @@ mod strict_codecs {
         Backpack,
         #[serde(rename = "binance")]
         Binance,
+        #[serde(rename = "binanceinverse")]
+        Binanceinverse,
+        #[serde(rename = "binanceoptions")]
+        Binanceoptions,
         #[serde(rename = "binancespot")]
         Binancespot,
         #[serde(rename = "binancepm")]
@@ -4784,8 +5016,6 @@ mod strict_codecs {
         Bitunix,
         #[serde(rename = "blofin")]
         Blofin,
-        #[serde(rename = "breakoutprop")]
-        Breakoutprop,
         #[serde(rename = "bybit")]
         Bybit,
         #[serde(rename = "bybitdemo")]
@@ -4832,10 +5062,6 @@ mod strict_codecs {
         Kodiakfi,
         #[serde(rename = "mode")]
         Mode,
-        #[serde(rename = "salsadex")]
-        Salsadex,
-        #[serde(rename = "tealstreet-dex")]
-        TealstreetDex,
         #[serde(rename = "txflow")]
         Txflow,
         #[serde(rename = "what")]
@@ -5077,6 +5303,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         proxy_region: Option<String>,
+        #[serde(rename = "hyrotraderDemo")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        hyrotrader_demo: Option<bool>,
         #[serde(rename = "useExtensionDirect")]
         #[serde(
             default,
@@ -5191,6 +5424,47 @@ mod strict_codecs {
     impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsAuth {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             WireExchangeOptionsAuth::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::ExchangeOptionsPolymarket")]
+    #[serde(rename_all = "camelCase")]
+    struct WireExchangeOptionsPolymarket {
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        api_key: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        api_secret: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        api_passphrase: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        signer_type: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        funder_address: Option<String>,
+    }
+    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsPolymarket {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireExchangeOptionsPolymarket::deserialize(crate::strict_decode::object(deserializer))
         }
     }
 
@@ -5336,6 +5610,23 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::ExchangeOptionsExtraHyrotraderMode")]
+    enum WireExchangeOptionsExtraHyrotraderMode {
+        #[serde(rename = "demo")]
+        Demo,
+        #[serde(rename = "production")]
+        Production,
+    }
+    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExtraHyrotraderMode {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireExchangeOptionsExtraHyrotraderMode::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+        }
+    }
+
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::ExchangeOptionsExtra")]
     struct WireExchangeOptionsExtra {
         #[serde(rename = "tickInterval")]
@@ -5401,6 +5692,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         lighter_stop_slippage_pct: Option<f64>,
+        #[serde(rename = "hyrotraderMode")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
         #[serde(rename = "kucoinBroker")]
         #[serde(
             default,
@@ -5722,6 +6020,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         extra: Option<ExchangeOptionsExtra>,
+        #[serde(rename = "polymarket")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        polymarket: Option<crate::ExchangeOptionsPolymarket>,
         #[serde(rename = "remoteSigner")]
         #[serde(
             default,
@@ -6424,7 +6729,8 @@ mod strict_codecs {
         order_pnl: f64,
         total_realized_pnl: f64,
         rolling_unrealized_pnl: f64,
-        order_line_pos_side: PositionSide,
+        #[serde(default)]
+        order_line_pos_side: ModelField<PositionSide>,
         position_size: f64,
         #[serde(
             default,
@@ -6444,7 +6750,29 @@ mod strict_codecs {
 
     impl<'de> serde::Deserialize<'de> for super::OrderRiskProfile {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireOrderRiskProfile::deserialize(crate::strict_decode::object(deserializer))
+            struct RecordVisitor;
+            impl<'de> serde::de::Visitor<'de> for RecordVisitor {
+                type Value = super::OrderRiskProfile;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a model record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    decoder: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WireOrderRiskProfile::deserialize(crate::strict_decode::object(decoder))
+                }
+                // Map-forwarding decoders (flatten/MapAccessDeserializer) skip the hint.
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    map: A,
+                ) -> Result<Self::Value, A::Error> {
+                    WireOrderRiskProfile::deserialize(crate::strict_decode::object(
+                        serde::de::value::MapAccessDeserializer::new(map),
+                    ))
+                }
+            }
+            deserializer.deserialize_newtype_struct(crate::model_field::MODEL_RECORD, RecordVisitor)
         }
     }
 
@@ -6887,6 +7215,16 @@ mod strict_codecs {
                         .as_str()
                         .unwrap()
                         .to_owned(),
+                    serde_json::to_value(ExchangeName::Binanceinverse)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(ExchangeName::Binanceoptions)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
                     serde_json::to_value(ExchangeName::Binancespot)
                         .unwrap()
                         .as_str()
@@ -6928,11 +7266,6 @@ mod strict_codecs {
                         .unwrap()
                         .to_owned(),
                     serde_json::to_value(ExchangeName::Blofin)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(ExchangeName::Breakoutprop)
                         .unwrap()
                         .as_str()
                         .unwrap()
@@ -7052,16 +7385,6 @@ mod strict_codecs {
                         .as_str()
                         .unwrap()
                         .to_owned(),
-                    serde_json::to_value(ExchangeName::Salsadex)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(ExchangeName::TealstreetDex)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
                     serde_json::to_value(ExchangeName::Txflow)
                         .unwrap()
                         .as_str()
@@ -7123,6 +7446,7 @@ mod strict_codecs {
             crate::strict_decode::tests::record::<ExchangeOptionsExtraKucoinBroker>(
                 "ExchangeOptionsExtraKucoinBroker",
             );
+            crate::strict_decode::tests::string_union::<ExchangeOptionsExtraHyrotraderMode>("ExchangeOptionsExtraHyrotraderMode", WireExchangeOptionsExtraHyrotraderMode::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExtraHyrotraderMode::Demo).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeOptionsExtraHyrotraderMode::Production).unwrap().as_str().unwrap().to_owned()]);
             crate::strict_decode::tests::record::<ExchangeOptionsExtra>("ExchangeOptionsExtra");
             crate::strict_decode::tests::string_union::<ExchangeOptionsExternalPublicDataVariant0Type>("ExchangeOptionsExternalPublicDataVariant0Type", WireExchangeOptionsExternalPublicDataVariant0Type::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExternalPublicDataVariant0Type::Websocket).unwrap().as_str().unwrap().to_owned()]);
             crate::strict_decode::tests::record::<ExchangeOptionsExternalPublicDataVariant0>(
@@ -7410,3 +7734,91 @@ pub mod subscriber_error;
 pub use subscriber_error::{PublicDataSubscriber, StoreSubscriber, StoreSubscriberError};
 
 pub mod exchange_metadata;
+
+impl serde::Serialize for Order {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct(crate::model_field::MODEL_RECORD, 22)?;
+        state.serialize_field("id", &self.id)?;
+        self.parent_id.serialize_field(&mut state, "parentId")?;
+        self.status.serialize_field(&mut state, "status")?;
+        state.serialize_field("symbol", &self.symbol)?;
+        self.r#type.serialize_field(&mut state, "type")?;
+        self.side.serialize_field(&mut state, "side")?;
+        self.price.serialize_field(&mut state, "price")?;
+        state.serialize_field("amount", &self.amount)?;
+        state.serialize_field("filled", &self.filled)?;
+        state.serialize_field("remaining", &self.remaining)?;
+        self.reduce_only.serialize_field(&mut state, "reduceOnly")?;
+        self.close.serialize_field(&mut state, "close")?;
+        match &self.info {
+            ModelField::Absent => {}
+            ModelField::Undefined
+            | ModelField::Value(crate::retained_json::RetainedJsonInput::Undefined) => {
+                state.skip_field("info")?
+            }
+            ModelField::Value(value) => state.serialize_field("info", value)?,
+        }
+        self.client_order_id
+            .serialize_field(&mut state, "clientOrderId")?;
+        self.time_in_force
+            .serialize_field(&mut state, "timeInForce")?;
+        state.serialize_field("lastUpdate", &self.last_update)?;
+        self.trigger_type
+            .serialize_field(&mut state, "triggerType")?;
+        self.tp_trigger_type
+            .serialize_field(&mut state, "tpTriggerType")?;
+        self.sl_trigger_type
+            .serialize_field(&mut state, "slTriggerType")?;
+        self.take_profit.serialize_field(&mut state, "takeProfit")?;
+        self.stop_loss.serialize_field(&mut state, "stopLoss")?;
+        self.extra.serialize_field(&mut state, "extra")?;
+        state.end()
+    }
+}
+
+impl serde::Serialize for Position {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct(crate::model_field::MODEL_RECORD, 17)?;
+        serialize_position_fields(self, &mut state)?;
+        state.end()
+    }
+}
+fn serialize_position_fields<S: serde::ser::SerializeStruct>(
+    position: &Position,
+    state: &mut S,
+) -> Result<(), S::Error> {
+    state.serialize_field("id", &position.id)?;
+    state.serialize_field("symbol", &position.symbol)?;
+    position.side.serialize_field(state, "side")?;
+    state.serialize_field("entryPrice", &position.entry_price)?;
+    state.serialize_field("notional", &position.notional)?;
+    state.serialize_field("leverage", &position.leverage)?;
+    position.margin_type.serialize_field(state, "marginType")?;
+    position
+        .position_mode
+        .serialize_field(state, "positionMode")?;
+    state.serialize_field("unrealizedPnl", &position.unrealized_pnl)?;
+    position
+        .realized_pnl
+        .serialize_field(state, "realizedPnl")?;
+    state.serialize_field("contracts", &position.contracts)?;
+    state.serialize_field("liquidationPrice", &position.liquidation_price)?;
+    position.margin_size.serialize_field(state, "marginSize")?;
+    match &position.info {
+        ModelField::Absent => {}
+        ModelField::Undefined
+        | ModelField::Value(crate::retained_json::RetainedJsonInput::Undefined) => {
+            state.skip_field("info")?
+        }
+        ModelField::Value(value) => state.serialize_field("info", value)?,
+    }
+    position.extra.serialize_field(state, "extra")?;
+    position.last_update.serialize_field(state, "lastUpdate")?;
+    position.option.serialize_field(state, "option")?;
+    Ok(())
+}
+
+pub mod prepared_order;
+pub use prepared_order::PreparedOrderOpts;

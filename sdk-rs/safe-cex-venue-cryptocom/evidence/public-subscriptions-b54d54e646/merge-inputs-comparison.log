@@ -1,4 +1,0 @@
-MEASURED SHA: fe7284543d609d33de379d010a25fd673aabb9f3
-COMMAND: ["git", "diff", "--exit-code", "b54d54e646fb15e46b644fd792c6cdbc7bceab08", "fe7284543d609d33de379d010a25fd673aabb9f3", "--", "packages/safe-cex/src/exchanges/cryptocom", "sdk-rs/safe-cex-venue-cryptocom/Cargo.toml", "sdk-rs/Cargo.toml", "sdk-rs/safe-cex-crypto/src", "sdk-rs/safe-cex-crypto/Cargo.toml", "sdk-rs/safe-cex-num/src", "sdk-rs/safe-cex-num/Cargo.toml", "sdk-rs/safe-cex-exchange/src", "sdk-rs/safe-cex-exchange/Cargo.toml", "sdk-rs/safe-cex-store/src", "sdk-rs/safe-cex-store/Cargo.toml", "sdk-rs/safe-cex-types/src", "sdk-rs/safe-cex-types/Cargo.toml"]
-
-MEASURED EXIT: 0

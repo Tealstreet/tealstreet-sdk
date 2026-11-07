@@ -96,6 +96,10 @@ export type ExchangeOptions = {
         /**
          * @ts-mutable
          */
+        hyrotraderMode?: "demo" | "production";
+        /**
+         * @ts-mutable
+         */
         kucoinBroker?: {
             readonly partner: string;
             readonly brokerKey: string;

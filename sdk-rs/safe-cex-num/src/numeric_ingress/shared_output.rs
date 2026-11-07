@@ -70,7 +70,8 @@ impl JsNumberOutput for safe_cex_types::DataProvenance {
 
 impl JsNumberOutput for safe_cex_types::ExchangeName {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binancespot, Binancepm, Bingx, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Breakoutprop, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Salsadex, TealstreetDex, Txflow, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
+        // #3034 restores Binance Options to the strict metadata roster; output eligibility must match.
+        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binanceinverse, Binancespot, Binancepm, Binanceoptions, Bingx, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Txflow, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
     }
 }
 
@@ -106,7 +107,7 @@ impl JsNumberOutput for safe_cex_types::ExchangeOptionsExternalPublicDataVariant
 
 impl JsNumberOutput for safe_cex_types::ExchangeOptionsExtra {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { tick_interval, recv_window, asterdex_api_version, aster_builder_address, aster_builder_fee_rate_maker, aster_builder_fee_rate_taker, lighter_builder_fee_mode, lighter_integrator_account_index, lighter_stop_slippage_pct, kucoin_broker });
+        crate::js_number_output!(self, struct { hyrotrader_mode, tick_interval, recv_window, asterdex_api_version, aster_builder_address, aster_builder_fee_rate_maker, aster_builder_fee_rate_taker, lighter_builder_fee_mode, lighter_integrator_account_index, lighter_stop_slippage_pct, kucoin_broker });
     }
 }
 
@@ -172,7 +173,7 @@ impl JsNumberOutput for safe_cex_types::MarginType {
 
 impl JsNumberOutput for safe_cex_types::MarketLimits {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { amount, leverage, price });
+        crate::js_number_output!(self, struct { amount, leverage, price, cost });
     }
 }
 
@@ -190,7 +191,7 @@ impl JsNumberOutput for safe_cex_types::MarketLimitsLeverage {
 
 impl JsNumberOutput for safe_cex_types::MarketLimitsPrice {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { min });
+        crate::js_number_output!(self, struct { min, max });
     }
 }
 
@@ -232,7 +233,7 @@ impl JsNumberOutput for safe_cex_types::PositionOption {
 
 impl JsNumberOutput for safe_cex_types::MarketPrecision {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { amount, price });
+        crate::js_number_output!(self, struct { amount, price, base, quote });
     }
 }
 
@@ -371,15 +372,21 @@ impl JsNumberOutput for safe_cex_types::ExchangeOptionsExternalPublicData {
     }
 }
 
+impl JsNumberOutput for safe_cex_types::ExchangeOptionsPolymarket {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, struct { api_key, api_secret, api_passphrase, signer_type, funder_address });
+    }
+}
+
 impl JsNumberOutput for safe_cex_types::ExchangeOptions {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { key, secret, passphrase, secondary_key, secondary_secret, secondary_passphrase, secondary_proxy_url, auth, paradex_address, subkey_address, grvt_signer_address, grvt_trading_account_id, stark_private_key, vault, application_id, api_key_index, hyperliquid_builder, testnet, enable_spot_markets, enable_option_markets, enable_inverse_markets, bybit_site_id, public_data_only, private_only, tealstreet_proxy, tealstreet_tunnel, tealstreet_ws_route, override_proxy_url, proxy_region, omni_key_seed, subaccount, orderly_exchange_id, tuning, extra, remote_signer, transport, payload_signer, hosted_mode, external_public_data });
+        crate::js_number_output!(self, struct { key, secret, passphrase, secondary_key, secondary_secret, secondary_passphrase, secondary_proxy_url, auth, paradex_address, subkey_address, grvt_signer_address, grvt_trading_account_id, stark_private_key, vault, application_id, api_key_index, hyperliquid_builder, testnet, enable_spot_markets, enable_option_markets, enable_inverse_markets, bybit_site_id, public_data_only, private_only, tealstreet_proxy, tealstreet_tunnel, tealstreet_ws_route, override_proxy_url, proxy_region, omni_key_seed, subaccount, orderly_exchange_id, tuning, extra, polymarket, remote_signer, transport, payload_signer, hosted_mode, external_public_data });
     }
 }
 
 impl JsNumberOutput for safe_cex_types::Market {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { id, symbol, pretty_symbol, base, quote, active, precision, limits, option, contract_size, is_expiring, is_inverse, is_spot, is_perpetual, is_read_only, taker_fee, maker_fee } passthrough { info });
+        crate::js_number_output!(self, struct { id, symbol, pretty_symbol, base, quote, active, precision, limits, option, contract_size, is_expiring, is_inverse, is_spot, is_perpetual, is_read_only, taker_fee, maker_fee, runtime } passthrough { info });
     }
 }
 
@@ -401,8 +408,56 @@ impl JsNumberOutput for safe_cex_types::Ticker {
     }
 }
 
+impl JsNumberOutput for safe_cex_types::CurrencyBalance {
+    fn check_number_output(&self) {
+        match self {
+            Self::Declared(balance) => balance.check_number_output(),
+            Self::AvailableLocked { available, locked } => {
+                available.check_number_output();
+                locked.check_number_output();
+            }
+        }
+    }
+}
+
 impl JsNumberOutput for safe_cex_types::Balance {
     fn check_number_output(&self) {
         crate::js_number_output!(self, struct { used, free, total, upnl, currencies, coins } passthrough { info });
+    }
+}
+
+impl<T: JsNumberOutput> JsNumberOutput for safe_cex_types::ModelField<T> {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, enum { Absent, Undefined, Value(value) });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::PreparedOrderOpts {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, struct { symbol, r#type, side, amount, price, trigger_price, stop_loss, take_profit, reduce_only, time_in_force, trigger_type, tp_trigger_type, sl_trigger_type, client_order_id, max_slippage_pct, close, implied_volatility });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::ExchangeOptionsExtraHyrotraderMode {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, enum { Demo, Production });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::NumericValue {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, enum { Number(value), Text(value) });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::MarketRuntime {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, struct { kind, spot, swap, future, contract, linear, inverse, fees });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::MarketFees {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, struct { maker, taker });
     }
 }

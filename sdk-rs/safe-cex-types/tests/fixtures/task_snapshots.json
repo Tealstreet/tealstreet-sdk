@@ -1,0 +1,57 @@
+{
+  "activeChasers": [
+    {
+      "id": "",
+      "symbol": "",
+      "size": 0,
+      "side": "buy",
+      "maxAttempts": 0,
+      "attempts": 0,
+      "isStopped": false,
+      "stopReason": ""
+    }
+  ],
+  "activeTWAPs": [
+    {
+      "id": "",
+      "symbol": "",
+      "accountName": "",
+      "activeMarket": {
+        "id": "",
+        "symbol": "",
+        "base": "",
+        "quote": "",
+        "active": false,
+        "precision": {
+          "amount": 0,
+          "price": 0
+        },
+        "limits": {
+          "amount": {
+            "min": 0,
+            "max": 0
+          },
+          "leverage": {
+            "min": 0,
+            "max": 0
+          }
+        }
+      },
+      "size": 0,
+      "duration": 0,
+      "ordersCount": 0,
+      "side": "buy",
+      "chaserDelay": 0,
+      "reduceOnly": false,
+      "randomnessPercentage": 0,
+      "useLimitOrders": false,
+      "useChaserOrders": false,
+      "ordersSizes": [
+        0
+      ],
+      "status": "idle",
+      "ordersExecuted": 0,
+      "nextOrderAt": 0
+    }
+  ]
+}

@@ -8,7 +8,7 @@ import {
   normalizeCoinbaseStarbaseInstrument,
   normalizeCoinbaseStarbaseOrderBookSnapshot,
   normalizeCoinbaseStarbaseTicker,
-} from '../../exchanges/coinbase/coinbase.starbase-public';
+} from '../reference/coinbase/coinbase.starbase-public';
 import {
   STARBASE_BOOK_CHANGE_PAYLOAD,
   STARBASE_BOOK_SNAPSHOT_PAYLOAD,

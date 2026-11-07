@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import axios from 'axios';
 
-import { BitgetExchange } from '../exchanges/bitget/bitget.exchange';
+import { BitgetExchange } from './reference/bitget/bitget.exchange';
 import { ENDPOINTS } from '../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../store/store.base';
 import { MarginType, PositionMode, PositionSide } from '../types';
@@ -9,7 +9,7 @@ import { createPositionId } from '../utils/createPositionId';
 
 const createAPIMock = vi.hoisted(() => vi.fn());
 
-vi.mock('../exchanges/bitget/bitget.api', () => ({
+vi.mock('./reference/bitget/bitget.api', () => ({
   createAPI: (...args: any[]) => createAPIMock(...args),
 }));
 

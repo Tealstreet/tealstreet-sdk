@@ -22,18 +22,12 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./exchangeMetadata')>()),
   getExchangeMetadata: vi.fn((exchangeName: string) => ({
     exchangeName,
-    requiresCors: exchangeName === 'coinbase',
+    requiresCors: exchangeName === 'apexomni',
     enforceWsTunnel: exchangeName === 'bybit',
   })),
 }));
 
-vi.mock('./exchanges/registry', () => ({
-  exchangeRegistry: {
-    bybit: () => Promise.resolve(testState.MockExchange),
-    coinbase: () => Promise.resolve(testState.MockExchange),
-  },
-  getRegisteredExchangeNames: vi.fn(() => ['bybit', 'coinbase']),
-}));
+vi.mock('./exchanges/rust/rust.exchange', () => ({ RustEngineExchange: testState.MockExchange }));
 
 vi.mock('./utils/virtualClock', () => ({
   virtualClock: {
@@ -48,13 +42,13 @@ describe('createPublicExchange', () => {
   });
 
   it('adds metadata-driven proxy override for public exchanges that need proxying', async () => {
-    await createPublicExchange('coinbase');
+    await createPublicExchange('apexomni');
 
     expect(testState.constructorCalls[0]?.options).toMatchObject({
       key: '',
       secret: '',
       publicDataOnly: true,
-      overrideProxyUrl: 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+      overrideProxyUrl: 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy', // fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e
     });
   });
 
@@ -63,12 +57,12 @@ describe('createPublicExchange', () => {
       key: '',
       secret: '',
       publicDataOnly: true,
-      overrideProxyUrl: 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+      overrideProxyUrl: 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy', // fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e
     });
   });
 
   it('disables all proxy routing when requested', async () => {
-    await createPublicExchange('coinbase', {
+    await createPublicExchange('apexomni', {
       forceAllProxiesOff: true,
       overrideProxyUrl: 'https://custom-proxy.example.com',
       tealstreetProxy: true,

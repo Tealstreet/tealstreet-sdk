@@ -1,10 +1,10 @@
 import type { Axios } from 'axios';
-import type { LIST_ORDERS_RESPONSE } from '../../exchanges/coinbase/coinbase.types';
+import type { LIST_ORDERS_RESPONSE } from '../reference/coinbase/coinbase.types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
-import { ENDPOINTS } from '../../exchanges/coinbase/coinbase.types';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
+import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, LogSeverity, Market, OrderSide, OrderStatus, OrderType } from '../../types';
 

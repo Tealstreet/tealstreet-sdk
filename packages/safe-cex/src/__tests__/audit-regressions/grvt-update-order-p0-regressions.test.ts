@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType } from '../../types';
 
@@ -14,6 +14,7 @@ const makeExchange = () => {
         base: 'BTC',
         quote: 'USDT',
         active: true,
+        info: { ih: '0x030501', bd: 9, qd: 6 },
         precision: { amount: 0.001, price: 0.1 },
         limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
       },
@@ -27,10 +28,11 @@ const makeExchange = () => {
 
 const rawStopOrder = (overrides: Record<string, unknown> = {}) => ({
   order_id: '0xstop',
+  is_market: false,
   time_in_force: 'GOOD_TILL_TIME',
   post_only: true,
   reduce_only: true,
-  legs: [{ instrument: 'BTC_USDT_Perp', is_buying_asset: false, limit_price: '0', size: '2' }],
+  legs: [{ instrument: 'BTC_USDT_Perp', is_buying_asset: false, limit_price: '58000', size: '2' }],
   state: { status: 'OPEN', book_size: ['2'], traded_size: ['0'], update_time: '1700000000000000000' },
   metadata: {
     client_order_id: '501',
@@ -91,18 +93,21 @@ describe('GRVT P0 audit regressions', () => {
     await expect(exchange.updateOrder({ order, update: { price: 59000 } })).resolves.toEqual(['replacement-nonce']);
 
     expect(cancelOrder).toHaveBeenCalledWith(order);
-    expect(placeOrder).toHaveBeenCalledWith({
-      symbol: 'BTC_USDT_PERP',
-      type: OrderType.StopLoss,
-      side: OrderSide.Sell,
-      amount: 2,
-      price: 59000,
-      triggerPrice: 59000,
-      reduceOnly: true,
-      timeInForce: OrderTimeInForce.PostOnly,
-      close: true,
-      slTriggerType: OrderStopTriggerType.MarkPrice,
-    });
+    expect(placeOrder).toHaveBeenCalledWith(
+      {
+        symbol: 'BTC_USDT_PERP',
+        type: OrderType.StopLoss,
+        side: OrderSide.Sell,
+        amount: 2,
+        price: 59000,
+        triggerPrice: 59000,
+        reduceOnly: true,
+        timeInForce: OrderTimeInForce.PostOnly,
+        close: true,
+        slTriggerType: OrderStopTriggerType.MarkPrice,
+      },
+      { isMarket: false, limitPrice: 58000 },
+    );
   });
 
   it('does not cancel an order when its upstream time-in-force or trigger metadata cannot be preserved', async () => {
@@ -160,5 +165,62 @@ describe('GRVT P0 audit regressions', () => {
       'split-position trigger is not supported',
     );
     expect(cancelOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe('GRVT replacement quantity and signing preflight', () => {
+  it.each([
+    ['remaining dust below grid', 0.2004, 100],
+    ['native price overflow', 1, 100_000_000_000],
+  ])('rejects %s before cancelling the original', async (_label, amount, price) => {
+    const exchange = makeExchange();
+    const order = {
+      id: '42',
+      symbol: 'BTC_USDT_PERP',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 1,
+      filled: 0.2,
+      remaining: 0.8,
+      price: 100,
+      reduceOnly: false,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+      status: OrderStatus.Open,
+      lastUpdate: 1700000000000,
+    } as any;
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const place = vi.fn().mockResolvedValue(['replacement']);
+    exchange.cancelOrder = cancel;
+    exchange.placeOrder = place;
+    await expect(exchange.updateOrder({ order, update: { amount, price } })).rejects.toThrow(/precision|uint64/);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(place).not.toHaveBeenCalled();
+  });
+
+  it('validates quantized native units while passing the original remaining amount to placement', async () => {
+    const exchange = makeExchange();
+    const order = {
+      id: '42',
+      symbol: 'BTC_USDT_PERP',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 1,
+      filled: 0.2,
+      remaining: 0.8,
+      price: 100,
+      reduceOnly: false,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+      status: OrderStatus.Open,
+      lastUpdate: 1700000000000,
+    } as any;
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const place = vi.fn().mockResolvedValue(['replacement']);
+    exchange.cancelOrder = cancel;
+    exchange.placeOrder = place;
+    await expect(exchange.updateOrder({ order, update: { amount: 0.5014, price: 110 } })).resolves.toEqual([
+      'replacement',
+    ]);
+    expect(cancel).toHaveBeenCalledWith(order);
+    expect(place).toHaveBeenCalledWith(expect.objectContaining({ amount: 0.5014 - 0.2, price: 110 }));
   });
 });

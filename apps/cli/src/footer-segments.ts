@@ -12,6 +12,7 @@
  * (PositionCommand.ts / MonitorCommand.ts).
  */
 import chalk from 'chalk';
+import { G } from './console-glyphs';
 
 export type FooterConnection = 'connected' | 'connecting' | 'auth-failed' | 'failed' | 'disconnected' | 'unknown';
 
@@ -178,7 +179,7 @@ export function renderSegment(seg: FooterSegment, state: FooterState): string {
 
     case 'totalpnl':
       if (state.totalUpnl == null) return '';
-      return chalk.hex(pnlColor(state.totalUpnl))(`Σ ${fmtSignedUsd(state.totalUpnl)}`);
+      return chalk.hex(pnlColor(state.totalUpnl))(`${G.sum} ${fmtSignedUsd(state.totalUpnl)}`);
 
     case 'position': {
       const pos = state.position;

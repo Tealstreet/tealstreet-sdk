@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinancePublicWebsocket } from '../../exchanges/phemex/phemex.ws-public';
+import { BinancePublicWebsocket } from '../reference/phemex/phemex.ws-public';
 import { DefaultStore } from '../../store/store.base';
 
 const createWebsocket = () => {
@@ -119,7 +119,7 @@ describe('Phemex public WebSocket dispatch', () => {
     } as MessageEvent);
 
     expect(btc).toHaveBeenCalledOnce();
-    expect(btc).toHaveBeenCalledWith(orderbook);
+    expect(btc).toHaveBeenCalledWith({ ...orderbook, sequence: 456, type: 'incremental', depth: undefined });
     expect(eth).not.toHaveBeenCalled();
     expect(recordStats).toHaveBeenCalledOnce();
     expect(recordStats).toHaveBeenCalledWith('orderbook_p.BTCUSDT');

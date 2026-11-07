@@ -62,6 +62,7 @@ function pickLoopSymbols(
   variant: string,
   ctx: PreprocessContext,
 ): string[] | null {
+  ctx.exchange?.syncAccountState?.();
   const positions = (ctx.exchange?.store?.positions ?? []).filter(
     (p) => p.contracts !== 0,
   );

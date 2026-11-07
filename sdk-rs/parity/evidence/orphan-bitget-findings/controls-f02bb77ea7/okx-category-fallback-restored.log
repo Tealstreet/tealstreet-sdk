@@ -1,9 +1,0 @@
-   Compiling safe-cex-venue-okx v0.1.0 (<worktree>/sdk-rs/safe-cex-venue-okx)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.37s
-     Running tests/findings.rs (sdk-rs/target/debug/deps/findings-c55a3405f7768a89)
-
-running 1 test
-test inherited_income_refuses_only_when_category_reaches_output ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.22s
-

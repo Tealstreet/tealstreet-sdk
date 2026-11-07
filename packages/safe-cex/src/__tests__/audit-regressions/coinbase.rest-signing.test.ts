@@ -2,9 +2,9 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 import { describe, expect, it } from 'vitest';
 
-import { createAPI } from '../../exchanges/coinbase/coinbase.api';
-import { ENDPOINTS } from '../../exchanges/coinbase/coinbase.types';
-import { normalizeCoinbaseApiCredentials, sign } from '../../exchanges/coinbase/coinbase.utils';
+import { createAPI } from '../reference/coinbase/coinbase.api';
+import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
+import { normalizeCoinbaseApiCredentials, sign } from '../reference/coinbase/coinbase.utils';
 
 const KEY_NAME = 'organizations/org-id/apiKeys/key-id';
 

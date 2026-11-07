@@ -59,7 +59,17 @@ fn model_fields_preserve_units_zero_values_and_optional_absence() {
     roundtrip::<Order>(order.clone());
     roundtrip::<Position>(position.clone());
     roundtrip::<Market>(market.clone());
-    for field in ["price", "remaining", "lastUpdate"] {
+    let mut missing_price = order.clone();
+    missing_price.as_object_mut().unwrap().remove("price");
+    let decoded: Order = serde_json::from_value(missing_price).unwrap();
+    assert!(decoded.price.is_absent());
+    assert!(
+        serde_json::to_value(decoded)
+            .unwrap()
+            .get("price")
+            .is_none()
+    );
+    for field in ["remaining", "lastUpdate"] {
         let mut incomplete = order.clone();
         incomplete.as_object_mut().unwrap().remove(field);
         assert!(
@@ -178,10 +188,20 @@ fn ticker_derivative_sentinels_are_required_and_preserve_fractional_numbers() {
         );
         let mut invalid = ticker.clone();
         invalid[field] = Value::Null;
-        assert!(
-            serde_json::from_value::<Ticker>(invalid).is_err(),
-            "{field}"
-        );
+        if field == "index" {
+            assert_eq!(
+                serde_json::from_value::<Ticker>(invalid.clone())
+                    .unwrap()
+                    .index,
+                None
+            );
+            roundtrip::<Ticker>(invalid);
+        } else {
+            assert!(
+                serde_json::from_value::<Ticker>(invalid).is_err(),
+                "{field}"
+            );
+        }
     }
     let mut full = ticker;
     full["fundingTime"] = json!(1234.5);
@@ -315,16 +335,13 @@ fn any_timeframe_preserves_distinct_minute_and_month_branches() {
 
 #[test]
 fn hyphenated_and_keyword_shaped_variants_keep_their_wire_literals() {
-    for (variant, literal) in [
-        (ExchangeName::LighterRobinhood, "lighter-robinhood"),
-        (ExchangeName::TealstreetDex, "tealstreet-dex"),
-    ] {
-        assert_eq!(serde_json::to_value(&variant).unwrap(), json!(literal));
-        assert_eq!(
-            serde_json::from_value::<ExchangeName>(json!(literal)).unwrap(),
-            variant
-        );
-    }
+    let variant = ExchangeName::LighterRobinhood;
+    let literal = "lighter-robinhood";
+    assert_eq!(serde_json::to_value(&variant).unwrap(), json!(literal));
+    assert_eq!(
+        serde_json::from_value::<ExchangeName>(json!(literal)).unwrap(),
+        variant
+    );
     let mode = ExchangeOptionsExtraLighterBuilderFeeMode::Static;
     assert_eq!(serde_json::to_value(&mode).unwrap(), json!("static"));
     assert_eq!(

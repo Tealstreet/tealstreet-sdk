@@ -6,7 +6,6 @@ use crate::{
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::Value;
-use std::cell::Ref;
 use std::sync::LazyLock;
 
 pub static TIMEFRAME_TO_SECONDS: LazyLock<IndexMap<&'static str, f64>> = LazyLock::new(|| {
@@ -79,7 +78,8 @@ pub type Writable<T> = T;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WritableStoreData {
-    pub latency: f64,
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    pub latency: Option<f64>,
     pub balance: Balance,
     pub markets: Vec<Market>,
     pub tickers: Vec<Ticker>,
@@ -97,9 +97,9 @@ pub struct WritableStoreData {
 }
 pub trait PublicDataStore {
     fn subscribe(&self, callback: crate::PublicDataSubscriber) -> Box<dyn Fn()>;
-    fn tickers(&self) -> Ref<'_, [Ticker]>;
-    fn markets(&self) -> Ref<'_, [Market]>;
-    fn loaded(&self) -> Ref<'_, StoreDataLoaded>;
+    fn tickers(&self) -> Result<Vec<Ticker>, crate::StoreReadError>;
+    fn markets(&self) -> Result<Vec<Market>, crate::StoreReadError>;
+    fn loaded(&self) -> Result<StoreDataLoaded, crate::StoreReadError>;
 }
 pub trait PublicDataSource {
     fn store(&self) -> &dyn PublicDataStore;
@@ -154,7 +154,8 @@ mod strict_codecs {
     #[serde(remote = "super::WritableStoreData")]
     #[serde(rename_all = "camelCase")]
     struct WireWritableStoreData {
-        latency: f64,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        latency: Option<f64>,
         balance: Balance,
         markets: Vec<Market>,
         tickers: Vec<Ticker>,

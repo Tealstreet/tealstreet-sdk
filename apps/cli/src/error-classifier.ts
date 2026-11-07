@@ -6,6 +6,7 @@
  * actions: suppress, critical (show once), warn, error, passthrough.
  */
 
+import { classifiedError, type ClassifiedError } from '../../../packages/safe-cex/src/commandOutcome';
 import type { ErrorCategory } from '../../../packages/safe-cex/src/health/errorPatterns';
 
 export type CLIAction =
@@ -56,6 +57,7 @@ export function classifyForCLI(
     case 'order_warning':
       return { action: 'warn' };
     case 'order_rejected':
+    case 'insufficient_balance':
       return { action: 'error' };
 
     // Unsupported backend — error with context
@@ -79,6 +81,12 @@ export function classifyForCLI(
  * Build a dedup key for critical errors (account + category).
  * Used to show critical errors only once per account+category combo.
  */
+/** The typed classification an exchange `'error'` event carries in its options, if any. */
+export const errorEventClassification = (opts: unknown): ClassifiedError | undefined =>
+  opts !== null && typeof opts === 'object'
+    ? classifiedError((opts as { classified?: unknown }).classified)
+    : undefined;
+
 export function criticalErrorKey(accountName: string, category: ErrorCategory): string {
   return `${accountName}:${category}`;
 }

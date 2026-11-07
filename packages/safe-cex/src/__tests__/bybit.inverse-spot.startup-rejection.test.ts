@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BybitInverseExchange } from '../exchanges/bybit/bybitinverse.exchange';
-import { BybitSpotExchange } from '../exchanges/bybit/bybitspot.exchange';
+import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
+import { BybitSpotExchange } from './reference/bybit/bybitspot.exchange';
 import { DefaultStore } from '../store/store.base';
 
 /**

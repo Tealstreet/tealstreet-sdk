@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
-import { BinancePrivateWebsocket } from '../../exchanges/binance/binance.ws-private';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
 import { DefaultStore } from '../../store/store.base';
 
 const preservedOrders = [{ id: 'regular-order' }, { id: 'algo-order' }] as any[];

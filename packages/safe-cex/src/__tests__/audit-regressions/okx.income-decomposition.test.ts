@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapOkxBillToIncomeRecords } from '../../exchanges/okx/okx.income';
+import { mapOkxBillToIncomeRecords } from '../reference/okx/okx.income';
 
 /**
  * Row shapes captured live from OKX `/api/v5/account/bills` (sheet row 13, 100 rows,

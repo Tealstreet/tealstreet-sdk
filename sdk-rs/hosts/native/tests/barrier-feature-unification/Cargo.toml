@@ -1,0 +1,23 @@
+[package]
+name = "safe-cex-native-barrier-feature-proof"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# An isolated dependency graph is necessary to keep the host capability off
+# while the engine capability is enabled through a different dependency.
+[workspace]
+
+[features]
+host-barriers = ["safe-cex-native/http-mutation-barriers"]
+
+[dependencies]
+safe-cex-engine = { path = "../../../../engine", features = ["test-support", "http-mutation-barriers"] }
+safe-cex-native = { path = "../..", default-features = false, features = ["http-plans"] }
+tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time"] }
+
+[lints.rust]
+warnings = "deny"
+
+[lints.clippy]
+all = "deny"

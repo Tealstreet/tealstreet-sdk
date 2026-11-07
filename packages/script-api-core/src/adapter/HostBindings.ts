@@ -12,6 +12,7 @@ import type {
   UpdateOrderOpts,
 } from '@tealstreet/safe-cex/src/types';
 import type { Store } from '@tealstreet/safe-cex/src/store/store.interface';
+import type { CommandOutcome } from '@tealstreet/safe-cex/src/commandOutcome';
 
 import type { HistoricalPosition, PrintKind, RunCommandResult } from '../api/CoreApi.types';
 import type { MaybePromise } from './AdapterContext';
@@ -86,12 +87,19 @@ export interface HostWriteEvent {
   readonly ok: boolean;
   readonly orderIds?: readonly string[];
   readonly error?: string;
+  /** SDK-reported IDs on a failed batch; an `unknown` outcome remains uncertain. */
+  readonly partialOrderIds?: readonly string[];
+  readonly outcome?: CommandOutcome;
+  readonly partialOrderCount?: number;
+  readonly totalOrderCount?: number;
 }
 
 export interface HostBindings {
   // ── Where the host keeps things ────────────────────────────────────────
   getExchange(account: string): HostExchange | undefined;
   getStore(account: string): Store | undefined;
+  /** Host-owned optimistic ids and wake/account lifetime checks, after shared rounding. */
+  submitOrderAmend?(account: string, options: UpdateOrderOpts): Promise<unknown>;
 
   // ── Ambient session state ──────────────────────────────────────────────
   readActiveAccount(): string;

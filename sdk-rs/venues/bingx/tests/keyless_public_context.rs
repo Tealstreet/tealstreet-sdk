@@ -1,0 +1,352 @@
+//! Keyless public reads are managed unsigned reads, never the legacy funnel.
+use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision};
+use safe_cex_engine::request_context::HttpAction;
+use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response};
+use safe_cex_venue_bingx::Bingx;
+mod support;
+
+const COMMAND: u32 = 42;
+
+#[test]
+fn candle_rate_limit_is_typed_before_list_decode_for_keyless_and_signed_reads() {
+    for keyed in [false, true] {
+        for (status, headers, body, expected) in [
+            // No named wait: no synthetic 5 min floor on a chart read, the chart's own backoff applies.
+            (200, "", r#"{"code":100410,"msg":"请稍后重试"}"#, None),
+            (
+                200,
+                "",
+                r#"{"code":100410,"msg":"请稍后重试; unblocked after 0000000090011"}"#,
+                Some(90_000.0),
+            ),
+            (
+                429,
+                "Retry-After: 120",
+                "Too Many Requests",
+                Some(120_000.0),
+            ),
+        ] {
+            let mut engine = support::engine(support::Options {
+                key: keyed.then(|| "key".into()),
+                secret: keyed.then(|| "secret".into()),
+                ..Default::default()
+            });
+            issue_candles(&mut engine);
+            let request = physical(&safe_cex_engine::test_support::prepared_actions(
+                &mut engine,
+                10.,
+            ))
+            .into_iter()
+            .find(|r| r.url.contains("/quote/klines"))
+            .unwrap();
+            engine.handle(
+                11.0,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status,
+                        headers,
+                        body,
+                    },
+                },
+            );
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 11.0);
+            let errors = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed {
+                        command: COMMAND,
+                        error,
+                    }) => Some(error),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(errors.len(), 1, "{actions:?}");
+            assert_eq!(
+                errors[0].kind,
+                Some(safe_cex_engine::ErrorKind::RateLimited)
+            );
+            assert_eq!(errors[0].retry_after_ms, expected);
+            assert!(!errors[0].message.contains("expected list"));
+        }
+    }
+}
+
+fn keyless() -> Engine<Bingx> {
+    let mut engine = support::engine(support::Options::default());
+    engine.start(0.);
+    engine
+}
+fn prepares(actions: &[Action]) -> usize {
+    actions
+        .iter()
+        .filter(|a| {
+            matches!(a, Action::ManagedHttp(action)
+                if matches!(action.as_ref(), HttpAction::Prepare { .. }))
+        })
+        .count()
+}
+fn physical(actions: &[Action]) -> Vec<HttpRequest> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request.clone()),
+            _ => None,
+        })
+        .collect()
+}
+fn unsigned(request: &HttpRequest) {
+    assert!(
+        !request.url.contains("signature=")
+            && !request
+                .headers
+                .iter()
+                .any(|(name, _)| *name == "X-BX-APIKEY"),
+        "keyless read must not sign: {}",
+        request.url
+    );
+}
+fn market() -> Market {
+    Market {
+        id: "BTC-USDT".into(),
+        symbol: "BTCUSDT".into(),
+        pretty_symbol: None,
+        base: "BTC".into(),
+        quote: "USDT".into(),
+        active: true,
+        precision: Precision {
+            amount: 0.001,
+            price: 0.1,
+        },
+        limits: Limits {
+            amount: MinMax {
+                min: 0.001,
+                max: 10.,
+            },
+            leverage: MinMax { min: 1., max: 100. },
+            price: None,
+        },
+        contract_size: None,
+        is_expiring: None,
+        is_inverse: None,
+        is_spot: None,
+        is_perpetual: Some(true),
+        is_read_only: None,
+        taker_fee: None,
+        maker_fee: None,
+    }
+}
+fn issue_candles(engine: &mut Engine<Bingx>) {
+    engine.drain_actions().for_each(drop);
+    engine.store_mut().set_markets(vec![market()]);
+    engine.handle(
+        10.,
+        Event::Command(Command::FetchCandles {
+            command: COMMAND,
+            symbol: "BTCUSDT".into(),
+            interval: Interval::M1,
+            limit: Some(1),
+            from_ms: None,
+            to_ms: Some(120_000.),
+        }),
+    );
+}
+
+#[test]
+fn keyless_startup_lists_are_managed_unsigned_background_reads() {
+    let mut engine = keyless();
+    let raw: Vec<_> = engine.drain_actions().collect();
+    assert!(prepares(&raw) >= 1, "keyless list reads begin with Prepare");
+    assert!(
+        physical(&raw).is_empty(),
+        "nothing releases before preparation"
+    );
+}
+
+#[test]
+fn keyless_klines_are_one_managed_unsigned_command_read() {
+    let mut engine = keyless();
+    issue_candles(&mut engine);
+    let raw: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(prepares(&raw), 1, "one command Read preparation");
+    assert!(
+        physical(&raw).is_empty(),
+        "nothing releases before preparation"
+    );
+}
+
+#[test]
+fn keyless_klines_complete_and_fail_through_their_context() {
+    for fail in [false, true] {
+        let mut engine = keyless();
+        issue_candles(&mut engine);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 10.);
+        let request = physical(&actions)
+            .into_iter()
+            .find(|r| r.url.contains("/quote/klines"))
+            .expect("one klines read");
+        unsigned(&request);
+        if fail {
+            engine.handle(
+                11.,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "transport lost",
+                },
+            );
+        } else {
+            engine.handle(
+                11.,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: r#"{"code":0,"data":[{"time":60000,"open":"1","high":"2","low":"0.5","close":"1.5","volume":"3"}]}"#,
+                    },
+                },
+            );
+        }
+        let done = safe_cex_engine::test_support::prepared_actions(&mut engine, 11.);
+        let terminals = done
+            .iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    Action::Notice(Notice::CommandDone {
+                        command: COMMAND,
+                        ..
+                    }) | Action::Notice(Notice::CommandFailed {
+                        command: COMMAND,
+                        ..
+                    })
+                )
+            })
+            .count();
+        assert_eq!(terminals, 1, "fail={fail}: exactly one terminal");
+        assert_eq!(
+            done.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandFailed {
+                    command: COMMAND,
+                    ..
+                })
+            )),
+            fail
+        );
+    }
+}
+
+fn klines_headers(options: support::Options) -> Vec<(&'static str, String)> {
+    let mut engine = support::engine(options);
+    engine.start(0.);
+    issue_candles(&mut engine);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 10.);
+    physical(&actions)
+        .into_iter()
+        .find(|r| r.url.contains("/quote/klines"))
+        .expect("one klines read")
+        .headers
+}
+
+#[test]
+fn managed_reads_keep_the_native_public_and_signed_header_vectors() {
+    let content = ("Content-Type", "application/json, charset=utf-8".to_owned());
+    assert_eq!(
+        klines_headers(support::Options::default()),
+        [("X-SOURCE-KEY", "Tealstreet".to_owned()), content.clone()]
+    );
+    let signed = klines_headers(support::Options {
+        key: Some("fixture-primary".into()),
+        secret: Some("fixture-signing-material".into()),
+        ..Default::default()
+    });
+    assert_eq!(
+        signed,
+        [
+            ("X-SOURCE-KEY", "Tealstreet".to_owned()),
+            ("X-BX-APIKEY", "fixture-primary".to_owned()),
+            content,
+        ]
+    );
+}
+
+#[test]
+fn catalogue_and_live_public_classes_are_declared_at_issuance() {
+    use safe_cex_engine::{
+        request_budget::RequestClass,
+        request_context::{Claim, Prepared},
+    };
+    let mut engine = keyless();
+    for (path, class, budget, body) in [
+        (
+            "contracts",
+            RequestClass::Discovery,
+            90_000,
+            r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0","tradeMinQuantity":"0.0001","maxLongLeverage":125}]}"#,
+        ),
+        (
+            "ticker",
+            RequestClass::Discovery,
+            90_000,
+            r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#,
+        ),
+        (
+            "premiumIndex",
+            RequestClass::Discovery,
+            90_000,
+            r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#,
+        ),
+    ] {
+        let (token, request) = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => Some((preparation, request)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("native public preparation");
+        assert!(request.url.ends_with(path));
+        assert_eq!(engine.http_request_class(token), Some(class));
+        assert_eq!(request.timeout_ms, Some(budget));
+        engine.http_prepared(
+            0.,
+            token,
+            Prepared {
+                id: request.id.0,
+                expires_at: None,
+            },
+        );
+        let permit = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("native public binding");
+        assert!(matches!(
+            engine.claim_http(0., permit),
+            Ok(Claim::Released(_))
+        ));
+        engine.handle(
+            0.,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+}

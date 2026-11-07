@@ -11,7 +11,7 @@ This directory contains the OKX exchange integration for Tealstreet. Regular OKX
 - **Base URL in code**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`; `okxdemo` uses the official Demo REST host `https://openapi.okx.com`; `okxeudemo` uses `https://eea.okx.com`; demo variants add `x-simulated-trading: 1` and route REST through Tealstreet's OKX REST proxy path). OKX Global now documents `https://openapi.okx.com` as its primary REST domain; `www.okx.com` remains supported for live global REST.
 - **Latency domain**: `www.okx.com` (`okxdemo`: `openapi.okx.com`; `okxeu` / `okxeudemo`: `eea.okx.com`)
 - **Browser transport**: `okxeu` requires the Tealstreet REST/WS proxy route. Direct Node requests to `eea.okx.com` can authenticate, but browser private REST fails CORS preflight (`OPTIONS`) before OKX can process the signed request. `okxdemo` and `okxeudemo` require the Tealstreet REST proxy route, while demo WebSockets stay direct to `wspap.okx.com` / `wseeapap.okx.com`. Keep `okxeu.requiresCors = true` and demo metadata `requiresCors = true`; regular `okx` remains direct-capable by metadata.
-- **okxeu WS tunnel paths**: private/business sockets tunnel via dedicated `okxeu/private` / `okxeu/business` paths (see `transport/tealstreet/routing/routingTable.ts`), which the python ws-proxy terminates on `wss://wseea.okx.com:8443`. Do NOT reuse the global `okx/*` paths — they terminate on `ws.okx.com`, where EEA credentials fail auth. `eea.okx.com` + `wseea.okx.com` are allowlisted in tradetunnel `ALLOWED_URLS` and in every live HAProxy proxy config (July 2026 rollout).
+- **okxeu WS tunnel paths**: private/business sockets go through the tradetunnel relay to `wss://wseea.okx.com/ws/v5/{private,business}` (`RELAY_UPSTREAM` in `transport/tealstreet/routing/routingTable.ts`, AWS_EXIT step 3e), in the hosted exchange server too. Do NOT reuse the global `okx` upstreams or `okx/*` paths — they terminate on `ws.okx.com`, where EEA credentials fail auth. `eea.okx.com` + `wseea.okx.com` are allowlisted in tradetunnel `ALLOWED_URLS` and in every live HAProxy proxy config (July 2026 rollout).
 
 ## API Documentation
 
@@ -194,15 +194,23 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 ## WebSocket Implementation
 
-OKX uses **three separate WebSocket connections**, all on port 8443.
+OKX uses **three separate WebSocket connections**, all on the default TLS port 443.
+
+The SDK direct URLs and global private/business relay targets omit the port,
+so secure WebSockets use 443. The Python ws-proxy upstreams for both
+`ws.okx.com` and `wseea.okx.com`, the `okx-proxy-ja` Caddy passthrough upstream,
+and tradetunnel's `RELAY_ALLOWED_UPSTREAMS` host/path allowlist must also be
+checked and moved to 443 before OKX retires 8443 on 2026-10-31. Changing these
+SDK constants does not deploy those infrastructure updates.
+See the [OKX changelog](https://www.okx.com/docs-v5/log_en/).
 
 ### URLs
 
 | Type     | Production                             | OKX Demo                                  | OKX EU Demo                                  |
 | -------- | -------------------------------------- | ----------------------------------------- | -------------------------------------------- |
-| Public   | `wss://ws.okx.com:8443/ws/v5/public`   | `wss://wspap.okx.com:8443/ws/v5/public`   | `wss://wseeapap.okx.com:8443/ws/v5/public`   |
-| Private  | `wss://ws.okx.com:8443/ws/v5/private`  | `wss://wspap.okx.com:8443/ws/v5/private`  | `wss://wseeapap.okx.com:8443/ws/v5/private`  |
-| Business | `wss://ws.okx.com:8443/ws/v5/business` | `wss://wspap.okx.com:8443/ws/v5/business` | `wss://wseeapap.okx.com:8443/ws/v5/business` |
+| Public   | `wss://ws.okx.com/ws/v5/public`   | `wss://wspap.okx.com/ws/v5/public`   | `wss://wseeapap.okx.com/ws/v5/public`   |
+| Private  | `wss://ws.okx.com/ws/v5/private`  | `wss://wspap.okx.com/ws/v5/private`  | `wss://wseeapap.okx.com/ws/v5/private`  |
+| Business | `wss://ws.okx.com/ws/v5/business` | `wss://wspap.okx.com/ws/v5/business` | `wss://wseeapap.okx.com/ws/v5/business` |
 
 `okxdemo` is a separate exchange variant because OKX Demo Trading uses separate
 demo API credentials. It forces `options.testnet = true`, which selects the
@@ -260,10 +268,11 @@ this.ws = this.createWebsocket(baseUrl);
 `directFallback` is a `WsDirectFallback` (`utils/wsDirectFallback.ts`; `protected`
 on the private class because the business class extends it). After two consecutive
 connects that produced zero messages it dials `route.fallback` — the athena Caddy
-passthrough `okx-proxy-ja.tealstreet.io`, which presents OKX's port 8443 on 443 —
+passthrough `okx-proxy-ja.tealstreet.io` (legacy upstream 8443, pending an infrastructure change to 443) —
 for the rest of the socket's lifetime and emits `grafana-info`. The resolver attaches
 `fallback` only to a DIRECT resolution, so with `tealstreetProxy` on the private and
-business sockets keep the chosen EKS tunnel and never degrade to the passthrough.
+business sockets keep the chosen tunnel route (the relay) and never degrade to the
+passthrough.
 Only global `okx` declares it: `okxeu` credentials do not authenticate on
 `ws.okx.com`, and the demo variants terminate on `wspap`/`wseeapap`.
 
@@ -866,9 +875,9 @@ OKX in this implementation **only supports cross margin** (`marginTypes: [Margin
   the private-proxy fleet before browser-proxied global demo requests can reach
   OKX. EEA demo uses the existing `eea.okx.com` proxy route.
 - **WebSocket behavior**: global demo sockets connect directly to
-  `wss://wspap.okx.com:8443/ws/v5/{public|private|business}`; EEA demo sockets
+  `wss://wspap.okx.com/ws/v5/{public|private|business}`; EEA demo sockets
   connect directly to
-  `wss://wseeapap.okx.com:8443/ws/v5/{public|private|business}`. The routing
+  `wss://wseeapap.okx.com/ws/v5/{public|private|business}`. The routing
   table intentionally does not give demo variants OKX private/business proxy
   overrides.
 - **Order-state safeguards**: do not copy Bybit Demo's recently-placed-order
@@ -1108,3 +1117,144 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends `clOrdId`, rule `^[A-Za-z0-9]{1,32}$` (OKX: case-sensitive alphanumeric). Replaces the generated `BROKER_ID…` ID; no prefix is composed. Inherited by OKX EU and both demo variants.
 - The native amend keeps the order and its `clOrdId`; no new client ID is sent.
+- With secondary GET credentials, cached client-ID hits cannot prove primary
+  identity and are bypassed in both TS and Rust. The primary response determines
+  success, absence or failure without changing the cached secondary snapshot.
+- Definitive client-ID lookup always uses the primary REST client that placed
+  the order. A secondary read key can belong to another account; its not-found
+  response cannot establish absence from the primary account. Rust also tags
+  this request with the explicit primary routing hint.
+
+## Rust replay depth correction
+
+Price updates cache native market IDs to current ticker rows. Rebuild this
+derived map after either authoritative market or ticker table replacement;
+preserve Store's last duplicate-symbol row and known markets without tickers.
+Mark/index readiness still records those known markets for private trigger
+fallbacks. Repeated updates reuse the readiness ID instead of allocating it.
+
+Books retain every venue level. Never filter bids/asks by the last trade price:
+trades can lag book updates, so that filter permanently deletes valid liquidity.
+The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.
+
+## Rust engine scope and verified corrections
+
+`engine: 'rust'` supports linear and inverse SWAPs under all four OKX names;
+EEA profiles additionally retain `FUTURES` with `ruleType: xperp`, matching TS.
+Signed EEA discovery uses account-scoped instruments for both product types.
+Catalogs, tickers, positions, and regular/algo orders stage complete product
+unions before committing. X-Perp dated IDs stay distinct from matching SWAPs.
+Sizes sent to OKX remain contracts; fills and remaining quantities use ctVal,
+while the existing book contract uses lotSz. Inverse base quantities divide
+quote contract value by the native reference price; position notional remains
+quote value. Position PnL and margin are USD-normalized, while raw coin collateral
+and ledger units remain distinct. Exact native filled/leaves and position counts
+survive both frame consumers. EEA income walks both product types before global
+limiting; stalled/capped composite sources fail explicitly. Generic account-wide
+fills retain the inherited empty-result contract.
+
+The replay oracle also implements public trades (previously inherited an
+unimplemented method), and OHLCV request bounds use UTC calendar arithmetic
+so a local timezone cannot move the monthly boundary. Rust additionally
+isolates bracket entries with their protective legs, amends OCO legs natively,
+refuses negative protective sizes and unsafe market/terminal amends, and
+continues standalone cancel batches after item failures. These corrections are
+listed in the harness KNOWN_TS_FIXES; they are independently tested instead
+of normalizing away output differences. Newer account equity survives REST
+snapshots and subsequent local balance ticks in both Rust and TS. Account WS
+`totalEq` is a separate aggregate anchor, never a synthetic USD currency row:
+USD is real settlement collateral for X-Perps. Details are currency deltas;
+validate the whole push before merging, retain currencies absent from it, and
+include live-order initial margin in free balance. Revision fences stop an
+older REST join, startup callback, or asynchronous local tick from restoring
+stale equity. A newer successful REST read can replace the WS anchor.
+
+Public-only business sockets subscribe candles directly without sending an
+empty-credential login or private order topics. Private accounts authenticate
+before subscribing account-order channels. This also corrects the TS replay
+oracle's previous unconditional keyless login.
+
+Rust oracle audit: historical fill windows compare native millisecond timestamps
+before truncating public execution timestamps to seconds. Positive protective
+dust must not become close-all; ambiguous standalone protective limit amends
+fail before cancellation in Rust, preserving the existing execution price.
+
+EEA account reconciliation reads explicit SWAP and FUTURES scopes and commits
+positions/orders only after both products finish successfully. Failed, malformed
+or stale later-product reads retain the proven whole-account snapshot. Public
+index prices use a catalog-owned fanout table for shared inverse/X-Perp indexes.
+Untraded X-Perps can appear live with empty REST `last` and `open24h` fields;
+unavailable REST seeds start at finite zero. An explicitly empty live last/open
+quote retains the last proven trade/change. Blank bid/ask/volume/last seed
+values are zero; malformed nonempty ones also start at zero with one counted
+warning, so the market keeps a ticker row that live updates can patch (they
+never create one). A ticker row that does not parse at all, or names an unknown
+instrument, is skipped with "Skipped malformed public discovery row".
+
+Rust startup is fail-open per row and retried per read through the shared
+engine `startup::Backoff` (1, 2, 4 … 30 s, separately for the catalogue and the
+ticker seed). A malformed instrument row is skipped with a Debug notice and its
+instId remembered, so a position or working order on it logs an error and keeps
+the previous account snapshot instead of disappearing. A failed or malformed
+read restarts its whole product chain without publishing a partial union; when
+a product scope yields no usable rows, valid rows from the other product merge
+into the existing catalogue and that read is retried. Private startup begins
+once the catalogue loads, independent of the ticker seed. `fetchLeverage` reads
+cross `leverage-info` for one symbol (flat symbols have no position row to
+carry it). Account config is guarded by an in-flight flag. Until the first
+config read succeeds, any failure (429, 5xx, transport, non-JSON, malformed or
+unknown-code envelope) retries through `startup::Backoff` (1 s doubling to 30 s,
+forever); a 418/429 waits at least its `Retry-After`, else 10 s (the discovery
+default), before the retry. Only documented key refusals end startup with one `StartupFailed`:
+REST 50101/50103/50104/50105/50111/50114/50119 (`AuthInvalid`), 50100/50110/50120
+(`AuthPermission`), and 50113 after one re-signed resend; timestamp codes
+50102/50112 stay transient. Before the account is ready, a private/business
+socket login refused with 60001/60003/60005/60024/60032 fails startup too; other
+login errors (60009 etc.) reconnect with backoff. A rejection stops config
+retries and closes and retires the private and business sockets; a refused
+trading key also emits `Deactivate` (a read-only key does not). Invalid read-only
+credentials fail startup with `InvalidInput` before any request. Once configured
+config is re-read every 30 s (a failed poll waits for the next interval), and a posMode
+or acctLv changed in the OKX app updates the hedged flag and reconciles
+positions instead of rejecting orders.
+
+Rust account startup preserves native currency balances when collateral FX is
+unavailable; it retains the previous USD aggregate or waits to publish the first
+one. Stable currencies use one; other currencies need a finite positive public
+quote or the native position mark. Entry prices and discounted `disEq`/`adjEq`
+are not raw equity conversion rates. Native `totalEq` remains authoritative.
+The first real public price supersedes a startup native mark and converts inverse
+exposure, native IMR and native PnL consistently. Missing-market currencies remain
+visible and require native aggregate equity rather than a one-dollar fallback.
+
+Rust closed-position caps and ordinary history caps/cursor stalls emit
+`history.incomplete` with their actual query command before partial completion.
+The host flags only the owning result and routes its warning to that caller.
+EEA composite-source cap/cursor failures still reject; strict financial rows,
+caps, cursors and retained-row policies are unchanged.
+
+
+## Rust signer migration checkpoint
+
+The draft Rust adoption stages native private HTTP and private/business login
+through the engine SignStep/provider. Venue options contain opaque identity refs;
+trusted setup owns key, secret and passphrase material, including absent-only
+secondary passphrase fallback. Native GET reads prefer secondary; client-ID lookup,
+ordered writes and both WS login channels stay primary. Public requests remain
+unsigned. Setup validation may report sanitized `Invalid local signer setup`
+before startup rather than the TS client error text.
+
+The draft integrates the landed shared encoding/passphrase presentation core.
+Hosted HTTP reuses `okx.signing.ts`, a standalone request serializer also used by
+the TS API interceptor; no TS venue is constructed. Four-alias browser and
+keyless RemoteSigner captures use owned primary refs and Base64 output.
+Native private/business WS work has three typed byte parts (seconds, GET,
+/users/self/verify), whose concatenation and MAC are unchanged. The bridge
+decodes them only against the declared `secondsTimestamp`/`secondsSuffix` wire
+codec, which Bitget shares with its own `/user/verify` suffix. That shape lets
+the shared bridge preserve numeric legacy `extraData.timestamp` from the exact
+prepared receipt without confusing an HTTP preimage with WS work. Native login
+JSON keeps its existing string timestamp. Private PayloadSigner remains typed
+unsupported/notSent; RemoteSigner wins and cannot fall back. Hosted admission
+still requires positive actual-WASM tests and final CI/replay proof before merge.
+No caller may restore raw secrets to sanitized options or use a local fallback.

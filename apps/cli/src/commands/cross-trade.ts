@@ -13,6 +13,7 @@ import {
   upsertCrossTradeConfig,
   type StoredCrossTradeConfig,
 } from '../cross-trade-store';
+import { BRAND } from '../brand';
 
 const SUPPORTED_EXECUTIONS: CrossTradeExecution[] = ['LimitSlippage', 'Market', 'Chase'];
 
@@ -36,7 +37,7 @@ export function registerCrossTradeCommand(program: Command): void {
   const crossTradeCmd = program
     .command('cross-trade')
     .alias('crosstrade')
-    .description('Manage and run the cross-trade engine (configs at ~/.tealstreet/cross-trade.json)');
+    .description(`Manage and run the cross-trade engine (configs at ~/${BRAND.configDirName}/cross-trade.json)`);
 
   crossTradeCmd
     .command('list')
@@ -46,7 +47,7 @@ export function registerCrossTradeCommand(program: Command): void {
       const rows = listCrossTradeConfigs();
       if (rows.length === 0) {
         console.log(chalk.yellow('No cross-trade configs.'));
-        console.log(chalk.gray('Run: tealstreet cross-trade add --master <account> --copier <account>'));
+        console.log(chalk.gray(`Run: ${BRAND.binName} cross-trade add --master <account> --copier <account>`));
         return;
       }
       console.log(chalk.cyan('\nCross-trade configs:\n'));
@@ -94,13 +95,13 @@ export function registerCrossTradeCommand(program: Command): void {
         console.log(
           chalk.yellow(
             '\nNote: Chase execution mode is NOT supported by the CLI cross-trade engine in v1.\n' +
-              'The config will be saved but skipped at `tealstreet cross-trade run`. Use Market\n' +
+              `The config will be saved but skipped at \`${BRAND.binName} cross-trade run\`. Use Market\n` +
               'or LimitSlippage if you want to run this on the CLI.',
           ),
         );
       }
       if (!row.enabled) {
-        console.log(chalk.gray(`Pass --enabled, or run: tealstreet cross-trade enable ${shortId(row.id)}`));
+        console.log(chalk.gray(`Pass --enabled, or run: ${BRAND.binName} cross-trade enable ${shortId(row.id)}`));
       }
     });
 
@@ -153,7 +154,7 @@ export function registerCrossTradeCommand(program: Command): void {
         console.log(chalk.gray('Cross-trade engine: not running.'));
         console.log(chalk.gray(`Configs: ${configs.length} total, ${runnableCount} runnable.`));
         if (runnableCount > 0) {
-          console.log(chalk.gray('Start with: tealstreet cross-trade run'));
+          console.log(chalk.gray(`Start with: ${BRAND.binName} cross-trade run`));
         }
         return;
       }

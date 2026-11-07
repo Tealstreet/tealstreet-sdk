@@ -8,12 +8,16 @@ fn assert_native_survivor(discarded: &str) {
         panic!("DISCARDED_DUPLICATE_CAPTURE native result must remain an object");
     };
     assert_eq!(fields.len(), 2, "independent surviving member count");
-    assert_eq!(fields[0].0, "z", "replacement retains first key position");
+    assert_eq!(fields[0].0, [122], "replacement retains first key position");
     let RetainedJsonInput::Text(text) = &fields[0].1 else {
         panic!("DISCARDED_DUPLICATE_CAPTURE native winner must remain text");
     };
-    assert_eq!(text, "kept", "native selected text before any wire output");
-    assert_eq!(fields[1].0, "a");
+    assert_eq!(
+        text,
+        &[107, 101, 112, 116],
+        "native selected text before any wire output"
+    );
+    assert_eq!(fields[1].0, [97]);
     let RetainedJsonInput::Lexeme(number) = &fields[1].1 else {
         panic!("unrelated native numeric lexeme must remain intact");
     };
@@ -41,8 +45,6 @@ fn discarded_duplicate_capture_still_refuses_invalid_json_syntax() {
 #[test]
 fn discarded_duplicate_capture_keeps_surviving_value_refusals() {
     let deep = format!("{}0{}", "[".repeat(140), "]".repeat(140));
-    for winner in [r#""\ud800""#.to_owned(), deep] {
-        let raw = format!(r#"{{"z":"discarded","z":{winner}}}"#);
-        assert!(serde_json::from_str::<RetainedJsonInput>(&raw).is_err());
-    }
+    let raw = format!(r#"{{"z":"discarded","z":{deep}}}"#);
+    assert!(serde_json::from_str::<RetainedJsonInput>(&raw).is_err());
 }

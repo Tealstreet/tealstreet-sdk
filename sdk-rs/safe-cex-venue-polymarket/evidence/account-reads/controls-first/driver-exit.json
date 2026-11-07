@@ -1,8 +1,0 @@
-{
-  "exit": 1,
-  "sha": "f66c36b0f3b686ef7ddb8edad188426945dc892d",
-  "executed_floor": 8,
-  "stop": "validateAccount",
-  "failure": "ownership anchor matched both state and task closing delimiters; detected before mutation9 was applied. No behavioral survivor or wrong runtime failure.",
-  "corrected_in": "5c17992cffbdf1d8b3e25fcca3bb9dfec0ec28ff"
-}

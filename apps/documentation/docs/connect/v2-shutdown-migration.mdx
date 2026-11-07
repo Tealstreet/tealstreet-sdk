@@ -1,31 +1,36 @@
 ---
 title: V2 Shutdown and IP Whitelist Migration
-description: Draft guide for moving V2 users to V3 and helping V3 users update exchange IP whitelists.
+description: Guide for moving V2 users to V3 and keeping exchange IP whitelists valid for Rust and legacy app egress.
 sidebar_position: 2
 hide_title: false
-draft: true
+draft: false
 hide_table_of_contents: false
 ---
 
-:::caution Draft placeholder
-This page is being prepared before the migration window opens. Final dates,
-Tealstreet IP addresses, and exchange screenshots will be added after the new
-infrastructure fleet is ready.
+import ProxyFleetIps from '@site/src/components/ProxyFleetIps';
+
+:::caution Keep both app lanes allowed
+The Rust app uses the Vultr Tokyo fleet. The legacy app still uses the AWS
+addresses for whitelabel users and rollback. Allow the union shown below so the
+same API key can work on either lane.
 :::
 
-:::note Temporary migration page
+<!-- :::note Temporary migration page
 This page is intended for the V2 shutdown and IP whitelist migration window.
 Retire it 30-60 days after the migration is complete, once support confirms the
 old Tealstreet IPs are no longer needed.
-:::
+::: -->
 
-Tealstreet is moving legacy infrastructure to a new setup. Most users only need
-to know which path applies to them:
+The Rust app uses the Vultr Tokyo fleet; the legacy app retains AWS egress.
+Most users only need to know which path applies to them:
 
 - If you still use the old V2 terminal, move to V3 and add your exchange
   accounts there.
 - If you already use V3 with Tealstreet IP whitelisting enabled, update the IP
-  whitelist on each exchange API key during the overlap window.
+  whitelist on each exchange API key using the current list below.
+- If you use V3 on multiple devices, turn on
+  [Cloud Sync for API Keys](/docs/connect/cloud-sync) before the cutover so the
+  same Tealstreet API key list is available everywhere you sign in.
 
 ## Which one am I?
 
@@ -53,20 +58,18 @@ should not require an exchange-side whitelist edit.
 
 | Item | Status |
 | --- | --- |
-| Announcement date | `[add date]` |
-| New Tealstreet IP list available | `[add date]` |
-| Overlap window | `[add start and end dates]` |
-| Final V2 shutdown | `[add date]` |
-| Old AWS IPs retired | `[add date after grace period]` |
+| New Tealstreet IP list available | Available now |
+| Migration window | Ended November 2, 2026 at 00:00 UTC |
+| Final V2 shutdown | November 2, 2026 at 00:00 UTC |
+| Legacy AWS egress | Still used for rollback and whitelabel |
 
-During the overlap window, keep both the old and new Tealstreet IPs on your
-exchange API key when the exchange allows it. Do not remove the old IPs until
-Tealstreet announces that the cutover is complete.
+Add the current fleet IPs and the selected venue/region's legacy AWS addresses.
+Keep any additional venue-specific addresses shown in the API key form.
 
 ## V2 user - move to V3
 
-V2 is being retired. To keep trading on Tealstreet, create or use a V3 account
-and add your exchange API keys there.
+V2 was retired on November 2, 2026 at 00:00 UTC. To keep trading on
+Tealstreet, create or use a V3 account and add your exchange API keys there.
 
 ### Before you start
 
@@ -89,6 +92,8 @@ and add your exchange API keys there.
 6. Add the Tealstreet IP whitelist values shown in the V3 API key form.
 7. Paste the API key and secret into Tealstreet V3.
 8. Save the key and confirm that the account connects successfully.
+9. Turn on [Cloud Sync for API Keys](/docs/connect/cloud-sync) if you want the
+   new V3 key to follow you to your other Tealstreet devices.
 
 Start with the general API walkthrough, then use the guide for your exchange:
 
@@ -107,7 +112,7 @@ IP whitelist field. If your exchange guide shows that option, use the selector
 shown there and follow the exchange-specific instructions.
 :::
 
-### Screenshot placeholders
+<!-- ### Screenshot placeholders
 
 Final screenshots will be added before publication:
 
@@ -115,7 +120,7 @@ Final screenshots will be added before publication:
 - V3 **Add new key** button.
 - Exchange selection menu.
 - Tealstreet IP whitelist field or copy button.
-- Example exchange-side API whitelist screen.
+- Example exchange-side API whitelist screen. -->
 
 ## V3 user - update your exchange IP whitelist
 
@@ -125,25 +130,30 @@ Tealstreet routing.
 
 ### What changes
 
-Tealstreet is replacing the old AWS IP addresses used by the Tealstreet Network
-with new Tealstreet IP addresses. For a short overlap window, both sets should
-work. After the migration window closes, keys that still allow only the old IPs
-may stop connecting through Tealstreet.
+The Rust app egresses through the Vultr Tokyo fleet, while the legacy app uses
+the AWS private proxy pool. A key may need to work on both when a user is moved
+back to the legacy app. Keep both groups allowed until the legacy app is retired.
+
+Cloud sync can help make your Tealstreet API key list available on every device
+while you work through this migration. It does not edit the exchange API key or
+its IP whitelist, so complete the whitelist update below for each affected
+exchange account.
 
 ### IP list
 
-The final IP list will be added after the new fleet is ready.
+Add the full new Tealstreet IP list anywhere your exchange asks for the
+Tealstreet Network, TS Network, or Tealstreet IP whitelist.
 
-| Region or role | Old Tealstreet IPs | New Tealstreet IPs |
-| --- | --- | --- |
-| Japan / Tokyo routing | `[add old AWS IPs]` | `[add new IPs]` |
-| Singapore routing | `[add old AWS IPs]` | `[add new IPs]` |
-| WebSocket or proxy routing | `[add old AWS IPs]` | `[add new IPs]` |
-| Exchange-specific extras | `[add old AWS IPs]` | `[add new IPs]` |
+Going forward, Tealstreet Network routing uses one region instead of split
+Japan and Singapore routing for Rust. The legacy app still has separate AWS
+regions. Choose your venue and legacy region below, and allow both groups.
+Retain any additional passthrough IPs shown in your venue-specific API key form.
 
-When Tealstreet shows both old and new blocks in the API key form, copy the new
-Tealstreet IP list for your exchange. Keep the old list in place until the
-published retirement date when the exchange allows both lists.
+#### New Tealstreet IPs, Vultr Tokyo fleet
+
+<ProxyFleetIps />
+
+Use the web API key form's copy button to copy the union. Where a verified venue limit is too small for the union, the form copies the fleet only and labels the legacy addresses optional; that key will not work on the legacy app unless its AWS addresses can also be allowed.
 
 ### Update each exchange key
 
@@ -155,8 +165,7 @@ Repeat these steps for each Tealstreet-connected exchange account:
 4. Find the API key used by Tealstreet.
 5. Edit the IP whitelist or allowed IP addresses.
 6. Add the new Tealstreet IPs.
-7. Keep the old Tealstreet IPs during the overlap window, if the exchange allows
-   enough entries.
+7. Retain any additional passthrough addresses shown in your venue-specific API key form.
 8. Save the exchange-side API key changes and complete any 2FA or email checks.
 9. Return to Tealstreet and reconnect or validate the account.
 
@@ -178,7 +187,7 @@ cannot keep both the old and new Tealstreet IPs at the same time:
 - Avoid making the change while you are actively managing a position only
   through Tealstreet.
 
-## Exchange screenshot placeholders
+<!-- ## Exchange screenshot placeholders
 
 Support will add exchange-specific screenshots as demand surfaces.
 
@@ -191,6 +200,7 @@ Support will add exchange-specific screenshots as demand surfaces.
 | Coinbase | API key allowed IP screen |
 | OKX | Third-party app selector or IP whitelist screen |
 | WOO X | API whitelist edit screen |
+-->
 
 ## Troubleshooting
 

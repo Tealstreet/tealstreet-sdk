@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { DefaultStore } from '../../store/store.base';
-import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
-import { BitgetUSDCExchange } from '../../exchanges/bitget/bitgetusdc.exchange';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
+import { BitgetUSDCExchange } from '../reference/bitget/bitgetusdc.exchange';
 
 type BitgetVariant = {
   name: 'bitget' | 'bitgetusdc';

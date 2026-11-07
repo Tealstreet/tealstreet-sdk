@@ -299,3 +299,113 @@ describe('bybit auth rejections the venue actually sends', () => {
     expect(match('invalid request, please check your server timestamp or recv_window param')).toBe('time_sync');
   });
 });
+
+describe('hyrotrader auth rejections the simulator sends', () => {
+  const match = (message: string) => {
+    const patterns = mergePatterns(DEFAULT_ERROR_PATTERNS, EXCHANGE_SPECIFIC_PATTERNS.hyrotrader);
+    for (const pattern of patterns) {
+      for (const p of pattern.patterns) {
+        const hit = typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message);
+        if (hit) return pattern.category;
+      }
+    }
+    return null;
+  };
+
+  it('classifies HyroTrader 10003 as an auth error for user-facing challenge guidance', () => {
+    expect(match('retCode:10003 retMsg:API key is invalid.')).toBe('auth_invalid');
+  });
+});
+
+describe('mexc permission rejections the venue sends', () => {
+  const match = (message: string) => {
+    const patterns = mergePatterns(DEFAULT_ERROR_PATTERNS, EXCHANGE_SPECIFIC_PATTERNS.mexc);
+    for (const pattern of patterns) {
+      for (const p of pattern.patterns) {
+        const hit = typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message);
+        if (hit) return pattern.category;
+      }
+    }
+    return null;
+  };
+
+  it('classifies missing API-key trading write access as a permission error', () => {
+    expect(match('Please enable API Key trading information write access')).toBe('auth_permissions');
+  });
+});
+
+describe('engine capacity refusals are not venue rate limits', () => {
+  const match = (message: string) => {
+    for (const pattern of DEFAULT_ERROR_PATTERNS) {
+      for (const p of pattern.patterns) {
+        const hit = typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message);
+        if (hit) return pattern.category;
+      }
+    }
+    return null;
+  };
+
+  it('leaves the Rust engine capacity message unclassified', () => {
+    expect(match('Engine request capacity reached')).toBeNull();
+  });
+
+  it('documents why the former engine text was replaced', () => {
+    expect(match('Too many requests in flight')).toBe('rate_limit');
+  });
+});
+
+describe('venue codes land in the category the engine classifies them by', () => {
+  const matcher = (exchange: string) => (message: string) => {
+    const patterns = mergePatterns(DEFAULT_ERROR_PATTERNS, EXCHANGE_SPECIFIC_PATTERNS[exchange] ?? []);
+    for (const pattern of patterns) {
+      for (const p of pattern.patterns) {
+        const hit = typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message);
+        if (hit) return pattern.category;
+      }
+    }
+    return null;
+  };
+
+  it('reads Binance -1022 as an invalid signature, and only -1021 as clock skew', () => {
+    const match = matcher('binance');
+    expect(match('Binance -1022: Signature for this request is not valid.')).toBe('auth_invalid');
+    expect(match('Binance -1021: Timestamp for this request is outside of the recvWindow.')).toBe('time_sync');
+  });
+
+  it('reads OKX 50112 as clock skew and the auth and permission codes by their CodeTable kind', () => {
+    const match = matcher('okx');
+    expect(match('OKX 50112: Invalid OK-ACCESS-TIMESTAMP')).toBe('time_sync');
+    expect(match('OKX 50102: Timestamp request expired')).toBe('time_sync');
+    for (const code of ['50101', '50103', '50104', '50105', '50111', '50113', '50114', '50119']) {
+      expect(match(`OKX ${code}: refused`)).toBe('auth_invalid');
+    }
+    for (const code of ['50100', '50110', '50120']) {
+      expect(match(`OKX ${code}: refused`)).toBe('auth_permissions');
+    }
+  });
+
+  it('reads an OKX code labelled in a raw JSON body', () => {
+    const match = matcher('okx');
+    expect(match('OKX HTTP 401: {"code":"50111","msg":"Invalid OK-ACCESS-KEY","data":[]}')).toBe('auth_invalid');
+    expect(match('okx API error (HTTP 400): {"code":"50112","msg":"Invalid OK-ACCESS-TIMESTAMP"}')).toBe('time_sync');
+    expect(match('{"code": "50110", "msg": "Invalid IP"}')).toBe('auth_permissions');
+    expect(match('{"code":"51008","msg":"Order failed. Insufficient balance","price":"50111"}')).not.toBe('auth_invalid');
+  });
+
+  it('never reads an OKX code inside a price', () => {
+    const match = matcher('okx');
+    expect(match('Order price 50111.5 is out of the limit range')).not.toBe('auth_invalid');
+    expect(match('Stop price 50112 must be below the last price')).not.toBe('time_sync');
+  });
+
+  it('reads 429, 502 and 503 only as a bare status number', () => {
+    const match = matcher('bybit');
+    expect(match('Request failed (HTTP 429)')).toBe('rate_limit');
+    expect(match('Bad gateway: 502')).toBe('exchange_down');
+    expect(match('HTTP 503')).toBe('exchange_down');
+    expect(match('Order 4294967295 was not found')).not.toBe('rate_limit');
+    expect(match('Fill at 25031.4 recorded')).not.toBe('exchange_down');
+    expect(match('Order id 1503 was not found')).not.toBe('exchange_down');
+    expect(match('Leverage 0.429 is below the minimum')).not.toBe('rate_limit');
+  });
+});
