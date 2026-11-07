@@ -132,6 +132,8 @@ test('enabled Bitget collection retains an eligible miss as unresolved without r
       books: Object.fromEntries(item.books.split(',').map((symbol) => [symbol, { bids: [[1, 1]] }])),
       metrics: metric(impl === 'ts' ? 200 : 183.6, mode) };
     if (impl === 'ts') Object.assign(output.metrics, { heapUsedBytes: 200, heapRetainedBytes: 100, retainedBytes: 100 });
+    // Only steady misses: Rust over 1.00x TS there, the case the paired Bitget certificate can still decide.
+    if (impl === 'rust' && mode === 'performance') output.metrics.steadyCpuMs = 201;
     const bytes = JSON.stringify(output);
     raw.push({ impl, mode, run, bytes, sha256: createHash('sha256').update(bytes).digest('hex') });
   };

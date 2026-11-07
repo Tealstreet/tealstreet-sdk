@@ -583,6 +583,16 @@ test('#3129 guarded GRVT edits (run 42145552491) retain measured headroom', () =
   assert.match(wasmBudgetError(currentCap + 1, 'venue', venue), /exceeds/);
 });
 
+test('#3227 GRVT hosted signing (run 42352873546, job 128345833529) keeps CI plus 10 KiB rounded up to the KiB', () => {
+  const measured = 1_944_314;
+  const cap = 1_954_816;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.grvt, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'grvt'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'grvt'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'grvt'), /exceeds/);
+});
+
 test('#3193 grvt provenance at ad4f1d6d5d9 keeps the larger composed cap', () => {
   const measured = 1_819_801;
   const measuredCap = 1_830_912;
@@ -595,10 +605,11 @@ test('#3193 grvt provenance at ad4f1d6d5d9 keeps the larger composed cap', () =>
   for (const name of ['grvt']) {
     const family = venueFamily(name);
     assert.equal(family, 'grvt');
-    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    const currentCap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(currentCap >= cap);
     assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
-    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+    assert.equal(wasmBudgetError(currentCap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(currentCap + 1, 'venue', family), /exceeds/);
   }
 });
 
@@ -866,6 +877,20 @@ test('#3150 merged-tree caps retain the approved exact boundaries', () => {
     assert.ok(cap >= minimumCap);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3219 drb public consumers (run 42352093025) retain CI headroom for Coinbase and Spot', () => {
+  const measured = 1_924_268;
+  const cap = 1_935_360;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
 
