@@ -12,6 +12,7 @@ use safe_cex_engine::text::JoinWith;
 
 // WEEX common error reference: https://www.weex.com/help/articles/52122274060569
 // Only explicit validation/authentication refusals prove pre-execution denial.
+const UNKNOWN_RATE: &str = "WEEX write outcome is unknown. Check Open Orders";
 const TABLE: CodeTable = CodeTable {
     rows: &[
         Row {
@@ -186,6 +187,11 @@ fn failure(
     native: Option<&Native<'_>>,
     message: String,
 ) -> Result<Result<Vec<String>, VenueError>, Error> {
+    let message = if native.is_some_and(|n| n.code == NativeCode::Int(429)) {
+        UNKNOWN_RATE.to_owned()
+    } else {
+        message
+    };
     let fact = cx.classify_write(context, &TABLE, native, message)?;
     let error = fact.error().clone();
     cx.http_write_fact(
@@ -390,6 +396,14 @@ fn record_rows(
         .map(|row| format!("{}: {}", row.client().unwrap_or(label), row.error()))
         .collect::<Vec<_>>()
         .join_with("; ");
+    let message = if rows
+        .iter()
+        .any(|row| !row.success && row_native(row).code == NativeCode::Int(429))
+    {
+        UNKNOWN_RATE.to_owned()
+    } else {
+        message
+    };
     let mut result =
         project(cx.http_write_batch(context, &TABLE, expected, &items, message, None)?);
     if !placement && let Ok(ids) = &mut result {

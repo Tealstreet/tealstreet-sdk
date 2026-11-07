@@ -4,12 +4,11 @@
 # actions, and no third-party action should hold a token that signs images for
 # boxes holding users' keys.
 #
-# STAGE 1: pushes and signs `:sdk-<sha>` only. `:latest` still moves from
-# tealstreet-next's docker-exchange-server-rust.yml until the Vultr units trust this
-# workflow's exact identity (infra/tofu/exchange-services `cosign_identity_regexp`).
-# Cutting over = add the `:latest` step here, then delete the monorepo workflow.
-# That cutover must reintroduce ordering: runs are keyed per sha below, so two
-# master pushes build in parallel and an older one could move `:latest` last.
+# The only builder and signer of these images since 2026-11-07: tealstreet-next's
+# docker-exchange-server-rust.yml is deleted, and the Vultr units' verified-run trusts this
+# workflow's exact identity alone (infra/tofu/exchange-services `cosign_identity_regexp`).
+# It pushes `:sdk-<sha>` only; nothing moves `:latest`, and boxes run digest pins. Adding a
+# `:latest` step would need ordering: runs are keyed per sha, so an older one could land last.
 #
 # Push-to-master only, never pull_request: a fork PR never gets packages: write
 # or id-token: write.

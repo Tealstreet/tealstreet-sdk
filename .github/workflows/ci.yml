@@ -30,6 +30,8 @@ jobs:
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - run: corepack yarn -s node --test .github/tests/*.test.cjs
       - run: corepack yarn check:licenses
+      - name: Check script types have not drifted
+        run: corepack yarn check:script-types
       - run: corepack yarn typecheck
       - run: corepack yarn lint
       - run: corepack yarn test

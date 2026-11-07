@@ -221,6 +221,14 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
     VenueError::new(message.to_string()).kind(ErrorKind::InvalidInput)
 }
 
+/// The refusal for a venue this build does not construct, including retired
+/// names still saved on user accounts (e.g. `bitmex`). Nothing was sent.
+pub fn unsupported_venue(venue: &str) -> VenueError {
+    VenueError::new(format!("unsupported venue: {venue}"))
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent)
+}
+
 /// Engine settings every venue receives after construction.
 #[derive(Clone, Copy)]
 struct Startup {
@@ -1385,7 +1393,7 @@ pub fn build_with_signer<T: Visit>(
 ) -> Result<T::Output, VenueError> {
     let _ = &signer;
     if !supported(venue) {
-        return Err(invalid(format!("unsupported venue: {venue}")));
+        return Err(unsupported_venue(venue));
     }
     if (options.signing.is_some() || signer.is_some())
         && !construction::bridge(venue, &options).dispatch_signing
@@ -2153,22 +2161,47 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "woo")]
-        "woo" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "woo" => {
+            if [&options.key, &options.secret]
+                .iter()
+                .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "WOO credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut identities = options.signing.take().unwrap_or_default();
+            // An incomplete local primary still denotes a public-only account.
+            identities.primary = identities.primary.filter(|identity| {
+                !identity.credential.0.is_empty()
+                    && identity.signing_ref().is_ok_and(|key| !key.0.is_empty())
+            });
+            for identity in [&identities.primary, &identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 Woo::new(WooOptions {
-                    read_credentials: options.read_credentials.take(),
+                    credentials: identities.primary.clone(),
+                    read_signing: identities.secondary.clone(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     application_id: options.application_id.take(),
+                    ..Default::default()
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bybit")]
         "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -2364,7 +2397,7 @@ pub fn build_with_signer<T: Visit>(
             engine.set_signer(signer)?;
             finish(visitor, policy, startup, engine)
         }
-        other => Err(invalid(format!("unsupported venue: {other}"))),
+        other => Err(unsupported_venue(other)),
     }
 }
 

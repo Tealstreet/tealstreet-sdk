@@ -976,3 +976,39 @@ test('#3220 KuCoin hosted signing (run 42324881707, job 128258225940) keeps meas
   assert.equal(wasmBudgetError(cap, 'venue', 'kucoin'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'kucoin'), /exceeds/);
 });
+
+test('#3111 candle repair readiness (run 42096897919) retains headroom and siblings match', () => {
+  const measured = 2_106_939;
+  const minimumCap = 2_117_632;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.hyperliquid;
+  assert.ok(cap >= minimumCap);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3221 hosted signing (run 42352558360) rounds web/node CI plus 10 KiB up to KiB', () => {
+  const measured = 2_568_219;
+  const minimumCap = 2_579_456;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.woo;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
+});
+
+test('#3221 run 42393607294 artifact 13582294491 retains measured Woo headroom', () => {
+  const measured = 2_578_659;
+  const minimumCap = 2_589_696;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.woo;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
+});

@@ -67,6 +67,47 @@ function check(text) {
 
 test('PR replay is affected-only and independent; CPU stays on calibrated landing runners', () => check(source));
 
+function checkIsolatedTypes(text) {
+  const native = job(text, 'native');
+  const candle = /- check: candle-cache\n([\s\S]*?)(?=          - check:)/.exec(native)?.[1];
+  assert(candle, 'missing isolated candle-cache lane');
+  const command = candle.split('\n').find(line => /cargo test .* -p safe-cex-types /.test(line));
+  assert(command, 'missing types test command');
+  assert.match(command, /SAFE_CEX_TYPESCRIPT_PATH="\$GITHUB_WORKSPACE\/node_modules\/typescript"/);
+  assert.match(command, /cargo test --locked -p safe-cex-types --tests\s*$/);
+  assert.doesNotMatch(command, /--skip|--lib|--workspace/);
+  assert.match(candle, /python3 scripts\/check-serde-json-features.py/);
+  for (const action of ['actions/setup-node', './.github/actions/prepare-yarn', './.github/actions/install-yarn']) {
+    const step = native.split('      - uses: ').find(value => value.startsWith(`${action}@`) || value.startsWith(`${action}\n`));
+    assert(step, `missing ${action}`);
+    const condition = /\n        if: ([^\n]+)/.exec(step)?.[1];
+    assert(condition, `missing ${action} admission`);
+    const lanes = [...condition.matchAll(/matrix.check == '([^']+)'/g)].map(match => match[1]);
+    assert(lanes.includes('metadata'), `${action} must retain metadata admission`);
+    assert(lanes.includes('candle-cache'), `${action} must admit isolated types`);
+  }
+  assert.equal((native.match(/\n        id: yarn\n/g) ?? []).length, 1, 'one shared Yarn preparation step');
+  assert.match(native, /cargo test --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types/);
+}
+
+test('complete types suite retains isolation and dependencies for both native oracle lanes', () => checkIsolatedTypes(source));
+
+test('types suite rejects a skipped audit, library-only selection or missing compiler', () => {
+  for (const changed of [
+    source.replace('cargo test --locked -p safe-cex-types --tests', 'cargo test --locked -p safe-cex-types --lib'),
+    source.replace('cargo test --locked -p safe-cex-types --tests', 'cargo test --locked -p safe-cex-types --tests -- --skip position_record'),
+    source.replace('SAFE_CEX_TYPESCRIPT_PATH="$GITHUB_WORKSPACE/node_modules/typescript" ', ''),
+  ]) assert.throws(() => checkIsolatedTypes(changed));
+});
+
+test('adding types dependencies must not retire the existing metadata lane', () => {
+  const native = job(source, 'native');
+  for (const [before, after] of [
+    ["matrix.check == 'metadata' || matrix.check == 'candle-cache'", "matrix.check == 'metadata'"],
+    ["matrix.check == 'metadata' || matrix.check == 'candle-cache'", "matrix.check == 'candle-cache'"],
+  ]) assert.throws(() => checkIsolatedTypes(source.replace(native, native.replaceAll(before, after))));
+});
+
 test('the Kraken hosted proof runs after the sealed family upload on selected and full builds', () => {
   const families = job(source, 'families');
   const proof = families.indexOf('name: Prove the shared operation channel through actual Kraken WASM engines');

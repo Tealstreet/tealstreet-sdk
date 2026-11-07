@@ -12,7 +12,7 @@ Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
 KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
-Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
+Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override. Refused `remoteSigner` accounts are told to
 turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
 accounts receive neutral delegated-signing wording. Both use the venue display
@@ -191,6 +191,13 @@ revision; provider text and partial results are not returned on failure.
 A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
 its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
 The BingX native checkpoint keeps hosted admission disabled until those gates.
+WOO local and RemoteSigner accounts share provider-owned dispatch signing for all
+V1/V3 private REST calls and private WS auth. V1 signs sorted form/query bytes plus
+`|timestamp`; V3 signs timestamp, method, path/query and the exact body. Replayed
+serialized bodies are preserved. WOO has no signing nonce or wire recvWindow.
+PayloadSigner remains refused because its legacy private lifecycle has no such
+mode; RemoteSigner cannot fall back to it or to local material. Before-dispatch
+signing failures are `notSent`; dispatched ambiguous writes remain `Unknown`.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
@@ -393,8 +400,11 @@ deadlines on subsequent synchronization. Browser workers wait up to 30 s for
 an initial host time push before anchoring. Later syncs update only the engine's
 protocol UTC fallback; small corrections preserve venue calibration, while a
 >1 s host-baseline discontinuity (including suspend) invalidates it. The default
-transport records wall-versus-monotonic divergence as pending UTC data only;
-EngineHost drains it outside HTTP handoffs before the next Rust call. Journal
+transport records wall-versus-monotonic divergence as pending UTC data;
+EngineHost drains it outside HTTP handoffs before the next Rust call. A detected
+step also defers a shared server-time resync to refresh the cached wall-clock
+offset. This permits a one-off request in browser workers; ordinary worker sync
+still uses page pushes. Resync notifications run after the current handoff. Journal
 UTC bounds and scheduled-cancel validation still use synchronized wall time.
 Explicit host/recording transports retain their own clock; native servers supply
 their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue
@@ -982,13 +992,13 @@ its count comes from the notional.
 `Position.contracts` being expressed in base makes `entryPrice * contracts` a
 valid notional, and therefore that price/PnL code never needs an inverse
 branch. Every inverse mapper derives `contracts` from the **MARK**, not the
-entry — `bybitinverse.exchange.ts`, `bitgetinverse`, `bitmex` and `okx` all
+entry — `bybitinverse.exchange.ts`, `bitgetinverse` and `okx` all
 compute `notionalUSD / (mark || last)` — so that product equals
 `notional * entry / mark` and drifts with the market. It is only the notional
 at `mark == entry`.
 
 On top of that, **bybitinverse and bitgetinverse leave `unrealizedPnl`
-base-denominated** (bitmex and okx convert; these two do not), so on those
+base-denominated** (okx converts; these two do not), so on those
 venues the numerator of any return calculation is in the wrong currency.
 
 That false rule was used to DELETE a correct refusal from the CLI's `$roe` on
@@ -1320,7 +1330,7 @@ HTTP-only (no HOW); adding its fleet route does not enable the venue or change
 that transport policy. Lighter's `testnet-api.lighter.xyz` does not resolve and
 is intentionally absent; do not introduce another dead backend to cover it.
 
-**`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned families (bitmex always, bybit when tunnelling) whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
+**`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned family (bybit when tunnelling), whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
 Canonical saved account construction lives in
 `src/accounts/buildExchangeAccountConfig.ts`, with routing normalization in
@@ -1583,6 +1593,14 @@ Is requiresCors true?
 - **Unknown metadata fails closed**: `getExchangeMetadata` throws for runtime
   names outside the exhaustive registry. Never restore a venue-shaped fallback;
   it can apply the wrong transport and capability flags to corrupt saved data.
+  Retired names stay saved on accounts (`bitmex`, `bitmextestnet`), so every
+  lookup refuses `unsupported`/`notSent` and the caller fails that one account:
+  factories and the worker throw `unsupportedVenueError` (`ExchangeError`), and
+  `getExchangeMetadata` throws an `Error` carrying the same fields, because the
+  Rust source oracles (`sdk-rs/safe-cex-types/scripts/accounts-source.cjs`) load
+  this file without the WASM host. Do not import `@tealstreet/safe-cex-wasm` here.
+  The WASM `venueFamily` and Rust `registry::unsupported_venue` match it
+  (`__tests__/audit-regressions/removed-venue-refusal.test.ts`).
 - **Non-browser tradetunnel callers must use the shared header-capable
   transport with a browser-like `User-Agent`.** CloudFront/WAF in front of
   `fsjnpy143pbz.{jp,asia}.tealstreet.io` (and Cloudflare in front of
@@ -1823,12 +1841,20 @@ Relay-failure notices strip URL queries from upstream error messages before
 reporting reconnect state. Request configs and signed dispatch bytes are retained
 unchanged; the web Sentry hooks provide independent diagnostic redaction.
 
-Unsigned Bybit mainnet market responses with native `retCode: 10006` generate
+Unsigned Bybit mainnet market responses with HTTP 429 or native `retCode`
+10006, 429 or legacy 10018 generate
 one causal transport diagnostic through the exchange log/Sentry channel (no
 additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+Observation runs at the shared host-transport response boundary for managed and
+legacy requests on tunnel, proxy, direct and public-CORS routes. Streamed bodies
+are observed lazily with a 1 MiB bound for native-code detection; incomplete or
+failed streams cannot supply a native-code notice. HTTP 429 reports once at the
+response headers regardless of body content, size or stream completion, without
+consuming the body. Status-only notices carry HTTP 429 instead of a guessed
+native code.
 
 
 Hyperliquid `/info` admission shares a token bucket across account workers through

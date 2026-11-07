@@ -2,6 +2,7 @@
 // unknown unless the cited venue contract defines a quantity-only minimum.
 export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
   binance: 'https://developers.binance.com/docs/derivatives/usds-margined-futures/common-definition',
+  binanceinverse: 'https://developers.binance.com/docs/derivatives/coin-margined-futures/common-definition',
   binancespot: 'https://developers.binance.com/docs/binance-spot-api-docs/filters',
   phemex: 'https://api.phemex.com/public/products',
   asterdex: 'https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md',
@@ -67,6 +68,7 @@ const familyOf = (name) => {
 };
 const hosts = {
   binance: /^(?:demo-)?fapi\.binance\.com$/,
+  binanceinverse: /^(?:demo-)?dapi\.binance\.com$/,
   binancespot: /^(?:api\.binance\.com|testnet\.binance\.vision)$/,
   phemex: /^(?:testnet-)?api\.phemex\.com$/,
   asterdex: /^fapi\.asterdex(?:-testnet)?\.com$/,
@@ -118,6 +120,18 @@ function filtered(row) {
   return known(Math.max(...values), lot.minQty, lot.stepSize, 1, false, bounds.length ? Math.max(...bounds) : undefined, lot.maxQty);
 }
 
+// COIN-M filters carry no monetary minimum: the documented floor is one LOT_SIZE
+// contract, each worth contractSize USD, so quantity is contracts.
+function coinMargined(row) {
+  const filters = array(row.filters).filter((filter) => filter && typeof filter === 'object');
+  const lots = filters.filter((filter) => filter.filterType === 'LOT_SIZE');
+  const bounds = filters.filter((filter) => filter.filterType === 'PERCENT_PRICE').map((filter) => positive(filter.multiplierDown));
+  const contractSize = positive(row.contractSize);
+  if (lots.length !== 1 || !contractSize || bounds.some((value) => value === undefined)) return unknown();
+  return known(0, lots[0].minQty, lots[0].stepSize, contractSize, true,
+    bounds.length ? Math.max(...bounds) : undefined, lots[0].maxQty);
+}
+
 // The optional returned amount fields are in PLACE/AMEND units. Store order
 // quantities may use different units (notably OKX, BloFin, KuCoin and MEXC).
 export function venueMarketRules(venue, records, market) {
@@ -146,6 +160,9 @@ export function venueMarketRules(venue, records, market) {
         if (method !== 'GET' || !(family === 'asterdex' ? ['/fapi/v1/exchangeInfo', '/fapi/v3/exchangeInfo'] :
           ['/fapi/v1/exchangeInfo']).includes(path)) continue;
         rows = array(payload.symbols); rule = filtered; break;
+      case 'binanceinverse':
+        if (method !== 'GET' || path !== '/dapi/v1/exchangeInfo') continue;
+        rows = array(payload.symbols); rule = coinMargined; break;
       case 'binancespot':
         // Spot LOT_SIZE/NOTIONAL as futures; PERCENT_PRICE_BY_SIDE claims no lower bound here.
         if (method !== 'GET' || path !== '/api/v3/exchangeInfo') continue;

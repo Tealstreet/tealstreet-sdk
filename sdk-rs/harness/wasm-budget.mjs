@@ -207,6 +207,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // at CI merge ba85167cc7c. CI size plus 10 KiB, rounded up to the KiB.
 // #3193 at ad4f1d6d5d9: seven CI measurements + 10 KiB, rounded up to KiB.
 // Later master caps win per family; shared-family siblings remain equal.
+// #3111 historical run 42096897919 measured HL siblings at 2,106,939 B; current larger caps retained.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
@@ -254,7 +255,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   txflow: 1_852_416,
   weex: 1_948_672,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
-  woo: 2_428_928,
+  // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
+  // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
+  woo: 2_589_696,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
