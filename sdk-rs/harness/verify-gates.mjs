@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 import { assessGateReport, assessCorrectnessReport, acceptedReplayErrors, ACCEPTED_DIFFERENCES } from './known-failure-policy.mjs';
 import { expectedGateCases, validateGateCoverage } from './ci-gate-suites.mjs';
-import { assessEligibility } from './cpu-remeasure.mjs';
+import { assessEligibility, isCpuOnlyMiss } from './cpu-remeasure.mjs';
 import { cpuRemeasureEnabled } from './cpu-rollout.mjs';
 import { readEvidenceText } from './recorded-replay.mjs';
 import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
@@ -13,12 +13,13 @@ import { familyCpuAssessment, familyCpuMiss } from './cpu-family-identity.mjs';
 import { pendingBitgetSteady } from './bitget-paired-steady.mjs';
 
 /** Strict remains the default. Collection may retain an eligible unresolved
- * CPU miss, but cannot label it PASS or supply final certification. */
+ * CPU miss, but cannot label it PASS or supply final certification. Any other
+ * CPU-only miss is left to the CPU gate, so measurement fails only on correctness. */
 export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_DIFFERENCES, mode = 'strict', family, sourceHead }) {
   if (!['strict', 'collect', 'correctness'].includes(mode)) throw new Error('unknown gate verifier mode');
-  const errors = [], cases = [], rows = [], pending = [], seen = new Set();
+  const errors = [], cases = [], rows = [], pending = [], cpuMisses = [], seen = new Set();
   let passes = 0, strictFailures = 0, knownFailures = 0, acceptedGates = 0;
-  if (!Array.isArray(entries) || entries.length === 0) return { errors: ['missing gate ledger'], rows, pending, passes, strictFailures, knownFailures, acceptedGates };
+  if (!Array.isArray(entries) || entries.length === 0) return { errors: ['missing gate ledger'], rows, pending, cpuMisses, passes, strictFailures, knownFailures, acceptedGates };
   for (const entry of entries) {
     if (!entry?.report || typeof entry.report !== 'object' || ![0, 1].includes(entry.exitCode)) {
       errors.push('invalid gate ledger entry'); continue;
@@ -35,7 +36,9 @@ export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_
     if (unchanged) assessment = familyCpuAssessment(assessment, report, family, sourceHead);
     const eligible = mode === 'collect' && cpuRemeasureEnabled(suite) && !ledgerMismatch && assessment.errors.length > 0 &&
       (assessEligibility({ report, raw: entry.raw }).eligible || suite === 'bitget' && pendingBitgetSteady(entry, manifest));
+    const cpuMiss = mode === 'collect' && !eligible && !ledgerMismatch && assessment.errors.length > 0 && isCpuOnlyMiss({ report, raw: entry.raw });
     if (eligible) pending.push({ venue: report.venue, tape: report.tape, books: report.books, tapeSha256: report.tapeSha256 });
+    else if (cpuMiss) cpuMisses.push({ venue: report.venue, tape: report.tape, books: report.books, tapeSha256: report.tapeSha256 });
     else errors.push(...assessment.errors);
     if (report.status === 'PASS' && !assessment.errors.length) passes++;
     // Every strict difference is a named acceptance: parity with exceptions, not debt.
@@ -45,13 +48,13 @@ export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_
       if (acceptedOnly) acceptedGates++;
       else if (!assessment.errors.length) knownFailures++;
     }
-    const label = unchanged ? 'UNCHANGED BYTES, NOT MEASURED' : eligible ? 'UNRESOLVED CPU MISS (not certification)' : assessment.errors.length ? 'UNEXPECTED / INVALID RESULT'
+    const label = unchanged ? 'UNCHANGED BYTES, NOT MEASURED' : eligible ? 'UNRESOLVED CPU MISS (not certification)' : cpuMiss ? 'CPU MISS (judged by the CPU gate)' : assessment.errors.length ? 'UNEXPECTED / INVALID RESULT'
       : report.status === 'PASS' ? 'PASS' : acceptedOnly ? 'PARITY WITH ACCEPTED DIFFERENCES' : 'KNOWN FAILURE (not parity)';
     rows.push({ label, identity, assessment });
   }
   errors.push(...validateGateCoverage(suite, cases));
   if (!errors.length) errors.push(...acceptedReplayErrors(accepted, expectedGateCases(suite), entries.map((entry) => entry.report)));
-  return { errors, rows, pending, passes, strictFailures, knownFailures, acceptedGates };
+  return { errors, rows, pending, cpuMisses, passes, strictFailures, knownFailures, acceptedGates };
 }
 
 export function loadGateLedger({ root = process.cwd(), directory = 'sdk-rs/harness/out/ci', includeRaw = false } = {}) {

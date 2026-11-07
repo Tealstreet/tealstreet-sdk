@@ -1588,7 +1588,7 @@ jobs:
 
 
   cpu-final:
-    name: Rust / replay gate (${{ matrix.suite }})
+    name: Rust / CPU gate (${{ matrix.suite }})
     needs: [selection, cpu-certify]
     if: always() && needs.selection.outputs.replayRequired == 'true'
     strategy:

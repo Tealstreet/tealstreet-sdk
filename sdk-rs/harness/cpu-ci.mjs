@@ -12,7 +12,7 @@ import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExe
 import { readArtifactZip } from './cpu-artifacts.mjs';
 import { captureCache, verifyCache } from './cpu-cache.mjs';
 import { assessGateReport } from './known-failure-policy.mjs';
-import { assessEligibility, decideRemeasurement, validatePublicEvidence } from './cpu-remeasure.mjs';
+import { assessEligibility, decideRemeasurement, isCpuOnlyMiss, validatePublicEvidence } from './cpu-remeasure.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
 import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint, environmentIdentity, environmentMismatch } from './cpu-runtime.mjs';
@@ -55,6 +55,8 @@ export function classifyInitialCase(evidence, declarations, paired, family, refu
     return { decision: 'first', assessment: identityAssessment, unchanged: true };
   }
   const eligible = assessEligibility(evidence, paired);
+  // A CPU-only miss beyond remeasurement refuses only this suite's CPU gate.
+  if (!eligible.eligible && isCpuOnlyMiss(evidence, paired)) return { decision: 'cpu-refused', assessment };
   insist(eligible.eligible, [...assessment.errors, ...eligible.errors].join('\n'));
   return { decision: 'second', assessment };
 }
@@ -380,6 +382,7 @@ async function collectMeasurement(context, suite) {
   insist(!result.errors.length, result.errors.join('\n'));
   if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `has_eligible=${result.pending.length > 0 && !unchanged}\n`, { flag: 'a' });
   console.log(`${unchanged ? 0 : result.pending.length} CPU cases remain unresolved; this collection is not final certification`);
+  for (const miss of result.cpuMisses) console.log(`${miss.venue} ${miss.tape}: CPU miss beyond remeasurement, judged by the CPU gate`);
   return result;
 }
 
@@ -590,6 +593,10 @@ export function validatePlannedCases(plan) {
   insist(same(plan.suites.map(row => row.suite).sort(), [...CPU_REMEASURE_SUITES].sort()), 'missing/duplicate/substituted suite roster');
   for (const row of plan.suites) {
     requireCpuRemeasureSuite(row.suite);
+    if (Object.hasOwn(row, 'refused')) {
+      insist(same(Object.keys(row).sort(), ['refused', 'suite']) && typeof row.refused === 'string' && row.refused, 'invalid refused suite row');
+      continue;
+    }
     insist(Number.isSafeInteger(row.firstArtifactId) && /^sha256:[a-f0-9]{64}$/.test(row.firstArtifactDigest ?? '') &&
       Array.isArray(row.cases) && same(row.cases.map(value => gateCaseKey(value.case)).sort(), publicCases(row.suite).map(gateCaseKey).sort()), 'missing/duplicate/substituted complete public roster');
     insist(new Set(row.cases.map(value => value.key)).size === row.cases.length, 'duplicate case key');
@@ -598,7 +605,7 @@ export function validatePlannedCases(plan) {
       row.oracleRefusal?.name === 'bitget-paired-steady' && Number.isSafeInteger(row.oracleRefusal.artifactId) && row.oracleRefusal.artifactId > 0 &&
       /^sha256:[a-f0-9]{64}$/.test(row.oracleRefusal.digest ?? '') && Number.isSafeInteger(row.oracleRefusal.bytes) && row.oracleRefusal.bytes > 0
       : row.oracleRefusal === undefined, 'invalid Bitget-only refusal plan authority');
-    for (const value of row.cases) insist(['first', 'second', 'not-certified'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
+    for (const value of row.cases) insist(['first', 'second', 'cpu-refused', 'not-certified'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
       value.case.private === false && value.case.runs === PUBLIC_REPLAY_PAIRS && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
   }
   return plan;
@@ -606,7 +613,7 @@ export function validatePlannedCases(plan) {
 
 export function secondMatrix(plan) {
   validatePlannedCases(plan);
-  return { include: plan.suites.filter(row => row.cases.some(value => value.decision === 'second')).map(({ suite }) => ({ suite })) };
+  return { include: plan.suites.filter(row => row.cases?.some(value => value.decision === 'second')).map(({ suite }) => ({ suite })) };
 }
 
 export function requireSecondState(dispositions, jobs) {
@@ -667,7 +674,11 @@ async function gatherSuite(context, suite) {
 
 async function planMeasurements(context, destination) {
   const suites = [];
-  for (const suite of CPU_REMEASURE_SUITES) suites.push(await gatherSuite(context, suite));
+  // One suite's missing or failed first evidence refuses only that suite (fail closed).
+  for (const suite of CPU_REMEASURE_SUITES) {
+    try { suites.push(await gatherSuite(context, suite)); }
+    catch (error) { suites.push({ suite, refused: String(error?.message ?? error).slice(0, 2000) || 'first evidence refused' }); }
+  }
   const plan = validatePlannedCases({ schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, suites });
   write(resolve(destination, 'plan.json'), plan);
   const matrix = secondMatrix(plan);
@@ -691,9 +702,12 @@ export function requireAuthorityRefs(evidence, originals) {
 
 async function certifySuite(context, suite, destination) {
   requireCpuRemeasureSuite(suite);
-  const { plan, bundle: planBundle } = await loadPlan(context), recomputed = await gatherSuite(context, suite);
-  const pairedBundle = suite === 'bitget' ? await loadBitgetPaired(context) : undefined;
+  const { plan, bundle: planBundle } = await loadPlan(context);
   const row = plan.suites.find(value => value.suite === suite);
+  insist(row, 'suite missing from plan');
+  if (row.refused) throw new Error(row.refused);
+  const recomputed = await gatherSuite(context, suite);
+  const pairedBundle = suite === 'bitget' ? await loadBitgetPaired(context) : undefined;
   insist(same(row, recomputed), 'authenticated plan differs from full current first-evidence revalidation');
   const { jobs: allJobs } = await evidenceInventory(context);
   const hasSecond = requireSecondState(row.cases, allJobs.filter(job => job.name === `Rust / CPU remeasurement (${suite})`));
@@ -736,6 +750,7 @@ async function certifySuite(context, suite, destination) {
     const first = firstEvidence(strict.entries, value.key, value.case);
     restoreOriginalOutputs(context, strict.entries);
     revalidateRecordedEvidence(first, { root: context.root });
+    insist(value.decision !== 'cpu-refused', `${gateCaseKey(value.case)}: CPU miss beyond remeasurement; not certified`);
     if (value.decision === 'first') {
       const initial = classifyInitialCase(first, manifest(), paired, family);
       insist(initial.decision === 'first',
@@ -775,7 +790,7 @@ export async function evidenceEndCheck(context) {
   }
 }
 
-/** One refused suite fails only its own replay gate; overall certification stays false. */
+/** One refused suite fails only its own CPU gate; overall certification stays false. */
 export async function certifySuites(suites, certifyOne) {
   const certificates = {}, results = { certified: true, suites: {}, reasons: {} };
   for (const suite of suites) {

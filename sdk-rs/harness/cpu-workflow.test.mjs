@@ -29,7 +29,7 @@ function verifyWorkflow(text) {
   assert.match(second, /name: Rust \/ CPU remeasurement \(\$\{\{ matrix\.suite \}\}\)/);
   assert.match(second, /--command second --suite '\$\{\{ matrix\.suite \}\}'/);
   assert.match(second, /name: cpu-second-\$\{\{ matrix\.suite \}\}/);
-  assert.match(final, /name: Rust \/ replay gate \(\$\{\{ matrix\.suite \}\}\)/);
+  assert.match(final, /name: Rust \/ CPU gate \(\$\{\{ matrix\.suite \}\}\)/);
   assert.match(certify, /needs: \[selection, gate, bitget-paired, cpu-plan, cpu-second\]\n    if: always\(\)/);
   assert.match(final, /needs: \[selection, cpu-certify\]\n    if: always\(\)/);
   const suites = /suite: \[([^\]]+)\]/.exec(final);

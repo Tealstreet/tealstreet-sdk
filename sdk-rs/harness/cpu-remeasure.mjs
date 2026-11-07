@@ -88,7 +88,7 @@ export function validatePublicEvidence(value) {
   catch (error) { return [`malformed public evidence: ${error.message}`]; }
 }
 
-function cpuOnlyErrors(value, requireMiss, paired) {
+function cpuOnlyErrors(value, requireMiss, paired, cap = true) {
   const errors = validatePublicEvidence(value);
   if (errors.length) return errors;
   const report = value.report, source = value.execution?.measuredCheckoutSha;
@@ -101,9 +101,15 @@ function cpuOnlyErrors(value, requireMiss, paired) {
     errors.push('strict failures include non-CPU diagnostics or omit/repeat computed failures');
   if (requireMiss && !cpuFailures.some(failure => objectives(report, paired, source).some(({ label }) => failure.startsWith(`performance ${label}:`))))
     errors.push('first measurement has no remaining CPU miss');
-  for (const objective of objectives(report, paired, source)) if (!Number.isFinite(objective.ratio) || objective.ratio >= 1.05)
+  if (cap) for (const objective of objectives(report, paired, source)) if (!Number.isFinite(objective.ratio) || objective.ratio >= 1.05)
     errors.push(`${objective.field}: CPU ratio must be strictly below 1.05`);
   return errors;
+}
+
+/** A valid strict report whose only failures are computed CPU misses, at any ratio.
+ * The CPU gate judges it; it is not a correctness failure. */
+export function isCpuOnlyMiss(value, paired) {
+  return cpuOnlyErrors(value, true, paired, false).length === 0;
 }
 
 export function assessEligibility(first, paired) {

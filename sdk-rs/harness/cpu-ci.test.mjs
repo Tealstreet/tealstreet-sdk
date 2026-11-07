@@ -69,6 +69,25 @@ test('only eligible suites enter the second matrix; complete PASS means zero sec
   value.suites.pop(); assert.throws(() => secondMatrix(value), /suite roster/);
 });
 
+test('one suite whose first evidence fails refuses only its own CPU gate', () => {
+  const value = plan(), index = value.suites.findIndex(row => row.suite === 'bitget');
+  value.suites[index] = { suite: 'bitget', refused: 'Bitget paired CI: missing/ambiguous exact open or merged PR for this run' };
+  value.suites.find(row => row.suite === 'okx').cases[0].decision = 'second';
+  assert.equal(validatePlannedCases(value), value);
+  assert.deepEqual(secondMatrix(value), { include: [{ suite: 'okx' }] }, 'other suites still remeasure');
+  for (const invalid of [{ suite: 'bitget', refused: '' }, { suite: 'bitget', refused: 'x', cases: [] }, { suite: 'unknown', refused: 'x' }]) {
+    const bad = plan(); bad.suites[index] = invalid; assert.throws(() => validatePlannedCases(bad));
+  }
+});
+
+test('a CPU-only miss beyond remeasurement is a planned CPU refusal, never a second runner', () => {
+  const value = plan();
+  value.suites.find(row => row.suite === 'bybit').cases[0].decision = 'cpu-refused';
+  assert.equal(validatePlannedCases(value), value);
+  assert.deepEqual(secondMatrix(value), { include: [] });
+  assert.equal(requireSecondState(value.suites.find(row => row.suite === 'bybit').cases, []), false);
+});
+
 test('only Bitget may plan a non-certified oracle refusal without a second measurement', () => {
   const value = plan(), bitget = value.suites.find(row => row.suite === 'bitget');
   bitget.cases[0].decision = 'not-certified';
@@ -168,7 +187,7 @@ test('required check wrappers accept only successful complete same-run same-chec
   }
 });
 
-test('a replay gate accepts its own certificate while another suite is uncertified, never the reverse', () => {
+test('a CPU gate accepts its own certificate while another suite is uncertified, never the reverse', () => {
   const suites = Object.fromEntries(GATE_SUITES.map(suite => [suite, suite !== 'txflow']));
   const reason = 'CPU certification: txflow not certified: runner image rolled 20261026.354.1→20261101.360.1; fresh run required';
   const results = { schema: 1, runId: 1, checkoutSha: 'a'.repeat(40), certified: false, suites, reasons: { txflow: reason } };
