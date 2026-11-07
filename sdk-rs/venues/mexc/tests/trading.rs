@@ -331,6 +331,99 @@ fn lost_write_response_never_retries_and_finishes_the_command() {
     );
 }
 
+fn ambiguous_batch_never_falls_back(status: u16) {
+    for body in [
+        r#"{"success":false,"code":511,"message":"Batch API unavailable"}"#,
+        r#"{"success":false,"code":406,"message":"You do not have access to the interface"}"#,
+    ] {
+        let mut e = ready();
+        e.handle(
+            200.0,
+            Event::Command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![order(), order()],
+            }),
+        );
+        let batch = requests(&mut e).remove(0);
+        assert!(batch.url.ends_with("/submit_batch"));
+        e.handle(
+            300.0,
+            Event::HttpResponse {
+                request: batch.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let mut actions = prepared(&mut e, 300.0);
+        // Fire a fallback's pacing timer so the assertion sees physical sends.
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms <= 2000.0 => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        for (timer, at_ms) in timers {
+            e.handle(at_ms, Event::TimerFired { timer });
+            actions.extend(prepared(&mut e, at_ms));
+        }
+        assert!(
+            !actions.iter().any(|action| matches!(action,
+                Action::Http(request) if request.method == safe_cex_engine::Method::Post
+                    && (request.url.ends_with("/submit") || request.url.ends_with("/submit_batch"))
+            )),
+            "HTTP {status} {body}: ambiguous batch resubmitted orders"
+        );
+        let errors: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "HTTP {status} {body}: {actions:?}");
+        assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 91, .. })
+        )));
+
+        e.handle(
+            3000.0,
+            Event::Command(Command::PlaceOrders {
+                command: 92,
+                orders: vec![order(), order()],
+            }),
+        );
+        let next = requests(&mut e);
+        assert_eq!(next.len(), 1);
+        assert!(
+            next[0].url.ends_with("/submit_batch"),
+            "an ambiguous reply must not disable batching for later commands"
+        );
+    }
+}
+
+#[test]
+fn ambiguous_batch_429_never_falls_back() {
+    ambiguous_batch_never_falls_back(429);
+}
+
+#[test]
+fn ambiguous_batch_408_never_falls_back() {
+    ambiguous_batch_never_falls_back(408);
+}
+
+#[test]
+fn ambiguous_batch_5xx_never_falls_back() {
+    for status in [500, 503] {
+        ambiguous_batch_never_falls_back(status);
+    }
+}
+
 #[test]
 fn late_placement_response_preserves_the_newer_stream_order() {
     let (mut e, socket, reads, _) = private_started();
