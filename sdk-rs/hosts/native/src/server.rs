@@ -3814,6 +3814,12 @@ mod tests {
                     .unwrap();
                 for (venue, options, message) in [
                     ("nope", "{}", "unsupported venue: nope"),
+                    ("bitmex", "{}", "unsupported venue: bitmex"),
+                    (
+                        "bitmextestnet",
+                        r#"{"key":"k","secret":"s"}"#,
+                        "unsupported venue: bitmextestnet",
+                    ),
                     (
                         "weex",
                         r#"{"key":"k","secret":"s"}"#,

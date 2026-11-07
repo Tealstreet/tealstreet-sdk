@@ -1,4 +1,4 @@
-use safe_cex_engine::{Engine, ErrorKind, Venue, VenueError};
+use safe_cex_engine::{Engine, ErrorKind, Outcome, Venue, VenueError};
 use safe_cex_venues::{EngineOptions, Visit, build};
 
 struct Accept;
@@ -26,7 +26,23 @@ fn rejected(venue: &str, options: &str) -> String {
 
 #[test]
 fn unknown_venues_are_refused_by_name() {
-    assert_eq!(rejected("nope", "{}"), "unsupported venue: nope");
+    // Retired venues stay saved on user accounts; they must refuse, typed, before any I/O.
+    for venue in ["nope", "bitmex", "bitmextestnet"] {
+        for options in [
+            "{}",
+            r#"{"publicDataOnly":true}"#,
+            r#"{"key":"k","secret":"s"}"#,
+        ] {
+            let error = construct(venue, options).expect_err("construction is refused");
+            assert_eq!(
+                error.kind,
+                Some(ErrorKind::Unsupported),
+                "{venue} {options}"
+            );
+            assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue} {options}");
+            assert_eq!(error.message, format!("unsupported venue: {venue}"));
+        }
+    }
 }
 
 #[test]
@@ -520,7 +536,6 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
 
 #[test]
 fn native_payload_refusal_preserves_classification_with_or_without_local_credentials() {
-    use safe_cex_engine::Outcome;
     for venue in [
         "binance",
         "binancepm",

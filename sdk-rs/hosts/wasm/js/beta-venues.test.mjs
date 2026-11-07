@@ -9,6 +9,7 @@ import {
 } from './beta-venues.mjs';
 import { familyLoader } from './family-loader.mjs';
 import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
+import { ExchangeError } from './host.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
@@ -44,9 +45,19 @@ test('every beta venue keeps the family the full registry gives it', () => {
 test('OUT venues are refused by name and unknown ones as before', () => {
   for (const venue of OUT) {
     assert.doesNotThrow(() => venueFamily(venue), venue);
-    assert.throws(() => betaVenueFamily(venue), (error) => error instanceof BetaVenueUnavailableError && error.venue === venue);
+    assert.throws(() => betaVenueFamily(venue), (error) => error instanceof BetaVenueUnavailableError && error.venue === venue
+      && error instanceof ExchangeError && error.kind === 'unsupported' && error.outcome === 'notSent');
   }
-  assert.throws(() => betaVenueFamily('bitmex'), /unsupported Rust venue: bitmex/);
+});
+
+test('retired venues still saved on accounts refuse typed, by name', () => {
+  for (const venue of ['bitmex', 'bitmextestnet']) {
+    for (const resolve of [venueFamily, betaVenueFamily]) {
+      assert.throws(() => resolve(venue), (error) => error instanceof ExchangeError
+        && error.kind === 'unsupported' && error.outcome === 'notSent'
+        && error.message === `unsupported Rust venue: ${venue}`);
+    }
+  }
 });
 
 test('the beta loader refuses an OUT venue before importing any engine', async () => {
