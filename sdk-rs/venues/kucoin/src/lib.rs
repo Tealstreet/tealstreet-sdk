@@ -940,9 +940,6 @@ impl Kucoin {
 }
 
 impl Venue for Kucoin {
-    fn http_plans() -> bool {
-        false
-    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
