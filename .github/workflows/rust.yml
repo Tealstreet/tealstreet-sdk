@@ -950,6 +950,9 @@ jobs:
               corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue$suffix-private.jsonl" --books ''
             done
           done
+      - name: Coinbase drb public replay and startup deadline
+        if: matrix.venue == 'coinbase'
+        run: node sdk-rs/harness/coinbase-drb-public.integration.mjs sdk-rs/hosts/wasm/pkg/ci-replay/safe_cex_wasm.js
       - name: Coinbase product and CDP algorithm variants (correctness)
         if: matrix.venue == 'coinbase'
         run: |
