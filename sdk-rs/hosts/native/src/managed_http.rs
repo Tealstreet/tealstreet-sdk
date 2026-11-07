@@ -58,6 +58,39 @@ impl Requests {
 }
 
 impl<V: Venue, T: Transport> Host<V, T> {
+    pub(super) fn execute_websocket_write(
+        &mut self,
+        binding: safe_cex_engine::WebSocketWriteBinding,
+    ) {
+        let preparation = binding.preparation();
+        let request = preparation.attempt().request;
+        let now = (self.clock)();
+        let ready = self
+            .engine
+            .websocket_write_socket(&binding)
+            .is_some_and(|socket| self.sockets.contains_key(&socket));
+        if !ready {
+            self.engine.http_preparation_failed(
+                now,
+                preparation,
+                safe_cex_engine::request_context::Error::Revoked,
+                VenueError::new("WebSocket write transport is unavailable"),
+            );
+            return;
+        }
+        if let Ok((socket, text)) = self.engine.claim_websocket_write(now, binding)
+            && self.sockets[&socket].send(text).is_err()
+        {
+            self.engine.handle(
+                now,
+                Event::HttpFailed {
+                    request,
+                    error: "WebSocket write transport refused the frame",
+                },
+            );
+        }
+    }
+
     pub(super) fn execute_managed_http(&mut self, action: HttpAction) {
         match action {
             HttpAction::Prepare {
