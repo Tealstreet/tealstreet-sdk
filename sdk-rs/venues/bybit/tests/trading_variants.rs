@@ -5212,3 +5212,44 @@ fn ambiguous_clock_like_write_failures_never_calibrate_or_replay() {
         ));
     }
 }
+
+/// A dispatched placement can have landed despite an HTTP refusal and a
+/// timestamp/signature diagnostic. Only reads may resolve that uncertainty.
+#[test]
+fn ambiguous_http_clock_refusals_never_resend_spot_creates() {
+    const SPOT_EMPTY: &str =
+        r#"{"retCode":0,"result":{"category":"spot","list":[],"nextPageCursor":""}}"#;
+    for status in [429, 408, 500, 503, 504] {
+        for code in [10002, 10004] {
+            // Complete the startup census so the unknown write owes a new read.
+            let mut h = ready_listing(options(Variant::Spot), SPOT_EMPTY);
+            place(&mut h, 603, vec![order("BTCUSDT", 0.1)]);
+            let first = h.take("/v5/order/create");
+            let clock = h.engine.signing_clock(h.now);
+            let refusal = format!(
+                r#"{{"retCode":{code},"retMsg":"recv_window server_timestamp[1793989307022]","result":{{}}}}"#
+            );
+            h.reply(first.id, status, &refusal);
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|r| r.method == safe_cex_engine::Method::Get),
+                "HTTP {status}, native {code}: no second physical write: {:?}",
+                h.requests
+            );
+            assert!(h.unknown.contains(&603), "HTTP {status}, native {code}");
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 603).count(), 1);
+            assert_eq!(h.engine.signing_clock(h.now), clock);
+            assert!(h.has_request("/v5/order/realtime"), "reconcile by reading");
+            while h.has_request("/v5/order/realtime") {
+                h.respond("/v5/order/realtime", 200, EMPTY);
+            }
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|r| r.method == safe_cex_engine::Method::Get)
+            );
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 603).count(), 1);
+        }
+    }
+}
