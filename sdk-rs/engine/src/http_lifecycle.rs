@@ -2735,19 +2735,19 @@ impl<V: Venue> Engine<V> {
                 self.io.core.http_history_failure = None;
             }
             let previous = self.io.core.http_delivery.replace(delivery.clone());
-            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-            let exempt = proof.error().is_some()
-                && self.venue.status_exempt_refusal(&pending.value, response);
-            #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
-            let exempt = false;
-            if let Some(error) = proof.error().filter(|_| !exempt) {
+            if let Some(error) = proof.error() {
                 let venue = &self.venue;
                 let recorded = self.io.core.request_contexts.unproven_result(
                     &delivery,
                     response.status,
-                    |evidence| venue.unproven_http_evidence(&pending.value, response, evidence),
+                    |evidence| {
+                        evidence.retry_after_ms(crate::classify::retry_after_ms(&response));
+                        venue.unproven_http_evidence(&pending.value, response, evidence);
+                    },
                 );
                 if recorded.is_ok() {
+                    self.venue
+                        .observe_unproven_http_response(now, &pending.value, response);
                     #[cfg(feature = "http-plans")]
                     let plan = self
                         .io
@@ -2800,11 +2800,6 @@ impl<V: Venue> Engine<V> {
                     Some((response.status, response.headers.to_owned()));
                 #[cfg(feature = "repair-mutations")]
                 let previous_data = self.begin_repair_data(Some(request));
-                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-                let previous_exempt = std::mem::replace(
-                    &mut self.io.core.http_status_exempt,
-                    exempt.then_some(request),
-                );
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -2817,10 +2812,6 @@ impl<V: Venue> Engine<V> {
                 #[cfg(feature = "repair-mutations")]
                 self.end_repair_data(previous_data);
                 self.io.core.http_write_reply = None;
-                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-                {
-                    self.io.core.http_status_exempt = previous_exempt;
-                }
             }
             self.io.core.http_delivery = previous;
             self.io.core.request_contexts.exit_delivery(&delivery);
@@ -3474,6 +3465,8 @@ mod tests {
         effect_fact: Option<EffectFact>,
         native_effects: usize,
         housekeeping_checks: usize,
+        rate_limit_header: Option<&'static str>,
+        rate_pause_until: f64,
         reconciles: Vec<Option<Vec<String>>>,
         reasks: Vec<bool>,
         // The command intent a test mutation is issued under (default Place).
@@ -3523,6 +3516,19 @@ mod tests {
             true
         }
         type Pending = Pending;
+        fn observe_unproven_http_response(
+            &mut self,
+            now: f64,
+            _: &Pending,
+            response: Response<'_>,
+        ) {
+            if response.status == 429
+                && let Some(header) = self.rate_limit_header
+                && let Some(seconds) = response.header(header).and_then(|v| v.parse::<f64>().ok())
+            {
+                self.rate_pause_until = self.rate_pause_until.max(now + seconds * 1000.);
+            }
+        }
         fn unproven_http_evidence(
             &self,
             pending: &Pending,
@@ -3642,11 +3648,16 @@ mod tests {
         fn http_release() -> crate::HttpRelease<Self> {
             crate::HttpRelease::Mutable(|this, _, release| {
                 this.releases.push(*release);
-                Ok(if this.deny {
-                    Admission::Denied
-                } else {
-                    Admission::Unscheduled
-                })
+                Ok(
+                    if this.deny
+                        || (this.rate_limit_header.is_some()
+                            && release.time.raw_ms < this.rate_pause_until)
+                    {
+                        Admission::Denied
+                    } else {
+                        Admission::Unscheduled
+                    },
+                )
             })
         }
         fn on_http_preparation_failed(
@@ -5401,6 +5412,52 @@ mod tests {
     }
 
     #[test]
+    fn rate_bookkeeping_precedes_unknown_seal_and_blocks_a_second_command() {
+        for header in ["retry-after", "x-ratelimit-retry-after-contract"] {
+            let (mut engine, _) = start(Probe {
+                rate_limit_header: Some(header),
+                ..Probe::default()
+            });
+            let (_, first, _) = mutation(&mut engine, 7, 0.);
+            let permit = bind(&mut engine, first, 1.);
+            assert!(matches!(
+                engine.claim_http(2., permit),
+                Ok(Claim::Released(_))
+            ));
+            let (_, second, _) = mutation(&mut engine, 8, 2.);
+            let held = bind(&mut engine, second, 3.);
+            let headers = format!("{header}: 0.020\r\n");
+            engine.handle(
+                4.,
+                Event::HttpResponse {
+                    request: first.attempt().request,
+                    response: Response {
+                        status: 429,
+                        headers: &headers,
+                        body: "auth refused",
+                    },
+                },
+            );
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            assert!(actions.iter().any(|action| matches!(action,
+                Action::Notice(Notice::CommandFailed { command: 7, error })
+                    if error.outcome == Some(crate::Outcome::Unknown))));
+            assert_eq!(engine.venue.responses, 0, "no native mutation reducer");
+            assert_eq!(engine.venue.rate_pause_until, 24., "{header}");
+            assert!(
+                engine.claim_http(5., held).is_err(),
+                "held B cannot release during A's pause"
+            );
+            let (_, third, _) = mutation(&mut engine, 9, 23.);
+            let permit = bind(&mut engine, third, 23.);
+            assert!(
+                matches!(engine.claim_http(24., permit), Ok(Claim::Released(_))),
+                "an independent command can release at pause equality"
+            );
+        }
+    }
+
+    #[test]
     fn response_proof_guard_keeps_late_unproven_replies_out_of_reconciliation() {
         let mut observed = Vec::new();
         for status in [408, 500, 503, 600, u16::MAX, 200] {
@@ -5810,7 +5867,7 @@ mod tests {
             auth_reject: true,
             ..Probe::default()
         });
-        for (command, status) in [(7, 429), (8, 503)] {
+        for (command, status) in [(6, 403), (7, 429), (8, 503)] {
             // A native auth refusal is credential evidence only on a signed write.
             let (_, token, _) = queue_mutation(&mut engine, command, 0., true);
             let (attempt, input) = work(&route(&mut engine, token, 1.));
@@ -5833,12 +5890,13 @@ mod tests {
                 },
             );
             assert_eq!(engine.health().auth_failures, 1);
-            if status == 503 {
+            if status != 403 {
                 assert!(!engine.io.core.auth_failure_counted);
                 let actions = engine.drain_actions().collect::<Vec<_>>();
                 assert!(actions.iter().any(|action| matches!(action,
-                    Action::Notice(Notice::CommandFailed { command: 8, error })
-                    if error.kind == Some(ErrorKind::VenueUnavailable)
+                    Action::Notice(Notice::CommandFailed { command: failed, error })
+                    if *failed == command
+                        && error.kind == Some(if status == 429 { ErrorKind::RateLimited } else { ErrorKind::VenueUnavailable })
                         && error.outcome == Some(crate::Outcome::Unknown))));
             }
         }
@@ -5864,7 +5922,7 @@ mod tests {
         );
         assert_eq!(engine.health(), &health);
         assert_eq!(engine.venue.responses, 1);
-        assert_eq!(engine.venue.reconciliations.borrow().len(), 1);
+        assert_eq!(engine.venue.reconciliations.borrow().len(), 0);
         assert!(engine.drain_actions().next().is_none());
     }
 

@@ -17597,19 +17597,6 @@
     },
     {
       "venue": "hyrotrader",
-      "tapeSha256": "3b8707627d73033b373751308e10655a8a9c70363e03ec1a43f1c820cfdbc6e0",
-      "tape": "sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz",
-      "diagnostics": [
-        {
-          "divergence": "Seven interleaved pairs did not establish the required 10% improvement; retain the observed performance failure, including if a later sample passes.",
-          "keys": [
-            "performance steady-state CPU: Rust must be at least 10% below TS"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "hyrotrader",
       "tapeSha256": "d950c8d866bffaa14a08439a36b77174a3c8421155481accfede6dd5cd0b66ac",
       "tape": "sdk-rs/harness/tapes/hyrotrader-private.jsonl",
       "diagnostics": [

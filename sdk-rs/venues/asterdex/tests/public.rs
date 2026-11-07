@@ -338,6 +338,63 @@ fn aggregate_and_raw_events_preserve_partial_fields_and_funding_zero() {
 }
 
 #[test]
+fn market_price_parsing_preserves_values_and_repeat_observations() {
+    use safe_cex_engine::model::StopTriggerType;
+    for (stream, field, reference) in [
+        ("!ticker@arr", "c", StopTriggerType::LastPrice),
+        ("!markPrice@arr@1s", "p", StopTriggerType::MarkPrice),
+    ] {
+        for (input, expected, observed) in [
+            (None, 100.0_f64, false),
+            (Some("null"), 100.0, false),
+            (Some(r#""""#), 100.0, false),
+            (Some(r#""   ""#), 0.0, false),
+            (Some(r#""broken""#), 0.0, false),
+            (Some(r#""NaN""#), 0.0, false),
+            (Some(r#""Infinity""#), 0.0, false),
+            (Some(r#""1e999""#), 0.0, false),
+            (Some(r#""-0""#), -0.0, false),
+            (Some(r#""-2""#), -2.0, false),
+            (Some(r#""100""#), 100.0, true),
+            (Some(r#"" 1e2 ""#), 100.0, true),
+        ] {
+            let mut h = Harness::ready();
+            h.now += 1.0;
+            h.message(&format!(
+                r#"{{"stream":"{stream}","data":[{{"s":"BTCUSDT","{field}":"100"}}]}}"#
+            ));
+            let seed_at = h.now;
+            let value = input.map_or(String::new(), |input| format!(r#", "{field}":{input}"#));
+            let message = format!(r#"{{"stream":"{stream}","data":[{{"s":"BTCUSDT"{value}}}]}}"#);
+            h.now += 1.0;
+            h.message(&message);
+            let first_at = h.now;
+            h.now += 1.0;
+            h.message(&message);
+            let ticker = h.engine.store().ticker("BTCUSDT").unwrap();
+            let actual = match reference {
+                StopTriggerType::LastPrice => ticker.last,
+                StopTriggerType::MarkPrice => ticker.mark,
+                StopTriggerType::IndexPrice => unreachable!(),
+            };
+            assert_eq!(actual.to_bits(), expected.to_bits(), "{stream} {input:?}");
+            let expected_at = if observed {
+                h.now
+            } else if expected.to_bits() != 100.0_f64.to_bits() {
+                first_at
+            } else {
+                seed_at
+            };
+            assert_eq!(
+                h.engine.store().reference_seen_at("BTCUSDT", reference),
+                Some(expected_at),
+                "{stream} {input:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn aggregate_decoder_preserves_reordered_escaped_and_typed_error_frames() {
     let cases = [
         (

@@ -39,6 +39,7 @@ const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
       const idle = () => '[]';
       return {
         construction: () => JSON.stringify({ frameFed: false, publicDataOnly: page }),
+        syncHostTime: () => true,
         capabilities: () => engineCapabilities('bybit'),
         start: () => {
           if (state === 'fails') throw new Error('instrument read refused');

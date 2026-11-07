@@ -2189,7 +2189,9 @@ impl Venue for Hyperliquid {
                     let _ = cx.fail_context(&context, "Market not found");
                     return;
                 };
-                let Some(body) = candle_body(cx.now, coin, interval, limit, from_ms, to_ms) else {
+                let Some(body) =
+                    candle_body(cx.protocol_now(), coin, interval, limit, from_ms, to_ms)
+                else {
                     let _ = cx.fail_context(&context, "Invalid candle time range");
                     return;
                 };

@@ -42,6 +42,7 @@ const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as Exch
       }),
     );
   const engine = {
+    syncHostTime: () => true,
     capabilities: () => engineCapabilities(venue),
     construction: () => JSON.stringify({ frameFed, canSign: true, publicDataOnly: false }),
     start: () => {
@@ -647,6 +648,8 @@ describe('frame-fed main-thread mirror', () => {
   });
 
   it("measures its data source's clock from the frames it ingests", async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     const fake = fakeEngine();
     exchange = mirrorWith(fake).exchange;
     await exchange.frameFedReady;

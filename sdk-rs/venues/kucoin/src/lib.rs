@@ -1679,7 +1679,7 @@ impl Venue for Kucoin {
             } => {
                 match interval(timeframe) {
                     Ok((minutes, _)) => {
-                        let end = to_ms.unwrap_or(cx.now);
+                        let end = to_ms.unwrap_or(cx.protocol_now());
                         let start = if let Some(limit) = limit {
                             end - minutes as f64 * 60000.0 * limit.clamp(1, 1000) as f64
                         } else {
