@@ -4087,10 +4087,12 @@ pub trait Venue {
     }
 
     /// Rate-limit bookkeeping for a validated delivery, before its Unknown seal.
+    /// Use raw `now` for scheduling, calibrated `protocol_now` for absolute dates.
     /// No Cx: this cannot send, publish financial rows or complete a command.
     fn observe_unproven_http_response(
         &mut self,
         _now: f64,
+        _protocol_now: f64,
         _pending: &Self::Pending,
         _response: Response<'_>,
     ) {
