@@ -7,6 +7,7 @@ import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positi
 import { amountPrecisionOf } from '../../utils/marketPrecision';
 import { resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
+import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
 
 /**
  * Base class for trading commands with utility methods for size/price processing
@@ -93,6 +94,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
    *        (`buy`, non-reduce `chase`) pass `'balance'`; exit commands
    *        (`close`, reduce-only `stop`/`chase`) pass `'position'`.
    * @param price resolved order price; omitted for market-price sizing.
+   * @param sizeFraction share of the requested size, applied before lot rounding.
    */
   protected parseSizeAndConvertIfUsd(
     exchange: ExchangeLike,
@@ -102,6 +104,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
     side?: PositionSide,
     defaultPercentScope: 'position' | 'balance' = 'position',
     price?: number,
+    sizeFraction = 1,
   ): number {
     const trimmed = size.trim();
 
@@ -138,7 +141,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
         // NATIVE contracts. `position.contracts` is base and differs by
         // `contractSize`, so `close 50%` on an OKX-shaped market asked for a
         // multiple of the position rather than half of it.
-        return adjust((nativePositionSize(position, market) * pct) / 100, amountPrecisionOf(market));
+        return adjust((nativePositionSize(position, market) * pct * sizeFraction) / 100, amountPrecisionOf(market));
       }
 
       // balance scope
@@ -148,7 +151,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
       }
       const positionForLev = (exchange.store?.positions ?? []).find((p) => p.symbol === symbol && p.contracts !== 0);
       const leverage = positionForLev?.leverage ?? 1;
-      const notional = (balance.free * leverage * pct) / 100;
+      const notional = (balance.free * leverage * pct * sizeFraction) / 100;
       // Inverse contracts are USD-denominated: each contract is
       // `contractSize` USD (1 for Bybit/Bitget; 100 or 10 for
       // Binance Coin-M / Deribit). The contract count is notional /
@@ -159,7 +162,10 @@ export abstract class TradingBaseCommand extends BaseCommand {
         const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
         return adjust(notional / contractSize, amountPrecisionOf(market));
       }
-      const conversionPrice = price ?? exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
+      const conversionPrice =
+        price === undefined
+          ? exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last
+          : prepareCliAmendPrice(exchange, symbol, price);
       if (!conversionPrice) {
         throw new Error(`Price not available for ${symbol}`);
       }
@@ -168,7 +174,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
     }
 
     if (this.looksLikeSize(trimmed)) {
-      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed), price);
+      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed) * sizeFraction, price);
     }
 
     throw new Error(`Invalid size "${size}". Use $1000, 1000$, or NN% (or NN%bal / NN%pos).`);
@@ -208,7 +214,11 @@ export abstract class TradingBaseCommand extends BaseCommand {
       return adjust(notional / contractSize, amountPrecision);
     }
 
-    const conversionPrice = price ?? exchange.store?.tickers?.find((ticker) => ticker.symbol === symbol)?.last;
+    // Use the same validated tick-rounded price that order preparation sends.
+    const conversionPrice =
+      price === undefined
+        ? exchange.store?.tickers?.find((ticker) => ticker.symbol === symbol)?.last
+        : prepareCliAmendPrice(exchange, symbol, price);
     if (!conversionPrice) {
       throw new Error('Price data is not available yet for a symbol');
     }

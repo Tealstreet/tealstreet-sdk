@@ -314,11 +314,7 @@ describe('BuyCommand', () => {
      */
     it('still finds a trailing symbol placed after an attached stop', async () => {
       const exchange = createMockExchange();
-      const ctx = createMockContext(
-        ['buy', '$100', 'at', '3000', 'stop', '2900', 'ETHUSDT'],
-        exchange,
-        'BTCUSDT',
-      );
+      const ctx = createMockContext(['buy', '$100', 'at', '3000', 'stop', '2900', 'ETHUSDT'], exchange, 'BTCUSDT');
       const result = await command.execute(ctx);
 
       expect(result.success).toBe(true);
@@ -426,6 +422,22 @@ describe('BuyCommand', () => {
   });
 
   describe('sizing at the order price', () => {
+    it.each(['$20', '10%bal'])('sizes %s at the tick-rounded limit price', async (size) => {
+      const exchange = createMockExchange();
+      Object.assign(exchange.store!.markets![0], {
+        symbol: 'MEMEUSDT',
+        base: 'MEME',
+        precision: { amount: 1, price: 0.001 },
+      });
+      Object.assign(exchange.store!.tickers![0], { symbol: 'MEMEUSDT', last: 0.002 });
+      exchange.store!.balance = { free: 200, total: 200, used: 0, upnl: 0 };
+
+      const result = await command.execute(createMockContext(['buy', size, 'at', '0.0015'], exchange, 'MEMEUSDT'));
+
+      expect(result.success).toBe(true);
+      expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 0.002, amount: 10_000 }));
+    });
+
     it('sizes suffix USD at a resolved percent limit price', async () => {
       const exchange = createMockExchange();
       exchange.store!.markets![0].precision.amount = 0.000001;

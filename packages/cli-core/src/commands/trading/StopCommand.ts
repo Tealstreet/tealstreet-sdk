@@ -128,6 +128,18 @@ export class StopCommand extends TradingBaseCommand {
         return this.error(`No position found for ${targetSymbol}`);
       }
 
+      const hasExplicitSize = sizePosition !== -1 && sizePosition < args.length;
+      const amount = hasExplicitSize
+        ? this.notionalToSize(exchange, targetSymbol, this.parseUsdAmount(args[sizePosition]), limitPrice)
+        : 0;
+      // Zero is the Full/Infinity sentinel; an explicit sub-lot size must not
+      // silently become a stop for the entire position.
+      if (hasExplicitSize && (!Number.isFinite(amount) || amount <= 0)) {
+        return this.error(
+          `Size "${args[sizePosition]}" is below the lot step or invalid for ${targetSymbol} — stop not placed.`,
+        );
+      }
+
       for (const { side } of positionSides) {
         const isLong = side === PositionSide.Long;
         // TP vs SL is decided by trigger vs mark — that's when the
@@ -146,10 +158,7 @@ export class StopCommand extends TradingBaseCommand {
           reduceOnly: true,
           price: limitPrice,
           triggerPrice,
-          amount:
-            sizePosition !== -1 && sizePosition < args.length
-              ? this.notionalToSize(exchange, targetSymbol, this.parseUsdAmount(args[sizePosition]), limitPrice)
-              : 0,
+          amount,
         };
         await exchange.placeOrder(prepareCliOrder(exchange, stopOrder));
       }

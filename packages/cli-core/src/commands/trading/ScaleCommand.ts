@@ -48,9 +48,7 @@ export class ScaleCommand extends TradingBaseCommand {
   private parseCommand(input: string): ParsedScaleCommand | string {
     const sizeRe = String.raw`(?:\$\d+(?:\.\d+)?|\d+(?:\.\d+)?\$|\d+(?:\.\d+)?%(?:bal|pos)?)`;
     const priceRe = String.raw`(?:[-+]?[\d.]+%?|\d+%?)`;
-    const core = new RegExp(
-      String.raw`^scale (?:buy|sell) ${sizeRe} into \d+ from ${priceRe} to ${priceRe}( .*)?$`,
-    );
+    const core = new RegExp(String.raw`^scale (?:buy|sell) ${sizeRe} into \d+ from ${priceRe} to ${priceRe}( .*)?$`);
     const match = core.exec(input);
     if (!match) {
       return `Invalid syntax "${input}"`;
@@ -156,16 +154,16 @@ export class ScaleCommand extends TradingBaseCommand {
     try {
       for (let i = 0; i < ordersCount; i++) {
         const price = priceLower + i * priceIncrement;
-        const size =
-          this.parseSizeAndConvertIfUsd(
-            exchange,
-            targetSymbol,
-            args[2],
-            true,
-            reduceOnly ? (orderSide === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) : undefined,
-            reduceOnly ? 'position' : 'balance',
-            price,
-          ) / ordersCount;
+        const size = this.parseSizeAndConvertIfUsd(
+          exchange,
+          targetSymbol,
+          args[2],
+          true,
+          reduceOnly ? (orderSide === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) : undefined,
+          reduceOnly ? 'position' : 'balance',
+          price,
+          1 / ordersCount,
+        );
         orders.push({
           size,
           price: String(price),

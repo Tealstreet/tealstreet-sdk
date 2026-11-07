@@ -21,12 +21,14 @@ The grammar that fills `<size>` and `<price>` slots in every trading command.
 
 A `$` or balance-percent `buy` / `sell` size is converted to coin at the
 order's limit or `best` price, and a `$` size for a sized `stop` at its `at`
-price. Market orders use the last price; inverse contracts don't depend on
-price.
+price, rounded to the venue's price tick. Market orders use the last price;
+inverse contracts don't depend on price. An explicit stop size that rounds
+below the lot step is refused; only an omitted size requests a full-position stop.
 
 `scale` gives each rung an equal dollar share, converted at that rung's price,
 so lower bids buy more coin. Position-percent and inverse sizes still split
-evenly in contracts.
+evenly in contracts. Each share is allocated before lot rounding; a rung that
+rounds below the lot step is refused before placing the ladder.
 
 ### Default percent scope
 
