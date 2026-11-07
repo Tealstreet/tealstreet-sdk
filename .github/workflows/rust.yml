@@ -933,6 +933,11 @@ jobs:
             corepack yarn "rust:private-tape-$venue"
             corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --books ''
           done
+      - name: Bybit filtered terminal order history (strict correctness)
+        if: matrix.venue == 'bybit'
+        run: |
+          corepack yarn rust:private-tape-bybit --history-only --out sdk-rs/harness/tapes/bybit-history-private.jsonl
+          corepack yarn -s rust:gate:record --venue bybit --tape sdk-rs/harness/tapes/bybit-history-private.jsonl --books ''
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
         run: |
@@ -1307,6 +1312,11 @@ jobs:
             corepack yarn "rust:private-tape-$venue"
             corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
           done
+      - name: Bybit filtered terminal order history (strict correctness)
+        if: matrix.venue == 'bybit'
+        run: |
+          corepack yarn rust:private-tape-bybit --history-only --out sdk-rs/harness/tapes/bybit-history-private.jsonl
+          corepack yarn -s rust:gate:record --venue bybit --tape sdk-rs/harness/tapes/bybit-history-private.jsonl --books ''
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
         run: |

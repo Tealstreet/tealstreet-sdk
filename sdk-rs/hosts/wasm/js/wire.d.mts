@@ -21,6 +21,7 @@ export const SECTION: {
   CAPABILITIES: 19;
   UNDERLYING_TOKENS: 20;
   ACCOUNT_READ: 21;
+  TICKER_OBSERVATIONS: 24;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -279,6 +280,7 @@ export class Frame {
   /** Owned copies survive source transfer; identities remain lazily decoded. */
   tickers(owned?: boolean): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
+  tickerObservations(): Float64Array | undefined;
   books(): Generator<BookRows>;
   bookDeltas(): Generator<BookDeltaRows>;
   candles(): CandleRows | undefined;
