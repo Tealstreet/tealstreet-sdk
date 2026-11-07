@@ -2933,13 +2933,23 @@ fn hosted_ordinary_and_protective_packets_are_byte_identical_to_legacy_local_cus
 
 #[test]
 fn ambiguous_write_auth_errors_never_relogin_or_send_another_create() {
+    assert_ambiguous_write_auth_errors(false);
+}
+
+#[test]
+fn hosted_ambiguous_write_auth_errors_never_relogin_or_send_another_create() {
+    assert_ambiguous_write_auth_errors(true);
+}
+
+fn assert_ambiguous_write_auth_errors(hosted: bool) {
     let mut observed = Vec::new();
     for session_proxy in [false, true] {
         for status in [429, 408, 500, 503, 600, u16::MAX] {
-            let (mut engine, _, _, _) = boot_capturing_public_session(
+            let (mut engine, _, _, _) = boot_capturing_public_route(
                 CATALOG,
                 Some(AUTHORIZED),
                 OPEN_ORDERS,
+                hosted,
                 session_proxy,
             );
             let create = http(
@@ -3008,12 +3018,22 @@ fn ambiguous_write_auth_errors_never_relogin_or_send_another_create() {
 
 #[test]
 fn ambiguous_write_native_errors_remain_unknown_on_both_session_routes() {
+    assert_ambiguous_write_native_errors(false);
+}
+
+#[test]
+fn hosted_ambiguous_write_native_errors_remain_unknown_on_both_session_routes() {
+    assert_ambiguous_write_native_errors(true);
+}
+
+fn assert_ambiguous_write_native_errors(hosted: bool) {
     for session_proxy in [false, true] {
         for status in [429, 408, 500, 503, 600, u16::MAX] {
-            let (mut engine, _, _, _) = boot_capturing_public_session(
+            let (mut engine, _, _, _) = boot_capturing_public_route(
                 CATALOG,
                 Some(AUTHORIZED),
                 OPEN_ORDERS,
+                hosted,
                 session_proxy,
             );
             let create = http(
@@ -3100,14 +3120,24 @@ fn ambiguous_read_auth_errors_keep_the_existing_session_retry() {
 
 #[test]
 fn ambiguous_cancel_and_setting_errors_never_refresh_or_replay() {
+    assert_ambiguous_cancel_and_setting_errors(false);
+}
+
+#[test]
+fn hosted_ambiguous_cancel_and_setting_errors_never_refresh_or_replay() {
+    assert_ambiguous_cancel_and_setting_errors(true);
+}
+
+fn assert_ambiguous_cancel_and_setting_errors(hosted: bool) {
     for session_proxy in [false, true] {
         for status in [429, 408, 503] {
             for native_code in [1000, 1001] {
                 for path in ["cancel_order", "set_initial_leverage"] {
-                    let (mut engine, _, _, _) = boot_capturing_public_session(
+                    let (mut engine, _, _, _) = boot_capturing_public_route(
                         CATALOG,
                         Some(AUTHORIZED),
                         OPEN_ORDERS,
+                        hosted,
                         session_proxy,
                     );
                     let request = if path == "cancel_order" {
