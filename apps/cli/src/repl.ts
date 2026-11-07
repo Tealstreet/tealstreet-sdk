@@ -71,7 +71,7 @@ import { registerRecordCommands, registerExportImportCommands } from './commands
 import { OrderSide, type Candle, type Timeframe, type Market } from '../../../packages/safe-cex/src/types';
 import type { Exchange } from '../../../packages/safe-cex/src/exchanges/base';
 import { loadConfig, saveConfig, getAccount } from './config';
-import { G, U } from './console-glyphs';
+import { G } from './console-glyphs';
 // TWAP support for taskAction handling
 import { commandRegistry } from '../../../packages/cli-core/src/commands/CommandRegistry';
 import { ensureCommandsRegistered } from '../../../packages/cli-core/src/commands/CommandExecutor';
