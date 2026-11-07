@@ -535,3 +535,24 @@ fn contradictory_success_row_never_authorizes_put_back() {
         "orderId": "0", "code": "0", "msg": "Order placed",
     }));
 }
+
+#[test]
+fn wire_none_placed_row_never_authorizes_put_back() {
+    assert_unproven_replacement_never_puts_back(serde_json::json!({
+        "orderId": "0", "code": "none-placed", "msg": "unlisted wire failure",
+    }));
+}
+
+#[test]
+fn wire_none_placed_envelope_never_authorizes_put_back() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond(
+        replacement,
+        r#"{"code":"none-placed","msg":"unlisted wire failure","data":[]}"#,
+    );
+    assert!(writes(&h).is_empty(), "wire text cannot prove a refusal");
+    assert_unknown_stop(&h);
+}

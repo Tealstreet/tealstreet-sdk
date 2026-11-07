@@ -138,6 +138,57 @@ fn unknown_top_level_placement_errors_present_uncertainty() {
     }
 }
 
+fn assert_codeless_write_requires_uncertainty(response: &str) {
+    for cancel in [true, false] {
+        let mut h = Harness::new();
+        h.open_private();
+        h.seed();
+        let path = if cancel {
+            seed_order(&mut h, "12", "");
+            h.handle(
+                1.0,
+                Event::Command(Command::CancelOrders {
+                    command: 7,
+                    ids: vec!["12".into()],
+                }),
+            );
+            h.collect();
+            "cancel-batch-orders"
+        } else {
+            place(
+                &mut h,
+                r#"[{"symbol":"BTCUSDT","type":"market","side":"buy","amount":1}]"#,
+            );
+            "batch-orders"
+        };
+        let request = h.take(path);
+        h.respond(request, response);
+        let [error] = h.failures.as_slice() else {
+            panic!("{path}: expected one terminal failure");
+        };
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let text = error.legacy_text();
+        assert!(text.contains("unknown"), "{path}: {text}");
+        assert!(text.contains("Check Open Orders"), "{path}: {text}");
+        assert!(!text.contains("rejected"), "{path}: {text}");
+        assert!(
+            h.pending
+                .iter()
+                .all(|r| r.method == safe_cex_engine::Method::Get)
+        );
+    }
+}
+
+#[test]
+fn blank_write_error_code_requires_uncertainty_guidance() {
+    assert_codeless_write_requires_uncertainty(r#"{"code":"","msg":"internal failure","data":[]}"#);
+}
+
+#[test]
+fn missing_write_error_code_requires_uncertainty_guidance() {
+    assert_codeless_write_requires_uncertainty(r#"{"msg":"internal failure","data":[]}"#);
+}
+
 #[test]
 fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
     for (status, response) in [

@@ -23,7 +23,6 @@ const CALL_MS: u32 = 20_000;
 /// 2026-10-26). Cited refusals are pre-execution; anything unlisted proves
 /// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
 /// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
-const NONE_PLACED: &str = "none-placed";
 const UNKNOWN_WRITE: &str = "BloFin write outcome is unknown. Check Open Orders";
 const CODES: CodeTable = CodeTable {
     rows: &[
@@ -66,7 +65,6 @@ const CODES: CodeTable = CodeTable {
         // Seen live inside a 200 on refused placements (deaws2 capture).
         refused(Key::Int(102016), ErrorKind::Rejected),
         refused(Key::Int(102123), ErrorKind::Rejected),
-        refused(Key::Text(NONE_PLACED), ErrorKind::Rejected),
         // Internal error: proves nothing.
         Row {
             key: Key::Int(103013),
@@ -456,12 +454,10 @@ fn trigger(value: Option<StopTriggerType>) -> &'static str {
 }
 /// A code the table cannot call a refusal (busy, internal, unlisted): the write may be live.
 fn outcome_unknown(code: &str, message: &str) -> bool {
-    !code.is_empty()
-        && code != "0"
-        && matches!(
-            CODES.verdict(&native(code, message), Intent::Place),
-            Verdict::Unknown(_)
-        )
+    matches!(
+        CODES.verdict(&native(code, message), Intent::Place),
+        Verdict::Unknown(_)
+    )
 }
 fn native_side(side: OrderSide) -> &'static str {
     if side == OrderSide::Buy {
@@ -2628,10 +2624,9 @@ impl Blofin {
         }
         let reply = match parsed {
             Ok(reply) => reply,
-            Err(error) => {
-                let message = error.to_string();
-                let _ = cx.http_write_unproven(context, message.clone());
-                return Err(unknown(message));
+            Err(_) => {
+                let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
+                return Err(unknown(UNKNOWN_WRITE));
             }
         };
         let rows = reply.data.map(ResultRows::rows).unwrap_or_default();
@@ -2663,8 +2658,8 @@ impl Blofin {
                             VenueError::new(message)
                         });
                     }
-                    let _ = cx.http_write_unproven(context, message.clone());
-                    return Err(unknown(message));
+                    let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
+                    return Err(unknown(UNKNOWN_WRITE));
                 }
                 let mut maybe_live = false;
                 let mut items = Vec::with_capacity(rows.len());
@@ -2685,22 +2680,7 @@ impl Blofin {
                     let gone = matches!(&*row.code, "1000" | "102068");
                     let odd = row.code.is_empty()
                         && !matches!(text.as_str(), "" | "success" | "order placed");
-                    // Order ID 0 under this envelope proves nothing without a
-                    // native refusal; missing and success codes remain unproven.
-                    let none_placed = id == "0"
-                        && reply.code != "0"
-                        && reply.msg.eq_ignore_ascii_case("All operations failed");
-                    if none_placed
-                        && CODES
-                            .verdict(&native(&row.code, &row.msg), Intent::Place)
-                            .is_refusal()
-                    {
-                        items.push(BatchItem::Native(Native {
-                            code: NativeCode::Text(NONE_PLACED),
-                            message: &row.msg,
-                        }));
-                        error = Some(format!("BloFin placement rejected: {}", row.msg));
-                    } else if refused && !gone {
+                    if refused && !gone {
                         items.push(BatchItem::Native(native(&row.code, &row.msg)));
                         maybe_live |= outcome_unknown(&row.code, &row.msg);
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
@@ -3257,7 +3237,15 @@ mod tests {
             verdict("152401", Intent::Setting),
             Verdict::Refused(ErrorKind::AuthInvalid)
         );
-        for code in ["102036", "102056", "152016", "999999", "1", "2"] {
+        for code in [
+            "102036",
+            "102056",
+            "152016",
+            "999999",
+            "1",
+            "2",
+            "none-placed",
+        ] {
             assert_eq!(
                 verdict(code, Intent::Place),
                 Verdict::Unknown(None),

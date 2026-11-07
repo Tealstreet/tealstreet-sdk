@@ -29,3 +29,6 @@ direct the caller to Check Open Orders; native diagnostics remain available.
 Missing or contradictory success row codes also cannot authorize put-back.
 Unknown cancellation rows and top-level placement/cancellation failures use the
 same uncertainty guidance while retaining their native diagnostic evidence.
+Only documented native refusal codes can authorize put-back; no synthetic text
+marker is accepted from the wire. Blank, missing, and malformed write replies
+remain unknown and direct the caller to Check Open Orders.
