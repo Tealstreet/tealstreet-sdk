@@ -161,11 +161,6 @@
     "AVAXUSDT": "AVAXUSDT",
     "QTUMUSDT": "QTUMUSDT"
   },
-  "breakoutprop": {
-    "BTCUSD": "BTCUSD",
-    "ETHUSD": "ETHUSD",
-    "SOLUSD": "SOLUSD"
-  },
   "bybit": {
     "BTCPERP": "BTCUSDC",
     "0GUSDT": "0GUSDT",

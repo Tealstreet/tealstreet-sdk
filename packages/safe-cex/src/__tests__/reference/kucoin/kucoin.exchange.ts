@@ -103,7 +103,7 @@ export class KucoinExchange extends BaseExchange {
   // KuCoin Futures reports sizes as integer CONTRACT counts; 1 contract =
   // market.contractSize base units (e.g. XBTUSDTM = 0.001 BTC). The rest of the
   // app expects position/order sizes in BASE units and `notional` in quote
-  // (USD), matching OKX/BitMEX/BloFin. Convert native↔base at the store
+  // (USD), matching OKX/BloFin. Convert native↔base at the store
   // boundary with this helper. Note: order PLACEMENT still takes native
   // contracts (opts.amount, same as OKX) — only store OUTPUTS are base.
   private contractSizeFor = (internalSymbol?: string) =>

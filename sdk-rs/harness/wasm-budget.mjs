@@ -82,13 +82,13 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #2812 readPositions: CI run 41375427208; Sam's order, CI + 10 KiB, rounded up to a KiB, for every family over its cap.
 // #2819 hosted Nuke fresh read: CI run 41378308674; ddi's fix-forward, CI + 10 KiB, rounded up to a KiB, for every family over its cap.
 // 11-02 nuke account cancel (#2831, #2852): CI run 41415587553 measured backpack 1,832,476, bitrue
-// 1,772,155, breakoutprop 1,471,040, coinbase 1,773,663, grvt 1,739,939, kucoin 1,550,412, kucoinspot
+// 1,772,155, coinbase 1,773,663, grvt 1,739,939, kucoin 1,550,412, kucoinspot
 // 2,063,720, mexc 1,687,491, orderly 1,682,273, polymarket 1,560,737, txflow 1,790,189, woo 2,327,820 B.
 // ddi2il ruling: each raised to CI size plus 10 KiB, rounded up to the KiB.
 // CI run 41423920329: bitgetusdc 2,242,622, hyperliquidspot 2,037,311, krakenspot 2,065,964, lighter-robinhood
 // 1,938,379 B; each CI size plus 10 KiB, rounded up to the KiB, and its shared-family sibling to the same.
 // CI run 41564406653 (master 473d18325b0): backpack 1,849,438 (run 41560014089), bitrue 1,787,754,
-// breakoutprop 1,483,576, coinbase 1,789,891, grvt 1,756,323, kucoin 1,566,571, kucoinspot 2,087,973,
+// coinbase 1,789,891, grvt 1,756,323, kucoin 1,566,571, kucoinspot 2,087,973,
 // orderly 1,697,103, polymarket 1,576,543, txflow 1,806,532, weex 1,898,411, woo 2,354,045 B. ddi2il
 // ruling: each raised to CI size plus 10 KiB, rounded up to the KiB.
 // #2945 managed-socket data silence: CI run 41599669844 measured bingx 1,970,123 B; ddi2il ruling,
@@ -120,11 +120,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3019 KuCoin 400002 resync: CI run 41794279458 measured kucoin 1,657,796 and kucoinspot 2,237,656 B.
 // ddi2il ruling: CI size plus 10 KiB, rounded up to the KiB. Shared engine queue, issuance and
 // admission code is newly linked by KuCoin; Binance already carries this machinery.
-// #3039 CI run 41823036111: breakoutprop 1,495,000 B.
-// Shared signing bookkeeping: standing CI + 10 KiB, rounded up to the KiB.
 // #3028 refresh ask (step 3) at 466b16cd11e: PR run 41804469904 measured
 // apexomni 1,974,257, asterdex 2,113,727, backpack 1,876,304, binance 2,184,476, bingx 2,015,091,
-// bitget 2,306,497, bitrue 1,810,954, blofin 1,952,470, breakoutprop 1,501,277, bybit 2,189,590,
+// bitget 2,306,497, bitrue 1,810,954, blofin 1,952,470, bybit 2,189,590,
 // coinbase 1,816,299, grvt 1,768,339, hyperliquid 2,095,474, kucoin 1,647,848, kucoinspot 2,235,996,
 // okx 1,936,660, paradex 2,223,483, phemex 2,040,251, polymarket 1,587,809, txflow 1,827,125,
 // weex 1,925,507, woo 2,388,474 B;
@@ -162,8 +160,6 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // (proof read and put-back). CI size plus 10 KiB, rounded up to the KiB.
 // #3138 run 42166643605 measured bitrue 1,829,700 B: guarded stop edits, cancel-proof polling and
 // put-back. CI size plus 10 KiB, rounded up to the KiB.
-// #3140 run 42172778210 measured breakoutprop 1,554,817 B on composed checkout 451287ba0229.
-// CI size plus 10 KiB, rounded up to the KiB.
 // #3199 run 42280800704, job 128112974377 at a527a7ccff0 measured okx 1,973,874 B.
 // CI size plus 10 KiB rounded up to the KiB; all OKX variants share the okx family cap.
 // #3202 run 42280173727 measured bitget 2,379,303 B; CI size plus 10 KiB rounded up
@@ -205,12 +201,17 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB rounded up to KiB; KuCoin Spot retains its existing cap.
 // #3210 run 42320236420, job 128244910061 measured Bitget 2,422,853 B at 191de16bd7d.
 // CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
+// #3229 hosted Backpack: run 42352281022, job 128343086016 measured 1,994,139 B.
+// Backpack keeps that CI size plus 10 KiB, rounded up to the KiB.
+// #3229 after master merge: run 42392889181, job 128464301381 measured 2,000,456 B
+// at CI merge ba85167cc7c. CI size plus 10 KiB, rounded up to the KiB.
 // #3193 at ad4f1d6d5d9: seven CI measurements + 10 KiB, rounded up to KiB.
 // Later master caps win per family; shared-family siblings remain equal.
+// #3111 historical run 42096897919 measured HL siblings at 2,106,939 B; current larger caps retained.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
-  backpack: 1_948_672,
+  backpack: 2_011_136,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
@@ -224,7 +225,6 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_851_392,
   bitunix: 1_863_680,
   blofin: 2_001_920,
-  breakoutprop: 1_580_032,
   bybit: 2_270_208,
   coinbase: 1_935_360,
   cryptocom: 1_740_800,
@@ -257,7 +257,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   txflow: 1_852_416,
   weex: 1_948_672,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
-  woo: 2_428_928,
+  // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
+  // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
+  woo: 2_589_696,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

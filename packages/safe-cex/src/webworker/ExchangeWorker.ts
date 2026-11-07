@@ -14,6 +14,7 @@ import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
+import { unsupportedVenueError } from '../unsupportedVenue';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
@@ -368,7 +369,7 @@ export class ExchangeWorker {
 
       const loader = exchangeRegistry[this._exchangeName];
       if (!loader) {
-        throw new Error(`Unknown exchange: ${this._exchangeName}`);
+        throw unsupportedVenueError(`Unknown exchange: ${this._exchangeName}`);
       }
       const Exchange = await loader();
       if (startupToken !== this._startupToken) {

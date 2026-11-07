@@ -5,6 +5,13 @@ it with `engine: 'rust'`. REST and private websocket authentication use an
 Ed25519 seed encoded as base64. REST receive windows default to 60,000 ms and
 clamp to Backpack's maximum; subscription signatures use 5,000 ms.
 
+SDK/registry construction consumes keys and seeds into the owned provider and
+passes only opaque signing refs to the venue, including for account startup and
+private WS. Hosted RemoteSigner uses the device's Ed25519 capture codec; private
+PayloadSigner remains unsupported. This activation is held for Sam's approval:
+see `docs/plans/callers/backpack-hosted-signing.md` at the repository root.
+Direct raw-options construction retains its existing compatibility path.
+
 Caller client IDs are canonical decimal strings from `1` through `4294967295`.
 They are sent as JSON uint32 numbers. Preflight rejects unsupported shapes and
 invalid IDs before any write. Amend cancels and replaces, preserving trigger

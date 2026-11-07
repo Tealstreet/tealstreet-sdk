@@ -96,12 +96,6 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
       (m) => m.BlofinExchange,
     ),
 
-  // Breakoutprop
-  breakoutprop: () =>
-    import(/* webpackChunkName: "exchange-breakoutprop" */ './breakoutprop/breakoutprop.exchange').then(
-      (m) => m.BreakoutpropExchange,
-    ),
-
   // Bybit
   bybit: () =>
     import(/* webpackChunkName: "exchange-bybit" */ './bybit/bybit.exchange').then(
@@ -246,7 +240,6 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
   kodiakfi: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
   mode: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
-
 
 
   // TxFlow testnet

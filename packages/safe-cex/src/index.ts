@@ -15,6 +15,7 @@ import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/regist
 import { assertBetaAccount, assertBetaVenue } from './exchanges/rust/betaVenues';
 import { DefaultStore } from './store/store.base';
 import { getTransport } from './transport/registry';
+import { unsupportedVenueError } from './unsupportedVenue';
 import { virtualClock } from './utils/virtualClock';
 
 export {
@@ -54,7 +55,7 @@ async function loadExchange(name: ExchangeName): Promise<typeof BaseExchange> {
 
   const loader = exchangeRegistry[name];
   if (!loader) {
-    throw new Error(`Unknown exchange: ${name}`);
+    throw unsupportedVenueError(`Unknown exchange: ${name}`);
   }
 
   const Exchange = await loader();

@@ -263,7 +263,7 @@ export type ExchangeMetadata = {
   /**
    * Whether fetchOHLCV must run in the worker/server (true) or can run directly
    * from the browser (false, default). Set to true for exchanges whose listenOHLCV
-   * calls fetchOHLCV internally (e.g., BitMEX polling, Coinbase REST from WS,
+   * calls fetchOHLCV internally (e.g., Coinbase REST from WS,
    * Bitrue WS klines, Lighter WS OHLCV, Paradex REST polling).
    */
   fetchOHLCVInWorker?: boolean;
@@ -320,7 +320,7 @@ const defaultMetaData: Omit<ExchangeMetadata, 'exchangeName' | 'features'> = {
   privateProxyRegions: {},
   autoDownSizeReduceOrders: false,
   reduceOrdersLockPositionSize: false,
-  // Safe default. Most exchanges override (BitMEX = 20_000, kraken = 500, etc.).
+  // Safe default. Most exchanges override (kraken = 500, etc.).
   tickInterval: 2_000,
   supportsChaser: false,
   supportsPositionMargin: false,
@@ -1134,56 +1134,6 @@ const BitrueMetadata: ExchangeMetadata = {
   enforceWsTunnel: true,
   latencyDomain: 'fapi.bitrue.com',
   fetchOHLCVInWorker: true,
-  features: {
-    kline: true,
-    orderbook: true,
-    orders: true,
-    positions: true,
-    balance: true,
-  },
-};
-
-const BreakoutpropMetadata: ExchangeMetadata = {
-  ...defaultMetaData,
-  supportsPublicOnly: true,
-  tvIntraDayMultipliers: ['1', '5', '15', '30', '60'],
-  // TODO: audit below....
-  exchangeName: 'breakoutprop' as ExchangeName,
-  logo: '/static/exchanges/logos/BREAKOUT_PROP/logo.svg',
-  lightLogo: '/static/exchanges/logos/BREAKOUT_PROP/light.png',
-  darkLogo: '/static/exchanges/logos/BREAKOUT_PROP/dark.png',
-  refLink: 'https://teal.link/breakout',
-  refImage: '/static/exchanges/reflinks/breakoutprop/ref.png',
-  requiresPassphrase: false,
-  requiresApplicationId: false,
-  enabled: false,
-  enableInPreview: false,
-  enabledInDev: true,
-  supportsTestnet: false,
-  orderbookTickDelay: 100,
-  prettyName: 'Breakout',
-  privateProxyIps: privateProxyIpsVultrTokyo,
-  orderPendingUpdateDelay: 2_000,
-  stopOrderPendingUpdateDelay: 4_000,
-  tickInterval: 2_000,
-  tvMaxGetBarFetches: 20,
-  hasEmptyPositions: false,
-  positionModeIsGlobal: true,
-  marginTypeIsGlobal: false,
-  hasIndependentHedgedLeverageInIsolatedMargin: true,
-  hasIndependentHedgedLeverageInCrossMargin: true,
-  supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice],
-  defaultTPTriggerType: OrderStopTriggerType.LastPrice,
-  defaultSLTriggerType: OrderStopTriggerType.LastPrice,
-  supportsChaser: false,
-  supportsPositionMargin: false,
-  requiresCors: false,
-  supportsMaxCrossLeverage: false,
-  positionModes: [PositionMode.OneWay],
-  marginTypes: [MarginType.Cross],
-  supportsSubaccount: true,
-  enforceWsTunnel: true,
-  latencyDomain: 'app.breakoutprop.com',
   features: {
     kline: true,
     orderbook: true,
@@ -2308,7 +2258,6 @@ export const exchangeMetadata: {
   phemex: PhemexMetadata,
   bingx: BingxMetadata,
   bitrue: BitrueMetadata,
-  breakoutprop: BreakoutpropMetadata,
   blofin: BlofinMetadata,
   lighter: LighterMetadata,
   'lighter-robinhood': LighterRobinhoodMetadata,
@@ -2334,13 +2283,24 @@ export const exchangeMetadata: {
   polymarket: PolymarketMetadata,
 };
 
+/**
+ * A retired or unknown name (e.g. a saved `bitmex` account) refuses with the
+ * `unsupported`/`notSent` fields `serializeCommandError` carries. It is not an
+ * `ExchangeError`: the Rust source oracles load this file without the WASM host.
+ */
+const unknownExchangeMetadata = (exchange: string): Error =>
+  Object.assign(new Error(`Unknown exchange metadata: ${exchange}`), {
+    kind: 'unsupported' as const,
+    outcome: 'notSent' as const,
+  });
+
 export const getExchangeMetadata = (exchange: ExchangeName, opts: Record<string, any> = {}): ExchangeMetadata => {
   if (exchange === 'bybit') {
     return opts.isUnified ? BybitUnifiedMetadata : BybitMetadata;
   }
   const metadata = exchangeMetadata[exchange];
   if (!metadata) {
-    throw new Error(`Unknown exchange metadata: ${exchange}`);
+    throw unknownExchangeMetadata(exchange);
   }
   return metadata;
 };

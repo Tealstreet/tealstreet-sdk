@@ -1,9 +1,11 @@
+import { ExchangeError } from './host.mjs';
+
 /** Every Rust venue name in the beta bundle, sorted. */
 export const betaVenueNames: readonly string[];
 /** Every family build the beta bundle ships, sorted. */
 export const betaVenueFamilies: readonly string[];
 /** Thrown for a known Rust venue that the beta bundle leaves out. */
-export class BetaVenueUnavailableError extends Error {
+export class BetaVenueUnavailableError extends ExchangeError {
   readonly venue: string;
   constructor(venue: string);
 }

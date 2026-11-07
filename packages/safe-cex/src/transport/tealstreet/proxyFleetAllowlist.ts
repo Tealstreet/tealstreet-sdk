@@ -33,10 +33,8 @@ export const PROXY_FLEET_REST_PREFIXES: readonly string[] = [
   'https://api.woo.network/',
   'https://api.woo.org/',
   'https://api.woox.io/',
-  'https://app.breakoutprop.com/',
   'https://arkm.com/',
   'https://aws.okx.com/',
-  'https://breakout.prosp.devexperts.com/',
   'https://clob.polymarket.com/',
   'https://contract.mexc.com/',
   'https://dapi.binance.com/',
@@ -79,7 +77,6 @@ export const PROXY_FLEET_REST_PREFIXES: readonly string[] = [
   'https://testnet-api.phemex.com/',
   'https://testnet.binance.vision/',
   'https://testnet.binancefuture.com/',
-  'https://testnet.bitmex.com/',
   'https://testnet.omni.apex.exchange/',
   'https://testnet.pro.apex.exchange/',
   'https://trades.grvt.io/',
@@ -99,7 +96,6 @@ export const PROXY_FLEET_REST_PREFIXES: readonly string[] = [
   'https://wss.woo.network/',
   'https://wss.woo.org/',
   'https://wss.woox.io/',
-  'https://www.bitmex.com/',
   'https://www.okx.com/',
 ];
 
