@@ -28,6 +28,7 @@ import chalk from 'chalk';
 
 import { addResizeListener, reserveBottom, resumeRegion, suspendRegion } from './scroll-region';
 import { BRAND } from './brand';
+import { G, terminalText } from './console-glyphs';
 
 const ESC = '\x1b';
 const SAVE_CURSOR = `${ESC}7`;
@@ -127,13 +128,13 @@ function drawFooter(): void {
   const line = content + ' '.repeat(Math.max(0, width - visibleLength(content)));
   if (line === lastContentLine) return;
   lastContentLine = line;
-  process.stdout.write(SAVE_CURSOR + moveTo(contentRow(), 1) + line + RESTORE_CURSOR);
+  process.stdout.write(SAVE_CURSOR + moveTo(contentRow(), 1) + terminalText(line) + RESTORE_CURSOR);
 }
 
 /** Draw the divider rule above the footer (full-width, dimmed). Static (resize only). */
 function drawDivider(): void {
   if (!enabled || suspended || !isTty() || !hasRoom()) return;
-  const rule = chalk.dim('─'.repeat(cols()));
+  const rule = chalk.dim(G.rule.repeat(cols()));
   process.stdout.write(SAVE_CURSOR + moveTo(dividerRow(), 1) + rule + RESTORE_CURSOR);
 }
 

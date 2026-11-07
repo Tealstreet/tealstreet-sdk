@@ -50,6 +50,14 @@ pub trait Transport {
     ) -> HttpPrepareFuture {
         Box::pin(async { Err(HttpPrepareError::Unsupported) })
     }
+    fn prepare_http_classified(
+        &self,
+        request: HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+        _class: safe_cex_engine::request_budget::RequestClass,
+    ) -> HttpPrepareFuture {
+        self.prepare_http(request, intent)
+    }
     /// Open a socket; report it on `events` and return where to send text.
     /// Dropping the returned sender closes the socket.
     fn connect(
@@ -622,7 +630,16 @@ impl Transport for NetworkTransport {
         request: HttpRequest,
         intent: safe_cex_engine::request_context::RoutingIntent,
     ) -> HttpPrepareFuture {
-        http::prepare(self, request, Some(intent))
+        http::prepare(self, request, Some(intent), None)
+    }
+
+    fn prepare_http_classified(
+        &self,
+        request: HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+        class: safe_cex_engine::request_budget::RequestClass,
+    ) -> HttpPrepareFuture {
+        http::prepare(self, request, Some(intent), Some(class))
     }
 
     fn request(&self, request: HttpRequest, events: Events) {
@@ -630,7 +647,7 @@ impl Transport for NetworkTransport {
         // classification remains legacy until its venue declares context.
         let id = request.id;
         let packet = request.clone();
-        let preparation = http::prepare(self, request, None);
+        let preparation = http::prepare(self, request, None, None);
         tokio::spawn(async move {
             let result = tokio::select! {
                 biased;

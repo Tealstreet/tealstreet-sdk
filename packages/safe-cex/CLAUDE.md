@@ -224,6 +224,11 @@ are reported through `console.error` with venue, event and original cause.
 Reporting emits no error/log event, so failures in those listeners cannot recurse.
 The inherited once/off/context and subscription-snapshot behavior stays intact.
 
+Rust `startup.incomplete` carries bounded per-section cause fields from the native
+engine. `BaseExchange.emitAndLogError` derives Sentry tags from those event fields
+for local and hosted accounts; it never guesses causes from browser read state.
+See `docs/plans/callers/startup-incomplete-causes.md` for the field contract.
+
 Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
 with the actual SDK venue plus method, redacted path template, phase and closed
 failure kind. Queries, origins and request material are never diagnostic fields;
@@ -1213,6 +1218,21 @@ hosts consume these hints before network I/O. Public CORS routes come from the
 provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.
 
+Managed HTTP carries the engine's closed `requestClass` into HOW outside signed
+packet bytes. TS ignores non-write hints on non-GET methods; explicit remaining
+engine deadlines still govern managed posted reads. Catalogue discovery alone
+gets 60 s (90 s during startup): markets, instruments, contracts and symbol/asset/
+product catalogues, including closed catalogue RPC kinds. Live public depth,
+order books, tickers/market summaries, trades, candle polls and funding/mark-price
+reads get 20 s on every family; unknown public read kinds also stay short. Engine
+history queries (fills/order history/income) get 30 s, while candles and public
+trades use 20 s. Semantic classification happens once at the shared managed-HTTP
+boundary and uses the original Context issuance time, so neither re-prepare nor
+retry renews the deadline. Explicit nonstandard venue bounds and shorter Plan/
+caller caps remain authoritative. Both engine and transport diagnostics name
+class, budget and elapsed milliseconds; readiness stays inside the original
+bound, with no write replay.
+
 Managed engine HTTP uses `Transport.prepareHttp` to finish route/proxy-token
 and tunnel readiness before signing. `credentialIntent` (`public`, `primary`,
 `secondary`) selects the route independently of HTTP method or credential headers;
@@ -1844,6 +1864,9 @@ Unavailable storage from startup preserves independent native discovery/backoff.
 After a successful coordination transaction, storage loss refuses preparation
 instead of bypassing an unknown lease. Waiter cancellation never deletes a peer's
 lease/cooldown; each engine still parses and publishes its own catalogue.
+The 30 s storage recovery pause starts only on an actual failed storage attempt.
+Retries refused during that pause cannot extend it; after expiry the coordinator
+reopens storage and rechecks the existing route-scoped lease before sending.
 Future-dated strict ownership stays blocking. A dispatched timeout publishes a
 cooldown before abort cleanup without delaying the caller; expired ownership
 retains its minimum failure window until that publication can settle. The original
@@ -1861,3 +1884,7 @@ sync publishes them without a new polling loop. The wasm binary is unchanged.
 `updateSymbolMetadata` rechecks exact symbol membership after native market readiness
 before querying leverage. A foreign symbol or an engine retired during readiness
 starts no metadata command. UI callers also validate their account market binding.
+
+Bybit native receive-window corrections emit bybit.clock.corrected with numeric
+offsetMs only. Hosts without an explicit clock-advice listener keep the normal
+info log; CLI listeners replace it with one clock-sync warning per session.

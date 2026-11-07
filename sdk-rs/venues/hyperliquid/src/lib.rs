@@ -1299,6 +1299,17 @@ impl Venue for Hyperliquid {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::ManagedInfo(read) => Self::startup_reads(&read.pending),
+            Pending::Meta { .. } | Pending::SpotMeta { .. } => S::PUBLIC,
+            Pending::Dexs { .. } => S::MARKETS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         // Every cancel names an order id; there is no immediate cancel-all.
         if self.spot {
@@ -2032,7 +2043,7 @@ impl Venue for Hyperliquid {
         self.account.fresh_positions.retired(owner);
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, *read, error),
             Pending::ManagedCandles(read) => {
@@ -2042,7 +2053,7 @@ impl Venue for Hyperliquid {
                 let _ = cx.fail_context(&read.context, error);
             }
             pending => self.on_sign_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {

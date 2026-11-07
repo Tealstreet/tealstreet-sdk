@@ -253,6 +253,34 @@ describe('HOW in a browser worker (no window or document)', () => {
     how.dispose();
   });
 
+  it.each(['throwing getter', 'invalid URL'])('keeps the first dial retryable after a %s', async (failure) => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', undefined);
+    vi.stubGlobal('document', undefined);
+    ConnectingSocket.instances = [];
+    const url = vi.fn().mockImplementationOnce(() => {
+      if (failure === 'throwing getter') throw new Error('configured URL getter failed');
+      return 'not a websocket URL';
+    }).mockReturnValue(TOKYO_HOW_EGRESS);
+    const how = new HOWWebSocket(url, ConnectingSocket as unknown as typeof WebSocket);
+    try {
+      expect(() => how.connectAndSubscribe()).toThrow();
+      expect(how.isInitialized).toBe(false);
+      expect(how.ws).toBeUndefined();
+      // The adapter only tries the initial dial while this flag is false.
+      if (!how.isInitialized) how.connectAndSubscribe();
+      expect(how.isInitialized).toBe(true);
+      expect(how.ws?.onopen).toBeTypeOf('function');
+      expect(how.ws?.onmessage).toBeTypeOf('function');
+      expect(how.ws?.onclose).toBeTypeOf('function');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(ConnectingSocket.instances).toHaveLength(1);
+      expect(url).toHaveBeenCalledTimes(2);
+    } finally {
+      how.dispose();
+    }
+  });
+
   it('never guards page globals with typeof, which Next folds to "object" in worker chunks', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('./HOWWebSocket.ts', import.meta.url), 'utf8');

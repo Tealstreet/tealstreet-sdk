@@ -935,7 +935,7 @@ fn owned_history_preparation_refusal_after_accepted_rows_remains_strict() {
                 .iter()
                 .filter_map(|a| match a {
                     safe_cex_engine::Action::SetTimer { timer, at_ms }
-                        if *at_ms == h.now + 19_994. =>
+                        if *at_ms == h.now + 20_000. =>
                     {
                         Some(*timer)
                     }
@@ -943,7 +943,7 @@ fn owned_history_preparation_refusal_after_accepted_rows_remains_strict() {
                 })
                 .collect();
             assert!(!windows.is_empty(), "the parked page has the walk's window");
-            h.now += 19_994.;
+            h.now += 20_000.;
             for timer in windows {
                 h.e.handle(h.now, safe_cex_engine::Event::TimerFired { timer });
                 h.collect();

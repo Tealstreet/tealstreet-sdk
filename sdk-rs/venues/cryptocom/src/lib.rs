@@ -202,7 +202,12 @@ impl Skipped {
 
 impl Cryptocom {
     fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        let context = match cx.http_context(Scope::Background, read_policy()) {
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, read_policy()) {
             Ok(context) => context,
             Err(_) => {
                 self.discovery.failed(cx, tickers);
@@ -586,6 +591,16 @@ impl Venue for Cryptocom {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1062,7 +1077,7 @@ impl Venue for Cryptocom {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(request) => self.identity_reject(cx, request, error),
             Pending::History(request) => self.history_reject(cx, request, error),
             Pending::Trade(request) => self.trade_reject(cx, request, error),
@@ -1077,7 +1092,7 @@ impl Venue for Cryptocom {
                 let _ = cx.fail_context(&context, error);
             }
             pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

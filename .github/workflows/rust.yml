@@ -20,6 +20,10 @@ on:
         description: Add separate GC and optimization traces after the A/A experiment
         type: boolean
         default: false
+      wasm_size_compare_pr:
+        description: PR number for a diagnostic same-run merge versus master-parent wasm size comparison
+        type: string
+        default: ''
       mutation_barrier_size:
         description: Compare standalone Bybit barrier capability off/on on this exact checkout
         type: boolean
@@ -98,12 +102,120 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          WASM_SIZE_COMPARE_PR: ${{ inputs.wasm_size_compare_pr }}
         run: |
+          if [ '${{ github.event_name }}' = workflow_dispatch ] && [ -n "$WASM_SIZE_COMPARE_PR" ]; then
+            echo 'relevant=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ '${{ github.event_name }}' = workflow_dispatch ] && [ '${{ inputs.cpu_budget_diagnostic }}' = true ]; then
             echo 'relevant=false' >> "$GITHUB_OUTPUT"
           else
             node sdk-rs/harness/ci-scope.mjs
           fi
+
+  wasm-size-source:
+    name: Rust / select immutable wasm size comparison
+    if: github.event_name == 'workflow_dispatch' && inputs.wasm_size_compare_pr != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      merge: ${{ steps.source.outputs.merge }}
+      base: ${{ steps.source.outputs.base }}
+      head: ${{ steps.source.outputs.head }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Select one GitHub PR merge for every comparison job
+        id: source
+        env:
+          COMPARE_PR: ${{ inputs.wasm_size_compare_pr }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$COMPARE_PR" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$COMPARE_PR" > "$RUNNER_TEMP/size-pr.json"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const pr = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/size-pr.json`));
+          assert.equal(pr.state, 'open');
+          assert.equal(pr.base.ref, 'master');
+          assert.equal(pr.head.repo.full_name, process.env.GITHUB_REPOSITORY);
+          JS
+          git fetch --no-tags --depth=2 origin "refs/pull/$COMPARE_PR/merge"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const pr = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/size-pr.json`));
+          const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+          const merge = git('rev-parse', 'FETCH_HEAD');
+          const parents = git('show', '-s', '--format=%P', merge).split(' ');
+          assert.equal(parents.length, 2, 'GitHub PR merge required');
+          assert.equal(parents[1], pr.head.sha, 'PR head moved during selection; retry');
+          appendFileSync(process.env.GITHUB_OUTPUT, `merge=${merge}\nbase=${parents[0]}\nhead=${parents[1]}\n`);
+          console.log({ merge, base: parents[0], head: parents[1] });
+          JS
+
+  wasm-size-comparison:
+    name: Rust / same-run wasm size (${{ matrix.family }})
+    needs: wasm-size-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, bitunix, blofin, breakoutprop, bybit, coinbase, cryptocom, grvt, hyperliquid, kraken, kucoin, kucoinspot, lighter, mexc, okx, orderly, paradex, phemex, polymarket, txflow, weex, woo, combined]
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
+      EXPECTED_MERGE_SHA: ${{ needs.wasm-size-source.outputs.merge }}
+      EXPECTED_BASE_SHA: ${{ needs.wasm-size-source.outputs.base }}
+      EXPECTED_HEAD_SHA: ${{ needs.wasm-size-source.outputs.head }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.wasm-size-source.outputs.merge }}
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+            sdk-rs/target
+          key: ${{ runner.os }}-cargo-size-compare-${{ matrix.family }}-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-family-${{ matrix.family }}-
+            ${{ runner.os }}-cargo-combined-
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
+      - uses: ./.github/actions/prefetch-cargo
+      - uses: ./.github/actions/install-binaryen
+      - name: Measure both revisions with identical pinned tools
+        run: node sdk-rs/harness/compare-wasm-size.mjs --family '${{ matrix.family }}' --out '${{ runner.temp }}/wasm-size-comparison'
+      - name: Retain paired modules and provenance
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-size-comparison-${{ matrix.family }}
+          path: ${{ runner.temp }}/wasm-size-comparison/
+          if-no-files-found: error
+          retention-days: 14
 
   cpu-budget-diagnostic:
     name: Rust / diagnostic A-A budget (${{ matrix.slot }})

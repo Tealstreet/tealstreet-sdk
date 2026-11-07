@@ -824,13 +824,36 @@ describe('Rust worker engine ownership', () => {
     await worker.dispose();
   });
 
+  it('sends startup logs as serialized emitter arguments, not an opaque object', async () => {
+    const { worker, messages } = createWorker();
+    expect(await start(worker)).toBe(true);
+    const log = messages.find((message) => message.op === 'log');
+    expect(Array.isArray(log?.data)).toBe(true);
+    const [text, severity] = log!.data;
+    expect(typeof text).toBe('string');
+    expect(severity).toBe('info');
+    expect(JSON.parse(text)).toEqual({
+      level: 'info',
+      message: 'Starting exchange in webworker: binance',
+      context: { exchange: 'binance', account: 'same-name' },
+    });
+    expect(`${text}`).not.toContain('[object Object]');
+  });
+
   it('does not reconstruct a startup panic and reports its startup failure', async () => {
     trapStartup = true;
     const { worker, messages } = createWorker();
     expect(await start(worker)).toBe(false);
     await vi.advanceTimersByTimeAsync(5000);
     expect(sources).toHaveLength(1);
-    expect(messages.some((m) => m.op === 'log' && m.data.context.worker_error_phase === 'startup')).toBe(true);
+    const log = messages.find(
+      (m) => m.op === 'log' && Array.isArray(m.data)
+        && m.data[1] === 'warning' && m.data[0].includes('"worker_error_phase":"startup"'),
+    );
+    expect(log?.data[1]).toBe('warning');
+    expect(JSON.parse(log!.data[0])).toMatchObject({
+      level: 'warn', context: { worker_error_phase: 'startup' },
+    });
   });
 
   it('leaves another account alive in the same module even when account names match', async () => {

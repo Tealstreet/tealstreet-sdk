@@ -461,6 +461,14 @@ pub struct OrderUpdate<'a> {
 }
 
 #[derive(Deserialize)]
+pub struct PmAlgoUpdateEvent<'a> {
+    #[serde(borrow, default)]
+    pub fs: Option<Str<'a>>,
+    #[serde(borrow)]
+    pub ao: AlgoUpdate<'a>,
+}
+
+#[derive(Deserialize)]
 pub struct AlgoUpdateEvent<'a> {
     #[serde(borrow)]
     pub o: AlgoUpdate<'a>,
@@ -470,6 +478,12 @@ pub struct AlgoUpdateEvent<'a> {
 #[derive(Deserialize)]
 pub struct AlgoUpdate<'a> {
     pub aid: Id,
+    #[serde(borrow, default)]
+    pub caid: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub aq: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub p: Option<Str<'a>>,
     #[serde(borrow, default)]
     pub ps: Option<Str<'a>>,
     #[serde(borrow)]
@@ -644,35 +658,37 @@ pub struct PmBalance<'a> {
     pub um_unrealized_pnl: Option<Str<'a>>,
 }
 
-/// One `/papi/v1/um/conditional/openOrders` row.
+/// One `/papi/v1/um/algo/openAlgoOrders` row.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PmConditionalOrder<'a> {
+pub struct PmAlgoOrder<'a> {
     #[serde(default)]
-    pub strategy_id: Option<Id>,
+    pub algo_id: Option<Id>,
     #[serde(borrow, default)]
     pub position_side: Option<Str<'a>>,
     #[serde(borrow)]
-    pub new_client_strategy_id: Str<'a>,
+    pub client_algo_id: Str<'a>,
     #[serde(borrow)]
     pub symbol: Str<'a>,
     #[serde(borrow)]
-    pub strategy_type: Str<'a>,
+    pub order_type: Str<'a>,
     #[serde(borrow)]
     pub side: Str<'a>,
     #[serde(borrow, default)]
     pub price: Option<Str<'a>>,
     #[serde(borrow, default)]
-    pub stop_price: Option<Str<'a>>,
+    pub trigger_price: Option<Str<'a>>,
     #[serde(borrow, default)]
-    pub orig_qty: Option<Str<'a>>,
+    pub quantity: Option<Str<'a>>,
     #[serde(default)]
     pub reduce_only: bool,
+    #[serde(default)]
+    pub close_position: bool,
     #[serde(borrow, default)]
     pub working_type: Option<Str<'a>>,
     /// TRAILING_STOP_MARKET only: the callback rate in percent, and its activation price.
     #[serde(borrow, default)]
-    pub price_rate: Option<Str<'a>>,
+    pub callback_rate: Option<Str<'a>>,
     #[serde(borrow, default)]
     pub activate_price: Option<Str<'a>>,
 }
@@ -709,6 +725,8 @@ pub struct ConditionalUpdate<'a> {
     pub q: Option<Str<'a>>,
     #[serde(rename = "R", default)]
     pub reduce_only: bool,
+    #[serde(default)]
+    pub cp: bool,
     #[serde(borrow, default)]
     pub wt: Option<Str<'a>>,
 }

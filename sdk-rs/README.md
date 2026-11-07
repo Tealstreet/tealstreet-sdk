@@ -49,6 +49,40 @@ deadline; it never resets the clock after readiness. Credentialed reads, caller
 commands, writes, explicit venue timeouts and reads after discovery keep their
 existing bounds.
 
+## HTTP request classes
+
+The TS HOW package's `requestBudget.ts` defines the parity reference: catalogue
+reads have 60 s, history pages 30 s, and order reads, writes and other reads 20 s.
+Engine history queries (fills, order history and income) use 30 s. Candles,
+public trades, live account/order reads and mutations use 20 s. Background
+catalogue/metadata reads alone use discovery: markets, instruments, contracts,
+symbol/asset/product catalogues and closed catalogue RPC kinds. Discovery keeps
+60 s, or the existing 90 s startup discovery/readiness allowance.
+
+Background issuance reserves a bounded catalogue ceiling while the semantic
+request is not yet available. The shared managed-HTTP boundary resolves the
+request and caps its physical deadline from the original Context issuance time.
+Depth/order books, tickers/market summaries, trades, candle polls, funding/mark
+prices and unknown public read kinds use 20 s on every family. Catalogue matching
+uses closed path components/RPC discriminators, never query parameter values.
+Explicit nonstandard venue bounds and shorter Plan/caller caps still win.
+Re-preparation and retry cannot restart the original class deadline.
+
+Native hosts query `http_request_class` only for an exact pending preparation.
+Browser preparation actions carry a compact `u8` class outside signed packet
+bytes (discovery 0, orderRead 1, orderWrite 2, history 3, read 4). The JS host
+maps that code to a closed label and formats timeout diagnostics. Native-only
+class names, legacy path classification and diagnostic formatting are excluded
+from wasm; engine issuance retains numeric bounded deadlines. TS conservatively
+labels non-GET methods `orderWrite` regardless of hints while honoring the
+explicit remaining engine deadline. Labels grant no send or retry authority.
+Timeouts name class, budget and elapsed milliseconds, including host diagnostics
+when engine expiry wins the timer race. HOW readiness remains capped at 30 s
+inside the same original deadline. Legacy GET paths use exact catalogue/history/
+order components; unknown paths use the 20 s read default and non-GET requests
+conservatively use the short write default. Explicit transport deadlines win.
+No server, retry, outcome-unknown or socket-silence policy changes are needed.
+
 ## Host entropy
 
 Core construction is explicit: `Engine::new(venue, Some(entropy))` returns a

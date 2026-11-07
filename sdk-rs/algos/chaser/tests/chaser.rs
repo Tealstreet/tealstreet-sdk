@@ -529,6 +529,120 @@ async fn a_refused_key_ends_the_chase_on_its_first_placement() {
     .await;
 }
 
+/// Counts placements while answering each with `error`.
+fn refuse_placements(port: &FakePort, error: VenueError) -> Rc<Cell<u32>> {
+    let tries = Rc::new(Cell::new(0));
+    let seen = tries.clone();
+    *port.responder.borrow_mut() = Box::new(move |command| match command {
+        Command::PlaceOrders { .. } => {
+            seen.set(seen.get() + 1);
+            Err(error.clone())
+        }
+        _ => Ok("[]".into()),
+    });
+    tries
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reduce_only_refused_for_position_ends_the_chase_on_its_first_placement() {
+    local(async {
+        let port = FakePort::new("bitget");
+        let tries = refuse_placements(
+            &port,
+            VenueError::new("Not enough position is available")
+                .kind(ErrorKind::InvalidInput)
+                .outcome(Outcome::Rejected),
+        );
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(30_000).await;
+        assert_eq!(tries.get(), 1);
+        assert_eq!(
+            port.errors(),
+            [r#""Chaser for BTCUSDT stopped: the venue refused the order: Not enough position is available""#]
+        );
+        assert_eq!(port.completes().len(), 1);
+        assert!(
+            factory
+                .book()
+                .active_chasers()
+                .iter()
+                .all(|chaser| chaser.is_stopped)
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unaffordable_or_unsupported_order_is_placed_once() {
+    for kind in [ErrorKind::InsufficientBalance, ErrorKind::Unsupported] {
+        local(async {
+            let port = FakePort::new("bitget");
+            let tries = refuse_placements(
+                &port,
+                VenueError::new("refused")
+                    .kind(kind)
+                    .outcome(Outcome::Rejected),
+            );
+            let _chase = start(&port, BUY_ONE);
+            settle(30_000).await;
+            assert_eq!(tries.get(), 1, "{kind:?}");
+            assert_eq!(port.errors().len(), 1, "{kind:?}: {:?}", port.errors());
+        })
+        .await;
+    }
+}
+
+/// Binance GTX_ORDER_REJECT, as its code table classifies it: a post-only cross
+/// is the routine re-price, so it retries to Binance's 20-try bound.
+#[tokio::test(start_paused = true)]
+async fn a_binance_post_only_cross_retries_to_its_bound() {
+    local(async {
+        let port = FakePort::new("binance");
+        let tries = refuse_placements(
+            &port,
+            VenueError::new("Due to the order could not be executed as maker, the Post Only order will be rejected.")
+                .kind(ErrorKind::Rejected)
+                .outcome(Outcome::Rejected)
+                .venue_code("-5022"),
+        );
+        let _chase = start(&port, BUY_ONE);
+        settle(30_000).await;
+        assert_eq!(tries.get(), 19);
+        assert_eq!(port.errors().len(), 1, "{:?}", port.errors());
+        assert!(port.errors()[0].contains("after 20 tries"), "{:?}", port.errors());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_passing_placement_failure_is_still_retried() {
+    for kind in [
+        ErrorKind::RateLimited,
+        ErrorKind::Timeout,
+        ErrorKind::Network,
+        ErrorKind::Rejected,
+    ] {
+        local(async {
+            let port = FakePort::new("bitget");
+            let tries = refuse_placements(
+                &port,
+                VenueError::new("try again")
+                    .kind(kind)
+                    .outcome(Outcome::NotSent),
+            );
+            let _chase = start(&port, BUY_ONE);
+            settle(30_000).await;
+            assert_eq!(tries.get(), 9, "{kind:?}");
+            assert_eq!(
+                port.errors(),
+                [r#""Chaser failed to place orders after 10 tries: try again""#],
+                "{kind:?}"
+            );
+        })
+        .await;
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_refused_requote_cancel_stops_the_chase_visibly_and_places_nothing_more() {
     local(async {

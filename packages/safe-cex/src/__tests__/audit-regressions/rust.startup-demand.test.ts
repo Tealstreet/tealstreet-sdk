@@ -354,6 +354,9 @@ it('a candle repair reaches the engine only for a live stream, once demand is re
     f.commands
       .filter(({ op }) => op === 'repairSubscription')
       .map((command) => ({ op: command.op, topic: (command as { topic?: unknown }).topic }));
+  const log = vi.spyOn(f.exchange, 'log');
+  const unsent = () =>
+    log.mock.calls.map(([message]) => String(message)).filter((message) => message.includes('repair not sent'));
   f.exchange.listenOHLCV({ symbol: 'BTC:USD', interval: '1m' }, vi.fn());
   f.exchange.repairOHLCV({ symbol: 'BTC:USD', interval: '1m' });
   void f.exchange.start().catch(() => {});
@@ -369,4 +372,9 @@ it('a candle repair reaches the engine only for a live stream, once demand is re
       { op: 'repairSubscription', topic: { kind: 'candles', symbol: 'BTC:USD', interval: '1m' } },
     ]),
   );
+  // A dropped repair names itself rather than vanishing.
+  expect(unsent()).toEqual([
+    expect.stringContaining('candles BTC:USD 1m repair not sent: public data is not ready'),
+    expect.stringContaining('candles BTC:USD 5m repair not sent: no candle listener'),
+  ]);
 });
