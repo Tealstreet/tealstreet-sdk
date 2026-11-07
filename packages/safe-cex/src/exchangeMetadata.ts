@@ -5,6 +5,8 @@ import {
   ExchangeName, MarginType, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode,
 } from '@tealstreet/safe-cex/src/types';
 
+import { unsupportedVenueError } from './unsupportedVenue';
+
 /** Features supported by an exchange - used to skip health checks for unsupported features */
 export type ExchangeFeatures = {
   /** Whether the exchange supports kline/candle data */
@@ -2340,7 +2342,7 @@ export const getExchangeMetadata = (exchange: ExchangeName, opts: Record<string,
   }
   const metadata = exchangeMetadata[exchange];
   if (!metadata) {
-    throw new Error(`Unknown exchange metadata: ${exchange}`);
+    throw unsupportedVenueError(`Unknown exchange metadata: ${exchange}`);
   }
   return metadata;
 };

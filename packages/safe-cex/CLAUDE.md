@@ -1578,6 +1578,11 @@ Is requiresCors true?
 - **Unknown metadata fails closed**: `getExchangeMetadata` throws for runtime
   names outside the exhaustive registry. Never restore a venue-shaped fallback;
   it can apply the wrong transport and capability flags to corrupt saved data.
+  Retired names stay saved on accounts (`bitmex`, `bitmextestnet`), so every
+  lookup throws `unsupportedVenueError` (`ExchangeError`, `unsupported`/`notSent`)
+  and the caller fails that one account; the WASM `venueFamily` and Rust
+  `registry::unsupported_venue` match it
+  (`__tests__/audit-regressions/removed-venue-refusal.test.ts`).
 - **Non-browser tradetunnel callers must use the shared header-capable
   transport with a browser-like `User-Agent`.** CloudFront/WAF in front of
   `fsjnpy143pbz.{jp,asia}.tealstreet.io` (and Cloudflare in front of
