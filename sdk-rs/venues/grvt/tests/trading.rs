@@ -1,3 +1,5 @@
+#[path = "support/hosted_parity.rs"]
+mod hosted_parity;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId, TimerId,
@@ -35,7 +37,15 @@ fn boot_capturing_public(
     builders: Option<&str>,
     open_orders: &str,
 ) -> (Engine<Grvt>, SocketId, Option<HttpRequest>, SocketId) {
-    boot_capturing_public_session(catalog, builders, open_orders, true)
+    boot_capturing_public_mode(catalog, builders, open_orders, true)
+}
+fn boot_capturing_public_mode(
+    catalog: &str,
+    builders: Option<&str>,
+    open_orders: &str,
+    hosted: bool,
+) -> (Engine<Grvt>, SocketId, Option<HttpRequest>, SocketId) {
+    boot_capturing_public_route(catalog, builders, open_orders, hosted, true)
 }
 fn boot_capturing_public_session(
     catalog: &str,
@@ -43,16 +53,30 @@ fn boot_capturing_public_session(
     open_orders: &str,
     session_proxy: bool,
 ) -> (Engine<Grvt>, SocketId, Option<HttpRequest>, SocketId) {
+    boot_capturing_public_route(catalog, builders, open_orders, false, session_proxy)
+}
+fn boot_capturing_public_route(
+    catalog: &str,
+    builders: Option<&str>,
+    open_orders: &str,
+    hosted: bool,
+    session_proxy: bool,
+) -> (Engine<Grvt>, SocketId, Option<HttpRequest>, SocketId) {
     let mut private_socket = None;
     let mut public_socket = None;
     let mut held = None;
-    let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
+    let options = Options {
         key: Some("grvt-test-key".into()),
         secret: Some(format!("0x{}", "01".repeat(32))),
         trading_account_id: Some("9007199254740993".into()),
         session_proxy,
         ..Options::default()
-    }));
+    };
+    let mut e = if hosted {
+        hosted_parity::engine(options)
+    } else {
+        safe_cex_engine::test_support::seeded_engine(Grvt::new(options))
+    };
     e.start(NOW);
     let mut pending: VecDeque<_> = drain(&mut e)
         .filter_map(|a| {
@@ -2871,6 +2895,39 @@ fn protective_429_on_replacement_or_put_back_stays_unknown_without_retry_or_prot
             assert!(error.message.contains("unknown") && error.message.contains("Open Orders"));
             assert!(!error.message.contains("both refused"));
         }
+    }
+}
+
+#[test]
+fn hosted_ordinary_and_protective_packets_are_byte_identical_to_legacy_local_custody() {
+    for protective in [false, true] {
+        let mut requests = vec![];
+        for hosted in [false, true] {
+            let (mut engine, _, _, _) =
+                boot_capturing_public_mode(CATALOG, Some(AUTHORIZED), OPEN_ORDERS, hosted);
+            let mut order = opts();
+            if protective {
+                order.kind = OrderType::StopLoss;
+                order.client_order_id = None;
+                order.trigger_price = Some(90.);
+                order.reduce_only = Some(true);
+            }
+            let request = http(
+                command(
+                    &mut engine,
+                    Command::PlaceOrders {
+                        command: 902,
+                        orders: vec![order],
+                    },
+                ),
+                "create_order",
+            );
+            requests.push((request.method, request.url, request.headers, request.body));
+        }
+        assert_eq!(
+            requests[0], requests[1],
+            "full signed ordinary/protective wire bytes"
+        );
     }
 }
 

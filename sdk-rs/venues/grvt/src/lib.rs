@@ -138,6 +138,7 @@ struct TickerState {
 }
 pub struct Grvt {
     options: safe_cex_crypto::secrets::Sensitive<Options>,
+    signing: Option<safe_cex_engine::signing::Identity>,
     account: account::Account,
     trading: trading::Trading,
     metadata: HashMap<String, InstrumentInfo>,
@@ -191,6 +192,7 @@ impl Grvt {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
+            signing: None,
             account: account::Account::new(),
             trading: trading::Trading::default(),
             metadata: HashMap::new(),
@@ -205,6 +207,18 @@ impl Grvt {
             startup_retry: Default::default(),
             refresh: None,
         }
+    }
+    /// Installed custody; raw credentials are consumed by trusted registry setup.
+    pub fn with_signing(
+        mut options: Options,
+        identity: Option<safe_cex_engine::signing::Identity>,
+    ) -> Self {
+        options.secret = None;
+        // Only presence is used outside the provider-backed login.
+        options.key = identity.as_ref().map(|_| "installed".into());
+        let mut venue = Self::new(options);
+        venue.signing = identity;
+        venue
     }
     fn edge(&self) -> &'static str {
         if self.options.testnet {
@@ -308,14 +322,62 @@ impl Grvt {
                 request.array_at(),
             ),
         };
+        let signing = if let Job::Trade(request) = &pending.job {
+            request.signing()
+        } else {
+            None
+        };
+        let signing_recipe = if let (Some(order), Some(identity)) = (signing, &self.signing) {
+            match crate::provider::CreateOrder::new(
+                identity,
+                self.options.signer_address.as_deref().unwrap_or_default(),
+                order,
+            ) {
+                Ok(recipe) => Some(
+                    recipe.hosted(
+                        headers
+                            .iter()
+                            .filter(|(key, _)| *key != "Content-Type")
+                            .cloned()
+                            .collect(),
+                    ),
+                ),
+                Err(_) => {
+                    self.fail_pending(cx, pending, "Invalid GRVT signing recipe");
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let headers = if signing_recipe.is_some() {
+            vec![("Content-Type", "application/json".into())]
+        } else {
+            headers
+        };
         let url = format!("{base}{}", pending.path);
-        let body = Some(pending.body.clone());
+        let body = if signing_recipe.is_some() {
+            None
+        } else {
+            Some(pending.body.clone())
+        };
         let builders = matches!(pending.job, Job::Account(account::Request::Builders { .. }));
         let id = if let Some(at) = at {
             cx.request_streamed_body(Method::Post, url, headers, body, at, pending)
         } else {
             cx.request(Method::Post, url, headers, body, pending)
         };
+        if let (Some(recipe), Some(identity)) = (signing_recipe, &self.signing) {
+            let slots = safe_cex_engine::credential_selection::Slots::new(
+                Some(identity),
+                None,
+                safe_cex_engine::credential_selection::SlotPolicy::default(),
+            );
+            let (selection, _) = slots
+                .select(safe_cex_engine::credential_selection::CredentialRole::Mutation)
+                .expect("installed identity");
+            selection.sign(cx, id, Box::new(recipe));
+        }
         if builders {
             // Matches TS's 10s abort; its own retry budget lives in `builder_failed`.
             cx.request_timeout(id, 10_000);
@@ -1250,6 +1312,28 @@ impl Venue for Grvt {
                 self.on_sign_error(cx, pending, error);
             }
         });
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Job::Trade(request) = pending.job {
+            self.trade_failed(
+                cx,
+                request,
+                &error.message,
+                error.outcome.unwrap_or(safe_cex_engine::Outcome::NotSent),
+            );
+        } else if matches!(pending.job, Job::Account(account::Request::Login))
+            && self.signing.is_some()
+        {
+            self.retire_login_session(cx);
+            self.account_login_unavailable(cx);
+        } else {
+            self.on_request_failed(cx, pending, &error.message);
+        }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
         if matches!(pending.job, Job::Markets { .. }) {
