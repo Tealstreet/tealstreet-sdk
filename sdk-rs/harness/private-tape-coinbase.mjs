@@ -6,18 +6,24 @@ import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { COINBASE_REPLAY, COINBASE_ES256_REPLAY } from './coinbase-protocol.mjs';
+import { coinbaseDrbIntxTape } from './coinbase-drb-tape.mjs';
 
 export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', venue = 'coinbase' } = {}) {
   if (!['intx', 'cfm', 'spot'].includes(profile)) throw new Error('Expected profile intx, cfm, or spot');
   if (!['ES256', 'EdDSA'].includes(algorithm)) throw new Error('Expected algorithm ES256 or EdDSA');
   if (!['coinbase', 'coinbasespot'].includes(venue) || (venue === 'coinbasespot' && profile !== 'spot'))
     throw new Error('coinbasespot requires the spot profile');
+  // INTX moved to the drb gateway; its tape is Rust-only (see coinbase-drb-tape.mjs).
+  if (profile === 'intx') {
+    const records = coinbaseDrbIntxTape({ algorithm });
+    return { records, commands: 0, seconds: records.at(-1).t / 1000, profile, algorithm, venue };
+  }
   const epoch = 1765805280000;
   const rest = 'https://api.coinbase.com';
   const root = '/api/v3/brokerage';
   const publicSocket = 'wss://advanced-trade-ws.coinbase.com';
   const privateSocket = 'wss://advanced-trade-ws-user.coinbase.com';
-  const main = profile === 'intx' ? 'BTC-PERP-INTX' : profile === 'cfm' ? 'BTC-CDE' : 'BTC-USD';
+  const main = profile === 'cfm' ? 'BTC-CDE' : 'BTC-USD';
   const nativeSize = profile === 'cfm' ? 1 : 0.1;
   const credentials = algorithm === 'ES256' ? COINBASE_ES256_REPLAY : COINBASE_REPLAY;
   const records = [
@@ -86,11 +92,11 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
     ...extra,
   });
   const future = product(main, 'FUTURE', {
-    quote_currency_id: profile === 'intx' ? 'USDC' : 'USD',
+    quote_currency_id: 'USD',
     future_product_details: {
-      contract_expiry_type: profile === 'intx' ? 'PERPETUAL' : 'EXPIRING',
+      contract_expiry_type: 'EXPIRING',
       contract_root_unit: 'BTC',
-      contract_size: profile === 'cfm' ? '0.01' : '1',
+      contract_size: '0.01',
       perpetual_details: { open_interest: '30', funding_time: '2025-12-15T12:00:00Z' },
     },
   });
@@ -107,38 +113,11 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
   else if (profile === 'cfm') {
     productReads('?product_type=FUTURE', [future]);
     productReads('', [spot]);
-  } else productReads('?product_type=FUTURE&contract_expiry_type=PERPETUAL', [future]);
-  if (profile === 'intx')
-    http('GET', 'https://api.international.coinbase.com/api/v1/instruments/', [
-      {
-        instrument_id: '1',
-        symbol: 'BTC-PERP',
-        type: 'PERP',
-        trading_state: 'TRADING',
-        base_asset_name: 'BTC',
-        quote_asset_name: 'USDC',
-        base_increment: '0.001',
-        quote_increment: '0.01',
-        min_quantity: '0.001',
-        min_notional_value: '1',
-        qty_24hr: '20',
-        notional_24hr: '2200',
-        open_interest: '30',
-        funding_interval: '3600000000',
-        quote: {
-          best_bid_price: '109',
-          best_ask_price: '111',
-          trade_price: '110',
-          mark_price: '110',
-          index_price: '109.9',
-          predicted_funding: '0.0001',
-        },
-      },
-    ]);
+  }
   const portfolio = {
     uuid: 'replay-portfolio',
     name: 'Replay',
-    type: profile === 'intx' ? 'INTX' : 'DEFAULT',
+    type: 'DEFAULT',
     deleted: false,
   };
   http('GET', root + '/portfolios', { portfolios: [portfolio] });
@@ -183,23 +162,6 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
       undefined,
       { status: 403 },
     );
-  } else if (profile === 'intx') {
-    http('GET', root + '/intx/portfolio/replay-portfolio', {
-      summary: { total_balance: { value: '1000', currency: 'USDC' }, buying_power: { value: '800', currency: 'USDC' } },
-    });
-    http('GET', root + '/intx/positions/replay-portfolio', {
-      positions: [
-        {
-          symbol: main,
-          position_side: 'POSITION_SIDE_LONG',
-          net_size: '2',
-          entry_vwap: { value: '100' },
-          mark_price: { value: '110' },
-          liquidation_price: { value: '50' },
-          leverage: '10',
-        },
-      ],
-    });
   }
   const order = (id, extra = {}) => ({
     order_id: id,
@@ -242,7 +204,7 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
       for (const status of ['PENDING', 'OPEN', 'QUEUED', 'CANCEL_QUEUED', 'EDIT_QUEUED']) {
         const productType = kind === 'spot' ? 'SPOT' : 'FUTURE';
         const expiry =
-          kind === 'cfm' ? '&contract_expiry_type=EXPIRING' : kind === 'intx' ? '&contract_expiry_type=PERPETUAL' : '';
+          kind === 'cfm' ? '&contract_expiry_type=EXPIRING' : '';
         const path = `${root}/orders/historical/batch?product_type=${productType}${expiry}&order_status=${status}&limit=100`;
         const rows =
           status === 'OPEN'
@@ -316,28 +278,7 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
   openStage(place);
   user('update', [wsOrder(thirty)]);
   const amend = command({ op: 'amendOrder', id: '11', price: 101 });
-  if (profile === 'intx') {
-    cancel(['11'], [{ order_id: '11', success: true }]);
-    http('GET', root + '/orders/historical/11', {
-      order: { order_id: '11', product_id: main, status: 'CANCELLED', filled_size: '0' },
-    });
-    create(
-      '31',
-      createBody('tealstreet-replacement', {
-        limit_limit_gtc: { base_size: String(nativeSize), limit_price: '101', post_only: false },
-      }),
-    );
-    active = active.filter((r) => r.order_id !== '11');
-    active.push(
-      order('31', {
-        client_order_id: 'tealstreet-replacement',
-        limit_price: '101',
-        order_configuration: {
-          limit_limit_gtc: { base_size: String(nativeSize), limit_price: '101', post_only: false },
-        },
-      }),
-    );
-  } else if (profile === 'spot') {
+  if (profile === 'spot') {
     http(
       'POST',
       root + '/orders/edit',
@@ -490,11 +431,7 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
   });
   const type = profile === 'spot' ? 'SPOT' : 'FUTURE',
     expiry =
-      profile === 'cfm'
-        ? '&contract_expiry_type=EXPIRING'
-        : profile === 'intx'
-          ? '&contract_expiry_type=PERPETUAL'
-          : '';
+      profile === 'cfm' ? '&contract_expiry_type=EXPIRING' : '';
   http(
     'GET',
     `${root}/orders/historical/batch?limit=2&order_status=FILLED&order_status=CANCELLED&order_status=EXPIRED&order_status=FAILED&product_ids=${main}&product_type=${type}${expiry}&start_date=${encodeURIComponent(new Date(from).toISOString())}&end_date=${encodeURIComponent(new Date(to + 1).toISOString())}`,

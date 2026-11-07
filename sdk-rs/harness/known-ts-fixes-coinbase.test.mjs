@@ -65,9 +65,11 @@ const fill = {
   side: 'BUY',
 };
 const request = (op, args = {}) => ({ type: 'command', op, ...args });
+// INTX moved to the drb gateway; its Rust-only tape is covered by coinbase-drb-tape.test.mjs.
+const LEGACY_PROFILES = ['cfm', 'spot'];
 
 test('tapes cover every product profile and native JWT algorithm with bounded exact commands', () => {
-  for (const profile of ['intx', 'cfm', 'spot'])
+  for (const profile of LEGACY_PROFILES)
     for (const algorithm of ['ES256', 'EdDSA']) {
       const tape = coinbasePrivateTape({ profile, algorithm });
       assert.equal(tape.commands, 15);
@@ -104,6 +106,12 @@ test('tapes cover every product profile and native JWT algorithm with bounded ex
         .filter((r) => r.type === 'http')
         .every((r) => !r.url.includes('/cfm/') && !r.url.includes('/intx/')),
     );
+  }
+  for (const algorithm of ['ES256', 'EdDSA']) {
+    const intx = coinbasePrivateTape({ profile: 'intx', algorithm });
+    assert.equal(intx.records[0].oracle, 'rust-only');
+    assert.ok(intx.records.filter((r) => r.type === 'http' || r.type === 'ws')
+      .every((r) => !r.url.includes('/intx/') && !r.url.includes('api.international.coinbase.com') && !r.url.includes('-ws-user.')));
   }
   assert.throws(() => coinbasePrivateTape({ profile: 'cfm', venue: 'coinbasespot' }), /requires the spot/);
   assert.throws(() => coinbasePrivateTape({ algorithm: 'none' }), /Expected algorithm/);
@@ -355,7 +363,7 @@ test('partial cancellation correction rejects unexpected results and keeps the f
 });
 
 test('command-owned replies cannot serve before the triggering command', () => {
-  for (const profile of ['intx', 'cfm', 'spot']) {
+  for (const profile of LEGACY_PROFILES) {
     const tape = coinbasePrivateTape({ profile });
     for (const r of tape.records.filter(
       (r) =>
@@ -377,7 +385,7 @@ test('command-owned replies cannot serve before the triggering command', () => {
 });
 
 test('candle tape serves the exact half-open Rust bound and retains the original TS reply', () => {
-  for (const profile of ['intx', 'cfm', 'spot']) {
+  for (const profile of LEGACY_PROFILES) {
     const { records } = coinbasePrivateTape({ profile });
     const index = records.findIndex((row) => row.type === 'command' && row.op === 'fetchCandles');
     const command = records[index];
@@ -401,7 +409,7 @@ test('candle tape serves the exact half-open Rust bound and retains the original
 });
 
 test('order history tapes use default sorting and external spot orders have native detail proof', () => {
-  for (const profile of ['intx', 'cfm', 'spot']) {
+  for (const profile of LEGACY_PROFILES) {
     const tape = coinbasePrivateTape({ profile });
     const history = tape.records.filter((r) => r.type === 'http' && r.url.includes('order_status=FILLED'));
     assert.ok(history.length > 0);
