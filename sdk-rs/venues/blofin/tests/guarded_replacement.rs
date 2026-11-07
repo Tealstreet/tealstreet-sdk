@@ -420,3 +420,61 @@ fn engine_ambiguity_bare_429_replacement_stays_unknown_in_journal() {
     h.respond_status(replacement, 429, "{}");
     assert_unknown_stop(&h);
 }
+
+#[test]
+fn dispatched_ambiguity_protective_cancel_and_replacement_never_restore() {
+    for (status, response) in [
+        (429, "{}"),
+        (429, REFUSED),
+        (200, RATE_LIMITED),
+        (408, REFUSED),
+        (500, REFUSED),
+        (503, REFUSED),
+    ] {
+        for replacement in [false, true] {
+            let mut h = Harness::new();
+            partly_filled(&mut h);
+            edit_stop(&mut h, 56000.0);
+            let request = if replacement {
+                to_replacement(&mut h)
+            } else {
+                h.collect();
+                h.take("cancel-batch-orders")
+            };
+            h.respond_status(request, status, response);
+            let error = failure(&h).expect("one terminal failure");
+            assert_eq!(
+                error.outcome,
+                Some(Outcome::Unknown),
+                "{status}: {response}"
+            );
+            assert_eq!(error.protection, None);
+            assert!(
+                error.message.to_lowercase().contains("unknown"),
+                "{error:?}"
+            );
+            assert!(error.message.contains("Check Open Orders"), "{error:?}");
+            assert!(!error.message.contains("refused"), "{error:?}");
+            assert!(!error.message.contains("position has no stop"), "{error:?}");
+            assert!(writes(&h).is_empty(), "no resend, replacement or put-back");
+        }
+    }
+}
+
+#[test]
+fn dispatched_ambiguity_native_rate_row_cannot_authorize_put_back() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond(replacement, r#"{"code":"1","msg":"All operations failed","data":[{"orderId":"0","code":"429","msg":"Too Many Requests"}]}"#);
+    assert!(
+        writes(&h).is_empty(),
+        "a native rate row must never release a put-back"
+    );
+    assert_unknown_stop(&h);
+    let error = failure(&h).unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert_eq!(error.venue_code.as_deref(), Some("429"));
+    assert_eq!(error.venue_message.as_deref(), Some("Too Many Requests"));
+}
