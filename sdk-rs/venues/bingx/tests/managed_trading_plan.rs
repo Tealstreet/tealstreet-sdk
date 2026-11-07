@@ -363,6 +363,16 @@ fn ambiguous_http_timestamp_refusal_never_resends_a_released_create() {
         let errors = failures(&after);
         assert_eq!(errors.len(), 1, "HTTP {status}: one terminal failure");
         assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
+        assert!(
+            errors[0].message.to_ascii_lowercase().contains("unknown"),
+            "HTTP {status}: CommandFailed must describe the uncertainty: {:?}",
+            errors[0]
+        );
+        assert!(
+            errors[0].message.contains("Check Open Orders"),
+            "HTTP {status}: CommandFailed must direct reconciliation: {:?}",
+            errors[0]
+        );
         assert!(!after.iter().any(|action| matches!(
             action,
             Action::Notice(Notice::CommandDone {
@@ -370,6 +380,59 @@ fn ambiguous_http_timestamp_refusal_never_resends_a_released_create() {
                 ..
             })
         )));
+    }
+}
+
+#[test]
+fn ambiguous_http_timestamp_refusal_fences_writes_until_primary_snapshot() {
+    for status in [429, 408, 503] {
+        let mut engine = engine();
+        place(&mut engine, 1);
+        let first = packet(&collect(&mut engine, START));
+        let after = respond(
+            &mut engine,
+            &first,
+            START + 1.,
+            status,
+            r#"{"code":109400,"msg":"timestamp is invalid","data":{}}"#,
+        );
+        assert_eq!(failures(&after)[0].outcome, Some(Outcome::Unknown));
+
+        // Probe admission before a reconciliation timeout can clear the fence.
+        // A distinct client ID ensures the placement hits the symbol fence.
+        let mut follow_up = orders(1);
+        follow_up[0].client_order_id = Some("follow-up".into());
+        engine.handle(
+            START + 2.,
+            Event::Command(Command::PlaceOrders {
+                command: COMMAND + 10,
+                orders: follow_up,
+            }),
+        );
+        let held = collect(&mut engine, START + 2.);
+        assert!(
+            !held.iter().any(|action| matches!(action,
+                Action::Http(request) if request.method != Method::Get
+            )),
+            "HTTP {status}: follow-up placement must stay fenced: {held:?}"
+        );
+        assert!(
+            held.iter().any(|action| matches!(action,
+                Action::Notice(Notice::CommandFailed { command, error })
+                    if *command == COMMAND + 10
+                        && error.outcome == Some(Outcome::NotSent)
+                        && error.message.contains("reconcile before placing or amending")
+            )),
+            "HTTP {status}: follow-up must be refused by the placement fence: {held:?}"
+        );
+
+        let cancel = cancel_all(&mut engine, COMMAND + 11, START + 2.5);
+        assert!(
+            !cancel_all_sent(&cancel),
+            "HTTP {status}: cancel-all must stay fenced before reconciliation: {cancel:?}"
+        );
+        assert!(fenced(&cancel, COMMAND + 11));
+        assert_fence_clears_only_on_the_primary_snapshot(&mut engine, &after);
     }
 }
 
