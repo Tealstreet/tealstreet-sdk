@@ -1119,6 +1119,12 @@ impl Okx {
                 .as_ref()
                 .filter(|native| native.valid())
                 .ok_or("OKX trailing parameters cannot be restored; the stop is unchanged")?;
+            // Until activation there is no trail to measure a dragged level against.
+            if price.is_some() && !native.active_px.is_empty() && original.trigger_price.is_none() {
+                return Err(
+                    "OKX trailing stop not active yet; re-place it to change its distance".into(),
+                );
+            }
             let mut replacement = native.clone();
             if let Some(amount) = amount {
                 let size = adjusted(amount, m.precision.amount, false)?;
