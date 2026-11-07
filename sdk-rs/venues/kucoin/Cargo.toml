@@ -9,7 +9,7 @@ spot = []
 private-adoption-originals = []
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["order-locks"] }
+safe-cex-engine = { workspace = true, features = ["order-locks", "serial-plans"] }
 safe-cex-crypto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
