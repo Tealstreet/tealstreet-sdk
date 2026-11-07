@@ -63,7 +63,7 @@ fn body(h: &mut Harness, path: &str) -> (RequestId, Value) {
 fn strategy(h: &mut Harness, quantity: &str, full: bool) {
     h.private_message(&json!({"arg":{"topic":"strategy-order"},"data":[{
         "category":"USDT-FUTURES","orderId":"stop","symbol":"BTCUSDT","qty":quantity,
-        "tpslMode":if full {"full"} else {"partial"},"stopLoss":"80","side":"sell","posSide":"long","status":"pending"
+        "tpslMode":if full {"full"} else {"partial"},"stopLoss":"80","side":"sell","posSide":"long","status":"pending","slTriggerBy":"market","slOrderType":"market"
     }]}).to_string());
 }
 
@@ -108,7 +108,7 @@ fn uncertain_native_amend_never_falls_through_to_cancel_and_replace() {
 fn uncertain_strategy_replacement_never_puts_back_a_second_stop() {
     for (status, code) in [(429, 429), (200, 429), (200, 25000), (200, 25001)] {
         let mut h = uta();
-        strategy(&mut h, "0.5", false);
+        strategy(&mut h, "0", true);
         amend(&mut h, "stop", Some(85.0), None);
         h.respond(
             "/cancel-strategy-order",
@@ -128,7 +128,7 @@ fn uncertain_strategy_replacement_never_puts_back_a_second_stop() {
 #[test]
 fn uncertain_put_back_does_not_claim_unprotected_or_try_again() {
     let mut h = uta();
-    strategy(&mut h, "0.5", false);
+    strategy(&mut h, "0", true);
     amend(&mut h, "stop", Some(85.0), None);
     h.respond(
         "/cancel-strategy-order",
@@ -236,14 +236,14 @@ fn strategy_size_edit_puts_back_original_venue_quantity_not_position_capacity() 
         p.contracts = 0.25;
     }
     h.engine.store_mut().set_positions(positions);
-    amend(&mut h, "stop", Some(85.0), Some(0.2));
+    amend(&mut h, "stop", Some(85.0), Some(0.0));
     h.respond(
         "/cancel-strategy-order",
         200,
         r#"{"code":"00000","data":null}"#,
     );
     let (replace, p) = body(&mut h, "/place-strategy-order");
-    assert_eq!(p["qty"], "0.2");
+    assert_eq!(p["qty"], "0.25");
     h.reply(
         replace,
         200,
