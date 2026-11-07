@@ -357,7 +357,7 @@ impl TxFlow {
             return;
         }
         self.account.started = true;
-        self.account.startup_at = cx.now.floor().max(0.0);
+        self.account.startup_at = cx.protocol_now().floor().max(0.0);
         cx.store.set_hedged(false);
         self.account_refresh(cx);
         self.account.refresh_timer = Some(cx.set_poll_timer(5000.0));

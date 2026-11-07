@@ -2106,7 +2106,14 @@ impl Venue for BinanceFutures {
                     cx.refuse_command(Operation::Read, error);
                     return;
                 }
-                let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
+                let query = match candles::query(
+                    &symbol,
+                    interval,
+                    limit,
+                    from_ms,
+                    to_ms,
+                    cx.protocol_now(),
+                ) {
                     Ok(query) => query,
                     Err(error) => {
                         let error = safe_cex_engine::VenueError::new(error)

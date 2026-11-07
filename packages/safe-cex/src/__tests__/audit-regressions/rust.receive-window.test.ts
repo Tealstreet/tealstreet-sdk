@@ -24,6 +24,7 @@ it.each(['binance', 'binancepm', 'binancespot', 'binanceinverse', 'bybit', 'bybi
     const construct = vi.fn();
     class Engine {
       constructor(venue: string, options: string) { construct(venue, JSON.parse(options)); }
+      syncHostTime() { return true; }
       capabilities() { return engineCapabilities(name); }
       free() {}
     }

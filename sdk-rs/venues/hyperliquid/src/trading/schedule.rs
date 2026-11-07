@@ -32,7 +32,7 @@ impl Hyperliquid {
             );
             return;
         }
-        let time_ms = match deadline(time, cx.now) {
+        let time_ms = match deadline(time, cx.protocol_now()) {
             Ok(time) => time,
             Err(error) => {
                 cx.refuse_command(

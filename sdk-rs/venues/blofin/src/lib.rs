@@ -1168,7 +1168,7 @@ impl Venue for Blofin {
                         return;
                     };
                     let step = i.ms();
-                    let end = to_ms.unwrap_or(cx.now);
+                    let end = to_ms.unwrap_or(cx.protocol_now());
                     let count = limit.filter(|n| *n > 0).unwrap_or(1440).min(1440);
                     let start = if limit.is_none() {
                         from_ms.unwrap_or(end - step * f64::from(count))

@@ -176,7 +176,8 @@ impl Woo {
             .filter(|_| method == Method::Get);
         let key = read.map_or(key.as_str(), |r| r.key.as_str());
         let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
-        let request = sign::request(key, secret, cx.now, method, path, &params, body);
+        let utc = cx.protocol_now();
+        let request = sign::request(key, secret, utc, method, path, &params, body);
         let url = if request.path.starts_with("https://") {
             request.path
         } else {
@@ -503,7 +504,8 @@ impl Woo {
         }
         let size = limit.unwrap_or(500).clamp(1, 1000);
         let ms = interval.ms();
-        let recent = (((cx.now / ms).floor() * ms - to.unwrap_or(0.0)).abs() / ms) < 100.0;
+        let recent =
+            (((cx.protocol_now() / ms).floor() * ms - to.unwrap_or(0.0)).abs() / ms) < 100.0;
         let (mut url, at) = if recent {
             (
                 format!(

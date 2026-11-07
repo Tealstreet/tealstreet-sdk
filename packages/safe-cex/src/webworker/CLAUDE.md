@@ -48,6 +48,11 @@ Do not make each exchange worker call the public endpoint: one tab may have
 many accounts, and foreground/page-show handling already forces a fresh
 main-thread sync after sleep.
 
+The initial worker clock startup waits up to 30 s for that push. The engine
+then uses an epoch-shaped monotonic scheduling clock, while later pushes update
+protocol timestamps only. Worker startup elapsed telemetry also uses
+`performance.now()` at both ends, independent of system/venue clock corrections.
+
 ## The `exchangeWorkers` registry is keyed by accountName — single-tenant only
 
 `store.webworker.ts` keeps module-global `exchangeWorkers` /

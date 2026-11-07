@@ -324,7 +324,7 @@ impl BitgetFutures {
         command: CommandId,
         query: Query,
     ) {
-        let windows = self.query_windows(&query, cx.now);
+        let windows = self.query_windows(&query, cx.protocol_now());
         let public = matches!(query, Query::PublicTrades { .. });
         let (credential, identity) = if windows.is_ok() && !public {
             self.read_selection(endpoint(&query, self.account.uta))
@@ -353,7 +353,7 @@ impl BitgetFutures {
                 return;
             }
         };
-        if !public && query_from(&query).is_some_and(|from| from < oldest_kept(cx.now)) {
+        if !public && query_from(&query).is_some_and(|from| from < oldest_kept(cx.protocol_now())) {
             completion.incomplete(
                 safe_cex_engine::history::IncompleteReason::RetentionLimit,
                 "Bitget keeps 90 days; the older part of this range was not read",

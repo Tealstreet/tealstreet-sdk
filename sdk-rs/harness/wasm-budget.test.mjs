@@ -302,6 +302,19 @@ test('#3245 Phemex CI 42367120442 at 46378cfab09 retains the ruled headroom', ()
   }
 });
 
+test('#3249 monotonic engine clock retains measured Phemex headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['phemex', 2_079_916, 2_091_008],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('#3018 after merging d171fbb0e31 (run 41893192741 at b94d76fa368) retains the ruled headroom', () => {
   for (const [venue, measured, cap] of [
     ['orderly', 1_721_849, 1_732_608],
