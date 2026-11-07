@@ -14,8 +14,9 @@ Unsubscribe removes the row at actual release; replacing queued interests remove
 orphaned rows. Recording one topic does not refresh another.
 JSON route aliases are compiled at subscription setup, including per-product
 aliases for batched Kraken subscriptions; no second message parse or per-frame
-allocation is required. Private URL subscriptions without managed interests use
-one implicit private subscription. Native variants whose response does not
+allocation is required. Private feeds without managed interest entries, including
+URL subscriptions and authentication-owned streams, use one implicit private row.
+Native variants whose response does not
 identify a subscription remain unobserved rather than inventing receipt proof.
 
 SCXF section 25 (`MESSAGE_HANDLER_STATS`, revision 0) carries a snapshot or changed rows:

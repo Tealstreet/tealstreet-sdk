@@ -689,7 +689,8 @@ state. `RustSocketHandle.messageHandlersStats` reads that same store bucket.
 Native parsers record borrowed topic keys, or bounded stack-formatted keys, at
 their existing data dispatch sites. JSON route aliases are compiled once when
 interests change. Never scan all subscriptions or parse a second data frame just
-to refresh telemetry. Implicit private URL subscriptions use a private-feed row;
+to refresh telemetry. Private feeds without managed interest entries use one
+private-feed row, including URL subscriptions and authentication-owned streams;
 unattributable native topic variants remain without a receipt timestamp rather
 than borrowing another subscription's traffic.
 
