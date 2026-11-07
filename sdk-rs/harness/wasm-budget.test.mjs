@@ -574,7 +574,7 @@ test('#3178 intent cleanup (run 42239151280, job 127965614325) retains HL headro
 });
 
 test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroom and exact boundaries', () => {
-  for (const [venue, measured, incomingCap, cap] of [
+  for (const [venue, measured, incomingCap, ruledCap] of [
     ['asterdex', 2_150_517, 2_150_400, 2_161_664],
     ['binance', 2_208_976, 2_223_104, 2_223_104],
     ['bitunix', 1_853_221, 1_849_344, 1_863_680],
@@ -589,8 +589,9 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
     ['txflow', 1_842_121, 1_838_080, 1_852_416],
     ['woo', 2_406_393, 2_410_496, 2_416_640],
   ]) {
-    assert.equal(cap, Math.max(incomingCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024));
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(ruledCap, Math.max(incomingCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024));
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= ruledCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -640,6 +641,18 @@ test('#3202 on #3207 (run 42305638406) uses CI plus 10 KiB and keeps Bitget sibl
   const cap = 2_419_712;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3120 on master 160884d020d (run 42319184274) uses CI plus 10 KiB and keeps HL siblings equal', () => {
+  const measured = 2_184_857;
+  const cap = 2_195_456;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
