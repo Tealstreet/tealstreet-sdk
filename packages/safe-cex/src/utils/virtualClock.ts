@@ -170,19 +170,19 @@ class VirtualClock {
   // `dayjs.utc().valueOf()` minus the per-call dayjs allocation.
   getCurrentTimeMs = () => Date.now() + this.offsetMs;
 
-  public syncClientServerTime = () => {
+  public syncClientServerTime = ({ afterClockStep = false } = {}) => {
     if (this.syncInFlight) {
       return this.syncInFlight;
     }
 
-    this.syncInFlight = this.syncClientServerTimeInner().finally(() => {
+    this.syncInFlight = this.syncClientServerTimeInner(afterClockStep).finally(() => {
       this.syncInFlight = null;
     });
 
     return this.syncInFlight;
   };
 
-  private syncClientServerTimeInner = async () => {
+  private syncClientServerTimeInner = async (afterClockStep: boolean) => {
     if (isNodeOrBunRuntime()) {
       // A server keeps its own clock; one shared offset would move every user's.
       this.server = null;
@@ -193,7 +193,9 @@ class VirtualClock {
     }
     // A browser worker (no `window`) keeps the offset the main thread pushes or a
     // venue correction set; zeroing it here undid both every 5 minutes.
-    if (typeof window === 'undefined') return;
+    // After an actual wall step, the pushed offset is stale too. Allow one
+    // shared request in this realm rather than waiting for the next page push.
+    if (typeof window === 'undefined' && !afterClockStep) return;
 
     this.syncFromServerTime((await this.fetchServerTime()).valueOf());
   };
