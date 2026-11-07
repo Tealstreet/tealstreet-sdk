@@ -53,6 +53,10 @@ export class DelegatedSignerSetup {
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
     this.usesPayloadSigner = selectDelegatedSigningMode(options) === 'payload';
+    if (name === 'grvt' && this.usesPayloadSigner) {
+      const message = 'GRVT PayloadSigner is unsupported';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     const remoteSigner = options.remoteSigner;
     const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');

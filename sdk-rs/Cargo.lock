@@ -4209,6 +4209,7 @@ dependencies = [
  "alloy-signer-local",
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venues",
  "serde",
  "serde_json",
 ]

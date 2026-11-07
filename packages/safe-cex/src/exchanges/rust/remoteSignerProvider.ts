@@ -26,7 +26,7 @@ const paradex = (name: ExchangeName) => name === 'paradex';
 /** Everything this provider signs for a venue; the engine's capability admission
  * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
 export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
-  doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : hyperliquid(name) ? WALLET_ALGORITHMS
+  doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'grvt') ? WALLET_ALGORITHMS
     : lighter(name) ? SCHNORR_ALGORITHMS : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
@@ -236,6 +236,7 @@ function wsMetadata(wire: RemoteSigningPolicy['wire'], payload: string, key: str
  */
 export function createRemoteSignerProvider(options: RemoteSignerProviderOptions): Signer {
   const { exchangeName, remoteSigner, payloadSigner } = options;
+  if (exchangeName === 'grvt' && !remoteSigner) throw refused();
   const declaration = deriveRemoteSigningPolicy(exchangeName)?.wire;
   const wire = declaration && { ...declaration,
     ...(declaration.secondsSuffix && { secondsSuffix: { ...declaration.secondsSuffix } }) };
@@ -349,7 +350,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     return Array.from({ length }, (_, i) => Number.parseInt(value.slice(2 + i * 2, 4 + i * 2), 16));
   };
   const askDevice = async (toSign: string,
-    outputFormat: 'hyperliquid-l1' | 'hyperliquid-address' | 'paradex-stark' | 'paradex-public', signal: AbortSignal) => {
+    outputFormat: 'hyperliquid-l1' | 'hyperliquid-address' | 'paradex-stark' | 'paradex-public' | 'grvt-order' | 'grvt-address', signal: AbortSignal) => {
     const id = nanoid();
     const response = await guarded(signal, remoteSigner, () => remoteSigner!.sign({
       id,
@@ -390,6 +391,33 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     if (bytes(sign.payload, 32).length !== 32) throw refused();
     const signature = hexBytes(await askDevice(decodeUtf8(preimage), 'hyperliquid-l1', signal), 65);
     return { values: [Array.from(sha256(preimage)), boundAddress.slice(), signature], receipt };
+  };
+
+  // GRVT session login is Present-only. Orders carry one closed EIP-712
+  // statement commitment, address and signature, resolved atomically on device.
+  const signGrvt = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const [first, address, sign] = operations;
+    if (operations.length === 1 && first?.kind === 'present') {
+      const entry = credentials.get(first.key);
+      if (!entry || !owned.get(first.key)?.primary) throw refused();
+      return { values: [entry.bytes.slice()], receipt };
+    }
+    const entry = sign?.kind === 'sign' ? owned.get(sign.key) : undefined;
+    if (operations.length !== 3 || first?.kind !== 'sha256' || address?.kind !== 'publicAddress'
+      || sign?.kind !== 'sign' || sign.algorithm !== 'secp256k1Digest' || !entry?.primary
+      || sign.key !== entry.identity.signing || address.key !== sign.key) throw refused();
+    const bytes = (parts: unknown, length?: number) => {
+      const part = Array.isArray(parts) && parts.length === 1 ? parts[0] : undefined;
+      if (!record(part) || part.kind !== 'bytes' || !Array.isArray(part.bytes) || part.bytes.length > MAX_PAYLOAD
+        || (length !== undefined && part.bytes.length !== length)
+        || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+      return Uint8Array.from(part.bytes as number[]);
+    };
+    const preimage = bytes(first.payload);
+    bytes(sign.payload, 32);
+    const joined = hexBytes(await askDevice(decodeUtf8(preimage), 'grvt-order', signal), 85);
+    return { values: [Array.from(sha256(preimage)), joined.slice(0, 20), joined.slice(20)], receipt };
   };
 
   /** Lighter never sends bare words: `[sha256(statement), sign schnorrDigest x n]`,
@@ -468,6 +496,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (receipt.stampMs !== undefined && receipt.expiryMs !== undefined && receipt.expiryMs <= receipt.stampMs) throw refused();
       if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
       const operations = Array.from(request.operations);
+      if (exchangeName === 'grvt') return await signGrvt(operations, receipt, signal);
       if (hyperliquid(exchangeName)) return await signWallet(operations, receipt, signal);
       if (lighter(exchangeName)) return await signLighter(operations, receipt, signal);
       if (paradex(exchangeName)) return await signStark(operations, receipt, signal);
