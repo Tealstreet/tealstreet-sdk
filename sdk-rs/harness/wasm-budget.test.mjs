@@ -962,6 +962,20 @@ test('#3210 admitted close split (run 42320236420) uses CI plus 10 KiB and keeps
   }
 });
 
+test('#3157 protective edit guards (run 42399005414) retain measured Bitget headroom and equal siblings', () => {
+  const measured = 2_447_105;
+  const minimumCap = 2_457_600;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bitget;
+  assert.ok(cap >= minimumCap);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('#3191 run 42249705679 retains measured Paradex headroom', () => {
   const measured = 2_249_779;
   const minimumCap = 2_260_992;
