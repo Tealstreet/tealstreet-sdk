@@ -225,7 +225,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   blofin: 2_001_920,
   bybit: 2_281_472,
   coinbase: 1_953_792,
-  cryptocom: 1_740_800,
+  cryptocom: 1_752_064,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
@@ -242,14 +242,14 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   krakenspot: 2_147_328,
   kucoin: 1_838_080,
   kucoinspot: 2_357_248,
-  lighter: 2_093_056,
-  'lighter-robinhood': 2_093_056,
+  lighter: 2_104_320,
+  'lighter-robinhood': 2_104_320,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   mexc: 1_872_896,
   okx: 1_986_560,
   orderly: 1_744_896,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
-  paradex: 2_266_112,
+  paradex: 2_277_376,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
   phemex: 2_091_008,

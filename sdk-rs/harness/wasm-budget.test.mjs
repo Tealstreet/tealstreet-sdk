@@ -1085,3 +1085,18 @@ test('#3268 (run 42404306341 at fca7d275e3a) retains measured wasm headroom', ()
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+test('#3268 (run 42422775913 at 1af9adc3527) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['cryptocom', 1_740_870, 1_752_064],
+    ['lighter', 2_093_401, 2_104_320],
+    ['paradex', 2_266_161, 2_277_376],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
