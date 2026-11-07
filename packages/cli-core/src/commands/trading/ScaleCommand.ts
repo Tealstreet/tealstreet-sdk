@@ -175,40 +175,34 @@ export class ScaleCommand extends TradingBaseCommand {
       return this.error((e as Error).message);
     }
 
-    // Fatfinger gate — applies per-leg, not per-total. A scale command
-    // that adds up to MORE than the limit but where each leg is
-    // smaller is allowed (the cap protects against single fat-finger
-    // entries, not aggregate exposure).
-    // Budget is aggregate — the whole ladder's notional, charged once
-    // AFTER the orders place (checked before so we fail closed early).
+    const preparedOrders = prepareCliOrders(
+      exchange,
+      orders.map((order) => ({
+        side: order.side,
+        symbol: targetSymbol,
+        price: parseFloat(order.price),
+        type: OrderType.Limit,
+        amount: order.size,
+        ...(!allowTaker ? { timeInForce: OrderTimeInForce.PostOnly } : {}),
+        reduceOnly: order.reduceOnly,
+      })),
+    );
+
+    // Check each prepared rung at its own rounded price before the batch write.
+    // Retain the combined notional and charge it only after acceptance.
     let budgetNotional = 0;
     if (!reduceOnly) {
       try {
-        for (const order of orders) {
-          this.enforceFatfinger(ctx, targetSymbol, order.size);
+        for (const order of preparedOrders) {
+          this.enforceFatfinger(ctx, order.symbol, order.amount);
+          budgetNotional += this.checkBudget(ctx, exchange, order.symbol, order.amount, order.price, budgetNotional);
         }
-        const totalAmount = orders.reduce((sum, o) => sum + Math.abs(o.size), 0);
-        budgetNotional = this.checkBudget(ctx, exchange, targetSymbol, totalAmount);
       } catch (e) {
         return this.error((e as Error).message);
       }
     }
 
-    const orderIds =
-      (await exchange.placeOrders(
-        prepareCliOrders(
-          exchange,
-          orders.map((order) => ({
-            side: order.side,
-            symbol: targetSymbol,
-            price: parseFloat(order.price),
-            type: OrderType.Limit,
-            amount: order.size,
-            ...(!allowTaker ? { timeInForce: OrderTimeInForce.PostOnly } : {}),
-            reduceOnly: order.reduceOnly,
-          })),
-        ),
-      )) ?? [];
+    const orderIds = (await exchange.placeOrders(preparedOrders)) ?? [];
 
     if (budgetNotional > 0) ctx.preprocessStore?.addBudgetSpent(budgetNotional);
     this.printSuccess(ctx, `Created orders ${orderIds.join(',')}`);

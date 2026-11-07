@@ -103,6 +103,9 @@ limitation:_ `twap` / `chase` task-spawners are not yet budget-counted
 For `buy` / `sell`, limit and `best` orders charge the submitted amount at
 the tick-rounded order price; market orders use the last price. Native
 contract sizes are included, and inverse contracts use their USD face value.
+`scale` checks and charges the sum of its prepared rungs, each valued at its
+own tick-rounded submitted price. An above-cap ladder places nothing and
+consumes no budget; accepted ladders charge that same preflight total.
 A multi-symbol command validates every leg and checks their combined budget
 before sending any order. Only accepted legs consume budget. If a later venue
 write fails, earlier accepted IDs and the native failure details are retained

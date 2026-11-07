@@ -1,6 +1,7 @@
+import { deserializeCommandError, serializeCommandError } from '@tealstreet/safe-cex/src/commandOutcome';
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
-import { placeCliOrders } from '../../order/prepareCliOrder';
+import { prepareCliOrders } from '../../order/prepareCliOrder';
 import { OrderSide, OrderTimeInForce, OrderType, PlaceOrderOpts, PositionSide } from '@tealstreet/safe-cex/src/types';
 
 /**
@@ -364,25 +365,42 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
 
   private async submitOrders(ctx: CommandContext, orders: PlaceOrderOpts[]): Promise<string[]> {
     const exchange = ctx.exchange!;
+    const prepared = prepareCliOrders(exchange, orders);
     const notionals = new Map<PlaceOrderOpts, number>();
-    return placeCliOrders(exchange, orders, {
-      validate: (prepared) => {
-        let pendingNotional = 0;
-        for (const order of prepared) {
-          if (order.reduceOnly) continue;
-          const blocked = this.healthGate(ctx);
-          if (blocked) throw new Error(blocked);
-          this.enforceFatfinger(ctx, order.symbol, order.amount);
-          const notional = this.checkBudget(ctx, exchange, order.symbol, order.amount, order.price, pendingNotional);
-          notionals.set(order, notional);
-          pendingNotional += notional;
-        }
-      },
-      onAccepted: (order) => {
-        const notional = notionals.get(order) ?? 0;
-        if (notional > 0) ctx.preprocessStore?.addBudgetSpent(notional);
-      },
-    });
+    let pendingNotional = 0;
+    for (const order of prepared) {
+      if (order.reduceOnly) continue;
+      const blocked = this.healthGate(ctx);
+      if (blocked) throw new Error(blocked);
+      this.enforceFatfinger(ctx, order.symbol, order.amount);
+      const notional = this.checkBudget(ctx, exchange, order.symbol, order.amount, order.price, pendingNotional);
+      notionals.set(order, notional);
+      pendingNotional += notional;
+    }
+
+    const ids: string[] = [];
+    let accepted = 0;
+    for (const order of prepared) {
+      try {
+        ids.push(...((await exchange.placeOrder!(order)) ?? []));
+      } catch (error) {
+        if (accepted === 0) throw error;
+        const details = serializeCommandError(error);
+        // Keep native Unknown/client-ID attribution and any inner partial batch.
+        // Earlier accepted legs also forbid retrying this whole command.
+        throw deserializeCommandError({
+          ...details,
+          partialOrderIds: [...ids, ...(details.partialOrderIds ?? [])],
+          partialOrderCount:
+            Math.max(accepted, ids.length) +
+            Math.max(details.partialOrderCount ?? 0, details.partialOrderIds?.length ?? 0),
+        });
+      }
+      accepted++;
+      const notional = notionals.get(order) ?? 0;
+      if (notional > 0) ctx.preprocessStore?.addBudgetSpent(notional);
+    }
+    return ids;
   }
 
   /** Buy/sell are entry commands per Phase 0 decision 1, so a bare `%`
