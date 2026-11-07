@@ -107,8 +107,9 @@ fn required_amend_preparation_refusal_restores_only_unchanged_cancel_state() {
 }
 
 #[test]
-fn unproven_child_stops_the_plan_and_keeps_native_metadata_and_prior_ids() {
-    for status in [408, 503] {
+fn hosted_unproven_child_stops_the_plan_and_keeps_native_metadata_and_prior_ids() {
+    // ready() installs the local/device parity provider for every dispatched write.
+    for status in [408, 429, 500, 503] {
         let (mut e, _) = ready();
         e.handle(2000., Event::Command(Command::PlaceOrders {
             command: 722,

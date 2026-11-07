@@ -170,7 +170,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        family: [apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, bitunix, blofin, breakoutprop, bybit, coinbase, cryptocom, grvt, hyperliquid, kraken, kucoin, kucoinspot, lighter, mexc, okx, orderly, paradex, phemex, polymarket, txflow, weex, woo, combined]
+        family: [apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, bitunix, blofin, bybit, coinbase, cryptocom, grvt, hyperliquid, kraken, kucoin, kucoinspot, lighter, mexc, okx, orderly, paradex, phemex, polymarket, txflow, weex, woo, combined]
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       SAFE_CEX_WASM_OPT: required
@@ -886,9 +886,6 @@ jobs:
       - name: Kraken Spot compiled auth and atomic amendment contracts
         if: matrix.venue == 'krakenspot'
         run: corepack yarn rust:test-krakenspot-parity
-      - name: Breakout compiled account, startup and polling controls
-        if: matrix.venue == 'breakoutprop'
-        run: corepack yarn rust:test-breakoutprop-parity
       - name: Backpack selected public-only history contracts
         if: matrix.venue == 'backpack'
         run: corepack yarn -s node --test sdk-rs/harness/backpack-history.integration.mjs
@@ -990,10 +987,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Legacy DXtrade has no anonymous API; this public fixture is documented/scripted.
-          - venue: breakoutprop
-            books: BTCUSD,ETHUSD
-            private_script: rust:private-tape-breakoutprop
           - venue: apexomni
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-apexomni
@@ -1265,9 +1258,6 @@ jobs:
       - name: Kraken Spot compiled auth and atomic amendment contracts
         if: matrix.venue == 'krakenspot'
         run: corepack yarn rust:test-krakenspot-parity
-      - name: Breakout compiled account, startup and polling controls
-        if: matrix.venue == 'breakoutprop'
-        run: corepack yarn rust:test-breakoutprop-parity
       - name: Backpack selected public-only history contracts
         if: matrix.venue == 'backpack'
         run: corepack yarn -s node --test sdk-rs/harness/backpack-history.integration.mjs
@@ -1549,7 +1539,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [breakoutprop, apexomni, asterdex, woo, binance, bitunix, orderly, coinbase, bitget, bitgetusdc, backpack, blofin, mexc, polymarket, kucoin, kucoinspot, bingx, bybit, okx, cryptocom, weex, grvt, phemex, krakenspot, hyperliquidspot, kraken, lighter, lighter-robinhood, bitrue, hyperliquid, paradex, txflow]
+        suite: [apexomni, asterdex, woo, binance, bitunix, orderly, coinbase, bitget, bitgetusdc, backpack, blofin, mexc, polymarket, kucoin, kucoinspot, bingx, bybit, okx, cryptocom, weex, grvt, phemex, krakenspot, hyperliquidspot, kraken, lighter, lighter-robinhood, bitrue, hyperliquid, paradex, txflow]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:

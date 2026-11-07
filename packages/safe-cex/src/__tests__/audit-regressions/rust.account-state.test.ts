@@ -499,7 +499,7 @@ describe('Rust native current-account reads', () => {
     ]);
   });
 
-  it.each(['woo', 'grvt', 'kucoin', 'kucoinspot', 'polymarket', 'breakoutprop'] as ExchangeName[])(
+  it.each(['woo', 'grvt', 'kucoin', 'kucoinspot', 'polymarket'] as ExchangeName[])(
     '%s preserves its native venue-global cancel-all command',
     async (name) => {
       const r = fixture(name);
