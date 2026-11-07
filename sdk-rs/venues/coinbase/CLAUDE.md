@@ -4,8 +4,9 @@
 portfolio type and can select INTX, CFM or Spot. Public-only non-spot accounts
 read the drb USDC perpetual catalogue and public stream.
 
-DRB candle history rounds an implicit or host-clamped end time down to whole
-milliseconds, since the SDK scheduling clock can be fractional. Explicit range
+DRB candle history bounds implicit and future-clamped ends with synchronized
+protocol UTC, rounded down to whole milliseconds. Scheduling time can stop
+during suspend and remains reserved for deadlines and pacing. Explicit range
 inputs still require whole milliseconds. A valid summary or stream ticker can
 restore a catalogue market omitted or malformed in the initial ticker seed;
 other venues retain the shared store's seed policy.
