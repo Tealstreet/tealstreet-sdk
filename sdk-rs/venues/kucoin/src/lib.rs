@@ -95,6 +95,7 @@ pub enum Pending {
     Leverage(leverage::Read),
     Account(account::Request),
     Trade(trading::Request),
+    Protective(trading::protective::Request),
     History(history::Request),
     Funding(funding::Request),
     Markets {
@@ -103,6 +104,7 @@ pub enum Pending {
     },
     Tickers {
         rows: Vec<Ticker>,
+        references: Vec<(String, safe_cex_engine::model::StopTriggerType, f64, f64)>,
         invalid: bool,
     },
     Bullet {
@@ -513,6 +515,7 @@ impl Kucoin {
             if tickers {
                 Pending::Tickers {
                     rows: vec![],
+                    references: vec![],
                     invalid: false,
                 }
             } else {
@@ -894,7 +897,29 @@ impl Kucoin {
         }
         if topic.starts_with("/contract/instrument:") {
             let symbol = internal_symbol(api);
-            if let Ok(row) = serde_json::from_str::<InstrumentPrice>(data.get()) {
+            if let Ok(row) = serde_json::from_str::<InstrumentPrice>(data.get())
+                && cx.store.market(&symbol).is_some()
+            {
+                if let Some(price) = row.mark {
+                    self.trading.protective.observe(
+                        &symbol,
+                        safe_cex_engine::model::StopTriggerType::MarkPrice,
+                        price.0,
+                        cx.now,
+                    );
+                }
+                if let Some(price) = row.index {
+                    self.trading.protective.observe(
+                        &symbol,
+                        safe_cex_engine::model::StopTriggerType::IndexPrice,
+                        price.0,
+                        cx.now,
+                    );
+                }
+                cx.store.observe_ticker_fields(
+                    &symbol,
+                    (u16::from(row.mark.is_some()) << 3) | (u16::from(row.index.is_some()) << 4),
+                );
                 cx.store.update_ticker(&symbol, |t| {
                     if let Some(n) = row.mark {
                         t.mark = n.0;
@@ -910,6 +935,18 @@ impl Kucoin {
             return;
         };
         let symbol = internal_symbol(row.symbol);
+        if topic.starts_with("/contractMarket/snapshot:")
+            && let Some(price) = row.last_price
+            && cx.store.market(&symbol).is_some()
+        {
+            self.trading.protective.observe(
+                &symbol,
+                safe_cex_engine::model::StopTriggerType::LastPrice,
+                price.0,
+                cx.now,
+            );
+            cx.store.observe_ticker_fields(&symbol, 1 << 2);
+        }
         cx.store.update_ticker(&symbol, |t| {
             if topic.starts_with("/contractMarket/tickerV2:") {
                 if let Some(n) = row.best_bid_price {
@@ -945,6 +982,49 @@ impl Venue for Kucoin {
     }
 
     type Pending = Pending;
+    fn http_release_veto(
+        &self,
+        store: &Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        match pending {
+            Pending::Protective(request) => self.protective_veto(store, request, release),
+            _ => Ok(()),
+        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Protective(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.trading.protective.retired(owner);
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.protective_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.protective_plan_ready(cx, plan);
+    }
     fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
         use safe_cex_engine::startup::Sections as S;
         match pending {
@@ -1120,16 +1200,36 @@ impl Venue for Kucoin {
                     }
                 }
             }
-            Pending::Tickers { rows, invalid: _ } => {
-                match serde_json::from_str::<TickerRow>(item) {
-                    Ok(row) => {
-                        if let Some(m) = cx.store.market_by_id(row.symbol) {
-                            rows.push(row.ticker(m.symbol.clone()));
+            Pending::Tickers {
+                rows,
+                references,
+                invalid: _,
+            } => match serde_json::from_str::<TickerRow>(item) {
+                Ok(row) => {
+                    if let Some(m) = cx.store.market_by_id(row.symbol) {
+                        for (source, price) in [
+                            (
+                                safe_cex_engine::model::StopTriggerType::LastPrice,
+                                Some(row.price),
+                            ),
+                            (
+                                safe_cex_engine::model::StopTriggerType::MarkPrice,
+                                row.mark_price,
+                            ),
+                            (
+                                safe_cex_engine::model::StopTriggerType::IndexPrice,
+                                row.index_price,
+                            ),
+                        ] {
+                            if let Some(price) = price {
+                                references.push((m.symbol.clone(), source, price.0, cx.now));
+                            }
                         }
+                        rows.push(row.ticker(m.symbol.clone()));
                     }
-                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
-            }
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+            },
             Pending::Candles { rows, invalid, .. } => {
                 match serde_json::from_str::<Vec<Number>>(item)
                     .ok()
@@ -1179,6 +1279,10 @@ impl Venue for Kucoin {
             self.leverage_response(cx, read, response);
             return;
         }
+        if let Pending::Protective(request) = pending {
+            self.protective_response(cx, request, response.status, response.body);
+            return;
+        }
         let status = response.status;
         let body = response.body;
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
@@ -1186,7 +1290,10 @@ impl Venue for Kucoin {
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         }
         match pending {
-            Pending::Read(_) | Pending::Identity { .. } | Pending::Leverage(_) => unreachable!(),
+            Pending::Read(_)
+            | Pending::Identity { .. }
+            | Pending::Leverage(_)
+            | Pending::Protective(_) => unreachable!(),
             Pending::Account(request) => self.account_response(cx, request, status, body),
             Pending::Trade(request) => self.trading_response(cx, request, status, body),
             Pending::History(request) => self.history_response(cx, request, status, body),
@@ -1279,6 +1386,7 @@ impl Venue for Kucoin {
                         rows
                     };
                     cx.store.set_markets(rows);
+                    self.trading.protective.retain_listed(cx.store);
                     self.books
                         .retain(|symbol, _| cx.store.market(symbol).is_some());
                     let before = self.malformed_markets.len();
@@ -1301,13 +1409,22 @@ impl Venue for Kucoin {
                     }
                 }
             }
-            Pending::Tickers { rows, invalid } => {
+            Pending::Tickers {
+                rows,
+                references,
+                invalid,
+            } => {
                 if success(status, body).is_err() || invalid || rows.is_empty() {
                     let pause = self.discovery_paused_until - cx.now;
                     self.discovery.failed_after(cx, true, pause);
                 } else {
                     self.discovery.succeeded(cx, &true);
                     cx.store.set_tickers(rows);
+                    for (symbol, source, price, seen) in references {
+                        self.trading
+                            .protective
+                            .observe(&symbol, source, price, seen);
+                    }
                     self.launch(cx);
                 }
             }
@@ -1347,10 +1464,22 @@ impl Venue for Kucoin {
                 self.on_sign_error(cx, pending, error);
             }
             Pending::Trade(request) => self.trading_sign_failed(cx, request, error),
+            Pending::Protective(request) => self.protective_failed(cx, request, error),
             Pending::Identity { command, root } => self.identity_failed(cx, command, root, error),
             Pending::Account(request) => self.account_failed(cx, request, Some(&error)),
             other => self.on_request_failed(cx, other, &error.message),
         });
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Protective(request) => self.protective_failed(cx, request, error),
+            other => self.on_request_failed(cx, other, &error.message),
+        }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Read(read) = pending {
@@ -1374,6 +1503,11 @@ impl Venue for Kucoin {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, None),
             Pending::Trade(request) => self.trading_response(cx, request, 0, error),
+            Pending::Protective(request) => self.protective_failed(
+                cx,
+                request,
+                safe_cex_engine::VenueError::new(error).outcome(safe_cex_engine::Outcome::Unknown),
+            ),
             Pending::History(request) => self.history_response(cx, request, 0, error),
             Pending::Funding(request) => self.funding_response(cx, request, 0, error),
             Pending::Depth { symbol, generation } => {
@@ -1409,7 +1543,8 @@ impl Venue for Kucoin {
             self.discovery_read(cx, tickers);
             return;
         }
-        if self.account_timer(cx, timer)
+        if self.protective_timer(cx, timer)
+            || self.account_timer(cx, timer)
             || self.trading_timer(cx, timer)
             || self.history_timer(cx, timer)
             || self.funding_timer(cx, timer)

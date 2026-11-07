@@ -567,6 +567,47 @@ fn amount_only_trailing_edit_preserves_ratio_and_activation_and_restores_origina
 }
 
 #[test]
+fn refused_ratio_price_edit_restores_the_original_callback_ratio_exactly() {
+    let row = TRAILING.replace(
+        "\"callbackSpread\":\"50\",\"callbackRatio\":\"\"",
+        "\"callbackSpread\":\"\",\"callbackRatio\":\"0.005\"",
+    );
+    let mut e = native_engine(&row, "move_order_stop");
+    amend(&mut e, "91_tsl", Some(39600.), None);
+    let cancel = post(&prepared(&mut e, 5.), "/cancel-algos");
+    reply(
+        &mut e,
+        &cancel,
+        &envelope(r#"{"algoId":"91","sCode":"0"}"#),
+        6.,
+    );
+    let replace = post(&prepared(&mut e, 6.), "/order-algo");
+    let replaced = body(&replace);
+    assert_eq!(
+        replaced["callbackRatio"], "0.01",
+        "the price edit re-derives the ratio"
+    );
+    assert!(replaced.get("callbackSpread").is_none());
+    reply(
+        &mut e,
+        &replace,
+        r#"{"code":"1","data":[{"sCode":"51280","sMsg":"replacement refused"}]}"#,
+        7.,
+    );
+    let mut restore = body(&post(&prepared(&mut e, 7.), "/order-algo"));
+    restore.as_object_mut().unwrap().remove("algoClOrdId");
+    assert_eq!(
+        restore,
+        serde_json::json!({
+            "instId":"BTC-USDT-SWAP", "tdMode":"cross", "side":"sell",
+            "posSide":"net", "ordType":"move_order_stop", "sz":"4",
+            "reduceOnly":true, "activePx":"41000", "callbackRatio":"0.005"
+        }),
+        "the restore puts back the original ratio, never the edited one"
+    );
+}
+
+#[test]
 fn unproven_trailing_and_dust_refuse_before_any_cancel() {
     let mut e = trading_engine();
     e.store_mut()
