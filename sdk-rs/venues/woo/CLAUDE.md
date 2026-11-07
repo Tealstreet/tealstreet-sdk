@@ -44,3 +44,10 @@ vectors; native and actual-WASM tests compare payloads and complete signed wires
 A signing failure before a write is `notSent`; loss after dispatch is `Unknown`
 and never retries that write. Composite failures preserve earlier accepted IDs
 and uncertainty.
+
+The request inventory gains no legacy HTTP/completion sites: provider and direct
+construction share the existing request site; credential selection attaches the
+provider and its egress together. Identity signing errors reuse the existing
+completion helper while retaining typed errors. The signing inventory freezes
+the test-only local oracle and updates the existing raw compatibility guard/call
+fingerprints; it adds no production credential holder or crypto primitive.

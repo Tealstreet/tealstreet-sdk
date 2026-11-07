@@ -209,6 +209,7 @@ fn opaque_read_identity_preserves_the_local_secondary_get_wire() {
     ));
     assert_eq!(actual.url, expected.url);
     assert_eq!(actual.headers, expected.headers);
+    assert_eq!(actual.route, Some(safe_cex_engine::RequestRoute::Secondary));
     assert!(
         actual
             .headers

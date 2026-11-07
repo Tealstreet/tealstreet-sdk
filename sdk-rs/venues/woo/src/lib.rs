@@ -169,12 +169,24 @@ impl Woo {
         if self.options.public_data_only {
             return Err("WOO private requests require credentials".into());
         }
-        if let Some(primary) = &self.options.credentials {
-            let identity = if method == Method::Get {
-                self.options.read_signing.as_ref().unwrap_or(primary)
+        let mut dispatch = None;
+        let request = if self.options.credentials.is_some() {
+            use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+            let slots = Slots::new(
+                self.options.credentials.clone(),
+                self.options.read_signing.clone(),
+                SlotPolicy {
+                    secondary_requires_primary: true,
+                },
+            );
+            let role = if method == Method::Get {
+                CredentialRole::Read { scope: None }
             } else {
-                primary
+                CredentialRole::Mutation
             };
+            let (selection, identity) = slots
+                .select(role)
+                .map_err(|_| "Invalid WOO signing identity")?;
             identity
                 .validate()
                 .map_err(|_| "Invalid WOO signing identity")?;
@@ -187,30 +199,39 @@ impl Woo {
                 body,
             );
             let (url, headers, body) = recipe.unsigned();
-            let request = cx.request(method, url, headers, body, pending);
-            cx.sign_http(request, Box::new(recipe));
-            return Ok(request);
-        }
-        let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) else {
-            return Err("WOO private requests require credentials".into());
-        };
-        if self.options.public_data_only || key.is_empty() || secret.is_empty() {
-            return Err("WOO private requests require credentials".into());
-        }
-        let read = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get);
-        let key = read.map_or(key.as_str(), |r| r.key.as_str());
-        let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
-        let request = sign::request(key, secret, cx.now, method, path, &params, body);
-        let url = if request.path.starts_with("https://") {
-            request.path
+            dispatch = Some((selection, recipe));
+            sign::Signed {
+                path: url,
+                headers,
+                body,
+            }
         } else {
-            format!("{}{}", self.rest, request.path)
+            let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) else {
+                return Err("WOO private requests require credentials".into());
+            };
+            if self.options.public_data_only || key.is_empty() || secret.is_empty() {
+                return Err("WOO private requests require credentials".into());
+            }
+            let read = self
+                .options
+                .read_credentials
+                .as_ref()
+                .filter(|_| method == Method::Get);
+            let key = read.map_or(key.as_str(), |r| r.key.as_str());
+            let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
+            sign::request(key, secret, cx.now, method, path, &params, body)
         };
-        Ok(cx.request(method, url, request.headers, request.body, pending))
+        let path = request.path;
+        let url = if path.starts_with("https://") {
+            path
+        } else {
+            format!("{}{}", self.rest, path)
+        };
+        let id = cx.request(method, url, request.headers, request.body, pending);
+        if let Some((selection, recipe)) = dispatch {
+            selection.sign(cx, id, Box::new(recipe));
+        }
+        Ok(id)
     }
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
@@ -952,7 +973,7 @@ impl Venue for Woo {
     ) {
         cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
-            Pending::Identity(command) => cx.fail(command, error),
+            Pending::Identity(command) => self.identity_sign_failed(cx, command, error),
             Pending::Account(request) => {
                 self.account_failed(cx, request, error);
                 self.account_read_again(cx);

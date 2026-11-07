@@ -93,15 +93,7 @@ fn every_signed_endpoint_dispatches_the_local_wire_and_independent_preimage_thro
     let work = provider.work.lock().unwrap();
     assert_eq!(work.len(), vectors.len());
     for ((actual, work), vector) in requests.iter().zip(work.iter()).zip(vectors.iter()) {
-        let expected = sign::request(
-            "fixture-public",
-            "fixture-signing-material",
-            1_700_000_000_000.,
-            method(&vector.method),
-            &vector.path,
-            &vector.params,
-            vector.body.clone(),
-        );
+        let expected = local_oracle(vector);
         assert_eq!(
             actual.url,
             format!("https://api.woox.io{}", expected.path),
@@ -128,4 +120,16 @@ fn every_signed_endpoint_dispatches_the_local_wire_and_independent_preimage_thro
                 .contains("fixture-signing-material")
         );
     }
+}
+
+fn local_oracle(vector: &Vector) -> sign::Signed {
+    sign::request(
+        "fixture-public",
+        "fixture-signing-material",
+        1_700_000_000_000.,
+        method(&vector.method),
+        &vector.path,
+        &vector.params,
+        vector.body.clone(),
+    )
 }
