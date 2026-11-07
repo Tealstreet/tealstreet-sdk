@@ -46,8 +46,6 @@ type HyperSpotMetaInput = {
 };
 type KrakenSpotPairInput = { wsname?: string };
 
-type BreakoutQuote = { symbol: string; bid: number; ask: number };
-
 type BinanceInstrumentInput = {
   symbol: string;
   baseAsset: string;
@@ -101,7 +99,6 @@ export const realVenue = (name: ExchangeName) => {
       .split('\n')
       .map((line) => JSON.parse(line));
     source = `${fixture}-public.jsonl.gz`;
-    if (name === 'breakoutprop') source += ' (documented-scripted DXtrade session, not a live recording)';
   }
   // Never replay commands or a private account payload from a schema builder.
   records = records.filter((record) => record.type === 'http' || record.type === 'ws' || record.type === 'config');
@@ -124,7 +121,6 @@ export const realVenue = (name: ExchangeName) => {
       : {}),
     ...(orderlyAliases.has(name) ? { applicationId: venue.publicOptions.applicationId } : {}),
     ...(name === 'polymarket' ? { polymarket: venue.publicOptions.polymarket } : {}),
-    ...(name === 'breakoutprop' ? { ...venue.publicOptions, subaccount: venue.options.subaccount } : {}),
     ...(name === 'hyrotrader' ? { extra: { hyrotraderMode: 'demo' } } : {}),
   };
   const restore: (() => void)[] = [];
@@ -166,15 +162,6 @@ export const realVenue = (name: ExchangeName) => {
   const tape = new Tape(records, venue, false, 2000, 'rust', [], options);
   const polling = venue.polling === true;
   let pollingEpoch: number | undefined;
-  const publicPollResponses: Array<{ status: number; quotes: BreakoutQuote[] }> = [];
-  const breakoutQuotes: BreakoutQuote[][] =
-    name === 'breakoutprop'
-      ? records
-          .filter((row) => row.type === 'http' && new URL(row.url!).pathname.endsWith('/marketdata'))
-          .map((row) =>
-            (JSON.parse(row.body!).events as BreakoutQuote[]).map(({ symbol, bid, ask }) => ({ symbol, bid, ask })),
-          )
-      : [];
   // Spot pair IDs and COIN-M settlement/contract sizes come directly from
   // their distinct recorded exchangeInfo endpoints, not the engine output.
   const binanceMarkets =
@@ -342,15 +329,6 @@ export const realVenue = (name: ExchangeName) => {
         : url;
       const response = tape.respond(method, venueUrl, body, headers);
       if (response.status === 599) errors.push(`Untaped ${method} ${url}${body ? ` ${body}` : ''}`);
-      if (polling && method === 'POST' && new URL(url).pathname.endsWith('/marketdata') && response.status === 200)
-        publicPollResponses.push({
-          status: response.status,
-          quotes: (JSON.parse(response.body).events as BreakoutQuote[]).map(({ symbol, bid, ask }) => ({
-            symbol,
-            bid,
-            ask,
-          })),
-        });
       return { status: response.status, headers: response.headers, body: new TextEncoder().encode(response.body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -363,8 +341,6 @@ export const realVenue = (name: ExchangeName) => {
     errors,
     source,
     polling,
-    publicPollResponses,
-    breakoutQuotes,
     binanceMarkets,
     spotMarkets,
     predictionMarkets,

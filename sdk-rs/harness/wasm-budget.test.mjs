@@ -106,7 +106,6 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
     bitrue: 1_719_296,
     bitunix: 1_727_488,
     blofin: 1_824_768,
-    breakoutprop: 1_420_288,
     bybit: 2_032_640,
     coinbase: 1_720_320,
     cryptocom: 1_612_800,
@@ -751,36 +750,6 @@ test('#3138 Bitrue guarded stop edits (run 42166643605) retain Bitrue headroom',
   }
 });
 
-test('BreakoutProp native protective edits retain measured headroom and the exact boundary', () => {
-  const measured = 1_554_817;
-  const cap = 1_565_696;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  const currentCap = WASM_VENUE_OVERRIDES.breakoutprop;
-  assert.ok(currentCap >= cap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'breakoutprop'), undefined);
-  assert.equal(wasmBudgetError(currentCap, 'venue', 'breakoutprop'), undefined);
-  assert.match(wasmBudgetError(currentCap + 1, 'venue', 'breakoutprop'), /exceeds/);
-});
-
-test('#3193 breakoutprop provenance at ad4f1d6d5d9 keeps the larger composed cap', () => {
-  const measured = 1_568_969;
-  const measuredCap = 1_580_032;
-  const incomingCap = 1_565_696;
-  const minimumCap = 1_580_032;
-  assert.equal(measuredCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(minimumCap, Math.max(incomingCap, measuredCap));
-  const cap = WASM_VENUE_OVERRIDES.breakoutprop;
-  assert.ok(cap >= minimumCap);
-  for (const name of ['breakoutprop']) {
-    const family = venueFamily(name);
-    assert.equal(family, 'breakoutprop');
-    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
-    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
-    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
-  }
-});
-
 test('#3199 chaser refusals (run 42280800704) retain OKX headroom and all siblings share the cap', () => {
   const measured = 1_973_874;
   const minimumCap = 1_984_512;
@@ -891,7 +860,6 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
 test('#3150 merged-tree caps retain the approved exact boundaries', () => {
   for (const [venue, minimumCap] of [
     ['apexomni', 2_024_448],
-    ['backpack', 1_948_672],
     ['bingx', 2_085_888],
     ['bitrue', 1_851_392],
     ['blofin', 2_001_920],
@@ -973,6 +941,29 @@ test('#3191 run 42249705679 retains measured Paradex headroom', () => {
   assert.match(wasmBudgetError(cap + 1, 'venue', 'paradex'), /exceeds/);
 });
 
+
+test('#3229 Backpack hosted signing (run 42352281022, job 128343086016) retains CI headroom', () => {
+  const measured = 1_994_139;
+  const minimumCap = 2_004_992;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const current = WASM_VENUE_OVERRIDES.backpack;
+  assert.ok(current >= minimumCap, 'Backpack retains at least CI size plus 10 KiB, rounded up to the KiB');
+  assert.equal(wasmBudgetError(measured, 'venue', 'backpack'), undefined);
+  assert.equal(wasmBudgetError(current, 'venue', 'backpack'), undefined);
+  assert.match(wasmBudgetError(current + 1, 'venue', 'backpack'), /exceeds/);
+});
+
+test('#3229 master merge (run 42392889181, job 128464301381) retains rounded CI headroom', () => {
+  const measured = 2_000_456;
+  const minimumCap = 2_011_136;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const current = WASM_VENUE_OVERRIDES.backpack;
+  assert.ok(current >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'backpack'), undefined);
+  assert.equal(wasmBudgetError(current, 'venue', 'backpack'), undefined);
+  assert.match(wasmBudgetError(current + 1, 'venue', 'backpack'), /exceeds/);
+});
+
 test('#3220 KuCoin hosted signing (run 42324881707, job 128258225940) keeps measured headroom', () => {
   const measured = 1_827_119;
   const minimumCap = 1_838_080;
@@ -998,4 +989,26 @@ test('#3111 candle repair readiness (run 42096897919) retains headroom and sibli
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+});
+
+test('#3221 hosted signing (run 42352558360) rounds web/node CI plus 10 KiB up to KiB', () => {
+  const measured = 2_568_219;
+  const minimumCap = 2_579_456;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.woo;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
+});
+
+test('#3221 run 42393607294 artifact 13582294491 retains measured Woo headroom', () => {
+  const measured = 2_578_659;
+  const minimumCap = 2_589_696;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.woo;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
 });

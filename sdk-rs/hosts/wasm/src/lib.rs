@@ -17,7 +17,6 @@ mod hosted_operations;
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -39,7 +38,7 @@ mod hosted_operations;
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{
@@ -957,7 +956,6 @@ impl WasmEngine {
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
-        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "polymarket",
@@ -2167,7 +2165,6 @@ mod tests {
         feature = "bitrue",
         feature = "bitunix",
         feature = "blofin",
-        feature = "breakoutprop",
         feature = "bybit",
         feature = "coinbase",
         feature = "cryptocom",
@@ -2199,7 +2196,6 @@ mod tests {
             "coinbasespot",
             "apexomni",
             "asterdex",
-            "breakoutprop",
             "binance",
             "binancespot",
             "binanceinverse",
@@ -2242,8 +2238,6 @@ mod tests {
         let engine_options = |venue: &str, extra: &str| {
             let endpoints = if venue == "txflow" {
                 r#","testnet":true"#
-            } else if venue == "breakoutprop" {
-                r#","key":"user","secret":"password""#
             } else if venue == "hyrotrader" {
                 r#","endpoints":{"rest":"https://hyro.test","publicWs":"wss://hyro.test/public","privateWs":"wss://hyro.test/private"}"#
             } else {
@@ -2254,7 +2248,6 @@ mod tests {
         for venue in venues {
             let no_history = any(
                 &[
-                    "breakoutprop",
                     "hyperliquidspot",
                     "krakenspot",
                     "binancespot",
@@ -2356,14 +2349,7 @@ mod tests {
                     ),
                 fills_by_order_id: venue == "grvt",
                 cancel_all: if any(
-                    &[
-                        "polymarket",
-                        "breakoutprop",
-                        "woo",
-                        "grvt",
-                        "kucoin",
-                        "kucoinspot",
-                    ],
+                    &["polymarket", "woo", "grvt", "kucoin", "kucoinspot"],
                     venue,
                 ) || any(&ORDERLY, venue)
                 {
@@ -2425,7 +2411,6 @@ mod tests {
                 max_leverage: match venue {
                     "bitrue" => MaxLeverage::Query,
                     "polymarket" => MaxLeverage::Rails,
-                    "breakoutprop" => MaxLeverage::Unsupported,
                     _ => MaxLeverage::Market,
                 },
                 account_leverage: any(&ORDERLY, venue),
@@ -2540,7 +2525,7 @@ mod tests {
                 finite_history_bounds: any(&["coinbase", "coinbasespot"], venue),
                 reject_order_history_filters: any(&["coinbase", "coinbasespot", "txflow"], venue)
                     || any(&ORDERLY, venue),
-                public_catalogue_validation: venue == "breakoutprop",
+                public_catalogue_validation: false,
                 isolated_book_subscriptions: venue == "asterdex",
                 inverse_closed_positions: venue == "bybitinverse",
                 nuke_account_cancel: any(
