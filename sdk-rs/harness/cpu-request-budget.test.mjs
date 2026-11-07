@@ -5,8 +5,8 @@ import { GATE_SUITES } from './ci-gate-suites.mjs';
 import { createGithubReader, CPU_COHORT_STEPS } from './cpu-cohort.mjs';
 import { authenticatedBundle, currentPhysical, evidenceEndCheck } from './cpu-ci.mjs';
 
-// Measured for the 32-suite cohort without second runners (was 310 with their inventory rows).
-const REQUESTS = 270;
+// Measured for the 31-suite cohort without second runners or the retired venue.
+const REQUESTS = 262;
 const sha = value => createHash('sha256').update(value).digest('hex');
 const at = second => new Date(Date.UTC(2026, 9, 23, 0, 0, second)).toISOString();
 function cohort() {

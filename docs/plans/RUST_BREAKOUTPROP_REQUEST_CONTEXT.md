@@ -1,5 +1,8 @@
 # BreakoutProp legacy DXtrade RequestContext inventory and plan
 
+Historical record: this venue was retired from the SDK on 2026-11-07.
+The implementation paths and validation commands below describe the former adapter.
+
 Lane `codex-hcmq3f`, overseer `claude-ddi2il`, 2026-10-23. Immutable source base: `fa5d5fb90c46f1c9d2984e1ed9c451b5f8370785`. Inventory: **3 source paths, 22 path/fingerprint entries, 24 conservative lexical occurrences**. This is a plan, not implementation, CI, live connectivity or cutover proof.
 
 ## Scope and first single-request path

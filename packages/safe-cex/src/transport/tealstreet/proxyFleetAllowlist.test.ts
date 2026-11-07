@@ -60,6 +60,8 @@ describe('proxy fleet allowlist', () => {
     'direct.bitmex.com',
     'ws.bitmex.com',
     'api.direct.bitmex.com',
+    'www.bitmex.com',
+    'testnet.bitmex.com',
     'api.coincatch.com',
     'api-swap-rest.bingx.com',
     'api-pub.woo.network',

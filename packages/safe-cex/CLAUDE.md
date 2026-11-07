@@ -9,9 +9,10 @@ Historical Rust-adapter fixtures mock only beta admission through
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
+Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
 KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
-Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
+Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override. Refused `remoteSigner` accounts are told to
 turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
 accounts receive neutral delegated-signing wording. Both use the venue display
@@ -190,6 +191,13 @@ revision; provider text and partial results are not returned on failure.
 A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
 its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
 The BingX native checkpoint keeps hosted admission disabled until those gates.
+WOO local and RemoteSigner accounts share provider-owned dispatch signing for all
+V1/V3 private REST calls and private WS auth. V1 signs sorted form/query bytes plus
+`|timestamp`; V3 signs timestamp, method, path/query and the exact body. Replayed
+serialized bodies are preserved. WOO has no signing nonce or wire recvWindow.
+PayloadSigner remains refused because its legacy private lifecycle has no such
+mode; RemoteSigner cannot fall back to it or to local material. Before-dispatch
+signing failures are `notSent`; dispatched ambiguous writes remain `Unknown`.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
@@ -212,6 +220,13 @@ WS and credential captures retain default deny.
 The delegated provider initializes UTF-8 codecs only when provider work begins.
 Importing the native registry before its host installs TextEncoder/TextDecoder
 must remain supported; signing and frame I/O require those runtime codecs.
+
+Backpack's `backpack-ed25519` device codec resolves `[Present, Sign Ed25519]`
+atomically for the selected primary/secondary slot. Registry engines hold only
+provider refs; private startup and WS use them without raw credentials. Private
+PayloadSigner remains refused. The direct native raw-options compatibility API
+retains its previous WS path. The caller document above owns parity and hold
+requirements; betaVenues.ts keeps its existing refusal wording.
 
 The beta registry always selects Rust in SDK factories and `ExchangeWorker`;
 `ExchangeOptions.engine` remains an accepted compatibility input only.
@@ -688,7 +703,7 @@ SDK.
   included (`isHonorableShape`): a stop is one native order, and on a bracket
   the caller's ID goes on the entry while each TP/SL leg gets its own minted
   cloid. It also mints a cloid for every order it places, caller ID or not.
-  **Rejecting venues**: AsterDEX, BreakoutProp, HyroTrader, Kraken (+spot),
+  **Rejecting venues**: AsterDEX, HyroTrader, Kraken (+spot),
   Lighter, MEXC, Polymarket.
 - **No broker prefix is composed onto a caller ID.** The generated paths keep
   their broker-attributed IDs (`x-s3vFFRQp…`, OKX/BloFin `BROKER_ID…`, Phemex
@@ -1434,10 +1449,7 @@ raw primary/secondary clients on `this._primaryXhr` / `this._secondaryXhr`. The 
 that wires it MUST equal the set the UI offers it for — i.e. everything **not** in
 `exchangesWithoutSecondaryKey` (`src/utils/exchangeSupportsSecondaryKey.ts`). That
 exclusion list is the wallet / single-keypair venues (hyperliquid, paradex,
-grvt, apexomni, lighter, polymarket, and the orderly ed25519 family) **plus** the
-session-login venue `breakoutprop` (DXtrade
-session token) — there a shared per-session token is injected on every request so a
-second client can't authenticate as a distinct key. A read-only "second API key" is
+grvt, apexomni, lighter, polymarket, and the orderly ed25519 family). A read-only "second API key" is
 not a coherent concept for any of these.
 When adding an exchange, wire the helper **and** reconcile that list.
 `binancepm` is the one bespoke case: it has no single `this.xhr` (uses
@@ -1521,7 +1533,7 @@ Is requiresCors true?
 │   └── Is enforceWsTunnel true?
 │       ├── YES → WS tunnel only, no CORS proxy
 │       │   Examples: Hyperliquid, Paradex, KuCoin, Kraken,
-│       │            AsterDEX, BreakoutProp, BitUnix, BybitDemo
+│       │            AsterDEX, BitUnix, BybitDemo
 │       └── NO → Fully direct, no proxy or tunnel
 │           Examples: OKX, Binance, BinancePM, BinanceSpot,
 │                     Bybit, BybitSpot, BybitInverse, Woo, WEEX
