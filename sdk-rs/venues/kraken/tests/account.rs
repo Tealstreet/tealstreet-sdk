@@ -254,9 +254,10 @@ fn authenticated_reconnect_requests_fresh_challenge_and_ignores_old_socket() {
             }
         })
         .collect::<Vec<_>>();
-    assert_eq!(sent.len(), 1);
-    assert!(sent[0].contains("challenge"));
-    assert!(!sent[0].contains("signed_challenge"));
+    assert_eq!(sent.len(), 2);
+    assert!(sent[0].contains(r#""feed":"heartbeat""#));
+    assert!(sent[1].contains("challenge"));
+    assert!(!sent[1].contains("signed_challenge"));
     message(
         &mut e,
         s,
@@ -283,9 +284,8 @@ fn authenticated_reconnect_requests_fresh_challenge_and_ignores_old_socket() {
             }
         })
         .collect::<Vec<_>>();
-    assert_eq!(sent.len(), 4);
-    assert!(sent[3].contains(r#""feed":"heartbeat""#));
-    for msg in &sent[..3] {
+    assert_eq!(sent.len(), 3);
+    for msg in &sent {
         assert!(msg.contains("fresh"));
         assert!(msg.contains("signed_challenge"));
         assert!(!msg.contains("account_balances"));

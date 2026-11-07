@@ -803,6 +803,7 @@ impl Kraken {
         self.account.acks.clear();
         self.account.payloads.clear();
         self.account.payload_complete = false;
+        cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
         cx.send(
             socket,
             serde_json::to_string(
@@ -887,8 +888,6 @@ impl Kraken {
             for feed in FEEDS {
                 cx.send(socket, serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string());
             }
-            // Kraken has no ping frame; this feed is its keepalive, every 10 s.
-            cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
             return true;
         }
         if refuses_private_feed(&msg) {

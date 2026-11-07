@@ -1,4 +1,6 @@
 import type { EngineSocketChannel, EngineSocketStats } from '@tealstreet/safe-cex-wasm/host';
+import type { StoreData } from '../../types';
+import type { MessageHandlersStats } from '../types';
 
 /**
  * Rust venues watch their own sockets and reconnect after up to a minute of
@@ -30,14 +32,22 @@ const emptyLog = { toArray: (): string[] => [] };
 export class RustSocketHandle {
   readonly lastLog = emptyLog;
   readonly isReconnectPauseActive = false;
-  /** Venues track their own subscriptions; there are no per-topic stats to report. */
-  readonly messageHandlersStats = {};
+  /** Channel observations, not invented native topic/callback counts. Mirrors
+   *  use the worker's timestamps, never their socket-free page engine. */
+  get messageHandlersStats(): MessageHandlersStats {
+    const timestamp =
+      this.mirroredHealth && this.channel !== 'business'
+        ? (this.mirroredHealth()?.[`${this.channel}LastMessage`] ?? 0)
+        : this.lastReceived;
+    return timestamp > 0 ? { [`engine:${this.channel}`]: { lastMessageTimestamp: timestamp } } : {};
+  }
   /** Patched by `disablePublicWebsockets`; the engine's feed policy suppresses public sockets. */
   connectAndSubscribe: () => void = () => {};
 
   constructor(
     readonly channel: EngineSocketChannel,
     private readonly owner: RustSocketOwner,
+    private readonly mirroredHealth?: () => StoreData['socketHealth'],
   ) {}
 
   private get stats(): EngineSocketStats | undefined {

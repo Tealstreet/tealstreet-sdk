@@ -26,7 +26,7 @@ afterEach(() => {
  * A venue with one public and one private socket that reopens a socket the
  * moment the engine reports it closed, like every engine venue's reconnect.
  */
-const setup = async (singleSocket?: 'keyed' | 'public') => {
+const setup = async (singleSocket?: 'keyed' | 'public', workerMirror = false) => {
   const venue = singleSocket ? 'hyperliquid' : 'bybit';
   const sockets: FakeSocket[] = [];
   const engineCloses: Array<[number, number]> = [];
@@ -107,7 +107,10 @@ const setup = async (singleSocket?: 'keyed' | 'public') => {
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
   const exchange = new RustEngineExchange(
     venue,
-    singleSocket === 'public' ? { key: '', secret: '', publicDataOnly: true } : { key: 'k', secret: 's' },
+    {
+      ...(singleSocket === 'public' ? { key: '', secret: '', publicDataOnly: true } : { key: 'k', secret: 's' }),
+      workerMirror,
+    },
     store,
   );
   exchanges.push(exchange);
@@ -198,6 +201,42 @@ describe('Rust engine socket health (cutover B5)', () => {
     exchange.syncSocketHealthToStore();
     // cli-core's stale-stream gate blocks on exactly this pair.
     expect(store.socketHealth).toMatchObject({ privateInitialized: true, privateHealthy: false });
+  });
+
+  it('reports observed channel traffic to handler diagnostics without inventing topic callbacks', async () => {
+    const { exchange, store, deliver, live } = await setup();
+    expect(exchange.privateWebsocket!.messageHandlersStats).toEqual({});
+    deliver('private');
+    const timestamp = store.socketHealth!.privateLastMessage;
+    expect(exchange.privateWebsocket!.messageHandlersStats).toEqual({
+      'engine:private': { lastMessageTimestamp: timestamp },
+    });
+    live('private').handlers.onClose(1006);
+    exchange.syncSocketHealthToStore();
+    expect(exchange.privateWebsocket!.messageHandlersStats).toEqual({
+      'engine:private': { lastMessageTimestamp: timestamp },
+    });
+  });
+
+  it('uses worker socket observations for a page mirror, including stale traffic during reconnect', () => {
+    const store = new DefaultStore();
+    const owner = { socketHost: undefined, isDisposed: false };
+    const socket = new RustSocketHandle('public', owner, () => store.socketHealth);
+    expect(socket.messageHandlersStats).toEqual({});
+    store.updateSocketHealth({ publicInitialized: false, publicLastMessage: 123_456 });
+    expect(socket.messageHandlersStats).toEqual({ 'engine:public': { lastMessageTimestamp: 123_456 } });
+  });
+
+  it('wires page-mirror exchange handles to worker-published channel timestamps', async () => {
+    const { exchange, store } = await setup(undefined, true);
+    expect(exchange.socketHost).toBeUndefined();
+    store.updateSocketHealth({ publicLastMessage: 123_456, privateLastMessage: 234_567 });
+    expect(exchange.publicWebsocket!.messageHandlersStats).toEqual({
+      'engine:public': { lastMessageTimestamp: 123_456 },
+    });
+    expect(exchange.privateWebsocket!.messageHandlersStats).toEqual({
+      'engine:private': { lastMessageTimestamp: 234_567 },
+    });
   });
 
   it('reconnect closes every open engine socket and the venue reopens it', async () => {

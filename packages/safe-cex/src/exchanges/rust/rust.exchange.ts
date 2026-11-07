@@ -994,7 +994,11 @@ export class RustEngineExchange extends BaseExchange {
     this.commandTimeoutMs = commandTimeoutMs;
     // Handles satisfy the BaseWebSocket members callers read; venues own the sockets.
     const socket = (channel: RustSocketHandle['channel']) =>
-      new RustSocketHandle(channel, this) as unknown as BaseWebSocket<any>;
+      new RustSocketHandle(
+        channel,
+        this,
+        this.isWorkerMirror ? () => this.store.socketHealth : undefined,
+      ) as unknown as BaseWebSocket<any>;
     this.publicWebsocket = socket('public');
     this.businessWebsocket = socket('business');
     if (!this.isPublicDataOnly) this.privateWebsocket = socket('private');

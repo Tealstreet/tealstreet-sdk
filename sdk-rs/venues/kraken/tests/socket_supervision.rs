@@ -329,23 +329,178 @@ fn spot_private_flapping_socket_backs_off_although_each_token_subscribes() {
 }
 
 #[test]
-fn futures_public_pings_every_fifteen_seconds_and_silence_retires_at_forty_five() {
+fn futures_public_uses_heartbeat_and_silence_retires_at_twenty_seconds() {
     pings_and_idle_timeout(
         futures(true, PublicFeedPolicy::Direct),
         noop,
-        15_000.0,
-        45_000.0,
+        f64::INFINITY,
+        20_000.0,
     );
 }
 
 #[test]
-fn futures_private_sends_no_ping_and_silence_retires_at_sixty() {
+fn futures_private_uses_heartbeat_and_silence_retires_at_twenty_seconds() {
     pings_and_idle_timeout(
         futures(false, PublicFeedPolicy::Direct),
         authenticate,
         f64::INFINITY,
-        60_000.0,
+        20_000.0,
     );
+}
+
+#[test]
+fn futures_subscribe_to_heartbeat_on_every_open_before_private_auth() {
+    for public in [true, false] {
+        let mut h = futures(public, PublicFeedPolicy::Direct);
+        for _ in 0..2 {
+            let socket = h.open();
+            assert!(
+                h.sent.iter().any(|(s, text)| *s == socket
+                    && text == r#"{"event":"subscribe","feed":"heartbeat"}"#)
+            );
+            let delay = h.close(socket);
+            h.wait(delay);
+        }
+    }
+}
+
+#[test]
+fn futures_heartbeat_keeps_quiet_public_and_private_sockets_alive() {
+    for public in [true, false] {
+        let mut h = futures(public, PublicFeedPolicy::Direct);
+        let socket = h.open();
+        if !public {
+            authenticate(&mut h, socket);
+        }
+        for _ in 0..12 {
+            h.wait(10_000.);
+            h.message(socket, r#"{"feed":"heartbeat","time":1700000000000}"#);
+        }
+        assert!(!h.closed.contains(&socket));
+        assert_eq!(h.pings(socket), 0, "Futures rejects JSON event:ping");
+    }
+}
+
+#[derive(Debug)]
+struct Recovery {
+    first_frame_ms: f64,
+    data_ms: f64,
+    redial_ms: f64,
+}
+
+fn initial_private_payloads(h: &mut H<Kraken>, socket: SocketId) {
+    for text in [
+        r#"{"feed":"fills_snapshot","fills":[]}"#,
+        r#"{"feed":"open_orders_snapshot","orders":[]}"#,
+        r#"{"feed":"open_positions_snapshot","positions":[]}"#,
+    ] {
+        h.message(socket, text);
+    }
+}
+
+fn wake_recovery(public: bool, sleep_ms: f64) -> Recovery {
+    let mut h = futures(public, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    if public {
+        h.event(Event::Command(Command::SubscribeOrderBook {
+            symbol: "PF_XBTUSD".into(),
+        }));
+    } else {
+        authenticate(&mut h, socket);
+        initial_private_payloads(&mut h, socket);
+    }
+    h.message(socket, r#"{"feed":"heartbeat","time":1700000000000}"#);
+    let sockets = h.sockets.len();
+    // Timers do not run while asleep. Deliver overdue callbacks at the new time.
+    h.now += sleep_ms;
+    let wake = h.now;
+    h.advance(wake);
+    while h.sockets.len() == sockets {
+        let next = h
+            .timers
+            .iter()
+            .map(|(_, at)| *at)
+            .min_by(f64::total_cmp)
+            .unwrap();
+        assert!(next < wake + 65_000., "recovery must remain bounded");
+        h.advance(next);
+    }
+    assert!(h.closed.contains(&socket));
+    let redial_ms = h.now - wake;
+    h.wait(50.); // Simulated websocket handshake.
+    let replacement = h.open();
+    assert_ne!(replacement, socket);
+    h.wait(50.); // Simulated first server response.
+    let first_frame_ms = h.now - wake;
+    if public {
+        for feed in ["ticker", "book"] {
+            assert!(
+                h.sent
+                    .iter()
+                    .any(|(s, text)| *s == replacement
+                        && text.contains(&format!(r#""feed":"{feed}""#))),
+                "public interest must be replayed: {feed}"
+            );
+        }
+        h.message(
+            replacement,
+            r#"{"feed":"ticker","product_id":"PF_XBTUSD","last":125}"#,
+        );
+        assert_eq!(h.engine.store().tickers()[0].last, 125.);
+    } else {
+        assert!(
+            h.sent
+                .iter()
+                .any(|(s, text)| *s == replacement && text.contains(r#""event":"challenge""#))
+        );
+        h.message(
+            replacement,
+            r#"{"event":"challenge","message":"fresh-wake-challenge"}"#,
+        );
+        h.wait(50.); // Challenge signing/subscription round trip.
+        for feed in ["fills", "open_orders", "open_positions"] {
+            assert!(h.sent.iter().any(|(s, text)| *s == replacement
+                && text.contains(&format!(r#""feed":"{feed}""#))
+                && text.contains("fresh-wake-challenge")));
+            h.message(
+                replacement,
+                &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
+            );
+        }
+        h.wait(50.); // Initial account payloads, without an account reload.
+        initial_private_payloads(&mut h, replacement);
+    }
+    Recovery {
+        first_frame_ms,
+        data_ms: h.now - wake,
+        redial_ms,
+    }
+}
+
+#[test]
+fn futures_wake_recovery_measurement() {
+    for sleep_ms in [35_000., 14_400_000.] {
+        for public in [true, false] {
+            let recovery = wake_recovery(public, sleep_ms);
+            println!(
+                "WAKE sleep_ms={sleep_ms} channel={} {recovery:?}",
+                if public { "public" } else { "private" }
+            );
+            assert!(recovery.first_frame_ms >= recovery.redial_ms);
+            assert!(recovery.data_ms >= recovery.first_frame_ms);
+        }
+    }
+}
+
+#[test]
+fn futures_idle_recovery_finishes_within_five_seconds_of_wake() {
+    for public in [true, false] {
+        let recovery = wake_recovery(public, 35_000.);
+        assert!(
+            recovery.data_ms < 5_000.,
+            "wake recovery: public={public} {recovery:?}"
+        );
+    }
 }
 
 #[test]

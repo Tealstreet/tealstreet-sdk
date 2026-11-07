@@ -680,6 +680,7 @@ impl Venue for Kraken {
             return;
         }
         self.public.open = true;
+        cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
         self.sync_public_interests(cx);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
