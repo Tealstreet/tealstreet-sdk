@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { Frame, NONE, ORDER_COLUMNS, ORDER_TRIGGER_WORD, SECTION, TICKER_FIELDS, TickerState, marketQuantityUnits, orderEnums, positionEnums } from './wire.mjs';
@@ -1205,4 +1206,25 @@ test('STATUS distinguishes unmeasured latency from a measured zero and legacy sa
   view.setUint32(28, 0, true);
   view.setFloat64(32, 42.5, true);
   assert.equal(new Frame(structuredClone(buffer)).status().latency, 42.5);
+});
+
+
+test('observation sections preserve format 1 and are ignorable by the legacy section reader', async () => {
+  const observation = { kind: 24, length: 32, write(view, at) {
+    [0, 1000, 8500, -Infinity].forEach((value, slot) => view.setFloat64(at + slot * 8, value, true));
+  } };
+  const frame = numericFrame([tickerTable(100), observation]);
+  assert.equal(new DataView(frame.buffer).getUint16(4, true), 1);
+  assert.deepEqual([...frame.tickerObservations()], [0, 1000, 8500, -Infinity]);
+  // Legacy consumers select TICKERS/TICKER_DELTAS and skip unknown sections.
+  const previousReader = readFileSync(new URL('./wire.mjs', import.meta.url), 'utf8')
+    .replace('  TICKER_OBSERVATIONS: 24,\n', '')
+    .replace(/  \/\*\* Source receipt times,[\s\S]*?(?=  \/\*\* Full books:)/, '');
+  assert.ok(!previousReader.includes('TICKER_OBSERVATIONS') && !previousReader.includes('tickerObservations()'));
+  const { Frame: OldFrame, TickerState: OldTickerState } = await import(`data:text/javascript;base64,${Buffer.from(previousReader).toString('base64')}`);
+  const legacy = new OldTickerState();
+  legacy.apply(new OldFrame(frame.buffer));
+  assert.deepEqual([...legacy.columns.mark], [106, 107]);
+  assert.equal(numericFrame([tickerTable(100)]).tickerObservations(), undefined);
+  assert.throws(() => numericFrame([{ ...observation, length: 24, write() {} }]).tickerObservations(), /observation length/);
 });
