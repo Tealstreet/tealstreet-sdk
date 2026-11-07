@@ -8,3 +8,9 @@ uncertain placements trigger an `OpenOrders` read before another placement.
 
 Definitive signature refusals retain the single re-sign attempt. Private reads
 also retain their existing bounded signature and transport retry policies.
+
+Futures writes likewise keep HTTP 408, 429, 5xx, and native `apiLimitExceeded`
+responses unknown, including a bracket leg after an accepted entry. Their user
+text says the outcome is unknown and directs the caller to Check Open Orders.
+These failures never resend or place a replacement stop. Definitive refusals and
+private reads retain their existing behavior.
