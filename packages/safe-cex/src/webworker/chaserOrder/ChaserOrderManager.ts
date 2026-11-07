@@ -23,6 +23,21 @@ import {
   ChaserCompleteEvent,
 } from './ChaserOrderOptions';
 
+/**
+ * A placement refusal a re-priced retry only repeats, as its stop reason: a refused key, or an
+ * order no price fixes (a reduce-only size above the position, unaffordable, malformed, unsupported).
+ */
+const settledRefusal = (error: unknown): string | undefined => {
+  if (!(error instanceof Error) || isUnknownOutcome(error)) return undefined;
+  const { kind, partialOrderIds } = error as { kind?: unknown; partialOrderIds?: unknown[] };
+  if (partialOrderIds?.length) return undefined;
+  if (kind === 'authInvalid' || kind === 'authPermission') return "The venue refused this account's key";
+  if (kind === 'invalidInput' || kind === 'insufficientBalance' || kind === 'unsupported') {
+    return 'The venue refused the order';
+  }
+  return undefined;
+};
+
 const FILL_RECONCILED_VENUES = new Set(['hyperliquid', 'grvt', 'bybitdemo']);
 
 const CHASER_PRICE_CHECK_MIN_INTERVAL_MS = 50;
@@ -302,6 +317,17 @@ export class ChaserOrderManager {
           return [];
         }
       }
+    }
+
+    const settled = orderIds.length === 0 ? settledRefusal(placementError) : undefined;
+    if (settled && !instance.isStopped) {
+      const message = `Chaser for ${instance.options.symbol} stopped: ${settled.toLowerCase()}: ${(placementError as Error).message}`;
+      this.log(message, instance);
+      exchange.emitter.emit('error', message);
+      instance.markComplete(settled);
+      this.checkAndMarkIfComplete(instance);
+      void this.cleanupInstance(instance);
+      return [];
     }
 
     // If the user cancelled while `placeOrder` was in flight, cancel

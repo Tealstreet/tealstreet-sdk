@@ -9,7 +9,7 @@ use safe_cex_venue_binance::Variant;
 use support::{Harness, Options};
 
 const PM_OPEN: &str = r#"[{"avgPrice":"0.00000","clientOrderId":"x-s3vFFRQpresting","cumQuote":"0","executedQty":"0","orderId":1917641,"origQty":"0.40","origType":"LIMIT","price":"90000","reduceOnly":false,"side":"BUY","positionSide":"BOTH","status":"NEW","symbol":"BTCUSDT","time":1579276756075,"timeInForce":"GTC","type":"LIMIT","updateTime":1579276756075,"selfTradePreventionMode":"NONE","goodTillDate":0}]"#;
-const PM_CONDITIONAL: &str = r#"[{"newClientStrategyId":"abc","strategyId":123445,"strategyStatus":"NEW","strategyType":"TAKE_PROFIT_MARKET","origQty":"0.010","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","stopPrice":"99000","symbol":"BTCUSDT","bookTime":1566818724710,"updateTime":1566818724722,"timeInForce":"GTC","workingType":"MARK_PRICE","priceProtect":false}]"#;
+const PM_CONDITIONAL: &str = r#"[{"clientAlgoId":"abc","algoId":123445,"algoStatus":"NEW","orderType":"TAKE_PROFIT_MARKET","quantity":"0.010","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","triggerPrice":"99000","symbol":"BTCUSDT","bookTime":1566818724710,"updateTime":1566818724722,"timeInForce":"GTC","workingType":"MARK_PRICE","priceProtect":false}]"#;
 const PM_POSITION: &str = r#"[{"entryPrice":"95000.0","leverage":"20","markPrice":"96000.0","maxNotionalValue":"6000000.0","positionAmt":"0.010","notional":"960.0","symbol":"BTCUSDT","unRealizedProfit":"10.0","liquidationPrice":"80000.5","positionSide":"BOTH","updateTime":1720736417660}]"#;
 const PM_BALANCE: &str = r#"[{"asset":"USDT","totalWalletBalance":"1000.0","crossMarginFree":"900.0","umWalletBalance":"1000.0","umUnrealizedPNL":"10.0","cmWalletBalance":"0","cmUnrealizedPNL":"0","updateTime":0,"negativeBalance":"0"}]"#;
 const SPOT_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}]}]}"#;
@@ -54,7 +54,7 @@ fn pm_local() -> Harness {
     h.respond("/papi/v1/um/positionRisk", 200, PM_POSITION);
     h.respond("/papi/v1/balance", 200, PM_BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, PM_OPEN);
-    h.respond("/papi/v1/um/conditional/openOrders", 200, PM_CONDITIONAL);
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, PM_CONDITIONAL);
     for path in ["/public/ws", "/market/ws", "/pm/ws"] {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
@@ -114,7 +114,7 @@ fn shape(request: &HttpRequest) -> (Method, String, Vec<String>) {
                     "signature=",
                     "timestamp=",
                     "newClientOrderId=",
-                    "newClientStrategyId=",
+                    "clientAlgoId=",
                 ]
                 .iter()
                 .any(|key| pair.starts_with(key))
@@ -127,7 +127,7 @@ fn shape(request: &HttpRequest) -> (Method, String, Vec<String>) {
 }
 
 /// Run `command` on both engines and answer each step alike: the frame-fed
-/// engine sends what LOCAL sends, one write per step, and never a read.
+/// engine sends what LOCAL sends, including the targeted PM cancellation proof.
 fn same_writes(local: &mut Harness, fed: &mut Harness, command: Command, replies: &[&str]) {
     local.event(Event::Command(command.clone()));
     fed.event(Event::Command(command));
@@ -140,7 +140,12 @@ fn same_writes(local: &mut Harness, fed: &mut Harness, command: Command, replies
             "one request per step: {:?}",
             fed.paths()
         );
-        assert_ne!(fed.requests[0].method, Method::Get, "never a read");
+        if fed.requests[0].method == Method::Get {
+            assert!(
+                fed.requests[0].url.contains("/papi/v1/um/algo/algoOrder"),
+                "only a targeted PM proof read"
+            );
+        }
         let (l, f) = (local.requests.remove(0), fed.requests.remove(0));
         local.reply(l.id, 200, "", body);
         fed.reply(f.id, 200, "", body);
@@ -169,7 +174,8 @@ fn a_frame_fed_pm_engine_cancels_regular_and_strategy_orders_as_local() {
         },
         &[
             r#"{"symbol":"BTCUSDT","orderId":1917641,"clientOrderId":"x-s3vFFRQpresting","origQty":"0.40","executedQty":"0","status":"CANCELED"}"#,
-            r#"{"symbol":"BTCUSDT","strategyId":123445,"newClientStrategyId":"abc","strategyStatus":"CANCELED"}"#,
+            r#"{"complete":true}"#,
+            r#"{"symbol":"BTCUSDT","algoId":123445,"clientAlgoId":"abc","algoStatus":"CANCELED","actualOrderId":"","actualPrice":"0","triggerTime":0}"#,
         ],
     );
     assert!(matches!(fed.result(3), Some(Ok(_))), "{:?}", fed.done);

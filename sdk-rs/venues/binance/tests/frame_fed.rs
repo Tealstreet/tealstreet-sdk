@@ -544,7 +544,7 @@ fn portfolio_margin() -> Harness {
     h.respond("/papi/v1/um/positionRisk", 200, "[]");
     h.respond("/papi/v1/balance", 200, "[]");
     h.respond("/papi/v1/um/openOrders", 200, "[]");
-    h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
     h.requests.clear();
     h
 }

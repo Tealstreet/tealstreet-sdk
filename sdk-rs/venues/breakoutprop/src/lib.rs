@@ -934,6 +934,18 @@ impl Venue for BreakoutProp {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &pending.operation {
+            Operation::Discover | Operation::Instruments { .. } | Operation::Details { .. } => {
+                S::MARKETS
+            }
+            Operation::Quotes { .. } => S::TICKERS,
+            Operation::Portfolio { .. } => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             public_catalogue_validation: true,

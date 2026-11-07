@@ -785,6 +785,14 @@ impl crate::engine::CoreCx<'_> {
         {
             context = context.with_egress(session_egress)?;
         }
+        let class = self
+            .io
+            .core
+            .request_contexts
+            .owner_entry(handle.owner())
+            .ok_or(Error::Revoked)?
+            .request_class;
+        context.set_request_class(class);
         context.bind_issuer(&self.io.core.request_contexts.issuer);
         let signing = signed.then(|| {
             self.io

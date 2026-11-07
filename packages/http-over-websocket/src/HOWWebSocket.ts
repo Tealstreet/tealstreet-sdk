@@ -290,7 +290,6 @@ export class HOWWebSocket {
   };
 
   connectAndSubscribe = () => {
-    this.isInitialized = true;
     if (!this.isDisposed) {
       this.ws = this.createWebsocket(typeof this.url === 'function' ? this.url() : this.url);
 
@@ -299,6 +298,7 @@ export class HOWWebSocket {
       this.ws.onopen = this.onOpen.bind(this);
       this.ws.onmessage = this.onMessage.bind(this);
       this.ws.onclose = this.onClose.bind(this);
+      this.isInitialized = true;
 
       // Next constant-folds typeof checks on window/document to true in worker chunks,
       // so a bare global there throws; read them off globalThis instead.

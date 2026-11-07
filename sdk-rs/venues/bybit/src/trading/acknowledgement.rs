@@ -770,6 +770,36 @@ pub(crate) fn cancelled_all(result: Option<&RawValue>) -> Result<Vec<String>, Ma
     Ok(ids)
 }
 
+/// A whole amend refusal that provably names nothing but `order_id`: `result` absent
+/// or holding only that `orderId` and a text `orderLinkId`; `retExtInfo` absent or
+/// holding only an empty `list`. Duplicate, mistyped or unknown fields are malformed.
+pub(crate) fn clean_amend_refusal(
+    result: Option<&RawValue>,
+    ext: Option<&RawValue>,
+    order_id: &str,
+) -> Result<(), Malformed> {
+    if let Some(result) = result {
+        let fields = object(result)?;
+        for (key, _) in &fields.0 {
+            match key.as_str() {
+                "orderId" if fields.text("orderId")?.as_deref() == Some(order_id) => {}
+                "orderLinkId" if fields.text("orderLinkId")?.is_some() => {}
+                _ => return Err(Malformed),
+            }
+        }
+    }
+    if let Some(ext) = ext {
+        let fields = object(ext)?;
+        for (key, _) in &fields.0 {
+            match key.as_str() {
+                "list" if elements(fields.required("list")?)?.is_empty() => {}
+                _ => return Err(Malformed),
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Bounded native IDs a malformed or contradictory answer carried, as
 /// reconciliation evidence only: the `result` object's own ID or every row of
 /// its list, and nothing at all when any row is not a well-formed object.

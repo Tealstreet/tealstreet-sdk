@@ -2383,6 +2383,18 @@ pub(crate) fn metadata_error(
     }
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::OpenOrders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod sign_failure_owners {
     use super::*;

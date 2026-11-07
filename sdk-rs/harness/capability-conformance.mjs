@@ -108,7 +108,8 @@ function managedHttp(action) {
       && (!Object.hasOwn(action, 'signing') || u32(action.signing));
   }
   if (action.phase === 'prepare') {
-    if (!closed(action, ['op', 'phase', 'preparation', 'intent', 'packet'])
+    if (!closed(action, ['op', 'phase', 'preparation', 'intent', 'packet'], ['requestClass'])
+      || (Object.hasOwn(action, 'requestClass') && (!Number.isInteger(action.requestClass) || action.requestClass < 0 || action.requestClass > 4))
       || !['public', 'primary', 'secondary'].includes(action.intent)) return false;
   } else if (action.phase === 'bind') {
     if (!closed(action, ['op', 'phase', 'preparation', 'permit', 'packet'])) return false;

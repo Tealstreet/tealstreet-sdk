@@ -54,6 +54,9 @@ pub(super) struct GroupMemberOut<'a> {
 #[serde(tag = "phase", rename_all = "camelCase")]
 pub(super) enum HttpPhaseOut<'a> {
     Prepare {
+        #[cfg(target_arch = "wasm32")]
+        #[serde(rename = "requestClass")]
+        request_class: u8,
         preparation: String,
         intent: &'static str,
         packet: HttpPacket<'a>,
@@ -78,10 +81,14 @@ impl<'a> From<&'a HttpAction> for HttpPhaseOut<'a> {
     fn from(action: &'a HttpAction) -> Self {
         match action {
             HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class,
                 preparation,
                 intent,
                 request,
             } => Self::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class: *request_class,
                 preparation: preparation.to_wire(),
                 intent: match intent {
                     RoutingIntent::Public => "public",
@@ -282,6 +289,8 @@ mod tests {
         let permit_text = "r1:7:18446744073709551615:18446744073709551615:18446744073709551615";
         let actions = [
             HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class: 3,
                 preparation,
                 intent: RoutingIntent::Secondary,
                 request: request.clone(),
@@ -300,6 +309,8 @@ mod tests {
         let rows: serde_json::Value = serde_json::from_str(&encode(&actions)).unwrap();
         assert_eq!(rows[0]["op"], "managedHttp");
         assert_eq!(rows[0]["intent"], "secondary");
+        #[cfg(target_arch = "wasm32")]
+        assert_eq!(rows[0]["requestClass"], 3);
         assert_eq!(rows[0]["preparation"], text);
         assert_eq!(rows[1]["permit"], permit_text);
         assert_eq!(rows[1]["packet"]["request"], 7);
