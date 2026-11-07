@@ -140,6 +140,18 @@ struct WsPosition {
 // Fix pre-send age at the first physical release, not at response delivery.
 const POSITION_RECEIPT_GRACE_MS: f64 = 5_000.0;
 
+/// A position row's size split: `locked` is held by resting close orders. Bound
+/// to the admitted row's contracts and update time and to its position epoch.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Closable {
+    pub contracts: f64,
+    pub last_update: Option<f64>,
+    pub epoch: u64,
+    pub total: f64,
+    pub available: f64,
+    pub locked: f64,
+}
+
 #[derive(Default)]
 pub struct Account {
     pub(crate) supervisor: Supervisor,
@@ -209,6 +221,10 @@ pub struct Account {
     census_follow_up: Option<TimerId>,
     cancel_checks: Vec<CancelCheck>,
     cancel_check_serial: u64,
+    /// Each admitted position row's unlocked split; it only words a close refusal.
+    closable: HashMap<(String, PositionSide), Closable>,
+    /// The positions read in flight: its number and each mapped row's split, in row order.
+    staged_closable: (u32, Vec<Option<Closable>>),
     degraded: bool,
     /// When positions, balance and orders were last read over REST while live;
     /// `None` after each (re)login, so the first live poll covers the gap.
@@ -827,12 +843,26 @@ impl BitgetFutures {
         item: &str,
     ) {
         match request {
-            Request::Positions { rows, skipped, .. } => {
+            Request::Positions {
+                rows,
+                skipped,
+                read,
+                ..
+            } => {
                 match serde_json::from_str::<PositionRow>(item)
                     .map_err(|_| "malformed record".to_owned())
-                    .and_then(|row| self.map_position(cx, &row))
-                {
-                    Ok(p) => rows.push(p),
+                    .and_then(|row| {
+                        let position = self.map_position(cx, &row)?;
+                        Ok((closable(&row, &position), position))
+                    }) {
+                    Ok((split, p)) => {
+                        let staged = &mut self.account.staged_closable;
+                        if staged.0 != *read || rows.is_empty() {
+                            *staged = (*read, Vec::new());
+                        }
+                        staged.1.push(split);
+                        rows.push(p)
+                    }
                     Err(error) => {
                         let key = self.position_key(item);
                         let message = format!(
@@ -1003,7 +1033,14 @@ impl BitgetFutures {
                     self.owe_position_repair(cx);
                     return;
                 };
-                let (mut rows, stream_held) = self.merge_positions(cx, rows, started, cut);
+                let staged = std::mem::take(&mut self.account.staged_closable);
+                let staged = if staged.0 == read && staged.1.len() == rows.len() {
+                    staged.1
+                } else {
+                    vec![None; rows.len()]
+                };
+                let (mut rows, stream_held, admitted) =
+                    self.merge_positions(cx, rows, started, cut);
                 if stream_held && !repair {
                     self.owe_position_repair(cx);
                 }
@@ -1015,7 +1052,7 @@ impl BitgetFutures {
                         self.refresh_settings(cx, Some(&symbol));
                     }
                 }
-                self.coherent_position_modes(cx, &mut rows, &mut skipped, true);
+                let conflicts = self.coherent_position_modes(cx, &mut rows, &mut skipped, true);
                 for p in &rows {
                     if !self
                         .account
@@ -1055,6 +1092,32 @@ impl BitgetFutures {
                 }
                 cx.store
                     .set_positions(rows.into_iter().filter(|p| p.contracts > 0.0).collect());
+                // Only this read's own admitted rows that every later filter kept carry a
+                // split; a duplicated identity is ambiguous and keeps none.
+                let survivors: Vec<_> = admitted
+                    .into_iter()
+                    .filter(|(_, p)| !conflicts.contains(&p.symbol))
+                    .collect();
+                for (index, admitted) in &survivors {
+                    let duplicated = survivors
+                        .iter()
+                        .filter(|(_, p)| p.id == admitted.id)
+                        .count()
+                        > 1;
+                    let stored = cx
+                        .store
+                        .positions()
+                        .iter()
+                        .find(|p| p.id == admitted.id)
+                        .cloned();
+                    match stored {
+                        Some(stored) if !duplicated => {
+                            self.commit_closable(&stored, staged[*index])
+                        }
+                        _ => self.commit_closable(admitted, None),
+                    }
+                }
+                self.prune_closable(cx);
                 self.settle_fresh_positions(cx, read, skipped.rejected() != 0, stream_held);
             }
             Request::Balance {
@@ -1854,7 +1917,9 @@ impl BitgetFutures {
         rows: Vec<Position>,
         started: f64,
         cut: PositionCut,
-    ) -> (Vec<Position>, bool) {
+    ) -> (Vec<Position>, bool, Vec<(usize, Position)>) {
+        // Each read row this merge admits as itself, by its index in `rows`.
+        let mut admitted = Vec::new();
         // A post-cut zero has no Store row, but still prevents certifying this read.
         let held = std::cell::Cell::new(self.account.ws_positions.values().any(|mark| {
             [mark.observed, mark.rejected]
@@ -1864,7 +1929,8 @@ impl BitgetFutures {
         }));
         let mut rows: Vec<_> = rows
             .into_iter()
-            .filter_map(|mut p| {
+            .enumerate()
+            .filter_map(|(index, mut p)| {
                 if self.account.config_at.is_some_and(|at| started <= at) {
                     if let Some(settings) = cx.store.setting(&p.symbol) {
                         if cx.store.hedged() && settings.margin_type == Some(MarginType::Isolated) {
@@ -1952,6 +2018,7 @@ impl BitgetFutures {
                             .cloned();
                     }
                 }
+                admitted.push((index, p.clone()));
                 Some(p)
             })
             .collect();
@@ -1978,7 +2045,7 @@ impl BitgetFutures {
                 rows.push(current.clone());
             }
         }
-        (rows, held.get())
+        (rows, held.get(), admitted)
     }
 
     fn order_metadata_current(
@@ -2309,6 +2376,8 @@ impl BitgetFutures {
                 };
                 let empty = rows.is_empty();
                 let mut positions = Vec::with_capacity(rows.len());
+                // Each mapped row's split, in the same order as `positions`.
+                let mut splits = Vec::with_capacity(rows.len());
                 let mut skipped = RowAdmission::default();
                 for item in rows {
                     let mapped = match serde_json::from_str::<PositionRow>(item.get()) {
@@ -2319,7 +2388,11 @@ impl BitgetFutures {
                             {
                                 continue;
                             }
-                            self.map_position(cx, &row)
+                            let mapped = self.map_position(cx, &row);
+                            if let Ok(position) = &mapped {
+                                splits.push((position.symbol.clone(), closable(&row, position)));
+                            }
+                            mapped
                         }
                         Err(_) => {
                             if self.foreign_stream_row(item.get(), true) {
@@ -2352,6 +2425,8 @@ impl BitgetFutures {
                 // Neither snapshot nor update proves the identities it omits.
                 let conflicts =
                     self.coherent_position_modes(cx, &mut positions, &mut skipped, false);
+                splits.retain(|(symbol, _)| !conflicts.contains(symbol));
+                debug_assert_eq!(splits.len(), positions.len());
                 for symbol in conflicts {
                     rejected.reject(Some((symbol, None)));
                 }
@@ -2417,9 +2492,14 @@ impl BitgetFutures {
                 }
                 // Only REST establishes readiness; an explicit zero closes its own ID.
                 if useful {
-                    for p in positions {
+                    let paired = splits.len() == positions.len();
+                    for (index, p) in positions.into_iter().enumerate() {
+                        // In upsert order, so a repeated identity ends with its last row's split.
+                        let split = splits.get(index).filter(|_| paired).and_then(|(_, s)| *s);
+                        self.commit_closable(&p, split);
                         cx.store.upsert_position(p);
                     }
+                    self.prune_closable(cx);
                 }
                 if useful {
                     self.account.last_payload = cx.now;
@@ -3033,6 +3113,54 @@ impl BitgetFutures {
         (!symbol.is_empty()).then_some((symbol, side))
     }
 
+    /// An admitted row's split, bound to that row and this position epoch.
+    fn commit_closable(&mut self, position: &Position, split: Option<Closable>) {
+        let key = (position.symbol.clone(), position.side);
+        match split {
+            Some(split) if position.contracts > 0.0 => {
+                let split = Closable {
+                    contracts: position.contracts,
+                    last_update: position.last_update,
+                    epoch: self.account.position_epoch,
+                    ..split
+                };
+                self.account.closable.insert(key, split);
+            }
+            _ => {
+                self.account.closable.remove(&key);
+            }
+        }
+    }
+
+    /// Retired and absent positions keep no split.
+    fn prune_closable(&mut self, cx: &Cx<'_, Pending>) {
+        let positions = cx.store.positions();
+        self.account.closable.retain(|(symbol, side), _| {
+            positions
+                .iter()
+                .any(|p| p.symbol == *symbol && p.side == *side)
+        });
+    }
+
+    /// The split of the Store's current row, admitted in this position epoch; `None`
+    /// whenever the Store's row is not the one the split was read with.
+    pub(crate) fn admitted_split(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        side: PositionSide,
+    ) -> Option<Closable> {
+        let split = self.account.closable.get(&(symbol.to_owned(), side))?;
+        (split.epoch == self.account.position_epoch
+            && cx.store.positions().iter().any(|p| {
+                p.symbol == symbol
+                    && p.side == side
+                    && p.contracts == split.contracts
+                    && p.last_update == split.last_update
+            }))
+        .then_some(*split)
+    }
+
     fn map_position(
         &self,
         cx: &Cx<'_, Pending>,
@@ -3386,6 +3514,20 @@ fn positions_agree(a: &Position, b: &Position) -> bool {
 pub(crate) fn clean(v: f64) -> f64 {
     (v * 1e12).round() / 1e12
 }
+/// The row's unlocked split, when it reports one; `locked` defaults to the rest.
+fn closable(raw: &PositionRow<'_>, position: &Position) -> Option<Closable> {
+    let total = first(&[raw.total, raw.size, raw.pos, raw.open_total_pos])?;
+    let available = raw.available.0?;
+    Some(Closable {
+        contracts: position.contracts,
+        last_update: position.last_update,
+        epoch: 0,
+        total,
+        available,
+        locked: raw.locked.0.unwrap_or_else(|| round8(total - available)),
+    })
+}
+
 pub(crate) fn first(values: &[Number]) -> Option<f64> {
     values.iter().find_map(|v| v.0)
 }
