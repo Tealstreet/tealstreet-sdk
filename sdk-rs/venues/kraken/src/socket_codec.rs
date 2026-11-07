@@ -40,8 +40,8 @@ pub(super) fn policy(private: bool, futures: bool) -> FeedPolicy {
         },
         subscription_interval_ms: 0.,
         close_floors: &[],
-        // Venue-owned per-symbol/feed clocks prevent a busy sibling from
-        // satisfying another feed's data deadline on the same socket.
+        // Public data clocks are per symbol; private event feeds may be quiet
+        // indefinitely after their initial snapshots and use receive liveness.
         data_silence: None,
     }
 }

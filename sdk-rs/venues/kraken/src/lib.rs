@@ -1300,7 +1300,6 @@ impl Venue for Kraken {
         if self.poll == Some(timer) {
             self.poll = None;
             self.watch_public_tickers(cx);
-            self.watch_private_feeds(cx);
             let stale: Vec<_> = self
                 .books
                 .iter()

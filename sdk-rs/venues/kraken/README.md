@@ -27,17 +27,17 @@ Heartbeats prove socket liveness only. Separate venue-owned clocks watch data:
 - Each subscribed book retains its existing validated-data clock: after more
   than 120 seconds without a snapshot/delta it requests unsubscribe/subscribe,
   retrying at 30-second intervals until a valid snapshot arrives.
-- Private fills, open orders and positions can legitimately be quiet. Each
-  feed independently requests a fresh authenticated snapshot after five minutes
-  without a valid payload. A snapshot for that feed must arrive within 30
-  seconds or the private socket reconnects and authenticates again. Other feeds,
-  heartbeats, REST polls and subscription acks cannot satisfy the probe. Empty
-  snapshots are valid; orders/settings revision fences still apply.
+- Private fills, open orders and positions can legitimately stay quiet after
+  their initial snapshots. Heartbeats and the 20-second socket receive watchdog
+  maintain that connection; inactivity does not unsubscribe or reconnect it.
+  In particular, a routine fills unsubscribe could hide a new execution in a
+  replacement history snapshot, suppressing its live fill notification and
+  order progress. Keep the live subscription uninterrupted while it is healthy.
 
 The existing five-second venue timer checks these clocks independently of the
-scaled account REST poll. Ticker/probe expiry is also checked before accepting
-late data. Initial private authentication and the 180-second first-payload bound
-remain separate from steady-state probes.
+scaled account REST poll. Ticker expiry is also checked before accepting late
+data. Initial private authentication and the 180-second first-payload bound
+remain independently enforced; heartbeats cannot satisfy missing initial data.
 
 The deterministic `socket_supervision::futures_wake_recovery_measurement` test
 models paused timers, a clock jump, 50 ms socket handshakes and 50 ms server/auth

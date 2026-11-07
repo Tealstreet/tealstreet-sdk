@@ -402,6 +402,62 @@ fn initial_private_payloads(h: &mut H<Kraken>, socket: SocketId) {
     }
 }
 
+fn quiet_window_execution(simulate_gap: bool) -> (u32, u32, f64, f64) {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, socket);
+    let before = h.sent.len();
+    for _ in 0..30 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+    }
+    let unsubscribed = h.sent[before..].iter().any(|(s, text)| {
+        *s == socket
+            && text.contains(r#""event":"unsubscribe""#)
+            && text.contains(r#""feed":"fills""#)
+    });
+    h.message(socket, &format!(r#"{{"feed":"open_orders","order":{{"instrument":"PF_XBTUSD","order_id":"quiet-order","qty":2,"filled":0,"type":"limit","direction":0,"limit_price":100,"last_update_time":{}}}}}"#, h.now));
+    h.now += 1.;
+    let fill = format!(
+        r#"{{"fill_id":"quiet-window-fill","order_id":"quiet-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"remaining_order_qty":1.5,"time":{}}}"#,
+        h.now
+    );
+    // The venue sends an execution during an unsubscribe gap in the replacement
+    // snapshot; an uninterrupted subscription receives the same execution live.
+    let feed = if simulate_gap && unsubscribed {
+        "fills_snapshot"
+    } else {
+        "fills"
+    };
+    h.message(socket, &format!(r#"{{"feed":"{feed}","fills":[{fill}]}}"#));
+    let first = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    let order = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .find(|order| order.id == "quiet-order")
+        .unwrap();
+    let progress = (order.filled, order.remaining);
+    h.message(socket, &format!(r#"{{"feed":"fills","fills":[{fill}]}}"#));
+    let duplicate = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    (first, duplicate, progress.0, progress.1)
+}
+
+#[test]
+fn futures_execution_during_the_quiet_probe_window_is_not_lost() {
+    let (first, duplicate, filled, remaining) = quiet_window_execution(true);
+    assert_eq!(first, 1, "a quiet-window execution must emit once");
+    assert_eq!(duplicate, 0, "a replay must not emit twice");
+    assert_eq!(filled, 0.5);
+    assert_eq!(remaining, 1.5);
+}
+
+#[test]
+fn futures_live_execution_control_at_the_quiet_window_emits_once() {
+    assert_eq!(quiet_window_execution(false), (1, 0, 0.5, 1.5));
+}
+
 fn ticker(h: &mut H<Kraken>, socket: SocketId, symbol: &str) {
     h.message(
         socket,
@@ -512,88 +568,29 @@ fn futures_book_silence_repairs_while_tickers_and_heartbeat_are_live() {
     }
 }
 
-fn private_payload(h: &mut H<Kraken>, socket: SocketId, feed: &str) {
-    let field = match feed {
-        "fills" => "fills",
-        "open_orders" => "orders",
-        "open_positions" => "positions",
-        _ => unreachable!(),
-    };
-    h.message(
-        socket,
-        &format!(r#"{{"feed":"{feed}_snapshot","{field}":[]}}"#),
+#[test]
+fn futures_quiet_private_feeds_keep_their_live_subscriptions() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, socket);
+    let before = h.sent.len();
+    for _ in 0..180 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+    }
+    assert!(
+        !h.closed.contains(&socket),
+        "quiet private feeds must not cause a reconnect"
+    );
+    assert_eq!(
+        h.sent.len(),
+        before,
+        "quiet private feeds must not unsubscribe or resubscribe"
     );
 }
 
 #[test]
-fn futures_each_quiet_private_feed_is_probed_and_missing_snapshot_reconnects() {
-    for stalled in ["fills", "open_orders", "open_positions"] {
-        let mut h = futures(false, PublicFeedPolicy::Direct);
-        let socket = ready_socket(&mut h, authenticate);
-        initial_private_payloads(&mut h, socket);
-        let before = h.sent.len();
-        for _ in 0..30 {
-            h.wait(10_000.);
-            heartbeat(&mut h, socket);
-            for feed in ["fills", "open_orders", "open_positions"] {
-                if feed != stalled {
-                    private_payload(&mut h, socket, feed);
-                }
-            }
-        }
-        assert!(
-            !h.closed.contains(&socket),
-            "quiet event feeds are probed before retiring: {stalled}"
-        );
-        for event in ["unsubscribe", "subscribe"] {
-            assert!(
-                h.sent[before..].iter().any(|(s, text)| *s == socket
-                    && text.contains(&format!(r#""event":"{event}""#))
-                    && text.contains(&format!(r#""feed":"{stalled}""#))),
-                "missing probe: {stalled}/{event}"
-            );
-        }
-        for _ in 0..3 {
-            h.wait(10_000.);
-            heartbeat(&mut h, socket);
-            for feed in ["fills", "open_orders", "open_positions"] {
-                if feed != stalled {
-                    private_payload(&mut h, socket, feed);
-                }
-            }
-        }
-        assert!(
-            h.closed.contains(&socket),
-            "other payloads and heartbeat cannot fulfill {stalled}'s probe"
-        );
-    }
-}
-
-#[test]
-fn futures_empty_private_probe_snapshots_keep_a_quiet_account_connected() {
-    let mut h = futures(false, PublicFeedPolicy::Direct);
-    let socket = ready_socket(&mut h, authenticate);
-    initial_private_payloads(&mut h, socket);
-    for _ in 0..2 {
-        let before = h.sent.len();
-        for _ in 0..30 {
-            h.wait(10_000.);
-            heartbeat(&mut h, socket);
-        }
-        assert_eq!(
-            h.sent[before..]
-                .iter()
-                .filter(|(s, text)| *s == socket && text.contains(r#""event":"subscribe""#))
-                .count(),
-            3
-        );
-        initial_private_payloads(&mut h, socket);
-    }
-    assert!(!h.closed.contains(&socket));
-}
-
-#[test]
-fn futures_private_probe_needs_a_snapshot_not_an_ack_or_incremental_payload() {
+fn futures_quiet_private_socket_still_recovers_when_heartbeats_stop() {
     let mut h = futures(false, PublicFeedPolicy::Direct);
     let socket = ready_socket(&mut h, authenticate);
     initial_private_payloads(&mut h, socket);
@@ -601,22 +598,22 @@ fn futures_private_probe_needs_a_snapshot_not_an_ack_or_incremental_payload() {
         h.wait(10_000.);
         heartbeat(&mut h, socket);
     }
-    private_payload(&mut h, socket, "open_orders");
-    private_payload(&mut h, socket, "open_positions");
-    for _ in 0..3 {
-        h.wait(10_000.);
-        heartbeat(&mut h, socket);
-        h.message(socket, r#"{"event":"subscribed","feed":"fills"}"#);
-        h.message(socket, r#"{"feed":"fills","fills":[]}"#);
+    assert!(!h.closed.contains(&socket));
+    h.wait(20_000.);
+    assert!(h.closed.contains(&socket));
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(replacement, socket);
+    authenticate(&mut h, replacement);
+    for feed in ["fills", "open_orders", "open_positions"] {
+        assert!(h.sent.iter().any(|(s, text)| *s == replacement
+            && text.contains(r#""event":"subscribe""#)
+            && text.contains(&format!(r#""feed":"{feed}""#))));
     }
-    assert!(
-        h.closed.contains(&socket),
-        "incremental fills and acks do not fulfill the fresh snapshot probe"
-    );
 }
 
 #[test]
-fn futures_late_data_after_a_timer_jump_cannot_rescue_expired_feeds() {
+fn futures_late_ticker_after_a_timer_jump_cannot_rescue_an_expired_feed() {
     let mut h = futures(true, PublicFeedPolicy::Direct);
     let socket = h.open();
     for _ in 0..2 {
@@ -628,20 +625,6 @@ fn futures_late_data_after_a_timer_jump_cannot_rescue_expired_feeds() {
     assert!(
         h.closed.contains(&socket),
         "a late ticker must not reset the expired data clock before its callback"
-    );
-
-    let mut h = futures(false, PublicFeedPolicy::Direct);
-    let socket = ready_socket(&mut h, authenticate);
-    initial_private_payloads(&mut h, socket);
-    for _ in 0..32 {
-        h.wait(10_000.);
-        heartbeat(&mut h, socket);
-    }
-    h.now += 10_000.;
-    initial_private_payloads(&mut h, socket);
-    assert!(
-        h.closed.contains(&socket),
-        "a late snapshot must not rescue an expired probe"
     );
 }
 
