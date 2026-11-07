@@ -83,6 +83,10 @@ describe('formatSizeCompact', () => {
       expect(formatSizeCompact(0.00012345, 0.00000001)).toBe('0.00012345');
       expect(formatSizeCompact(100, 0.001)).toBe('100.000');
     });
+
+    it.each([1, 10])('uses no decimal places for a whole-unit step of %s', (precision) => {
+      expect(formatSizeCompact(400, precision)).toBe('400');
+    });
   });
 
   describe('edge cases', () => {
