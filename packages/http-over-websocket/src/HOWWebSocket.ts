@@ -49,6 +49,7 @@ export class HOWWebSocket {
   ws?: ReconnectingWebSocket;
 
   private localClose = false;
+  private reportedReconnectFailure = false;
   readonly diagnostics = new ConnectionDiagnostics('HOW');
   readonly timerLateness = new HiddenTimerLateness();
   pingAt = 0;
@@ -175,10 +176,23 @@ export class HOWWebSocket {
     // Extract error message if available
     const errorMessage = (event as any)?.message || (event as any)?.error?.message || (event as any)?.type;
 
+    this.reportReconnectFailures();
     // Log WebSocket errors (state errors are now prevented in send() method)
-    console.error(`WebSocket error: ${stripDiagnosticUrlQueries(String(errorMessage || 'Unknown error'))}`);
+    console.info(
+      `[HOWWebSocket] WebSocket error: ${stripDiagnosticUrlQueries(String(errorMessage || 'Unknown error'))}`,
+    );
     return false;
   };
+
+  private reportReconnectFailures() {
+    if (this.isDisposed || this.ws?.loopState.phase === 'stopped') return;
+    const retries = this.ws?.retryCount ?? 0;
+    if (retries < 3) this.reportedReconnectFailure = false;
+    else if (!this.isDisposed && !this.reportedReconnectFailure) {
+      this.reportedReconnectFailure = true;
+      console.error('[HOWWebSocket] Repeated connection failures; retrying');
+    }
+  }
 
   private validateAndSend(message: string, data: any, isTokenSend = false, redacted = false): boolean {
     // Pre-check WebSocket state to avoid the opaque DOMException
@@ -444,10 +458,17 @@ export class HOWWebSocket {
     this.isTokenSent = false;
     this.authState = HOWWebSocketAuthState.Unknown;
     clearTimeout(this.lastMessageTimeout);
-    console.error('[HOWWebSocket] WebSocket connection disconnected, reconnecting...');
+    if (!this.isDisposed) {
+      if (event?.code === 4000 && this.ws?.loopState.phase === 'stopped') {
+        console.error('[HOWWebSocket] Reconnect retries exhausted');
+      } else {
+        this.reportReconnectFailures();
+        console.info('[HOWWebSocket] WebSocket connection disconnected, reconnecting...');
+      }
+    }
 
     for (const event of this._activeEventHandlers) {
-      console.error('[HOWWebSocket] emitting disconnect event for ', event);
+      console.info('[HOWWebSocket] emitting disconnect event');
       this.emit(event, { error: 'TradeTunnel connection lost, reconnecting...' });
     }
 
