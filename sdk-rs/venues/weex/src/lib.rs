@@ -747,6 +747,12 @@ fn interval(i: Interval, stream: bool) -> bool {
     matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
+    fn observe_unproven_http_response(&mut self, now: f64, _: &Pending, response: Response<'_>) {
+        if response.status == 429 {
+            self.paused_until = self.paused_until.max(now + rate::delay(response, now));
+        }
+    }
+
     fn managed_sockets() -> bool {
         true
     }
@@ -1293,6 +1299,10 @@ impl Venue for WeexFutures {
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
     ) {
         self.retire_trade(owner);
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.account.invalidate_orders();
+        self.refresh_account(cx);
     }
     fn unproven_http_evidence(
         &self,

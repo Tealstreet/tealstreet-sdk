@@ -30,16 +30,18 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
    journal still recomputes the command outcome from earlier releases.
 2. **Released, then transport failure → write `unknown` / `network`.** A read gets
    `network`, and read-retry eligibility applies only under `RetryPolicy::ReadFailure`.
-3. **408 or ≥500 → write `unknown`** (`timeout` / `venueUnavailable`), whatever
-   the body says. A native code in that body is kept only as
+3. **408, 429 or ≥500 → write `unknown`** (`timeout` / `rateLimited` /
+   `venueUnavailable`), whatever the body says. A native code in that body is kept only as
    `venueCode`/`venueMessage` evidence and never makes the write `rejected`. On
    the managed path the message stays the engine's "HTTP response does not prove
    the write outcome" (`http_evidence.rs:36`, already live for Binance). There is
    no documented-row escape.
-4. **A decoded native error code → venue table verdict, overriding any
-   status-derived kind** (KuCoin returns 400002 with HTTP 401, for example).
-   Integer codes decode strictly: an exact integer or a canonical quoted
-   integer, never `f64`. String codes compare exactly.
+4. **Outside ambiguous statuses, a decoded native error code → venue table
+   verdict, overriding any status-derived kind** (KuCoin returns 400002 with HTTP 401, for example).
+   Released write verdicts carrying `rateLimited` are always weakened to `unknown`,
+   including 2xx native rate codes; they grant no resend or put-back. Reads keep
+   their native rate-limit and retry policy. Integer codes decode strictly: an
+   exact integer or a canonical quoted integer, never `f64`. String codes compare exactly.
 5. **Non-2xx with no decodable native error → the venue's documented status row,
    else `unknown` with a status-derived kind** (401 `authInvalid`, 403
    `authPermission`, 418/429 `rateLimited`). "HTTP status alone is not refusal
@@ -47,7 +49,7 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
    - Phase 2 starts by listing each family's documented 4xx semantics, with a
      citation for every status row. Binance, for example, documents 4XX as
      client-side refusals and 418/429 as rate-limit refusals, so those rows are
-     `Refused`.
+     `Refused` in the table; released rate-limited writes still become `unknown`.
    - A family without documentation flips from today's bare-4xx `rejected` to
      `unknown`. That flip is listed per family in Callers.
    - An `unknown` carrying an auth or rate-limit kind must not fan out reconcile
@@ -70,7 +72,7 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
    reconciliation and never writes `Cancelled` on that evidence.
 8. **One-shot re-sign resend, only through an opaque `ResendGrant`.**
    - The grant comes from `http_write_failure`, and only for a `RefusedResend`
-     verdict under rules 3–4 (status <500 and ≠408).
+     verdict under rules 3–4 (status <500 and neither 408 nor 429).
    - `CommandWrites::retry` and `Context::retry` require the grant. Constructing
      `RetryEvidence::DefinitiveRefusal` publicly is removed.
    - Each leg keeps a `resend_used` flag, so a second resend is refused.
@@ -90,7 +92,9 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
      - A cancel row counts as proven only when it echoes the requested native ID.
        Its ID then joins `order_ids` as cancellation evidence.
    - `CommandWrites::fail` keeps the `notSent`/`rejected`/`unknown`/partial
-     projections. Venues never pick the command outcome or demote it after an effect.
+     projections. A recorded Unknown stays Unknown after accepted sibling effects,
+     even if an older result wrapper calls it a refusal or known partial. Venues
+     never pick the command outcome or demote it after an effect.
 10. **Reads never claim money effects.** `ReadFailure` carries a kind, native
     evidence and retry facts, and no `Outcome`.
     - Native retry facts (`RefusedResend`, a rate-limit delay) are separate from

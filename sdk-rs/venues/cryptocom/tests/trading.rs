@@ -462,7 +462,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"code":42901,"message":"TOO_MANY_REQUESTS"}"#,
-            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
         ),
         (200, r#"{"code":50001,"message":"internal"}"#, unknown),
         (200, r#"{"code":43012,"message":"self trade"}"#, unknown),
