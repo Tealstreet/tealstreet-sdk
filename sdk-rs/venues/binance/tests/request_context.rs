@@ -942,20 +942,20 @@ fn unproven_batch_error_object_keeps_bounded_native_diagnostics_without_ids() {
 }
 
 #[test]
-fn documented_rate_limit_statuses_without_a_code_are_typed_refusals() {
+fn rate_limits_are_unknown_while_definitive_status_refusals_stay_rejected() {
     use safe_cex_engine::ErrorKind;
     for (status, headers, outcome, kind, retry) in [
         (
             429,
             "Retry-After: 3\r\n",
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some(ErrorKind::RateLimited),
             Some(3_000.),
         ),
         (
             418,
             "",
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some(ErrorKind::RateLimited),
             None,
         ),
@@ -990,5 +990,57 @@ fn documented_rate_limit_statuses_without_a_code_are_typed_refusals() {
         assert_eq!(failure.kind, kind, "{status}");
         assert_eq!(failure.retry_after_ms, retry, "{status}");
         assert!(failure.message.contains("HTTP"), "{status}");
+    }
+}
+
+#[test]
+fn a_later_native_batch_rate_limit_stops_the_remaining_lots() {
+    for rate_limited in [true, false] {
+        let mut h = ready();
+        h.requests.clear();
+        let order = serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}"#,
+        )
+        .unwrap();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 740,
+            orders: vec![order; 6],
+        }));
+        let batch = h.take("/fapi/v1/batchOrders");
+        let later_code = if rate_limited { -1003 } else { -2019 };
+        let rows = serde_json::json!([
+            {"code":-2019,"msg":"insufficient margin"},
+            {"code":later_code,"msg":"second refusal"},
+            {"code":-2019,"msg":"insufficient margin"},
+            {"code":-2019,"msg":"insufficient margin"},
+            {"code":-2019,"msg":"insufficient margin"}
+        ]);
+        h.reply(batch.id, 200, "", &rows.to_string());
+        if !rate_limited {
+            let last = h.take("/fapi/v1/order");
+            h.reply(
+                last.id,
+                400,
+                "",
+                r#"{"code":-2019,"msg":"insufficient margin"}"#,
+            );
+        }
+        assert!(
+            h.requests
+                .iter()
+                .all(|r| r.method == safe_cex_engine::Method::Get),
+            "rate_limited={rate_limited}: {:?}",
+            h.paths()
+        );
+        let error = &h.failures.iter().find(|(id, _)| *id == 740).unwrap().1;
+        assert_eq!(
+            error.outcome,
+            Some(if rate_limited {
+                Outcome::Unknown
+            } else {
+                Outcome::Rejected
+            }),
+            "{error:?}"
+        );
     }
 }
