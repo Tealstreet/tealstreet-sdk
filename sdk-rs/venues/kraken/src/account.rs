@@ -1218,6 +1218,11 @@ impl Kraken {
             .positions()
             .iter()
             .find(|p| p.symbol == row.symbol && p.side == side);
+        let liquidation_price = if live {
+            row.liquidation_price
+        } else {
+            old.map(|p| p.liquidation_price)
+        };
         Some(Position {
             id: format!(
                 "{}:{}",
@@ -1243,11 +1248,9 @@ impl Kraken {
             unrealized_pnl: row.unrealized_pnl,
             realized_pnl: None,
             contracts: quantity.abs(),
-            liquidation_price: if live {
-                row.liquidation_price.unwrap_or(f64::NAN)
-            } else {
-                old.map_or(f64::NAN, |p| p.liquidation_price)
-            },
+            liquidation_price: liquidation_price
+                .filter(|price| price.is_finite() && *price > 0.0)
+                .unwrap_or(f64::NAN),
             margin_size: None,
             last_update: Some(cx.now),
         })

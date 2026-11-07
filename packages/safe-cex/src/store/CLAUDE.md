@@ -22,8 +22,9 @@ so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
 frames still derive identity from symbol and position mode.
 
 Position `liquidationPrice` preserves an unknown/non-finite native column as
-`null`, including through serialization and worker snapshots. Finite values,
-including an explicit venue zero, remain numbers.
+`null`, including through serialization and worker snapshots. Venue mappers
+normalize their unusable sentinels first; Kraken maps nonpositive thresholds
+as unknown. The frame applier otherwise preserves finite column values.
 
 Revised SCXF sections carry explicit revisions with fixed tails. Preserve venue
 `prettySymbol`, bracket trigger types, conditional prices, remaining notionals,

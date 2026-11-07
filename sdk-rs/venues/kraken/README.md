@@ -4,10 +4,12 @@
 
 Futures [`open_positions`](https://docs.kraken.com/exchange/api-reference/futures-websocket/open_position)
 publishes `liquidation_threshold` in the instrument's quoted price units.
-Numbers and numeric strings are retained, including an explicit `0` as in
-Kraken's example and the TS reference. Missing, null, empty or malformed
-numeric strings are unknown; they must not default to a liquidation price of zero
-or prevent the rest of the position from updating.
+Only finite, positive numbers and numeric strings are usable prices.
+Missing, null, empty, malformed or nonpositive thresholds are unknown. Some
+Futures accounts publish `0.0` when no per-position threshold exists; a zero
+or negative price cannot be used as a position's liquidation price. Normalize
+these sentinels to unknown without preventing the position from updating.
+This deliberately corrects the TS reference's preservation of explicit zero.
 
 REST [`openpositions`](https://docs.kraken.com/api-reference/account-information/get-open-positions)
 does not publish that threshold. It preserves a previously received WS value;
@@ -20,7 +22,7 @@ invent a per-position estimate from those totals.
 
 Unknown prices use the packed frame's NaN representation and serialize to JSON
 `null`. The SDK frame applier preserves that as `Position.liquidationPrice: null`;
-finite prices and explicit zero remain numbers. Spot currently exposes wallet
+finite positive prices remain numbers. Spot currently exposes wallet
 balances and an empty positions table, without margin-position REST/WS mapping.
 
 Kraken Spot treats a dispatched write's HTTP 408, 429, or 5xx response as

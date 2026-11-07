@@ -712,7 +712,7 @@ export type Position = {
   readonly realizedPnl?: number;
   // always in whole units of base for easy math elsewhere
   readonly contracts: number;
-  /** Null when unreported; a venue's explicit zero stays zero. */
+  /** Null when the liquidation threshold is unavailable. */
   readonly liquidationPrice: number | null;
   // absolute quote-currency margin allocated to the position, when the
   // exchange exposes it. Cross-margin positions may be reported as 0 by

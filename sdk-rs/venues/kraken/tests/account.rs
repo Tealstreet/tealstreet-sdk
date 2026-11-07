@@ -1746,6 +1746,8 @@ fn missing_liquidation_is_unknown_for_rest_flex_and_single_collateral() {
 
 #[test]
 fn websocket_unknown_liquidation_does_not_discard_or_zero_the_position() {
+    // Reported zero is an unavailable threshold, not a usable liquidation price.
+    // Nonpositive numbers and numeric strings must also clear a prior value.
     for feed in ["open_positions", "open_positions_snapshot"] {
         for field in [
             "",
@@ -1754,6 +1756,11 @@ fn websocket_unknown_liquidation_does_not_discard_or_zero_the_position() {
             r#","liquidation_threshold":"N/A""#,
             r#","liquidation_threshold":"NaN""#,
             r#","liquidation_threshold":"Infinity""#,
+            r#","liquidation_threshold":0"#,
+            r#","liquidation_threshold":"0""#,
+            r#","liquidation_threshold":-0.0"#,
+            r#","liquidation_threshold":-1"#,
+            r#","liquidation_threshold":"-1""#,
         ] {
             let (mut e, socket) = ready();
             message(&mut e, socket, NOW, POSITION);
@@ -1777,15 +1784,8 @@ fn websocket_unknown_liquidation_does_not_discard_or_zero_the_position() {
 }
 
 #[test]
-fn websocket_reported_liquidation_prices_include_explicit_zero() {
-    // The reference copies liquidation_threshold directly, including Kraken's
-    // documented 0.0 example. Do not confuse that with an absent threshold.
-    for (raw, expected) in [
-        ("67.8", 67.8),
-        (r#""67.8""#, 67.8),
-        ("0", 0.0),
-        (r#""0""#, 0.0),
-    ] {
+fn websocket_positive_liquidation_prices_remain_usable() {
+    for (raw, expected) in [("67.8", 67.8), (r#""67.8""#, 67.8)] {
         let (mut e, socket) = ready();
         message(
             &mut e,
@@ -1821,15 +1821,26 @@ fn frame_liquidation_prices(frame: &[u8]) -> Vec<f64> {
 
 #[test]
 fn unknown_liquidation_survives_the_native_frame_column() {
-    let (mut e, socket) = ready();
-    message(
-        &mut e,
-        socket,
-        NOW,
-        r#"{"feed":"open_positions","positions":[{"instrument":"PF_XBTUSD","balance":2,"entry_price":100,"mark_price":120}]}"#,
-    );
-    let frame = e.take_frame(NOW).unwrap();
-    let prices = frame_liquidation_prices(frame);
-    assert_eq!(prices.len(), 1);
-    assert!(prices[0].is_nan());
+    for field in [
+        "",
+        r#","liquidation_threshold":0"#,
+        r#","liquidation_threshold":-2"#,
+    ] {
+        let (mut e, socket) = ready();
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &format!(
+                r#"{{"feed":"open_positions","positions":[{{"instrument":"PF_XBTUSD","balance":2,"entry_price":100,"mark_price":120{field}}}]}}"#
+            ),
+        );
+        let frame = e.take_frame(NOW).unwrap();
+        let prices = frame_liquidation_prices(frame);
+        assert_eq!(prices.len(), 1);
+        assert!(
+            prices[0].is_nan(),
+            "unusable threshold must be unknown in the wire column: {field}"
+        );
+    }
 }
