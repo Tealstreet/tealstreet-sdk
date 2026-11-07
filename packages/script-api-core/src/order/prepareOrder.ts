@@ -9,6 +9,7 @@ import {
   roundOrderPrice,
   roundOrderSize,
   venueAutoDownsizesReduceOrders,
+  venueReduceOrdersLockPositionSize,
   venueSupportsInfinityStops,
 } from './orderPricing';
 import { ScriptValidationError } from './ScriptValidationError';
@@ -121,5 +122,7 @@ export const clampReduceOnlyOrder = (
   if (!venueAutoDownsizesReduceOrders(exchangeName)) return order;
   const price = order.price || ticker?.mark || ticker?.last || 0;
   if (!price) return order;
-  return downSizeReduceOrder(market, order, positions as Position[], restingOrders, price);
+  return downSizeReduceOrder(market, order, positions as Position[], restingOrders, price, {
+    locksPositionSize: venueReduceOrdersLockPositionSize(exchangeName),
+  });
 };

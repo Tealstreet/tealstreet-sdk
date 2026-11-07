@@ -132,3 +132,7 @@ export const venueSupportsInfinityStops = (exchangeName: ExchangeName): boolean 
  */
 export const venueAutoDownsizesReduceOrders = (exchangeName: ExchangeName): boolean =>
   Boolean(exchangeMetadata[exchangeName]?.autoDownSizeReduceOrders);
+
+/** Resting close orders hold position size on this venue (Bitget family): only the free part closes. */
+export const venueReduceOrdersLockPositionSize = (exchangeName: ExchangeName): boolean =>
+  Boolean(exchangeMetadata[exchangeName]?.reduceOrdersLockPositionSize);

@@ -93,7 +93,7 @@ fn ready_reads(
         &format!(
             "{root}/{}",
             if variant == Variant::PortfolioMargin {
-                "conditional/openOrders"
+                "algo/openAlgoOrders"
             } else {
                 "openAlgoOrders"
             }
@@ -101,7 +101,7 @@ fn ready_reads(
         200,
         &match full_close {
             None => "[]".to_owned(),
-            Some(close) if variant == Variant::PortfolioMargin => format!(r#"[{{"newClientStrategyId":"stop","strategyId":42,"strategyStatus":"NEW","strategyType":"STOP_MARKET","origQty":"7","price":"0","side":"SELL","stopPrice":"90","symbol":"BTCUSDT","workingType":"MARK_PRICE","closePosition":{close}}}]"#),
+            Some(close) if variant == Variant::PortfolioMargin => format!(r#"[{{"clientAlgoId":"stop","algoId":42,"algoStatus":"NEW","orderType":"STOP_MARKET","quantity":"{}","price":"0","side":"SELL","triggerPrice":"90","symbol":"BTCUSDT","workingType":"MARK_PRICE","closePosition":{close}}}]"#, if close { "0" } else { "7" }),
             Some(close) => format!(r#"[{{"algoId":42,"clientAlgoId":"stop","algoType":"CONDITIONAL","orderType":"STOP_MARKET","symbol":"BTCUSDT","side":"SELL","quantity":"{}","algoStatus":"NEW","triggerPrice":"90","workingType":"MARK_PRICE","closePosition":{close}}}]"#, if close {"0"} else {"7"}),
         },
     );
@@ -268,7 +268,7 @@ fn duplicate_amendment_does_not_cancel_twice() {
 
 fn conditional_path(variant: Variant) -> &'static str {
     if variant == Variant::PortfolioMargin {
-        "/papi/v1/um/conditional/order"
+        "/papi/v1/um/algo/order"
     } else {
         "/fapi/v1/algoOrder"
     }
@@ -298,18 +298,21 @@ fn conditional_amend_accepts_its_distinct_cancellation_contract_and_preserves_fu
             let cancel = h.take(conditional_path(variant));
             assert_eq!(cancel.method, Method::Delete);
             let ack = if variant == Variant::PortfolioMargin {
-                r#"{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"stop","strategyStatus":"CANCELED","origQty":"7"}"#
+                r#"{"complete":true}"#
             } else {
                 r#"{"algoId":42,"clientAlgoId":"stop","code":"200","msg":"success"}"#
             };
             h.reply(cancel.id, 200, "", ack);
+            if variant == Variant::PortfolioMargin {
+                h.pm_cancel_proof(42, "stop", "BTCUSDT");
+            }
             let replacement = h.take(conditional_path(variant));
             assert_eq!(
                 replacement.method,
                 Method::Post,
                 "{variant:?} full_close={full_close}"
             );
-            if full_close && variant == Variant::UsdM {
+            if full_close {
                 assert_eq!(quantity(&replacement.url), None);
                 assert!(replacement.url.contains("closePosition=true"));
             } else {
@@ -325,8 +328,8 @@ fn malformed_unknown_or_mismatched_conditional_cancellation_never_replaces() {
         let mut bad = vec!["{}", r#"{"code":-2011,"msg":"Unknown order sent."}"#];
         if variant == Variant::PortfolioMargin {
             bad.extend([
-                r#"{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"other","strategyStatus":"CANCELED"}"#,
-                r#"{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"stop","strategyStatus":"TRIGGERED"}"#,
+                r#"{"symbol":"BTCUSDT","algoId":42,"clientAlgoId":"other","algoStatus":"CANCELED"}"#,
+                r#"{"symbol":"BTCUSDT","algoId":42,"clientAlgoId":"stop","algoStatus":"TRIGGERED"}"#,
             ]);
         } else {
             bad.extend([
@@ -394,11 +397,19 @@ fn pm_reused_strategy_id_is_not_changed_by_an_old_cancellation() {
             let cancel = h.take(conditional_path(variant));
             h.message("/pm/ws", r#"{"e":"CONDITIONAL_ORDER_TRADE_UPDATE","fs":"UM","so":{"s":"BTCUSDT","c":"stop","si":43,"S":"SELL","st":"STOP_MARKET","q":"9","p":"0","sp":"89","os":"NEW","R":true,"wt":"MARK_PRICE","ps":"BOTH","cp":false,"i":0}}"#);
             let before = h.engine.store().order("stop").unwrap().clone();
-            h.reply(cancel.id, 200, "", if unknown {
-                r#"{"code":-2011,"msg":"Unknown order sent."}"#
-            } else {
-                r#"{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"stop","strategyStatus":"CANCELED","origQty":"7"}"#
-            });
+            h.reply(
+                cancel.id,
+                200,
+                "",
+                if unknown {
+                    r#"{"code":-2011,"msg":"Unknown order sent."}"#
+                } else {
+                    r#"{"complete":true}"#
+                },
+            );
+            if h.has_request("/papi/v1/um/algo/algoOrder") {
+                h.pm_cancel_proof(42, "stop", "BTCUSDT");
+            }
             assert_eq!(h.engine.store().order("stop"), Some(&before));
             assert!(h.only_reconcile_reads());
             if amend_order || !unknown {
@@ -421,7 +432,7 @@ fn pm_symbol_cancel_applies_only_to_captured_native_incarnations() {
                 symbol: "BTCUSDT".into(),
             }));
             let regular = h.take("/papi/v1/um/allOpenOrders");
-            let strategy = h.take("/papi/v1/um/conditional/allOpenOrders");
+            let strategy = h.take("/papi/v1/um/algo/allOpenOrders");
             if reuse_regular {
                 h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"maker","i":13,"S":"BUY","o":"LIMIT","f":"GTC","q":"9","p":"101","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}"#);
             }
@@ -465,8 +476,8 @@ fn pm_symbol_cancel_applies_only_to_captured_native_incarnations() {
                 200,
                 &format!("[{}]", regular_rows.join(",")),
             );
-            h.respond("/papi/v1/um/conditional/openOrders", 200, if reuse_strategy {
-                r#"[{"newClientStrategyId":"stop","strategyId":43,"strategyStatus":"NEW","strategyType":"STOP_MARKET","origQty":"9","price":"0","side":"SELL","stopPrice":"89","symbol":"BTCUSDT","workingType":"MARK_PRICE"}]"#
+            h.respond("/papi/v1/um/algo/openAlgoOrders", 200, if reuse_strategy {
+                r#"[{"clientAlgoId":"stop","algoId":43,"algoStatus":"NEW","orderType":"STOP_MARKET","quantity":"9","price":"0","side":"SELL","triggerPrice":"89","symbol":"BTCUSDT","workingType":"MARK_PRICE"}]"#
             } else {"[]"});
             assert_eq!(
                 h.engine.store().orders().len(),
@@ -523,10 +534,10 @@ fn pm_cross_symbol_client_reuse_fences_the_captured_native_after_row_removal() {
             } else {
                 "/papi/v1/um/order"
             });
-            let conditional = bulk.then(|| h.take("/papi/v1/um/conditional/allOpenOrders"));
+            let conditional = bulk.then(|| h.take("/papi/v1/um/algo/allOpenOrders"));
             h.advance(10_000.0);
             h.respond("/papi/v1/um/openOrders", 200, "[]");
-            h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+            h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
             assert!(h.engine.store().order("maker").is_none());
             let unknown = r#"{"code":-2011,"msg":"Unknown order sent."}"#;
             h.reply(cancel.id, 400, "", unknown);
@@ -540,7 +551,7 @@ fn pm_cross_symbol_client_reuse_fences_the_captured_native_after_row_removal() {
                 r#"[{{"symbol":"{symbol}","orderId":{native},"clientOrderId":"maker","price":"101","origQty":"9","executedQty":"0","type":"LIMIT","side":"BUY","status":"NEW"}}]"#
             );
             h.respond("/papi/v1/um/openOrders", 200, &stale);
-            h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+            h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
             assert!(
                 h.engine.store().order("maker").is_none(),
                 "bulk={bulk} {symbol}/{native}: stale replica reopened the canceled native incarnation"
@@ -586,7 +597,7 @@ fn pm_old_symbol_cancel_success_cannot_modify_a_reused_client_row_or_amend_it() 
             assert_eq!(h.engine.store().order("maker"), Some(&before));
             h.advance(10_000.0);
             h.respond("/papi/v1/um/openOrders", 200, r#"[{"symbol":"BTCUSDT","orderId":12,"clientOrderId":"maker","price":"100","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED"}]"#);
-            h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+            h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
             assert_eq!(
                 h.engine.store().order("maker"),
                 Some(&before),
@@ -619,18 +630,19 @@ fn pm_old_symbol_strategy_ack_and_stream_cannot_retire_the_new_symbol_row() {
             h.message("/pm/ws", &update("BTCUSDT", 42, "CANCELED"));
             assert_eq!(h.engine.store().order("stop"), Some(&before));
         }
-        h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"stop","strategyStatus":"CANCELED"}"#);
+        h.reply(cancel.id, 200, "", r#"{"complete":true}"#);
+        h.pm_cancel_proof(42, "stop", "BTCUSDT");
         assert!(h.result(99).unwrap().is_err());
         h.message("/pm/ws", &update("BTCUSDT", 42, "CANCELED"));
         assert_eq!(h.engine.store().order("stop"), Some(&before));
         h.advance(10_000.0);
         h.respond("/papi/v1/um/openOrders", 200, "[]");
-        h.respond("/papi/v1/um/conditional/openOrders", 200, r#"[{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"stop","strategyStatus":"NEW","strategyType":"STOP_MARKET","origQty":"7","price":"0","side":"SELL","stopPrice":"90"}]"#);
+        h.respond("/papi/v1/um/algo/openAlgoOrders", 200, r#"[{"symbol":"BTCUSDT","algoId":42,"clientAlgoId":"stop","algoStatus":"NEW","orderType":"STOP_MARKET","quantity":"7","price":"0","side":"SELL","triggerPrice":"90"}]"#);
         assert_eq!(h.engine.store().order("stop"), Some(&before));
         h.message("/pm/ws", &update("ETHUSDT", 43, "NEW"));
         h.advance(10_000.0);
         h.respond("/papi/v1/um/openOrders", 200, "[]");
-        h.respond("/papi/v1/um/conditional/openOrders", 200, r#"[{"symbol":"ETHUSDT","strategyId":43,"newClientStrategyId":"stop","strategyStatus":"NEW","strategyType":"STOP_MARKET","origQty":"9","price":"0","side":"SELL","stopPrice":"89"}]"#);
+        h.respond("/papi/v1/um/algo/openAlgoOrders", 200, r#"[{"symbol":"ETHUSDT","algoId":43,"clientAlgoId":"stop","algoStatus":"NEW","orderType":"STOP_MARKET","quantity":"9","price":"0","side":"SELL","triggerPrice":"89"}]"#);
         assert_eq!(h.engine.store().orders().len(), 1);
         let current = h.engine.store().order("stop").unwrap();
         assert_eq!(
@@ -649,7 +661,7 @@ fn pm_known_old_snapshot_before_cancel_ack_preserves_new_symbol_but_unseen_nativ
             symbol: "BTCUSDT".into(),
         }));
         let regular = h.take("/papi/v1/um/allOpenOrders");
-        let strategy = h.take("/papi/v1/um/conditional/allOpenOrders");
+        let strategy = h.take("/papi/v1/um/algo/allOpenOrders");
         h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"ETHUSDT","c":"maker","i":13,"S":"BUY","o":"LIMIT","f":"GTC","q":"9","p":"101","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}"#);
         h.message("/pm/ws", r#"{"e":"CONDITIONAL_ORDER_TRADE_UPDATE","fs":"UM","so":{"s":"ETHUSDT","c":"stop","si":43,"S":"SELL","st":"STOP_MARKET","q":"9","p":"0","sp":"89","os":"NEW","R":true,"wt":"MARK_PRICE","ps":"BOTH","cp":false,"i":0}}"#);
         let new_regular = h.engine.store().order("maker").unwrap().clone();
@@ -663,7 +675,7 @@ fn pm_known_old_snapshot_before_cancel_ack_preserves_new_symbol_but_unseen_nativ
         };
         let strategies = |native: u64| {
             format!(
-                r#"[{{"symbol":"BTCUSDT","strategyId":{native},"newClientStrategyId":"stop","strategyStatus":"NEW","strategyType":"STOP_MARKET","origQty":"7","price":"0","side":"SELL","stopPrice":"90"}}]"#
+                r#"[{{"symbol":"BTCUSDT","algoId":{native},"clientAlgoId":"stop","algoStatus":"NEW","orderType":"STOP_MARKET","quantity":"7","price":"0","side":"SELL","triggerPrice":"90"}}]"#
             )
         };
         h.advance(10_000.0);
@@ -678,14 +690,14 @@ fn pm_known_old_snapshot_before_cancel_ack_preserves_new_symbol_but_unseen_nativ
             "[]".to_owned()
         };
         h.respond("/papi/v1/um/openOrders", 200, &old_orders);
-        h.respond("/papi/v1/um/conditional/openOrders", 200, &old_strategies);
+        h.respond("/papi/v1/um/algo/openAlgoOrders", 200, &old_strategies);
         assert_eq!(h.engine.store().order("maker"), Some(&new_regular));
         assert_eq!(h.engine.store().order("stop"), Some(&new_strategy));
         // A genuinely new native generation can establish the next binding by REST.
         h.message("/pm/ws", "{}");
         h.advance(10_000.0);
         h.respond("/papi/v1/um/openOrders", 200, &orders(14));
-        h.respond("/papi/v1/um/conditional/openOrders", 200, &strategies(44));
+        h.respond("/papi/v1/um/algo/openAlgoOrders", 200, &strategies(44));
         for id in ["maker", "stop"] {
             let row = h.engine.store().order(id).unwrap();
             assert_eq!(
