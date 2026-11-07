@@ -219,6 +219,140 @@ fn temporary_clock_rollback_cannot_replay_an_unseen_historical_fill() {
 }
 
 #[test]
+fn corrected_clock_then_frozen_sleep_preserves_proven_live_order_suffix() {
+    const START: f64 = 1_800_000_000_000.;
+    let true_start = START - 7_200_000.;
+    for (sleep, fill_after_capture) in [(false, false), (true, true), (true, false)] {
+        let mut h = Harness::new_at(START);
+        h.open_private();
+        h.seed();
+        h.e.take_frame(START);
+        assert!(h.e.sync_host_time(START, START));
+        assert!(h.e.sync_host_time(START + 100., true_start + 100.));
+        let first = startup_execution(
+            "proven-live",
+            1,
+            60000,
+            true_start + 1.,
+            true_start + 50.,
+            "partially_filled",
+        );
+        h.handle(
+            START + 100.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &first,
+            },
+        );
+        h.collect();
+        assert_eq!(
+            h.e.take_frame(START + 100.)
+                .map(executions)
+                .unwrap_or_default(),
+            [(60000., 0.001)]
+        );
+        let utc = if sleep {
+            START + 200.
+        } else {
+            true_start + 200.
+        };
+        assert!(h.e.sync_host_time(START + 200., utc));
+        let updated = if fill_after_capture {
+            START + 150.
+        } else if sleep {
+            true_start + 3_600_000. + 50.
+        } else {
+            true_start + 150.
+        };
+        // An unpriceable observation must not consume proven live quantity as
+        // a historical floor when the clock has moved past its updateTime.
+        let unpriceable = startup_execution(
+            "proven-live",
+            2,
+            0,
+            true_start + 1.,
+            updated,
+            "partially_filled",
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &unpriceable,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+        let suffix = startup_execution(
+            "proven-live",
+            2,
+            60000,
+            true_start + 1.,
+            updated,
+            "partially_filled",
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &suffix,
+            },
+        );
+        h.collect();
+        assert_eq!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default(),
+            [(60000., 0.001)],
+            "sleep={sleep}, fill_after_capture={fill_after_capture}"
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &suffix,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+        // Provenance belongs to this order. An unseen old terminal order must
+        // still remain historical after the same correction/sleep sequence.
+        let old = startup_execution(
+            "unseen-before-session",
+            1,
+            60000,
+            true_start - 1000.,
+            true_start - 500.,
+            "filled",
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &old,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
 fn stale_rest_cannot_reopen_a_filled_order() {
     let mut h = Harness::new();
     h.open_private();

@@ -8,7 +8,7 @@
 //! known, margin isolated); the sources, sorted by order id; the fill progress
 //! in its eviction order. Strings are a u32 length and UTF-8 bytes; an absent
 //! value is NaN.
-use super::{Account, Source};
+use super::{Account, ExecutionPrefix, Source};
 use safe_cex_engine::model::MarginType;
 use std::collections::{HashMap, VecDeque};
 
@@ -103,7 +103,7 @@ impl Account {
         let fills: Vec<_> = self
             .fill_order
             .iter()
-            .filter_map(|id| Some((id, *self.fills.get(id)?)))
+            .filter_map(|id| Some((id, self.fills.get(id)?.baseline)))
             .collect();
         out.extend_from_slice(&(fills.len() as u32).to_le_bytes());
         for (id, (qty, value)) in fills {
@@ -126,7 +126,19 @@ impl Account {
         self.fills = HashMap::new();
         self.fill_order = VecDeque::new();
         for (id, progress) in fills {
-            if self.fills.insert(id.clone(), progress).is_none() {
+            // Frame-fed writers need quantities, not authority to report live
+            // executions. A source replacement cannot inherit local provenance.
+            if self
+                .fills
+                .insert(
+                    id.clone(),
+                    ExecutionPrefix {
+                        baseline: progress,
+                        live: false,
+                    },
+                )
+                .is_none()
+            {
                 self.fill_order.push_back(id);
             }
         }
@@ -213,9 +225,12 @@ mod tests {
             },
         );
         account.store_execution_prefix("order-1", 2., None);
+        account.fills.get_mut("order-1").unwrap().live = true;
         let bytes = account.export_venue_state();
 
         let mut copy = Account::new();
+        copy.store_execution_prefix("order-1", 1., Some(60_000.));
+        copy.fills.get_mut("order-1").unwrap().live = true;
         assert!(copy.apply_venue_state(&bytes));
         assert!(copy.mode_loaded);
         assert_eq!(copy.margin, Some(MarginType::Isolated));
@@ -229,7 +244,8 @@ mod tests {
             (70_000., (0.5, Some(30_000.)))
         );
         assert!(source.sl.is_nan());
-        assert_eq!(copy.fills["order-1"], (2., None));
+        assert_eq!(copy.fills["order-1"].baseline, (2., None));
+        assert!(!copy.execution_is_live("order-1"));
         assert_eq!(
             copy.export_venue_state(),
             bytes,

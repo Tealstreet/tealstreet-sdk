@@ -73,11 +73,20 @@ UTC; only the poll cadence uses scheduling time.
 
 BloFin retains immutable UTC and scheduling captures of each execution boundary.
 Each observation projects the scheduling capture through the current calibration
-and caps it at the captured UTC. This admits new live fills after a backward UTC
+and caps it at the captured UTC for an order without proven live provenance.
+This admits new live fills after a backward UTC
 correction and restores the original boundary when UTC recovers; a temporary
 rollback cannot permanently admit historical fills. Forward corrections never
 advance boundaries past their captured UTC, so accumulated live fills after a
 sleep remain live even when scheduling stopped.
+
+After a validated live execution, the order's bounded cumulative prefix records
+that live provenance. Later clock corrections or sleeps cannot reclassify its
+progress as historical or consume unpriceable live quantity into a historical
+floor. Pricing and deduplication still use the last validated cumulative prefix.
+Provenance is evicted with that prefix; frame-fed writers receive cumulative
+quantities without inheriting authority to report native live executions. An
+unseen order still passes through the historical-prefix guard.
 
 Controls reproduce both directions of a 162-day correction through the default
 SDK clock, a late initial worker sync, missing worker sync, disposal, explicit

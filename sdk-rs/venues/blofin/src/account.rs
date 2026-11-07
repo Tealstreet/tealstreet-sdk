@@ -93,6 +93,14 @@ struct Execution {
     updated: f64,
 }
 
+#[derive(Clone, Copy)]
+struct ExecutionPrefix {
+    baseline: (f64, Option<f64>),
+    // Once this order has emitted a proven live delta, clock corrections may
+    // not classify its subsequent cumulative progress as historical.
+    live: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct Account {
     pub(super) authenticated: bool,
@@ -104,6 +112,7 @@ pub(crate) struct Account {
     pub settings_revision: u64,
     orders_busy: bool,
     startup_started: bool,
+    /// Admission bound for unproven orders; a live prefix owns its provenance.
     session_started: f64,
     session_started_at: f64,
     orders_seeded: bool,
@@ -129,7 +138,7 @@ pub(crate) struct Account {
     /// The typed cause of the read failure being delivered, for its waiters.
     pub(crate) read_error: Option<VenueError>,
     pub sources: HashMap<String, Source>,
-    fills: HashMap<String, (f64, Option<f64>)>,
+    fills: HashMap<String, ExecutionPrefix>,
     fill_order: VecDeque<String>,
     terminal: HashSet<String>,
     terminal_order: VecDeque<String>,
@@ -155,6 +164,12 @@ pub(crate) enum StartupRead {
     Mode,
 }
 impl Account {
+    fn execution_baseline(&self, id: &str) -> Option<(f64, Option<f64>)> {
+        self.fills.get(id).map(|prefix| prefix.baseline)
+    }
+    fn execution_is_live(&self, id: &str) -> bool {
+        self.fills.get(id).is_some_and(|prefix| prefix.live)
+    }
     fn execution_marks(&self, now: f64, utc: f64) -> (f64, f64) {
         // Derive boundaries from immutable captures: a temporary rollback must
         // not persist after UTC recovers. Cap at the captured UTC so a suspended
@@ -168,7 +183,7 @@ impl Account {
     }
     fn execution_progress(&mut self, id: &str, qty: f64, value: Option<f64>) {
         if !matches!(
-            execution_prefix(self.fills.get(id).copied(), qty, value),
+            execution_prefix(self.execution_baseline(id), qty, value),
             Ok(true)
         ) {
             return;
@@ -176,13 +191,20 @@ impl Account {
         self.store_execution_prefix(id, qty, value);
     }
     fn historical_execution_floor(&mut self, id: &str, qty: f64) {
-        if qty.is_finite() && qty > self.fills.get(id).map_or(0.0, |prefix| prefix.0) {
+        if qty.is_finite() && qty > self.execution_baseline(id).map_or(0.0, |prefix| prefix.0) {
             // Unpriceable pre-session quantity is history, never a live suffix.
             self.store_execution_prefix(id, qty, None);
         }
     }
     fn store_execution_prefix(&mut self, id: &str, qty: f64, value: Option<f64>) {
-        self.fills.insert(id.to_owned(), (qty, value));
+        let live = self.execution_is_live(id);
+        self.fills.insert(
+            id.to_owned(),
+            ExecutionPrefix {
+                baseline: (qty, value),
+                live,
+            },
+        );
         self.fill_order.retain(|key| key != id);
         self.fill_order.push_back(id.to_owned());
         while self.fill_order.len() > 500 {
@@ -280,7 +302,7 @@ impl Blofin {
         qty: f64,
         value: Option<f64>,
     ) {
-        match execution_prefix(self.account.fills.get(id).copied(), qty, value) {
+        match execution_prefix(self.account.execution_baseline(id), qty, value) {
             Ok(true) => self.account.execution_progress(id, qty, value),
             Ok(false) => {}
             Err(error) => cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline")),
@@ -543,7 +565,9 @@ impl Blofin {
         self.account.remember_terminal(id);
     }
     pub(crate) fn filled_native(&self, id: &str) -> f64 {
-        self.account.fills.get(id).map_or(0.0, |value| value.0)
+        self.account
+            .execution_baseline(id)
+            .map_or(0.0, |value| value.0)
     }
     pub(crate) fn signed(&self) -> bool {
         !self.options.public_data_only && self.options.identities.primary.is_some()
@@ -2208,10 +2232,11 @@ impl Blofin {
         } else {
             &row.order_id
         };
+        let proven_live = self.account.execution_is_live(id);
         let qty = row.filled_size.0;
         let value = qty * row.average_price.0;
         if qty > 0.0 && (row.average_price.0 <= 0.0 || !value.is_finite() || value <= 0.0) {
-            if updated > 0.0 && updated < session_started {
+            if !proven_live && updated > 0.0 && updated < session_started {
                 self.account.historical_execution_floor(id, qty);
             } else {
                 cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {id}: invalid cumulative quote value; retained proven execution baseline"));
@@ -2242,7 +2267,8 @@ impl Blofin {
             && created <= cx.protocol_now()
             && (updated == 0.0 || created <= updated);
         let known_prefix = self.account.fills.contains_key(id.as_ref());
-        if !session_order
+        if !proven_live
+            && !session_order
             && (!self.account.orders_seeded || !known_prefix)
             && !(updated > 0.0 && updated < session_started)
         {
@@ -2264,7 +2290,7 @@ impl Blofin {
                     .iter()
                     .filter(|queued| queued.fill.order_id == id.as_ref())
                     .fold(
-                        self.account.fills.get(id.as_ref()).copied(),
+                        self.account.execution_baseline(id.as_ref()),
                         |prefix, queued| {
                             if matches!(
                                 execution_prefix(prefix, queued.qty, Some(queued.value)),
@@ -2287,8 +2313,7 @@ impl Blofin {
                     // baseline, so later cumulative rows cannot replay its prefix.
                     let previous = self
                         .account
-                        .fills
-                        .get(&old.fill.order_id)
+                        .execution_baseline(&old.fill.order_id)
                         .map_or(0.0, |p| p.0);
                     if old.qty > previous {
                         self.seed_execution_prefix(
@@ -2372,9 +2397,7 @@ impl Blofin {
         } = execution;
         let previous = self
             .account
-            .fills
-            .get(&fill.order_id)
-            .copied()
+            .execution_baseline(&fill.order_id)
             .unwrap_or((0.0, Some(0.0)));
         if qty <= previous.0 {
             if qty == previous.0 && previous.1.is_none() {
@@ -2384,7 +2407,9 @@ impl Blofin {
             return;
         }
         let (session_started, _) = self.account.execution_marks(cx.now, cx.protocol_now());
-        let historical = updated > 0.0 && updated < session_started;
+        let historical = !self.account.execution_is_live(&fill.order_id)
+            && updated > 0.0
+            && updated < session_started;
         // Missing historical quote value cannot prove the suffix price. This
         // observation supplies the quote baseline for subsequent live executions.
         let Some(previous_value) = previous.1 else {
@@ -2437,6 +2462,11 @@ impl Blofin {
         let next = prepared.next();
         self.account
             .execution_progress(&fill.order_id, next.quantity(), next.value());
+        // Provenance belongs to the bounded prefix, so it survives updates but
+        // cannot outlive eviction or a replacement source's state.
+        if let Some(prefix) = self.account.fills.get_mut(&fill.order_id) {
+            prefix.live = true;
+        }
         fill.price = prepared.price();
         fill.amount = prepared.amount();
         cx.fill(fill);
