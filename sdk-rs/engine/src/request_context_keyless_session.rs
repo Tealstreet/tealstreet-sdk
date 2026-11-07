@@ -47,25 +47,26 @@ impl ContextRegistry {
             .transpose()
     }
 
-    pub(in crate::engine) fn session_call(&self, owner: Owner) -> bool {
-        match self.owner_entry(owner).map(|entry| &entry.phase) {
+    /// Whether this leg rides the login Session: every Preflight leg of a
+    /// Session root, and each Plan leg as its call declares.
+    pub(in crate::engine) fn session_call(&self, context: &Context) -> bool {
+        match self.owner_entry(context.owner()).map(|entry| &entry.phase) {
             Some(CommandPhase::Preflight(state)) => state.session_root().is_some(),
-            Some(CommandPhase::Planned(state)) => state.session_call(),
+            Some(CommandPhase::Planned(state)) => state.session_call(context),
             _ => false,
         }
     }
 
+    /// The validated root's egress; the caller keeps it only for a Session leg.
     pub(in crate::engine) fn keyless_session_egress(
         &self,
         owner: Owner,
         identities: &crate::signing::Identities,
     ) -> Result<Option<Egress>, Error> {
         let generation = self.validate_keyless_session(owner, identities)?;
-        Ok(generation
-            .filter(|_| self.session_call(owner))
-            .map(|generation| {
-                Egress::Session(crate::request_context::SessionEgress::new(generation))
-            }))
+        Ok(generation.map(|generation| {
+            Egress::Session(crate::request_context::SessionEgress::new(generation))
+        }))
     }
 
     #[cfg(test)]

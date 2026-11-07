@@ -646,3 +646,31 @@ fn nonfinite_acquisition_retry_recovers_once_on_a_finite_poll_at_its_original_bo
         );
     }
 }
+
+/// The control-free public feed reads a frame one millisecond before the idle
+/// deadline; a frame exactly at the deadline, before the watchdog fires, is not
+/// reduced and retires only that socket.
+#[test]
+fn a_public_frame_at_the_idle_deadline_is_not_reduced() {
+    const CONTRACTS: &str = r#"{"dataType":"market.contracts","data":{"contracts":[{"symbol":"BTC-USDT","tradePrice":"90","fairPrice":"91","indexPrice":"92","fundingRate":"0.01"}]}}"#;
+    const LATE: &str = r#"{"dataType":"market.contracts","data":{"contracts":[{"symbol":"BTC-USDT","tradePrice":"95","fairPrice":"96","indexPrice":"97","fundingRate":"0.01"}]}}"#;
+    let mut h = Harness::new(false, false);
+    let socket = h.public.unwrap();
+    h.event(Event::WsOpened { socket });
+    let opened = h.now;
+    // `event` advances the clock one millisecond before handling.
+    h.now = opened + 19_999. - 1.;
+    h.event(Event::WsMessage {
+        socket,
+        text: CONTRACTS,
+    });
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 90.);
+    h.now = opened + 39_999. - 1.;
+    let late = h.event(Event::WsMessage { socket, text: LATE });
+    assert!(
+        late.iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+    assert!(late.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 90.);
+}
