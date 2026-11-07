@@ -262,7 +262,7 @@ impl BitgetFutures {
     fn close_event(
         &self,
         cx: &mut Cx<'_, Pending>,
-        request: &CloseRequest,
+        close: &CloseRequest,
         diagnostic: Diagnostic<'_>,
     ) {
         let Diagnostic {
@@ -275,10 +275,10 @@ impl BitgetFutures {
             .store
             .positions()
             .iter()
-            .find(|p| p.symbol == request.symbol && p.side == request.side);
+            .find(|p| p.symbol == close.symbol && p.side == close.side);
         let step = cx
             .store
-            .market(&request.symbol)
+            .market(&close.symbol)
             .map_or(0.0, |m| m.precision.amount);
         let mut reduce_count = 0;
         let mut reduce_size = 0.0;
@@ -286,9 +286,9 @@ impl BitgetFutures {
         let mut plan_size = 0.0;
         let mut seen = HashSet::new();
         for order in cx.store.orders().iter().filter(|o| {
-            o.symbol == request.symbol
+            o.symbol == close.symbol
                 && o.side
-                    == match request.side {
+                    == match close.side {
                         PositionSide::Long => OrderSide::Sell,
                         PositionSide::Short => OrderSide::Buy,
                     }
@@ -326,10 +326,10 @@ impl BitgetFutures {
                 "accountMode",
                 if self.account.uta { "uta" } else { "classic" }.into(),
             ),
-            ("symbol", request.symbol.clone().into()),
+            ("symbol", close.symbol.clone().into()),
             (
                 "side",
-                match request.side {
+                match close.side {
                     PositionSide::Long => "long",
                     PositionSide::Short => "short",
                 }
@@ -337,11 +337,11 @@ impl BitgetFutures {
             ),
             (
                 "requestedSize",
-                formatted_size(request.requested, step).into(),
+                formatted_size(close.requested, step).into(),
             ),
             (
                 "submittedSize",
-                formatted_size(request.submitted, step).into(),
+                formatted_size(close.submitted, step).into(),
             ),
             (
                 "positionTotal",
@@ -375,7 +375,13 @@ impl BitgetFutures {
         if let Some(booked) = booked {
             fields.push(("bookedSize", formatted_size(booked, step).into()));
         }
-        // PR A's venue-private available/locked receipt will be bound after it lands.
+        if let Some(split) = self.admitted_split(cx, &close.symbol, close.side) {
+            fields.push((
+                "positionAvailable",
+                formatted_size(split.available, step).into(),
+            ));
+            fields.push(("positionLocked", formatted_size(split.locked, step).into()));
+        }
         cx.event(
             Level::Warn,
             "bitget.close.diagnostic",
