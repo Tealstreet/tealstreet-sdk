@@ -910,10 +910,11 @@ test('#3219 drb public consumers (run 42352093025) retain CI headroom for Coinba
   for (const venue of ['coinbase', 'coinbasespot']) {
     const family = venueFamily(venue);
     assert.equal(family, 'coinbase');
-    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    const current = WASM_VENUE_OVERRIDES[family];
+    assert.ok(current >= cap);
     assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
-    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+    assert.equal(wasmBudgetError(current, 'venue', family), undefined);
+    assert.match(wasmBudgetError(current + 1, 'venue', family), /exceeds/);
   }
 });
 
@@ -1055,4 +1056,17 @@ test('#3264 Kraken Spot ambiguous-write fence (run 42403521233 at d1f8b3c2e40) r
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
+
+test('#3270 (run 42404311752 at 46e5a6918ec) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['coinbase', 1943133, 1953792],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
