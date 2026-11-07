@@ -50,7 +50,9 @@ export class PositionsCommand extends BaseCommand {
     const filteredExchange = {
       ...ctx.exchange,
       store: {
-        ...ctx.exchange?.store,
+        markets: ctx.exchange?.store?.markets,
+        tickers: ctx.exchange?.store?.tickers,
+        balance: ctx.exchange?.store?.balance,
         positions: filteredPositions,
       },
     };
