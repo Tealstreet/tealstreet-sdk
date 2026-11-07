@@ -1605,3 +1605,146 @@ fn coupled_leverage_released_failure_never_continues_or_resends() {
         ));
     }
 }
+
+#[test]
+fn released_429_signature_code_cannot_resend() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::CancelSymbolOrders {
+        command: OWNER,
+        symbol: "BTCUSD-PERP".into(),
+    }));
+    let r = h.http("private/cancel-all-orders");
+    h.actions.clear();
+    h.event(Event::HttpResponse {
+        request: r.id,
+        response: Response {
+            status: 429,
+            headers: "",
+            body: r#"{"code":40101,"message":"bad signature"}"#,
+        },
+    });
+    assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(r)
+        if r.url.contains("private/cancel-all-orders"))));
+    pace(&mut h);
+    assert!(
+        h.actions.iter().all(|a| match a {
+            Action::Http(r) => r.url.contains("private/get-positions"),
+            _ => true,
+        }),
+        "an ambiguous cancel cannot send another write"
+    );
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::Unknown));
+}
+#[test]
+fn released_408_rate_body_stays_unknown() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::CancelSymbolOrders {
+        command: OWNER,
+        symbol: "BTCUSD-PERP".into(),
+    }));
+    let r = h.http("private/cancel-all-orders");
+    h.actions.clear();
+    h.event(Event::HttpResponse {
+        request: r.id,
+        response: Response {
+            status: 408,
+            headers: "",
+            body: r#"{"code":42901,"message":"rate limited"}"#,
+        },
+    });
+    pace(&mut h);
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::Unknown));
+}
+#[test]
+fn released_503_rate_body_stays_unknown() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::CancelSymbolOrders {
+        command: OWNER,
+        symbol: "BTCUSD-PERP".into(),
+    }));
+    let r = h.http("private/cancel-all-orders");
+    h.actions.clear();
+    h.event(Event::HttpResponse {
+        request: r.id,
+        response: Response {
+            status: 503,
+            headers: "",
+            body: r#"{"code":42901,"message":"rate limited"}"#,
+        },
+    });
+    pace(&mut h);
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::Unknown));
+}
+
+#[test]
+fn released_ambiguous_refusal_codes_preserve_the_placement_fence() {
+    for status in [408, 429, 500, 503] {
+        for code in [306, 415, 43005, 42901] {
+            let mut h = Harness::new();
+            h.load();
+            h.actions.clear();
+            h.event(Event::Command(Command::PlaceOrders {
+                command: OWNER,
+                orders: vec![placement("ambiguous")],
+            }));
+            let request = h.http("private/create-order");
+            h.actions.clear();
+            let body = format!(r#"{{"code":{code},"message":"native refusal"}}"#);
+            h.event(Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            });
+            assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(r)
+                if r.url.contains("private/create-order"))));
+            pace(&mut h);
+            only_reconcile_read(&h.actions);
+            let terminal = terminals(&h.actions);
+            assert_eq!(terminal.len(), 1);
+            assert_eq!(
+                terminal[0].as_ref().unwrap_err().outcome,
+                Some(Outcome::Unknown),
+                "{status}/{code}"
+            );
+            h.actions.clear();
+            h.event(Event::Command(Command::PlaceOrders {
+                command: OWNER + 1,
+                orders: vec![placement("blocked-peer")],
+            }));
+            assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(
+                h.actions.iter().any(|a| matches!(a,
+                    Action::Notice(Notice::CommandFailed { command, error })
+                        if *command == OWNER + 1 && error.outcome == Some(Outcome::NotSent)
+                )),
+                "{status}/{code}: uncertain placement must keep its fence"
+            );
+            h.actions.clear();
+            h.event(Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            });
+            assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(terminals(&h.actions).is_empty());
+        }
+    }
+}
