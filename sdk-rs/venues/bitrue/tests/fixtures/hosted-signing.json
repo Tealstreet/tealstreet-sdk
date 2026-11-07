@@ -86,5 +86,29 @@
     "body": "{\"contractName\":\"E-BTC-USDT\",\"leverage\":10}",
     "payload": "1700000000123POST/fapi/v2/level_edit{\"contractName\":\"E-BTC-USDT\",\"leverage\":10}",
     "signature": "22467ed710a8b20a952bd9b2c650c999afc20997672c518848278c74df91697f"
+  },
+  {
+    "label": "listen-delete",
+    "method": "DELETE",
+    "url": "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey/fixture-token_1",
+    "body": null,
+    "payload": "1700000000123DELETE/user_stream/api/v1/listenKey/fixture-token_1",
+    "signature": "65b2a48d97479980fa56378f9709c01088a7db404c8842119a8e57414b26510e"
+  },
+  {
+    "label": "absolute-account",
+    "method": "GET",
+    "url": "https://fapi.bitrue.com/fapi/v2/account",
+    "body": null,
+    "payload": "1700000000123GET/fapi/v2/account",
+    "signature": "694edd969cf2feef0407d3eb24b08c4e45921551756c96539ec0652499f74fb7"
+  },
+  {
+    "label": "listen-query",
+    "method": "PUT",
+    "url": "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey/fixture-token_1?tag=a%2Bb&flag=%2F",
+    "body": null,
+    "payload": "1700000000123PUT/user_stream/api/v1/listenKey/fixture-token_1?tag=a%2Bb&flag=%2F",
+    "signature": "0f716537ef31adc6ec9d5b1b7546e0d4b5a1ba1856c40eed42e300e91c5c1a4c"
   }
 ]

@@ -102,18 +102,19 @@ export const finishWooRequest = (prepared: ReturnType<typeof prepareWooRequest>,
 /** Bitrue signs timestamp, method, exact path/query and the serialized body. */
 export const prepareBitrueRequest = (config: InternalAxiosRequestConfig, stampMs: number) => {
   const next = { ...config };
+  // Capture replies omit baseURL, so absolute transport URLs must stay intact.
+  let signingPath = next.url ?? '';
   if (next.url?.startsWith('https://')) {
     const url = new URL(next.url);
     if (!['https://fapi.bitrue.com', 'https://fapiws-auth.bitrue.com'].includes(url.origin))
       throw new Error('Unsupported Bitrue signing origin');
-    next.baseURL = url.origin;
-    next.url = url.pathname + url.search;
+    signingPath = url.pathname + url.search;
   }
   const method = next.method?.toUpperCase() ?? 'GET';
   const params = next.params ? qs.stringify(next.params) : '';
   const query = params ? `${next.url?.includes('?') ? '&' : '?'}${params}` : '';
   const body = next.data == null ? '' : typeof next.data === 'string' ? next.data : JSON.stringify(next.data);
-  return { config: next, stampMs: Math.floor(stampMs), payload: `${Math.floor(stampMs)}${method}${next.url ?? ''}${query}${body}` };
+  return { config: next, stampMs: Math.floor(stampMs), payload: `${Math.floor(stampMs)}${method}${signingPath}${query}${body}` };
 };
 
 /** The surviving hosted wire adapter uses standalone codecs, never a TS venue.

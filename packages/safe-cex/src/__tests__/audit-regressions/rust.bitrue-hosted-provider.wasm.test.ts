@@ -54,6 +54,7 @@ it.each(vectors)('actual WASM Bitrue $label: keyless server matches local device
     expect(local.error).toBeUndefined();
     expect(delegated.error).toBeUndefined();
     expect(delegated.config).toEqual(local.config);
+    expect(delegated.config?.url).toBe(vector.url);
     const payload = String(stamp) + vector.payload.slice(13);
     expect(delegated.config?.headers['X-CH-SIGN']).toBe(offset === 0 ? vector.signature : mac(payload));
     expect(sign).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: 'ws-auth', exchangeName: 'bitrue',

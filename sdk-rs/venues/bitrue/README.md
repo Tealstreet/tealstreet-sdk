@@ -25,8 +25,10 @@ receives the canonical payload through the existing `ws-auth` / `hex` envelope;
 no secret or opaque signing ref crosses that wire. Browser `signHttpRequest`
 uses a standalone codec backed by native hosted capture, including requests to
 the separate `fapiws-auth.bitrue.com` origin. It preserves serialized bodies and
-query bytes and cannot fall back to a local key on the server. Callback errors
-are redacted. Authentication, receive-window, content-type and broker headers
+query bytes; absolute request URLs retain their origin through the hosted
+signing adapter, while only path/query enter the HMAC. It cannot fall back to a
+local key on the server. Callback errors are redacted. Authentication,
+receive-window, content-type and broker headers
 cannot be replaced by callback metadata.
 
 The signed endpoint inventory is catalogue `GET /fapi/v1/contracts`; account
@@ -42,6 +44,8 @@ Private WebSocket authentication is signed HTTP:
 the token-authenticated socket URL above. The 30-minute refresh signs
 `PUT` to that same path plus the listen key. RemoteSigner supports this entire
 streaming lifecycle; there is no independent socket-login MAC.
+Hosted HTTP parity also covers explicit listen-key `DELETE` requests without
+changing their authentication origin or path.
 
 PayloadSigner accepts the canonical HMAC payload and selects a primary or
 secondary API key explicitly. It follows the shared REST-only account policy:

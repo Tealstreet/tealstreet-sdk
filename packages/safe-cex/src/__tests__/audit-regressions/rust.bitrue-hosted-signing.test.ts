@@ -67,6 +67,7 @@ it.each(vectors)('Bitrue $label: browser hosted HTTP preserves the native preima
   const before = structuredClone(input);
   const output = await signHostedHttp('bitrue', { key: '', secret: '' }, true, host, input);
   expect(output.error).toBeUndefined();
+  expect(output.config?.url).toBe(vector.url);
   expect(hostedSigning.mock.calls).toEqual([[{ kind: 'credential' }], [{ kind: 'http', payload: vector.payload, stampMs: stamp, revision: '7' }]]);
   expect(output.config?.headers).toMatchObject({ 'X-CH-APIKEY': key, 'X-CH-SIGN': vector.signature,
     'X-CH-TS': String(stamp), recvWindow: '20000', 'X-Referer': 'Tealstreet' });
