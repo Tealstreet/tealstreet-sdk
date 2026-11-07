@@ -537,6 +537,9 @@ fn resolution(interval: Interval) -> Option<&'static str> {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
+    fn http_plans() -> bool {
+        false
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }

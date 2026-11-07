@@ -192,6 +192,10 @@ selected time window so later depth resynchronizations remain reproducible.
 Legacy contract families stay filtered as in TypeScript. `Triggered` displays
 as Closed but remains nonterminal; a later native New update can reopen it.
 Public books request full depth and replace periodic snapshots.
+Live candles accept only `kline_p` incremental frames; subscription snapshots
+and backfill never publish live candles. Candle timestamps remain in seconds.
+Each public frame parse failure emits a `stream.malformed` warning with
+the raw frame's byte count and wire `type` (`unknown` for unreadable JSON).
 
 Fills and order history use bounded symbol-scoped reads (up to 200 rows), public
 trades up to 1000; they do not claim exhaustive range history. Generic income

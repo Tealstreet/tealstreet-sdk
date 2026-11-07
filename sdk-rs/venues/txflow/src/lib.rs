@@ -657,6 +657,10 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn http_plans() -> bool {
+        false
+    }
+
     fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
         match pending {
             Pending::Account(account::Request::Setting { .. }) => {

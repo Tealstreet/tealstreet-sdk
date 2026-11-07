@@ -295,6 +295,12 @@ pub struct OrderRow<'a> {
     pub reduce_only: bool,
 }
 
+/// A trailing stop's activePx while its activation is pending: one numeric test
+/// shared by the row display and the edit refusal, so the two can never disagree.
+pub fn pending_activation(active_px: &str) -> Option<f64> {
+    Some(safe_cex_engine::num::parse(active_px)).filter(|px| *px > 0.0)
+}
+
 fn boolean<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]

@@ -10,9 +10,18 @@ mod trading;
 mod wire;
 
 use safe_cex_engine::book::Book;
-use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue};
+use safe_cex_engine::{
+    Command, Cx, ErrorKind, Level, Response, SocketId, TimerId, Venue, VenueError,
+};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
+
+const INTX_MOVED: &str =
+    "Coinbase International moved to Coinbase's new derivatives API; an update is coming.";
+
+fn unavailable(status: u16) -> bool {
+    matches!(status, 404 | 408 | 410) || status >= 500
+}
 
 #[derive(Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -57,6 +66,7 @@ pub struct Coinbase {
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
     pub(crate) history: history::History,
+    intx_startup_failed: bool,
 }
 impl Coinbase {
     pub fn new(options: Options) -> Result<Self, String> {
@@ -91,10 +101,59 @@ impl Coinbase {
             account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
+            intx_startup_failed: false,
         })
     }
 }
 impl Coinbase {
+    fn is_intx_startup_read(&self, pending: &Pending) -> bool {
+        match pending {
+            Pending::Public(public::Request::Instruments { initial: true, .. })
+            | Pending::Public(public::Request::Products {
+                kind: ProductKind::Intx,
+                ..
+            }) => true,
+            Pending::Account(account::Request::Probe { portfolios, index }, _) => {
+                portfolios.get(*index).is_some_and(|p| p.kind == "INTX")
+            }
+            Pending::Account(
+                account::Request::Balance
+                | account::Request::Positions { .. }
+                | account::Request::Orders(_),
+                _,
+            ) => self.account.is_intx(),
+            _ => false,
+        }
+    }
+
+    /// Only positively identified INTX bootstrap reads can report the migration.
+    /// Spot/CFM, credentials, malformed 2xx replies and running feeds keep their handling.
+    fn fail_moved_intx_startup(&mut self, cx: &mut Cx<'_, Pending>, intx: bool) -> bool {
+        let loaded = cx.store.loaded();
+        let ready = loaded.markets
+            && if self.credentials.is_some() {
+                loaded.balance && loaded.orders && loaded.positions
+            } else {
+                loaded.tickers
+            };
+        if self.options.spot_only || ready {
+            return false;
+        }
+        if !intx {
+            return false;
+        }
+        if !std::mem::replace(&mut self.intx_startup_failed, true) {
+            let error = VenueError::new(INTX_MOVED).kind(ErrorKind::Unsupported);
+            cx.notice_error(
+                Level::Error,
+                safe_cex_engine::log::code::REQUEST_FAILED,
+                &error,
+            );
+            cx.startup_failed(error);
+        }
+        true
+    }
+
     /// The private portfolio discovered at startup is the account's identity.
     fn account_identity(&self) -> Result<String, String> {
         #[derive(Serialize)]
@@ -112,6 +171,9 @@ impl Coinbase {
 }
 
 impl Venue for Coinbase {
+    fn http_plans() -> bool {
+        false
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -171,6 +233,16 @@ impl Venue for Coinbase {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        // Instrument error arrays are decoded by public_response before classifying availability.
+        let intx = self.is_intx_startup_read(&pending)
+            && !matches!(
+                pending,
+                Pending::Public(public::Request::Instruments { .. })
+            );
+        if unavailable(response.status) && self.fail_moved_intx_startup(cx, intx) {
+            self.on_request_failed(cx, pending, INTX_MOVED);
+            return;
+        }
         match pending {
             Pending::Public(p) => self.public_response(cx, p, response),
             Pending::Account(p, read) => self.private_on_response(cx, p, read, response),
@@ -193,6 +265,16 @@ impl Venue for Coinbase {
             Pending::Trading(p) => self.trading_failed(cx, p, error),
             Pending::History(p) => self.history_failed(cx, p, error),
         }
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        let intx = self.is_intx_startup_read(&pending);
+        if matches!(error.kind, Some(ErrorKind::Network | ErrorKind::Timeout))
+            && self.fail_moved_intx_startup(cx, intx)
+        {
+            self.on_request_failed(cx, pending, INTX_MOVED);
+            return;
+        }
+        self.on_request_failed(cx, pending, &error.message);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if !self.rest_timer(cx, timer) && !self.public_timer(cx, timer) {

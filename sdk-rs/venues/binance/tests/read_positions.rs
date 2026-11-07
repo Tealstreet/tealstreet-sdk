@@ -109,6 +109,7 @@ fn coinm() -> Harness {
     h.respond(COIN, 200, COIN_RISK);
     h.respond("/dapi/v1/account",200,r#"{"assets":[{"asset":"BTC","walletBalance":"1","availableBalance":"0.8","initialMargin":"0.1","unrealizedProfit":"0.01"}]}"#);
     h.respond("/dapi/v1/openOrders", 200, "[]");
+    h.respond("/dapi/v1/openAlgoOrders", 200, "[]");
     let private = h.socket("/ws/coin-key").unwrap();
     h.event(Event::WsOpened { socket: private });
     h.answer_open_position_read();
