@@ -880,6 +880,20 @@ test('#3150 merged-tree caps retain the approved exact boundaries', () => {
   }
 });
 
+test('#3219 drb public consumers (run 42352093025) retain CI headroom for Coinbase and Spot', () => {
+  const measured = 1_924_268;
+  const cap = 1_935_360;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
 test('#3207 telemetry (run 42279265759) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
   const measured = 2_390_477;
   const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
