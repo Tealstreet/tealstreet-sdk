@@ -3,7 +3,7 @@
 Managed interests own receipt statistics alongside their released ledger. A
 subscription does not count as subscribed until its frame passes the final
 handoff. Only native data dispatch calls `Cx::record_socket_topic` (borrowed key
-fragments), `record_socket_topic_fmt` (bounded stack formatting), or
+fragments), `record_socket_topic_number` (bounded decimal digits), or
 `record_socket_symbol_topic` (lowercase-symbol protocols). None grants socket or
 write authority. The diagnostic callback context survives consumption of a
 snapshot/auth proof but ends when that exact admitted message callback returns.
@@ -16,8 +16,16 @@ JSON route aliases are compiled at subscription setup, including per-product
 aliases for batched Kraken subscriptions; no second message parse or per-frame
 allocation is required. Private feeds without managed interest entries, including
 URL subscriptions and authentication-owned streams, use one implicit private row.
-Native variants whose response does not
-identify a subscription remain unobserved rather than inventing receipt proof.
+Native variants whose response does not identify a subscription remain unobserved
+rather than inventing receipt proof.
+
+Topic labels and implicit private rows are created lazily at publication. Inline
+private receipt state preserves traffic received before that first publication.
+Managed telemetry rows reserve their exact initial capacity; route aliases share
+one sorted engine table. Typed alias decoding runs only for JSON interest keys,
+and only the Hyperliquid, Kraken and TxFlow families enable `socket-topic-aliases`.
+Receipt handling uses borrowed fragments or bounded stack bytes, without generic
+formatting or heap allocation.
 
 SCXF section 25 (`MESSAGE_HANDLER_STATS`, revision 0) carries a snapshot or changed rows:
 

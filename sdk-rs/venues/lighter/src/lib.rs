@@ -1234,7 +1234,13 @@ impl Venue for Lighter {
         let channel = parts.next().unwrap_or("");
         let id = parts.next();
         if let Some(id) = id {
-            cx.record_socket_topic(&[channel, "/", id]);
+            if channel == "candle" {
+                if let Some(interval) = parts.clone().next() {
+                    cx.record_socket_topic(&[channel, "/", id, "/", interval]);
+                }
+            } else {
+                cx.record_socket_topic(&[channel, "/", id]);
+            }
         } else {
             cx.record_socket_topic(&[channel]);
         }

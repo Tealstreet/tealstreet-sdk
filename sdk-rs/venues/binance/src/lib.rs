@@ -923,7 +923,7 @@ impl BinanceFutures {
         match event_type(text) {
             Some("bookTicker") | None if self.is_spot() || event_type(text).is_some() => {
                 if let Ok(event) = serde_json::from_str::<BookTickerEvent>(text) {
-                    cx.record_socket_symbol_topic(&event.s, "@bookTicker");
+                    cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
                     let (bid, ask) = (num::parse(&event.b), num::parse(&event.a));
                     cx.store.update_ticker(&event.s, |t| {
                         t.bid = bid;
@@ -944,7 +944,7 @@ impl BinanceFutures {
     fn apply_ticker(&mut self, cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
         cx.record_socket_topic(&["!ticker@arr"]);
         if self.is_spot() {
-            cx.record_socket_symbol_topic(&event.s, "@ticker");
+            cx.record_socket_symbol_topic(&event.s, &["@ticker"]);
         }
         let last = num::parse(&event.c);
         let percentage = num::parse(&event.percentage);
@@ -1021,7 +1021,7 @@ impl BinanceFutures {
             Some("kline") => {
                 if let Ok(event) = serde_json::from_str::<KlineEvent>(text) {
                     let k = &event.k;
-                    cx.record_socket_symbol_topic(&k.s, format_args!("@kline_{}", k.i));
+                    cx.record_socket_symbol_topic(&k.s, &["@kline_", &k.i]);
                     if let Some(interval) = Interval::parse(&k.i)
                         && self.candles.contains_key(&(k.s.to_string(), interval))
                     {
@@ -1039,7 +1039,7 @@ impl BinanceFutures {
     }
 
     fn on_depth(&mut self, cx: &mut Cx<'_, Pending>, event: DepthEvent<'_>) {
-        cx.record_socket_symbol_topic(&event.s, "@depth");
+        cx.record_socket_symbol_topic(&event.s, &["@depth"]);
         let paused = cx.now < self.rest_paused_until;
         let Some(state) = self.books.get_mut(event.s.as_ref()) else {
             return;

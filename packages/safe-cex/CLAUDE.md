@@ -686,7 +686,7 @@ only when projecting the existing `messageHandlerStats` shape. Source-frame-fed
 trading engines retain their source's diagnostics independently of held account
 state. `RustSocketHandle.messageHandlersStats` reads that same store bucket.
 
-Native parsers record borrowed topic keys, or bounded stack-formatted keys, at
+Native parsers record borrowed topic keys, or bounded stack-built keys, at
 their existing data dispatch sites. JSON route aliases are compiled once when
 interests change. Never scan all subscriptions or parse a second data frame just
 to refresh telemetry. Private feeds without managed interest entries use one

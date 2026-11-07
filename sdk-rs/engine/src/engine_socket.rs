@@ -47,47 +47,26 @@ impl<P> Cx<'_, P> {
         false
     }
 
-    /// Binance-style native topics use a lowercase symbol and a case-sensitive suffix.
-    pub fn record_socket_symbol_topic(&mut self, symbol: &str, suffix: impl std::fmt::Display) {
-        struct Lower<'a>(&'a str);
-        impl std::fmt::Display for Lower<'_> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                use std::fmt::Write;
-                for ch in self.0.chars() {
-                    f.write_char(ch.to_ascii_lowercase())?;
-                }
-                Ok(())
-            }
+    /// Binance-style native topics use a lowercase symbol and borrowed suffix fragments.
+    pub fn record_socket_symbol_topic(&mut self, symbol: &str, suffix: &[&str]) {
+        if let Some((epoch, received_at)) = self.io.core.socket_stats_message {
+            self.io.core.socket_driver.state.record_symbol_topic(
+                epoch,
+                symbol,
+                suffix,
+                received_at,
+            );
         }
-        self.record_socket_topic_fmt(format_args!("{}{suffix}", Lower(symbol)));
     }
 
-    /// Format an existing native key into bounded stack storage, never a frame allocation.
-    pub fn record_socket_topic_fmt(&mut self, args: std::fmt::Arguments<'_>) {
-        use std::fmt::Write;
-        struct Key {
-            bytes: [u8; 1024],
-            len: usize,
-        }
-        impl Write for Key {
-            fn write_str(&mut self, value: &str) -> std::fmt::Result {
-                let end = self.len + value.len();
-                if end > self.bytes.len() {
-                    return Err(std::fmt::Error);
-                }
-                self.bytes[self.len..end].copy_from_slice(value.as_bytes());
-                self.len = end;
-                Ok(())
-            }
-        }
-        let mut key = Key {
-            bytes: [0; 1024],
-            len: 0,
-        };
-        if key.write_fmt(args).is_ok() {
-            self.record_socket_topic(&[
-                std::str::from_utf8(&key.bytes[..key.len]).expect("formatted UTF-8")
-            ]);
+    /// Append a native numeric topic ID using bounded stack storage.
+    pub fn record_socket_topic_number(&mut self, parts: &[&str], number: u64) {
+        if let Some((epoch, received_at)) = self.io.core.socket_stats_message {
+            self.io
+                .core
+                .socket_driver
+                .state
+                .record_number_topic(epoch, parts, number, received_at);
         }
     }
     fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut CoreCx<'_>) -> R) -> R {

@@ -460,7 +460,7 @@ impl TxFlow {
                 }
             }
             PublicFrame::Ticker(row) => {
-                cx.record_socket_topic_fmt(format_args!("@ticker|||||||{}", row.instrument_id));
+                cx.record_socket_topic_number(&["@ticker|||||||"], row.instrument_id as u64);
                 if let Some(instrument) = self.instruments.get(&row.instrument_id) {
                     let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);

@@ -442,46 +442,132 @@ impl Interests {
             .sum()
     }
 }
-// Decode route aliases once at subscription setup; never parse JSON on frame receipt.
-fn observation_route(key: &str) -> Option<String> {
-    let root: serde_json::Value = serde_json::from_str(key).ok()?;
-    let topic = root.get("subscription").unwrap_or(&root);
-    let text = |name| {
-        topic
-            .get(name)
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-    };
-    if let Some(kind) = topic.get("type").and_then(serde_json::Value::as_str) {
-        return Some(format!(
-            "@{kind}|{}|{}|{}|{}|{}|{}|{}",
-            text("coin"),
-            text("interval"),
-            text("user"),
-            text("dex"),
-            topic
-                .get("fast")
-                .filter(|v| **v == true)
-                .map_or(String::new(), |v| v.to_string()),
-            topic
-                .get("nSigFigs")
-                .filter(|v| !v.is_null())
-                .map_or(String::new(), |v| v.to_string()),
-            topic
-                .get("instrumentId")
-                .or_else(|| topic.get("instrument_id"))
-                .filter(|v| !v.is_null())
-                .map_or(String::new(), |v| v.to_string())
-        ));
+// Decode aliases once at subscription setup; plain topic keys never enter JSON.
+#[cfg(feature = "socket-topic-aliases")]
+#[derive(Default, serde::Deserialize)]
+#[serde(default)]
+struct ObservationTopic<'a> {
+    #[serde(borrow)]
+    subscription: Option<&'a serde_json::value::RawValue>,
+    #[serde(rename = "type")]
+    kind: &'a str,
+    coin: &'a str,
+    interval: &'a str,
+    user: &'a str,
+    dex: &'a str,
+    fast: bool,
+    #[serde(rename = "nSigFigs")]
+    precision: Option<u64>,
+    #[serde(rename = "instrumentId", alias = "instrument_id")]
+    instrument: Option<u64>,
+    feed: &'a str,
+    #[serde(borrow)]
+    product_ids: Vec<&'a str>,
+}
+
+#[cfg(feature = "socket-topic-aliases")]
+#[inline(never)]
+fn observation_routes(feed: FeedId, key: &Arc<str>, routes: &mut Vec<TopicRoute>) -> bool {
+    if !key.starts_with('{') {
+        return false;
     }
-    let feed = topic.get("feed")?.as_str()?;
-    let products = topic.get("product_ids")?.as_array()?;
-    let product = if products.len() == 1 {
-        products[0].as_str().unwrap_or("")
-    } else {
-        ""
+    let Ok(mut topic) = serde_json::from_str::<ObservationTopic<'_>>(key) else {
+        return false;
     };
-    Some(format!("@{feed}|{product}"))
+    if let Some(raw) = topic.subscription {
+        let Ok(inner) = serde_json::from_str(raw.get()) else {
+            return false;
+        };
+        topic = inner;
+    }
+    if !topic.kind.is_empty() {
+        TopicRoute::insert(
+            routes,
+            feed,
+            format!(
+                "@{}|{}|{}|{}|{}|{}|{}|{}",
+                topic.kind,
+                topic.coin,
+                topic.interval,
+                topic.user,
+                topic.dex,
+                if topic.fast { "true" } else { "" },
+                topic.precision.map_or(String::new(), |v| v.to_string()),
+                topic.instrument.map_or(String::new(), |v| v.to_string())
+            ),
+            key.clone(),
+        );
+        return matches!(
+            topic.kind,
+            "allMids"
+                | "fastAssetCtxs"
+                | "allAssetCtxs"
+                | "activeAssetCtx"
+                | "ticker"
+                | "l2Book"
+                | "bbo"
+                | "candle"
+                | "trades"
+        );
+    }
+    if !topic.feed.is_empty() {
+        if topic.product_ids.len() != 1 {
+            TopicRoute::insert(routes, feed, format!("@{}|", topic.feed), key.clone());
+        }
+        for product in topic.product_ids {
+            TopicRoute::insert(
+                routes,
+                feed,
+                format!("@{}|{product}", topic.feed),
+                key.clone(),
+            );
+        }
+    }
+    false
+}
+
+#[cfg(feature = "socket-topic-aliases")]
+struct TopicRoute {
+    feed: FeedId,
+    alias: String,
+    key: Arc<str>,
+}
+#[cfg(feature = "socket-topic-aliases")]
+impl TopicRoute {
+    fn insert(routes: &mut Vec<Self>, feed: FeedId, alias: String, key: Arc<str>) {
+        let row = Self { feed, alias, key };
+        match routes
+            .binary_search_by(|r| (r.feed.0, r.alias.as_str()).cmp(&(feed.0, row.alias.as_str())))
+        {
+            Ok(index) => routes[index] = row,
+            Err(index) => routes.insert(index, row),
+        }
+    }
+}
+
+struct TopicKey {
+    bytes: [u8; 1024],
+    len: usize,
+}
+impl TopicKey {
+    fn new() -> Self {
+        Self {
+            bytes: [0; 1024],
+            len: 0,
+        }
+    }
+    fn append(&mut self, part: &str) -> bool {
+        let end = self.len + part.len();
+        if end > self.bytes.len() {
+            return false;
+        }
+        self.bytes[self.len..end].copy_from_slice(part.as_bytes());
+        self.len = end;
+        true
+    }
+    fn text(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len]).expect("native topic UTF-8")
+    }
 }
 
 struct TopicStats {
@@ -506,7 +592,8 @@ struct Feed {
     interests: Interests,
     message_stats: Map<Arc<str>, TopicStats>,
     implicit_stats: bool,
-    stats_routes: Map<String, Arc<str>>,
+    implicit_received: f64,
+    implicit_observed: bool,
 }
 
 /// A native subscription encoder, called through one shared vtable.
@@ -587,6 +674,8 @@ pub(crate) struct Lifecycle {
     current_sockets: SocketIndex,
     #[cfg(test)]
     socket_lookups: std::cell::Cell<usize>,
+    #[cfg(feature = "socket-topic-aliases")]
+    stats_routes: Vec<TopicRoute>,
     stats_dirty: bool,
     stats_replace: bool,
     stats_published_at: Option<f64>,
@@ -604,7 +693,58 @@ impl Drop for Lifecycle {
     }
 }
 impl Lifecycle {
+    #[inline(never)]
+    pub(crate) fn record_symbol_topic(
+        &mut self,
+        epoch: Epoch,
+        symbol: &str,
+        suffix: &[&str],
+        now: f64,
+    ) {
+        let mut key = TopicKey::new();
+        if !key.append(symbol) {
+            return;
+        }
+        key.bytes[..key.len].make_ascii_lowercase();
+        for part in suffix {
+            if !key.append(part) {
+                return;
+            }
+        }
+        self.record_topic(epoch, &[key.text()], now);
+    }
+
+    #[inline(never)]
+    pub(crate) fn record_number_topic(
+        &mut self,
+        epoch: Epoch,
+        parts: &[&str],
+        mut number: u64,
+        now: f64,
+    ) {
+        let mut key = TopicKey::new();
+        for part in parts {
+            if !key.append(part) {
+                return;
+            }
+        }
+        let mut digits = [0; 20];
+        let mut start = digits.len();
+        loop {
+            start -= 1;
+            digits[start] = b'0' + (number % 10) as u8;
+            number /= 10;
+            if number == 0 {
+                break;
+            }
+        }
+        if key.append(std::str::from_utf8(&digits[start..]).expect("decimal digits")) {
+            self.record_topic(epoch, &[key.text()], now);
+        }
+    }
+
     /// Record only the subscription whose data was decoded on the current epoch.
+    #[inline(never)]
     pub(crate) fn record_topic(&mut self, epoch: Epoch, parts: &[&str], now: f64) -> bool {
         let Some(f) = self.feeds.get_mut(epoch.feed.0) else {
             return false;
@@ -613,12 +753,13 @@ impl Lifecycle {
             return false;
         }
         if f.implicit_stats && f.phase == Phase::Ready {
-            if let Some(stats) = f.message_stats.get_mut("private") {
-                stats.received = Some(stats.received.map_or(now, |previous| previous.max(now)));
-                stats.dirty = true;
-                stats.observed = true;
-                self.stats_dirty = true;
-            }
+            f.implicit_received = if f.implicit_received.is_nan() {
+                now
+            } else {
+                f.implicit_received.max(now)
+            };
+            f.implicit_observed = true;
+            self.stats_dirty = true;
             return true;
         }
         let found = if let [topic] = parts {
@@ -633,20 +774,30 @@ impl Lifecycle {
         let index = match found {
             Ok(index) => index,
             Err(_) => {
-                let Ok(route) = f.stats_routes.0.binary_search_by(|(key, _)| {
-                    key.bytes().cmp(parts.iter().flat_map(|part| part.bytes()))
-                }) else {
-                    return false;
-                };
-                let key = &f.stats_routes.0[route].1;
-                let Ok(index) = f
-                    .message_stats
-                    .0
-                    .binary_search_by(|(candidate, _)| candidate.cmp(key))
-                else {
-                    return false;
-                };
-                index
+                #[cfg(not(feature = "socket-topic-aliases"))]
+                return false;
+                #[cfg(feature = "socket-topic-aliases")]
+                {
+                    let Ok(route) = self.stats_routes.binary_search_by(|route| {
+                        route.feed.0.cmp(&epoch.feed.0).then_with(|| {
+                            route
+                                .alias
+                                .bytes()
+                                .cmp(parts.iter().flat_map(|part| part.bytes()))
+                        })
+                    }) else {
+                        return false;
+                    };
+                    let key = &self.stats_routes[route].key;
+                    let Ok(index) = f
+                        .message_stats
+                        .0
+                        .binary_search_by(|(candidate, _)| candidate.cmp(key))
+                    else {
+                        return false;
+                    };
+                    index
+                }
             }
         };
         let (_, stats) = &mut f.message_stats.0[index];
@@ -677,6 +828,39 @@ impl Lifecycle {
         for feed in &mut self.feeds {
             for stats in feed.message_stats.0.iter_mut().map(|(_, stats)| stats) {
                 stats.dirty = false;
+            }
+        }
+    }
+
+    pub(crate) fn prepare_stats(&mut self) {
+        for (index, f) in self.feeds.iter_mut().enumerate() {
+            if f.implicit_stats {
+                if f.message_stats.is_empty() {
+                    f.message_stats.insert(
+                        Arc::from("private"),
+                        TopicStats {
+                            id: String::new(),
+                            received: None,
+                            public_topic: false,
+                            dirty: true,
+                            subscribed: false,
+                            observed: false,
+                        },
+                    );
+                }
+                let stats = f
+                    .message_stats
+                    .get_mut("private")
+                    .expect("implicit private row");
+                let received = (!f.implicit_received.is_nan()).then_some(f.implicit_received);
+                stats.dirty |= stats.received != received || stats.observed != f.implicit_observed;
+                stats.received = received;
+                stats.observed = f.implicit_observed;
+            }
+            for (key, stats) in &mut f.message_stats.0 {
+                if stats.id.is_empty() {
+                    stats.id = format!("{index}.{key}");
+                }
             }
         }
     }
@@ -808,6 +992,7 @@ impl Lifecycle {
             observer.observe(InterestObservation::Cleared { feed });
         }
         f.interests.released.clear();
+        f.implicit_observed = false;
         for (_, stats) in &mut f.message_stats.0 {
             stats.subscribed = false;
             stats.observed = false;
@@ -839,20 +1024,6 @@ impl Lifecycle {
         }
         let id = FeedId(self.feeds.len());
         let implicit_stats = policy.role == SocketChannel::Private;
-        let mut message_stats = Map::default();
-        if implicit_stats {
-            message_stats.insert(
-                Arc::from("private"),
-                TopicStats {
-                    id: format!("{}.private", id.0),
-                    received: None,
-                    public_topic: false,
-                    dirty: true,
-                    subscribed: false,
-                    observed: false,
-                },
-            );
-        }
         self.feeds.push(Feed {
             policy,
             generation: 0,
@@ -864,9 +1035,10 @@ impl Lifecycle {
             ever_ready: false,
             pong_seen: false,
             interests: Interests::default(),
-            message_stats,
+            message_stats: Map::default(),
             implicit_stats,
-            stats_routes: Map::default(),
+            implicit_received: f64::NAN,
+            implicit_observed: false,
         });
         Ok(id)
     }
@@ -898,6 +1070,7 @@ impl Lifecycle {
             observer.observe(InterestObservation::Cleared { feed });
         }
         f.interests.released.clear();
+        f.implicit_observed = false;
         for (_, stats) in &mut f.message_stats.0 {
             stats.subscribed = false;
             stats.observed = false;
@@ -1119,6 +1292,7 @@ impl Lifecycle {
             observer.observe(InterestObservation::Cleared { feed });
         }
         f.interests.released.clear();
+        f.implicit_observed = false;
         for (_, stats) in &mut f.message_stats.0 {
             stats.subscribed = false;
             stats.observed = false;
@@ -1153,6 +1327,7 @@ impl Lifecycle {
                 observer.observe(InterestObservation::Cleared { feed: *feed });
             }
             f.interests.released.clear();
+            f.implicit_observed = false;
             for (_, stats) in &mut f.message_stats.0 {
                 stats.subscribed = false;
                 stats.observed = false;
@@ -1276,7 +1451,11 @@ impl Lifecycle {
         // (quadratic for up to MAX_INTERESTS rows in descending order). A
         // duplicate still refuses wherever the per-row check did: before a
         // later row's Capacity failure, and before the budget checks below.
-        let mut keys = Vec::with_capacity(interests.len());
+        let mut keys = Vec::with_capacity(if interests.len() > 1 {
+            interests.len()
+        } else {
+            0
+        });
         let mut desired_bytes = 0usize;
         for item in interests.rows() {
             if item.key.is_empty()
@@ -1285,7 +1464,9 @@ impl Lifecycle {
             {
                 return Err(SocketError::InvalidInterest);
             }
-            keys.push(item.key.as_ref());
+            if interests.len() > 1 {
+                keys.push(item.key.as_ref());
+            }
             match desired_bytes
                 .checked_add(item.key.len())
                 .and_then(|v| v.checked_add(item.wire_args.len()))
@@ -1449,42 +1630,23 @@ impl Lifecycle {
             f.message_stats.remove("private");
             f.implicit_stats = false;
         }
+        f.message_stats.0.reserve_exact(
+            f.interests
+                .desired
+                .values()
+                .count()
+                .saturating_sub(f.message_stats.0.len()),
+        );
         for (key, _) in f.interests.desired.iter() {
             if !f.message_stats.contains_key(key) {
-                let route = observation_route(key);
-                let public_topic = route.as_ref().is_some_and(|route| {
-                    [
-                        "@allMids|",
-                        "@fastAssetCtxs|",
-                        "@allAssetCtxs|",
-                        "@activeAssetCtx|",
-                        "@ticker|",
-                        "@l2Book|",
-                        "@bbo|",
-                        "@candle|",
-                        "@trades|",
-                    ]
-                    .iter()
-                    .any(|prefix| route.starts_with(prefix))
-                });
-                if let Some(route) = route {
-                    f.stats_routes.insert(route, key.clone());
-                    if let Ok(root) = serde_json::from_str::<serde_json::Value>(key)
-                        && let (Some(feed), Some(products)) = (
-                            root.get("feed").and_then(|v| v.as_str()),
-                            root.get("product_ids").and_then(|v| v.as_array()),
-                        )
-                    {
-                        for product in products.iter().filter_map(|v| v.as_str()) {
-                            f.stats_routes
-                                .insert(format!("@{feed}|{product}"), key.clone());
-                        }
-                    }
-                }
+                #[cfg(feature = "socket-topic-aliases")]
+                let public_topic = observation_routes(feed, key, &mut self.stats_routes);
+                #[cfg(not(feature = "socket-topic-aliases"))]
+                let public_topic = false;
                 f.message_stats.insert(
                     key.clone(),
                     TopicStats {
-                        id: format!("{}.{}", feed.0, key),
+                        id: String::new(),
                         received: None,
                         public_topic,
                         dirty: true,
@@ -1499,9 +1661,9 @@ impl Lifecycle {
                 || f.interests.desired.contains_key(key)
                 || f.interests.released.contains_key(key)
         });
-        f.stats_routes
-            .0
-            .retain(|(_, key)| f.message_stats.contains_key(key));
+        #[cfg(feature = "socket-topic-aliases")]
+        self.stats_routes
+            .retain(|route| route.feed != feed || f.message_stats.contains_key(&route.key));
         self.stats_dirty = true;
         self.stats_replace = true;
         self.pending_frames = pending_frames;
@@ -3239,6 +3401,7 @@ mod tests {
         l.record_topic(epoch, &["ticker.BTC"], 3.);
         assert!(!l.stats_due(1_001.));
         assert!(l.stats_due(1_002.));
+        l.prepare_stats();
         let id = l.feeds[feed.0].message_stats["ticker.BTC"].id.clone();
         let retired = l.retire(feed).unwrap();
         l.record_topic(epoch, &["ticker.BTC"], 4.);
@@ -3253,6 +3416,7 @@ mod tests {
         l.replay_interests(feed, encode).unwrap();
         while l.release_batch(next, false).is_some() {}
         l.record_topic(next, &["ticker.BTC"], 1_004.);
+        l.prepare_stats();
         assert_eq!(l.feeds[feed.0].message_stats["ticker.BTC"].id, id);
         assert_eq!(
             l.feeds[feed.0].message_stats["ticker.BTC"].received,
@@ -3277,6 +3441,7 @@ mod tests {
         assert_eq!(l.feeds[feed.0].message_stats["one"].received, Some(100.));
         assert_eq!(l.feeds[feed.0].message_stats["two"].received, None);
         let mut writer = crate::wire::FrameWriter::new(Vec::new(), 150.);
+        l.prepare_stats();
         l.write_stats(&mut writer, 150., true);
         let bytes = writer.finish();
         let (_, rows) = crate::wire::sections(&bytes)
@@ -3288,6 +3453,7 @@ mod tests {
         assert!(f64::from_le_bytes(rows[48..56].try_into().unwrap()).is_nan());
     }
 
+    #[cfg(feature = "socket-topic-aliases")]
     #[test]
     fn topic_stats_compile_json_aliases_only_for_the_named_subscription() {
         let (mut l, feed, epoch) = started(AuthMode::None);
@@ -3306,7 +3472,114 @@ mod tests {
         let (mut l, feed, epoch) = started(AuthMode::None);
         l.replace_interests(feed, Vec::new(), encode).unwrap();
         assert!(l.record_topic(epoch, &["private"], 5.));
+        assert_eq!(l.feeds[feed.0].implicit_received, 5.);
+        assert!(l.feeds[feed.0].implicit_observed);
+        let mut writer = crate::wire::FrameWriter::new(Vec::new(), 6.);
+        l.prepare_stats();
+        l.write_stats(&mut writer, 6., true);
+        let _ = writer.finish();
         assert_eq!(l.feeds[feed.0].message_stats["private"].received, Some(5.));
+    }
+    #[cfg(feature = "socket-topic-aliases")]
+    #[test]
+    fn topic_stats_typed_aliases_keep_precision_ids_and_product_batches_isolated() {
+        let (mut l, feed, epoch) = started(AuthMode::None);
+        let precision =
+            r#"{"subscription":{"type":"l2Book","coin":"BTC","fast":true,"nSigFigs":5}}"#;
+        let instrument = r#"{"type":"ticker","instrument_id":18446744073709551615}"#;
+        let batch = r#"{"feed":"ticker","product_ids":["PF_ETHUSD","PF_BTCUSD"]}"#;
+        let other = r#"{"feed":"ticker","product_ids":["PF_SOLUSD"]}"#;
+        l.replace_interests(
+            feed,
+            vec![
+                interest(precision),
+                interest(instrument),
+                interest(batch),
+                interest(other),
+            ],
+            encode,
+        )
+        .unwrap();
+        while l.release_batch(epoch, false).is_some() {}
+        assert!(l.record_topic(epoch, &["@l2Book|BTC||||true|5|"], 10.));
+        assert!(l.record_topic(epoch, &["@ticker|||||||18446744073709551615"], 11.));
+        assert!(l.record_topic(epoch, &["@ticker|PF_BTCUSD"], 12.));
+        assert_eq!(l.feeds[feed.0].message_stats[precision].received, Some(10.));
+        assert_eq!(
+            l.feeds[feed.0].message_stats[instrument].received,
+            Some(11.)
+        );
+        assert_eq!(l.feeds[feed.0].message_stats[batch].received, Some(12.));
+        assert_eq!(l.feeds[feed.0].message_stats[other].received, None);
+    }
+
+    #[test]
+    fn topic_stats_stack_keys_preserve_suffix_case_and_full_numeric_range() {
+        let (mut l, feed, epoch) = started(AuthMode::None);
+        l.replace_interests(
+            feed,
+            vec![
+                interest("btcusdt@bookTicker"),
+                interest("btcusdt@kline_1m"),
+                interest("n:0"),
+                interest("n:18446744073709551615"),
+            ],
+            encode,
+        )
+        .unwrap();
+        while l.release_batch(epoch, false).is_some() {}
+        l.record_symbol_topic(epoch, "BTCUSDT", &["@bookTicker"], 10.);
+        l.record_symbol_topic(epoch, "BTCUSDT", &["@kline_", "1m"], 11.);
+        l.record_number_topic(epoch, &["n:"], 0, 12.);
+        l.record_number_topic(epoch, &["n:"], u64::MAX, 13.);
+        for key in [
+            "btcusdt@bookTicker",
+            "btcusdt@kline_1m",
+            "n:0",
+            "n:18446744073709551615",
+        ] {
+            assert!(l.feeds[feed.0].message_stats[key].received.is_some());
+        }
+        l.record_symbol_topic(epoch, &"X".repeat(1025), &["@bookTicker"], 14.);
+        assert_eq!(
+            l.feeds[feed.0].message_stats["btcusdt@bookTicker"].received,
+            Some(10.)
+        );
+    }
+
+    #[test]
+    fn topic_stats_implicit_receipts_survive_first_publication_and_reconnect() {
+        let (mut l, feed, epoch) = started(AuthMode::None);
+        assert!(l.feeds[feed.0].message_stats.is_empty());
+        assert!(l.record_topic(epoch, &["private"], 5.));
+        let retired = l.retire(feed).unwrap();
+        l.retired(retired.epoch, true).unwrap();
+        l.grant_retry(feed).unwrap();
+        let next = l.begin(feed, SocketId(2)).unwrap();
+        l.opened(next).unwrap();
+        l.prepare_stats();
+        assert_eq!(l.feeds[feed.0].message_stats["private"].received, Some(5.));
+        assert!(!l.feeds[feed.0].message_stats["private"].observed);
+        l.record_topic(next, &["private"], 10.);
+        l.prepare_stats();
+        assert_eq!(l.feeds[feed.0].message_stats["private"].received, Some(10.));
         assert!(l.feeds[feed.0].message_stats["private"].observed);
+    }
+    #[cfg(feature = "socket-topic-aliases")]
+    #[test]
+    fn topic_stats_shared_alias_table_does_not_cross_feed_epochs() {
+        let (mut l, first, epoch) = started(AuthMode::None);
+        let second = l.register(policy(AuthMode::None)).unwrap();
+        let other_epoch = l.begin(second, SocketId(2)).unwrap();
+        l.opened(other_epoch).unwrap();
+        let key = r#"{"subscription":{"type":"l2Book","coin":"BTC"}}"#;
+        for (feed, current) in [(first, epoch), (second, other_epoch)] {
+            l.replace_interests(feed, vec![interest(key)], encode)
+                .unwrap();
+            while l.release_batch(current, false).is_some() {}
+        }
+        assert!(l.record_topic(other_epoch, &["@l2Book|BTC||||||"], 10.));
+        assert_eq!(l.feeds[first.0].message_stats[key].received, None);
+        assert_eq!(l.feeds[second.0].message_stats[key].received, Some(10.));
     }
 }

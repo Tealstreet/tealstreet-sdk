@@ -7745,6 +7745,8 @@ impl<V: Venue> Engine<V> {
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
         self.expire_read_roots(now);
+        #[cfg(feature = "managed-sockets")]
+        self.io.core.socket_driver.state.prepare_stats();
         let buffer = std::mem::take(&mut self.io.core.snapshot);
         let mut w = FrameWriter::new(buffer, now);
         #[cfg(feature = "managed-sockets")]
@@ -7862,6 +7864,7 @@ impl<V: Venue> Engine<V> {
         let publish_stats = store && self.io.core.socket_driver.state.stats_due(now);
         #[cfg(feature = "managed-sockets")]
         if publish_stats {
+            self.io.core.socket_driver.state.prepare_stats();
             self.io
                 .core
                 .socket_driver
