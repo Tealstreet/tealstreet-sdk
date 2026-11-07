@@ -307,6 +307,13 @@ fn gateway_100001_does_not_grant_a_write_resend() {
     );
 }
 #[test]
+fn rate_limited_100001_does_not_grant_a_write_resend() {
+    assert_uncertain_response_never_resends(
+        429,
+        r#"{"code":100001,"msg":"Signature verification failed"}"#,
+    );
+}
+#[test]
 fn timeout_status_100001_does_not_grant_a_write_resend() {
     assert_uncertain_response_never_resends(
         408,
