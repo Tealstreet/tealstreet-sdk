@@ -23,7 +23,7 @@ function run(number, extra = {}) {
 function job(runValue, { second = false, id = 100, runner = 101, legacy = false } = {}) {
   const start = second ? 30 : 0, stop = second ? 59 : 29;
   return { id, run_id: runValue.id, run_attempt: 1, head_sha: runValue.head_sha, head_branch: runValue.head_branch,
-    name: `Rust / ${second ? 'CPU remeasurement' : legacy ? 'replay gate' : 'replay measurement'} (bitget)`, runner_id: runner,
+    name: `Rust / ${second ? 'CPU remeasurement' : legacy ? 'CPU gate' : 'replay measurement'} (bitget)`, runner_id: runner,
     status: 'completed', conclusion: 'success', started_at: at(start), completed_at: at(stop),
     steps: [{ name: 'Run actions/checkout@v7', status: 'completed', conclusion: 'success', started_at: at(start + 1), completed_at: at(start + 3) },
       { name: second ? CPU_COHORT_STEPS.second : CPU_COHORT_STEPS.first, status: 'completed', conclusion: 'success', started_at: at(start + 20), completed_at: at(start + 25) }] };
@@ -241,7 +241,7 @@ test('artifact execution wrapper fixes first/second/plan/final job and upload na
     ['Rust / replay measurement (bitget)', 'cpu-runtime-bitget', CPU_COHORT_STEPS.runtime],
     ['Rust / CPU remeasurement (bitget)', 'cpu-second-bitget', CPU_COHORT_STEPS.second],
     ['Rust / CPU remeasurement plan', 'cpu-plan', CPU_COHORT_STEPS.plan],
-    ['Rust / replay gate (bitget)', 'cpu-cert-bitget', CPU_COHORT_STEPS.final],
+    ['Rust / CPU gate (bitget)', 'cpu-cert-bitget', CPU_COHORT_STEPS.final],
   ]) {
     const value = fixture(), record = value.claims[0], source = record.observations[0];
     source.job.name = jobName; source.job.steps[1].name = stepName; record.artifact.name = artifactName;

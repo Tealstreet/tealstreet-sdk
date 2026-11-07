@@ -88,7 +88,7 @@ export function validatePublicEvidence(value) {
   catch (error) { return [`malformed public evidence: ${error.message}`]; }
 }
 
-function cpuOnlyErrors(value, requireMiss, paired) {
+function cpuOnlyErrors(value, requireMiss, paired, cap = true) {
   const errors = validatePublicEvidence(value);
   if (errors.length) return errors;
   const report = value.report, source = value.execution?.measuredCheckoutSha;
@@ -101,9 +101,20 @@ function cpuOnlyErrors(value, requireMiss, paired) {
     errors.push('strict failures include non-CPU diagnostics or omit/repeat computed failures');
   if (requireMiss && !cpuFailures.some(failure => objectives(report, paired, source).some(({ label }) => failure.startsWith(`performance ${label}:`))))
     errors.push('first measurement has no remaining CPU miss');
-  for (const objective of objectives(report, paired, source)) if (!Number.isFinite(objective.ratio) || objective.ratio >= 1.05)
+  if (cap) for (const objective of objectives(report, paired, source)) if (!Number.isFinite(objective.ratio) || objective.ratio >= 1.05)
     errors.push(`${objective.field}: CPU ratio must be strictly below 1.05`);
   return errors;
+}
+
+/** Split assessment errors of a valid CPU-only strict miss: only the exact computed
+ * CPU failures are deferred to the CPU gate; every other error is kept. */
+export function splitCpuErrors(value, errors, paired) {
+  if (cpuOnlyErrors(value, true, paired, false).length) return { kept: errors, deferred: [] };
+  const report = value.report;
+  const cpu = new Set(performanceFailures(report.samples.ts, report.samples.rust)
+    .filter((failure) => objectives(report).some(({ label }) => failure.startsWith(`performance ${label}:`)))
+    .map((failure) => `${report.venue}: unexpected ${failure}`));
+  return { kept: errors.filter((error) => !cpu.has(error)), deferred: errors.filter((error) => cpu.has(error)) };
 }
 
 export function assessEligibility(first, paired) {

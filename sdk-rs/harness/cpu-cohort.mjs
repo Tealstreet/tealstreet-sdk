@@ -166,7 +166,7 @@ export function authenticateArtifactMetadata({ artifact, run, job, logBytes, ste
   } else if (jobName === 'Rust / CPU certification audit') {
     throw new Error('CPU cohort: no all-suite audit in this rollout');
   } else {
-    const match = /^Rust \/ (replay measurement|CPU remeasurement|replay gate) \(([a-z0-9-]+)\)$/.exec(jobName);
+    const match = /^Rust \/ (replay measurement|CPU remeasurement|CPU gate) \(([a-z0-9-]+)\)$/.exec(jobName);
     check(match, 'unknown artifact authority job name');
     const kind = match[1] === 'replay measurement' ? 'first' : match[1] === 'CPU remeasurement' ? 'second' : 'final';
     expectedArtifact = `${kind === 'first' ? 'cpu-cohort' : kind === 'second' ? 'cpu-second' : 'cpu-cert'}-${match[2]}`;
