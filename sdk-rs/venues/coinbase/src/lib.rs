@@ -112,6 +112,9 @@ impl Coinbase {
 }
 
 impl Venue for Coinbase {
+    fn http_plans() -> bool {
+        false
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }

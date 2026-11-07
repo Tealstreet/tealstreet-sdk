@@ -597,7 +597,7 @@ impl<V: Venue> Engine<V> {
 
     #[inline]
     pub(in crate::engine) fn flush_preflight_readiness(&mut self, now: f64) {
-        if self.io.core.request_contexts.preflight_ready.is_empty() {
+        if !V::http_plans() || self.io.core.request_contexts.preflight_ready.is_empty() {
             return;
         }
         self.flush_live_preflight_readiness(now);

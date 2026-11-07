@@ -1066,6 +1066,9 @@ fn candle(text: &str) -> Result<Candle, String> {
 }
 
 impl Venue for KucoinSpot {
+    fn http_plans() -> bool {
+        false
+    }
     type Pending = Pending;
     fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
         use safe_cex_engine::startup::Sections as S;
