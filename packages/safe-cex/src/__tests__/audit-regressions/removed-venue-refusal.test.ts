@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { normalizeExchangeAccountConfig } from '../../accounts/normalizeExchangeAccountConfig';
+import { serializeCommandError } from '../../commandOutcome';
 import { accountToExchangeOptions, createExchangeFromAccount } from '../../createExchangeFromAccount';
 import { exchangePrettyNames, getExchangeMetadata, isExchangeSupportedOnMobile } from '../../exchangeMetadata';
 import { buildPublicExchangeOptions, createExchange, createPublicExchange, preloadExchange } from '../../index';
@@ -41,6 +42,19 @@ const typedRefusal = (run: () => unknown): ExchangeError => {
   throw new Error('expected a typed refusal');
 };
 
+// Metadata lookups stay free of the WASM host (the Rust source oracles load them),
+// so their refusal carries the classification fields rather than the class.
+const classifiedRefusal = (run: () => unknown): Error => {
+  try {
+    run();
+  } catch (error) {
+    expect(error).toMatchObject(unsupported);
+    expect(serializeCommandError(error)).toMatchObject(unsupported);
+    return error as Error;
+  }
+  throw new Error('expected a classified refusal');
+};
+
 beforeEach(() => {
   state.calls.length = 0;
   vi.mocked(virtualClock.start).mockClear();
@@ -67,11 +81,11 @@ describe('a removed venue beside live accounts', () => {
 });
 
 describe.each(REMOVED)('removed venue %s', (name) => {
-  it('refuses typed on every synchronous metadata lookup', () => {
-    expect(typedRefusal(() => getExchangeMetadata(name)).message).toBe(`Unknown exchange metadata: ${name}`);
-    typedRefusal(() => buildPublicExchangeOptions(name));
-    typedRefusal(() => normalizeExchangeAccountConfig(savedAccount(name)));
-    typedRefusal(() => accountToExchangeOptions(savedAccount(name)));
+  it('refuses classified on every synchronous metadata lookup', () => {
+    expect(classifiedRefusal(() => getExchangeMetadata(name)).message).toBe(`Unknown exchange metadata: ${name}`);
+    classifiedRefusal(() => buildPublicExchangeOptions(name));
+    classifiedRefusal(() => normalizeExchangeAccountConfig(savedAccount(name)));
+    classifiedRefusal(() => accountToExchangeOptions(savedAccount(name)));
     expect(isExchangeSupportedOnMobile(name)).toBe(false);
     expect(exchangePrettyNames[name]).toBeUndefined();
   });

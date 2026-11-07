@@ -5,8 +5,6 @@ import {
   ExchangeName, MarginType, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode,
 } from '@tealstreet/safe-cex/src/types';
 
-import { unsupportedVenueError } from './unsupportedVenue';
-
 /** Features supported by an exchange - used to skip health checks for unsupported features */
 export type ExchangeFeatures = {
   /** Whether the exchange supports kline/candle data */
@@ -2285,13 +2283,24 @@ export const exchangeMetadata: {
   polymarket: PolymarketMetadata,
 };
 
+/**
+ * A retired or unknown name (e.g. a saved `bitmex` account) refuses with the
+ * `unsupported`/`notSent` fields `serializeCommandError` carries. It is not an
+ * `ExchangeError`: the Rust source oracles load this file without the WASM host.
+ */
+const unknownExchangeMetadata = (exchange: string): Error =>
+  Object.assign(new Error(`Unknown exchange metadata: ${exchange}`), {
+    kind: 'unsupported' as const,
+    outcome: 'notSent' as const,
+  });
+
 export const getExchangeMetadata = (exchange: ExchangeName, opts: Record<string, any> = {}): ExchangeMetadata => {
   if (exchange === 'bybit') {
     return opts.isUnified ? BybitUnifiedMetadata : BybitMetadata;
   }
   const metadata = exchangeMetadata[exchange];
   if (!metadata) {
-    throw unsupportedVenueError(`Unknown exchange metadata: ${exchange}`);
+    throw unknownExchangeMetadata(exchange);
   }
   return metadata;
 };
