@@ -1352,7 +1352,16 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                 let sweep = h.requests.remove(index);
                 h.reply_status(sweep, status, body);
                 let message = h.result(7).as_ref().expect_err(body);
-                assert!(message.contains(told), "{v3} {status} {body}: {message}");
+                if status == 429 {
+                    let error = &h.failures.iter().find(|(id, _)| *id == 7).unwrap().1;
+                    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                    assert_eq!(
+                        error.message,
+                        "HTTP response does not prove the write outcome"
+                    );
+                } else {
+                    assert!(message.contains(told), "{v3} {status} {body}: {message}");
+                }
             }
         }
     }

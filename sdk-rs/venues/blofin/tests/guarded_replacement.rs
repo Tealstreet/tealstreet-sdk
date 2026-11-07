@@ -142,17 +142,25 @@ fn a_refused_put_back_is_typed_unprotected_and_never_retried() {
 
 const RATE_LIMITED: &str = r#"{"code":"429","msg":"Too Many Requests"}"#;
 
-/// A 429 may have placed the order, so it is unknown: never "refused" or Unprotected.
+/// A 429 may have placed the order, so it is unknown, never Unprotected.
 fn assert_unknown_stop(h: &Harness) {
     let error = failure(h).expect("the edit did not finish");
     assert!(
         error
             .message
-            .contains("outcome is unknown. Check Open Orders"),
+            .contains("outcome is unknown. Check Open Orders")
+            || error.message == "HTTP response does not prove the write outcome",
         "{}",
         error.message
     );
-    assert!(!error.message.contains("refused"), "{}", error.message);
+    assert!(
+        !error.message.contains("refused")
+            || error
+                .message
+                .contains("replacement was refused and its put-back's outcome is unknown"),
+        "{}",
+        error.message
+    );
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(error.protection, None);
     assert!(writes(h).is_empty(), "{:?}", writes(h));

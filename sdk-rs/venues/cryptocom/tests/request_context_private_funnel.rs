@@ -1625,7 +1625,11 @@ fn engine_ambiguity_429_signature_code_cannot_resend() {
             body: r#"{"code":40101,"message":"bad signature"}"#,
         },
     });
-    only_reconcile_read(&h.actions);
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("private/cancel-all-orders")))
+    );
     pace(&mut h);
     let t = terminals(&h.actions);
     assert_eq!(t.len(), 1);

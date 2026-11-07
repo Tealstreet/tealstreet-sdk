@@ -1096,7 +1096,7 @@ fn explicit_invalid_margin_rejection_refreshes_account_without_resubmitting() {
     assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:7,error}) if error.venue_code.as_deref()==Some("21613")&&error.outcome==Some(Outcome::Rejected))));
 }
 #[test]
-fn proven_rate_limit_refusals_keep_rejected_and_never_replay() {
+fn released_http_throttles_are_unknown_and_never_replay() {
     use safe_cex_engine::ErrorKind;
     for status in [405, 429] {
         let (mut e, _) = ready_unattributed();
@@ -1110,11 +1110,29 @@ fn proven_rate_limit_refusals_keep_rejected_and_never_replay() {
         let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
             .into_iter()
             .collect::<Vec<_>>();
-        assert_eq!(out.iter().filter(|a| matches!(a,
-            Action::Notice(Notice::CommandFailed { command: 7, error })
-                if error.kind == Some(ErrorKind::Rejected) && error.outcome == Some(Outcome::Rejected)
-                    && error.venue_code.as_deref() == Some("23000") && error.message.contains("native throttle")
-        )).count(), 1, "definitive native refusal never resends: {out:?}");
+        let errors: Vec<_> = out
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{out:?}");
+        let error = errors[0];
+        if status == 429 {
+            assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_eq!(
+                error.message,
+                "HTTP response does not prove the write outcome"
+            );
+            assert_eq!(error.venue_code, None);
+        } else {
+            assert_eq!(error.kind, Some(ErrorKind::Rejected));
+            assert_eq!(error.outcome, Some(Outcome::Rejected));
+            assert!(error.message.contains("native throttle"));
+            assert_eq!(error.venue_code.as_deref(), Some("23000"));
+        }
         assert!(!out.iter().any(
             |a| matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))
         ));
@@ -1269,7 +1287,14 @@ fn rate_limit_without_rejection_proof_keeps_unknown_outcome() {
         let submit = begin(&mut e, vec![limit()]);
         reply(&mut e, &submit, status, body);
         let [error] = typed_failures(&mut e).try_into().unwrap();
-        assert_eq!(error.kind, Some(ErrorKind::Internal));
+        assert_eq!(
+            error.kind,
+            Some(if status == 429 {
+                ErrorKind::RateLimited
+            } else {
+                ErrorKind::Internal
+            })
+        );
         assert_eq!(error.outcome, Some(Outcome::Unknown));
     }
     let (mut e, _) = ready_unattributed();

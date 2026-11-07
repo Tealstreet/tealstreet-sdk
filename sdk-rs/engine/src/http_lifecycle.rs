@@ -2735,17 +2735,15 @@ impl<V: Venue> Engine<V> {
                 self.io.core.http_history_failure = None;
             }
             let previous = self.io.core.http_delivery.replace(delivery.clone());
-            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-            let exempt = proof.error().is_some()
-                && self.venue.status_exempt_refusal(&pending.value, response);
-            #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
-            let exempt = false;
-            if let Some(error) = proof.error().filter(|_| !exempt) {
+            if let Some(error) = proof.error() {
                 let venue = &self.venue;
                 let recorded = self.io.core.request_contexts.unproven_result(
                     &delivery,
                     response.status,
-                    |evidence| venue.unproven_http_evidence(&pending.value, response, evidence),
+                    |evidence| {
+                        evidence.retry_after_ms(crate::classify::retry_after_ms(&response));
+                        venue.unproven_http_evidence(&pending.value, response, evidence);
+                    },
                 );
                 if recorded.is_ok() {
                     #[cfg(feature = "http-plans")]
@@ -2800,11 +2798,6 @@ impl<V: Venue> Engine<V> {
                     Some((response.status, response.headers.to_owned()));
                 #[cfg(feature = "repair-mutations")]
                 let previous_data = self.begin_repair_data(Some(request));
-                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-                let previous_exempt = std::mem::replace(
-                    &mut self.io.core.http_status_exempt,
-                    exempt.then_some(request),
-                );
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -2817,10 +2810,6 @@ impl<V: Venue> Engine<V> {
                 #[cfg(feature = "repair-mutations")]
                 self.end_repair_data(previous_data);
                 self.io.core.http_write_reply = None;
-                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-                {
-                    self.io.core.http_status_exempt = previous_exempt;
-                }
             }
             self.io.core.http_delivery = previous;
             self.io.core.request_contexts.exit_delivery(&delivery);
@@ -5810,7 +5799,7 @@ mod tests {
             auth_reject: true,
             ..Probe::default()
         });
-        for (command, status) in [(7, 429), (8, 503)] {
+        for (command, status) in [(6, 403), (7, 429), (8, 503)] {
             // A native auth refusal is credential evidence only on a signed write.
             let (_, token, _) = queue_mutation(&mut engine, command, 0., true);
             let (attempt, input) = work(&route(&mut engine, token, 1.));
@@ -5833,12 +5822,13 @@ mod tests {
                 },
             );
             assert_eq!(engine.health().auth_failures, 1);
-            if status == 503 {
+            if status != 403 {
                 assert!(!engine.io.core.auth_failure_counted);
                 let actions = engine.drain_actions().collect::<Vec<_>>();
                 assert!(actions.iter().any(|action| matches!(action,
-                    Action::Notice(Notice::CommandFailed { command: 8, error })
-                    if error.kind == Some(ErrorKind::VenueUnavailable)
+                    Action::Notice(Notice::CommandFailed { command: failed, error })
+                    if *failed == command
+                        && error.kind == Some(if status == 429 { ErrorKind::RateLimited } else { ErrorKind::VenueUnavailable })
                         && error.outcome == Some(crate::Outcome::Unknown))));
             }
         }
@@ -5864,7 +5854,7 @@ mod tests {
         );
         assert_eq!(engine.health(), &health);
         assert_eq!(engine.venue.responses, 1);
-        assert_eq!(engine.venue.reconciliations.borrow().len(), 1);
+        assert_eq!(engine.venue.reconciliations.borrow().len(), 0);
         assert!(engine.drain_actions().next().is_none());
     }
 

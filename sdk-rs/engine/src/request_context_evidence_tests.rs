@@ -401,7 +401,7 @@ fn unproven_capture_refuses_proven_unreleased_duplicate_and_sealed_attempts_firs
     );
     assert!(!captured);
     writes.released(RequestId(1)).unwrap();
-    for status in [0, 99, 200, 400, 429, 499] {
+    for status in [0, 99, 200, 400, 499] {
         assert_eq!(
             writes.unproven_result(RequestId(1), status, |_| captured = true),
             Err(Error::Invalid)

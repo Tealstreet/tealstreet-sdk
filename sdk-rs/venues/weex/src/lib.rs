@@ -1294,6 +1294,10 @@ impl Venue for WeexFutures {
     ) {
         self.retire_trade(owner);
     }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.account.invalidate_orders();
+        self.refresh_account(cx);
+    }
     fn unproven_http_evidence(
         &self,
         pending: &Pending,

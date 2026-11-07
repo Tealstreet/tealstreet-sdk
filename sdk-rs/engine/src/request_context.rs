@@ -2118,10 +2118,13 @@ impl CommandWrites {
         let any_released = self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
-                && (matches!(
-                    a.result,
-                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_))
-                ) || self.attempts[index + 1..]
+                && (match &a.result {
+                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_)) => true,
+                    Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
+                        error.outcome == Some(Outcome::Unknown)
+                    }
+                    Some(WriteResult::Accepted { .. }) => false,
+                } || self.attempts[index + 1..]
                     .iter()
                     .any(|later| later.leg == a.leg && !later.released))
         }) || self.legs.iter().any(|leg| {

@@ -942,20 +942,20 @@ fn unproven_batch_error_object_keeps_bounded_native_diagnostics_without_ids() {
 }
 
 #[test]
-fn documented_rate_limit_statuses_without_a_code_are_typed_refusals() {
+fn released_rate_limit_statuses_without_a_code_are_unknown() {
     use safe_cex_engine::ErrorKind;
     for (status, headers, outcome, kind, retry) in [
         (
             429,
             "Retry-After: 3\r\n",
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some(ErrorKind::RateLimited),
             Some(3_000.),
         ),
         (
             418,
             "",
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some(ErrorKind::RateLimited),
             None,
         ),

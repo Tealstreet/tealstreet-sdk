@@ -1088,12 +1088,7 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     prove_cancel(&mut e);
     let replacement = requests(&mut e).remove(0);
-    response(
-        &mut e,
-        &replacement,
-        NOW + 16.0,
-        r#"{"code":429,"msg":"too many requests"}"#,
-    );
+    response(&mut e, &replacement, NOW + 16.0, REFUSED);
     let error = e
         .drain_actions()
         .find_map(|a| match a {
@@ -1127,12 +1122,7 @@ fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
         response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         prove_cancel(&mut e);
         let replacement = requests(&mut e).remove(0);
-        response(
-            &mut e,
-            &replacement,
-            NOW + 16.0,
-            r#"{"code":429,"msg":"too many requests"}"#,
-        );
+        response(&mut e, &replacement, NOW + 16.0, REFUSED);
         let error = e
             .drain_actions()
             .find_map(|a| match a {
@@ -1166,7 +1156,7 @@ fn write_failures_use_shared_classification_and_preserve_network_text() {
             429,
             r#"{"code":429,"msg":"too many requests"}"#,
             Some(ErrorKind::RateLimited),
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some("429"),
         ),
         (
@@ -1577,7 +1567,14 @@ fn quoted_refusal_codes_share_the_integer_code_table_and_message() {
                 _ => None,
             })
             .unwrap();
-        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+        assert_eq!(
+            error.outcome,
+            Some(if code == "429" {
+                safe_cex_engine::Outcome::Unknown
+            } else {
+                safe_cex_engine::Outcome::Rejected
+            })
+        );
         assert_eq!(error.venue_code.as_deref(), Some(code));
         assert_eq!(error.venue_message.as_deref(), Some("native refusal"));
         assert_eq!(
@@ -2365,7 +2362,7 @@ fn placements(requests: &[HttpRequest]) -> Vec<&HttpRequest> {
         .filter(|r| r.url.ends_with("/v3/order") || r.url.ends_with("/v3/delete-order"))
         .collect()
 }
-const REFUSED: &str = r#"{"code":429,"msg":"too many requests"}"#;
+const REFUSED: &str = r#"{"code":10002,"msg":"Requires Login: Your API key is wrong"}"#;
 /// Amends the resting stop to 56000 and lands its cancel; its replacement is next.
 fn to_stop_replacement(e: &mut TestEngine) -> HttpRequest {
     let cancel = amend_to(e, "stop", 56000.0).remove(0);

@@ -119,7 +119,7 @@ fn a_decoded_native_code_overrides_the_status_kind() {
     assert_eq!(verdict, Verdict::RefusedResend(ErrorKind::AuthInvalid));
     assert_eq!(
         classify(400, Some(&int(-1003)), Intent::Place),
-        Verdict::Refused(ErrorKind::RateLimited)
+        Verdict::Unknown(Some(ErrorKind::RateLimited))
     );
 }
 
@@ -127,7 +127,7 @@ fn a_decoded_native_code_overrides_the_status_kind() {
 fn a_bare_status_is_refusal_only_when_the_table_documents_it() {
     assert_eq!(
         classify(429, None, Intent::Place),
-        Verdict::Refused(ErrorKind::RateLimited)
+        Verdict::Unknown(Some(ErrorKind::RateLimited))
     );
     assert_eq!(
         classify(418, None, Intent::Place),
@@ -205,7 +205,7 @@ fn success_codes_and_codeless_envelopes_never_become_refusals() {
     };
     assert_eq!(
         classify(429, Some(&bare), Intent::Place),
-        Verdict::Refused(ErrorKind::RateLimited)
+        Verdict::Unknown(Some(ErrorKind::RateLimited))
     );
     assert_eq!(
         classify(400, Some(&bare), Intent::Place),
@@ -270,9 +270,9 @@ fn errors_keep_the_venue_message_and_native_evidence() {
         Some(&int(-1003)),
         "Too many requests",
     );
-    assert_eq!(verdict, Verdict::Refused(ErrorKind::RateLimited));
+    assert_eq!(verdict, Verdict::Unknown(Some(ErrorKind::RateLimited)));
     assert_eq!(error.message, "Too many requests");
-    assert_eq!(error.outcome, Some(Outcome::Rejected));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(error.venue_code.as_deref(), Some("-1003"));
     assert_eq!(error.venue_message.as_deref(), Some("native message"));
     assert_eq!(error.retry_after_ms, Some(2_000.0));
