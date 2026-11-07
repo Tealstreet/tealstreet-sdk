@@ -174,7 +174,7 @@ impl PhemexPerpetuals {
         }
     }
     fn discovery_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, true) {
             Ok(read) => read,
             Err(_) => {
                 self.discovery.failed(cx, true);
@@ -332,7 +332,7 @@ impl PhemexPerpetuals {
         b.fetching = true;
         b.deadline = Some(cx.set_timer(20_000.));
         let generation = b.generation;
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, true) {
             Ok(read) => read,
             Err(_) => {
                 self.book_failed(cx, symbol);
@@ -498,6 +498,17 @@ impl Venue for PhemexPerpetuals {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets(..) => S::MARKETS,
+            Pending::Tickers(..) => S::TICKERS,
+            Pending::Account(_) => S::BALANCE.union(S::POSITIONS),
+            Pending::Orders(_) => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
@@ -524,7 +535,7 @@ impl Venue for PhemexPerpetuals {
             return;
         }
         self.catalogue_partial = false;
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, false) {
             Ok(read) => read,
             Err(_) => {
                 self.discovery.failed(cx, false);
@@ -1007,22 +1018,25 @@ impl Venue for PhemexPerpetuals {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        self.settle_retired_trading(cx);
-        match pending {
-            Pending::Identity(command) => self.identity_failed(cx, command, error),
-            Pending::Candles { root, .. } => {
-                let _ = cx.fail_context(root.context(), error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.settle_retired_trading(cx);
+            match pending {
+                Pending::Identity(command) => self.identity_failed(cx, command, error),
+                Pending::Candles { root, .. } => {
+                    let _ = cx.fail_context(root.context(), error);
+                }
+                Pending::Repair(request) => self.repair_failed(cx, request, error),
+                Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
+                Pending::History(read) => self.history_failed(cx, read, error),
+                Pending::Income(read) => self.income_failed(cx, read, error),
+                Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
+                Pending::PublicCandles { context, .. } => {
+                    let _ =
+                        cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+                }
+                pending => self.on_request_failed(cx, pending, &error.message),
             }
-            Pending::Repair(request) => self.repair_failed(cx, request, error),
-            Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
-            Pending::History(read) => self.history_failed(cx, read, error),
-            Pending::Income(read) => self.income_failed(cx, read, error),
-            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
-            Pending::PublicCandles { context, .. } => {
-                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
-            }
-            pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

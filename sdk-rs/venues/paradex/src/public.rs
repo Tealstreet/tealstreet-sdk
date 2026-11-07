@@ -264,7 +264,13 @@ impl Paradex {
                 },
             )
         };
-        let context = match cx.http_context(
+        let issue = if !markets {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -1284,7 +1290,7 @@ impl Paradex {
             if !self.poll_generation_live(&target, &symbol, interval) {
                 return;
             }
-            match cx.http_context(
+            match cx.http_live_context(
                 Scope::Background,
                 Policy {
                     operation: Operation::Read,
@@ -1689,6 +1695,18 @@ fn skip_or_reject(cx: &mut Cx<'_, Pending>, invalid: &mut bool, e: &serde_json::
         *invalid = true;
     } else {
         safe_cex_engine::startup::skipped_row(cx);
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::ManagedSeed(_, request) => request.startup_sections(),
+            Self::Markets { .. } => S::MARKETS,
+            Self::Tickers { .. } => S::TICKERS,
+            _ => S::NONE,
+        }
     }
 }
 

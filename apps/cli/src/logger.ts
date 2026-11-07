@@ -4,6 +4,8 @@ import * as os from 'os';
 import * as readline from 'readline';
 import { stableHash } from '@tealstreet/utils/src/stableHash';
 
+import { G, terminalText } from './console-glyphs';
+import { describeCause, terminalErrorText } from './error-cause';
 import { classifyLog, isOperational } from './log-classify';
 import { setStatus } from './status-line';
 import { BRAND } from './brand';
@@ -109,7 +111,10 @@ function shouldRateLimit(): boolean {
       rateLimitWarningShown = true;
       // Use original console to avoid recursion
       writeAbovePrompt(() =>
-        originalConsoleWarn('\x1b[33m⚠\x1b[0m', 'Some output hidden (too many messages). Check log file for details.'),
+        originalConsoleWarn(
+          `\x1b[33m${G.warn}\x1b[0m`,
+          'Some output hidden (too many messages). Check log file for details.',
+        ),
       );
     }
     return true;
@@ -284,7 +289,7 @@ function formatForLog(arg: unknown): string {
   if (arg instanceof Error) {
     // Format error with nice stack trace
     const errorName = arg.name || 'Error';
-    const message = arg.message || 'Unknown error';
+    const message = arg.message || describeCause(arg);
     let result = `${errorName}: ${message}`;
 
     if (arg.stack) {
@@ -338,7 +343,8 @@ export function interceptConsole(): void {
     if (isDuplicateMessage(message)) return;
     if (shouldRateLimit()) return;
 
-    writeAbovePrompt(() => (stdoutReservedForJson ? originalConsoleError : originalConsoleLog)(...args));
+    const terminalArgs = args.map((arg) => (typeof arg === 'string' ? terminalText(arg) : arg));
+    writeAbovePrompt(() => (stdoutReservedForJson ? originalConsoleError : originalConsoleLog)(...terminalArgs));
   };
   console.log = handleInfoLog;
   console.info = handleInfoLog;
@@ -355,7 +361,7 @@ export function interceptConsole(): void {
     logger.error(args.map(formatForLog).join(' '));
 
     // For terminal: extract just the error message, skip noise
-    const cleanMessage = extractErrorMessage(args);
+    const cleanMessage = terminalErrorText(args);
     if (!cleanMessage) return;
     consoleTap?.('error', cleanMessage);
 
@@ -366,7 +372,7 @@ export function interceptConsole(): void {
     if (shouldRateLimit()) return;
 
     // Format with red X like watch mode
-    writeAbovePrompt(() => originalConsoleError('\x1b[31m✗\x1b[0m', cleanMessage));
+    writeAbovePrompt(() => originalConsoleError(`\x1b[31m${G.error}\x1b[0m`, terminalText(cleanMessage)));
     setStatus(cleanMessage, classifyLog(cleanMessage, 'error'));
   };
 
@@ -375,7 +381,7 @@ export function interceptConsole(): void {
     logger.warn(args.map(formatForLog).join(' '));
 
     // Show clean message in terminal
-    const cleanMessage = extractErrorMessage(args);
+    const cleanMessage = terminalErrorText(args);
     if (!cleanMessage) return;
     consoleTap?.('warn', cleanMessage);
 
@@ -385,7 +391,7 @@ export function interceptConsole(): void {
     // Apply rate limiting
     if (shouldRateLimit()) return;
 
-    writeAbovePrompt(() => originalConsoleWarn('\x1b[33m⚠\x1b[0m', cleanMessage));
+    writeAbovePrompt(() => originalConsoleWarn(`\x1b[33m${G.warn}\x1b[0m`, terminalText(cleanMessage)));
     setStatus(cleanMessage, classifyLog(cleanMessage, 'warn'));
   };
 
@@ -396,36 +402,6 @@ export function interceptConsole(): void {
     logger.error('TRACE: ' + args.map(formatForLog).join(' ') + '\n' + stack);
     // Don't output to terminal - full trace is in log file
   };
-}
-
-/**
- * Extract a clean error message from console args
- */
-function extractErrorMessage(args: unknown[]): string | null {
-  if (args.length === 0) return null;
-
-  const parts: string[] = [];
-  for (const arg of args) {
-    if (arg instanceof Error) {
-      parts.push(arg.message);
-    } else if (typeof arg === 'string') {
-      // Skip common prefixes that are redundant
-      if (arg === 'exchange error' || arg === 'Exchange error:') continue;
-      parts.push(arg);
-    } else if (typeof arg === 'object' && arg !== null) {
-      // For objects like API responses, extract message if present
-      if ('message' in arg) {
-        parts.push(String((arg as { message: unknown }).message));
-      } else if ('retMsg' in arg) {
-        // Bybit-style error
-        parts.push(String((arg as { retMsg: unknown }).retMsg));
-      } else if ('msg' in arg) {
-        parts.push(String((arg as { msg: unknown }).msg));
-      }
-    }
-  }
-
-  return parts.length > 0 ? parts.join(' ') : null;
 }
 
 export function restoreConsole(): void {

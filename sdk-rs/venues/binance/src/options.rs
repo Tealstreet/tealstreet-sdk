@@ -376,7 +376,13 @@ impl BinanceFutures {
         } else {
             None
         };
-        let Ok(context) = cx.http_context(
+        let issue = if matches!(kind, Kind::Tickers | Kind::Marks) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let Ok(context) = issue(
+            cx,
             Scope::Background,
             reads::policy(selected.as_ref().map(|(c, _)| c.clone())),
         ) else {
@@ -1101,4 +1107,18 @@ fn optional_native_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u
     #[derive(Deserialize)]
     struct Id(#[serde(deserialize_with = "native_id")] u64);
     Option::<Id>::deserialize(d).map(|id| id.map(|id| id.0))
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.kind {
+            Kind::Markets => S::MARKETS,
+            Kind::Tickers | Kind::Marks => S::TICKERS,
+            Kind::Balance => S::BALANCE,
+            Kind::Positions => S::POSITIONS,
+            Kind::Orders => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
 }

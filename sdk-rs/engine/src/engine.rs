@@ -113,7 +113,6 @@ pub enum HttpReadClass {
     Normal = 0,
     Critical = 1,
     Bulk = 2,
-    #[cfg(feature = "address-nonce")]
     Reconciliation = 3,
 }
 
@@ -1045,6 +1044,7 @@ struct ReadAuth {
 }
 
 struct PendingHttp<P> {
+    startup: crate::startup::Sections,
     value: P,
     auth: Option<ReadAuth>,
 }
@@ -1866,6 +1866,8 @@ impl OrdersRefresh {
 }
 
 struct IoCore {
+    startup_causes: crate::startup_causes::Causes,
+    startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
     address_setup: address_nonce_setup::AddressNonceSetup,
     nonce_unscheduled: bool,
@@ -2147,6 +2149,7 @@ impl IoCore {
 
 struct Io<P> {
     core: IoCore,
+    startup_reads: fn(&P) -> crate::startup::Sections,
     /// Managed close, installed by `Engine::new` only for venues that declare
     /// managed sockets, so other venues never reference the managed retire path.
     #[cfg(feature = "managed-sockets")]
@@ -2177,6 +2180,8 @@ impl Default for IoCore {
             http_delivery: None,
             #[cfg(feature = "http-plans")]
             http_history_failure: None,
+            startup_causes: Default::default(),
+            startup_delivery: Default::default(),
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
             #[cfg(feature = "repair-mutations")]
@@ -2337,6 +2342,12 @@ pub(crate) struct CoreCx<'a> {
 }
 
 impl<P> Io<P> {
+    fn startup_issued(&mut self, pending: &P) -> crate::startup::Sections {
+        let sections = (self.startup_reads)(pending);
+        self.core.startup_causes.started(sections);
+        sections
+    }
+
     #[inline]
     fn core_io(&mut self) -> CoreIo<'_> {
         CoreIo {
@@ -2421,6 +2432,7 @@ impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
             core: IoCore::default(),
+            startup_reads: |_| crate::startup::Sections::NONE,
             #[cfg(feature = "managed-sockets")]
             managed_close: None,
             pending: Default::default(),
@@ -2794,6 +2806,7 @@ impl<P> Cx<'_, P> {
         body: Option<String>,
         pending: P,
     ) -> RequestId {
+        let startup = self.io.startup_issued(&pending);
         let id = RequestId(self.io.next());
         #[cfg(feature = "order-locks")]
         {
@@ -2813,6 +2826,7 @@ impl<P> Cx<'_, P> {
         self.io.pending.insert(
             id,
             PendingHttp {
+                startup,
                 value: pending,
                 auth: None,
             },
@@ -3142,6 +3156,76 @@ impl<P> Cx<'_, P> {
     #[inline]
     pub fn command_error(&mut self, command: CommandId, message: impl Into<String>) {
         self.core().command_error(command, message)
+    }
+
+    /// A native startup failure with explicit section membership; no error text is retained.
+    pub fn startup_read_failure(&mut self, sections: crate::startup::Sections, error: &VenueError) {
+        if self.io.core.startup_delivery.sections == sections {
+            self.io.core.startup_causes.failed(
+                &mut self.io.core.startup_delivery,
+                error,
+                error.outcome == Some(crate::Outcome::NotSent),
+            );
+        } else {
+            self.io.core.startup_causes.failed(
+                &mut crate::startup_causes::Delivery::new(sections, None),
+                error,
+                error.outcome == Some(crate::Outcome::NotSent),
+            );
+        }
+    }
+
+    /// A declared startup read denied before an HTTP request could be issued.
+    pub fn startup_admission_refused(
+        &mut self,
+        sections: crate::startup::Sections,
+        error: &VenueError,
+    ) {
+        self.io.core.startup_causes.failed(
+            &mut crate::startup_causes::Delivery::new(sections, None),
+            error,
+            true,
+        );
+    }
+
+    fn with_startup_delivery<R>(
+        &mut self,
+        sections: crate::startup::Sections,
+        callback: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = std::mem::replace(
+            &mut self.io.core.startup_delivery,
+            crate::startup_causes::Delivery::new(sections, None),
+        );
+        let result = callback(self);
+        self.io.core.startup_delivery = previous;
+        result
+    }
+
+    /// Keep a child read's local failure handling and logging separate from its parent callback.
+    pub fn with_startup_request<R>(
+        &mut self,
+        pending: P,
+        callback: impl FnOnce(&mut Self, P) -> R,
+    ) -> R {
+        let sections = (self.io.startup_reads)(&pending);
+        self.with_startup_delivery(sections, |cx| callback(cx, pending))
+    }
+
+    /// Scope a pre-send failure, including its native cleanup and legacy failure notices.
+    pub fn with_startup_request_failure<R>(
+        &mut self,
+        pending: P,
+        error: VenueError,
+        callback: impl FnOnce(&mut Self, P, VenueError) -> R,
+    ) -> R {
+        self.with_startup_request(pending, |cx, pending| {
+            cx.io
+                .core
+                .startup_causes
+                .failed(&mut cx.io.core.startup_delivery, &error, true);
+            callback(cx, pending, error)
+        })
     }
 
     /// A private read the venue refused over the key, before the account
@@ -3614,7 +3698,7 @@ impl crate::engine::CoreCx<'_> {
         let mut message = message.into();
         if level >= Level::Warn {
             let kind = fields.iter().find_map(|(name, value)| match (name, value) {
-                (&"kind", Value::Str(kind)) => auth_kind(kind),
+                (&"kind", value) => value.as_str().and_then(auth_kind),
                 _ => None,
             });
             if let Some((hinted, named)) = crate::error::ip_whitelist_text(&message, kind) {
@@ -3627,6 +3711,26 @@ impl crate::engine::CoreCx<'_> {
                     fields.push(("kind", ErrorKind::AuthPermission.as_str().into()));
                 }
             }
+        }
+        if matches!(
+            code,
+            log_code::REQUEST_FAILED | log_code::AUTH_REJECTED | log_code::STARTUP_DEGRADED
+        ) {
+            let mut error = VenueError::new("");
+            for (key, value) in &fields {
+                if let Some(value) = value.as_str() {
+                    if *key == "kind" {
+                        error.kind = crate::startup_causes::error_kind(value);
+                    }
+                    if *key == "venueCode" {
+                        error.venue_code = crate::startup_causes::venue_code(value);
+                    }
+                }
+            }
+            self.io
+                .core
+                .startup_causes
+                .failed(&mut self.io.core.startup_delivery, &error, false);
         }
         // A rejection often also arrives as an auth-kind failure or `deactivate`.
         if code == log_code::AUTH_REJECTED {
@@ -4140,7 +4244,9 @@ pub trait Venue {
         _reason: crate::request_context::Error,
         error: VenueError,
     ) {
-        self.on_sign_error(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_sign_error(cx, pending, error);
+        });
     }
 
     /// Reconcile writes whose outcome is unknown: issue a fresh order read for
@@ -4327,7 +4433,9 @@ pub trait Venue {
         pending: Self::Pending,
         error: VenueError,
     ) {
-        self.on_sign_failed(cx, pending, &error.message);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_sign_failed(cx, pending, &error.message);
+        });
     }
     /// Delegated signing failed before an HTTP write could reach the venue.
     fn on_sign_failed(
@@ -4505,6 +4613,15 @@ pub trait Venue {
     ) {
         self.on_request_failed(cx, pending, &error.message);
     }
+    /// Exact native startup-set membership, sampled at issuance, never inferred
+    /// from a URL or a missing section. Commands and metadata return NONE.
+    fn startup_reads(_pending: &Self::Pending) -> crate::startup::Sections
+    where
+        Self: Sized,
+    {
+        crate::startup::Sections::NONE
+    }
+
     /// Optional public stage facts for the nonterminal startup watchdog.
     fn startup_diagnostics(&self, _store: &Store) -> Vec<(&'static str, Value)> {
         Vec::new()
@@ -4581,6 +4698,7 @@ fn watch_startup<P>(
         fields.push(("elapsedMs", elapsed.max(0.0).into()));
         fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
     }
+    cx.io.core.startup_causes.fields(&missing, &mut fields);
     cx.event(
         level,
         log_code::STARTUP_INCOMPLETE,
@@ -4752,6 +4870,7 @@ impl<V: Venue> Engine<V> {
             store,
             io: Io {
                 core,
+                startup_reads: V::startup_reads,
                 #[cfg(feature = "managed-sockets")]
                 managed_close: V::managed_sockets().then_some(
                     Cx::<V::Pending>::managed_close
@@ -5702,6 +5821,20 @@ impl<V: Venue> Engine<V> {
         if let Some(delivery) = delivery.as_ref() {
             self.io.core.request_contexts.enter_delivery(delivery);
         }
+        let sections = request
+            .and_then(|id| self.io.pending.get(&id))
+            .map_or(crate::startup::Sections::NONE, |p| p.startup);
+        let status = match &event {
+            Event::HttpResponse { response, .. } => Some(response.status),
+            Event::HttpStart { status, .. } => Some(*status),
+            _ => request
+                .and_then(|id| self.io.core.incoming.get(&id))
+                .map(|r| r.status),
+        };
+        let previous_startup = std::mem::replace(
+            &mut self.io.core.startup_delivery,
+            crate::startup_causes::Delivery::new(sections, status),
+        );
         let previous = std::mem::replace(&mut self.io.core.http_delivery, delivery.clone());
         #[cfg(feature = "managed-sockets")]
         let socket_message = self.io.core.socket_message.take();
@@ -5713,6 +5846,7 @@ impl<V: Venue> Engine<V> {
             _ => None,
         });
         self.handle_event_scoped(now, event, physical_timeout);
+        self.io.core.startup_delivery = previous_startup;
         #[cfg(feature = "repair-mutations")]
         self.end_repair_data(previous_data);
         #[cfg(feature = "http-plans")]
@@ -5984,6 +6118,11 @@ impl<V: Venue> Engine<V> {
                     cx.io.core.health.count(log_code::HTTP_FAILED);
                     let kind = cx.io.core.http_failure_kind;
                     let make_failure = || VenueError::new(error).kind(kind);
+                    cx.io.core.startup_causes.failed(
+                        &mut cx.io.core.startup_delivery,
+                        &make_failure(),
+                        false,
+                    );
                     #[cfg(feature = "http-plans")]
                     {
                         use request_context_registry::ReleasedReadFailure;
@@ -6043,7 +6182,10 @@ impl<V: Venue> Engine<V> {
                 }
                 .write_intent();
                 cx.io.core.request_contexts.dispatch = Some((command, intent));
+                cx.io.core.request_contexts.dispatch_class =
+                    crate::request_budget::RequestClass::venue_action(&action);
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.core.request_contexts.dispatch_class = Default::default();
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
@@ -6211,7 +6353,10 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.request_contexts.dispatch = command
                     .completion_id()
                     .map(|id| (id, command.write_intent()));
+                cx.io.core.request_contexts.dispatch_class =
+                    crate::request_budget::RequestClass::command(&command);
                 self.venue.on_command(&mut cx, command);
+                cx.io.core.request_contexts.dispatch_class = Default::default();
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
@@ -6660,6 +6805,21 @@ impl<V: Venue> Engine<V> {
             return;
         };
         self.count_http_status(incoming.status);
+        if incoming.status >= 400 {
+            let kind = match incoming.status {
+                401 => ErrorKind::AuthInvalid,
+                403 => ErrorKind::AuthPermission,
+                408 | 504 => ErrorKind::Timeout,
+                418 | 429 => ErrorKind::RateLimited,
+                _ => ErrorKind::VenueUnavailable,
+            };
+            self.io.core.startup_causes.failed(
+                &mut self.io.core.startup_delivery,
+                &VenueError::new("").kind(kind),
+                false,
+            );
+        }
+
         let mut cx = Cx {
             now,
             store: &mut self.store,
@@ -6670,6 +6830,11 @@ impl<V: Venue> Engine<V> {
         if let Some(splitter) = &incoming.splitter {
             let outside = splitter.outside();
             if !splitter.finished() {
+                cx.io.core.startup_causes.failed(
+                    &mut cx.io.core.startup_delivery,
+                    &VenueError::new("").kind(ErrorKind::Internal),
+                    false,
+                );
                 let body = splitter.envelope();
                 if serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok() {
                     let response = Response {
@@ -6718,6 +6883,11 @@ impl<V: Venue> Engine<V> {
                 Ok(body) => body,
                 Err(_) => {
                     let make_failure = || malformed_body("stream envelope is not UTF-8");
+                    cx.io.core.startup_causes.failed(
+                        &mut cx.io.core.startup_delivery,
+                        &make_failure(),
+                        false,
+                    );
                     cx.with_owned_read_failure(make_failure, |cx| {
                         self.venue.on_http_failed(cx, pending.value, make_failure());
                     });
@@ -6821,8 +6991,15 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.order_read_tokens.remove(&http.id);
                 cx.io.core.streams.remove(&http.id);
                 if let Some(pending) = cx.io.pending.remove(&http.id) {
-                    self.venue
-                        .on_sign_error(&mut cx, pending.value, error.venue_error());
+                    cx.with_startup_delivery(pending.startup, |cx| {
+                        let error = error.venue_error();
+                        cx.io.core.startup_causes.failed(
+                            &mut cx.io.core.startup_delivery,
+                            &error,
+                            true,
+                        );
+                        self.venue.on_sign_error(cx, pending.value, error);
+                    });
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
@@ -7124,6 +7301,7 @@ impl<V: Venue> Engine<V> {
     ) {
         self.assert_live();
         self.flush_http_owner_retirements();
+        self.apply_account_read_budgets(self.io.core.dispatch_now, emitted);
         for action in self.io.core.actions.split_off(emitted).into_iter().rev() {
             queued.push_front(action);
         }
@@ -7132,6 +7310,7 @@ impl<V: Venue> Engine<V> {
     #[inline(always)]
     fn dispatch_actions(&mut self, now: f64) {
         self.assert_live();
+        self.apply_account_read_budgets(now, 0);
         if self.io.core.actions.is_empty()
             && self.io.core.signing_admission.is_empty()
             && self.io.core.signing.is_empty()
@@ -8025,8 +8204,12 @@ fn push_event(
     }
     event.message = crate::log::cap(event.message);
     for (_, value) in &mut event.fields {
-        if let Value::Str(text) = value {
-            *text = crate::log::cap(std::mem::take(text));
+        match value {
+            Value::Str(text) => *text = crate::log::cap(std::mem::take(text)),
+            Value::StaticStr(text) if text.len() > crate::log::MAX_LOG_BYTES => {
+                *value = Value::Str(crate::log::cap((*text).to_owned()));
+            }
+            _ => {}
         }
     }
     actions.push(Action::Notice(Notice::Event(event)));
@@ -10953,6 +11136,47 @@ mod startup_watch_tests {
     }
 
     #[test]
+    fn startup_watch_reports_only_missing_required_section_causes() {
+        let mut engine = crate::test_support::seeded_engine(Idle);
+        engine.set_account_startup(true);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.store_mut().set_balance(Default::default());
+        engine.handle(STARTUP_WATCH_MS, Event::PollScaleChanged { scale: 1.0 });
+        let event = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::Event(e)) if e.code == log_code::STARTUP_INCOMPLETE => {
+                    Some(e)
+                }
+                _ => None,
+            })
+            .unwrap();
+        for section in [
+            "startupTickersState",
+            "startupOrdersState",
+            "startupPositionsState",
+        ] {
+            assert!(
+                event.fields.contains(&(section, "neverStarted".into())),
+                "{section}: {:?}",
+                event.fields
+            );
+        }
+        assert!(
+            !event
+                .fields
+                .iter()
+                .any(|(key, _)| key.starts_with("startupMarkets")
+                    || key.starts_with("startupBalance"))
+        );
+        assert_eq!(
+            event.message,
+            "Startup incomplete: still waiting for tickers, orders, positions"
+        );
+    }
+
+    #[test]
     fn unloaded_startup_is_reported_until_every_section_loads() {
         let mut engine = crate::test_support::seeded_engine(Idle);
         engine.set_account_startup(true);
@@ -11599,3 +11823,7 @@ mod orders_refresh_tests;
 #[cfg(test)]
 #[path = "retried_read_diagnostic_tests.rs"]
 mod retried_read_diagnostic_tests;
+
+#[cfg(test)]
+#[path = "startup_cause_tests.rs"]
+mod startup_cause_tests;
