@@ -975,10 +975,21 @@ test('#3191 run 42249705679 retains measured Paradex headroom', () => {
 
 test('#3229 Backpack hosted signing (run 42352281022, job 128343086016) retains CI headroom', () => {
   const measured = 1_994_139;
-  const cap = 2_004_992;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const minimumCap = 2_004_992;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   const current = WASM_VENUE_OVERRIDES.backpack;
-  assert.equal(current, cap, 'Backpack retains CI size plus 10 KiB, rounded up to the KiB');
+  assert.ok(current >= minimumCap, 'Backpack retains at least CI size plus 10 KiB, rounded up to the KiB');
+  assert.equal(wasmBudgetError(measured, 'venue', 'backpack'), undefined);
+  assert.equal(wasmBudgetError(current, 'venue', 'backpack'), undefined);
+  assert.match(wasmBudgetError(current + 1, 'venue', 'backpack'), /exceeds/);
+});
+
+test('#3229 master merge (run 42392889181, job 128464301381) retains rounded CI headroom', () => {
+  const measured = 2_000_456;
+  const minimumCap = 2_011_136;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const current = WASM_VENUE_OVERRIDES.backpack;
+  assert.ok(current >= minimumCap);
   assert.equal(wasmBudgetError(measured, 'venue', 'backpack'), undefined);
   assert.equal(wasmBudgetError(current, 'venue', 'backpack'), undefined);
   assert.match(wasmBudgetError(current + 1, 'venue', 'backpack'), /exceeds/);

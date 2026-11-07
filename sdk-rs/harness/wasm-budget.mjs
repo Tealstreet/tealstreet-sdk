@@ -207,12 +207,14 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
 // #3229 hosted Backpack: run 42352281022, job 128343086016 measured 1,994,139 B.
 // Backpack keeps that CI size plus 10 KiB, rounded up to the KiB.
+// #3229 after master merge: run 42392889181, job 128464301381 measured 2,000,456 B
+// at CI merge ba85167cc7c. CI size plus 10 KiB, rounded up to the KiB.
 // #3193 at ad4f1d6d5d9: seven CI measurements + 10 KiB, rounded up to KiB.
 // Later master caps win per family; shared-family siblings remain equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
-  backpack: 2_004_992,
+  backpack: 2_011_136,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
