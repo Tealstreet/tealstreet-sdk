@@ -207,6 +207,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // at CI merge ba85167cc7c. CI size plus 10 KiB, rounded up to the KiB.
 // #3193 at ad4f1d6d5d9: seven CI measurements + 10 KiB, rounded up to KiB.
 // Later master caps win per family; shared-family siblings remain equal.
+// #3111 historical run 42096897919 measured HL siblings at 2,106,939 B; current larger caps retained.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
@@ -235,8 +236,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Hyperliquid 2,184,857 B. CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   hyperliquid: 2_195_456,
   hyperliquidspot: 2_195_456,
-  kraken: 2_136_064,
-  krakenspot: 2_136_064,
+  // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
+  // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
+  kraken: 2_147_328,
+  krakenspot: 2_147_328,
   kucoin: 1_838_080,
   kucoinspot: 2_357_248,
   lighter: 2_093_056,

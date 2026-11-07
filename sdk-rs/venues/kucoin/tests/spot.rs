@@ -2130,12 +2130,16 @@ fn spot_invalid_negotiated_heartbeat_intervals_reject_before_connecting() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
     let unknown = (None, Some(Outcome::Unknown));
     for (status, body, classified) in [
-        (503, r#"{"code":"500000","msg":"busy"}"#, unknown),
+        (
+            503,
+            r#"{"code":"500000","msg":"busy"}"#,
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+        ),
         (
             200,
             r#"{"code":"200004","msg":"Balance insufficient"}"#,
@@ -2579,4 +2583,185 @@ fn a_missing_book_timestamp_uses_protocol_utc_after_a_host_correction() {
         json!({"timestamp":h.now+1.,"bids":[[97,1]],"asks":[[103,2]]}),
     );
     assert_eq!(h.e.venue().book("BTC-USDT").unwrap().bids(), &[(98., 1.)]);
+}
+
+#[test]
+fn dispatched_write_ambiguity_matrix() {
+    for (status, body) in [
+        (429, "{}"),
+        (429, r#"{"code":"400100","msg":"invalid argument"}"#),
+        (429, r#"{"code":"400005","msg":"signature refused"}"#),
+        (429, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+        (200, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+        (408, r#"{"code":"400100","msg":"invalid argument"}"#),
+        (500, r#"{"code":"400100","msg":"invalid argument"}"#),
+        (503, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+        (408, r#"{"code":"400005","msg":"signature refused"}"#),
+        (500, r#"{"code":"400005","msg":"signature refused"}"#),
+        (503, r#"{"code":"400005","msg":"signature refused"}"#),
+        (599, r#"{"code":"400005","msg":"signature refused"}"#),
+        (400, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+        (404, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+    ] {
+        for operation in ["create", "amend", "cancel", "accepted_prefix"] {
+            let mut h = H::new(true);
+            h.actions.clear();
+            let (command, path) = match operation {
+                "amend" => (
+                    Command::AmendOrder {
+                        command: 1,
+                        id: "order-1".into(),
+                        price: Some(91.0),
+                        amount: None,
+                    },
+                    "/orders/alter",
+                ),
+                "cancel" => (
+                    Command::CancelOrders {
+                        command: 1,
+                        ids: vec!["order-1".into()],
+                    },
+                    "/hf/orders/",
+                ),
+                "accepted_prefix" => {
+                    let mut second = place(None);
+                    second.client_order_id = None;
+                    (
+                        Command::PlaceOrders {
+                            command: 1,
+                            orders: vec![place(None), second],
+                        },
+                        "/hf/orders",
+                    )
+                }
+                _ => (
+                    Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![place(None)],
+                    },
+                    "/hf/orders",
+                ),
+            };
+            h.command(command);
+            let mut r = h.http(path);
+            if operation == "accepted_prefix" {
+                h.respond(
+                    &r,
+                    200,
+                    r#"{"code":"200000","data":{"orderId":"accepted"}}"#,
+                );
+                r = h.http(path);
+            }
+            assert_ne!(r.method, Method::Get);
+            let sent = h.requests.len();
+            h.respond(&r, status, body);
+            let error = h.failures.last().expect("terminal failure");
+            let case = format!("{operation} {status} {body}: {error:?}");
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "{case}"
+            );
+            let text = error.legacy_text().to_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "{case}"
+            );
+            assert!(
+                !text.contains("refused") && !text.contains("no stop"),
+                "{case}"
+            );
+            assert_eq!(h.requests.len(), sent, "no resend/put-back: {case}");
+        }
+    }
+}
+
+#[test]
+fn review_3259_spot_warning_is_normalized_before_the_terminal() {
+    for operation in ["create", "amend", "cancel"] {
+        let mut h = H::new(true);
+        let (command, path) = match operation {
+            "amend" => (
+                Command::AmendOrder {
+                    command: 1,
+                    id: "order-1".into(),
+                    price: Some(91.0),
+                    amount: None,
+                },
+                "/orders/alter",
+            ),
+            "cancel" => (
+                Command::CancelOrders {
+                    command: 1,
+                    ids: vec!["order-1".into()],
+                },
+                "/hf/orders/",
+            ),
+            _ => (
+                Command::PlaceOrders {
+                    command: 1,
+                    orders: vec![place(None)],
+                },
+                "/hf/orders",
+            ),
+        };
+        h.command(command);
+        let request = h.http(path);
+        h.actions.clear();
+        let sent = h.requests.len();
+        h.respond(
+            &request,
+            429,
+            r#"{"code":"400005","msg":"signature refused"}"#,
+        );
+        let warnings: Vec<_> = h
+            .actions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, action)| match action {
+                Action::Notice(Notice::CommandError {
+                    command: 1,
+                    message,
+                }) => Some((index, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1, "{operation}: {:?}", h.actions);
+        let (warning_at, message) = warnings[0];
+        assert!(
+            message.contains("unknown") && message.contains("Check Open Orders"),
+            "{operation}: {message}"
+        );
+        assert!(!message.contains("refused"), "{operation}: {message}");
+        let terminal_at = h
+            .actions
+            .iter()
+            .position(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+            .unwrap();
+        assert!(warning_at < terminal_at);
+        assert_eq!(message, &h.failures.last().unwrap().message);
+        assert_eq!(h.requests.len(), sent, "no resend");
+    }
+}
+
+#[test]
+fn review_3259_spot_business_code_does_not_inherit_futures_rate_semantics() {
+    let mut h = H::new(true);
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["order-1".into()],
+    });
+    let request = h.http("/hf/orders/");
+    let sent = h.requests.len();
+    h.respond(
+        &request,
+        404,
+        r#"{"code":"200002","msg":"Order cancel for this pair suspended"}"#,
+    );
+    let error = h.failures.last().unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert_eq!(error.venue_code.as_deref(), Some("200002"));
+    assert!(error.message.contains("suspended"));
+    assert_eq!(h.requests.len(), sent);
 }

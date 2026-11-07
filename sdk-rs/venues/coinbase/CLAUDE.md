@@ -4,6 +4,18 @@
 portfolio type and can select INTX, CFM or Spot. Public-only non-spot accounts
 read the drb USDC perpetual catalogue and public stream.
 
+DRB candle history rounds an implicit or host-clamped end time down to whole
+milliseconds, since the SDK scheduling clock can be fractional. Explicit range
+inputs still require whole milliseconds. A valid summary or stream ticker can
+restore a catalogue market omitted or malformed in the initial ticker seed;
+other venues retain the shared store's seed policy.
+
+DRB auth invalidation fences both accepted and issued authentication starts.
+Replies from an exchange begun before invalidation cannot restore its token.
+Fresh exchanges need a strictly later start timestamp, including when the host
+clock has not advanced. JWT creation records issued starts without changing the
+public auth API signatures; cached tokens retain their zeroizing lifetime.
+
 ## INTX startup migration message
 
 When a positively identified INTX bootstrap read is unavailable (HTTP 404, 408,

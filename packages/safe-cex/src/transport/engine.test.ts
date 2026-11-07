@@ -102,6 +102,51 @@ const browserHeaders = {
   'sec-fetch-dest': 'empty',
 };
 
+describe('WOO private IP-bound routing', () => {
+  it.each([{ tealstreetProxy: true }, { tealstreetTunnel: true }])('relays private traffic with %j', (flags) => {
+    const opts = options({ ...flags, applicationId: 'application-123' });
+    const route = resolveExchangeRouting('woo', opts);
+    expect(route.wsPublic).toEqual({ tunnelled: false });
+    expect(route.wsPrivate.tunnelled).toBe(true);
+    expect(new URL(route.wsPrivate.host!).searchParams.get('ts-relay')).toBe(
+      'wss://wss.woox.io/v2/ws/private/stream/application-123',
+    );
+    const plan = resolveEngineRoutingPlan('woo', opts, 'https://api.woox.io');
+    expect(plan.ws.private.host).toBe(route.wsPrivate.host);
+    expect(plan.ws.private.fallback).toBeUndefined();
+  });
+
+  it('leaves unproxied and staging sockets direct', () => {
+    for (const flags of [{}, { tealstreetProxy: true, testnet: true }]) {
+      expect(resolveExchangeRouting('woo', options(flags)).wsPrivate).toEqual({ tunnelled: false });
+    }
+  });
+
+  it('opens the real relay adapter without a direct private fallback', async () => {
+    mocks.relay.mockImplementation(function () {
+      return { addEventListener: vi.fn(), send: vi.fn(), close: vi.fn() };
+    });
+    const raw = makeRaw();
+    const routed = createEngineTransport(
+      'woo',
+      options({ tealstreetProxy: true, applicationId: 'application-123' }),
+      raw,
+    );
+    const socket = routed.connect('wss://wss.woox.io/v2/ws/private/stream/application-123', {
+      channel: 'private',
+      onOpen: vi.fn(),
+      onMessage: vi.fn(),
+      onClose: vi.fn(),
+    });
+    await vi.waitFor(() => expect(mocks.relay).toHaveBeenCalledOnce());
+    expect(new URL(mocks.relay.mock.calls[0][0]).searchParams.get('ts-relay')).toBe(
+      'wss://wss.woox.io/v2/ws/private/stream/application-123',
+    );
+    expect(raw.connect).not.toHaveBeenCalled();
+    socket.close();
+  });
+});
+
 beforeEach(() => {
   mocks.nodeRuntime.mockReturnValue(true);
   mocks.token.mockResolvedValue('proxy-jwt');
@@ -134,7 +179,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     try {
       const reply = await routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1', headers: {} });
       expect(new TextDecoder().decode(reply.body as Uint8Array)).toBe(body);
-      expect(report).toHaveBeenCalledExactlyOnceWith({ egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
+      expect(report).toHaveBeenCalledExactlyOnceWith({ retCode: 10006, egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
       expect(mocks.adapter).toHaveBeenCalledTimes(1);
       report.mockImplementation(() => { throw new Error('listener'); });
       await expect(routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?symbol=ETHUSDT&interval=1', headers: {} })).resolves.toMatchObject({ status: 200 });

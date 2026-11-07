@@ -245,6 +245,35 @@ test('#3018 after merging 78bc1ae5a39 (run 41870743418 at c9d4de158d5) retains h
   assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
 });
 
+test('#2351 managed ingress (run 42402512142) retains Kraken headroom and equal siblings', () => {
+  const measured = 2_136_136;
+  const minimumCap = 2_147_328;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.kraken;
+  assert.ok(cap >= minimumCap);
+  for (const venue of ['kraken', 'krakenspot']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3259 KuCoin/Kraken ambiguous writes (run 42401545356 at f9ec901182f) retain headroom and siblings match', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['kraken', 2_136_165, 2_147_328],
+    ['krakenspot', 2_136_165, 2_147_328],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
+
 test('#3018 protective-amend caps (run 41854021043 at 824ff543b6d) retain the ruled headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['polymarket', 1_590_031, 1_600_512],
@@ -977,6 +1006,20 @@ test('#3220 KuCoin hosted signing (run 42324881707, job 128258225940) keeps meas
   assert.match(wasmBudgetError(cap + 1, 'venue', 'kucoin'), /exceeds/);
 });
 
+test('#3111 candle repair readiness (run 42096897919) retains headroom and siblings match', () => {
+  const measured = 2_106_939;
+  const minimumCap = 2_117_632;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.hyperliquid;
+  assert.ok(cap >= minimumCap);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('#3221 hosted signing (run 42352558360) rounds web/node CI plus 10 KiB up to KiB', () => {
   const measured = 2_568_219;
   const minimumCap = 2_579_456;
@@ -997,6 +1040,21 @@ test('#3221 run 42393607294 artifact 13582294491 retains measured Woo headroom',
   assert.equal(wasmBudgetError(measured, 'venue', 'woo'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
   assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
+});
+
+test('#3264 Kraken Spot ambiguous-write fence (run 42403521233 at d1f8b3c2e40) retains headroom and siblings match', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['kraken', 2_136_521, 2_147_328],
+    ['krakenspot', 2_136_521, 2_147_328],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
 });
 
 test('#3277 TxFlow public decode (run 42407352871, job 128508214838) retains CI headroom', () => {
