@@ -2650,8 +2650,14 @@ impl Blofin {
                 };
                 if rows.len() != *count {
                     if reply.code != "0" && rows.is_empty() {
+                        let maybe_live = outcome_unknown(&reply.code, &reply.msg);
+                        let message = if maybe_live {
+                            UNKNOWN_WRITE.to_owned()
+                        } else {
+                            message
+                        };
                         record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
-                        return Err(if outcome_unknown(&reply.code, &reply.msg) {
+                        return Err(if maybe_live {
                             unknown(message)
                         } else {
                             VenueError::new(message)
@@ -2679,12 +2685,16 @@ impl Blofin {
                     let gone = matches!(&*row.code, "1000" | "102068");
                     let odd = row.code.is_empty()
                         && !matches!(text.as_str(), "" | "success" | "order placed");
-                    // Order ID 0 under this envelope names no order, but an unknown
-                    // native code still cannot prove that nothing was placed.
+                    // Order ID 0 under this envelope proves nothing without a
+                    // native refusal; missing and success codes remain unproven.
                     let none_placed = id == "0"
                         && reply.code != "0"
                         && reply.msg.eq_ignore_ascii_case("All operations failed");
-                    if none_placed && !outcome_unknown(&row.code, &row.msg) {
+                    if none_placed
+                        && CODES
+                            .verdict(&native(&row.code, &row.msg), Intent::Place)
+                            .is_refusal()
+                    {
                         items.push(BatchItem::Native(Native {
                             code: NativeCode::Text(NONE_PLACED),
                             message: &row.msg,
@@ -2754,9 +2764,18 @@ impl Blofin {
             }
             Effect::Cancel(targets) => {
                 if reply.code != "0" && rows.is_empty() {
-                    let message = format!("BloFin cancellation rejected: {}", reply.msg);
+                    let maybe_live = outcome_unknown(&reply.code, &reply.msg);
+                    let message = if maybe_live {
+                        UNKNOWN_WRITE.to_owned()
+                    } else {
+                        format!("BloFin cancellation rejected: {}", reply.msg)
+                    };
                     record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
-                    return Err(VenueError::new(message));
+                    return Err(if maybe_live {
+                        unknown(message)
+                    } else {
+                        VenueError::new(message)
+                    });
                 }
                 let mut matched: Vec<Option<&ResultRow<'_>>> = vec![None; targets.len()];
                 let mut unproven = rows.len() != targets.len();
@@ -2790,6 +2809,7 @@ impl Blofin {
                     }
                 }
                 let mut items = Vec::with_capacity(targets.len());
+                let mut maybe_live = false;
                 for (target, row) in targets.iter().zip(&matched) {
                     let Some(row) = row else {
                         continue;
@@ -2851,10 +2871,14 @@ impl Blofin {
                             self.account.sources.remove(id);
                         }
                     } else {
+                        maybe_live |= matches!(
+                            CODES.verdict(&native(&row.code, &row.msg), Intent::Cancel),
+                            Verdict::Unknown(_)
+                        );
                         error = Some(format!("BloFin cancellation rejected: {}", row.msg));
                     }
                 }
-                if rows.iter().any(|row| row.code == "429") {
+                if unproven || maybe_live {
                     error = Some(UNKNOWN_WRITE.to_owned());
                 }
                 if unproven {
@@ -2866,7 +2890,7 @@ impl Blofin {
                         cx.http_write_batch(context, &CODES, targets.len(), &items, message, None);
                 }
                 match error {
-                    Some(error) if unproven => Err(unknown(error)),
+                    Some(error) if unproven || maybe_live => Err(unknown(error)),
                     Some(error) => Err(VenueError::new(error)),
                     None => Ok(()),
                 }

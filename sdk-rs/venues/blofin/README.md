@@ -26,3 +26,6 @@ Unknown native placement codes, including internal errors and duplicate client
 IDs, also remain unknown under an `All operations failed` envelope with order
 ID `0`. They cannot authorize a protective put-back. Uncertain placement rows
 direct the caller to Check Open Orders; native diagnostics remain available.
+Missing or contradictory success row codes also cannot authorize put-back.
+Unknown cancellation rows and top-level placement/cancellation failures use the
+same uncertainty guidance while retaining their native diagnostic evidence.

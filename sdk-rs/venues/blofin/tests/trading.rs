@@ -65,6 +65,80 @@ fn unknown_placement_rows_present_uncertainty_instead_of_rejection() {
 }
 
 #[test]
+fn unknown_cancel_rows_present_uncertainty_instead_of_rejection() {
+    for (code, top_level) in ["103013", "150003", "987654"]
+        .into_iter()
+        .flat_map(|code| [(code, false), (code, true)])
+    {
+        let mut h = Harness::new();
+        h.open_private();
+        h.seed();
+        seed_order(&mut h, "12", "");
+        h.handle(
+            1.0,
+            Event::Command(Command::CancelOrders {
+                command: 7,
+                ids: vec!["12".into()],
+            }),
+        );
+        h.collect();
+        let request = h.take("cancel-batch-orders");
+        let response = if top_level {
+            serde_json::json!({"code": code, "msg": "internal failure", "data": []})
+        } else {
+            serde_json::json!({
+                "code": "0", "data": [{"orderId": "12", "code": code, "msg": "internal failure"}],
+            })
+        };
+        h.respond(request, &response.to_string());
+        let [error] = h.failures.as_slice() else {
+            panic!("{code}: expected one terminal failure");
+        };
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let text = error.legacy_text();
+        assert!(text.contains("unknown"), "{code}: {text}");
+        assert!(text.contains("Check Open Orders"), "{code}: {text}");
+        assert!(!text.contains("rejected"), "{code}: {text}");
+        assert_eq!(error.venue_code.as_deref(), Some(code));
+        assert_eq!(error.venue_message.as_deref(), Some("internal failure"));
+        assert!(
+            h.pending
+                .iter()
+                .all(|r| r.method == safe_cex_engine::Method::Get)
+        );
+    }
+}
+
+#[test]
+fn unknown_top_level_placement_errors_present_uncertainty() {
+    for code in ["103013", "150003", "987654"] {
+        let mut h = Harness::new();
+        h.seed();
+        place(
+            &mut h,
+            r#"[{"symbol":"BTCUSDT","type":"market","side":"buy","amount":1}]"#,
+        );
+        let request = h.take("batch-orders");
+        let response = serde_json::json!({"code": code, "msg": "internal failure", "data": []});
+        h.respond(request, &response.to_string());
+        let [error] = h.failures.as_slice() else {
+            panic!("{code}: expected one terminal failure");
+        };
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let text = error.legacy_text();
+        assert!(text.contains("unknown"), "{code}: {text}");
+        assert!(text.contains("Check Open Orders"), "{code}: {text}");
+        assert_eq!(error.venue_code.as_deref(), Some(code));
+        assert_eq!(error.venue_message.as_deref(), Some("internal failure"));
+        assert!(
+            h.pending
+                .iter()
+                .all(|r| r.method == safe_cex_engine::Method::Get)
+        );
+    }
+}
+
+#[test]
 fn dispatched_ambiguity_covers_ordinary_and_native_protective_writes() {
     for (status, response) in [
         (429, "{}"),

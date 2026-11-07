@@ -505,3 +505,33 @@ fn unknown_native_replacement_rows_never_authorize_put_back() {
         assert_eq!(error.venue_message.as_deref(), Some(message));
     }
 }
+
+fn assert_unproven_replacement_never_puts_back(row: serde_json::Value) {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    let response = serde_json::json!({
+        "code": "1", "msg": "All operations failed", "data": [row],
+    });
+    h.respond(replacement, &response.to_string());
+    assert!(
+        writes(&h).is_empty(),
+        "unproven replacement must never authorize put-back"
+    );
+    assert_unknown_stop(&h);
+}
+
+#[test]
+fn missing_replacement_row_code_never_authorizes_put_back() {
+    assert_unproven_replacement_never_puts_back(serde_json::json!({
+        "orderId": "0", "msg": "internal failure",
+    }));
+}
+
+#[test]
+fn contradictory_success_row_never_authorizes_put_back() {
+    assert_unproven_replacement_never_puts_back(serde_json::json!({
+        "orderId": "0", "code": "0", "msg": "Order placed",
+    }));
+}
