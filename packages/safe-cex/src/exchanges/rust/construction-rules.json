@@ -4,6 +4,7 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "woo": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": false, "protectedHeaders": ["x-api-key", "x-api-signature", "x-api-timestamp"]}},
     "grvt": {"remoteSigning": {"enabled": true, "payloadSupported": false, "protectedHeaders": []}, "bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"secretEncoding": "hex", "signingAlgorithm": "secp256k1Digest"}}},
     "backpack": {"bridge": {"readCredentials": "publicRead"}},
     "cryptocom": {"bridge": {"dispatchSigning": true, "readCredentials": "validateOnly"}},

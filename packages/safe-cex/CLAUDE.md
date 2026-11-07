@@ -11,7 +11,7 @@ Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
 KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
-Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
+Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override. Refused `remoteSigner` accounts are told to
 turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
 accounts receive neutral delegated-signing wording. Both use the venue display
@@ -190,6 +190,13 @@ revision; provider text and partial results are not returned on failure.
 A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
 its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
 The BingX native checkpoint keeps hosted admission disabled until those gates.
+WOO local and RemoteSigner accounts share provider-owned dispatch signing for all
+V1/V3 private REST calls and private WS auth. V1 signs sorted form/query bytes plus
+`|timestamp`; V3 signs timestamp, method, path/query and the exact body. Replayed
+serialized bodies are preserved. WOO has no signing nonce or wire recvWindow.
+PayloadSigner remains refused because its legacy private lifecycle has no such
+mode; RemoteSigner cannot fall back to it or to local material. Before-dispatch
+signing failures are `notSent`; dispatched ambiguous writes remain `Unknown`.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
