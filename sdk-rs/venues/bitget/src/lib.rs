@@ -1558,7 +1558,7 @@ impl Venue for BitgetFutures {
                     return;
                 };
                 let limit = limit.unwrap_or(500).clamp(1, 1000);
-                let mut end = to_ms.unwrap_or(cx.now);
+                let mut end = to_ms.unwrap_or(cx.protocol_now());
                 if let Some(start) = from_ms {
                     end = end.min(start + (value.ms() * f64::from(limit)).min(90.0 * 86_400_000.0));
                 }

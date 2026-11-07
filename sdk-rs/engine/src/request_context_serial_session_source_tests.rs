@@ -22,24 +22,21 @@ mod source_controls {
     }
 
     #[test]
-    fn native_codec_statuses_never_consult_the_exemption_hook() {
-        for status in [200, 201, 400, 401, 403, 404, 429] {
+    fn native_codec_statuses_still_reach_the_codec() {
+        for status in [200, 201, 400, 401, 403, 404] {
             let mut e = start(false, 1);
             let first = prep(&drain(&mut e));
             release(&mut e, first, 0.);
             reply(&mut e, first, 1., status, r#"{"code":0}"#);
-            assert_eq!(e.venue.exempt_calls.get(), 0, "status {status}");
+            assert_eq!(e.venue.data, 1, "status {status}");
+            assert_eq!(e.venue.unproven.get(), 0);
         }
     }
 
     #[test]
-    fn every_unproven_status_consults_the_full_body_before_evidence() {
-        for status in [408, 500, 502, 503, 504, 599] {
-            let mut e = start(false, 2);
-            auth(&mut e, status);
-            assert_eq!(e.venue.exempt_calls.get(), 1, "status {status}");
-            assert_eq!(e.venue.selected, vec![Ok(())]);
-            assert_eq!(e.venue.unproven.get(), 0);
+    fn every_ambiguous_status_captures_evidence_without_running_the_codec() {
+        for status in [408, 429, 500, 502, 503, 504, 599] {
+            strict(status, r#"{"code":1000}"#);
         }
     }
 
@@ -190,7 +187,6 @@ mod source_controls {
             read: true,
             unbound: true,
             attempts: 2,
-            exempt: true,
             ..Default::default()
         });
         e.start(0.);

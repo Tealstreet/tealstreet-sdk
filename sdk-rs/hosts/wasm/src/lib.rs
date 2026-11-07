@@ -95,6 +95,9 @@ trait AnyEngine {
         &mut self,
         algorithms: Option<Vec<safe_cex_engine::signing::Algorithm>>,
     ) -> Result<(), safe_cex_engine::VenueError>;
+    fn sync_host_time(&mut self, _now: f64, _utc: f64) -> bool {
+        false
+    }
     fn prepare_dispatch(&mut self, now: f64);
     fn set_entropy(
         &mut self,
@@ -247,6 +250,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
     ) -> Result<(), safe_cex_engine::VenueError> {
         self.set_signer(None)?;
         self.set_host_algorithms(algorithms)
+    }
+    fn sync_host_time(&mut self, now: f64, utc: f64) -> bool {
+        Engine::sync_host_time(self, now, utc)
     }
     fn prepare_dispatch(&mut self, now: f64) {
         Engine::prepare_dispatch(self, now);
@@ -1049,6 +1055,10 @@ impl WasmEngine {
                         #[cfg(not(feature = "lighter"))]
                         api_key_index: None,
                         paradex_address: options.paradex_address.clone(),
+                        #[cfg(feature = "grvt")]
+                        grvt_trading_account_id: options.grvt_trading_account_id.clone(),
+                        #[cfg(not(feature = "grvt"))]
+                        grvt_trading_account_id: None,
                     };
                     (venue.to_owned(), identities, account)
                 })
@@ -1306,6 +1316,12 @@ impl WasmEngine {
                 .filter(|at| at.is_finite())
                 .map_or_else(|| "null".to_owned(), |at| at.to_string())
         )
+    }
+
+    /// Host UTC is protocol time only; every deadline keeps the stable host clock.
+    #[wasm_bindgen(js_name = syncHostTime)]
+    pub fn sync_host_time(&mut self, now: f64, utc: f64) -> bool {
+        self.inner.sync_host_time(now, utc)
     }
 
     pub fn start(&mut self, now: f64) -> String {

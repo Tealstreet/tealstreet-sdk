@@ -947,6 +947,9 @@ jobs:
               corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue$suffix-private.jsonl" --books ''
             done
           done
+      - name: Coinbase drb public replay and startup deadline
+        if: matrix.venue == 'coinbase'
+        run: node sdk-rs/harness/coinbase-drb-public.integration.mjs sdk-rs/hosts/wasm/pkg/ci-replay/safe_cex_wasm.js
       - name: Coinbase product and CDP algorithm variants (correctness)
         if: matrix.venue == 'coinbase'
         run: |
@@ -1348,14 +1351,6 @@ jobs:
           path: sdk-rs/harness/out/cpu-collection/cohort/
           retention-days: 14
           if-no-files-found: error
-      - name: Retain the eligible original runtime bytes
-        if: steps.cpu_collect.outputs.has_eligible == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: cpu-runtime-${{ matrix.venue }}
-          path: ${{ steps.cpu_prepare.outputs.runtime_path }}/
-          retention-days: 3
-          if-no-files-found: error
       - name: Retain strict gate reports and artifact budgets
         if: always()
         uses: actions/upload-artifact@v7
@@ -1453,9 +1448,6 @@ jobs:
     if: always() && needs.selection.outputs.replayRequired == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 32
-    outputs:
-      has_eligible: ${{ steps.plan.outputs.has_eligible }}
-      matrix: ${{ steps.plan.outputs.matrix }}
     defaults:
       run:
         working-directory: .
@@ -1479,7 +1471,7 @@ jobs:
       # Offline revalidation re-reads every public tape, including this generated one.
       - name: Generate Binance Options public CPU input
         run: corepack yarn rust:private-tape-binanceoptions --public
-      - name: Authenticate complete first evidence and select eligible cases
+      - name: Authenticate complete first evidence per suite
         id: plan
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -1494,46 +1486,9 @@ jobs:
           if-no-files-found: error
 
 
-  cpu-second:
-    name: Rust / CPU remeasurement (${{ matrix.suite }})
-    needs: cpu-plan
-    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.cpu-plan.outputs.matrix) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 42
-    defaults:
-      run:
-        working-directory: .
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-          fetch-tags: false
-      - uses: ./.github/actions/fetch-rust-history
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # No install, compilation, module build, or measurement fallback here.
-      - name: Public CPU remeasurement from sealed original runtime
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/cpu-ci.mjs --command second --suite '${{ matrix.suite }}' --out '${{ runner.temp }}/cpu-runtime-second'
-      - name: Retain CPU remeasurement results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: cpu-second-${{ matrix.suite }}
-          path: sdk-rs/harness/out/
-          retention-days: 14
-          if-no-files-found: error
-
-
   cpu-certify:
     name: Rust / shared CPU certification
-    needs: [selection, gate, bitget-paired, cpu-plan, cpu-second]
+    needs: [selection, gate, bitget-paired, cpu-plan]
     if: always() && needs.selection.outputs.replayRequired == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 42
@@ -1578,7 +1533,7 @@ jobs:
 
 
   cpu-final:
-    name: Rust / replay gate (${{ matrix.suite }})
+    name: Rust / CPU gate (${{ matrix.suite }})
     needs: [selection, cpu-certify]
     if: always() && needs.selection.outputs.replayRequired == 'true'
     strategy:

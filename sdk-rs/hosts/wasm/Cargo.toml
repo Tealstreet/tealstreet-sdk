@@ -25,7 +25,7 @@ hosted-wallet = ["dispatch-signing", "safe-cex-venues/hosted-wallet"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing", "hosted-signing"]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
-grvt = ["safe-cex-venues/grvt", "text-ingress"]
+grvt = ["safe-cex-venues/grvt", "text-ingress", "dispatch-signing", "hosted-wallet"]
 polymarket = ["safe-cex-venues/polymarket", "text-ingress", "safe-cex-engine/command-polymarket"]
 coinbase = ["safe-cex-venues/coinbase", "text-ingress"]
 # The combined build isolates the startup subscription decoder.

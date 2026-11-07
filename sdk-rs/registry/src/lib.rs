@@ -1430,23 +1430,61 @@ pub fn build_with_signer<T: Visit>(
     };
     match venue {
         #[cfg(feature = "grvt")]
-        "grvt" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Grvt::new(GrvtOptions {
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    trading_account_id: options.grvt_trading_account_id.take(),
-                    signer_address: options.grvt_signer_address.take(),
-                    session_proxy: options.grvt_session_proxy,
-                }),
+        "grvt" => {
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() {
+                return Err(invalid("GRVT secondary signing is unsupported"));
+            }
+            let identity = identities.primary.clone();
+            if identity.is_some() && signer.is_none() {
+                return Err(invalid("GRVT requires its primary signing provider"));
+            }
+            let signer_address = if let Some(id) =
+                identity.as_ref().filter(|id| id.signing_ref().is_ok())
+            {
+                if let Some(provider) = signer.as_ref().filter(|provider| provider.immediate()) {
+                    let values = fetch_public(
+                        provider,
+                        vec![safe_cex_engine::signing::Operation::PublicAddress {
+                            key: id
+                                .signing_ref()
+                                .map_err(|_| invalid("Invalid GRVT signer"))?
+                                .clone(),
+                        }],
+                    )
+                    .map_err(|_| invalid("Invalid GRVT signer"))?;
+                    Some(format!("0x{}", safe_cex_crypto::hex(&values[0])))
+                } else {
+                    let address = options
+                        .grvt_signer_address
+                        .take()
+                        .ok_or_else(|| invalid("Hosted GRVT requires grvtSignerAddress"))?;
+                    Some(
+                        safe_cex_crypto::ethereum::get_address(&address)
+                            .map_err(|_| invalid("Invalid GRVT signer address"))?,
+                    )
+                }
+            } else {
+                None
+            };
+            let mut engine = Engine::new(
+                Grvt::with_signing(
+                    GrvtOptions {
+                        testnet: options.testnet,
+                        public_data_only: options.public_data_only,
+                        trading_account_id: options.grvt_trading_account_id.take(),
+                        signer_address,
+                        session_proxy: options.grvt_session_proxy,
+                        ..Default::default()
+                    },
+                    identity,
+                ),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "coinbase")]
         "coinbase" | "coinbasespot" => finish(
             visitor,

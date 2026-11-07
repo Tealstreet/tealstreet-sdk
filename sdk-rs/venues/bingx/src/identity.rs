@@ -139,7 +139,7 @@ impl Bingx {
         {
             return;
         }
-        if let Some(error) = crate::read_rate_limit(&response, cx.now) {
+        if let Some(error) = crate::read_rate_limit(&response, cx.protocol_now()) {
             self.identity_failed(cx, read, error);
             return;
         }
