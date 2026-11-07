@@ -146,10 +146,9 @@ export class ScaleCommand extends TradingBaseCommand {
     const priceLower = Math.min(parseFloat(to), parseFloat(from));
     const priceIncrement = subtract(priceUpper, priceLower) / subtract(ordersCount, 1);
 
-    // Entries take a bare % of balance, reduce-only exits a % of position.
-    // Each rung gets an equal share: a `$` / `%bal` share is converted at that
-    // rung's price (equal dollars per rung); position and inverse sizes don't
-    // depend on price, so they split evenly in contracts.
+    // Split the request before lot rounding. Dollar/balance shares convert at
+    // each rung's price; position/inverse shares split in native contracts.
+    // Floor each share so rounding cannot inflate the allocation.
     const orders = [];
     try {
       for (let i = 0; i < ordersCount; i++) {
@@ -163,6 +162,7 @@ export class ScaleCommand extends TradingBaseCommand {
           reduceOnly ? 'position' : 'balance',
           price,
           1 / ordersCount,
+          true,
         );
         orders.push({
           size,

@@ -3,6 +3,7 @@ import type { CommandContext } from '../Command';
 import type { ExchangeLike } from '../../types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
+import { roundToNearestMultipleDown } from '@tealstreet/math/src/roundToNearestMultiple';
 import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
 import { amountPrecisionOf } from '../../utils/marketPrecision';
 import { resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
@@ -95,6 +96,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
    *        (`close`, reduce-only `stop`/`chase`) pass `'position'`.
    * @param price resolved order price; omitted for market-price sizing.
    * @param sizeFraction share of the requested size, applied before lot rounding.
+   * @param roundDown floor scale shares so lot rounding cannot exceed the allocation.
    */
   protected parseSizeAndConvertIfUsd(
     exchange: ExchangeLike,
@@ -105,7 +107,9 @@ export abstract class TradingBaseCommand extends BaseCommand {
     defaultPercentScope: 'position' | 'balance' = 'position',
     price?: number,
     sizeFraction = 1,
+    roundDown = false,
   ): number {
+    const roundSize = roundDown ? roundToNearestMultipleDown : adjust;
     const trimmed = size.trim();
 
     // Percent forms (only when allowed)
@@ -141,7 +145,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
         // NATIVE contracts. `position.contracts` is base and differs by
         // `contractSize`, so `close 50%` on an OKX-shaped market asked for a
         // multiple of the position rather than half of it.
-        return adjust((nativePositionSize(position, market) * pct * sizeFraction) / 100, amountPrecisionOf(market));
+        return roundSize((nativePositionSize(position, market) * pct * sizeFraction) / 100, amountPrecisionOf(market));
       }
 
       // balance scope
@@ -160,7 +164,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
       // explanation in `notionalToSize`.
       if (market.isInverse) {
         const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
-        return adjust(notional / contractSize, amountPrecisionOf(market));
+        return roundSize(notional / contractSize, amountPrecisionOf(market));
       }
       const conversionPrice =
         price === undefined
@@ -170,11 +174,11 @@ export abstract class TradingBaseCommand extends BaseCommand {
         throw new Error(`Price not available for ${symbol}`);
       }
       // See notionalToSize — linear venues can still carry a ctVal (OKX).
-      return adjust(baseToNativeContracts(market, notional / conversionPrice), amountPrecisionOf(market));
+      return roundSize(baseToNativeContracts(market, notional / conversionPrice), amountPrecisionOf(market));
     }
 
     if (this.looksLikeSize(trimmed)) {
-      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed) * sizeFraction, price);
+      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed) * sizeFraction, price, roundDown);
     }
 
     throw new Error(`Invalid size "${size}". Use $1000, 1000$, or NN% (or NN%bal / NN%pos).`);
@@ -205,13 +209,20 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * populate `contractSize` in their `fetchMarkets` mapping so this
    * formula stays correct without per-exchange branches here.
    */
-  protected notionalToSize(exchange: ExchangeLike, symbol: string, notional: number, price?: number): number {
+  protected notionalToSize(
+    exchange: ExchangeLike,
+    symbol: string,
+    notional: number,
+    price?: number,
+    roundDown = false,
+  ): number {
+    const roundSize = roundDown ? roundToNearestMultipleDown : adjust;
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
     const amountPrecision = amountPrecisionOf(market);
 
     if (market?.isInverse) {
       const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
-      return adjust(notional / contractSize, amountPrecision);
+      return roundSize(notional / contractSize, amountPrecision);
     }
 
     // Use the same validated tick-rounded price that order preparation sends.
@@ -226,7 +237,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
     // on its linear swaps (1000 DOGE, 0.01 BTC), so the base amount has to be
     // divided by it to get the native contract count.
     const baseAmount = notional / conversionPrice;
-    return adjust(baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount), amountPrecision);
+    return roundSize(baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount), amountPrecision);
   }
 
   /**
@@ -369,13 +380,13 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * Returns 0 when price is unavailable so the budget gate fails open
    * rather than mis-counting.
    */
-  protected sizeToNotional(exchange: ExchangeLike, symbol: string, amount: number): number {
+  protected sizeToNotional(exchange: ExchangeLike, symbol: string, amount: number, orderPrice?: number): number {
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
     if (market?.isInverse) {
       const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
       return Math.abs(amount) * contractSize;
     }
-    const price = exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
+    const price = orderPrice ?? exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
     if (!price) return 0;
     // The inverse of `baseToNativeContracts`: a linear contract (OKX, BloFin) is `contractSize` base.
     const contractSize = market?.contractSize && market.contractSize > 0 ? market.contractSize : 1;
@@ -392,13 +403,20 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * orders (skip reduce-only). Throws on breach — callers catch and
    * surface as a command error.
    */
-  protected checkBudget(ctx: CommandContext, exchange: ExchangeLike, symbol: string, amount: number): number {
+  protected checkBudget(
+    ctx: CommandContext,
+    exchange: ExchangeLike,
+    symbol: string,
+    amount: number,
+    orderPrice?: number,
+    pendingNotional = 0,
+  ): number {
     const store = ctx.preprocessStore;
     const cap = store?.getBudget();
     if (!store || !cap || cap <= 0) return 0;
-    const notional = this.sizeToNotional(exchange, symbol, amount);
+    const notional = this.sizeToNotional(exchange, symbol, amount, orderPrice);
     if (notional <= 0) return 0; // can't price → don't gate (fail open)
-    const spent = store.getBudgetSpent();
+    const spent = store.getBudgetSpent() + pendingNotional;
     if (spent + notional > cap) {
       throw new Error(
         `budget: $${spent.toFixed(2)} spent + $${notional.toFixed(2)} this order exceeds the $${cap.toFixed(2)} cap. ` +
