@@ -81,7 +81,6 @@ export class SharedCatalogue {
   }
 
   private open(): Promise<IDBDatabase> {
-    if (this.retryAt > Date.now()) return Promise.reject(new Error('Catalogue cache unavailable'));
     if (this.database) return this.database;
     const attempt = new Promise<IDBDatabase>((resolve, reject) => {
       let settled = false;
@@ -131,6 +130,8 @@ export class SharedCatalogue {
   private async transaction<T>(
     work: (store: IDBObjectStore, done: (value: T) => void, fail: () => void) => void,
   ): Promise<T> {
+    // A refused retry is not another storage failure and must not renew the pause.
+    if (this.retryAt > Date.now()) throw new Error('Catalogue cache unavailable');
     try {
       const db = await this.open();
       return await new Promise<T>((resolve, reject) => {

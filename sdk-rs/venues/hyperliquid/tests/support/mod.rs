@@ -428,9 +428,18 @@ pub fn answer_order_status(e: &mut Engine<Hyperliquid>, r: &HttpRequest) {
     } else {
         "A"
     };
-    let reply_body = format!(
-        r#"{{"status":"order","order":{{"order":{{"coin":"BTC","oid":{id},"side":"{side}","limitPx":"{}","origSz":"{}","sz":"{}"}},"status":"open"}}}}"#,
-        order.price, order.amount, order.remaining
-    );
+    let native = match order.kind {
+        safe_cex_engine::model::OrderType::StopLoss => "Stop Market",
+        safe_cex_engine::model::OrderType::TakeProfit => "Take Profit Market",
+        _ => "Limit",
+    };
+    let trigger = native != "Limit";
+    let coin = e.store().market(&order.symbol).unwrap().id.clone();
+    let reply_body = serde_json::json!({"status":"order","order":{"order":{
+        "coin":coin,"oid":id.parse::<u64>().unwrap(),"side":side,"limitPx":order.price.to_string(),
+        "origSz":order.amount.to_string(),"sz":order.remaining.to_string(),"reduceOnly":order.reduce_only,
+        "orderType":native,"triggerPx":trigger.then(||order.price.to_string()),"isTrigger":trigger,
+        "isPositionTpsl":trigger && order.amount == 0.,"cloid":order.client_order_id
+    },"status":"open"}}).to_string();
     reply(e, r, 200, &reply_body);
 }

@@ -30,10 +30,31 @@ are ignored. Shared ticker input updates native state without replacing local
 market metadata or account settings. Shared quote changes invoke native account
 revaluation so UPNL and available margin follow provider prices.
 
+## Rust queued write intent
+
+Native writes capture the original caller wait before entering the venue queue;
+an amend caps it at five seconds in that same capture. Read owner/deadline
+bindings, read timers and both final Claim guards copy this one bound.
+Unsent queued or builder/prerequisite-waiting jobs expire through bounded owner
+custody, and the first physical Claim checks the same exclusive deadline even
+when the timer has not fired. Queue, preparation, signing and pacing never renew
+it. An already released write keeps its response window and serial continuation;
+an amend whose cancel landed must still place its replacement after that bound.
+
+Queued independent cancels and protective placements may pass older placements
+only when their markets and order/client identities are disjoint from every
+older job. Same-market work and account-wide schedule controls remain barriers.
+The active owner is never preempted; nonce custody and 334 ms release pacing are
+unchanged. Expiry is a typed Timeout/NotSent for an entirely unsent command.
+Retirement has no I/O authority: retired intent timer IDs are cleared at the next
+trading or timer callback, without clearing a surviving owner's timer. Missing
+command receipts use the shared unstamped-command refusal.
+
 ## Rust amendments
 
 An amend resolves account identity and fresh partial-fill sizing within the
-exclusive five-second deadline from command receipt before cancelling. Read
+exclusive deadline, at most five seconds and capped by the caller's original
+remaining wait, before cancelling. Read
 receipts and the final cancel claim enforce it independently of timer order.
 The deadline never abandons a replacement after a cancel already left. Identity
 and sizing reads/timers retain the genuine amend preflight owner and original
@@ -45,6 +66,32 @@ omit the captured fee. Standalone placements retain their existing approval wait
 `transport.http.timing` distinguishes identity, builder approval, order status,
 cancel and place using closed labels derived from the final bound packet; ordinary info reads remain aggregated.
 
+Rust SL/TP edits use guarded cancel/place. Hyperliquid's modify contract excludes
+trigger replacements without `always_place`; that flag can place after failed
+cancellation, so it is never used. The owner-bound sizing read verifies source
+identity and native execution parameters. The final cancel claim requires an
+own-symbol mark observed within five seconds, unchanged fills/identity, and a
+loaded live closing-side position. A veto preserves the original. The old
+pre-cancel deadline never abandons replacement after a cancel already left.
+
+A documented definitive replacement refusal permits one original-parameter
+restore only for a proven full-position `isPositionTpsl` source. An unknown
+replacement never restores or resends. Partial and attached edits remain available
+with the same final veto. When their original grouping is unproven, definitive
+replacement refusal reports typed `Protection::Unprotected` and “stop removed,
+please re-place”, with no invented restore. Exact recovery rechecks position,
+newer protection, late fills and the original fresh trigger at its final claim.
+Its terminal carries `Protection::Restored` after an accepted put-back, or
+`Protection::Unprotected` only after a definitive put-back refusal. Unknown or
+rate-limited put-back carries no protection claim and says its outcome is unknown,
+with a request to check Open Orders. Replacement 429 uses the same uncertain
+wording and never restores/resends. The serial root refusal remains intact.
+Put-back preserves economic parameters but mints a fresh cloid: HL documents its
+format, not reuse after cancellation. Obsolete recovery is refused visibly.
+Replacement preserves native execution type/price and the fresh remaining size. Complete native stream fields take precedence over stale cached
+placement fields. ACKs reconcile accepted parameters into an existing row while
+retaining newer stream fills, remaining quantity, status and observation time.
+
 ## Rust startup reads
 
 Open-order snapshot failures retry per DEX scope with jittered backoff, including
@@ -55,6 +102,19 @@ join preserves orders and retries instead of silently ending the read.
 The SDK transport admits all `/info` reads through one weighted token bucket per
 API origin, including metadata, candles and history. Its initial 1,000-weight
 capacity permits cold discovery immediately, then refills at 1,000 weight/minute.
+Native pending metadata promotes amend identity/sizing and order-fence reads to
+explicit critical; account State/Orders, reconnect snapshots and Role/Mode/Spot
+are financial reconciliation, below explicit critical but above normal work.
+Both classes may use the same 200-weight reserve. Caller history and candles are bulk. Noncritical work has an 800-weight
+ceiling, leaving 200 for critical work within the same total. Native and shared
+queues keep FIFO within each class, and native refill is continuous. Queued
+candles retain their original 20 s bound, shortened by a smaller caller wait.
+Startup-only fees/builder wait for pending financial reads before their managed
+20 s deadline starts. A live placement may release its queued builder check;
+this does not promote it to critical. Catalogue completion refreshes its own DEX,
+but any shared identity/index remap retains a conservative all-DEX refresh.
+Spot catalogue joins keep their broad refresh. The source census epoch, revision
+and row-coverage guards remain unchanged.
 A 429 empties the bucket and pauses refill until Retry-After ends. Immediately
 before dispatch, an atomic shared-state check refuses prepared reads whose grant
 generation changed or whose origin is paused. Managed claim and send execute

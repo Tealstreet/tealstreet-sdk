@@ -528,3 +528,144 @@ fn transient_http_history_failure_still_retries_and_accepts_a_valid_page() {
     assert_eq!(result(&h)[0]["id"], "valid");
     assert!(h.failures.is_empty());
 }
+
+fn cancelled_order_history(uta: bool, limit: Option<u32>) -> Harness {
+    let mut h = if uta {
+        Harness::private_started()
+    } else {
+        Harness::classic()
+    };
+    if uta {
+        h.respond(
+            "/account/settings",
+            200,
+            r#"{"code":"00000","data":{"holdMode":"one_way_mode"}}"#,
+        );
+    }
+    query(
+        &mut h,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit,
+        },
+    );
+    h
+}
+
+fn cancelled_order(id: usize) -> Value {
+    json!({
+        "orderId": (1500078781190803457_u64 + id as u64).to_string(),
+        "symbol": "USELESSUSDT", "orderType": "limit", "side": "sell",
+        "size": "10", "qty": "10", "baseVolume": "0", "cumExecQty": "0",
+        "status": "canceled", "orderStatus": "cancelled", "price": "0.1", "priceAvg": "0", "avgPrice": "0",
+        "reduceOnly": "YES", "tradeSide": "close", "posMode": "one_way_mode", "holdMode": "one_way_mode",
+        "cTime": "1793372400000", "createdTime": "1793372400000", "uTime": "1793373600000", "updatedTime": "1793373600000"
+    })
+}
+
+fn orders_page(h: &mut Harness, uta: bool, rows: Vec<Value>, cursor: Option<Value>) {
+    let mut data = json!({ if uta { "list" } else { "entrustedList" }: rows });
+    if let Some(cursor) = cursor {
+        data[if uta { "cursor" } else { "endId" }] = cursor;
+    }
+    h.respond(
+        if uta {
+            "/v3/trade/history-orders"
+        } else {
+            "/orders-history"
+        },
+        200,
+        &json!({"code": "00000", "data": data}).to_string(),
+    );
+}
+
+#[test]
+fn a_full_orders_page_without_a_cursor_never_proves_complete_history() {
+    for uta in [false, true] {
+        for cursor in [None, Some(Value::Null), Some(json!(""))] {
+            for limit in [100, 1] {
+                let mut h = cancelled_order_history(uta, Some(limit));
+                orders_page(
+                    &mut h,
+                    uta,
+                    (0..limit as usize).map(cancelled_order).collect(),
+                    cursor.clone(),
+                );
+                assert!(
+                    h.events
+                        .iter()
+                        .any(|event| event.code == "history.incomplete"),
+                    "a full page with no cursor was silently completed: uta={uta}, limit={limit}, cursor={cursor:?}"
+                );
+                let markers = h
+                    .events
+                    .iter()
+                    .filter(|event| event.code == "history.incomplete")
+                    .collect::<Vec<_>>();
+                assert_eq!(markers.len(), 1);
+                assert!(
+                    markers[0]
+                        .fields
+                        .contains(&("command", safe_cex_engine::log::Value::Num(42.)))
+                );
+                assert_eq!(h.done.iter().filter(|(id, _)| *id == 42).count(), 1);
+                assert_eq!(result(&h).as_array().unwrap().len(), limit as usize);
+                assert!(
+                    h.failures.is_empty(),
+                    "validated rows remain a usable lower bound"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn cancelled_zero_fill_ladders_survive_paging_and_do_not_need_fills() {
+    for uta in [false, true] {
+        let mut h = cancelled_order_history(uta, None);
+        let first = h.take(if uta {
+            "/v3/trade/history-orders"
+        } else {
+            "/orders-history"
+        });
+        assert!(!first.url.contains("status="));
+        assert!(!first.url.contains("orderSource="));
+        h.requests.push(first);
+        orders_page(
+            &mut h,
+            uta,
+            (0..100).map(cancelled_order).collect(),
+            Some(json!("next-page")),
+        );
+        assert!(h.done.iter().all(|(id, _)| *id != 42));
+        h.timer_after(100.0);
+        let next = h.take(if uta {
+            "/v3/trade/history-orders"
+        } else {
+            "/orders-history"
+        });
+        assert!(next.url.contains(if uta {
+            "cursor=next-page"
+        } else {
+            "idLessThan=next-page"
+        }));
+        h.requests.push(next);
+        orders_page(&mut h, uta, (100..120).map(cancelled_order).collect(), None);
+        assert!(
+            !h.events
+                .iter()
+                .any(|event| event.code == "history.incomplete")
+        );
+        let rows = result(&h);
+        assert_eq!(rows.as_array().unwrap().len(), 120);
+        for (i, row) in rows.as_array().unwrap().iter().enumerate() {
+            assert_eq!(row["id"], (1500078781190803457_u64 + i as u64).to_string());
+            assert_eq!(row["status"], "canceled");
+            assert_eq!(row["type"], "limit");
+            assert_eq!(row["filled"], 0.0);
+            assert_eq!(row["reduceOnly"], true);
+        }
+    }
+}

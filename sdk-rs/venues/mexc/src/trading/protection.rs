@@ -65,54 +65,91 @@ fn reference(source: Option<f64>) -> Result<StopTriggerType, String> {
         _ => Err("MEXC reference stale: native trigger source is unknown; stop not changed".into()),
     }
 }
-fn check(
-    cx: &Cx<'_, Pending>,
-    refs: &HashMap<String, References>,
-    order: &Order,
-    take: bool,
-    price: f64,
-    source: Option<f64>,
-    closing: bool,
-) -> Result<(), String> {
-    let value = refs
-        .get(&order.symbol)
-        .and_then(|r| r.get(reference(source).ok()?, cx.now))
-        .ok_or_else(|| "MEXC reference stale; stop not changed".to_owned())?;
-    let gte = (take && order.side == OrderSide::Sell) || (!take && order.side == OrderSide::Buy);
-    if !price.is_finite() || price <= 0. || if gte { price <= value } else { price >= value } {
-        return Err("MEXC replacement trigger is crossed; stop not changed".into());
-    }
-    if closing {
-        let side = if order.side == OrderSide::Sell {
-            PositionSide::Long
-        } else {
-            PositionSide::Short
-        };
-        if !cx.store.positions().iter().any(|p| {
-            p.symbol == order.symbol
-                && p.side == side
-                && p.contracts.is_finite()
-                && p.contracts > 0.
-        }) {
-            return Err("MEXC protected position is absent; stop not changed".into());
-        }
-    }
-    Ok(())
+struct GuardView<'a> {
+    store: &'a safe_cex_engine::Store,
+    now: f64,
+    refs: &'a HashMap<String, References>,
 }
-// Every destructive amend send is checked here, including deferred/re-signed sends.
-// Read-only: a refusal leaves the original stop and the FIFO claim unchanged.
+impl GuardView<'_> {
+    fn check(
+        &self,
+        order: &Order,
+        take: bool,
+        price: f64,
+        source: Option<f64>,
+        closing: bool,
+    ) -> Result<(), String> {
+        let value = self
+            .refs
+            .get(&order.symbol)
+            .and_then(|r| r.get(reference(source).ok()?, self.now))
+            .ok_or_else(|| "MEXC reference stale; stop not changed".to_owned())?;
+        let gte =
+            (take && order.side == OrderSide::Sell) || (!take && order.side == OrderSide::Buy);
+        if !price.is_finite() || price <= 0. || if gte { price <= value } else { price >= value } {
+            return Err("MEXC replacement trigger is crossed; stop not changed".into());
+        }
+        if closing {
+            let side = if order.side == OrderSide::Sell {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            };
+            if !self.store.positions().iter().any(|p| {
+                p.symbol == order.symbol
+                    && p.side == side
+                    && p.contracts.is_finite()
+                    && p.contracts > 0.
+            }) {
+                return Err("MEXC protected position is absent; stop not changed".into());
+            }
+        }
+        Ok(())
+    }
+}
+
 pub fn guard(
     cx: &Cx<'_, Pending>,
     refs: &HashMap<String, References>,
     edit: &Edit,
     restore: bool,
 ) -> Result<(), String> {
+    guard_at(cx.store, cx.now, refs, edit, restore)
+}
+// Every destructive amend send is checked here, including deferred/re-signed sends.
+// Read-only: a refusal leaves the original stop and the FIFO claim unchanged.
+pub fn guard_at(
+    store: &safe_cex_engine::Store,
+    now: f64,
+    refs: &HashMap<String, References>,
+    edit: &Edit,
+    restore: bool,
+) -> Result<(), String> {
+    guard_send(store, now, refs, edit, restore, restore)
+}
+pub fn replacement_guard_at(
+    store: &safe_cex_engine::Store,
+    now: f64,
+    refs: &HashMap<String, References>,
+    edit: &Edit,
+) -> Result<(), String> {
+    guard_send(store, now, refs, edit, true, false)
+}
+fn guard_send(
+    store: &safe_cex_engine::Store,
+    now: f64,
+    refs: &HashMap<String, References>,
+    edit: &Edit,
+    after_cancel: bool,
+    restore: bool,
+) -> Result<(), String> {
+    let view = GuardView { store, now, refs };
     let original = &edit.observed;
-    if !restore && cx.store.order(&original.id) != Some(original) {
+    if !after_cancel && store.order(&original.id) != Some(original) {
         return Err("MEXC original order changed or filled; stop not changed".into());
     }
-    if restore {
-        let Some(current) = cx.store.order(&original.id) else {
+    if after_cancel {
+        let Some(current) = store.order(&original.id) else {
             return Err("MEXC original protection disappeared during restore".into());
         };
         let mut normalized = current.clone();
@@ -128,9 +165,7 @@ pub fn guard(
         serde_json::from_str(&edit.native).map_err(|_| "MEXC native stop provenance missing")?;
     let new = if restore { None } else { edit.price };
     if edit.scope == Scope::Plan && edit.leg.is_none() {
-        check(
-            cx,
-            refs,
+        view.check(
             original,
             original.kind == OrderType::TakeProfit,
             new.unwrap_or(raw.trigger_price),
@@ -144,7 +179,7 @@ pub fn guard(
         ] {
             let selected = edit.leg.unwrap_or(original.kind == OrderType::TakeProfit) == take;
             if let Some(price) = if selected { new.or(old) } else { old }.filter(|p| *p > 0.) {
-                check(cx, refs, original, take, price, source, true)?;
+                view.check(original, take, price, source, true)?;
             }
         }
     } else {
@@ -165,21 +200,11 @@ pub fn guard(
                 } else {
                     OrderSide::Buy
                 };
-                check(
-                    cx,
-                    refs,
-                    &closing,
-                    take,
-                    price,
-                    source,
-                    original.reduce_only,
-                )?;
+                view.check(&closing, take, price, source, original.reduce_only)?;
             }
         }
         if edit.scope == Scope::Plan {
-            check(
-                cx,
-                refs,
+            view.check(
                 original,
                 original.kind == OrderType::TakeProfit,
                 raw.trigger_price,
@@ -257,6 +282,20 @@ fn source(n: Option<f64>, price: f64) -> Result<u8, String> {
     }
 }
 
+// Moving a trigger alone cannot retain a stop-limit's execution-price offset.
+fn check_plan_limit(edit: &Edit, raw: &OrderRow<'_>) -> Result<(), String> {
+    if edit.scope == Scope::Plan
+        && edit.leg.is_none()
+        && raw.order_type != 5.
+        && edit.price.is_some_and(|price| price != raw.trigger_price)
+    {
+        return Err(
+            "MEXC stop-limit trigger cannot retain its limit offset; stop not changed".into(),
+        );
+    }
+    Ok(())
+}
+
 pub fn native_edit(edit: &Edit) -> Result<Option<Step>, String> {
     if (edit.scope == Scope::Regular && edit.leg.is_none())
         || (edit.amount.is_some()
@@ -268,6 +307,7 @@ pub fn native_edit(edit: &Edit) -> Result<Option<Step>, String> {
         return Ok(None);
     }
     let raw: OrderRow<'_> = serde_json::from_str(&edit.native).map_err(|e| e.to_string())?;
+    check_plan_limit(edit, &raw)?;
     let native: Native<'_> = serde_json::from_str(&edit.native).map_err(|e| e.to_string())?;
     let price = edit.price.unwrap();
     if !price.is_finite() || price <= 0. {
@@ -410,6 +450,9 @@ pub fn placement(edit: &Edit, restore: bool) -> Result<(&'static str, String), S
     }
     let amount = if restore { None } else { edit.amount };
     let price = if restore { None } else { edit.price };
+    if !restore {
+        check_plan_limit(edit, &raw)?;
+    }
     if edit.scope == Scope::Plan {
         if !matches!(n.execute_cycle, Some(1. | 2.))
             || !matches!(n.open_type, Some(1. | 2.))
@@ -468,6 +511,9 @@ pub fn placement(edit: &Edit, restore: bool) -> Result<(&'static str, String), S
             })?,
         ))
     } else if edit.scope == Scope::Stop {
+        if n.vol_type == Some(2.) && amount.is_some_and(|a| a > 0.) {
+            return Err("MEXC full-position protection cannot be resized; stop not changed".into());
+        }
         if !matches!(n.vol_type, Some(1. | 2.))
             || !matches!(n.price_protect, Some(0. | 1.))
             || !matches!(n.take_profit_reverse, Some(1. | 2.))
@@ -507,11 +553,7 @@ pub fn placement(edit: &Edit, restore: bool) -> Result<(&'static str, String), S
                 take_profit_price: if take { price.unwrap_or(tp) } else { tp },
                 price_protect: required(n.price_protect)?,
                 profit_loss_vol_type: &n.profit_loss_vol_type,
-                vol_type: if amount.is_some_and(|a| a > 0.) {
-                    1.
-                } else {
-                    required(n.vol_type)?
-                },
+                vol_type: required(n.vol_type)?,
                 take_profit_vol: n.take_profit_vol,
                 stop_loss_vol: n.stop_loss_vol,
                 take_profit_reverse: required(n.take_profit_reverse)?,
@@ -580,12 +622,12 @@ impl MexcFutures {
             let start = if edit.observed.last_update >= 1e12 {
                 edit.observed.last_update - 89. * 86400000.
             } else {
-                cx.now - 89. * 86400000.
+                cx.protocol_now() - 89. * 86400000.
             };
             crate::sign::query(vec![
                 ("symbol", market.id.clone()),
                 ("start_time", num::format(start.max(0.))),
-                ("end_time", num::format(cx.now)),
+                ("end_time", num::format(cx.protocol_now())),
                 ("page_num", page.to_string()),
                 ("page_size", "100".into()),
                 (
@@ -710,8 +752,25 @@ impl MexcFutures {
                         },
                         revision: self.account.revision,
                     };
-                    let timer = cx.set_timer(200.);
-                    self.trading.read_retry = Some((timer, retry));
+                    if self.trading_is_protective(command) {
+                        self.trading
+                            .active
+                            .as_mut()
+                            .unwrap()
+                            .steps
+                            .push_front(Step {
+                                receipts: vec![],
+                                path: "",
+                                body: String::new(),
+                                call: retry.call,
+                            });
+                        self.protective_delay(cx, 200., Operation::Read)
+                            .map_err(|error| format!("MEXC delayed confirmation: {error:?}"))?;
+                        outstanding = true;
+                    } else {
+                        let timer = cx.set_timer(200.);
+                        self.trading.read_retry = Some((timer, retry));
+                    }
                     return Ok(None);
                 }
                 if raw.state != 2. {
@@ -1024,7 +1083,7 @@ mod tests {
                     .entry("BTCUSDT".into())
                     .or_default()
                     .observe(cx.now, [None, Some(60000.), None]);
-                venue.trading.active=Some(Job{command:1,steps:VecDeque::new(),ids:vec![],gap:0.,total_orders:1,failed_index:None,effective:false,replaces:None,protection:Some(Box::new(Edit{observed:order,scope:Scope::Plan,leg:None,price:Some(54000.),amount:Some(2.),native:r#"{"id":"o","symbol":"BTC_USDT","side":4,"orderType":5,"state":1,"vol":1,"triggerPrice":55000,"triggerType":2,"trend":2}"#.into(),replacement:None,restore:None,canceled:false,cancel_proven:false,restoring:false,refusal:None,started:cx.now}))});
+                venue.trading.active=Some(Job{command:1,steps:VecDeque::new(),ids:vec![],gap:0.,total_orders:1,failed_index:None,effective:false,replaces:None,managed:None,protection:Some(Box::new(Edit{observed:order,scope:Scope::Plan,leg:None,price:Some(54000.),amount:Some(2.),native:r#"{"id":"o","symbol":"BTC_USDT","side":4,"orderType":5,"state":1,"vol":1,"triggerPrice":55000,"triggerType":2,"trend":2}"#.into(),replacement:None,restore:None,canceled:false,cancel_proven:false,restoring:false,refusal:None,started:cx.now}))});
                 let cancel_request = Request {
                     command: 1,
                     revision: 0,

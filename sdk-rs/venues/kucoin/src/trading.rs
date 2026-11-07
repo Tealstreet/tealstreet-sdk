@@ -1,4 +1,5 @@
 //! Preflighted write plans; a lost response never resends a mutation.
+pub(crate) mod protective;
 use crate::wire::{Envelope, Number, not_sent, write_failure};
 use crate::{Kucoin, Pending, api_symbol, encode};
 use safe_cex_engine::json::ArrayAt;
@@ -50,16 +51,17 @@ struct Replacement {
     amended: (OrderSide, OrderType),
     id: String,
     options: PlaceOrderOpts,
+    stop_limit: Option<f64>,
     filled: f64,
     polls: u8,
     read_retries: u8,
-    /// A stop, take-profit or trigger edit: its cancel's final check and put-back.
-    stop: Option<Box<StopProtect>>,
 }
 /// An amended stop's final pre-cancel check, and what puts it back.
 #[derive(Clone)]
 struct StopProtect {
     guard: StopGuard,
+    /// The original venue trigger, unchanged by the amendment.
+    original_trigger: f64,
     /// The original placed again, unchanged, once its replacement is refused.
     restore: Step,
     /// False when the original cannot be proven again (its entry has fills):
@@ -83,7 +85,7 @@ struct StopGuard {
 impl StopGuard {
     /// A refusal is typed NotSent and leaves the order untouched.
     fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
-        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        use safe_cex_engine::protective_amend::refused;
         let unchanged = || format!("Your {} order was not changed", self.order.symbol);
         let same = |planned: &Order| store.order(&planned.id) == Some(planned);
         if !same(&self.order) || self.parent.as_ref().is_some_and(|parent| !same(parent)) {
@@ -103,6 +105,19 @@ impl StopGuard {
                 unchanged()
             ))));
         }
+        self.validate_trigger(store, now, self.trigger)
+            .map_err(|mut error| {
+                error.message = format!("{}: {}", unchanged(), error.message);
+                error
+            })
+    }
+    fn validate_trigger(
+        &self,
+        store: &safe_cex_engine::Store,
+        now: f64,
+        trigger: f64,
+    ) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
         let label = match self.reference {
             StopTriggerType::MarkPrice => "mark",
             StopTriggerType::IndexPrice => "index",
@@ -110,16 +125,14 @@ impl StopGuard {
         };
         let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
             return Err(refused(Some(format!(
-                "{}: the {label} price reference is stale",
-                unchanged()
+                "the {label} price reference is stale"
             ))));
         };
         if let Some(below) = self.below
-            && ((below && self.trigger >= price) || (!below && self.trigger <= price))
+            && ((below && trigger >= price) || (!below && trigger <= price))
         {
             return Err(refused(Some(format!(
-                "{}: the new trigger has already crossed the {label} price",
-                unchanged()
+                "the trigger has already crossed the {label} price"
             ))));
         }
         Ok(())
@@ -150,10 +163,6 @@ struct Job {
     metadata_started: HashSet<String>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
-    /// The amended stop's put-back, once its cancel is proven.
-    protect: Option<Box<StopProtect>>,
-    /// The put-back is under way: the replacement was refused.
-    restoring: bool,
 }
 impl Job {
     /// Keeps the first failure's text. An Unknown leg makes the whole command
@@ -175,6 +184,7 @@ impl Job {
 }
 #[derive(Default)]
 pub struct Trading {
+    pub(crate) protective: protective::State,
     jobs: HashMap<CommandId, Job>,
     queue: VecDeque<CommandId>,
     active: bool,
@@ -223,7 +233,15 @@ fn advanced(kind: OrderType) -> bool {
 fn positive(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
+fn native_stop_limit(order: &Order) -> Option<f64> {
+    advanced(order.kind)
+        .then(|| order.extra.as_ref().and_then(|e| e.conditional_order_price))
+        .flatten()
+}
 fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
+    preflight_native(orders, None)
+}
+fn preflight_native(orders: &[PlaceOrderOpts], stop_limit: Option<f64>) -> Result<(), String> {
     let mut seen = HashSet::new();
     for order in orders {
         if order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some() {
@@ -269,7 +287,9 @@ fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
                 "KuCoin requires positive native lots (zero only for full-position stops)".into(),
             );
         }
-        if order.kind == OrderType::Limit && !order.price.is_some_and(positive) {
+        if (order.kind == OrderType::Limit || stop_limit.is_some())
+            && !stop_limit.or(order.price).is_some_and(positive)
+        {
             return Err("KuCoin limit price must be positive".into());
         }
         if advanced(order.kind) && !order.trigger_price.or(order.price).is_some_and(positive) {
@@ -283,7 +303,10 @@ fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
         {
             return Err("KuCoin attached stop prices must be positive".into());
         }
-        if order.kind != OrderType::Limit && order.time_in_force == Some(TimeInForce::PostOnly) {
+        if order.kind != OrderType::Limit
+            && stop_limit.is_none()
+            && order.time_in_force == Some(TimeInForce::PostOnly)
+        {
             return Err("KuCoin post-only requires a limit order".into());
         }
         if order.take_profit.is_some()
@@ -350,6 +373,7 @@ impl Kucoin {
         &mut self,
         cx: &Cx<'_, Pending>,
         order: &PlaceOrderOpts,
+        stop_limit: Option<f64>,
     ) -> Result<Step, String> {
         let market = cx
             .store
@@ -360,8 +384,8 @@ impl Kucoin {
             .setting(&order.symbol)
             .ok_or("KuCoin account settings unavailable")?;
         for price in [
-            (order.kind == OrderType::Limit)
-                .then_some(order.price)
+            (order.kind == OrderType::Limit || stop_limit.is_some())
+                .then_some(stop_limit.or(order.price))
                 .flatten(),
             advanced(order.kind)
                 .then_some(order.trigger_price.or(order.price))
@@ -385,6 +409,10 @@ impl Kucoin {
             return Err("KuCoin native lots are outside market limits".into());
         }
         let is_stop = advanced(order.kind);
+        // Only native edit metadata selects stop-limit: app placements commonly
+        // repeat their trigger in both public price fields.
+        let limit = order.kind == OrderType::Limit || stop_limit.is_some();
+        let close = is_stop && order.amount == 0.0;
         let reduce = order.reduce_only.unwrap_or(is_stop);
         let closing = reduce || is_stop;
         let long = (order.side == OrderSide::Buy) != closing;
@@ -424,20 +452,15 @@ impl Kucoin {
         let has_attached = up.is_some() || down.is_some();
         let payload = Placement {
             symbol: market.id.clone(),
-            kind: if order.kind == OrderType::Market || is_stop {
-                "market"
-            } else {
-                "limit"
-            },
+            kind: if limit { "limit" } else { "market" },
             side: if order.side == OrderSide::Buy {
                 "buy"
             } else {
                 "sell"
             },
             client_oid: oid,
-            price: (!is_stop && order.kind == OrderType::Limit)
-                .then(|| price(order.price.unwrap())),
-            size: (order.amount > 0.0).then(|| num::format(amount)),
+            price: limit.then(|| price(stop_limit.or(order.price).unwrap())),
+            size: (!close && order.amount > 0.0).then(|| num::format(amount)),
             leverage: (!is_stop).then_some(leverage.max(1.0)),
             reduce_only: reduce,
             margin_mode: match margin {
@@ -448,15 +471,13 @@ impl Kucoin {
                 .store
                 .hedged()
                 .then_some(if long { "LONG" } else { "SHORT" }),
-            time_in_force: (!is_stop && order.kind == OrderType::Limit).then_some(
-                match order.time_in_force {
-                    Some(TimeInForce::ImmediateOrCancel) => "IOC",
-                    Some(TimeInForce::FillOrKill) => "FOK",
-                    _ => "GTC",
-                },
-            ),
+            time_in_force: limit.then_some(match order.time_in_force {
+                Some(TimeInForce::ImmediateOrCancel) => "IOC",
+                Some(TimeInForce::FillOrKill) => "FOK",
+                _ => "GTC",
+            }),
             post_only: (order.time_in_force == Some(TimeInForce::PostOnly)).then_some(true),
-            close_order: (is_stop && order.amount == 0.0).then_some(true),
+            close_order: close.then_some(true),
             stop: is_stop.then_some(match (order.kind, order.side) {
                 (OrderType::StopLoss, OrderSide::Buy)
                 | (OrderType::TakeProfit, OrderSide::Sell) => "up",
@@ -554,6 +575,10 @@ impl Kucoin {
         if virtual_stop && amount.is_some() {
             return Err("KuCoin attached stop size is controlled by its parent".into());
         }
+        if parent.close == Some(true) && amount.is_some() {
+            return Err("KuCoin full-position stop size is controlled by closeOrder".into());
+        }
+        let stop_limit = native_stop_limit(parent);
         let native = parent
             .extra
             .as_ref()
@@ -566,7 +591,9 @@ impl Kucoin {
             symbol: parent.symbol.clone(),
             kind: parent.kind,
             side: parent.side,
-            amount: if virtual_stop {
+            amount: if parent.close == Some(true) {
+                0.0
+            } else if virtual_stop {
                 native
             } else {
                 amount
@@ -600,7 +627,7 @@ impl Kucoin {
             client_order_id: None,
             close: parent.close,
         };
-        preflight(std::slice::from_ref(&opts))?;
+        preflight_native(std::slice::from_ref(&opts), stop_limit)?;
         Ok((parent.clone(), opts))
     }
 
@@ -638,7 +665,7 @@ impl Kucoin {
                 opts.stop_loss
             }
         } else {
-            opts.price
+            opts.trigger_price.or(opts.price)
         }
         .map(|p| num::adjust(p, market.precision.price))
         .ok_or("KuCoin amendment has no trigger")?;
@@ -657,6 +684,7 @@ impl Kucoin {
         // The source the replacement is sent with (format_placement's
         // stopPriceType), so the veto checks the price KuCoin triggers on.
         let source = if leg {
+            // st-orders has one shared stopPriceType for both attached legs.
             opts.tp_trigger_type.or(opts.sl_trigger_type)
         } else if order.kind == OrderType::StopLoss {
             opts.sl_trigger_type.or(opts.trigger_type)
@@ -675,10 +703,11 @@ impl Kucoin {
             .validate(cx.store, cx.now)
             .map_err(|error| error.message)?;
         let (_, original) = self.replacement(cx, id, None, None)?;
-        let mut restore = self.format_placement(cx, &original)?;
+        let mut restore = self.format_placement(cx, &original, native_stop_limit(parent))?;
         restore.call = Call::Place;
         Ok(Some(Box::new(StopProtect {
             guard,
+            original_trigger: num::adjust(order.price, market.precision.price),
             restore,
             restorable: parent.filled == 0.0,
         })))
@@ -694,15 +723,20 @@ impl Kucoin {
             Command::PlaceOrders { orders, .. } => {
                 preflight(&orders)?;
                 for order in orders {
-                    steps.push_back(self.format_placement(cx, &order)?);
+                    steps.push_back(self.format_placement(cx, &order, None)?);
                 }
             }
             Command::AmendOrder {
                 id, price, amount, ..
             } => {
                 let (parent, opts) = self.replacement(cx, &id, price, amount)?;
-                self.format_placement(cx, &opts)?;
-                let stop = self.stop_protect(cx, &id, &parent, &opts)?;
+                let stop_limit = native_stop_limit(&parent);
+                self.format_placement(cx, &opts, stop_limit)?;
+                if protective::guarded(cx.store, &id) {
+                    return Err(
+                        "KuCoin protection changed while preparing the edit; retry it".into(),
+                    );
+                }
                 let amended = cx
                     .store
                     .order(&id)
@@ -721,10 +755,10 @@ impl Kucoin {
                         amended,
                         id: parent.id,
                         options: opts,
+                        stop_limit,
                         filled,
                         polls: 0,
                         read_retries: 0,
-                        stop,
                     },
                     &api_symbol(cx.store, &parent.symbol),
                 ));
@@ -857,6 +891,10 @@ impl Kucoin {
         id: CommandId,
         input: Command,
     ) {
+        if protective::handles(cx.store, &input) {
+            self.protective_command(cx, id, input);
+            return;
+        }
         let validation = match &input {
             Command::PlaceOrders { orders, .. } => preflight(orders),
             Command::AmendOrder {
@@ -892,8 +930,6 @@ impl Kucoin {
                 error: None,
                 metadata_started: HashSet::new(),
                 effective: false,
-                protect: None,
-                restoring: false,
             },
         );
         self.trading.queue.push_back(id);
@@ -1021,22 +1057,6 @@ impl Kucoin {
         true
     }
     fn send_trade(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
-        // The amended stop's cancel, its stop-family fallback and any re-signed
-        // resend are checked once more as each is sent.
-        if let Call::Cancel { .. } = &request.step.call
-            && let Some(job) = self.trading.jobs.get_mut(&request.command)
-            && let Some(Call::ConfirmCancel(replacement)) = job.steps.front().map(|s| &s.call)
-            && let Some(stop) = &replacement.stop
-            && let Err(error) = stop.guard.validate(cx.store, cx.now)
-        {
-            cx.command_error(request.command, &error.message);
-            job.error = Some(error);
-            job.steps.clear();
-            self.trading.active = false;
-            self.trading.queue.push_front(request.command);
-            self.trading.timer = Some(cx.set_timer(20.0));
-            return;
-        }
         if let Call::PlaceAfterCancel { id, filled, .. } = &request.step.call
             && self.account_order_filled(id) > *filled
         {
@@ -1170,19 +1190,6 @@ impl Kucoin {
                         }
                         let job = self.trading.jobs.get_mut(&request.command).unwrap();
                         job.ids.push(created.order_id.into());
-                        if job.restoring {
-                            let symbol = job
-                                .protect
-                                .as_ref()
-                                .map_or("", |p| p.guard.order.symbol.as_str());
-                            let mut error = VenueError::new(format!(
-                                "Your {symbol} stop is unchanged: its replacement was refused, so the original was put back as a new order"
-                            ));
-                            error.protection =
-                                Some(safe_cex_engine::error::Protection::Restored);
-                            error.presents = true;
-                            job.error = Some(error);
-                        }
                     }
                     Call::ConfirmCancel(mut replacement) => {
                         #[derive(Deserialize)]
@@ -1252,16 +1259,14 @@ impl Kucoin {
                             replacement.options.amount -= filled - replacement.filled;
                         }
                         self.account_order_terminal(cx, &replacement.id);
-                        let filled_during_cancel = filled > replacement.filled;
-                        if let Some(mut stop) = replacement.stop.take() {
-                            stop.restorable &= !filled_during_cancel;
-                            self.trading.jobs.get_mut(&request.command).unwrap().protect =
-                                Some(stop);
-                        }
                         if full_position_stop && canceled && !fully_filled
                             || !full_position_stop && replacement.options.amount > 0.0
                         {
-                            let mut step = self.format_placement(cx, &replacement.options)?;
+                            let mut step = self.format_placement(
+                                cx,
+                                &replacement.options,
+                                replacement.stop_limit,
+                            )?;
                             step.call = Call::PlaceAfterCancel {
                                 id: replacement.id.clone(),
                                 filled,
@@ -1375,29 +1380,12 @@ impl Kucoin {
                 error.outcome = Some(Outcome::NotSent);
             }
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
-            let guarded = replacing.is_some() || job.restoring;
+            let guarded = replacing.is_some();
             // A 429 may have placed the order: for a guarded stop it is unknown, not refused.
             if guarded && error.kind == Some(ErrorKind::RateLimited) {
                 error.outcome = Some(Outcome::Unknown);
             }
             let refused = error.outcome == Some(Outcome::Rejected);
-            // A definite refusal proves no replacement exists: put the original back once.
-            if replacing.is_some()
-                && refused
-                && let Some(restore) = job
-                    .protect
-                    .as_ref()
-                    .filter(|p| p.restorable)
-                    .map(|p| p.restore.clone())
-            {
-                job.restoring = true;
-                job.steps.push_front(restore);
-                self.trading.active = false;
-                self.trading.queue.push_front(request.command);
-                self.trading.timer = Some(cx.set_timer(20.0));
-                return;
-            }
-            let lost_stop = guarded && job.protect.is_some();
             if let Some((symbol, (side, kind))) = replacing.filter(|_| job.ids.is_empty()) {
                 let unknown = !refused;
                 let gone = if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
@@ -1405,7 +1393,7 @@ impl Kucoin {
                 } else {
                     safe_cex_engine::error::order_gone_text(&symbol, unknown)
                 };
-                error.message = if refused && !job.protect.as_ref().is_some_and(|p| p.restorable) {
+                error.message = if refused {
                     format!(
                         "Your {symbol} stop was removed: its replacement was refused, please re-place it ({gone}: {})",
                         error.message
@@ -1413,26 +1401,6 @@ impl Kucoin {
                 } else {
                     format!("{gone}: {}", error.message)
                 };
-            } else if job.restoring && job.ids.is_empty() {
-                let symbol = job
-                    .protect
-                    .as_ref()
-                    .map_or(String::new(), |p| p.guard.order.symbol.clone());
-                error.message = if refused {
-                    format!(
-                        "Your {symbol} stop was removed: its replacement and the put-back were both refused, please re-place it ({})",
-                        error.message
-                    )
-                } else {
-                    format!(
-                        "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders ({})",
-                        error.message
-                    )
-                };
-            }
-            if lost_stop && refused {
-                error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
-                error.presents = true;
             }
             job.record(error);
             if !job.keep_going {

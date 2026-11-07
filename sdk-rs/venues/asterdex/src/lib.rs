@@ -782,14 +782,15 @@ fn is_partial_stream(stream: &str) -> bool {
 }
 
 fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
-    let observed = event
+    let last = event
         .c
         .as_deref()
-        .and_then(num::parse_decimal)
-        .is_some_and(|p| p > 0.0);
+        .filter(|value| !value.is_empty())
+        .map(num::parse);
+    let observed = last.is_some_and(|price| price > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
-        if let Some(value) = event.c.as_deref().filter(|s| !s.is_empty()) {
-            ticker.last = num::parse(value);
+        if let Some(value) = last {
+            ticker.last = value;
         }
         if let Some(value) = event.percentage.as_deref().filter(|s| !s.is_empty()) {
             ticker.percentage = num::parse(value);
@@ -807,14 +808,15 @@ fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
 }
 
 fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
-    let observed = event
+    let mark = event
         .p
         .as_deref()
-        .and_then(num::parse_decimal)
-        .is_some_and(|p| p > 0.0);
+        .filter(|value| !value.is_empty())
+        .map(num::parse);
+    let observed = mark.is_some_and(|price| price > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
-        if let Some(value) = event.p.as_deref().filter(|s| !s.is_empty()) {
-            ticker.mark = num::parse(value);
+        if let Some(value) = mark {
+            ticker.mark = value;
         }
         if let Some(value) = event.i.as_deref().filter(|s| !s.is_empty()) {
             ticker.index = num::parse(value);
@@ -980,6 +982,17 @@ impl Venue for AsterDex {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Signed(request) => Self::startup_reads(&request.pending),
+            Pending::ExchangeInfo { .. } => S::MARKETS,
+            Pending::Daily { .. } | Pending::OpenInterest { initial: true, .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             stp_controls: self.version == Version::V3,

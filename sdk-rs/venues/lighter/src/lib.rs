@@ -74,6 +74,7 @@ impl Default for Options {
         }
     }
 }
+type TickerSeed = (String, Ticker, Option<(f64, f64)>);
 pub enum Pending {
     Account {
         context: Context,
@@ -96,7 +97,7 @@ pub enum Pending {
     },
     Tickers {
         context: Context,
-        rows: Vec<(String, Ticker)>,
+        rows: Vec<TickerSeed>,
         failed: bool,
         revision: u64,
     },
@@ -227,6 +228,7 @@ fn candle_channel(store: &Store, symbol: &str, interval: Interval) -> Option<Str
     Some(format!("candle/{}/{interval}", store.market(symbol)?.id))
 }
 pub struct Lighter {
+    protection: trading::protection::ProtectionState,
     options: Options,
     account: account::Account,
     trading: trading::Trading,
@@ -274,6 +276,7 @@ impl Lighter {
     }
     pub fn new(options: Options) -> Self {
         Self {
+            protection: Default::default(),
             options,
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -516,7 +519,7 @@ impl Lighter {
         if self.ticker_in_flight || self.startup.waiting(&false) {
             return;
         }
-        let Ok(context) = cx.http_context(
+        let Ok(context) = cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -572,7 +575,7 @@ impl Lighter {
         if state.in_flight || cx.now < state.rest_retry_at {
             return;
         }
-        let Ok(context) = cx.http_context(
+        let Ok(context) = cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -635,7 +638,7 @@ impl Lighter {
             };
             context
         } else {
-            match cx.http_context(Scope::Background, policy) {
+            match cx.http_live_context(Scope::Background, policy) {
                 Ok(context) => context,
                 Err(_) => {
                     if let Some(state) = self
@@ -663,7 +666,7 @@ impl Lighter {
                 return Err("Invalid candle time range".to_owned());
             }
             let count = limit.filter(|n| *n > 0).unwrap_or(500).min(1500);
-            let end = to.unwrap_or(cx.now);
+            let end = to.unwrap_or(cx.protocol_now());
             let start = if limit.is_none() {
                 from.unwrap_or(end - duration * f64::from(count))
             } else {
@@ -723,6 +726,7 @@ impl Lighter {
         let Some(symbol) = symbol.map(str::to_owned) else {
             return;
         };
+        self.observe_mark(&symbol, stats.mark_price, cx.now);
         self.ticker_revision += 1;
         self.ticker_sources
             .insert(symbol.clone(), self.ticker_revision);
@@ -1015,6 +1019,13 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::Account { .. } => safe_cex_engine::HttpReadClass::Reconciliation,
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
+
     /// A repair re-sends the topic's book or candle channel; a book resubscribe
     /// answers with a full snapshot, which replaces the book.
     fn subscription_interest(
@@ -1068,6 +1079,14 @@ impl Venue for Lighter {
             return Err(safe_cex_engine::request_context::Error::Invalid);
         }
         safe_cex_engine::request_context::ReconciliationData::new(String::new())
+    }
+    fn http_release_veto(
+        &self,
+        store: &Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.protective_release_veto(store, pending, release.time.raw_ms)
     }
     fn cancel_needs_stored_order(&self) -> bool {
         true
@@ -1133,6 +1152,16 @@ impl Venue for Lighter {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account { request, .. } => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn on_http_preflight_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1612,7 +1641,11 @@ impl Venue for Lighter {
                             if let Some(v) = stats.daily_price_change {
                                 ticker.percentage = v;
                             }
-                            rows.push((symbol.into(), ticker));
+                            rows.push((
+                                symbol.into(),
+                                ticker,
+                                stats.mark_price.map(|v| (v, cx.now)),
+                            ));
                         } else {
                             *failed = true;
                             safe_cex_engine::startup::skipped_row(cx);
@@ -1750,9 +1783,15 @@ impl Venue for Lighter {
                     return;
                 }
                 self.startup.succeeded(cx, &false);
-                for (symbol, ticker) in rows {
+                let genuine = !failed
+                    && (200..300).contains(&response.status)
+                    && trading::protection::accepted_envelope(response.body);
+                for (symbol, ticker, mark) in rows {
                     if self.ticker_sources.get(&symbol).copied().unwrap_or(0) <= revision {
                         cx.store.update_ticker(&symbol, |t| *t = ticker);
+                        if genuine && let Some((value, at)) = mark {
+                            self.observe_mark(&symbol, Some(value), at);
+                        }
                     }
                 }
             }
@@ -1921,13 +1960,13 @@ impl Venue for Lighter {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(request) => self.identity_rejected(cx, request, error),
             other => self.on_sign_error(cx, other, error),
-        }
+        });
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(request) => self.identity_rejected(cx, request, error),
             Pending::Trade(request) => self.trade_error(cx, request, error),
             Pending::Account { context, request } => {
@@ -1960,7 +1999,7 @@ impl Venue for Lighter {
                 }
             }
             pending => self.public_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_trades(cx);

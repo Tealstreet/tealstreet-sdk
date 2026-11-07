@@ -38,6 +38,7 @@ impl ContextRegistry {
             None => self.repairs.insert(
                 generation,
                 CommandOwner {
+                    request_class: crate::request_budget::RequestClass::OrderWrite,
                     generation,
                     phase: CommandPhase::Context {
                         root: context.clone(),

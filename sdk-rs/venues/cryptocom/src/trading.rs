@@ -72,22 +72,6 @@ pub struct Request {
     identity: Identity,
 }
 impl Request {
-    /// A documented refusal code in the body proves nothing executed, whatever the status.
-    pub(crate) fn refused_by_body(&self, body: &str) -> bool {
-        use safe_cex_engine::classify::{Native, NativeCode};
-        serde_json::from_str::<crate::wire::RestEnvelope<'_>>(body).is_ok_and(|e| {
-            let native = Native {
-                code: NativeCode::Int(e.code),
-                message: e.message,
-            };
-            // A resendable refusal at 5xx stays unproven: only a plain refusal is exempt.
-            e.code != 0
-                && matches!(
-                    ERRORS.verdict(&native, self.step.call.intent()),
-                    safe_cex_engine::classify::Verdict::Refused(_)
-                )
-        })
-    }
     pub(crate) fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
         match &self.physical {
             Physical::Prerequisite { preflight, context } => {
@@ -955,7 +939,12 @@ impl Cryptocom {
                     return;
                 };
                 WriteFact::Failed {
-                    fact,
+                    // Native evidence cannot authorize replay after an ambiguous status.
+                    fact: if matches!(response.status, 408 | 429 | 500..) {
+                        fact.unproven()
+                    } else {
+                        fact
+                    },
                     known_effects: false,
                 }
             }
@@ -1077,7 +1066,7 @@ pub(crate) const ERRORS: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },
-        // Documented refusals; 415 and 43005 come at HTTP 500.
+        // Native refusal codes only prove refusal at non-ambiguous HTTP statuses.
         Row {
             key: Key::Int(415),
             verdict: Verdict::Refused(ErrorKind::Rejected),

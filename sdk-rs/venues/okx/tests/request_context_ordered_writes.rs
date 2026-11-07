@@ -1428,3 +1428,37 @@ fn a_documented_refusal_is_rejected_not_unknown() {
         )), "{code}");
     }
 }
+
+#[test]
+fn engine_ambiguity_429_signature_must_not_resend() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 429, SIGNATURE_REJECTED, 6.);
+    let output = prepared(&mut engine, 6.);
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "429 physically resent: {:?}",
+        output
+    );
+}
+#[test]
+fn engine_ambiguity_503_signature_working_control_never_resends() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 503, SIGNATURE_REJECTED, 6.);
+    let output = prepared(&mut engine, 6.);
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
+    );
+    assert!(
+        failures(&output)
+            .iter()
+            .all(|e| e.outcome == Some(safe_cex_engine::Outcome::Unknown))
+    );
+}

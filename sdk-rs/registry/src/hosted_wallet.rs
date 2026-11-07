@@ -1,9 +1,14 @@
 //! Device-side wallet signing for keyless servers. The device never signs a
 //! digest it did not derive itself from an allowlisted, account-bound statement.
 //! Synchronous over the local provider, without the HMAC capture codec.
-use safe_cex_engine::signing::{
-    Algorithm, Context, Identities, Operation, PayloadPart, Provider, SignError, SignRequest,
-};
+use safe_cex_engine::signing::{Context, Identities, Operation, Provider, SignError, SignRequest};
+
+#[cfg(any(feature = "hyperliquid", feature = "lighter", feature = "paradex"))]
+use safe_cex_engine::signing::{Algorithm, PayloadPart};
+
+#[cfg(feature = "grvt")]
+#[path = "hosted_signing/grvt.rs"]
+mod grvt;
 
 /// The signed-in account a device signs for, captured at construction.
 #[derive(Clone, Debug, Default)]
@@ -16,10 +21,12 @@ pub struct Account {
     pub api_key_index: Option<String>,
     /// Paradex: the account address this device's Stark key signs for.
     pub paradex_address: Option<String>,
+    pub grvt_trading_account_id: Option<String>,
 }
 
 pub fn admitted(venue: &str) -> bool {
     (cfg!(feature = "hyperliquid") && matches!(venue, "hyperliquid" | "hyperliquidspot"))
+        || (cfg!(feature = "grvt") && venue == "grvt")
         || lighter(venue)
         || (cfg!(feature = "paradex") && venue == "paradex")
 }
@@ -197,6 +204,20 @@ pub fn sign(
     now_ms: f64,
 ) -> Result<String, SignError> {
     if !admitted(venue) {
+        return Err(SignError::Unsupported);
+    }
+    #[cfg(feature = "grvt")]
+    if venue == "grvt" {
+        return grvt::sign(
+            identities,
+            account,
+            provider,
+            to_sign,
+            output_format,
+            now_ms,
+        );
+    }
+    if output_format.starts_with("grvt-") {
         return Err(SignError::Unsupported);
     }
     let paradex_format = output_format.starts_with("paradex-");

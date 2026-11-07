@@ -102,7 +102,7 @@ impl PhemexPerpetuals {
             );
             return;
         }
-        let end = to_ms.unwrap_or(cx.now.floor());
+        let end = to_ms.unwrap_or(cx.protocol_now().floor());
         let start = from_ms.unwrap_or((end - 30. * DAY).max(0.));
         if !valid_time(start) || !valid_time(end) || start > end || limit == Some(0) {
             Self::finish_local_history(cx, Err("Invalid Phemex income range or limit"));

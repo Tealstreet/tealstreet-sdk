@@ -897,7 +897,7 @@ impl Backpack {
             params: [&'static str; 2],
             signature: [String; 4],
         }
-        let signature = c.ws_auth(cx.now);
+        let signature = c.ws_auth(cx.protocol_now());
         cx.send(
             socket,
             serde_json::to_string(&Subscribe {
@@ -1144,6 +1144,18 @@ impl crate::Backpack {
                 Some(order.price),
             );
             cx.store.update_order(&id, |order| order.kind = relabelled);
+        }
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &self.data {
+            ReadData::Info { .. } => S::ACCOUNT,
+            ReadData::Balance { .. } => S::BALANCE,
+            ReadData::Positions { .. } => S::POSITIONS,
+            ReadData::Orders { .. } => S::ORDERS,
         }
     }
 }

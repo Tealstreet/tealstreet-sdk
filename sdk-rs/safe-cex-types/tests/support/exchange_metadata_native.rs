@@ -671,6 +671,17 @@ pub fn assert_exchange_metadata_native(native: &ExchangeMetadata, source: &serde
         "native ExchangeMetadata.autoDownSizeReduceOrders"
     );
     assert_eq!(
+        native.reduce_orders_lock_position_size,
+        serde_json::from_value::<bool>(
+            source
+                .get("reduceOrdersLockPositionSize")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field reduceOrdersLockPositionSize"),
+        "native ExchangeMetadata.reduceOrdersLockPositionSize"
+    );
+    assert_eq!(
         native.supports_chaser,
         serde_json::from_value::<bool>(
             source

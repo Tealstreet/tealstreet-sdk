@@ -77,7 +77,13 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     return;
                 }
                 let request_id = request.id;
-                let future = self.transport.prepare_http(request, intent);
+                let request_class = self
+                    .engine
+                    .http_request_class(preparation)
+                    .expect("live preparation has a class");
+                let future = self
+                    .transport
+                    .prepare_http_classified(request, intent, request_class);
                 let events = self.events.clone();
                 let task = tokio::spawn(async move {
                     let result = tokio::select! {
@@ -219,7 +225,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
 
     fn fail_http_preparation(&mut self, preparation: Preparation, error: HttpPrepareError) {
         let (reason, kind) = match error {
-            HttpPrepareError::Expired => (Error::TimedOut, safe_cex_engine::ErrorKind::Timeout),
+            HttpPrepareError::Expired | HttpPrepareError::ExpiredWithBudget(_) => {
+                (Error::TimedOut, safe_cex_engine::ErrorKind::Timeout)
+            }
             HttpPrepareError::Unsupported => {
                 (Error::Invalid, safe_cex_engine::ErrorKind::Unsupported)
             }

@@ -438,6 +438,12 @@ pub struct Context {
     owner: Owner,
     leg: u64,
     operation: Operation,
+    request_class: crate::request_budget::RequestClass,
+    #[cfg(not(target_arch = "wasm32"))]
+    created_at: f64,
+    // Precomputed at logical issuance, never reset by queueing or retries.
+    // Discovery keeps the logical bound; live reads use this shorter ceiling.
+    short_read_deadline: f64,
     credential: Option<Credential>,
     /// Egress declared at issuance; it may only confirm a credential's intent.
     egress: Option<Egress>,
@@ -490,12 +496,40 @@ impl Context {
             owner,
             leg,
             operation,
+            request_class: if operation == Operation::Mutation {
+                crate::request_budget::RequestClass::OrderWrite
+            } else {
+                crate::request_budget::RequestClass::Read
+            },
             credential,
+            #[cfg(not(target_arch = "wasm32"))]
+            created_at,
+            short_read_deadline: deadline,
             egress: None,
             deadline,
             pacing,
             retry: RetryPolicy::Never,
         })
+    }
+
+    pub fn request_class(&self) -> crate::request_budget::RequestClass {
+        self.request_class
+    }
+
+    pub(crate) fn set_request_class(&mut self, class: crate::request_budget::RequestClass) {
+        self.request_class = class.for_operation(self.operation);
+    }
+
+    pub(crate) fn set_background_budget(&mut self, issued_at: f64) {
+        self.short_read_deadline = self.deadline.min(issued_at + 20_000.);
+    }
+
+    pub(crate) fn background_deadline(&self, class: crate::request_budget::RequestClass) -> f64 {
+        if class == crate::request_budget::RequestClass::Discovery {
+            self.deadline
+        } else {
+            self.short_read_deadline
+        }
     }
 
     /// Capture egress before issuer binding: unsigned reads declare it, a
@@ -633,6 +667,9 @@ pub struct Prepared {
 #[derive(Clone, Debug, PartialEq)]
 pub enum HttpAction {
     Prepare {
+        /// Browser-only diagnostic metadata; outside immutable signed request bytes.
+        #[cfg(target_arch = "wasm32")]
+        request_class: u8,
         preparation: Preparation,
         intent: RoutingIntent,
         request: crate::HttpRequest,
@@ -842,7 +879,10 @@ enum State {
 /// One physical attempt. A retry constructs another lifecycle with the same
 /// context; command evidence is retained separately until command sealing.
 pub struct Lifecycle {
+    #[cfg(not(target_arch = "wasm32"))]
+    created_at: f64,
     context: Context,
+    request_class: crate::request_budget::RequestClass,
     deadline: f64,
     attempt: Attempt,
     state: State,
@@ -869,7 +909,10 @@ pub(crate) mod group_lifecycle;
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            created_at: context.created_at,
             deadline: context.deadline(),
+            request_class: context.request_class(),
             context,
             attempt,
             state: State::Preparing,
@@ -898,8 +941,40 @@ impl Lifecycle {
             return Err(Error::Invalid);
         }
         let mut lifecycle = Self::new(context, attempt);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            lifecycle.created_at = created_at;
+        }
         lifecycle.deadline = deadline;
         Ok(lifecycle)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn timeout_diagnostic(&self, now: f64) -> String {
+        self.request_class.diagnostic(
+            (self.deadline - self.created_at).max(0.) as u32,
+            (now - self.created_at).max(0.) as u128,
+        )
+    }
+
+    pub(crate) fn request_class(&self) -> crate::request_budget::RequestClass {
+        self.request_class
+    }
+
+    pub(crate) fn set_request_class(&mut self, class: crate::request_budget::RequestClass) {
+        self.request_class = class;
+    }
+
+    pub(crate) fn narrow_account_read(&mut self) -> bool {
+        let deadline = self
+            .context
+            .background_deadline(crate::request_budget::RequestClass::Read);
+        if self.context.operation() != Operation::Read || deadline >= self.deadline {
+            return false;
+        }
+        self.deadline = deadline;
+        self.request_class = crate::request_budget::RequestClass::Read;
+        true
     }
 
     /// Immutable physical cap; it never grants more time than the Context.
@@ -1990,7 +2065,6 @@ impl CommandWrites {
     }
 
     /// Mark a live journal maybe-sent; like `inheriting`, never clears.
-    #[cfg(feature = "http-plans")]
     pub(crate) fn inherit_uncertain(&mut self) {
         self.inherited_uncertain = true;
     }
@@ -2044,10 +2118,13 @@ impl CommandWrites {
         let any_released = self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
-                && (matches!(
-                    a.result,
-                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_))
-                ) || self.attempts[index + 1..]
+                && (match &a.result {
+                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_)) => true,
+                    Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
+                        error.outcome == Some(Outcome::Unknown)
+                    }
+                    Some(WriteResult::Accepted { .. }) => false,
+                } || self.attempts[index + 1..]
                     .iter()
                     .any(|later| later.leg == a.leg && !later.released))
         }) || self.legs.iter().any(|leg| {
@@ -2105,7 +2182,11 @@ impl CommandWrites {
         // The text a settled refusal gave: stale once a later write is unknown.
         let refusal_text = retained.is_some()
             || self.attempts.iter().any(|attempt| {
-                self.terminal(attempt) && matches!(attempt.result, Some(WriteResult::Rejected(_)))
+                self.terminal(attempt)
+                    && matches!(
+                        attempt.result,
+                        Some(WriteResult::Rejected(_) | WriteResult::KnownPartial(_))
+                    )
             });
         let selected = retained.or_else(|| select(true)).or_else(|| select(false));
         let mut overflow = self.attempts.iter().any(|attempt| attempt.id_overflow);
@@ -2205,6 +2286,9 @@ impl CommandWrites {
             error.message = message.clone();
         } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
             error.message = UNKNOWN_AFTER_REFUSAL.into();
+            if overflow {
+                evidence::mark_id_overflow(&mut error);
+            }
         }
         #[cfg(feature = "http-plans")]
         if let Some(note) = note {

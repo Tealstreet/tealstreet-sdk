@@ -20,6 +20,31 @@ impl<'de> Deserialize<'de> for Number {
     }
 }
 
+#[derive(Default)]
+pub enum ExecutionPrice {
+    #[default]
+    Blank,
+    Value(f64),
+    Invalid,
+}
+
+impl<'de> Deserialize<'de> for ExecutionPrice {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        Ok(
+            if serde_json::from_str::<Cow<'_, str>>(raw.get())
+                .is_ok_and(|text| text.trim().is_empty())
+            {
+                Self::Blank
+            } else if let Ok(Number(Some(value))) = serde_json::from_str::<Number>(raw.get()) {
+                Self::Value(value)
+            } else {
+                Self::Invalid
+            },
+        )
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contract<'a> {
@@ -332,6 +357,8 @@ pub struct PositionRow<'a> {
     pub open_total_pos: Number,
     #[serde(default, rename = "available")]
     pub available: Number,
+    #[serde(default, rename = "locked")]
+    pub locked: Number,
     #[serde(default, rename = "openPriceAvg")]
     pub open_price_avg: Number,
     #[serde(default, rename = "openAvgPrice")]
@@ -442,7 +469,7 @@ pub struct OrderRow<'a> {
     #[serde(default, rename = "slLimitPrice")]
     pub sl_limit_price: Number,
     #[serde(default, rename = "executePrice")]
-    pub execute_price: Number,
+    pub execute_price: ExecutionPrice,
     #[serde(
         default,
         rename = "tpslMode",

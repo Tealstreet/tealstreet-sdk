@@ -529,7 +529,7 @@ impl BinanceFutures {
     }
 
     /// Note request weight; near the limit, or on a 418/429, pause background reads.
-    fn observe_weight(&mut self, cx: &mut Cx<'_, Pending>, response: &Response<'_>) {
+    fn observe_weight(&mut self, now: f64, response: &Response<'_>) {
         let pause = if matches!(response.status, 418 | 429) {
             Some(
                 response
@@ -548,7 +548,7 @@ impl BinanceFutures {
                 .map(|_| WEIGHT_PAUSE_MS)
         };
         if let Some(pause) = pause {
-            self.background_paused_until = self.background_paused_until.max(cx.now + pause);
+            self.background_paused_until = self.background_paused_until.max(now + pause);
         }
     }
 
@@ -614,9 +614,20 @@ impl BinanceFutures {
                 if self.is_spot() {
                     topics.extend(self.kline_topics());
                 } else {
-                    // Bid and ask are public: a guest account without this
-                    // stream would keep the startup REST quote forever.
-                    topics.push("!bookTicker".to_owned());
+                    if self.options.portfolio_margin {
+                        // USD-M's all-market book ticker is sampled every 5s.
+                        // PM needs real-time best quotes, even without a book
+                        // subscription or private account stream.
+                        topics.extend(
+                            cx.store.markets().iter().map(|market| {
+                                format!("{}@bookTicker", market.symbol.to_lowercase())
+                            }),
+                        );
+                    } else {
+                        // Bid and ask are public: a guest account without this
+                        // stream would keep the startup REST quote forever.
+                        topics.push("!bookTicker".to_owned());
+                    }
                     if self.shared_public_socket() {
                         topics.push("!ticker@arr".to_owned());
                         topics.push("!markPrice@arr@1s".to_owned());
@@ -749,6 +760,8 @@ impl BinanceFutures {
                 for shard in previous_len / 1_024..self.spot_tickers.len() {
                     self.sync_interests(cx, Channel::SpotTicker(shard));
                 }
+            } else if self.options.portfolio_margin && previous_len < cx.store.markets().len() {
+                self.sync_interests(cx, Channel::Public);
             }
         }
         if !was_loaded && self.credentials.has_primary() && !self.is_spot() {
@@ -1349,6 +1362,24 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn observe_unproven_http_response(
+        &mut self,
+        now: f64,
+        pending: &Pending,
+        response: Response<'_>,
+    ) {
+        let mut pending = pending;
+        while let Pending::Background(_, inner) = pending {
+            pending = inner;
+        }
+        if !matches!(pending, Pending::Options(_) | Pending::OptionsProduct(_)) {
+            self.observe_weight(now, &response);
+        }
+    }
+
+    fn http_plans() -> bool {
+        false
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -1418,6 +1449,18 @@ impl Venue for BinanceFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Background(_, pending) => Self::startup_reads(pending),
+            Pending::ExchangeInfo { .. } => S::MARKETS,
+            Pending::Daily | Pending::BookTickers | Pending::PremiumIndex => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            Pending::Options(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         let capabilities = match self.options.variant {
             Variant::UsdM | Variant::PortfolioMargin => safe_cex_engine::Capabilities {
@@ -1709,7 +1752,7 @@ impl Venue for BinanceFutures {
             self.options_product_response(cx, *request, response);
             return;
         }
-        self.observe_weight(cx, &response);
+        self.observe_weight(cx.now, &response);
         if let Pending::Identity(context) = pending {
             self.identity_response(cx, context, response);
             return;
@@ -1843,7 +1886,7 @@ impl Venue for BinanceFutures {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Background(context, pending) => {
                 let _ = cx.finish_http_context(&context);
                 self.on_sign_error(cx, *pending, error);
@@ -1855,7 +1898,7 @@ impl Venue for BinanceFutures {
             }
             Pending::History(request) => self.history_failed(cx, *request, error, true),
             pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
 
     /// Managed history keeps the typed failure, such as a page Timeout.
@@ -2063,7 +2106,14 @@ impl Venue for BinanceFutures {
                     cx.refuse_command(Operation::Read, error);
                     return;
                 }
-                let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
+                let query = match candles::query(
+                    &symbol,
+                    interval,
+                    limit,
+                    from_ms,
+                    to_ms,
+                    cx.protocol_now(),
+                ) {
                     Ok(query) => query,
                     Err(error) => {
                         let error = safe_cex_engine::VenueError::new(error)

@@ -18,6 +18,29 @@ const send = (audit, message, generation = 1) => audit.sent(URL, JSON.stringify(
 const receive = (audit, message, generation = 1) => audit.received(URL, JSON.stringify(message), generation);
 const ack = (audit, generation = 1) => receive(audit, { id: 'subscribe', status: 200, result: { subscriptionId: 7 } }, generation);
 
+test('PM replay subscribes real-time quotes from its own catalogue on every open', () => {
+  for (const publicDataOnly of [true, false]) {
+    const sent = []; let resets = 0; let books = 0;
+    const onMessage = () => {};
+    const feed = { send: (text) => sent.push(JSON.parse(text)), onMessage,
+      resetOrderbook: () => resets++, subscribe: () => books++ };
+    const exchange = { publicWebsocket: feed, options: { publicDataOnly },
+      store: { markets: [{ symbol: 'BTCUSDT' }, { symbol: 'ETHUSDT' }] } };
+    venueOf('binancepm').prepareTs(exchange);
+    feed.onOpen();
+    assert.deepEqual(sent, [{ id: 1, method: 'SUBSCRIBE', params: ['btcusdt@bookTicker', 'ethusdt@bookTicker'] }]);
+    assert.equal(resets, 1); assert.equal(books, 1); assert.equal(feed.onMessage, onMessage);
+    const keys = subscriptionKeys('wss://fstream.binance.com/public/ws', sent[0], new Set(), venueOf('binancepm'));
+    assert.notDeepEqual(keys, subscriptionKeys('wss://fstream.binance.com/public/ws',
+      { ...sent[0], params: ['btcusdt@bookTicker'] }, new Set(), venueOf('binancepm')));
+    exchange.store.markets.push({ symbol: 'SOLUSDT' });
+    feed.onOpen();
+    assert.deepEqual(sent[1].params, ['btcusdt@bookTicker', 'ethusdt@bookTicker', 'solusdt@bookTicker']);
+    feed.isDisposed = true; feed.onOpen(); assert.equal(sent.length, 2);
+  }
+  for (const venue of ['binance', 'binanceinverse']) assert.equal(venueOf(venue).prepareTs, undefined);
+});
+
 test('Binance REST verifies original bytes, header, clock and unsigned public/listen-key boundary', () => {
   const query = `symbol=BTCUSD_PERP&quantity=7&timestamp=${Date.now()}&recvWindow=20000`;
   const request = { method: 'POST', url: `https://dapi.binance.com/dapi/v1/order?${query}&signature=${hmac(query)}`, headers: {'X-MBX-APIKEY':'replay-key'} };

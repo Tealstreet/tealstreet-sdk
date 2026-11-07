@@ -21,6 +21,13 @@ Put-back presentation is registered before dispatch for engine-sealed failures.
 Attached fallbacks never guess a restore. Missing execution evidence refuses
 before canceling. Existing command ownership covers the whole sequence.
 
+Quote receipt age and the five-second release guard use the engine's monotonic
+scheduling clock. Protocol UTC corrections affect outbound timestamps, not quote
+freshness. An ambiguous released HTTP status remains Unknown even if its body
+claims success or a signature refusal; cancellation, replacement, put-back and
+native modification never use that answer to authorize another write or claim
+protection.
+
 UTA full-mode native modification remains excluded: the documented `qty` is
 required but described as partial-mode only. UTA trailing native modification is
 undocumented and excluded. These are contract limits, not inferred support.

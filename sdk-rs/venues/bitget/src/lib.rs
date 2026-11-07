@@ -7,6 +7,7 @@ mod leverage;
 mod paths;
 mod protective;
 mod sign;
+mod telemetry;
 mod trading;
 mod venue_state;
 mod wire;
@@ -135,6 +136,7 @@ pub struct BitgetFutures {
     discovery: PublicRetries,
     account: account::Account,
     trading: trading::Trading,
+    telemetry: telemetry::Telemetry,
     history: history::History,
     sockets: [Connection; 4],
     ticker_index: Vec<Option<u32>>,
@@ -260,6 +262,7 @@ impl BitgetFutures {
             discovery: Default::default(),
             account: account::Account::new(),
             trading: trading::Trading::default(),
+            telemetry: telemetry::Telemetry::default(),
             history: history::History::default(),
             sockets: Default::default(),
             ticker_index: Vec::new(),
@@ -279,9 +282,25 @@ impl BitgetFutures {
             self.live_tickers.begin();
         }
         let scope = safe_cex_engine::request_context::Scope::Background;
-        let context = match cx.http_context(scope, read_policy(None)) {
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, scope, read_policy(None)) {
             Ok(context) => context,
-            Err(reason) => return self.public_failed(cx, tickers, reason.read_venue_error()),
+            Err(reason) => {
+                let error = reason.read_venue_error();
+                cx.startup_admission_refused(
+                    if tickers {
+                        safe_cex_engine::startup::Sections::TICKERS
+                    } else {
+                        safe_cex_engine::startup::Sections::MARKETS
+                    },
+                    &error,
+                );
+                return self.public_failed(cx, tickers, error);
+            }
         };
         let path = if tickers {
             paths::TICKERS
@@ -853,6 +872,10 @@ impl Venue for BitgetFutures {
             &self.account.execution_prices,
         ))
     }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account_mode_event(cx);
+        self.observe_framed_close_bookings(cx);
+    }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
         let Some(state) = venue_state::decode(state) else {
             cx.venue_state_unreadable("Unreadable Bitget venue state from the data source");
@@ -928,6 +951,19 @@ impl Venue for BitgetFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Discovery {
+                rows: Discovered::Markets(..),
+                ..
+            } => S::MARKETS,
+            Pending::Discovery { .. } => S::TICKERS,
+            Pending::Account { request, .. } => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1008,6 +1044,7 @@ impl Venue for BitgetFutures {
         }
         if index == 3 {
             self.private_message(cx, text);
+            self.account_mode_event(cx);
         } else {
             self.public_message(cx, text);
         }
@@ -1153,6 +1190,7 @@ impl Venue for BitgetFutures {
                 && cx.validate_background_read_http_delivery(&context).is_ok()
             {
                 self.account_response(cx, request, response);
+                self.account_mode_event(cx);
                 self.wake_trading(cx);
             }
             let _ = cx.finish_http_context(&context);
@@ -1319,7 +1357,7 @@ impl Venue for BitgetFutures {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
@@ -1338,7 +1376,7 @@ impl Venue for BitgetFutures {
                     self.wake_trading(cx);
                 }
             }
-        }
+        });
     }
 
     /// History keeps typed failure causes separate from native response retries;
@@ -1539,7 +1577,7 @@ impl Venue for BitgetFutures {
                     return;
                 };
                 let limit = limit.unwrap_or(500).clamp(1, 1000);
-                let mut end = to_ms.unwrap_or(cx.now);
+                let mut end = to_ms.unwrap_or(cx.protocol_now());
                 if let Some(start) = from_ms {
                     end = end.min(start + (value.ms() * f64::from(limit)).min(90.0 * 86_400_000.0));
                 }

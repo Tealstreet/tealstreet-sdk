@@ -95,7 +95,7 @@ impl Kraken {
                 return true;
             }
         };
-        let to = cx.now;
+        let to = cx.protocol_now();
         let from = (to - 7.0 * 86_400_000.0).max(0.0);
         if !from.is_finite()
             || !to.is_finite()

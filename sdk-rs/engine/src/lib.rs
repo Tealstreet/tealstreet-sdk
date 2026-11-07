@@ -36,6 +36,7 @@ pub mod public_feed;
 pub mod read_scheduler;
 #[cfg(feature = "repair-mutations")]
 pub mod repair;
+pub mod request_budget;
 pub mod request_context;
 pub mod resource_ids;
 pub mod selected_read;
@@ -59,6 +60,7 @@ mod socket_driver;
 #[cfg(feature = "managed-sockets")]
 pub mod socket_lifecycle;
 pub mod startup;
+mod startup_causes;
 pub mod store;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
@@ -73,8 +75,8 @@ pub use capabilities::{
 pub use credentials::{READ_CREDENTIALS_INVALID, ReadCredentials};
 pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CommandWait, CredentialSlot, Cx,
-    DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpRelease, HttpRequest,
-    MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PollTimerBounds, Query,
+    DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpReadClass, HttpRelease,
+    HttpRequest, MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PollTimerBounds, Query,
     ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SigningTarget, SocketChannel,
     SocketContext, SocketId, SocketSpec, SubscriptionTopic, TimerId, Venue, VenueAction,
     unsupported_venue_action,

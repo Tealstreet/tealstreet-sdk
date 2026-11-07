@@ -190,7 +190,7 @@ impl KrakenSpot {
     }
     fn tickers(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.tickers_in_flight {
-            let context = match cx.http_context(
+            let context = match cx.http_live_context(
                 Scope::Background,
                 crate::public_context::policy(Operation::Read),
             ) {
@@ -398,6 +398,9 @@ impl KrakenSpot {
     }
 }
 impl Venue for KrakenSpot {
+    fn http_plans() -> bool {
+        false
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }
@@ -422,6 +425,21 @@ impl Venue for KrakenSpot {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Private(read) => match read.kind {
+                account::Kind::Balance { .. } => S::BALANCE,
+                account::Kind::Orders { .. } => S::ORDERS,
+                account::Kind::Token { .. } => S::ACCOUNT,
+                _ => S::NONE,
+            },
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             nuke_account_cancel: true,

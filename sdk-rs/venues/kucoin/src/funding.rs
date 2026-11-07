@@ -174,7 +174,7 @@ impl Kucoin {
             );
             return;
         };
-        let end = to_ms.unwrap_or_else(|| cx.now.floor());
+        let end = to_ms.unwrap_or_else(|| cx.protocol_now().floor());
         let start = from_ms.unwrap_or((end - DAY as f64).max(0.0));
         let (Some(from), Some(end)) = (millis(start), millis(end)) else {
             let Ok(context) = cx.admit_http_command(local_read_policy()) else {

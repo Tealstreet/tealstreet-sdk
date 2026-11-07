@@ -232,7 +232,11 @@ fn unanswered_candle_read_ends_at_the_shared_deadline() {
         1,
         "an unanswered candle read needs exactly one terminal by the 20 s shared deadline"
     );
-    assert_soft_empty(&seen, 7, "HTTP request timed out");
+    assert_soft_empty(
+        &seen,
+        7,
+        "HTTP request timed out (class=orderRead budget=20000ms elapsed=20000ms)",
+    );
     let late = answer(
         &mut e,
         &request,
@@ -264,7 +268,11 @@ fn history_fallback_leg_keeps_the_original_deadline() {
         "the fallback leg is bounded by the command's original deadline, not a fresh one"
     );
     let seen = fire_armed(&mut e, &out, NOW + DEADLINE_MS);
-    assert_soft_empty(&seen, 8, "HTTP request timed out");
+    assert_soft_empty(
+        &seen,
+        8,
+        "HTTP request timed out (class=orderRead budget=10000ms elapsed=10000ms)",
+    );
     let late = answer(
         &mut e,
         &fallback,

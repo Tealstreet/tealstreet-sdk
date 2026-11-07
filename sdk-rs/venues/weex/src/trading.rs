@@ -1375,7 +1375,7 @@ impl WeexFutures {
         if context::rate_limited(cx, &request.context) {
             self.paused_until = self
                 .paused_until
-                .max(cx.now + crate::rate::delay(response, cx.now));
+                .max(cx.now + crate::rate::delay(response, cx.protocol_now()));
         }
         let assessment = match record(cx, &request.context, &request.call, response) {
             Ok(result) => result,

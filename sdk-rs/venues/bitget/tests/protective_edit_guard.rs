@@ -702,3 +702,104 @@ fn a_client_only_or_conflicting_put_back_ack_cannot_claim_protection_restored() 
         assert!(!h.requests.iter().any(|r| r.method == Method::Post));
     }
 }
+
+#[test]
+fn ambiguous_replies_never_retry_any_protective_edit_leg_or_claim_protection() {
+    for leg in ["cancel", "replacement", "put-back", "native-amend"] {
+        for (status, code) in [
+            (429, "00000"),
+            (429, "40009"),
+            (429, "40017"),
+            (408, "40017"),
+            (503, "40009"),
+            (200, "429"),
+            (200, "25000"),
+            (200, "25001"),
+        ] {
+            let mut h = uta();
+            let native = leg == "native-amend";
+            if native {
+                h.private_message(r#"{"arg":{"topic":"strategy-order"},"data":[{"category":"USDT-FUTURES","orderId":"partial","symbol":"BTCUSDT","tpslMode":"partial","qty":"0.5","side":"sell","posSide":"long","stopLoss":"80","slTriggerBy":"market","slOrderType":"market","status":"pending"}]}"#);
+            } else {
+                full_stop(&mut h);
+            }
+            h.command(edit(
+                if native { "partial" } else { "full" },
+                Some(85.0),
+                None,
+            ));
+            if matches!(leg, "replacement" | "put-back") {
+                h.respond(
+                    "/cancel-strategy-order",
+                    200,
+                    r#"{"code":"00000","data":null}"#,
+                );
+            }
+            if leg == "put-back" {
+                h.respond(
+                    "/place-strategy-order",
+                    200,
+                    r#"{"code":"40017","msg":"replacement refused","data":null}"#,
+                );
+            }
+            let path = match leg {
+                "cancel" => "/cancel-strategy-order",
+                "native-amend" => "/modify-strategy-order",
+                _ => "/place-strategy-order",
+            };
+            // A success or signature-refusal body cannot override an ambiguous HTTP status.
+            h.respond(
+                path,
+                status,
+                &format!(r#"{{"code":"{code}","msg":"ambiguous","data":{{"orderId":"partial"}}}}"#),
+            );
+            let error = h.failures.last().expect("terminal protective edit failure");
+            assert_eq!(
+                error.outcome,
+                Some(Outcome::Unknown),
+                "{leg}/{status}/{code}: {error:?}"
+            );
+            assert_eq!(error.protection, None, "{leg}/{status}/{code}: {error:?}");
+            assert!(
+                !error.message.contains("original protection restored"),
+                "{error:?}"
+            );
+            assert!(
+                !error.message.contains("protection is not in place"),
+                "{error:?}"
+            );
+            assert!(
+                !h.requests.iter().any(|r| r.method == Method::Post),
+                "{leg}/{status}/{code}: no resend, replacement or put-back after uncertainty"
+            );
+        }
+    }
+}
+
+#[test]
+fn protective_quote_age_stays_monotonic_across_protocol_utc_jumps() {
+    const UTC: f64 = 1_800_000_000_000.0;
+    for elapsed in [5000.0, 5001.0] {
+        for correction in [-3_600_000.0, 3_600_000.0] {
+            let mut h = uta();
+            full_stop(&mut h);
+            assert!(h.engine.sync_host_time(h.now, UTC));
+            h.engine
+                .handle(h.now, Event::Command(edit("full", Some(85.0), None)));
+            h.now += elapsed;
+            assert!(h.engine.sync_host_time(h.now, UTC + elapsed + correction));
+            let permit = held(&mut h);
+            let claim = h.engine.claim_http(h.now, permit);
+            assert_eq!(
+                matches!(claim, Ok(Claim::Released(_))),
+                elapsed <= 5000.0,
+                "quote age {elapsed}, UTC correction {correction}: {claim:?}"
+            );
+            if elapsed > 5000.0 {
+                h.collect();
+                assert_eq!(h.failures.last().unwrap().outcome, Some(Outcome::NotSent));
+                assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+            }
+        }
+    }
+}

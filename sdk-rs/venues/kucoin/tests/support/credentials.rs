@@ -121,7 +121,10 @@ pub fn with_seed<V: safe_cex_engine::Venue>(
     )
     .unwrap();
     engine
-        .set_signer(Some(std::sync::Arc::new(provider)))
+        .set_signer(Some(std::sync::Arc::new(super::hosted_parity::Parity {
+            local: provider,
+            ids: identities.clone(),
+        })))
         .unwrap();
     engine.set_identities(identities).unwrap();
     engine

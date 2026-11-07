@@ -267,7 +267,7 @@ impl Hyperliquid {
             let _ = cx.fail_context(&root, "Hyperliquid account identity is missing");
             return;
         }
-        let to = to.unwrap_or(cx.now).floor();
+        let to = to.unwrap_or(cx.protocol_now()).floor();
         let from = from
             .unwrap_or(if matches!(kind, Kind::Orders | Kind::Lookup) {
                 0.0

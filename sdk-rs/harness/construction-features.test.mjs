@@ -21,13 +21,13 @@ const setupFeatures = {
 };
 
 // Wallet families answer remote requests through the slim hosted-wallet export.
-const walletDevices = new Set(['hyperliquid', 'lighter', 'paradex']);
-const remoteFeature = (rule) => walletDevices.has(rule.setupMapping) ? 'hosted-wallet' : 'hosted-signing';
+const walletDevices = new Set(['hyperliquid', 'lighter', 'paradex', 'grvt']);
+const remoteFeature = (rule, family) => walletDevices.has(rule.setupMapping ?? family) ? 'hosted-wallet' : 'hosted-signing';
 
-function requiredFeatures(rule) {
+function requiredFeatures(rule, family) {
   const required = new Set(rule.bridge?.dispatchSigning ? ['dispatch-signing'] : []);
   // Every family that admits remote signing keeps its device signing path.
-  if (rule.remoteSigning?.enabled) required.add(remoteFeature(rule));
+  if (rule.remoteSigning?.enabled) required.add(remoteFeature(rule, family));
   if (rule.setupMapping) {
     assert(Object.hasOwn(setupFeatures, rule.setupMapping), `Unspecified setup mapping: ${rule.setupMapping}`);
     for (const feature of setupFeatures[rule.setupMapping]) required.add(feature);
@@ -47,7 +47,7 @@ function enabledFeatures(graph, root, enabled = new Set()) {
 
 function checkFeatures(graph, family, rule) {
   const enabled = enabledFeatures(graph, family);
-  for (const feature of requiredFeatures(rule)) {
+  for (const feature of requiredFeatures(rule, family)) {
     assert(enabled.has(feature), `${family}: construction requires host feature ${feature}`);
   }
 }
@@ -62,7 +62,7 @@ test('a family that admits remote signing cannot drop hosted signing', () => {
   const remote = Object.entries(rules.venues).filter(([, rule]) => rule.remoteSigning?.enabled);
   assert.ok(remote.length > 0);
   for (const [venue, rule] of remote)
-    assert.ok(enabledFeatures(features, venueFamily(venue)).has(remoteFeature(rule)), venue);
+    assert.ok(enabledFeatures(features, venueFamily(venue)).has(remoteFeature(rule, venueFamily(venue))), venue);
   assert.throws(() => checkFeatures({ family: ['dispatch-signing'], 'dispatch-signing': [] }, 'family',
     { bridge: { dispatchSigning: true }, remoteSigning: { enabled: true } }), /hosted-signing/);
 });
@@ -86,6 +86,17 @@ test('Hyperliquid ScalarOnly setup requires isolated dispatch signing, address s
     assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquid), new RegExp(missing));
     assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquidspot), new RegExp(missing));
   }
+});
+
+test('GRVT requires its isolated wallet codec without a setup mapping', () => {
+  const required = ['dispatch-signing', 'hosted-wallet'];
+  for (const missing of required) {
+    const graph = { grvt: required.filter(feature => feature !== missing),
+      'dispatch-signing': [], 'hosted-wallet': [] };
+    assert.throws(() => checkFeatures(graph, 'grvt', rules.venues.grvt), new RegExp(missing));
+  }
+  assert.throws(() => checkFeatures({ grvt: ['dispatch-signing', 'hosted-signing'],
+    'dispatch-signing': [], 'hosted-signing': [] }, 'grvt', rules.venues.grvt), /hosted-wallet/);
 });
 
 test('feature guard follows transitive local features, without borrowing combined defaults', () => {

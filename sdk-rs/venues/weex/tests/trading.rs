@@ -1829,10 +1829,10 @@ fn write_failures_are_classified_without_changing_their_text() {
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
         let error = failure(&actions);
-        if status == 502 {
+        if matches!(status, 429 | 502) {
             assert_eq!(
                 error.message,
-                "HTTP response does not prove the write outcome"
+                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
         } else {
             assert_eq!(error.message, format!("HTTP {status}: {body}"));

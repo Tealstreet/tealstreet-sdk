@@ -72,7 +72,10 @@ fn assert_unknown_without_more_writes(h: &Harness) {
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
     assert_eq!(error.protection, None, "{error:?}");
     assert!(
-        error.legacy_text().contains("check Open Orders"),
+        error
+            .legacy_text()
+            .to_ascii_lowercase()
+            .contains("check open orders"),
         "{error:?}"
     );
     assert!(

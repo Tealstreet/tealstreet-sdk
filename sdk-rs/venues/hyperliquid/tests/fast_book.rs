@@ -101,7 +101,8 @@ fn subscribes_fast_slow_bbo_once_and_releases_after_last_reference() {
             _ => None,
         })
         .collect();
-    assert_eq!(sent.len(), 3);
+    // Fast, slow and bbo depth, and the coin's trades stream for its last.
+    assert_eq!(sent.len(), 4);
     assert!(sent.iter().any(|s| s
         == r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC","fast":true}}"#));
     for command in [
@@ -130,7 +131,7 @@ fn subscribes_fast_slow_bbo_once_and_releases_after_last_reference() {
             .into_iter()
             .filter(|a| matches!(a, Action::WsSend { .. }))
             .count(),
-        3
+        4
     );
 }
 #[test]
@@ -328,7 +329,8 @@ fn many_books_stay_under_the_venue_limit_and_refuse_only_the_excess() {
         .into_iter()
         .filter(|a| matches!(a, Action::WsSend { .. }))
         .count();
-    for i in 0..332 {
+    // Four topics a book: fast, slow, bbo and trades.
+    for i in 0..249 {
         e.handle(
             2000.,
             Event::Command(Command::SubscribeOrderBook {
@@ -344,14 +346,14 @@ fn many_books_stay_under_the_venue_limit_and_refuse_only_the_excess() {
     e.handle(
         2000.,
         Event::Command(Command::SubscribeOrderBook {
-            symbol: "C332-PERP".into(),
+            symbol: "C249-PERP".into(),
         }),
     );
     let refused = prepared_now(&mut e);
     assert!(!refused.iter().any(|a| matches!(a, Action::WsSend { .. })));
     assert!(refused.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::SUBSCRIPTION_REJECTED)));
-    e.handle(2100., Event::WsMessage {socket, text: r#"{"channel":"l2Book","data":{"coin":"C332","time":1,"fast":true,"levels":[[{"px":"100","sz":"1"}],[{"px":"101","sz":"1"}]]}}"#});
-    assert!(e.book("C332-PERP").is_none());
+    e.handle(2100., Event::WsMessage {socket, text: r#"{"channel":"l2Book","data":{"coin":"C249","time":1,"fast":true,"levels":[[{"px":"100","sz":"1"}],[{"px":"101","sz":"1"}]]}}"#});
+    assert!(e.book("C249-PERP").is_none());
     e.handle(
         2000.,
         Event::Command(Command::UnsubscribeOrderBook {
@@ -362,7 +364,7 @@ fn many_books_stay_under_the_venue_limit_and_refuse_only_the_excess() {
     e.handle(
         2000.,
         Event::Command(Command::SubscribeOrderBook {
-            symbol: "C332-PERP".into(),
+            symbol: "C249-PERP".into(),
         }),
     );
     assert_eq!(
@@ -370,7 +372,7 @@ fn many_books_stay_under_the_venue_limit_and_refuse_only_the_excess() {
             .into_iter()
             .filter(|a| matches!(a, Action::WsSend { .. }))
             .count(),
-        3
+        4
     );
 }
 
@@ -430,9 +432,10 @@ fn keyed_hip3_topic_budget_includes_private_topics_books_and_candles() {
             .filter(|f| f.contains("\"method\":\"subscribe\""))
             .count()
     };
-    // Two core markets, one HIP-3 scope: 9 + 2 + 1 = 12 fixed topics (only
-    // clearinghouseState is per dex; fastAssetCtxs carries the dex's mids).
-    assert_eq!(topics(initial), 12);
+    // Two core markets, one HIP-3 scope: 7 private + 2 public + 1 per dex = 10 fixed
+    // topics. Only clearinghouseState is per dex (fastAssetCtxs carries the dex's mids),
+    // and no activeAssetData until a symbol is selected or holds an open order.
+    assert_eq!(topics(initial), 10);
     for symbol in ["BTC-PERP", "ETH-PERP", "XYZ|FOO-PERP"] {
         e.handle(
             2000.,
@@ -447,7 +450,7 @@ fn keyed_hip3_topic_budget_includes_private_topics_books_and_candles() {
                 _ => None,
             })
             .collect();
-        assert_eq!(topics(sent), 2);
+        assert_eq!(topics(sent), 3, "l2Book, bbo and trades");
     }
     e.handle(
         2000.,
@@ -822,7 +825,7 @@ fn default_options_keep_fast_depth_off() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(sent.len(), 2);
+    assert_eq!(sent.len(), 3, "l2Book, bbo and trades");
     assert!(!sent.iter().any(|s| s.contains("\"fast\":true")));
 }
 
@@ -861,7 +864,9 @@ fn opted_in_book_repair_releases_each_of_its_three_native_topics_once() {
     }
 }
 
-fn catalogue_capacity_start(partial: bool) -> (Engine<Hyperliquid>, SocketId, Vec<Action>, String) {
+fn catalogue_capacity_start(
+    partial: bool,
+) -> (Engine<Hyperliquid>, SocketId, Vec<Action>, String, String) {
     use safe_cex_venue_hyperliquid::Options;
     let mut e = support::private_engine(
         Options {
@@ -881,6 +886,14 @@ fn catalogue_capacity_start(partial: bool) -> (Engine<Hyperliquid>, SocketId, Ve
         .map(|_| serde_json::json!({"midPx":"100"}))
         .collect();
     let full = serde_json::json!([{"universe":universe},contexts]).to_string();
+    // activeAssetData follows symbols with open orders, so an order rests on every market.
+    let orders: Vec<_> = (0..1005)
+        .map(|i| serde_json::json!({"coin":format!("C{i}"),"oid":i + 1,"side":"B","limitPx":"90","origSz":"1","sz":"1","reduceOnly":false,"orderType":"Limit","tif":"Gtc","timestamp":1}))
+        .collect();
+    // A partial catalogue lists orders only on the markets it knows.
+    let resting = if partial { &orders[..980] } else { &orders[..] };
+    let resting = serde_json::Value::Array(resting.to_vec()).to_string();
+    let orders = serde_json::Value::Array(orders).to_string();
     let mut first: serde_json::Value = serde_json::from_str(&full).unwrap();
     if partial {
         for ctx in first[1].as_array_mut().unwrap().iter_mut().skip(980) {
@@ -905,7 +918,7 @@ fn catalogue_capacity_start(partial: bool) -> (Engine<Hyperliquid>, SocketId, Ve
                         "userAbstraction" => "\"disabled\"",
                         "maxBuilderFee" => "0",
                         "userFees" => r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
-                        "frontendOpenOrders" => "[]",
+                        "frontendOpenOrders" => resting.as_str(),
                         "clearinghouseState" => {
                             r#"{"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":1000}"#
                         }
@@ -924,7 +937,13 @@ fn catalogue_capacity_start(partial: bool) -> (Engine<Hyperliquid>, SocketId, Ve
             }
         }
     }
-    (e, socket.expect("genuine keyed socket"), observed, full)
+    (
+        e,
+        socket.expect("genuine keyed socket"),
+        observed,
+        full,
+        orders,
+    )
 }
 
 fn subscription_keys(actions: &[Action]) -> std::collections::HashSet<String> {
@@ -942,13 +961,13 @@ fn subscription_keys(actions: &[Action]) -> std::collections::HashSet<String> {
 #[test]
 fn catalogue_growth_refuses_only_new_excess_topics_and_replays_accepted_keys() {
     use safe_cex_engine::Notice;
-    let (mut e, socket, initial, full) = catalogue_capacity_start(true);
+    let (mut e, socket, initial, full, orders) = catalogue_capacity_start(true);
     assert_eq!(e.store().markets().len(), 980);
     let mut accepted = subscription_keys(&initial);
     assert_eq!(
         accepted.len(),
         989,
-        "nine fixed topics plus 980 activeAssetData"
+        "nine fixed topics plus 980 activeAssetData, one per symbol with an open order"
     );
     e.handle(
         1100.,
@@ -957,7 +976,7 @@ fn catalogue_growth_refuses_only_new_excess_topics_and_replays_accepted_keys() {
         }),
     );
     let book = prepared_now(&mut e);
-    assert_eq!(subscription_keys(&book).len(), 2);
+    assert_eq!(subscription_keys(&book).len(), 3, "l2Book, bbo and trades");
     accepted.extend(subscription_keys(&book));
     e.handle(
         1100.,
@@ -991,7 +1010,7 @@ fn catalogue_growth_refuses_only_new_excess_topics_and_replays_accepted_keys() {
                         answered = true;
                         full.as_str()
                     }
-                    "frontendOpenOrders" => "[]",
+                    "frontendOpenOrders" => orders.as_str(),
                     "clearinghouseState" => {
                         r#"{"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":1000}"#
                     }
@@ -1021,7 +1040,7 @@ fn catalogue_growth_refuses_only_new_excess_topics_and_replays_accepted_keys() {
     assert!(growth.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::SUBSCRIPTION_REJECTED && event.message.contains("Capacity"))));
     assert_eq!(
         subscription_keys(&growth).len(),
-        9,
+        8,
         "only remaining topic slots are filled"
     );
     accepted.extend(subscription_keys(&growth));
@@ -1067,7 +1086,7 @@ fn catalogue_growth_refuses_only_new_excess_topics_and_replays_accepted_keys() {
 #[test]
 fn oversized_initial_catalogue_keeps_core_private_and_public_subscriptions() {
     use safe_cex_engine::Notice;
-    let (e, _, actions, _) = catalogue_capacity_start(false);
+    let (e, _, actions, _, _) = catalogue_capacity_start(false);
     assert_eq!(e.store().markets().len(), 1005);
     assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
     let keys = subscription_keys(&actions);

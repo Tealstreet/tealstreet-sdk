@@ -87,6 +87,9 @@ enum Call {
         ids: Vec<String>,
         proof: Option<CancelProof>,
     },
+    VerifyPmAlgo {
+        target: CancelTarget,
+    },
     Leverage {
         symbol: String,
         leverage: f64,
@@ -112,9 +115,7 @@ struct UnprovenOrder<'a> {
     algo_id: Option<u64>,
     #[serde(borrow)]
     client_order_id: Option<Cow<'a, str>>,
-    strategy_id: Option<u64>,
-    #[serde(borrow)]
-    new_client_strategy_id: Option<Cow<'a, str>>,
+    client_algo_id: Option<Cow<'a, str>>,
 }
 
 impl<'a> UnprovenOrder<'a> {
@@ -166,7 +167,7 @@ struct Job {
     /// The same for any other order: a refusal now leaves it gone.
     replacing_order: Option<String>,
     /// The replaced stop exactly as it stood, to put back if its replacement is refused.
-    restore: Option<(PlaceOrderOpts, Option<&'static str>)>,
+    restore: Option<(PlaceOrderOpts, Option<&'static str>, Option<NativeTrailing>)>,
     /// Putting it back is under way; the replacement's refusal.
     restoring: Option<String>,
 }
@@ -186,6 +187,13 @@ impl Job {
     }
 }
 
+/// A trailing stop's native callback rate (percent) and activation price.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct NativeTrailing {
+    pub(crate) rate: f64,
+    pub(crate) activate_price: Option<String>,
+}
+
 struct Amendment {
     id: String,
     target_total: f64,
@@ -193,6 +201,9 @@ struct Amendment {
     /// The order as it stands, with its own trigger and size.
     original: PlaceOrderOpts,
     position_side: Option<&'static str>,
+    /// A trailing stop's native parameters, captured before the cancel: what its put-back
+    /// restores, whatever a later snapshot says.
+    trailing: Option<NativeTrailing>,
 }
 
 #[derive(Clone)]
@@ -226,6 +237,8 @@ pub struct TradingState {
     jobs: HashMap<CommandId, Job>,
     /// While an amendment plans its replacement: the original row's hedge side.
     amended_position_side: Option<&'static str>,
+    /// A trailing put-back's native parameters, restored rather than recomputed.
+    restoring_trailing: Option<NativeTrailing>,
     #[cfg(test)]
     id_generator: Option<fn() -> Result<String, String>>,
 }
@@ -293,6 +306,11 @@ fn tif_text(tif: TimeInForce) -> &'static str {
         TimeInForce::FillOrKill => "FOK",
         TimeInForce::PostOnly => "GTX",
     }
+}
+
+/// A row read or streamed from the venue's algo endpoints, carried on the row itself.
+fn native_algo(order: &Order) -> bool {
+    order.extra.as_ref().is_some_and(|extra| extra.native_algo)
 }
 
 fn is_algo(kind: OrderType) -> bool {
@@ -422,6 +440,7 @@ impl BinanceFutures {
                     .iter()
                     .filter(|o| o.symbol == symbol)
                     .partition(|o| self.order_uses_strategy(o));
+                let algo_rows: Vec<Order> = algo.iter().map(|order| (*order).clone()).collect();
                 let ids = |orders: Vec<&Order>| orders.iter().map(|o| o.id.clone()).collect();
                 let mut step = vec![
                     Planned {
@@ -477,6 +496,7 @@ impl BinanceFutures {
                                     .orders()
                                     .iter()
                                     .filter(|order| order.symbol == symbol)
+                                    .filter(|order| !self.order_uses_strategy(order))
                                     .map(|order| self.cancel_target(order))
                                     .collect(),
                             )
@@ -486,9 +506,14 @@ impl BinanceFutures {
                             .orders()
                             .iter()
                             .filter(|o| o.symbol == symbol)
+                            .filter(|o| !self.order_uses_strategy(o))
                             .map(|o| o.id.clone())
                             .collect();
                     }
+                }
+                // COIN-M has no cancel-all for algo orders: each goes by its algoId.
+                if self.is_inverse() {
+                    step.extend(self.algo_cancels(&algo_rows));
                 }
                 let job = Job {
                     steps: VecDeque::from([step]),
@@ -632,7 +657,11 @@ impl BinanceFutures {
                     } else {
                         (original.amount - filled).max(0.0)
                     };
-                    job.restore = Some((original, amendment.position_side));
+                    job.restore = Some((
+                        original,
+                        amendment.position_side,
+                        amendment.trailing.clone(),
+                    ));
                 }
             }
             amendment.replacement.amount = if full_close {
@@ -679,6 +708,13 @@ impl BinanceFutures {
         // amendment's cancel stays part of the amend.
         let amending = job.amendment.is_some();
         for planned in step {
+            let verifying_pm_cancel = matches!(planned.call, Call::VerifyPmAlgo { .. });
+            if verifying_pm_cancel && root.deadline() <= cx.now + 20_000.0 {
+                let _ = cx.inherit_http_uncertainty(&root);
+                self.trading.jobs.remove(&command);
+                let _ = cx.fail_context(&root, "Binance PM algo cancellation could not be confirmed within the command bound; check Open Orders before re-placing");
+                return;
+            }
             let (selection, credentials) = self
                 .credentials
                 .select(CredentialRole::Mutation)
@@ -687,12 +723,20 @@ impl BinanceFutures {
             let context = cx.http_leg_context(
                 &root,
                 Policy {
-                    operation: Operation::Mutation,
+                    operation: if verifying_pm_cancel {
+                        Operation::Read
+                    } else {
+                        Operation::Mutation
+                    },
                     credential: Some(selection.credential(credentials.credential.clone())),
                     timeout_ms: 20_000,
                     pacing: None,
                     // A -1022 signature rejection is re-signed and sent once more.
-                    retry: RetryPolicy::DefinitiveRefusal,
+                    retry: if verifying_pm_cancel {
+                        RetryPolicy::Never
+                    } else {
+                        RetryPolicy::DefinitiveRefusal
+                    },
                 },
             );
             let context = context.and_then(|context| {
@@ -702,6 +746,9 @@ impl BinanceFutures {
                 Ok(context)
             });
             let Ok(context) = context else {
+                if verifying_pm_cancel {
+                    let _ = cx.inherit_http_uncertainty(&root);
+                }
                 self.trading.jobs.remove(&command);
                 let _ = cx.fail_context(
                     &root,
@@ -716,6 +763,9 @@ impl BinanceFutures {
                 query: planned.query,
             };
             if !self.send_trade(cx, command, context, planned.call, resend, credentials) {
+                if verifying_pm_cancel {
+                    let _ = cx.inherit_http_uncertainty(&root);
+                }
                 self.trading.jobs.remove(&command);
                 let _ = cx.fail_context(
                     &root,
@@ -813,7 +863,7 @@ impl BinanceFutures {
                     evidence.order_id(&id.to_string());
                 }
             }
-            Call::PlaceAlgo { client_id: None } if futures && !self.is_inverse() => {
+            Call::PlaceAlgo { client_id: None } if futures => {
                 if let Some(id) = positive(row.algo_id) {
                     evidence.order_id(&id.to_string());
                 }
@@ -829,14 +879,10 @@ impl BinanceFutures {
             Call::PlaceAlgo {
                 client_id: Some(expected),
             } if self.options.portfolio_margin
-                && positive(row.strategy_id).is_some()
-                && row.new_client_strategy_id.as_deref() == Some(expected.as_str()) =>
+                && positive(row.algo_id).is_some()
+                && row.client_algo_id.as_deref() == Some(expected.as_str()) =>
             {
-                evidence.order_id(
-                    row.new_client_strategy_id
-                        .as_deref()
-                        .expect("matched native echo"),
-                );
+                evidence.order_id(row.client_algo_id.as_deref().expect("matched native echo"));
             }
             _ => {}
         }
@@ -877,6 +923,9 @@ impl BinanceFutures {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
+        if let Call::VerifyPmAlgo { target } = &request.call {
+            return self.pm_cancel_readback(cx, &request, target.clone(), response);
+        }
         let Request {
             command,
             context,
@@ -890,12 +939,14 @@ impl BinanceFutures {
         let mut reports = Vec::new();
         let mut batch_reports = false;
         let mut continue_after_item_refusal = false;
-        // The shared engine filters unproven envelopes before this reducer.
-        // Native malformed/mixed replies still supply their native facts here.
-        let mut unproven = false;
+        // A rate response cannot prove the write was refused, even when its
+        // body carries a normally definitive signature error.
+        let mut unproven = response
+            .as_ref()
+            .is_ok_and(|response| response.status == 429);
         let outcome = match response {
             Ok(response) => match venue_error(&response) {
-                Some(error) => Err(error),
+                Some((code, message)) => Err((code, algo_only_refusal(code, message))),
                 None => Ok(response.body),
             },
             Err(error) => Err((0, error.to_owned())),
@@ -990,10 +1041,13 @@ impl BinanceFutures {
                                     unproven |= item_unknown(code);
                                     rejection.get_or_insert((
                                         code,
-                                        item.msg
-                                            .as_deref()
-                                            .unwrap_or("Binance batch order rejected")
-                                            .to_owned(),
+                                        algo_only_refusal(
+                                            code,
+                                            item.msg
+                                                .as_deref()
+                                                .unwrap_or("Binance batch order rejected")
+                                                .to_owned(),
+                                        ),
                                     ));
                                     if code != POST_ONLY_REJECTED {
                                         let msg =
@@ -1034,9 +1088,15 @@ impl BinanceFutures {
                     ids: canceled,
                     proof,
                 },
-                Err((UNKNOWN_ORDER, message)),
+                Err((UNKNOWN_ORDER, _)),
             ) if !unproven => {
-                if self
+                if matches!(proof, Some(CancelProof::Strategy(_))) {
+                    unproven = true;
+                    Some((
+                        UNKNOWN_ORDER,
+                        "Binance algo cancellation could not be confirmed; check Open Orders before re-placing".into(),
+                    ))
+                } else if self
                     .trading
                     .jobs
                     .get(&command)
@@ -1044,7 +1104,7 @@ impl BinanceFutures {
                 {
                     Some((
                         UNKNOWN_ORDER,
-                        format!("Cancellation was not confirmed: {message}"),
+                        "Binance order was already filled or cancelled; check Open Orders".into(),
                     ))
                 } else {
                     if let Some(proof) = &proof {
@@ -1102,6 +1162,7 @@ impl BinanceFutures {
                 cx.hold_setting(SettingKey::Hedged);
                 None
             }
+            (Call::VerifyPmAlgo { .. }, _) => unreachable!("read handled before write facts"),
             (_, Err(error)) => Some(error),
         };
         let mut native_fact = None;
@@ -1123,6 +1184,7 @@ impl BinanceFutures {
                 else {
                     return;
                 };
+                unproven |= verdict.kind() == Some(ErrorKind::RateLimited);
                 // A signature refusal is as proven as any; once the cancel landed it is not resent.
                 let refused =
                     !unproven && matches!(verdict, Verdict::Refused(_) | Verdict::RefusedResend(_));
@@ -1256,6 +1318,72 @@ impl BinanceFutures {
         }
     }
 
+    fn pm_cancel_readback(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        target: CancelTarget,
+        response: Result<Response<'_>, &str>,
+    ) {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Proof {
+            algo_id: u64,
+            client_algo_id: String,
+            symbol: String,
+            algo_status: String,
+            actual_order_id: String,
+            actual_price: String,
+            trigger_time: u64,
+        }
+        let valid = response
+            .ok()
+            .filter(|r| (200..300).contains(&r.status) && venue_error(r).is_none())
+            .filter(|r| r.body.trim_start().starts_with('{'))
+            .and_then(|r| serde_json::from_str::<Proof>(r.body).ok())
+            .is_some_and(|p| {
+                // Execution requires a triggered child: all three never-triggered fields prove zero fills.
+                // https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/rest-api/trade#query-current-um-open-algo-order-user_data
+                p.algo_id > 0
+                    && target.native == Some(p.algo_id)
+                    && p.client_algo_id == target.id
+                    && p.symbol == target.symbol
+                    && p.algo_status == "CANCELED"
+                    && p.actual_order_id.is_empty()
+                    && p.trigger_time == 0
+                    && p.actual_price
+                        .parse::<f64>()
+                        .is_ok_and(|price| price == 0.0)
+            })
+            && self.cancel_target_is_current(cx, &target, true)
+            && cx
+                .store
+                .order(&target.id)
+                .is_none_or(|order| order.filled == 0.0 && order.status != OrderStatus::Closed);
+        if valid {
+            self.mark_captured_canceled(cx, &[target], true);
+        }
+        let Some(job) = self.trading.jobs.get_mut(&request.command) else {
+            return;
+        };
+        if !valid {
+            if let Some(root) = &job.context {
+                let _ = cx.inherit_http_uncertainty(root);
+            }
+            job.stop = true;
+            job.planning_error = Some(VenueError {
+                outcome: Some(Outcome::Unknown),
+                ..VenueError::new(
+                    "Binance PM algo cancellation could not be confirmed; check Open Orders before re-placing",
+                )
+            });
+        }
+        job.outstanding = job.outstanding.saturating_sub(1);
+        if job.outstanding == 0 {
+            self.advance(cx, request.command);
+        }
+    }
+
     /// Plan putting a refused replacement's original back; true when it will be sent.
     fn plan_restore(
         &mut self,
@@ -1264,7 +1392,7 @@ impl BinanceFutures {
         gone: &Option<String>,
         refusal: &str,
     ) -> bool {
-        let Some((original, position_side)) = self
+        let Some((original, position_side, trailing)) = self
             .trading
             .jobs
             .get_mut(&command)
@@ -1273,8 +1401,10 @@ impl BinanceFutures {
             return false;
         };
         self.trading.amended_position_side = position_side;
+        self.trading.restoring_trailing = trailing;
         let plan = self.plan_place(cx, std::slice::from_ref(&original));
         self.trading.amended_position_side = None;
+        self.trading.restoring_trailing = None;
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return false;
         };
@@ -1390,19 +1520,12 @@ impl BinanceFutures {
             } else if self.is_spot() {
                 (self.format_spot(cx, opts)?, Vec::new())
             } else if self.is_inverse() {
-                (self.format_inverse(cx, opts)?, Vec::new())
+                self.format_inverse(cx, opts)?
             } else {
                 self.format_order(cx, opts)?
             };
             regular.extend(r);
-            if pm {
-                algo.extend(
-                    a.into_iter()
-                        .map(|params| self.conditional_params(cx, params)),
-                );
-            } else {
-                algo.extend(a);
-            }
+            algo.extend(a);
         }
         if !replaced.is_empty() {
             cx.notice(
@@ -1458,7 +1581,7 @@ impl BinanceFutures {
                 path: self.paths.conditional_order,
                 query: params.query(),
                 call: Call::PlaceAlgo {
-                    client_id: pm.then(|| params.get("newClientStrategyId")).flatten(),
+                    client_id: pm.then(|| params.get("clientAlgoId")).flatten(),
                 },
             }]);
         }
@@ -1497,6 +1620,10 @@ impl BinanceFutures {
         {
             return matches!(source, PmOrderSource::Strategy(_));
         }
+        // COIN-M stops placed before the algo migration still live on the order endpoint.
+        if self.is_inverse() {
+            return native_algo(order);
+        }
         is_algo(order.kind)
     }
 
@@ -1523,17 +1650,36 @@ impl BinanceFutures {
             // One at a time, by the client ids the orders were placed with.
             for order in orders {
                 let (path, field) = if !self.is_spot() && self.order_uses_strategy(order) {
-                    (self.paths.conditional_order, "newClientStrategyId")
+                    (self.paths.conditional_order, "algoId")
                 } else {
                     (self.paths.order, "origClientOrderId")
+                };
+                let target = self.cancel_target(order);
+                let strategy = !self.is_spot() && self.order_uses_strategy(order);
+                let identity = if strategy {
+                    let Some(native) = target.native else {
+                        return Job {
+                            planning_error: Some(not_sent(
+                                "Binance PM algo native identity unavailable; refresh Open Orders before canceling",
+                            )),
+                            ..Job::default()
+                        };
+                    };
+                    native.to_string()
+                } else {
+                    order.id.clone()
                 };
                 job.steps.push_back(vec![Planned {
                     receipts: Vec::new(),
                     method: Method::Delete,
                     path,
-                    query: Query::new()
-                        .str("symbol", &order.symbol)
-                        .str(field, &order.id),
+                    query: if strategy {
+                        Query::new().str(field, &identity)
+                    } else {
+                        Query::new()
+                            .str("symbol", &order.symbol)
+                            .str(field, &identity)
+                    },
                     call: Call::Cancel {
                         ids: vec![order.id.clone()],
                         proof: Some(if !self.is_spot() && self.order_uses_strategy(order) {
@@ -1543,14 +1689,20 @@ impl BinanceFutures {
                         }),
                     },
                 }]);
+                if strategy {
+                    job.steps.push_back(vec![Planned {
+                        receipts: Vec::new(),
+                        method: Method::Get,
+                        path: crate::paths::PM_ALGO_QUERY,
+                        query: Query::new().str("algoId", &identity),
+                        call: Call::VerifyPmAlgo { target },
+                    }]);
+                }
             }
             return job;
         }
         let mut by_symbol: Vec<(String, Vec<String>)> = Vec::new();
-        for order in orders
-            .iter()
-            .filter(|o| self.is_inverse() || !is_algo(o.kind))
-        {
+        for order in orders.iter().filter(|o| !self.order_uses_strategy(o)) {
             match by_symbol
                 .iter_mut()
                 .find(|(symbol, _)| *symbol == order.symbol)
@@ -1608,11 +1760,21 @@ impl BinanceFutures {
                 }]);
             }
         }
-        for order in orders
+        let algo: Vec<Order> = orders
             .iter()
-            .filter(|o| !self.is_inverse() && is_algo(o.kind))
-        {
-            job.steps.push_back(vec![Planned {
+            .filter(|o| self.order_uses_strategy(o))
+            .cloned()
+            .collect();
+        for cancel in self.algo_cancels(&algo) {
+            job.steps.push_back(vec![cancel]);
+        }
+        job
+    }
+
+    fn algo_cancels(&self, orders: &[Order]) -> Vec<Planned> {
+        orders
+            .iter()
+            .map(|order| Planned {
                 receipts: Vec::new(),
                 method: Method::Delete,
                 path: self.paths.conditional_order,
@@ -1621,9 +1783,8 @@ impl BinanceFutures {
                     ids: vec![order.id.clone()],
                     proof: Some(CancelProof::Algo(self.cancel_target(order))),
                 },
-            }]);
-        }
-        job
+            })
+            .collect()
     }
 
     fn format_option(
@@ -1789,11 +1950,13 @@ impl BinanceFutures {
         Ok(out)
     }
 
+    /// Regular payloads, and stop-type payloads for the algo endpoint: since the CM-UM
+    /// integration /dapi/v1/order refuses stop types with -4120.
     fn format_inverse(
         &self,
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
-    ) -> Result<Vec<Params>, String> {
+    ) -> Result<(Vec<Params>, Vec<Params>), String> {
         if opts.kind == OrderType::Conditional {
             return Err("Binance COIN-M conditional orders require a supported stop type".into());
         }
@@ -1865,14 +2028,27 @@ impl BinanceFutures {
                 )?),
             );
         } else if opts.kind == OrderType::TrailingStopLoss {
-            let target = positive_price(opts.price, market.precision.price)?;
-            let last = cx.store.ticker(&opts.symbol).map_or(0.0, |t| t.last);
-            if !last.is_finite() || last <= 0.0 {
-                return Err("Binance COIN-M trailing orders require a valid ticker".into());
+            // A put-back restores the captured native parameters: COIN-M ignores stopPrice
+            // for trailing stops, so the row's price may be 0 and is never re-validated.
+            match &self.trading.restoring_trailing {
+                Some(native) => {
+                    p.set("callbackRate", number(native.rate));
+                    if let Some(activate) = &native.activate_price {
+                        p.set("activationPrice", activate.clone());
+                    }
+                }
+                None => {
+                    let target = positive_price(opts.price, market.precision.price)?;
+                    let last = cx.store.ticker(&opts.symbol).map_or(0.0, |t| t.last);
+                    if !last.is_finite() || last <= 0.0 {
+                        return Err("Binance COIN-M trailing orders require a valid ticker".into());
+                    }
+                    let rate = ((last - target).abs() * 1000.0 / last).round() / 10.0;
+                    trailing_rate_in_range((last - target).abs(), rate, 10.0)?;
+                    p.set("callbackRate", number(rate));
+                    p.set("activationPrice", number(target));
+                }
             }
-            let rate = ((last - target).abs() * 1000.0 / last).round() / 10.0;
-            p.set("callbackRate", number(rate.clamp(0.1, 10.0)));
-            p.set("activationPrice", number(target));
         }
         let mut out = if close {
             vec![p]
@@ -1882,6 +2058,11 @@ impl BinanceFutures {
         for p in &mut out {
             p.set("newClientOrderId", self.generated_id(cx)?);
         }
+        let (mut regular, mut algo) = if stop || opts.kind == OrderType::TrailingStopLoss {
+            (Vec::new(), out.into_iter().map(coin_algo_params).collect())
+        } else {
+            (out, Vec::new())
+        };
         for (kind, trigger) in [
             (OrderType::StopLoss, opts.stop_loss),
             (OrderType::TakeProfit, opts.take_profit),
@@ -1900,44 +2081,12 @@ impl BinanceFutures {
                 bracket.take_profit = None;
                 bracket.reduce_only = Some(true);
                 bracket.close = Some(false);
-                out.extend(self.format_inverse(cx, &bracket)?);
+                let (r, a) = self.format_inverse(cx, &bracket)?;
+                regular.extend(r);
+                algo.extend(a);
             }
         }
-        Ok(out)
-    }
-
-    /// Portfolio margin's conditional orders name their fields differently and
-    /// have no closePosition: a full-position stop carries the position's size.
-    fn conditional_params(&self, cx: &Cx<'_, Pending>, params: Params) -> Params {
-        let symbol = params.get("symbol").unwrap_or_default();
-        let side = params.get("side");
-        let mut out = Params::default();
-        for (name, value) in params.0 {
-            match name {
-                "algoType" => {}
-                "type" => out.set("strategyType", value),
-                "triggerPrice" => out.set("stopPrice", value),
-                "clientAlgoId" => out.set("newClientStrategyId", value),
-                "closePosition" => {
-                    let closes = match side.as_deref() {
-                        Some("SELL") => PositionSide::Long,
-                        _ => PositionSide::Short,
-                    };
-                    let size = cx
-                        .store
-                        .positions()
-                        .iter()
-                        .find(|p| p.symbol == symbol && p.side == closes)
-                        .map_or(0.0, |p| p.contracts);
-                    out.set("quantity", number(size));
-                    if !cx.store.hedged() {
-                        out.set("reduceOnly", "true");
-                    }
-                }
-                _ => out.set(name, value),
-            }
-        }
-        out
+        Ok((regular, algo))
     }
 
     /// Binance has no amend for these orders: cancel, then place the replacement.
@@ -1963,6 +2112,28 @@ impl BinanceFutures {
         if order.status != OrderStatus::Open {
             return Err("Only an open order can be amended".into());
         }
+        // Its put-back restores the native callback rate exactly, never one recomputed
+        // from the current last price (or from a row price Binance may leave empty).
+        let trailing = if order.kind == OrderType::TrailingStopLoss {
+            Some(self.native_trailing(id).ok_or_else(|| {
+                format!(
+                    "Your {} trailing stop was not changed: its native callback rate is not known yet, so it could not be put back exactly; try again shortly",
+                    order.symbol
+                )
+            })?)
+        } else {
+            None
+        };
+        if self.options.portfolio_margin
+            && trailing
+                .as_ref()
+                .is_some_and(|native| !(0.1..=10.0).contains(&native.rate))
+        {
+            return Err("Your PM trailing stop was not changed: its original callback rate is outside the supported 0.1%-10% range, so it could not be put back exactly".into());
+        }
+        // A one-way trailing stop trails a whole position: its replacement and put-back
+        // only reduce, even where an older order was placed without reduceOnly.
+        let reduce_only = order.reduce_only || (trailing.is_some() && !cx.store.hedged());
         let replacement = PlaceOrderOpts {
             symbol: order.symbol.clone(),
             kind: order.kind,
@@ -1972,7 +2143,7 @@ impl BinanceFutures {
             trigger_price: None,
             stop_loss: None,
             take_profit: None,
-            reduce_only: Some(order.reduce_only),
+            reduce_only: Some(reduce_only),
             time_in_force: order.time_in_force,
             trigger_type: None,
             tp_trigger_type: (order.kind == OrderType::TakeProfit)
@@ -2022,8 +2193,18 @@ impl BinanceFutures {
             replacement,
             original,
             position_side: self.order_position_side(id),
+            trailing,
         });
         Ok(job)
+    }
+
+    /// The native rate and activation price the last open-orders snapshot listed.
+    fn native_trailing(&self, id: &str) -> Option<NativeTrailing> {
+        self.account
+            .trailing
+            .get(id)
+            .or_else(|| self.account.regular_trailing.get(id))
+            .cloned()
     }
 
     fn plan_leverage(
@@ -2334,7 +2515,23 @@ impl BinanceFutures {
             ticker.last.max(target) - ticker.last.min(target),
             market.precision.price,
         );
-        let rate = (distance * 100.0 / ticker.last * 10.0).round() / 10.0;
+        let restored = self.trading.restoring_trailing.clone();
+        let rate = match &restored {
+            Some(native) => native.rate,
+            None => {
+                let rate = (distance * 100.0 / ticker.last * 10.0).round() / 10.0;
+                trailing_rate_in_range(
+                    distance,
+                    rate,
+                    if self.options.portfolio_margin {
+                        10.0
+                    } else {
+                        20.0
+                    },
+                )?;
+                rate
+            }
+        };
         let mut params = Params::default();
         params.set("algoType", "CONDITIONAL");
         params.set("symbol", opts.symbol.clone());
@@ -2346,10 +2543,43 @@ impl BinanceFutures {
         params.set("type", type_text(OrderType::TrailingStopLoss));
         params.set("quantity", number(position.contracts));
         params.set("callbackRate", number(rate));
+        if let Some(activate) = restored.and_then(|native| native.activate_price) {
+            params.set("activatePrice", activate);
+        }
+        // A one-way trailing stop without reduceOnly could reverse the position it trails:
+        // it reduces unless the caller explicitly says otherwise.
+        if opts.reduce_only != Some(false) && !cx.store.hedged() {
+            params.set("reduceOnly", "true");
+        }
         params.set("priceProtect", "TRUE");
         params.set("clientAlgoId", self.generated_id(cx)?);
         Ok(params)
     }
+}
+
+/// Since the CM-UM integration the order endpoints refuse stop types: "Order type not
+/// supported for this endpoint. Please use the Algo Order API endpoints instead."
+const ALGO_ONLY_TYPE: i64 = -4120;
+
+fn algo_only_refusal(code: i64, message: String) -> String {
+    if code != ALGO_ONLY_TYPE {
+        return message;
+    }
+    format!(
+        "Binance no longer accepts this stop type on its regular order endpoint, so nothing was placed: {message}"
+    )
+}
+
+/// A trailing distance as Binance's callbackRate must sit in its documented range
+/// (USD-M 0.1-20, COIN-M 0.1-10, portfolio margin conservatively 0.1-10): never clamped, which would
+/// trail at a distance the user did not choose.
+fn trailing_rate_in_range(distance: f64, rate: f64, max: f64) -> Result<(), String> {
+    if rate.is_finite() && (0.1..=max).contains(&rate) {
+        return Ok(());
+    }
+    Err(format!(
+        "A trailing stop {distance} ({rate}%) from the last price is outside Binance's 0.1%-{max}% callback range; the order was not changed"
+    ))
 }
 
 /// Binance native codes and documented statuses
@@ -2435,21 +2665,27 @@ pub(crate) const BINANCE: CodeTable = CodeTable {
             only: None,
         },
         // Order rules the order itself broke: UNABLE_TO_FILL,
-        // ORDER_WOULD_IMMEDIATELY_TRIGGER, REDUCE_ONLY_REJECT, FOK_ORDER_REJECT
-        // and GTX_ORDER_REJECT (post-only).
+        // ORDER_WOULD_IMMEDIATELY_TRIGGER and REDUCE_ONLY_REJECT.
         Row {
             key: Key::Range(-2022, -2020),
             verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
+        // FOK_ORDER_REJECT and GTX_ORDER_REJECT (post-only): the book was against
+        // the order this time, so a re-priced order may rest; a chaser retries them.
         Row {
             key: Key::Range(-5022, -5021),
-            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },
         Row {
             key: Key::Range(-1199, -1100),
             verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+        Row {
+            key: Key::Int(ALGO_ONLY_TYPE),
+            verdict: Verdict::Refused(ErrorKind::Unsupported),
             only: None,
         },
         Row {
@@ -2481,7 +2717,10 @@ fn item_unknown(code: i64) -> bool {
         code: NativeCode::Int(code),
         message: "",
     };
-    code == 0 || matches!(BINANCE.verdict(&native, Intent::Place), Verdict::Unknown(_))
+    let verdict = BINANCE.verdict(&native, Intent::Place);
+    code == 0
+        || matches!(verdict, Verdict::Unknown(_))
+        || verdict.kind() == Some(ErrorKind::RateLimited)
 }
 
 #[cfg(test)]
@@ -2567,6 +2806,21 @@ fn positive_price(value: Option<f64>, precision: f64) -> Result<f64, String> {
         return Err("Binance price/trigger must be finite and positive after rounding".into());
     }
     Ok(price)
+}
+
+/// A COIN-M stop as the algo endpoint names its fields.
+fn coin_algo_params(params: Params) -> Params {
+    let mut out = Params::default();
+    out.set("algoType", "CONDITIONAL");
+    for (name, value) in params.0 {
+        match name {
+            "stopPrice" => out.set("triggerPrice", value),
+            "activationPrice" => out.set("activatePrice", value),
+            "newClientOrderId" => out.set("clientAlgoId", value),
+            _ => out.set(name, value),
+        }
+    }
+    out
 }
 
 fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Vec<Params>, String> {
@@ -2739,7 +2993,7 @@ impl BinanceFutures {
             if let Some(order) = cx.store.order(id) {
                 let symbol = order.symbol.clone();
                 let filled = order.filled;
-                let native_regular = self.is_inverse() || !self.order_uses_strategy(order);
+                let native_regular = !self.order_uses_strategy(order);
                 let closed = order.status == OrderStatus::Closed;
                 if !native_regular {
                     self.observe_strategy_terminal(cx, &symbol, id);
@@ -2796,7 +3050,12 @@ impl BinanceFutures {
             && current == target.native
             && !self.client_order_row_is_foreign(cx, &target.symbol, &target.id)
             && cx.store.order(&target.id).is_none_or(|order| {
-                (!(self.is_spot() || self.is_inverse()) && is_algo(order.kind)) == strategy
+                let algo = if self.is_inverse() {
+                    native_algo(order)
+                } else {
+                    !self.is_spot() && is_algo(order.kind)
+                };
+                algo == strategy
             })
     }
 
@@ -2988,33 +3247,17 @@ impl BinanceFutures {
                     return invalid();
                 }
             }
-            CancelProof::Strategy(target) => {
+            CancelProof::Strategy(_) => {
                 #[derive(serde::Deserialize)]
-                #[serde(rename_all = "camelCase")]
                 struct Ack {
-                    symbol: String,
-                    strategy_id: u64,
-                    new_client_strategy_id: String,
-                    strategy_status: String,
+                    complete: bool,
                 }
-                let Ok(ack) = serde_json::from_str::<Ack>(body) else {
-                    return invalid();
-                };
-                if ack.strategy_id == 0
-                    || target
-                        .native
-                        .is_some_and(|native| native != ack.strategy_id)
-                    || ack.symbol != target.symbol
-                    || ack.new_client_strategy_id != target.id
-                    || ack.strategy_status != "CANCELED"
+                if !body.trim_start().starts_with('{')
+                    || !serde_json::from_str::<Ack>(body).is_ok_and(|ack| ack.complete)
                 {
                     return invalid();
                 }
-                let current = self.cancel_target_is_current(cx, &target, true);
-                self.mark_captured_canceled(cx, &[target], true);
-                if !current {
-                    return invalid();
-                }
+                // ACK only; the separately bounded targeted Read proves cancellation.
             }
             CancelProof::Batch(targets) => {
                 let Ok(rows) = serde_json::from_str::<Vec<CancelRow>>(body) else {
@@ -3277,7 +3520,20 @@ mod audit_tests {
                 if variant == Variant::Spot && kind == OrderType::TrailingStopLoss {
                     continue;
                 }
-                cases.push((PlaceOrderOpts { kind, ..limit() }, 1));
+                // A trailing stop needs a level inside the callback range: 1% from last.
+                let price = if kind == OrderType::TrailingStopLoss {
+                    101.0
+                } else {
+                    100.0
+                };
+                cases.push((
+                    PlaceOrderOpts {
+                        kind,
+                        price: Some(price),
+                        ..limit()
+                    },
+                    1,
+                ));
             }
             for (order, fail_at) in cases {
                 let kind = order.kind;

@@ -94,6 +94,18 @@ fn reject<T>(
     }
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::Balance => S::BALANCE,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Account, subtract};
@@ -1466,7 +1478,7 @@ impl ApexOmni {
                 .map(|args| args.get())
                 .filter(|args| args.starts_with('[') && *args != "[]")
                 .map(str::to_owned)
-                .unwrap_or_else(|| format!(r#"["{}"]"#, cx.now as u64));
+                .unwrap_or_else(|| format!(r#"["{}"]"#, cx.protocol_now() as u64));
             cx.send(socket, format!(r#"{{"op":"pong","args":{args}}}"#));
         }
         if message.op == "pong" || message.ret_msg == "pong" || message.pong.is_some() {

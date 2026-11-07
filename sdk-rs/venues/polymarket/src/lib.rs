@@ -350,14 +350,14 @@ impl Polymarket {
                 .collect::<Vec<_>>(),
         )
         .expect("token list");
-        let context = match cx.http_context(Scope::Background, public_read::policy(Operation::Read))
-        {
-            Ok(context) => context,
-            Err(_) => {
-                self.midpoints_failed(cx, offset, false);
-                return;
-            }
-        };
+        let context =
+            match cx.http_live_context(Scope::Background, public_read::policy(Operation::Read)) {
+                Ok(context) => context,
+                Err(_) => {
+                    self.midpoints_failed(cx, offset, false);
+                    return;
+                }
+            };
         self.midpoint_inflight.insert(offset, context.clone());
         if cx
             .request_managed_with_headers(
@@ -762,7 +762,20 @@ fn valid_level(price: f64, size: f64) -> bool {
     (0.0..=1.0).contains(&price) && size >= 0.0
 }
 impl Venue for Polymarket {
+    fn http_plans() -> bool {
+        false
+    }
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Midpoints { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
@@ -1254,7 +1267,9 @@ impl Venue for Polymarket {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        self.on_http_failed(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_http_failed(cx, pending, error);
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
