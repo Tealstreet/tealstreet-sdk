@@ -66,6 +66,12 @@ protocol UTC session/reporting marks and current UTC. Polymarket live candle
 subscriptions and recurring polls likewise construct their windows from protocol
 UTC; only the poll cadence uses scheduling time.
 
+BloFin retains the scheduling capture time of each execution boundary. After a
+backward UTC correction it projects that capture through the current calibration
+and lowers the stored UTC boundary, so a formerly fast host clock cannot hide
+new live fills as historical. Forward corrections never raise these boundaries:
+when scheduling stopped during sleep, accumulated live fills must remain live.
+
 Controls reproduce both directions of a 162-day correction through the default
 SDK clock, a late initial worker sync, missing worker sync, disposal, explicit
 clocks and host API refusal. A real Binance pending read survives host sync at

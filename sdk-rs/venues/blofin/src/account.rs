@@ -105,6 +105,7 @@ pub(crate) struct Account {
     orders_busy: bool,
     startup_started: bool,
     session_started: f64,
+    session_started_at: f64,
     orders_seeded: bool,
     /// A reconcile snapshot was requested while another was in flight.
     reconcile_owed: bool,
@@ -118,6 +119,7 @@ pub(crate) struct Account {
     /// A page answered outside its read response: the census proves nothing.
     census_read_lost: bool,
     reporting_started: f64,
+    reporting_started_at: f64,
     startup_executions: VecDeque<Execution>,
     account_busy: bool,
     /// Numbers every positions read, so `readPositions` can name one it may trust.
@@ -153,6 +155,19 @@ pub(crate) enum StartupRead {
     Mode,
 }
 impl Account {
+    fn reanchor_execution_clock(&mut self, now: f64, utc: f64) {
+        // Project the capture times through the current UTC calibration when
+        // it moves these lower bounds backwards. Never advance the fences:
+        // scheduling may have stopped during sleep while live fills accumulated.
+        self.session_started = self
+            .session_started
+            .min(utc - (now - self.session_started_at));
+        if self.orders_seeded {
+            self.reporting_started = self
+                .reporting_started
+                .min(utc - (now - self.reporting_started_at));
+        }
+    }
     fn execution_progress(&mut self, id: &str, qty: f64, value: Option<f64>) {
         if !matches!(
             execution_prefix(self.fills.get(id).copied(), qty, value),
@@ -603,6 +618,7 @@ impl Blofin {
             return;
         }
         self.account.session_started = cx.protocol_now();
+        self.account.session_started_at = cx.now;
         if let Err(error) = self.connect_feed(cx, true) {
             Self::socket_notice(cx, error);
         }
@@ -2187,6 +2203,8 @@ impl Blofin {
         updated: f64,
         created: f64,
     ) {
+        self.account
+            .reanchor_execution_clock(cx.now, cx.protocol_now());
         let id = if row.order_id.is_empty() {
             &row.ord_id
         } else {
@@ -2295,6 +2313,8 @@ impl Blofin {
         rows: &[Order],
         sources: &HashMap<String, Source>,
     ) {
+        self.account
+            .reanchor_execution_clock(cx.now, cx.protocol_now());
         for order in rows {
             if matches!(order.kind, OrderType::Limit | OrderType::Market)
                 && let Some(source) = sources.get(&order.id)
@@ -2325,6 +2345,7 @@ impl Blofin {
         }
         self.account.orders_seeded = true;
         self.account.reporting_started = cx.protocol_now();
+        self.account.reporting_started_at = cx.now;
         for execution in pending {
             if !self.account.fills.contains_key(&execution.fill.order_id) {
                 // The bounded tracker may have evicted a queued order while

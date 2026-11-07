@@ -82,8 +82,8 @@ fn cumulative_fills_emit_execution_deltas_and_prices_once() {
 }
 
 #[test]
-fn new_live_fill_survives_forward_protocol_clock_correction() {
-    for jump in [0., 7_200_000.] {
+fn new_live_fill_survives_protocol_clock_corrections_in_both_directions() {
+    for jump in [0., 7_200_000., -7_200_000.] {
         const START: f64 = 1_800_000_000_000.;
         let mut h = Harness::new_at(START);
         h.open_private();
@@ -93,6 +93,31 @@ fn new_live_fill_survives_forward_protocol_clock_correction() {
         let utc = START + jump;
         let raw = START + 100.;
         assert!(h.e.sync_host_time(raw, utc + 100.));
+        // Correcting the boundary must not turn an older terminal prefix into
+        // a live fill. Forward sleep recovery keeps the original UTC floor.
+        let session_start = START + jump.min(0.);
+        let historical = startup_execution(
+            "old-before-start",
+            1,
+            60000,
+            session_start - 1000.,
+            session_start - 500.,
+            "filled",
+        );
+        h.handle(
+            raw,
+            Event::WsMessage {
+                socket: h.private,
+                text: &historical,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(raw)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
         let text = startup_execution(
             "new-after-sync",
             1,
