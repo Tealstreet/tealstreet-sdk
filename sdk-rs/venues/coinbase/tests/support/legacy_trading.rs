@@ -1,7 +1,10 @@
+//! Offline regression oracles for legacy Advanced Trade codecs and trading.
+//! Production INTX startup is covered by private_drb; this unit fixture alone
+//! explicitly selects the old protocol so Spot/CFM shared-code coverage remains.
+use crate::{Coinbase, Options};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, TimerId};
-use safe_cex_venue_coinbase::{Coinbase, Options};
 use serde::Deserialize;
 
 const SPOT: &str = r#"{"products":[{"product_id":"BTC-USD","product_type":"SPOT","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1"}]}"#;
@@ -49,7 +52,9 @@ impl Session {
         )
     }
     fn with_options(kind: &'static str, options: Options) -> Self {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Coinbase::new(options).unwrap());
+        let mut venue = Coinbase::new(options).unwrap();
+        venue.account.legacy_protocol_fixture = true;
+        let mut e = safe_cex_engine::test_support::seeded_engine(venue);
         e.start(1000.0);
         Self {
             details: std::collections::HashMap::new(),
