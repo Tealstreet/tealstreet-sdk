@@ -86,6 +86,22 @@ impl Run {
         }
         None
     }
+    fn advance(&mut self, until: f64) {
+        loop {
+            self.drain();
+            self.timers.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let Some(&(timer, at)) = self.timers.last() else {
+                break;
+            };
+            if at > until {
+                break;
+            }
+            self.timers.pop();
+            self.now = self.now.max(at);
+            self.engine.handle(self.now, Event::TimerFired { timer });
+        }
+        self.now = until;
+    }
     fn fire_all(&mut self) {
         let mut due: Vec<_> = std::mem::take(&mut self.timers);
         due.sort_by(|a, b| a.1.total_cmp(&b.1));
@@ -130,10 +146,11 @@ fn a_failed_role_lookup_retries_and_does_not_show_the_account_flat() {
         200,
         &format!(r#"{{"role":"agent","data":{{"user":"{MASTER}"}}}}"#),
     );
-    assert!(
-        run.take("userFees").is_some(),
-        "the resolved account starts"
-    );
+    let state = run
+        .take("clearinghouseState")
+        .expect("the resolved account starts its core read");
+    let body: serde_json::Value = serde_json::from_str(state.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["user"], MASTER);
 }
 
 #[test]
@@ -180,4 +197,42 @@ fn a_failed_margin_mode_read_is_retried_and_a_portfolio_account_reads_its_spot()
         "portfolio spot is subscribed: {:?}",
         run.sent
     );
+}
+
+#[test]
+fn pending_role_is_single_flight_until_its_managed_deadline() {
+    let mut run = keyed();
+    let role = run.take("userRole").expect("first role read");
+    run.advance(16_000.0);
+    assert!(
+        run.take("userRole").is_none(),
+        "quota or network wait must not start a second role lookup"
+    );
+    run.answer(&role, 500, "busy");
+    let retry = run
+        .fire_until("userRole")
+        .expect("completion failure permits one retry");
+    assert_ne!(role.id, retry.id);
+}
+
+#[test]
+fn pending_mode_is_single_flight_until_its_managed_deadline() {
+    let mut run = keyed();
+    let role = run.take("userRole").expect("first role read");
+    run.answer(
+        &role,
+        200,
+        &format!(r#"{{"role":"agent","data":{{"user":"{MASTER}"}}}}"#),
+    );
+    let mode = run.take("userAbstraction").expect("first mode read");
+    run.advance(16_000.0);
+    assert!(
+        run.take("userAbstraction").is_none(),
+        "quota or network wait must not start a second mode lookup"
+    );
+    run.answer(&mode, 500, "busy");
+    let retry = run
+        .fire_until("userAbstraction")
+        .expect("completion failure permits one retry");
+    assert_ne!(mode.id, retry.id);
 }

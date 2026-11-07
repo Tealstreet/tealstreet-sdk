@@ -119,6 +119,7 @@ pub struct Cryptocom {
     options: Options,
     rest: &'static str,
     sockets: [Connection; 2],
+    login_refusal_reported: bool,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     // Instruments rejected as malformed; owned exposure there holds the snapshot.
     malformed_markets: HashSet<String>,
@@ -201,7 +202,12 @@ impl Skipped {
 
 impl Cryptocom {
     fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        let context = match cx.http_context(Scope::Background, read_policy()) {
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, read_policy()) {
             Ok(context) => context,
             Err(_) => {
                 self.discovery.failed(cx, tickers);
@@ -267,6 +273,7 @@ impl Cryptocom {
             },
             options,
             sockets: [Connection::new(false), Connection::new(true)],
+            login_refusal_reported: false,
             discovery: Default::default(),
             malformed_markets: HashSet::new(),
             reread_stalls: 0,
@@ -316,7 +323,7 @@ impl Cryptocom {
                     self.message_id,
                     quoted(method),
                     serde_json::to_string(chunk).unwrap(),
-                    cx.now as u64
+                    cx.protocol_now() as u64
                 ),
             );
         }
@@ -494,12 +501,12 @@ impl Cryptocom {
                 }
                 let mut candles = Vec::new();
                 json::each::<CandleRow>(message.data.get(), |row| candles.push(row.candle()))?;
-                candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                // A subscription's first answer carries history: only its newest row is live.
+                // The first answer is history, including its newest row. Only subsequent
+                // pushes belong on the live path; REST supplies requested history.
                 if self.candles_live.insert(message.subscription.to_owned()) {
-                    let newest = candles.pop();
-                    candles = newest.into_iter().collect();
+                    return Ok(());
                 }
+                safe_cex_engine::model::sort_candles_by_time(&mut candles);
                 for candle in candles {
                     cx.candle(symbol, timeframe, candle);
                 }
@@ -584,19 +591,22 @@ impl Venue for Cryptocom {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         topic: &SubscriptionTopic,
     ) -> Option<Result<(), String>> {
         Some(self.repair(cx, topic))
-    }
-    fn status_exempt_refusal(
-        &self,
-        pending: &Pending,
-        response: safe_cex_engine::Response<'_>,
-    ) -> bool {
-        matches!(pending, Pending::Trade(request) if request.refused_by_body(response.body))
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(Err(error)) = self.options.secondary_validation {
@@ -667,14 +677,18 @@ impl Venue for Cryptocom {
                     );
                     cx.close(socket);
                     self.on_close(cx, socket, 1008);
-                    cx.startup_read_refused(
-                        &safe_cex_engine::VenueError::new(format!(
-                            "Crypto.com private login rejected: {}",
-                            envelope.message
-                        ))
-                        .kind(safe_cex_engine::ErrorKind::AuthInvalid),
-                    );
+                    // REST readiness cannot recover a rejected private stream login.
+                    if !std::mem::replace(&mut self.login_refusal_reported, true) {
+                        cx.startup_failed(
+                            safe_cex_engine::VenueError::new(format!(
+                                "Crypto.com private login rejected: {}",
+                                envelope.message
+                            ))
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                        );
+                    }
                 } else if !self.sockets[channel].authenticated {
+                    self.login_refusal_reported = false;
                     self.sockets[channel].authenticated = true;
                     self.sockets[channel].supervisor.authenticated(cx);
                     self.authenticated(cx, &envelope);
@@ -1056,7 +1070,7 @@ impl Venue for Cryptocom {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(request) => self.identity_reject(cx, request, error),
             Pending::History(request) => self.history_reject(cx, request, error),
             Pending::Trade(request) => self.trade_reject(cx, request, error),
@@ -1071,7 +1085,7 @@ impl Venue for Cryptocom {
                 let _ = cx.fail_context(&context, error);
             }
             pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

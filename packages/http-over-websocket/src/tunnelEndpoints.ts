@@ -5,6 +5,8 @@
 // `NEXT_PUBLIC_TRADETUNNEL_STAGING=1` swaps the path to the staging tunnel
 // deployment on the same hostnames.
 
+import { diagnosticUrl } from './diagnosticUrl';
+
 export const TUNNEL_PATH =
   typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_TRADETUNNEL_STAGING === '1'
     ? '/tunnel-staging'
@@ -111,6 +113,19 @@ export const tunnelLastOpenedAt = (): number | undefined => lastOpenedAt;
 /** The current outage when this realm's tunnel is unreachable on every port, else undefined. */
 export const tunnelOutage = (): TunnelOutage | undefined => outage;
 
+// Visibly failing comes one handshake before unreachable: the lane is on 443 and a
+// handshake failed there too. Unsigned public reads take the HTTP proxy from here.
+const failingListeners = new Set<() => void>();
+
+/** This realm's tunnel has failed on 443 since it last opened (always true during an outage). */
+export const tunnelFailing = (): boolean => failuresOn443 > 0;
+
+/** Called each time the tunnel starts failing. Returns the unsubscribe. */
+export const onTunnelFailing = (listener: () => void): (() => void) => {
+  failingListeners.add(listener);
+  return () => failingListeners.delete(listener);
+};
+
 /** A socket dialed from `tunnelDialUrl` opened its handshake. */
 export const noteTunnelDialOpened = (dialedUrl: string): void => {
   if (!dialedPort(dialedUrl)) return;
@@ -139,6 +154,7 @@ export const noteTunnelDialFailed = (dialedUrl: string): void => {
   }
   if (lanePort !== '443') return;
   failuresOn443 += 1;
+  if (failuresOn443 === 1) for (const listener of [...failingListeners]) listener();
   if (failuresOn443 < UNREACHABLE_AFTER_443_FAILURES || outage) return;
   episode += 1;
   outage = {
@@ -185,7 +201,7 @@ export const isRelayUrl = (url: string): boolean => {
 export const parseRelayUrl = (url: string): { tunnelUrl: string; upstream: string } => {
   const parsed = new URL(url);
   const upstream = parsed.searchParams.get(RELAY_QUERY_PARAM);
-  if (!upstream) throw new Error(`not a relay url: ${url}`);
+  if (!upstream) throw new Error(`not a relay url: ${diagnosticUrl(url)}`);
   parsed.searchParams.delete(RELAY_QUERY_PARAM);
   return { tunnelUrl: parsed.toString(), upstream };
 };

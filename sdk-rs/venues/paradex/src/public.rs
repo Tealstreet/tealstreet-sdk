@@ -130,6 +130,7 @@ pub(crate) struct Public {
     retries: Vec<(TimerId, String, u8)>,
     seed_retry: safe_cex_engine::startup::Backoff<bool>,
     failed_market_reads: u32,
+    first_market_failure: Option<String>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     pub(crate) books: HashMap<String, BookState>,
     pub(crate) price_bands: HashMap<String, f64>,
@@ -263,7 +264,13 @@ impl Paradex {
                 },
             )
         };
-        let context = match cx.http_context(
+        let issue = if !markets {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -615,6 +622,9 @@ impl Paradex {
             t.open_interest = row.open_interest.0;
             t.funding_rate = row.funding_rate.0;
         });
+        // An unchanged mark or last is still a fresh observation of it.
+        cx.store
+            .observe_ticker_fields(&row.symbol, supplied & ((1 << 2) | (1 << 3)));
         self.public
             .live_tickers
             .record(cx.store, &row.symbol, supplied);
@@ -973,6 +983,7 @@ impl Paradex {
             } => {
                 self.public.seed_retry.succeeded(cx, &true);
                 self.public.failed_market_reads = 0;
+                self.public.first_market_failure = None;
                 self.public.price_bands = bands;
                 self.account.excluded_perps = excluded;
                 cx.store.set_markets(rows);
@@ -1001,7 +1012,7 @@ impl Paradex {
                         },
                         symbol,
                         interval,
-                        (Some(cx.now - step * 3.), Some(cx.now)),
+                        (Some(cx.protocol_now() - step * 3.), Some(cx.protocol_now())),
                         false,
                     );
                 }
@@ -1100,12 +1111,27 @@ impl Paradex {
                 let markets = matches!(seed, Request::Markets { .. });
                 cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
                 if markets {
-                    self.public.failed_market_reads += 1;
+                    self.public.failed_market_reads =
+                        self.public.failed_market_reads.saturating_add(1);
+                    if self.public.failed_market_reads == 1 {
+                        self.public.first_market_failure = Some(error.chars().take(256).collect());
+                    }
                     if self.public.failed_market_reads == 2 {
-                        cx.notice(
+                        cx.event(
                             safe_cex_engine::Level::Error,
                             code::REQUEST_FAILED,
-                            "Paradex market list is unavailable; retrying",
+                            format!("Paradex market list is unavailable; retrying: {error}"),
+                            vec![
+                                (
+                                    "firstCause",
+                                    self.public
+                                        .first_market_failure
+                                        .take()
+                                        .unwrap_or_default()
+                                        .into(),
+                                ),
+                                ("cause", error.into()),
+                            ],
                         );
                     }
                 }
@@ -1264,7 +1290,7 @@ impl Paradex {
             if !self.poll_generation_live(&target, &symbol, interval) {
                 return;
             }
-            match cx.http_context(
+            match cx.http_live_context(
                 Scope::Background,
                 Policy {
                     operation: Operation::Read,
@@ -1307,7 +1333,7 @@ impl Paradex {
             p.push_str("&countback=2000&price_kind=last");
             p
         } else {
-            let end = to.unwrap_or(cx.now);
+            let end = to.unwrap_or(cx.protocol_now());
             let start = from.unwrap_or(end - interval_ms(interval).unwrap() * 2000.);
             format!(
                 "/markets/klines?symbol={symbol}&resolution={resolution}&start_at={}&end_at={}&price_kind=last",
@@ -1482,7 +1508,7 @@ impl Paradex {
                 },
                 symbol,
                 interval,
-                (Some(cx.now - step * 3.), Some(cx.now)),
+                (Some(cx.protocol_now() - step * 3.), Some(cx.protocol_now())),
                 false,
             );
             return true;
@@ -1580,7 +1606,7 @@ impl Paradex {
                     },
                     symbol,
                     interval,
-                    (Some(cx.now - step * 3.), Some(cx.now)),
+                    (Some(cx.protocol_now() - step * 3.), Some(cx.protocol_now())),
                     false,
                 );
             }
@@ -1669,6 +1695,18 @@ fn skip_or_reject(cx: &mut Cx<'_, Pending>, invalid: &mut bool, e: &serde_json::
         *invalid = true;
     } else {
         safe_cex_engine::startup::skipped_row(cx);
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::ManagedSeed(_, request) => request.startup_sections(),
+            Self::Markets { .. } => S::MARKETS,
+            Self::Tickers { .. } => S::TICKERS,
+            _ => S::NONE,
+        }
     }
 }
 

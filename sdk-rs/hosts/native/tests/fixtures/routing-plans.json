@@ -3236,830 +3236,6 @@
     ]
   },
   {
-    "name": "breakout-direct-provider",
-    "exchange": "breakoutprop",
-    "plan": {
-      "http": {
-        "mode": "direct",
-        "prefix": "",
-        "authorize": false,
-        "authorizationHeader": "Tealstreet-Authorization",
-        "headers": {}
-      },
-      "ws": {
-        "public": {},
-        "private": {},
-        "business": {}
-      },
-      "wsHeaders": {},
-      "venueWsHeaders": {},
-      "socketChannels": [
-        {
-          "contains": "/business",
-          "channel": "business"
-        },
-        {
-          "contains": "/ws-futures",
-          "channel": "business"
-        },
-        {
-          "contains": "/private",
-          "channel": "private"
-        },
-        {
-          "contains": "/user",
-          "channel": "private"
-        },
-        {
-          "contains": "/account",
-          "channel": "private"
-        },
-        {
-          "contains": "listenKey=",
-          "channel": "private"
-        }
-      ]
-    },
-    "http": [
-      {
-        "request": {
-          "url": "https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json",
-            "Authorization": "DXAPI documented-session"
-          }
-        },
-        "expected": {
-          "url": "https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
-          "prefix": "",
-          "mode": "direct",
-          "authorize": false,
-          "authorizationHeader": "Tealstreet-Authorization",
-          "headers": {},
-          "tunnelUrl": null
-        }
-      }
-    ],
-    "sockets": [
-      {
-        "channel": "public",
-        "original": "wss://venue.invalid/opaque-public",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      },
-      {
-        "channel": "private",
-        "original": "wss://venue.invalid/opaque-private",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      },
-      {
-        "channel": "business",
-        "original": "wss://venue.invalid/opaque-business",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "name": "breakout-tealstreet-direct",
-    "exchange": "breakoutprop",
-    "plan": {
-      "http": {
-        "mode": "direct",
-        "prefix": "",
-        "authorize": false,
-        "authorizationHeader": "Tealstreet-Authorization",
-        "headers": {}
-      },
-      "ws": {
-        "public": {},
-        "private": {},
-        "business": {}
-      },
-      "wsHeaders": {
-        "Origin": "https://preview.tealstreet.io",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-      },
-      "venueWsHeaders": {},
-      "socketChannels": [
-        {
-          "contains": "/business",
-          "channel": "business"
-        },
-        {
-          "contains": "/ws-futures",
-          "channel": "business"
-        },
-        {
-          "contains": "/private",
-          "channel": "private"
-        },
-        {
-          "contains": "/user",
-          "channel": "private"
-        },
-        {
-          "contains": "/account",
-          "channel": "private"
-        },
-        {
-          "contains": "listenKey=",
-          "channel": "private"
-        }
-      ]
-    },
-    "http": [
-      {
-        "request": {
-          "url": "https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json",
-            "Authorization": "DXAPI documented-session"
-          }
-        },
-        "expected": {
-          "url": "https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
-          "prefix": "",
-          "mode": "direct",
-          "authorize": false,
-          "authorizationHeader": "Tealstreet-Authorization",
-          "headers": {},
-          "tunnelUrl": null
-        }
-      }
-    ],
-    "sockets": [
-      {
-        "channel": "public",
-        "original": "wss://venue.invalid/opaque-public",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      },
-      {
-        "channel": "private",
-        "original": "wss://venue.invalid/opaque-private",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      },
-      {
-        "channel": "business",
-        "original": "wss://venue.invalid/opaque-business",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "name": "breakout-proxy",
-    "exchange": "breakoutprop",
-    "plan": {
-      "http": {
-        "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
-        "authorizationHeader": "Tealstreet-Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
-      },
-      "ws": {
-        "public": {},
-        "private": {},
-        "business": {}
-      },
-      "wsHeaders": {
-        "Origin": "https://preview.tealstreet.io",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-      },
-      "venueWsHeaders": {},
-      "socketChannels": [
-        {
-          "contains": "/business",
-          "channel": "business"
-        },
-        {
-          "contains": "/ws-futures",
-          "channel": "business"
-        },
-        {
-          "contains": "/private",
-          "channel": "private"
-        },
-        {
-          "contains": "/user",
-          "channel": "private"
-        },
-        {
-          "contains": "/account",
-          "channel": "private"
-        },
-        {
-          "contains": "listenKey=",
-          "channel": "private"
-        }
-      ]
-    },
-    "http": [
-      {
-        "request": {
-          "url": "https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json",
-            "Authorization": "DXAPI documented-session"
-          }
-        },
-        "expected": {
-          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-          "mode": "direct",
-          "authorize": true,
-          "authorizationHeader": "Tealstreet-Authorization",
-          "headers": {
-            "Origin": "https://trade.tealstreet.io",
-            "Referer": "https://trade.tealstreet.io/",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "sec-fetch-dest": "empty"
-          },
-          "tunnelUrl": null
-        }
-      }
-    ],
-    "sockets": [
-      {
-        "channel": "public",
-        "original": "wss://venue.invalid/opaque-public",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      },
-      {
-        "channel": "private",
-        "original": "wss://venue.invalid/opaque-private",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      },
-      {
-        "channel": "business",
-        "original": "wss://venue.invalid/opaque-business",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "name": "breakout-how",
-    "exchange": "breakoutprop",
-    "plan": {
-      "http": {
-        "mode": "how",
-        "prefix": "",
-        "authorize": false,
-        "authorizationHeader": "Tealstreet-Authorization",
-        "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
-      },
-      "ws": {
-        "public": {},
-        "private": {},
-        "business": {}
-      },
-      "wsHeaders": {
-        "Origin": "https://preview.tealstreet.io",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-      },
-      "venueWsHeaders": {},
-      "socketChannels": [
-        {
-          "contains": "/business",
-          "channel": "business"
-        },
-        {
-          "contains": "/ws-futures",
-          "channel": "business"
-        },
-        {
-          "contains": "/private",
-          "channel": "private"
-        },
-        {
-          "contains": "/user",
-          "channel": "private"
-        },
-        {
-          "contains": "/account",
-          "channel": "private"
-        },
-        {
-          "contains": "listenKey=",
-          "channel": "private"
-        }
-      ]
-    },
-    "http": [
-      {
-        "request": {
-          "url": "https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json",
-            "Authorization": "DXAPI documented-session"
-          }
-        },
-        "expected": {
-          "url": "https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
-          "prefix": "",
-          "mode": "how",
-          "authorize": false,
-          "authorizationHeader": "Tealstreet-Authorization",
-          "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
-        }
-      }
-    ],
-    "sockets": [
-      {
-        "channel": "public",
-        "original": "wss://venue.invalid/opaque-public",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-public",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      },
-      {
-        "channel": "private",
-        "original": "wss://venue.invalid/opaque-private",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      },
-      {
-        "channel": "business",
-        "original": "wss://venue.invalid/opaque-business",
-        "headers": {
-          "X-Venue-Header": "keep"
-        },
-        "attempts": [
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          },
-          {
-            "url": "wss://venue.invalid/opaque-business",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep"
-            }
-          }
-        ]
-      }
-    ]
-  },
-  {
     "name": "coinbase-direct-jwt",
     "exchange": "coinbase",
     "plan": {
@@ -9201,13 +8377,13 @@
     "http": [
       {
         "request": {
-          "url": "https://fapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://fapi.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://fapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://fapi.binance.com/fixture",
           "prefix": "",
           "mode": "direct",
           "authorize": false,
@@ -9438,13 +8614,13 @@
     "http": [
       {
         "request": {
-          "url": "https://fapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://fapi.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://fapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://fapi.binance.com/fixture",
           "prefix": "",
           "mode": "how",
           "authorize": false,
@@ -9680,13 +8856,13 @@
     "http": [
       {
         "request": {
-          "url": "https://api.binance.com/fixture?signature=a%2Fb",
+          "url": "https://api.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com/fixture?signature=a%2Fb",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com/fixture",
           "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
           "mode": "direct",
           "authorize": true,
@@ -9929,13 +9105,13 @@
     "http": [
       {
         "request": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://dapi.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://dapi.binance.com/fixture",
           "prefix": "",
           "mode": "direct",
           "authorize": false,
@@ -10123,36 +9299,6 @@
           "sec-fetch-dest": "empty"
         }
       },
-      "readHeader": "X-MBX-APIKEY",
-      "readPublic": true,
-      "readHttp": {
-        "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
-        "authorize": true,
-        "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
-      },
-      "readPublicHttp": {
-        "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
-        "authorize": true,
-        "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
-      },
       "publicHeader": "X-MBX-APIKEY",
       "publicHttp": {
         "mode": "direct",
@@ -10205,57 +9351,7 @@
         }
       ]
     },
-    "http": [
-      {
-        "request": {
-          "url": "https://api.binance.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json"
-          }
-        },
-        "expected": {
-          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
-          "mode": "direct",
-          "authorize": true,
-          "authorizationHeader": "Authorization",
-          "headers": {
-            "Origin": "https://trade.tealstreet.io",
-            "Referer": "https://trade.tealstreet.io/",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "sec-fetch-dest": "empty"
-          },
-          "tunnelUrl": null
-        }
-      },
-      {
-        "request": {
-          "url": "https://api.binance.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json",
-            "x-mbx-apikey": "fixture-read-key"
-          }
-        },
-        "expected": {
-          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
-          "mode": "direct",
-          "authorize": true,
-          "authorizationHeader": "Authorization",
-          "headers": {
-            "Origin": "https://trade.tealstreet.io",
-            "Referer": "https://trade.tealstreet.io/",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "sec-fetch-dest": "empty"
-          },
-          "tunnelUrl": null
-        }
-      }
-    ],
+    "http": [],
     "sockets": [
       {
         "channel": "public",
@@ -10409,22 +9505,6 @@
           "sec-fetch-dest": "empty"
         }
       },
-      "readHeader": "X-MBX-APIKEY",
-      "readPublic": false,
-      "readHttp": {
-        "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
-        "authorize": true,
-        "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
-      },
       "publicHeader": "X-MBX-APIKEY",
       "publicHttp": {
         "mode": "direct",
@@ -10473,43 +9553,18 @@
     "http": [
       {
         "request": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://dapi.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://dapi.binance.com/fixture",
           "prefix": "",
           "mode": "direct",
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": null
-        }
-      },
-      {
-        "request": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json",
-            "x-mbx-apikey": "fixture-read-key"
-          }
-        },
-        "expected": {
-          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
-          "mode": "direct",
-          "authorize": true,
-          "authorizationHeader": "Authorization",
-          "headers": {
-            "Origin": "https://trade.tealstreet.io",
-            "Referer": "https://trade.tealstreet.io/",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "sec-fetch-dest": "empty"
-          },
           "tunnelUrl": null
         }
       }
@@ -11639,13 +10694,13 @@
     "http": [
       {
         "request": {
-          "url": "https://mainnet.zklighter.elliot.ai/fixture?signature=a%2Fb",
+          "url": "https://mainnet.zklighter.elliot.ai/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai/fixture?signature=a%2Fb",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai/fixture",
           "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
           "mode": "direct",
           "authorize": false,

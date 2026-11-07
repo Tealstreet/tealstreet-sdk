@@ -34,7 +34,6 @@
     "binance",
     "kucoin",
     "kraken",
-    "breakout",
     "aster",
     "paradex",
     "grvt",
@@ -291,16 +290,6 @@
       },
       "requiresCors": true,
       "enforceWsTunnel": false,
-      "supportsTunnel": false,
-      "privateProxyRegions": []
-    },
-    "breakoutprop": {
-      "routing": {
-        "restPool": "asia",
-        "howEgress": "jp"
-      },
-      "requiresCors": false,
-      "enforceWsTunnel": true,
       "supportsTunnel": false,
       "privateProxyRegions": []
     },
@@ -673,7 +662,7 @@
       },
       "requiresCors": false,
       "enforceWsTunnel": true,
-      "supportsTunnel": false,
+      "supportsTunnel": true,
       "privateProxyRegions": []
     },
     "phemex": {
@@ -694,26 +683,6 @@
       "requiresCors": true,
       "enforceWsTunnel": false,
       "supportsTunnel": false,
-      "privateProxyRegions": []
-    },
-    "salsadex": {
-      "routing": {
-        "restPool": "asia",
-        "howEgress": "sg"
-      },
-      "requiresCors": false,
-      "enforceWsTunnel": false,
-      "supportsTunnel": true,
-      "privateProxyRegions": []
-    },
-    "tealstreet-dex": {
-      "routing": {
-        "restPool": "asia",
-        "howEgress": "sg"
-      },
-      "requiresCors": false,
-      "enforceWsTunnel": false,
-      "supportsTunnel": true,
       "privateProxyRegions": []
     },
     "txflow": {

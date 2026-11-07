@@ -31,6 +31,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const MAX_QUEUED: usize = 256;
 const RETAINED: usize = 20_000;
 const POLL_MS: f64 = 10_000.;
+/// The open-order census's read-cover scope: one census reads the whole account.
+const ORDERS_SCOPE: &str = "orders";
+/// A census the stream outran is read again no sooner than this after it began.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.;
 const AUTH_REFRESH_MS: f64 = 180_000.;
 /// Frame-fed: how long before `refresh_at` a held JWT is renewed.
 const JWT_RENEW_EARLY_MS: f64 = 15_000.;
@@ -75,6 +79,7 @@ pub enum Request {
         coverage: SnapshotCoverage<String>,
         invalid: bool,
         cycle: bool,
+        started: f64,
     },
 }
 
@@ -165,6 +170,23 @@ enum OrderEvidence {
     Ignore,
     Unresolved,
     Coherent,
+}
+/// What a row moves its amend fence to: a new floor, and a new target for an
+/// external edit.
+type FenceChange = (f64, Option<AmendTarget>);
+
+/// A census's rows and the per-order state they would set, built before the
+/// read is admitted and applied only for the symbols it may replace.
+#[derive(Default)]
+struct OrdersPlan {
+    rows: Vec<Order>,
+    native: HashMap<String, NativeOrder>,
+    versions: Vec<(String, OrderVersion)>,
+    fences: Vec<(String, FenceChange)>,
+    terminals: Vec<String>,
+    /// Each census row's own symbol, terminal and unpublished rows included:
+    /// its state is gated on that symbol's admission.
+    symbols: HashMap<String, String>,
 }
 
 struct Queued {
@@ -612,6 +634,15 @@ impl Account {
         }
     }
     fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, mut request: Queued) {
+        // The last moment before an amend's destructive cancel leaves: after any
+        // JWT refresh it waited on, against the Store as it is now.
+        if let Pending::Trade(trade) = &request.pending
+            && let Some(guard) = trade.stop_guard()
+            && let Err(error) = guard.validate(self, cx.store, cx.now)
+        {
+            self.failed.push((request.pending, error));
+            return;
+        }
         if let Pending::Trade(trade) = &request.pending {
             trade.report_progress(cx);
         }
@@ -1371,6 +1402,7 @@ impl Account {
                 coverage: SnapshotCoverage::default(),
                 invalid: false,
                 cycle,
+                started: cx.now,
             }),
         );
     }
@@ -1764,11 +1796,11 @@ impl Account {
                 coverage,
                 invalid,
                 cycle,
+                started,
                 ..
             } => {
                 self.orders_busy = false;
                 if !invalid {
-                    let unproven = coverage.unproven().to_vec();
                     // Decode all fallible mapping before entering native publication.
                     let prepared = rows
                         .into_iter()
@@ -1778,11 +1810,26 @@ impl Account {
                             Some((row, order, version))
                         })
                         .collect();
-                    let committed = cx.store.commit_orders_snapshot([token], |current| {
-                        self.publish_orders_snapshot(prepared, coverage, current)
+                    let current = cx.store.orders().to_vec();
+                    let plan = self.plan_orders_snapshot(prepared, &coverage, &current);
+                    // What this census may replace, decided before any per-order state
+                    // moves (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+                    let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                        key: ORDERS_SCOPE,
+                        account: &[ORDERS_SCOPE],
+                    };
+                    let refused = if cx.store.orders_snapshot_current(&token) {
+                        cx.orders_read_refusals(scope, |_| true, &plan.rows)
+                    } else {
+                        None
+                    };
+                    let committed = refused.is_some_and(|refused| {
+                        self.commit_orders_plan(cx, plan, &current, &coverage, refused, started)
                     });
-                    if committed {
-                        cx.orders_reconciled_except(&unproven, u64::MAX);
+                    if !committed {
+                        // Refused whole, or unprovable: newer rows already stand, and
+                        // another census follows to prove what they cannot (absences).
+                        self.census_follow_up(cx, started);
                     }
                 } else {
                     cx.notice(
@@ -1798,23 +1845,23 @@ impl Account {
             }
         }
     }
-    /// Runs only after Store has validated the read's complete authority.
-    fn publish_orders_snapshot(
-        &mut self,
+    /// The census's rows and per-order state, changing nothing yet.
+    fn plan_orders_snapshot(
+        &self,
         rows: Vec<(NativeOrder, Order, OrderVersion)>,
-        coverage: SnapshotCoverage<String>,
+        coverage: &SnapshotCoverage<String>,
         current_rows: &[Order],
-    ) -> Vec<Order> {
-        let mut mapped = vec![];
-        let mut native = HashMap::new();
+    ) -> OrdersPlan {
+        let mut plan = OrdersPlan::default();
         for (row, order, version) in rows {
             if self.terminals.contains(&row.id) {
                 continue;
             }
-            let evidence = if self.stale_order(&row.id, version) {
-                OrderEvidence::Ignore
+            plan.symbols.insert(row.id.clone(), order.symbol.clone());
+            let (evidence, fence) = if self.stale_order(&row.id, version) {
+                (OrderEvidence::Ignore, None)
             } else {
-                self.order_evidence(&row, version, order.status != OrderStatus::Open)
+                self.order_evidence_change(&row, version, order.status != OrderStatus::Open)
             };
             if evidence == OrderEvidence::Ignore {
                 // A read started after a live event can still hit an
@@ -1823,37 +1870,125 @@ impl Account {
                 if let Some(current) = current_rows.iter().find(|current| current.id == row.id)
                     && current.status == OrderStatus::Open
                 {
-                    mapped.push(current.clone());
+                    plan.rows.push(current.clone());
                     if let Some(current) = self.native.get(&row.id) {
-                        native.insert(row.id.clone(), current.clone());
+                        plan.native.insert(row.id.clone(), current.clone());
                     }
                 }
                 continue;
             }
-            self.remember_order(&row.id, version);
+            if let Some(fence) = fence {
+                plan.fences.push((row.id.clone(), fence));
+            }
+            plan.versions.push((row.id.clone(), version));
             if order.status == OrderStatus::Open {
-                mapped.push(order);
+                plan.rows.push(order);
                 if evidence == OrderEvidence::Coherent {
-                    native.insert(row.id.clone(), row);
+                    plan.native.insert(row.id.clone(), row);
                 }
             } else {
-                self.terminal_order(&row.id);
+                plan.terminals.push(row.id);
             }
         }
         for current in current_rows {
             if !coverage.allows_absence(&current.id)
                 && current.status == OrderStatus::Open
                 && !self.terminals.contains(&current.id)
-                && !mapped.iter().any(|o: &Order| o.id == current.id)
+                && !plan.rows.iter().any(|o: &Order| o.id == current.id)
             {
-                mapped.push(current.clone());
+                plan.rows.push(current.clone());
                 if let Some(row) = self.native.get(&current.id) {
-                    native.insert(current.id.clone(), row.clone());
+                    plan.native.insert(current.id.clone(), row.clone());
                 }
             }
         }
+        plan
+    }
+    /// Commits an admitted census; its per-order state moves only for the
+    /// symbols it replaced. False when the store refused it after all.
+    fn commit_orders_plan(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: OrdersPlan,
+        current: &[Order],
+        coverage: &SnapshotCoverage<String>,
+        refused: Vec<String>,
+        started: f64,
+    ) -> bool {
+        let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+            key: ORDERS_SCOPE,
+            account: &[ORDERS_SCOPE],
+        };
+        let symbols = &plan.symbols;
+        let symbol_of = |id: &str| {
+            symbols.get(id).cloned().or_else(|| {
+                current
+                    .iter()
+                    .find(|order| order.id == id)
+                    .map(|order| order.symbol.clone())
+            })
+        };
+        let held = |id: &str| symbol_of(id).is_none_or(|symbol| refused.contains(&symbol));
+        // A refused symbol keeps the signing evidence its kept rows already had.
+        let mut native: HashMap<String, NativeOrder> = plan
+            .native
+            .into_iter()
+            .filter(|(id, _)| !held(id))
+            .collect();
+        for (id, row) in &self.native {
+            if held(id) && !native.contains_key(id) {
+                native.insert(id.clone(), row.clone());
+            }
+        }
+        let versions: Vec<_> = plan
+            .versions
+            .into_iter()
+            .filter(|(id, _)| !held(id))
+            .collect();
+        let fences: Vec<_> = plan
+            .fences
+            .into_iter()
+            .filter(|(id, _)| !held(id))
+            .collect();
+        let terminals: Vec<_> = plan.terminals.into_iter().filter(|id| !held(id)).collect();
+        // Any rejected row proves the account nothing.
+        let mut cover_unproven = coverage.unproven().to_vec();
+        if coverage.rejected() != 0 {
+            cover_unproven.push(String::new());
+        }
+        if cx
+            .commit_orders_read(scope, |_| true, plan.rows, &cover_unproven)
+            .is_none()
+        {
+            return false;
+        }
+        cx.store.set_orders_loaded();
+        for (id, change) in fences {
+            self.apply_fence_change(&id, change);
+        }
+        for (id, version) in versions {
+            self.remember_order(&id, version);
+        }
+        for id in terminals {
+            self.terminal_order(&id);
+        }
         self.native = native;
-        mapped
+        if !refused.is_empty() {
+            self.census_follow_up(cx, started);
+        }
+        let mut unproven = coverage.unproven().to_vec();
+        unproven.extend(refused);
+        cx.orders_reconciled_except(&unproven, u64::MAX);
+        true
+    }
+    /// Owe a census after one the stream outran, `CENSUS_FOLLOW_UP_MS` after
+    /// that one started at the earliest; it replaces any repair already owed.
+    fn census_follow_up(&mut self, cx: &mut Cx<'_, Pending>, started: f64) {
+        if let Some(timer) = self.repair_orders.take() {
+            cx.clear_timer(timer);
+        }
+        let wait = (started + CENSUS_FOLLOW_UP_MS - cx.now).max(0.);
+        self.repair_orders = Some(cx.set_timer(wait));
     }
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         if let Some(context) = request.read_context() {
@@ -1939,39 +2074,60 @@ impl Account {
         version: OrderVersion,
         terminal: bool,
     ) -> OrderEvidence {
-        if self.terminals.contains(&row.id) {
-            return OrderEvidence::Ignore;
+        let (evidence, change) = self.order_evidence_change(row, version, terminal);
+        if let Some(change) = change {
+            self.apply_fence_change(&row.id, change);
         }
-        let Some(fence) = self.amend_fences.get_mut(&row.id) else {
-            return OrderEvidence::Coherent;
+        evidence
+    }
+    /// What `row` proves, and how it would move its amend fence.
+    fn order_evidence_change(
+        &self,
+        row: &NativeOrder,
+        version: OrderVersion,
+        terminal: bool,
+    ) -> (OrderEvidence, Option<FenceChange>) {
+        if self.terminals.contains(&row.id) {
+            return (OrderEvidence::Ignore, None);
+        }
+        let Some(fence) = self.amend_fences.get(&row.id) else {
+            return (OrderEvidence::Coherent, None);
         };
         if !fence.target.same_identity(row) {
-            return OrderEvidence::Ignore;
+            return (OrderEvidence::Ignore, None);
         }
         if terminal {
-            return OrderEvidence::Coherent;
+            return (OrderEvidence::Coherent, None);
         }
+        let floor = fence.floor.max(version.updated);
         if fence.target.matches(row) {
-            fence.floor = fence.floor.max(version.updated);
-            return OrderEvidence::Coherent;
+            return (OrderEvidence::Coherent, Some((floor, None)));
         }
         if fence.pending {
             // Executions can advance while the write is in flight. They remain
             // visible, but old mutable attributes are never signing evidence.
-            fence.floor = fence.floor.max(version.updated);
-            return OrderEvidence::Unresolved;
+            return (OrderEvidence::Unresolved, Some((floor, None)));
         }
         if version.updated > fence.floor {
             // A strictly newer coherent venue version may be an external edit.
             if let Ok(target) =
                 AmendTarget::new(row, &row.size, &row.price, Some(&row.trigger_price))
             {
-                fence.target = target;
-                fence.floor = version.updated;
-                return OrderEvidence::Coherent;
+                return (
+                    OrderEvidence::Coherent,
+                    Some((version.updated, Some(target))),
+                );
             }
         }
-        OrderEvidence::Ignore
+        (OrderEvidence::Ignore, None)
+    }
+    fn apply_fence_change(&mut self, id: &str, (floor, target): FenceChange) {
+        if let Some(fence) = self.amend_fences.get_mut(id) {
+            fence.floor = floor;
+            if let Some(target) = target {
+                fence.target = target;
+            }
+        }
     }
     fn stale_order(&self, id: &str, version: OrderVersion) -> bool {
         let old = self.order_versions.get(id).copied().or_else(|| {
@@ -2020,7 +2176,8 @@ impl Account {
             return false;
         }
         self.remember_order(&row.id, version);
-        self.bump_orders(cx);
+        // A census released before this row refuses its symbol through the read
+        // cover; the other symbols it read still commit.
         order.last_update = cx.now;
         if order.status != OrderStatus::Open {
             self.native.remove(&row.id);
@@ -2642,4 +2799,17 @@ pub(crate) fn auth_token(body: &str) -> Option<String> {
             .filter(|s| !s.trim().is_empty())
             .or(t.token.filter(|s| !s.trim().is_empty()))
     })
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Auth { .. } => S::ACCOUNT,
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
 }

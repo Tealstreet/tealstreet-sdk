@@ -26,6 +26,7 @@ use safe_cex_engine::socket_lifecycle::{
     Interest as SocketInterest, Invalidation, LifecycleEvent, MAX_FRAME_BYTES, SocketCapabilities,
     SocketError, TrafficPolicy,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CredentialSlot, Cx, ErrorKind, PublicFeedPolicy, Response, SocketChannel, SocketId,
     SubscriptionTopic, TimerId, Venue, VenueError, json, num,
@@ -35,6 +36,19 @@ use sign::Version;
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use wire::*;
+
+/// Aster refuses a klines limit outside 1..=1500 (-1130).
+const MAX_KLINES: u32 = 1500;
+
+/// The REST depth sizes Aster accepts; any other value is refused (-1130 or -4021).
+/// A request rounds up to the next size, and anything larger asks for the deepest.
+fn depth_limit(requested: u32) -> u32 {
+    const SIZES: [u32; 7] = [5, 10, 20, 50, 100, 500, 1000];
+    SIZES
+        .into_iter()
+        .find(|size| *size >= requested)
+        .unwrap_or(1000)
+}
 
 const INTEREST_MS: f64 = 15_000.0;
 
@@ -160,6 +174,7 @@ fn feed_policy(role: SocketChannel, backoff_base_ms: f64) -> FeedPolicy {
         invalidation: Invalidation::Required,
         subscription_interval_ms: 0.0,
         close_floors: &[],
+        data_silence: None,
     }
 }
 
@@ -616,6 +631,22 @@ impl AsterDex {
             let _ = json::each::<&RawValue>(text, |item| self.on_public_frame(cx, item.get()));
             return;
         }
+        if let Some(frame) = FastAggregate::decode(text) {
+            match frame {
+                FastAggregate::Tickers(rows) => {
+                    for row in rows {
+                        update_ticker(cx, row);
+                    }
+                }
+                FastAggregate::Marks(rows) => {
+                    for row in rows {
+                        update_mark(cx, row);
+                    }
+                }
+            }
+            return;
+        }
+        // General decoding preserves reordered frames and valid prefixes before a typed-row error.
         let Ok(envelope) = serde_json::from_str::<Envelope>(text) else {
             return;
         };
@@ -669,6 +700,9 @@ impl AsterDex {
             let price = num::parse(&event.p);
             cx.store
                 .update_ticker(&event.s, |ticker| ticker.last = price);
+            if price.is_finite() && price > 0.0 {
+                cx.store.observe_ticker_fields(&event.s, 1 << 2);
+            }
         }
     }
 
@@ -748,9 +782,15 @@ fn is_partial_stream(stream: &str) -> bool {
 }
 
 fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
+    let last = event
+        .c
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(num::parse);
+    let observed = last.is_some_and(|price| price > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
-        if let Some(value) = event.c.as_deref().filter(|s| !s.is_empty()) {
-            ticker.last = num::parse(value);
+        if let Some(value) = last {
+            ticker.last = value;
         }
         if let Some(value) = event.percentage.as_deref().filter(|s| !s.is_empty()) {
             ticker.percentage = num::parse(value);
@@ -762,12 +802,21 @@ fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
             ticker.quote_volume = num::parse(value);
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 2);
+    }
 }
 
 fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
+    let mark = event
+        .p
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(num::parse);
+    let observed = mark.is_some_and(|price| price > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
-        if let Some(value) = event.p.as_deref().filter(|s| !s.is_empty()) {
-            ticker.mark = num::parse(value);
+        if let Some(value) = mark {
+            ticker.mark = value;
         }
         if let Some(value) = event.i.as_deref().filter(|s| !s.is_empty()) {
             ticker.index = num::parse(value);
@@ -779,6 +828,9 @@ fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
             ticker.funding_time = value;
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 3);
+    }
 }
 
 fn collect_interest(body: &str, output: &mut HashMap<String, f64>) {
@@ -892,6 +944,15 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
 }
 
 impl Venue for AsterDex {
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.stop_release_veto(store, pending, release)
+    }
+
     #[inline]
     fn managed_sockets() -> bool {
         true
@@ -921,6 +982,17 @@ impl Venue for AsterDex {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Signed(request) => Self::startup_reads(&request.pending),
+            Pending::ExchangeInfo { .. } => S::MARKETS,
+            Pending::Daily { .. } | Pending::OpenInterest { initial: true, .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             stp_controls: self.version == Version::V3,
@@ -1527,7 +1599,7 @@ impl Venue for AsterDex {
                 let mut path = format!(
                     "{}?symbol={symbol}&interval={interval}&limit={}",
                     self.path("klines"),
-                    limit.unwrap_or(500)
+                    limit.unwrap_or(500).clamp(1, MAX_KLINES)
                 );
                 if let Some(from) = from_ms {
                     path.push_str(&format!("&startTime={}", num::format(from)));
@@ -1567,7 +1639,7 @@ impl Venue for AsterDex {
                     self.path("depth"),
                     sign::Query::new()
                         .str("symbol", &symbol)
-                        .num("limit", f64::from(limit.unwrap_or(100)))
+                        .num("limit", f64::from(depth_limit(limit.unwrap_or(100))))
                         .as_str()
                 );
                 let Ok(context) = cx.admit_http_command(request::public_read_policy()) else {
@@ -1615,7 +1687,7 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
             format!(
                 "Aster skipped {} malformed {kind} row(s): {}",
                 skipped.len(),
-                skipped.join(", ")
+                skipped.join_with(", ")
             ),
         );
     }

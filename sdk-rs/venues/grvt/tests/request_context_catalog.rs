@@ -13,7 +13,7 @@ use safe_cex_venue_grvt::{Grvt, Options, Pending};
 
 const NOW: f64 = 1_700_000_000_000.;
 /// Startup catalog reads get the engine's discovery deadline, not the 20 s read bound.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const GOOD: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}]}"#;
 struct Probe {
     inner: Grvt,

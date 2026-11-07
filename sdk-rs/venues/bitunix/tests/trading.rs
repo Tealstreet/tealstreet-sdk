@@ -1045,3 +1045,127 @@ fn a_duplicate_client_id_stays_unknown() {
         });
     assert_eq!(outcome, Some(Some(safe_cex_engine::Outcome::Unknown)));
 }
+
+/// The command's failure text, and whether any write went out, from one batch of actions.
+fn failed_without_write(e: &mut TestEngine, command: u32) -> (String, bool) {
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
+    let wrote = actions
+        .iter()
+        .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post));
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: c, error }) if *c == command => {
+                Some(error.legacy_text())
+            }
+            _ => None,
+        })
+        .expect("command failure");
+    (error, wrote)
+}
+fn fallback_to_detail(e: &mut TestEngine, command: u32) -> safe_cex_engine::HttpRequest {
+    e.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command,
+            id: "one__tp".into(),
+            price: Some(79.0),
+            amount: None,
+        }),
+    );
+    let r = requests(e).remove(0);
+    reply(
+        e,
+        r.id,
+        r#"{"code":20003,"msg":"The order does not support this operation"}"#,
+    );
+    let cancel = requests(e).remove(0);
+    reply(
+        e,
+        cancel.id,
+        r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
+    );
+    requests(e).remove(0)
+}
+
+// The parent filled before its cancel landed: its TP/SL went live with the old triggers,
+// so the edit failed. It used to finish as a success with nothing placed.
+#[test]
+fn a_parent_that_filled_during_the_fallback_fails_the_tpsl_edit() {
+    for detail_body in [
+        r#"{"code":0,"data":{"symbol":"BTCUSDT","orderId":"one","qty":"3","tradeQty":"3","status":"FILLED","orderType":"LIMIT","side":"SELL"}}"#,
+        r#"{"code":0,"data":{"symbol":"BTCUSDT","orderId":"one","qty":"3","tradeQty":"3","status":"CANCELED","orderType":"LIMIT","side":"SELL"}}"#,
+    ] {
+        let (mut e, _) = startup();
+        let detail = fallback_to_detail(&mut e, 13);
+        reply(&mut e, detail.id, detail_body);
+        let (error, wrote) = failed_without_write(&mut e, 13);
+        assert!(!wrote, "{detail_body}");
+        assert!(error.contains("filled before its TP/SL edit"), "{error}");
+    }
+}
+
+// The private channel omits reduceOnly. Native modify_order carries no reduceOnly, so an
+// order seen only there is modified as before; only the cancel-and-re-place fallback,
+// which would carry a guessed flag, is refused before anything is canceled.
+#[test]
+fn a_ws_only_order_is_modified_natively_but_never_re_placed() {
+    let (mut e, s) = startup();
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"stray","side":"Buy","type":"LIMIT","qty":"1","price":"90","dealAmount":"0","tpPrice":"120"}}"#,
+    );
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
+    e.handle(
+        2.0,
+        Event::Command(Command::AmendOrder {
+            command: 15,
+            id: "stray".into(),
+            price: Some(91.0),
+            amount: None,
+        }),
+    );
+    let modify = requests(&mut e).remove(0);
+    assert!(
+        modify.url.ends_with("/trade/modify_order"),
+        "{}",
+        modify.url
+    );
+    reply(
+        &mut e,
+        modify.id,
+        r#"{"code":0,"data":{"orderId":"stray"}}"#,
+    );
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
+    assert!(
+        e.store().order("stray__tp").is_some(),
+        "the attached take profit"
+    );
+
+    e.handle(
+        3.0,
+        Event::Command(Command::AmendOrder {
+            command: 16,
+            id: "stray__tp".into(),
+            price: Some(121.0),
+            amount: None,
+        }),
+    );
+    let drag = requests(&mut e).remove(0);
+    assert!(drag.url.ends_with("/trade/modify_order"), "{}", drag.url);
+    reply(
+        &mut e,
+        drag.id,
+        r#"{"code":20003,"msg":"The order does not support this operation"}"#,
+    );
+    let (error, wrote) = failed_without_write(&mut e, 16);
+    assert!(!wrote, "nothing canceled or re-placed");
+    assert!(error.contains("reduce-only state"), "{error}");
+}

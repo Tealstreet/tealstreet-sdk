@@ -4,8 +4,11 @@ import Emitter from 'tiny-emitter';
 import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 
 import { getUniqueLatencyDomains, syncServerTime } from './config';
+import { diagnosticUrl, stripDiagnosticUrlQueries } from './diagnosticUrl';
 import { decodeTradeTunnelMessage } from './tradeTunnelBinaryFrame';
 import { noteTunnelDialFailed, noteTunnelDialOpened, tunnelDialUrl } from './tunnelEndpoints';
+import { ConnectionDiagnostics, HiddenTimerLateness } from './connectionDiagnostics';
+
 import { HOWWebSocketAuthState, LatencyEntry } from './types';
 
 // Import ws package for Node.js/Bun - needed because Bun's native WebSocket
@@ -37,9 +40,17 @@ const extractDomainFromUrl = (url: string): string | null => {
   }
 };
 
+const WAITING_REDIAL_INTERVAL_MS = 5_000;
+const CONNECT_TIMEOUT_MS = 4_000;
+const CONNECT_AUDIT_MARGIN_MS = 2_000;
+const CONNECT_CHECK_TICK_MS = 1_000;
+
 export class HOWWebSocket {
   ws?: ReconnectingWebSocket;
 
+  private localClose = false;
+  readonly diagnostics = new ConnectionDiagnostics('HOW');
+  readonly timerLateness = new HiddenTimerLateness();
   pingAt = 0;
   pingTimeoutId?: NodeJS.Timeout;
   isDisposed = false;
@@ -68,6 +79,7 @@ export class HOWWebSocket {
   retries = 0;
   /** Invalidates readiness across connection or authentication transitions. */
   epoch = 0;
+  private lastWaitingRedialAt = 0;
 
   private _activeEventHandlers = new Set<string>();
 
@@ -92,6 +104,10 @@ export class HOWWebSocket {
   // The url the current connect attempt dialed, and whether that attempt opened.
   private dialedUrl = '';
   private dialOpened = false;
+  private dialStartedAt?: number;
+  private connectCheckTimeout?: ReturnType<typeof setTimeout>;
+  private lifecycleDocument?: Document;
+  private lifecycleWindow?: Window;
 
   constructor(
     url: string | (() => string),
@@ -111,7 +127,7 @@ export class HOWWebSocket {
     // 2. Pass Origin header for CloudFront to accept the WebSocket upgrade
     // 3. Force HTTP/1.1 via ALPNProtocols (WebSocket upgrade doesn't work over HTTP/2)
     // The library's own default, stated so a reader (and the network lint) can see the bound.
-    const options: Record<string, unknown> = { connectionTimeout: 4_000 };
+    const options: Record<string, unknown> = { connectionTimeout: CONNECT_TIMEOUT_MS };
 
     const Socket = this.WebSocketCtor ?? NodeWebSocket;
     if (Socket) {
@@ -128,9 +144,15 @@ export class HOWWebSocket {
     wsUrl.searchParams.set('t', String(Date.now()));
     // Resolved per attempt, so a reconnect after the lane falls back dials 443.
     const dialUrl = () => {
-      this.dialedUrl = tunnelDialUrl(wsUrl.toString());
-      this.dialOpened = false;
-      return this.dialedUrl;
+      const dialedUrl = tunnelDialUrl(wsUrl.toString());
+      // A disposed wrapper cannot update another connection's bookkeeping.
+      if (this.ws === ws && ws.loopState.phase === 'connecting') {
+        this.dialedUrl = dialedUrl;
+        this.diagnostics.dial(dialedUrl);
+        this.dialOpened = false;
+        this.dialStartedAt = Date.now();
+      }
+      return dialedUrl;
     };
     ws = new ReconnectingWebSocket(dialUrl, protocols, options);
     ws.binaryType = 'arraybuffer';
@@ -154,7 +176,7 @@ export class HOWWebSocket {
     const errorMessage = (event as any)?.message || (event as any)?.error?.message || (event as any)?.type;
 
     // Log WebSocket errors (state errors are now prevented in send() method)
-    console.error(`WebSocket error: ${errorMessage || 'Unknown error'}`);
+    console.error(`WebSocket error: ${stripDiagnosticUrlQueries(String(errorMessage || 'Unknown error'))}`);
     return false;
   };
 
@@ -171,15 +193,19 @@ export class HOWWebSocket {
         return false;
       }
 
-      // Create our own error with full context BEFORE the DOMException would occur
+      const request = data?.arg ?? data;
+      const preview = JSON.stringify({
+        type: data?.type,
+        method: request?.method,
+        url: typeof request?.url === 'string' ? diagnosticUrl(request.url) : undefined,
+      });
       const err = new Error(
-        `HOWWebSocket${isTokenSend ? ' sendToken' : ''} not ready for send. State: ${stateName}, Message: ${message.substring(0, 100)}...`,
+        `HOWWebSocket${isTokenSend ? ' sendToken' : ''} not ready for send. State: ${stateName}, Message: ${preview}`,
       );
       err.name = 'WebSocketNotReadyError';
       (err as any).webSocketState = stateName;
       (err as any).webSocketReadyState = wsState;
-      (err as any).messagePreview = message.substring(0, 200);
-      (err as any).fullMessage = message;
+      (err as any).messagePreview = preview;
       (err as any).isHOWWebSocket = true;
       if (isTokenSend) {
         (err as any).isReconnecting = !this.isOpen;
@@ -210,8 +236,60 @@ export class HOWWebSocket {
     this.trackDomainFromUrl(url);
   };
 
+  /**
+   * Redials now when the reconnect loop is waiting out a backoff (after a wake or a
+   * network drop) while a request needs the socket; at most once per 5 s per socket.
+   */
+  redialIfBackingOff = (): boolean => {
+    if (this.isDisposed || this.ws?.loopState.phase !== 'retry-scheduled') return false;
+    if (Date.now() - this.lastWaitingRedialAt < WAITING_REDIAL_INTERVAL_MS) return false;
+    this.lastWaitingRedialAt = Date.now();
+    this.ws.reconnect();
+    return true;
+  };
+
+  /** Timer delivery is not a deadline: check elapsed wall time whenever JS runs. */
+  redialIfConnectExpired = (): boolean => {
+    const socket = this.ws;
+    const loop = socket?.loopState;
+    if (this.isDisposed || this.isOpen || !socket || loop?.phase !== 'connecting') return false;
+    const startedAt = this.dialStartedAt ?? loop.since;
+    if (socket.readyState === socket.OPEN || Date.now() - startedAt <= CONNECT_TIMEOUT_MS + CONNECT_AUDIT_MARGIN_MS)
+      return false;
+
+    // Native timeout wins when timers run normally; recovery keeps its retry count.
+    // onClose counts a failed handshake only if this attempt actually obtained a URL.
+    return socket.timeoutConnecting();
+  };
+
+  private checkConnectOnVisibility = () => {
+    if (this.lifecycleDocument?.visibilityState === 'visible') this.redialIfConnectExpired();
+  };
+
+  private checkConnectOnResume = () => {
+    this.redialIfConnectExpired();
+  };
+
+  private scheduleConnectCheck = () => {
+    if (
+      this.isDisposed ||
+      this.isOpen ||
+      !this.ws ||
+      this.ws.loopState.phase === 'stopped' ||
+      this.connectCheckTimeout !== undefined
+    )
+      return;
+    this.connectCheckTimeout = this.observedTimeout(() => {
+      this.connectCheckTimeout = undefined;
+      try {
+        this.redialIfConnectExpired();
+      } finally {
+        this.scheduleConnectCheck();
+      }
+    }, CONNECT_CHECK_TICK_MS);
+  };
+
   connectAndSubscribe = () => {
-    this.isInitialized = true;
     if (!this.isDisposed) {
       this.ws = this.createWebsocket(typeof this.url === 'function' ? this.url() : this.url);
 
@@ -220,17 +298,43 @@ export class HOWWebSocket {
       this.ws.onopen = this.onOpen.bind(this);
       this.ws.onmessage = this.onMessage.bind(this);
       this.ws.onclose = this.onClose.bind(this);
+      this.isInitialized = true;
+
+      // Next constant-folds typeof checks on window/document to true in worker chunks,
+      // so a bare global there throws; read them off globalThis instead.
+      const page = (globalThis as { document?: Document }).document;
+      if (!this.lifecycleDocument && page?.addEventListener) {
+        this.lifecycleDocument = page;
+        page.addEventListener('visibilitychange', this.checkConnectOnVisibility);
+        page.addEventListener('resume', this.checkConnectOnResume);
+      }
+      const browserWindow = (globalThis as { window?: Window }).window;
+      if (!this.lifecycleWindow && browserWindow?.addEventListener) {
+        this.lifecycleWindow = browserWindow;
+        browserWindow.addEventListener('pageshow', this.checkConnectOnResume);
+      }
+      this.scheduleConnectCheck();
     }
   };
 
   onOpen = async () => {
     this.epoch++;
+    this.localClose = false;
+    this.diagnostics.opened(true);
     this.dialOpened = true;
     noteTunnelDialOpened(this.dialedUrl);
     if (!this.isDisposed) {
       this.isOpen = true;
+      // A frozen browser can redial a CLOSED socket before its old close event runs.
+      // Never carry clock/auth readiness into a replacement connection.
+      this.isTimeSynced = false;
+      this.isTokenSent = false;
+      this.tokenSentAt = 0;
+      this.authState = HOWWebSocketAuthState.Unknown;
+      clearTimeout(this.connectCheckTimeout);
+      this.connectCheckTimeout = undefined;
 
-      this.pingTimeoutId = setTimeout(() => this.ping(), 5_000);
+      this.pingTimeoutId = this.observedTimeout(() => this.ping(), 5_000);
       // A socket that opens and then never pongs must be redialed too, not only one that stops.
       this.armSilenceReconnect();
 
@@ -239,11 +343,19 @@ export class HOWWebSocket {
     }
   };
 
+  private observedTimeout = (callback: () => void, delay: number): ReturnType<typeof setTimeout> => {
+    const dueAt = Date.now() + delay;
+    return setTimeout(() => {
+      this.timerLateness.observe(dueAt);
+      callback();
+    }, delay);
+  };
+
   private armSilenceReconnect = () => {
     clearTimeout(this.lastMessageTimeout);
-    this.lastMessageTimeout = setTimeout(() => {
+    this.lastMessageTimeout = this.observedTimeout(() => {
       if (!this.isDisposed) {
-        this.ws?.reconnect?.();
+        this.ws?.retryConnection();
       }
     }, 25_000);
   };
@@ -256,7 +368,7 @@ export class HOWWebSocket {
       if (this.pingTimeoutId) {
         clearTimeout(this.pingTimeoutId);
       }
-      this.pingTimeoutId = setTimeout(this.ping.bind(this), 5_000);
+      this.pingTimeoutId = this.observedTimeout(this.ping.bind(this), 5_000);
     }
   };
 
@@ -306,6 +418,7 @@ export class HOWWebSocket {
           this.isTimeSynced = true;
           syncServerTime(json?.serverTime);
         }
+        if (this.isTimeSynced && this.authState === HOWWebSocketAuthState.Good) this.diagnostics.established();
         if (json?.type === 'rpc.http' && json?.nonce) {
           this.emit(`sub:${json?.nonce}`, json?.data || {});
         }
@@ -316,10 +429,16 @@ export class HOWWebSocket {
     }
   };
 
-  onClose = async () => {
+  onClose = async (event?: { code?: number; initiator?: 'local' | 'remote' | 'unknown' }) => {
+    this.diagnostics.closed(
+      event?.initiator ??
+        (this.localClose ? 'local' : event?.code !== undefined && event.code !== 1006 ? 'remote' : 'unknown'),
+    );
     this.epoch++;
     if (!this.dialOpened && this.dialedUrl && !this.isDisposed) noteTunnelDialFailed(this.dialedUrl);
     this.dialedUrl = '';
+    this.dialOpened = false;
+    this.dialStartedAt = undefined;
     this.isOpen = false;
     this.isTimeSynced = false;
     this.isTokenSent = false;
@@ -339,6 +458,7 @@ export class HOWWebSocket {
 
     // Stop latency checks
     this.stopLatencyChecks();
+    if (!this.isDisposed) this.scheduleConnectCheck();
   };
 
   // ==================== Latency Tracking ====================
@@ -409,7 +529,7 @@ export class HOWWebSocket {
       return;
     }
 
-    this.latencyCheckTimeoutId = setTimeout(() => {
+    this.latencyCheckTimeoutId = this.observedTimeout(() => {
       this.queryStaleLatencies();
       this.scheduleNextLatencyTick();
     }, LATENCY_CHECK_TICK);
@@ -494,10 +614,13 @@ export class HOWWebSocket {
    * @deprecated debug only
    */
   simulateClose = () => {
+    this.localClose = true;
     this.ws?.close();
   };
 
   dispose = () => {
+    this.localClose = true;
+    if (this.ws) this.diagnostics.closed('local');
     this.isDisposed = true;
     this.isOpen = false;
     this.isInitialized = false;
@@ -512,6 +635,14 @@ export class HOWWebSocket {
     clearTimeout(this.lastMessageTimeout);
     this.lastMessageTimeout = undefined;
     this.stopLatencyChecks();
+
+    clearTimeout(this.connectCheckTimeout);
+    this.connectCheckTimeout = undefined;
+    this.lifecycleDocument?.removeEventListener('visibilitychange', this.checkConnectOnVisibility);
+    this.lifecycleDocument?.removeEventListener('resume', this.checkConnectOnResume);
+    this.lifecycleWindow?.removeEventListener('pageshow', this.checkConnectOnResume);
+    this.lifecycleDocument = undefined;
+    this.lifecycleWindow = undefined;
 
     this.ws?.terminate?.();
     this.ws = undefined;

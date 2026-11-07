@@ -1704,7 +1704,7 @@ fn refused_with(status: u16, refusal: &str) {
                 Action::WsConnect { socket, .. } => {
                     e.handle(support::NOW, Event::WsOpened { socket })
                 }
-                Action::Notice(safe_cex_engine::Notice::StartupFailed { error }) => {
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { error, .. }) => {
                     failures.push(error)
                 }
                 _ => {}

@@ -220,6 +220,19 @@ pub struct NativeOrder<'a> {
     pub reduce_only: bool,
     #[serde(default, alias = "cp", deserialize_with = "boolean")]
     pub close_position: bool,
+    #[serde(default)]
+    #[serde(borrow)]
+    pub stop_guaranteed: Option<&'a serde_json::value::RawValue>,
+    #[serde(default)]
+    #[serde(borrow)]
+    pub price_protect: Option<&'a serde_json::value::RawValue>,
+    #[serde(default)]
+    #[serde(borrow)]
+    pub position_id: Option<&'a serde_json::value::RawValue>,
+    #[serde(default, borrow)]
+    pub parent_order_id: Option<Str<'a>>,
+    #[serde(default, borrow)]
+    pub group_id: Option<Str<'a>>,
     #[serde(default, deserialize_with = "boolean")]
     pub post_only: bool,
     #[serde(default, borrow, alias = "c")]

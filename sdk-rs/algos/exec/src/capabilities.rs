@@ -18,7 +18,6 @@ pub(crate) fn infinity(venue: &str) -> bool {
             | "mexc"
             | "phemex"
             | "bingx"
-            | "breakoutprop"
             | "blofin"
             | "okx"
             | "okxdemo"
@@ -28,8 +27,6 @@ pub(crate) fn infinity(venue: &str) -> bool {
             | "woofi"
             | "kodiakfi"
             | "mode"
-            | "salsadex"
-            | "tealstreet-dex"
             | "what"
             | "hyperliquid"
             | "hyperliquidspot"
@@ -149,8 +146,9 @@ mod tests {
             );
             count += 1;
         }
-        assert!(
-            count >= 50,
+        // Retired venue metadata entries were deleted; every remaining entry is checked.
+        assert_eq!(
+            count, 47,
             "metadata extraction must not silently skip source"
         );
     }

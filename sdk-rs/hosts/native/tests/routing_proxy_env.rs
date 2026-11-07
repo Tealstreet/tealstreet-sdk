@@ -34,13 +34,14 @@ fn deployed_proxy_hosts_join_venue_urls_exactly_as_typescript() {
 
     // Private (signed) route: the trailing slash is normalised, the query kept verbatim.
     let signed = "https://api.binance.com/api/v3/order?symbol=BTCUSDT&timestamp=1&signature=ab%2Bc";
-    assert!(plan.http.authorize);
+    // The fleet admits by network and forwards every header: our proxy JWT never rides it.
+    assert!(!plan.http.authorize);
     assert_eq!(
         join(&plan.http.prefix, signed),
         "https://proxies.tyo.tealstreet.io/api/exchange_proxy/https://api.binance.com/api/v3/order?symbol=BTCUSDT&timestamp=1&signature=ab%2Bc"
     );
 
-    // Public CORS read (binancespot publicHttp), token attached as in TS.
+    // Public CORS read (binancespot publicHttp), token attached as in TS: that host is not the fleet.
     let public = plan.public_http.unwrap();
     assert!(public.authorize);
     assert_eq!(
@@ -59,4 +60,29 @@ fn deployed_proxy_hosts_join_venue_urls_exactly_as_typescript() {
     let plan =
         resolve_routing_plan("binancespot", &public_only, base, Provider::Tealstreet).unwrap();
     assert_eq!(plan.http.prefix, PUBLIC);
+
+    // OKX: a Bearer of ours reached the venue as an OAuth token (53000 on third-party-app keys).
+    let okx = account_transport("okx", &account).unwrap();
+    let plan =
+        resolve_routing_plan("okx", &okx, "https://www.okx.com", Provider::Tealstreet).unwrap();
+    assert_eq!(plan.http.prefix, PRIVATE.trim_end_matches('/'));
+    assert!(!plan.http.authorize);
+
+    // Coinbase keeps its own Authorization (the CDP JWT) under its own name: the fleet does not
+    // rename headers as the edge does, so nothing is aliased on this route.
+    let coinbase = account_transport("coinbase", &account).unwrap();
+    let plan = resolve_routing_plan(
+        "coinbase",
+        &coinbase,
+        "https://api.coinbase.com",
+        Provider::Tealstreet,
+    )
+    .unwrap();
+    assert_eq!(plan.http.prefix, PRIVATE.trim_end_matches('/'));
+    assert!(!plan.http.authorize);
+    assert!(
+        plan.http.header_aliases.is_empty(),
+        "{:?}",
+        plan.http.header_aliases
+    );
 }

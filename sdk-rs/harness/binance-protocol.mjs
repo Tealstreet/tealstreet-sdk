@@ -206,6 +206,21 @@ export const prepareBinanceSpot = (exchange, WebSocket) => {
   prepareBinanceSpotPrivate(exchange);
 };
 
+/** Replay PM's real-time quote feed through the reference's existing handlers.
+ * Derive the subscription from its own seeded catalogue, never Rust output.
+ * Keep each symbol visible to strict subscription comparison.
+ */
+export const prepareBinancePmPublic = (exchange) => {
+  const feed = exchange.publicWebsocket;
+  feed.onOpen = () => {
+    if (feed.isDisposed) return;
+    const params = exchange.store.markets.map((market) => `${market.symbol.toLowerCase()}@bookTicker`);
+    if (params.length) feed.send(JSON.stringify({ id: 1, method: 'SUBSCRIBE', params }));
+    feed.resetOrderbook();
+    feed.subscribe();
+  };
+};
+
 // executionReport.p is the resting limit, L is this execution's price.
 export const fixBinanceSpotFills = (account, records) => {
   if (!account) return;

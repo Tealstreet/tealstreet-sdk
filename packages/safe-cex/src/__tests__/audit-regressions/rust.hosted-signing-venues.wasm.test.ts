@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import '../reference/orderly/orderly.encryption';
 
+import { exchangeMetadata } from '../../exchangeMetadata';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
 import { DefaultStore } from '../../store/store.base';
@@ -20,7 +21,7 @@ const remoteSigner: RemoteSigner = {
   onAvailabilityChange: () => () => {},
 };
 
-const orderlyNames: ExchangeName[] = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'];
+const orderlyNames: ExchangeName[] = ['kodiakfi', 'mode', 'what', 'woofi'];
 // Generated per run so no credential-shaped literal is committed.
 const orderlyCredentials = () => ({
   key: `ed25519:${bs58.encode(Uint8Array.from({ length: 32 }, (_, index) => index + 1))}`,
@@ -53,7 +54,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
     for (const name of ['coinbase', 'coinbasespot', ...orderlyNames] as ExchangeName[]) {
       const options: ExchangeOptions = { key: 'hosted-key', secret: '', remoteSigner, privateOnly: true };
       await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
-      expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrow('unsupported in this build');
+      expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrow(`${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`);
     }
     expect(clock).not.toHaveBeenCalled();
   });

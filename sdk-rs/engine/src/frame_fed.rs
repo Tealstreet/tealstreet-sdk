@@ -18,6 +18,9 @@ pub const FENCE_GRACE_MS: f64 = 3_000.0;
 /// The same grace when the host has not measured the source's clock offset:
 /// it also absorbs that much clock skew between the source and this engine.
 pub const UNSYNCED_FENCE_GRACE_MS: f64 = 30_000.0;
+/// Data source: a refresh read the stream outran is read again no sooner than
+/// this after it went out, so a busy symbol cannot drive back-to-back reads.
+pub const REFRESH_FOLLOW_UP_MS: f64 = 2_000.0;
 
 /// The commands a frame-fed engine executes itself.
 pub fn is_write(command: &Command) -> bool {

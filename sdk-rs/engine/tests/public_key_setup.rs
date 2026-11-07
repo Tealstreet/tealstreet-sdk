@@ -188,3 +188,33 @@ fn unsupported_hosts_and_conflicting_declarations_refuse() {
         assert!(e.initialize_address_nonce(100.).is_err());
     }
 }
+
+#[test]
+fn key_setup_preserves_exact_outbound_bytes_and_timer_order() {
+    for (algorithm, encoded) in [
+        (
+            Algorithm::StarkDigest,
+            br#"{"receipt":{},"operations":[{"kind":"publicKey","algorithm":"starkDigest","key":"signing"}],"context":{"venue":"","method":"","host":"","path":""}}"#.as_slice(),
+        ),
+        (
+            Algorithm::SchnorrDigest,
+            br#"{"receipt":{},"operations":[{"kind":"publicKey","algorithm":"schnorrDigest","key":"signing"}],"context":{"venue":"","method":"","host":"","path":""}}"#.as_slice(),
+        ),
+    ] {
+        let mut e = engine(
+            Some((AddressSetupSlots::Primary, algorithm)),
+            AddressSetupSlots::None,
+            true,
+        );
+        e.initialize_address_nonce(100.).unwrap();
+        let actions: Vec<_> = e.drain_actions().collect();
+        let [Action::SetTimer { timer, at_ms }, Action::Sign { attempt, work, timeout_ms }] =
+            actions.as_slice()
+        else {
+            panic!("setup arms its bound before emitting signing work");
+        };
+        assert_eq!((*timer, *at_ms), (TimerId(1), 20_100.));
+        assert_eq!((*attempt, *timeout_ms), (RequestId(1), 20_000));
+        assert_eq!(serde_json::to_vec(work).unwrap(), encoded);
+    }
+}

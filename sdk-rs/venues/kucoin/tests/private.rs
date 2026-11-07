@@ -6,7 +6,8 @@ use safe_cex_engine::model::{MarginType, OrderSide, OrderType, PositionMode, Tim
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 use support::jittered;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 500.0;
@@ -40,13 +41,22 @@ impl Harness {
         Self::with_markets(MARKET)
     }
     fn with_markets(markets: &str) -> Self {
+        Self::with_engine(
+            markets,
+            support::credentials::engine(
+                Options {
+                    key: Some("key".into()),
+                    secret: Some("secret".into()),
+                    passphrase: Some("passphrase".into()),
+                    ..Default::default()
+                },
+                Kucoin::new,
+            ),
+        )
+    }
+    fn with_engine(markets: &str, engine: Engine<Kucoin>) -> Self {
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-                key: Some("key".into()),
-                secret: Some("secret".into()),
-                passphrase: Some("passphrase".into()),
-                ..Default::default()
-            })),
+            engine,
             actions: vec![],
             failures: vec![],
             now: 1610000000000.0,
@@ -63,6 +73,7 @@ impl Harness {
             .find_map(|a| match a {
                 Action::WsConnect {
                     binary,
+                    public_topics,
                     socket,
                     url,
                     headers,
@@ -70,6 +81,10 @@ impl Harness {
                     context,
                 } if url.contains("/private?") => {
                     assert!(!binary, "KuCoin sockets use the text protocol");
+                    assert!(
+                        !public_topics,
+                        "KuCoin private feeds do not carry public topics"
+                    );
                     assert!(
                         headers.is_empty(),
                         "KuCoin authenticates with a bullet token"
@@ -92,7 +107,9 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in
+            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now).into_iter()
+        {
             let action = plain(action, &mut self.failures);
             self.actions.push(action);
         }
@@ -580,12 +597,28 @@ fn full_position_stop_keeps_close_flag_after_documented_partial_event() {
         h.engine.store().order("full-stop").unwrap().close,
         Some(true)
     );
+    h.reply("/bullet-public", r#"{"code":"200000","data":{"token":"public-token","instanceServers":[{"endpoint":"wss://example.test/public","pingInterval":18000,"pingTimeout":10000}]}}"#);
+    let socket = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/public?") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.event(Event::WsOpened { socket });
+    h.event(Event::WsMessage {
+        socket,
+        text: r#"{"type":"welcome"}"#,
+    });
+    h.event(Event::WsMessage { socket, text: r#"{"type":"message","topic":"/contract/instrument:XBTUSDTM","data":{"markPrice":100}}"# });
     h.event(Event::Command(Command::AmendOrder {
         command: 1,
         id: "full-stop".into(),
         price: Some(81.0),
         amount: None,
     }));
+    h.pace();
     h.reply(
         "/orders/full-stop",
         r#"{"code":"200000","data":{"cancelledOrderIds":["full-stop"]}}"#,
@@ -950,8 +983,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = support::actions(engine)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -1237,12 +1270,15 @@ fn unknown_terminal_execution_never_guesses_fill_size_or_removes_another_symbol_
 #[test]
 fn account_reconciliation_starts_without_the_private_socket() {
     let mut h = Harness {
-        engine: safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-            key: Some("key".into()),
-            secret: Some("secret".into()),
-            passphrase: Some("passphrase".into()),
-            ..Default::default()
-        })),
+        engine: support::credentials::engine(
+            Options {
+                key: Some("key".into()),
+                secret: Some("secret".into()),
+                passphrase: Some("passphrase".into()),
+                ..Default::default()
+            },
+            Kucoin::new,
+        ),
         actions: vec![],
         failures: vec![],
         now: 1610000000000.0,
@@ -1471,4 +1507,192 @@ fn a_refused_key_ends_the_start_with_the_reason() {
         }
     }
     assert_eq!(failed, 1);
+}
+
+fn private_read_notice(h: &Harness, path: &str) -> safe_cex_engine::LogEvent {
+    h.actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if matches!(event.code, "request.failed" | "auth.rejected")
+                    && event.message.starts_with("KuCoin private read failed:")
+                    && event.message.contains(path) =>
+            {
+                Some(event.clone())
+            }
+            _ => None,
+        })
+        .expect("terminal private read diagnostic")
+}
+
+#[test]
+fn private_read_http_refusals_keep_status_code_message_and_source_without_data() {
+    for (path, status, native_code, attempts) in [
+        ("/orders?", 401, "400004", 3),
+        ("/stopOrders?", 401, "400004", 3),
+        ("/account-overview?", 401, "400004", 3),
+        ("/getPositionMode", 401, "400004", 3),
+        ("/account-overview?", 200, "400005", 2),
+    ] {
+        let mut h = Harness::new();
+        let body = format!(
+            r#"{{"code":"{native_code}","msg":"Invalid KC-API-PASSPHRASE","data":{{"secret":"response-data-must-not-escape"}}}}"#
+        );
+        for _ in 0..attempts {
+            let request = h.http(path);
+            assert!(
+                request
+                    .headers
+                    .contains(&("KC-API-KEY-VERSION", "2".into()))
+            );
+            h.respond(&request, status, &body);
+        }
+        let event = private_read_notice(&h, path);
+        assert!(
+            event
+                .message
+                .contains(&format!("source=http signError=false HTTP={status}")),
+            "{}",
+            event.message
+        );
+        assert!(event.message.contains(native_code));
+        assert!(event.message.contains("Invalid KC-API-PASSPHRASE"));
+        assert!(event.fields.contains(&("venueCode", native_code.into())));
+        assert!(
+            event
+                .fields
+                .contains(&("venueMessage", "Invalid KC-API-PASSPHRASE".into()))
+        );
+        assert!(!format!("{event:?}").contains("response-data-must-not-escape"));
+    }
+}
+
+#[test]
+fn malformed_http_and_transport_failure_diagnostics_are_distinct_and_do_not_dump_text() {
+    for transport in [false, true] {
+        let mut h = Harness::new();
+        for _ in 0..3 {
+            let request = h.http("/account-overview?");
+            if transport {
+                h.event(Event::HttpFailed {
+                    request: request.id,
+                    error: "transport-with-sensitive-sentinel",
+                });
+            } else {
+                h.respond(&request, 503, "<html>body-with-sensitive-sentinel</html>");
+            }
+        }
+        let event = private_read_notice(&h, "/account-overview?");
+        assert!(
+            event.message.contains(if transport {
+                "source=transport signError=false HTTP=none"
+            } else {
+                "source=http signError=false HTTP=503"
+            }),
+            "{}",
+            event.message
+        );
+        assert!(event.message.contains("code=none msg=none"));
+        assert!(!format!("{event:?}").contains("sensitive-sentinel"));
+    }
+}
+
+#[test]
+fn local_signing_refusal_reports_a_sign_error_and_sends_no_private_read() {
+    use safe_cex_engine::signing::{
+        Capability, KeyRef, SignError, SignFuture, SignRequest, SignResult, Signer,
+    };
+    struct RefuseRead(safe_cex_crypto::signer::LocalSigner);
+    impl Signer for RefuseRead {
+        fn sign(&self, request: SignRequest) -> SignFuture {
+            self.0.sign(request)
+        }
+        fn can_sign(
+            &self,
+            key: &KeyRef,
+            algorithm: safe_cex_engine::signing::Algorithm,
+        ) -> Capability {
+            self.0.can_sign(key, algorithm)
+        }
+        fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+            Some(if request.context.path.contains("account-overview") {
+                Err(SignError::Refused)
+            } else {
+                self.0.sign_now(request)
+            })
+        }
+    }
+    let (options, provider, identities) = Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("passphrase".into()),
+        ..Default::default()
+    }
+    .prepare();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(options));
+    engine.set_identities(identities).unwrap();
+    engine
+        .set_signer(Some(std::sync::Arc::new(RefuseRead(provider))))
+        .unwrap();
+    let h = Harness::with_engine(MARKET, engine);
+    let event = private_read_notice(&h, "/account-overview?");
+    assert!(
+        event
+            .message
+            .contains("source=signing signError=true HTTP=none"),
+        "{}",
+        event.message
+    );
+    assert!(
+        event
+            .message
+            .contains("Signing provider refused the request")
+    );
+    assert!(event.message.contains("code=none msg=none"));
+    assert!(!h.actions.iter().any(
+        |action| matches!(action, Action::Http(request) if request.url.contains("account-overview"))
+    ));
+}
+
+#[test]
+fn native_stop_limit_rows_keep_limit_price_across_sparse_stop_events() {
+    let mut h = Harness::new();
+    h.ready();
+    let row = r#"{"orderId":"stop-limit","symbol":"XBTUSDTM","type":"open","orderType":"limit","status":"open","side":"sell","stop":"down","stopPrice":"80","price":"79","stopPriceType":"MP","size":10,"filledSize":0,"reduceOnly":true,"closeOrder":false,"postOnly":false,"timeInForce":"GTC"}"#;
+    h.ws("/contractMarket/advancedOrders", row);
+    let original = h.engine.store().order("stop-limit").unwrap();
+    assert_eq!(original.kind, OrderType::StopLoss);
+    assert_eq!(original.price, 80.0);
+    assert_eq!(
+        original.extra.as_ref().unwrap().conditional_order_price,
+        Some(79.0)
+    );
+    h.ws("/contractMarket/advancedOrders", r#"{"orderId":"stop-limit","symbol":"XBTUSDTM","type":"open","orderType":"stop","side":"sell","stop":"down","stopPrice":"80","stopPriceType":"MP","size":10,"ts":1610000000500000000}"#);
+    let sparse = h.engine.store().order("stop-limit").unwrap();
+    assert_eq!(
+        sparse.extra.as_ref().unwrap().conditional_order_price,
+        Some(79.0)
+    );
+    assert_eq!(sparse.close, Some(false));
+}
+
+#[test]
+fn native_stop_limit_rest_rows_keep_a_separate_limit_price() {
+    let mut h = Harness::new();
+    h.ready();
+    h.poll();
+    h.reply("/stopOrders?", &Harness::page(r#"{"id":"rest-limit","symbol":"XBTUSDTM","type":"limit","status":"open","side":"sell","stop":"down","stopPrice":"80","price":"79","stopPriceType":"MP","size":10,"filledSize":0,"reduceOnly":true,"closeOrder":false,"postOnly":false,"timeInForce":"GTC"}"#, 1));
+    h.reply("/orders?", EMPTY);
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    let order = h.engine.store().order("rest-limit").unwrap();
+    assert_eq!(order.kind, OrderType::StopLoss);
+    assert_eq!(order.price, 80.0);
+    assert_eq!(
+        order.extra.as_ref().unwrap().conditional_order_price,
+        Some(79.0)
+    );
 }

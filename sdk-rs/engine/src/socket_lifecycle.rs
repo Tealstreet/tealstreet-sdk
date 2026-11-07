@@ -10,6 +10,50 @@ use sorted::{Map, Set};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+/// Host observation of committed upstream interests, never desired or queued rows.
+#[cfg(not(target_arch = "wasm32"))]
+pub enum InterestObservation<'a> {
+    Attached,
+    Released {
+        feed: FeedId,
+        subscribed: bool,
+        interest: &'a Interest,
+    },
+    Cleared {
+        feed: FeedId,
+    },
+    /// Native transport handoff for a venue without managed interests.
+    TransportSent {
+        socket: SocketId,
+        text: &'a str,
+    },
+    TransportClosed {
+        socket: SocketId,
+    },
+    Dropped,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub struct InterestObserver(Arc<dyn Fn(InterestObservation<'_>) + Send + Sync>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl InterestObserver {
+    pub fn new(observe: impl Fn(InterestObservation<'_>) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(observe))
+    }
+    pub fn observe(&self, event: InterestObservation<'_>) {
+        (self.0)(event);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::fmt::Debug for InterestObserver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("InterestObserver")
+    }
+}
+
 pub const MAX_FEEDS: usize = 512;
 pub const MAX_INTERESTS: usize = 8192;
 pub const MAX_FRAMES: usize = 4096;
@@ -126,6 +170,24 @@ pub struct FeedPolicy {
     /// Minimum reconnect delay, in ms, after the venue closes with each code.
     /// The retry waits for the longer of this and the ordinary backoff.
     pub close_floors: &'static [(u16, f64)],
+    /// Reconnect a socket that answers pings but carries no data. None: never.
+    pub data_silence: Option<DataSilence>,
+}
+
+/// A feed is watched for data silence only while one of its interests streams
+/// continuously (tickers, an order book): quiet topics alone never count.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DataSilence {
+    /// No data frame for this long on a watched feed means its subscriptions died.
+    pub after_ms: f64,
+    /// Interest-key prefixes of the topics that stream continuously.
+    pub streams: &'static [&'static str],
+}
+impl DataSilence {
+    /// Whether this interest key is a continuous stream.
+    pub(crate) fn streams(&self, key: &str) -> bool {
+        self.streams.iter().any(|prefix| key.starts_with(prefix))
+    }
 }
 impl FeedPolicy {
     /// Longest floor a feed may declare: ten minutes.
@@ -169,6 +231,9 @@ impl FeedPolicy {
             || self.controls == ControlPolicy::None
                 && (self.auth != AuthMode::None || self.traffic != TrafficPolicy::AnyText)
             || !self.valid_close_floors()
+            || self
+                .data_silence
+                .is_some_and(|silence| !positive(silence.after_ms) || silence.streams.is_empty())
         {
             return Err(SocketError::InvalidPolicy);
         }
@@ -191,6 +256,9 @@ pub enum Control {
     #[cfg(feature = "socket-native-timing")]
     Traffic,
     Other,
+    /// Delivered traffic that proves nothing about a watched stream (account
+    /// updates sharing a public socket, acknowledgements): never data.
+    Unwatched,
     Pong,
     Auth(AuthEvidence),
 }
@@ -467,6 +535,16 @@ pub(crate) struct Lifecycle {
     socket_lookups: std::cell::Cell<usize>,
     pending_frames: usize,
     external_queue_bytes: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) observer: Option<InterestObserver>,
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for Lifecycle {
+    fn drop(&mut self) {
+        if let Some(observer) = &self.observer {
+            observer.observe(InterestObservation::Dropped);
+        }
+    }
 }
 impl Lifecycle {
     pub(crate) fn reserve_external(&mut self, bytes: usize) -> Result<(), SocketError> {
@@ -541,6 +619,10 @@ impl Lifecycle {
         f.phase = Phase::Quarantined;
         f.authenticated = false;
         f.interests.clear_queue(&mut self.pending_frames);
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(observer) = &self.observer {
+            observer.observe(InterestObservation::Cleared { feed });
+        }
         f.interests.released.clear();
         self.retire(feed)
     }
@@ -604,6 +686,10 @@ impl Lifecycle {
         f.phase = Phase::Connecting;
         f.authenticated = false;
         f.pong_seen = false;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(observer) = &self.observer {
+            observer.observe(InterestObservation::Cleared { feed });
+        }
         f.interests.released.clear();
         f.interests.clear_queue(&mut self.pending_frames);
         self.current_sockets.insert(socket.0, epoch);
@@ -625,6 +711,22 @@ impl Lifecycle {
         self.feeds
             .get(feed.0)
             .is_some_and(|f| !f.stopped && f.interests.desired.contains_key(key))
+    }
+    /// Whether `key`'s subscribe frame went out on the feed's current socket.
+    pub(crate) fn released(&self, feed: FeedId, key: &str) -> bool {
+        self.feeds
+            .get(feed.0)
+            .is_some_and(|f| f.interests.released.contains_key(key))
+    }
+    /// Whether a live feed wants any key matching `matches`.
+    pub(crate) fn desires_any(&self, feed: FeedId, matches: impl Fn(&str) -> bool) -> bool {
+        self.feeds.get(feed.0).is_some_and(|f| {
+            !f.stopped
+                && f.interests
+                    .desired
+                    .values()
+                    .any(|interest| matches(&interest.key))
+        })
     }
     pub(crate) fn current(&self, epoch: Epoch) -> bool {
         self.epoch(epoch.feed) == Some(epoch)
@@ -796,6 +898,10 @@ impl Lifecycle {
         f.phase = Phase::Quarantined;
         f.authenticated = false;
         f.interests.clear_queue(&mut self.pending_frames);
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(observer) = &self.observer {
+            observer.observe(InterestObservation::Cleared { feed });
+        }
         f.interests.released.clear();
         Some(Retirement {
             epoch,
@@ -819,6 +925,10 @@ impl Lifecycle {
             f.phase = Phase::Quarantined;
             f.authenticated = false;
             f.interests.clear_queue(&mut self.pending_frames);
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(observer) = &self.observer {
+                observer.observe(InterestObservation::Cleared { feed: *feed });
+            }
             f.interests.released.clear();
         }
         feeds
@@ -1137,8 +1247,26 @@ impl Lifecycle {
         for key in queued.batch.covered_keys {
             if queued.subscribe {
                 let row = f.interests.desired.get(&key)?.clone();
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(observer) = &self.observer {
+                    observer.observe(InterestObservation::Released {
+                        feed: epoch.feed,
+                        subscribed: true,
+                        interest: &row,
+                    });
+                }
                 f.interests.released.insert(key, row);
             } else {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(observer) = &self.observer
+                    && let Some(row) = f.interests.released.get(&key)
+                {
+                    observer.observe(InterestObservation::Released {
+                        feed: epoch.feed,
+                        subscribed: false,
+                        interest: row,
+                    });
+                }
                 f.interests.released.remove(&key);
             }
         }
@@ -1447,6 +1575,7 @@ mod tests {
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
             close_floors: &[],
+            data_silence: None,
         }
     }
     fn started(auth: AuthMode) -> (Lifecycle, FeedId, Epoch) {

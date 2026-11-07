@@ -120,7 +120,7 @@ const reportedStartFailure = (messages: Array<{ op: string; data: any }>) =>
 
 beforeEach(() => {
   setTwapLockManager(null);
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   loads = false;
   built.length = 0;
   telegram.started.length = 0;
@@ -374,4 +374,55 @@ describe('a re-init seeded with the page store', () => {
     const posted = messages.filter((message) => message.op === 'store');
     expect(posted.some((message) => (message.data?.activeChasers?.length ?? 0) > 0)).toBe(false);
   });
+});
+
+it('preserves bounded native startup facts on the actual 120s worker timeout', async () => {
+  const { messages, send } = context();
+  void send(init);
+  await vi.advanceTimersByTimeAsync(60_000);
+  const exchange = exchangeWorkers[ACCOUNT].exchange!;
+  (exchange as any).receiveEvent({
+    code: 'startup.incomplete',
+    level: 'error',
+    message: 'still waiting for orders',
+    fields: {
+      stage: 'frontendOpenOrders',
+      elapsedMs: 60_000,
+      deadlineMs: 60_000,
+      readTimeoutMs: 20_000,
+      http429Count: 2,
+      lastFailedPrivateReadKind: 'state',
+      user: 'never-in-tags',
+    },
+  });
+  await vi.advanceTimersByTimeAsync(59_999);
+  expect(reportedStartFailure(messages)).toBe(false);
+  await vi.advanceTimersByTimeAsync(101);
+  const report = messages.find(
+    (message) => message.op === 'error' && message.data?.[0]?.includes('Exchange start timed out after 120s'),
+  );
+  expect(report?.data[1].sentryData.tags).toMatchObject({
+    worker_error_phase: 'startup',
+    startup_stage: 'frontendOpenOrders',
+    startup_elapsed_ms: '120000',
+    startup_deadline_ms: '120000',
+    startup_read_timeout_ms: '20000',
+    startup_http_429_count: '2',
+    startup_last_failed_private_read_kind: 'state',
+    startup_native_sample_age_ms: '60000',
+  });
+  expect(JSON.stringify(report?.data[1].sentryData.tags)).not.toContain('never-in-tags');
+});
+
+it('measures the worker startup timeout monotonically across a 162-day wall-clock correction', async () => {
+  const { messages, send } = context();
+  void send(init);
+  await vi.advanceTimersByTimeAsync(1_000);
+  vi.setSystemTime(Date.now() + 162 * 86_400_000);
+  await vi.advanceTimersByTimeAsync(119_100);
+  const report = messages.find(
+    (message) => message.op === 'error' && message.data?.[0]?.includes('Exchange start timed out after 120s'),
+  );
+  expect(report).toBeDefined();
+  expect(report!.data[1].sentryData.tags.startup_elapsed_ms).toBe('120000');
 });

@@ -1,4 +1,5 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
+pub(crate) mod protection;
 use crate::{Lighter, Pending, sign};
 use safe_cex_engine::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact};
 use safe_cex_engine::model::*;
@@ -7,6 +8,7 @@ use safe_cex_engine::request_context::{
     Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -60,6 +62,7 @@ struct Job {
     builder_stage: u8,
     retried_nonce: bool,
     amend: Option<Order>,
+    protection: Option<protection::Edit>,
     amend_filled: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
@@ -92,6 +95,9 @@ enum Step {
         orders: Vec<Prepared>,
     },
     Cancel(Box<Order>),
+    Modify(sign::Modify),
+    CancelProof,
+    RestoreProof,
     Setting {
         symbol: String,
         leverage: Option<f64>,
@@ -105,6 +111,8 @@ struct Prepared {
 pub enum Request {
     Approval,
     Nonce,
+    CancelProof,
+    RestoreProof,
     Submit(Submission),
 }
 pub struct Submission {
@@ -115,6 +123,7 @@ pub struct Submission {
 }
 #[derive(Clone)]
 enum Effect {
+    Modify,
     Place,
     Cancel,
     Setting {
@@ -314,6 +323,7 @@ impl Lighter {
 
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, cmd: Command) {
         let mut amend = None;
+        let mut protection = None;
         let (command, steps) = match cmd {
             Command::PlaceOrders { command, orders } => {
                 // This venue cannot honor a caller ID, including on a later batch item.
@@ -452,6 +462,38 @@ impl Lighter {
                     refuse(cx, not_sent("Lighter order is not open for amendment"));
                     return;
                 }
+                if self.protection.complex.contains(&old.id)
+                    || old.parent_id.is_some()
+                    || old.take_profit.is_some()
+                    || old.stop_loss.is_some()
+                {
+                    refuse(
+                        cx,
+                        not_sent("Lighter stop not changed: grouped or attached edit unsupported"),
+                    );
+                    return;
+                }
+                let native_stop = self
+                    .protection
+                    .originals
+                    .get(&old.id)
+                    .is_some_and(|source| {
+                        source.observed == old
+                            && source.waiting_mark
+                            && matches!(source.native.order_type, 2..=5)
+                    });
+                if !native_stop
+                    && old
+                        .extra
+                        .as_ref()
+                        .is_some_and(|extra| extra.conditional_order_price.is_some())
+                {
+                    refuse(
+                        cx,
+                        not_sent("Lighter stop-limit edit is unsupported; stop not changed"),
+                    );
+                    return;
+                }
                 let left = match amount
                     .map(|total| safe_cex_engine::num::left_of_total(total, old.filled))
                     .transpose()
@@ -462,7 +504,24 @@ impl Lighter {
                         return;
                     }
                 };
-                let kind = protective_kind(cx, &old, price.unwrap_or(old.price));
+                let kind = old.kind;
+                let original = self
+                    .protection
+                    .originals
+                    .get(&old.id)
+                    .filter(|original| original.observed == old);
+                let max_slippage_pct = original.and_then(protection::Original::market_slippage_pct);
+                if original.is_some_and(|original| matches!(original.native.order_type, 2 | 4))
+                    && max_slippage_pct.is_none()
+                {
+                    refuse(
+                        cx,
+                        not_sent(
+                            "Lighter stop not changed: original slippage bound unsupported; re-place it",
+                        ),
+                    );
+                    return;
+                }
                 let opts = PlaceOrderOpts {
                     symbol: old.symbol.clone(),
                     kind,
@@ -479,7 +538,7 @@ impl Lighter {
                     sl_trigger_type: None,
                     client_order_id: None,
                     close: old.close,
-                    max_slippage_pct: None,
+                    max_slippage_pct,
                     stp_mode: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,
@@ -492,7 +551,96 @@ impl Lighter {
                         return;
                     }
                 };
-                steps.push_front(Step::Cancel(Box::new(old.clone())));
+                if matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                    || old.reduce_only
+                {
+                    if cx.frame_fed()
+                        && matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                    {
+                        refuse(cx, not_sent("Lighter stop not changed: reference stale"));
+                        return;
+                    }
+                    let Some(original) = self
+                        .protection
+                        .originals
+                        .get(&old.id)
+                        .filter(|o| o.observed == old)
+                        .cloned()
+                    else {
+                        refuse(
+                            cx,
+                            not_sent(
+                                "Lighter stop not changed: exact standalone original unavailable",
+                            ),
+                        );
+                        return;
+                    };
+                    let Some(Step::Place(orders)) = steps.front() else {
+                        refuse(
+                            cx,
+                            not_sent("Lighter stop not changed: unsupported edit shape"),
+                        );
+                        return;
+                    };
+                    if steps.len() != 1 || orders.len() != 1 {
+                        refuse(
+                            cx,
+                            not_sent("Lighter stop not changed: split edit unsupported"),
+                        );
+                        return;
+                    }
+                    if matches!(original.native.order_type, 3 | 5)
+                        && if original.native.is_buy {
+                            original.native.price < orders[0].native.trigger_price
+                        } else {
+                            original.native.price > orders[0].native.trigger_price
+                        }
+                    {
+                        refuse(
+                            cx,
+                            not_sent(
+                                "Lighter stop not changed: kept limit cannot execute at the new trigger; re-place with the intended limit",
+                            ),
+                        );
+                        return;
+                    }
+                    if let Err(error) =
+                        self.protective_reference(cx.store, &orders[0].order, cx.now)
+                    {
+                        refuse(cx, error);
+                        return;
+                    }
+                    protection = Some(protection::Edit {
+                        original,
+                        replacement: orders[0].order.clone(),
+                        canceled: false,
+                        restoring: false,
+                        refusal: None,
+                    });
+                }
+                if let Some(edit) = &protection
+                    && edit.original.waiting_mark
+                    && matches!(edit.original.native.order_type, 2..=5)
+                    && let Some(Step::Place(orders)) = steps.front()
+                    && matches!(
+                        (edit.original.native.order_type, orders[0].native.order_type),
+                        (2 | 3, 2) | (4 | 5, 4)
+                    )
+                {
+                    steps = VecDeque::from([Step::Modify(sign::Modify {
+                        market_index: edit.original.native.market_id,
+                        index: edit.original.index,
+                        base_amount: orders[0].native.amount,
+                        price: if matches!(edit.original.native.order_type, 2 | 4) {
+                            orders[0].native.price
+                        } else {
+                            edit.original.native.price
+                        },
+                        trigger_price: orders[0].native.trigger_price,
+                    })]);
+                } else {
+                    steps.push_front(Step::Cancel(Box::new(old.clone())));
+                }
                 amend = Some(old);
                 (command, steps)
             }
@@ -560,7 +708,10 @@ impl Lighter {
             .collect();
         let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
-            read_credential: None,
+            read_credential: protection
+                .as_ref()
+                .and(self.account.identity.as_ref())
+                .map(crate::primary_credential),
             write_credential: self
                 .account
                 .identity
@@ -589,6 +740,7 @@ impl Lighter {
             builder_stage: 0,
             retried_nonce: false,
             amend,
+            protection,
             amend_filled: false,
             effective: false,
             group_legs,
@@ -666,6 +818,55 @@ impl Lighter {
                 cx,
                 not_sent("Lighter signer unavailable; execution is disabled"),
             );
+            return;
+        }
+        if matches!(
+            job.steps.front(),
+            Some(Step::CancelProof | Step::RestoreProof)
+        ) {
+            let restoring = matches!(job.steps.front(), Some(Step::RestoreProof));
+            let client = if restoring {
+                job.ids.last().unwrap().parse().unwrap()
+            } else {
+                job.protection.as_ref().unwrap().original.client
+            };
+            let account = self.account.account_index.unwrap();
+            let Some(context) = self.trade_context(cx, Operation::Read, None) else {
+                return;
+            };
+            let recipe = match self
+                .account
+                .identity
+                .clone()
+                .ok_or_else(|| "Lighter signer unavailable".to_owned())
+                .and_then(|identity| self.auth_recipe(identity, sign::AuthPlacement::Header))
+            {
+                Ok(recipe) => recipe,
+                Err(error) => {
+                    self.trade_finish(cx, uncertain(error));
+                    return;
+                }
+            };
+            self.trading.inflight = true;
+            if let Err((_, error)) = cx.request_signed_managed(
+                context,
+                None,
+                Method::Get,
+                format!(
+                    "{}/api/v1/accountOrders?account_index={account}&client_order_indexes={client}",
+                    self.host()
+                ),
+                None,
+                recipe,
+                Pending::Trade(if restoring {
+                    Request::RestoreProof
+                } else {
+                    Request::CancelProof
+                }),
+            ) {
+                self.trading.inflight = false;
+                self.trade_finish(cx, error.venue_error());
+            }
             return;
         }
         if let Some(Step::Position {
@@ -820,6 +1021,7 @@ impl Lighter {
         let count = txs.len();
         let intent = match &effect {
             Effect::Place => Some(safe_cex_engine::classify::Intent::Place),
+            Effect::Modify => Some(safe_cex_engine::classify::Intent::Amend),
             Effect::Setting { .. } => Some(safe_cex_engine::classify::Intent::Setting),
             Effect::Cancel => None,
         };
@@ -867,6 +1069,22 @@ impl Lighter {
             self.account_setting_write(symbol);
         }
         let job = self.trading.active.as_ref().unwrap();
+        if let Some(edit) = &job.protection
+            && let Some(plan) = &job.plan
+        {
+            let message = if edit.canceled {
+                format!(
+                    "Your {} protection outcome unknown; check Open Orders",
+                    edit.original.observed.symbol
+                )
+            } else {
+                format!(
+                    "Your {} stop edit outcome unknown; check Open Orders",
+                    edit.original.observed.symbol
+                )
+            };
+            let _ = cx.present_plan_failure(plan, message);
+        }
         let grouped = matches!(job.steps.front(), Some(Step::Group { .. }));
         if let Some(Step::Place(orders) | Step::Group { orders, .. }) = job.steps.front() {
             cx.command_progress(
@@ -906,7 +1124,7 @@ impl Lighter {
         cx: &Cx<'_, Pending>,
     ) -> Result<(Vec<sign::Transaction>, Effect), String> {
         match self.trading.active.as_ref().unwrap().steps.front().unwrap() {
-            Step::Position { .. } => unreachable!(),
+            Step::Position { .. } | Step::CancelProof | Step::RestoreProof => unreachable!(),
             Step::Place(orders) => {
                 let builder = self.builder();
                 Ok((
@@ -927,6 +1145,10 @@ impl Lighter {
                     builder: self.builder(),
                 }],
                 Effect::Place,
+            )),
+            Step::Modify(order) => Ok((
+                vec![sign::Transaction::Modify(order.clone())],
+                Effect::Modify,
             )),
             Step::Cancel(order) => Ok((
                 vec![sign::Transaction::Cancel {
@@ -959,7 +1181,7 @@ impl Lighter {
                 let previous_leverage = setting
                     .map(|s| s.leverage)
                     .filter(|n| n.is_finite() && *n > 0.0)
-                    .unwrap_or(market.limits.leverage.max);
+                    .unwrap_or_else(|| self.default_leverage(market));
                 let leverage = leverage.unwrap_or(previous_leverage);
                 if !leverage.is_finite() || leverage <= 0.0 {
                     return Err("Invalid Lighter leverage".into());
@@ -1031,6 +1253,10 @@ impl Lighter {
         }
         self.trading.inflight = false;
         if matches!(response.status, 405 | 429) && !matches!(&request, Request::Submit(_)) {
+            if matches!(&request, Request::CancelProof | Request::RestoreProof) {
+                self.trade_finish(cx, uncertain("Lighter protection proof outcome unknown after rate limit; check Open Orders").kind(ErrorKind::RateLimited));
+                return;
+            }
             let parsed = serde_json::from_str::<Reply>(response.body).ok();
             let mut error = not_sent(RATE_MESSAGE).kind(ErrorKind::RateLimited);
             if let Some(reply) = parsed {
@@ -1061,7 +1287,7 @@ impl Lighter {
                             a.account_index.integer() == Some(builder.account_index)
                                 && a.approval_expiry
                                     .integer()
-                                    .is_some_and(|expiry| expiry as f64 > cx.now)
+                                    .is_some_and(|expiry| expiry as f64 > cx.protocol_now())
                                 && a.max_perps_maker_fee
                                     .as_ref()
                                     .and_then(Number::integer)
@@ -1109,6 +1335,68 @@ impl Lighter {
                     }
                 }
             }
+            Request::RestoreProof => {
+                self.trade_read_finished(cx, &context);
+                let job = self.trading.active.as_ref().unwrap();
+                let edit = job.protection.as_ref().unwrap();
+                if !(200..300).contains(&response.status)
+                    || !protection::restored_proof(response.body, edit, job.ids.last().unwrap())
+                {
+                    self.trade_finish(
+                        cx,
+                        uncertain("Lighter original put-back is unproven; check Open Orders"),
+                    );
+                    return;
+                }
+                let mut error = edit.refusal.clone().unwrap();
+                error.message = format!(
+                    "Your {} protection is unchanged: its replacement was refused, so the original protection was restored",
+                    edit.original.observed.symbol
+                );
+                error.protection = Some(safe_cex_engine::error::Protection::Restored);
+                error.presents = true;
+                self.trading.active.as_mut().unwrap().protection = None;
+                self.trade_finish(cx, error);
+            }
+            Request::CancelProof => {
+                self.trade_read_finished(cx, &context);
+                let valid = (200..300).contains(&response.status)
+                    && protection::terminal_proof(
+                        response.body,
+                        &self
+                            .trading
+                            .active
+                            .as_ref()
+                            .unwrap()
+                            .protection
+                            .as_ref()
+                            .unwrap()
+                            .original,
+                    );
+                if !valid {
+                    self.trade_finish(cx, uncertain("Lighter cancellation outcome unknown; check Open Orders; replacement withheld"));
+                    return;
+                }
+                let old = self
+                    .trading
+                    .active
+                    .as_ref()
+                    .unwrap()
+                    .amend
+                    .as_ref()
+                    .unwrap()
+                    .clone();
+                if self.trading.active.as_ref().unwrap().amend_filled {
+                    self.trade_finish(cx, uncertain("Lighter source filled; replacement withheld"));
+                    return;
+                }
+                self.record_cancel(&old.id, cx.now);
+                cx.store.remove_orders(&[&old.id]);
+                let job = self.trading.active.as_mut().unwrap();
+                job.protection.as_mut().unwrap().canceled = true;
+                job.steps.pop_front();
+                self.trade_kick(cx);
+            }
             Request::Submit(submission) => {
                 let parsed = serde_json::from_str::<Reply>(response.body);
                 let reply = match parsed {
@@ -1129,9 +1417,12 @@ impl Lighter {
                 let code = reply.code.as_ref().and_then(Number::integer);
                 if submission.count == 1
                     && !submission.grouped
+                    && !matches!(submission.effect, Effect::Modify)
                     && code == Some(21104)
                     && response.status < 500
                     && !matches!(response.status, 405 | 429)
+                    && !(response.status == 408
+                        && self.trading.active.as_ref().unwrap().protection.is_some())
                     && !self.trading.active.as_ref().unwrap().retried_nonce
                 {
                     self.trading.active.as_mut().unwrap().retried_nonce = true;
@@ -1152,7 +1443,11 @@ impl Lighter {
                 if response.status >= 300 || code != Some(200) || hash_count != submission.count {
                     self.trading.next_nonce.invalidate();
                     // The sequencer may still accept individual transactions of a refused batch.
-                    let unknown = response.status >= 500
+                    let guarded = self.trading.active.as_ref().unwrap().protection.is_some();
+                    let unknown = (guarded
+                        && (matches!(response.status, 405 | 408 | 429)
+                            || matches!(code, Some(23000 | 23100))))
+                        || response.status >= 500
                         || (submission.grouped && (response.status == 408 || code == Some(21104)))
                         || code.is_none()
                         || code == Some(200)
@@ -1189,6 +1484,16 @@ impl Lighter {
                         message.push_str(RATE_MESSAGE);
                     }
                     let mut error = VenueError::new(message);
+                    if matches!(submission.effect, Effect::Modify) {
+                        error.message = if unknown {
+                            format!(
+                                "Lighter stop edit outcome unknown: {}; check Open Orders",
+                                error.message
+                            )
+                        } else {
+                            format!("Lighter stop not changed: {}", error.message)
+                        };
+                    }
                     if let Some(code) = code {
                         error = error.venue_code(code.to_string());
                     }
@@ -1227,6 +1532,7 @@ impl Lighter {
                     return;
                 }
                 let ids: Vec<String> = match self.trading.active.as_ref().unwrap().steps.front() {
+                    Some(Step::Modify(order)) => vec![order.index.to_string()],
                     Some(Step::Place(orders) | Step::Group { orders, .. }) => {
                         orders.iter().map(|p| p.order.id.clone()).collect()
                     }
@@ -1260,7 +1566,9 @@ impl Lighter {
                         .extend(orders.iter().map(|p| p.order.id.clone()));
                 }
                 match step {
-                    Step::Position { .. } => unreachable!(),
+                    Step::Position { .. } | Step::CancelProof | Step::RestoreProof => {
+                        unreachable!()
+                    }
                     Step::Place(orders) | Step::Group { orders, .. } => {
                         for mut p in orders {
                             p.order.last_update = cx.now;
@@ -1283,6 +1591,9 @@ impl Lighter {
                             }
                         }
                     }
+                    Step::Modify(order) => {
+                        self.record_modify(&order.index.to_string());
+                    }
                     Step::Cancel(order) => {
                         if let Some(job) = self.trading.active.as_mut()
                             && job.amend.as_ref().is_some_and(|o| o.id == order.id)
@@ -1292,8 +1603,17 @@ impl Lighter {
                         {
                             job.amend_filled = true;
                         }
-                        self.record_cancel(&order.id, cx.now);
-                        cx.store.remove_orders(&[&order.id]);
+                        if self.trading.active.as_ref().unwrap().protection.is_some() {
+                            self.trading
+                                .active
+                                .as_mut()
+                                .unwrap()
+                                .steps
+                                .push_front(Step::CancelProof);
+                        } else {
+                            self.record_cancel(&order.id, cx.now);
+                            cx.store.remove_orders(&[&order.id]);
+                        }
                     }
                     Step::Setting {
                         leverage: asked_leverage,
@@ -1361,6 +1681,18 @@ impl Lighter {
             Request::Approval => {
                 self.trade_finish(cx, not_sent(error).kind(ErrorKind::Network));
             }
+            Request::RestoreProof => self.trade_finish(
+                cx,
+                uncertain(format!(
+                    "Lighter original put-back is unproven: {error}; check Open Orders"
+                )),
+            ),
+            Request::CancelProof => self.trade_finish(
+                cx,
+                uncertain(format!(
+                    "Lighter cancellation proof unavailable: {error}; check Open Orders"
+                )),
+            ),
             Request::Nonce => self.trade_finish(cx, not_sent(error).kind(ErrorKind::Network)),
             Request::Submit(s) => {
                 self.submission_uncertain(cx, &s.effect);
@@ -1375,6 +1707,19 @@ impl Lighter {
 
     fn submission_uncertain(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
         self.trading.next_nonce.invalidate();
+        if matches!(effect, Effect::Modify) {
+            let id = self
+                .trading
+                .active
+                .as_ref()
+                .unwrap()
+                .amend
+                .as_ref()
+                .unwrap()
+                .id
+                .clone();
+            self.record_modify(&id);
+        }
         // Frame-fed settings come from the data source, which reconciles them.
         if let Effect::Setting { symbol, .. } = effect
             && !cx.frame_fed()
@@ -1455,6 +1800,16 @@ impl Lighter {
     }
 
     fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, error: impl Into<VenueError>) {
+        let mut error = error.into();
+        if self.protective_finish(cx, &mut error) {
+            return;
+        }
+        if let Some(job) = &self.trading.active
+            && let Some(plan) = &job.plan
+            && job.protection.is_some()
+        {
+            let _ = cx.present_plan_failure(plan, error.message.clone());
+        }
         if let Some(wait) = self.trading.position_wait.take() {
             self.trading.retired_snapshot = Some(wait.serial);
         }
@@ -1463,9 +1818,9 @@ impl Lighter {
             if job.effect.is_some() {
                 self.trading.next_nonce.invalidate();
             }
-            let mut error = error.into();
+            let mut error = error;
             if !job.ids.is_empty() {
-                let indexes = job.ids.join(",");
+                let indexes = job.ids.join_with(",");
                 error.message = format!(
                     "{}; previously placed order indexes: {indexes}",
                     error.message
@@ -1866,25 +2221,6 @@ fn snap_leverage(requested: f64) -> f64 {
         .min_by(|a, b| (requested - a).abs().total_cmp(&(requested - b).abs()))
         .unwrap()
 }
-fn protective_kind(cx: &Cx<'_, Pending>, order: &Order, price: f64) -> OrderType {
-    if !order.reduce_only || order.kind != OrderType::Limit {
-        return order.kind;
-    }
-    let Some(reference) = cx.store.ticker(&order.symbol).and_then(|t| {
-        [t.mark, t.last, t.index]
-            .into_iter()
-            .find(|n| n.is_finite() && *n > 0.0)
-    }) else {
-        return order.kind;
-    };
-    if (order.side == OrderSide::Sell && price <= reference)
-        || (order.side == OrderSide::Buy && price >= reference)
-    {
-        OrderType::StopLoss
-    } else {
-        OrderType::Limit
-    }
-}
 /// Lighter lets a maker-only key send only 0ms speed-bump transactions.
 const MAKER_ONLY_MESSAGE: &str = "This Lighter API key is maker-only, which allows only post-only orders and cancels; change leverage or place market and stop orders from a key that is not maker-only";
 const UNCERTAIN_RESULT: &str =
@@ -1976,7 +2312,11 @@ impl Lighter {
                 &job.preflight,
                 Policy {
                     operation,
-                    credential: None,
+                    credential: job
+                        .protection
+                        .as_ref()
+                        .and(self.account.identity.as_ref())
+                        .map(crate::primary_credential),
                     timeout_ms: 20_000,
                     pacing: None,
                     retry: RetryPolicy::Never,
@@ -2033,6 +2373,33 @@ impl Lighter {
             return;
         };
         self.trading.inflight = true;
+        if self.trading.active.as_ref().unwrap().protection.is_some() {
+            let recipe = self.auth_recipe(
+                self.account.identity.clone().unwrap(),
+                sign::AuthPlacement::Header,
+            );
+            match recipe {
+                Ok(recipe) => {
+                    if let Err((_, error)) = cx.request_signed_managed(
+                        context,
+                        None,
+                        Method::Get,
+                        url,
+                        None,
+                        recipe,
+                        Pending::Trade(request),
+                    ) {
+                        self.trading.inflight = false;
+                        self.trade_finish(cx, error.venue_error());
+                    }
+                }
+                Err(error) => {
+                    self.trading.inflight = false;
+                    self.trade_finish(cx, not_sent(error));
+                }
+            }
+            return;
+        }
         if let Err((_, error)) = cx.request_managed(
             context,
             None,
@@ -2219,6 +2586,11 @@ impl Lighter {
         {
             let job = self.trading.active.take().unwrap();
             if let Some(effect) = job.effect {
+                if matches!(effect, Effect::Modify)
+                    && let Some(old) = job.amend.as_ref()
+                {
+                    self.record_modify(&old.id);
+                }
                 self.trading.retired_effects.push(effect);
             }
             self.trading.inflight = false;
@@ -2261,6 +2633,14 @@ impl Lighter {
             return;
         }
         self.trading.inflight = false;
+        let error = if matches!(&request, Request::CancelProof | Request::RestoreProof) {
+            uncertain(format!(
+                "Lighter protection proof outcome unknown: {}; check Open Orders",
+                error.message
+            ))
+        } else {
+            error
+        };
         if let Request::Submit(submission) = request
             && error.outcome != Some(Outcome::NotSent)
         {

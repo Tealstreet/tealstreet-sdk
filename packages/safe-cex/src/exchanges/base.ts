@@ -84,6 +84,7 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { FrameApplier, FrameApplyError } from '../store/frameApplier';
 import { ExchangeEmitter } from './exchangeEmitter';
 import { claimWriteTiming, emitWriteTiming, TIMED_WRITE_METHODS } from '../writeTiming';
+import { startupDiagnosticTags } from './rust/startupDiagnostics';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -180,7 +181,8 @@ export const summarizeSocketHealth = (
   const privateHealthy =
     privateSockets.every((socket) => socket.isRecoveryComplete !== false) &&
     (initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy));
-  const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
+  // Reconnect resets initialization, not the last message's page-clock timestamp.
+  const privateTimestamps = privateSockets.map((s) => s.lastMessageTimestamp || 0);
   const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
 
   return {
@@ -304,7 +306,7 @@ export const CAPABILITY_METHODS = {
 } as const satisfies Record<string, BaseCapabilityMethod>;
 
 /** What this venue can answer. The only supported way to ask; never inspect the methods. */
-export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean>;
+export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean> & Partial<EngineCapabilities>;
 
 export type EngineSnapshot = {
   frame: ArrayBuffer;
@@ -358,6 +360,7 @@ export const WORKER_OPTIONAL_METHODS = [
   // Rust native account reads; a main-thread mirror asks the worker's engine.
   'getAccount',
   'fetchPositions',
+  'readPositions',
   'fetchBalance',
   'fetchPositionMode',
   // Rust-only engine methods a mirror forwards whole.
@@ -371,11 +374,14 @@ export const WORKER_OPTIONAL_METHODS = [
   'stopAccountAlgos',
   // ...and asks it to re-read the settings that engine just changed.
   'refreshAccountSettings',
+  // ...and, while it holds an uncertain write, for orders from a fresh read.
+  'refreshAccountOrders',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'refreshMarkets',
   'fetchPositions',
+  'readPositions',
   'fetchBalance',
   'fetchPositionMode',
   'findOrderByClientOrderId',
@@ -804,7 +810,7 @@ export class BaseExchange implements Exchange {
   get capabilities(): ExchangeCapabilities {
     const answers = {} as ExchangeCapabilities;
     for (const [capability, method] of Object.entries(CAPABILITY_METHODS) as Array<
-      [keyof ExchangeCapabilities, BaseCapabilityMethod]
+      [keyof typeof CAPABILITY_METHODS, BaseCapabilityMethod]
     >)
       answers[capability] = !isInertCapability(this[method], method);
     return answers;
@@ -1850,7 +1856,10 @@ export class BaseExchange implements Exchange {
         if (timing) emitWriteTiming(this, timing, 'error');
         reject(
           Object.assign(this.workerCommandTimeoutError(method, args), {
-            message: 'The account worker stopped before answering; reconcile interrupted writes before retrying',
+            ...(!WORKER_WRITE_METHODS.has(method) ? { code: 'WORKER_STOPPED' } : {}),
+            message: WORKER_WRITE_METHODS.has(method)
+              ? 'The account worker stopped before answering; reconcile interrupted writes before retrying'
+              : 'The account worker stopped before answering this read; retry after it reconnects',
           }),
         );
       };
@@ -2043,10 +2052,14 @@ export class BaseExchange implements Exchange {
     let formattedMsg;
     let errorObject: Error | undefined;
     let sentryContext: any = {};
-    const sentryTags =
-      structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
+    const sentryTags = {
+      ...(structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
         ? structuredExtraData.sentryTags
-        : {};
+        : {}),
+      ...(structuredExtraData.engineEvent?.code === 'startup.incomplete'
+        ? startupDiagnosticTags(structuredExtraData.engineEvent)
+        : {}),
+    };
     const sentryExtra =
       structuredExtraData.sentryExtra && typeof structuredExtraData.sentryExtra === 'object'
         ? structuredExtraData.sentryExtra
@@ -2454,6 +2467,10 @@ export class BaseExchange implements Exchange {
       }
       case 'kraken-challenge':
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
+      case 'backpack-ed25519':
+      case 'grvt-order':
+      case 'grvt-address':
+      case 'kucoin-batch':
       case 'hyperliquid-l1':
       case 'hyperliquid-address':
       case 'lighter-tx':

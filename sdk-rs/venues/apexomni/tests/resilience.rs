@@ -49,6 +49,7 @@ fn engine(seed: &str) -> TestEngine {
                     key: ExtraKey::ZklinkSeed,
                     field: ExtraFieldPolicy::Optional,
                     encoding: Some(KeyEncoding::Hex),
+                    trim: false,
                 }),
                 ..Default::default()
             }),

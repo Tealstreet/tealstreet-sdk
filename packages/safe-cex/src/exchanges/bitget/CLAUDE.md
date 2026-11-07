@@ -24,6 +24,10 @@ native units; only remaining and position display sizes use the TS price-based
 8-decimal conversion. Collateral uses each market's base coin and preserves the
 per-coin balance map through worker frames.
 
+An empty inverse catalogue keeps its terminal `venueUnavailable` startup failure
+and emits the same cause as an error-level `request.failed` event for UI consumers.
+It does not retry discovery or change the selected API product.
+
 UTA bills use v3 `financial-records`, retaining raw signed amount and fee metadata
 without assuming trade rows are gross PnL. Classic trailing modifies through
 `modify-plan-order`; UTA trailing uses `type=trailing_stop` and native distance
@@ -31,6 +35,19 @@ parameters. Size-only edits preserve original callback parameters and activation
 basis. Unsupported external opening, ambiguous exposure, limit-execution or
 index-triggered trailing configurations remain visible and cancelable; edits
 fail before canceling them.
+
+Classic TP/SL cancellation uses `/api/v2/mix/order/cancel-plan-order` with
+`orderIdList: [{ orderId }]`, just like trailing stops. Whole-position TP/SL
+retain `pos_profit`/`pos_loss`; sized orders retain `profit_plan`/`loss_plan`.
+A top-level `orderId` does not address an individual Classic plan cancellation.
+A matching native ID or a client-only acknowledgement matching the known order's
+client ID proves cancellation; conflicting native IDs do not fall back to client
+IDs. Empty or unrelated success lists leave it visible and fail the command.
+Retained placement routes keep the same bounded ID list and client identity
+before private updates arrive. Documented `moving_plan` rows remain visible as
+trailing orders and retain that type for cancellation; `track_plan` and `track`
+retain their existing mapping. UTA
+continues using `/api/v3/trade/cancel-strategy-order` with a single `orderId`.
 
 Documented native regressions and private tapes cover these engine paths; the TS
 implementation below remains the replay reference for its supported overlap.

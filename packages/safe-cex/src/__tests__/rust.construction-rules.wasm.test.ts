@@ -59,8 +59,6 @@ const startRejects = async (name: ExchangeName, options: Partial<ExchangeOptions
   expect(requests).toEqual([]);
 };
 
-it('BreakoutProp market data still needs DXtrade credentials', () =>
-  startRejects('breakoutprop', { publicDataOnly: true }, 'BreakoutProp market data requires a legacy DXtrade username and password'));
 
 it('AsterDEX wallet keys without the main wallet carry the message the app routes on', () =>
   startRejects(
@@ -73,7 +71,7 @@ it('Polymarket private accounts need a wallet private key', () =>
   startRejects('polymarket', { key: 'not-a-key' }, 'Polymarket requires a local 32-byte wallet private key'));
 
 it('Orderly private accounts need an application id', () =>
-  startRejects('tealstreet-dex', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
+  startRejects('woofi', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
 // Unadopted native families still refuse payload callbacks before I/O.
 it('unadopted private venues refuse a payload signer before any I/O', () =>

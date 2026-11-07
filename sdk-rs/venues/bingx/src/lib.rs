@@ -16,9 +16,12 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
-use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{
+    Candle, Interval, Limits, Market, MinMax, Precision, StopTriggerType, Ticker,
+};
 use safe_cex_engine::selected_read::ReadRole;
 use safe_cex_engine::socket_lifecycle::FeedId;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, Store, SubscriptionTopic,
     TimerId, Venue, num,
@@ -48,9 +51,12 @@ pub enum Pending {
     Daily {
         rows: Vec<Ticker>,
         skipped: Vec<String>,
+        // Keep the row's receipt time; only an accepted envelope publishes it.
+        references: Vec<(String, f64, f64)>,
     },
     Premium {
         skipped: Vec<String>,
+        references: Vec<(String, f64, f64)>,
     },
     Candles {
         command: CommandId,
@@ -125,7 +131,7 @@ pub(crate) fn log_skipped(cx: &mut Cx<'_, Pending>, kind: &str, ids: &[String]) 
         format!(
             "BingX skipped {} malformed {kind} row(s): {}{}",
             ids.len(),
-            shown.join(", "),
+            shown.join_with(", "),
             if more > 0 {
                 format!(" and {more} more")
             } else {
@@ -231,9 +237,12 @@ impl Bingx {
     }
 
     fn observe_orders(&mut self, cx: &Cx<'_, Pending>) {
-        for (order, kind, side, attached, native_status) in self.account.drain_order_meta() {
+        for (order, kind, side, attached, native_status, original) in
+            self.account.drain_order_meta()
+        {
             self.trading
                 .observe_order(&order, &kind, &side, attached, &native_status);
+            self.trading.observe_original(&order.id, original);
         }
         self.trading.retain_open_orders(cx.store);
     }
@@ -259,7 +268,7 @@ impl Bingx {
     }
 
     fn note_ban(&mut self, cx: &mut Cx<'_, Pending>, response: &Response<'_>) {
-        self.ban_wait_ms = ban_wait_ms(response, cx.now);
+        self.ban_wait_ms = ban_wait_ms(response, cx.protocol_now());
         if let Some(wait_ms) = self.ban_wait_ms {
             cx.notice(
                 Level::Warn,
@@ -291,6 +300,11 @@ impl Bingx {
         rows: Vec<Candle>,
         valid: bool,
     ) {
+        if let Some(error) = candle_rate_limit(&response, cx.protocol_now()) {
+            let _ = cx.command_error_context(context, error.message.clone());
+            let _ = cx.fail_context(context, error);
+            return;
+        }
         let result = success(response).and_then(|_| {
             if valid {
                 candle_data(rows)
@@ -352,6 +366,11 @@ impl Bingx {
         if let Pending::Candles { rows, valid, .. } = &mut signed.inner {
             rows.clear();
             *valid = true;
+        }
+        if let Pending::Daily { references, .. } | Pending::Premium { references, .. } =
+            &mut signed.inner
+        {
+            references.clear();
         }
         // The retry keeps its Selection, so account evidence is tagged again.
         if let Err((pending, error)) = managed::retry(cx, signed) {
@@ -454,7 +473,7 @@ impl Bingx {
         if text == "Pong" {
             return;
         }
-        let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
+        let Ok(message) = Message::decode(text) else {
             return;
         };
         if message.ping.is_some() {
@@ -464,66 +483,87 @@ impl Bingx {
         if message.pong.is_some() {
             return;
         }
-        let Some(data) = message.data else { return };
         if message.data_type == "market.contracts" {
-            let result = safe_cex_engine::json::each_in_field::<LiveTicker<'_>>(
-                data.get(),
-                "contracts",
-                |row| {
-                    let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
-                        return;
-                    };
-                    // Before the seed commits, a staged row keeps live fields for its overlay;
-                    // afterwards, like TS, markets the daily or funding read omitted stay absent.
-                    let ticker = match self.seed_index.get(market as usize).copied().flatten() {
-                        Some(ticker) => ticker,
-                        None if !self.tickers_committed => {
-                            let symbol = cx.store.markets()[market as usize].symbol.clone();
-                            let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
-                                return;
-                            };
-                            if !self.staged_tickers.contains(&symbol) {
-                                self.staged_tickers.push(symbol);
-                            }
-                            ticker as usize
+            let mut update = |row: LiveTicker<'_>| {
+                let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
+                    return;
+                };
+                // Before the seed commits, a staged row keeps live fields for its overlay;
+                // afterwards, like TS, markets the daily or funding read omitted stay absent.
+                let ticker = match self.seed_index.get(market as usize).copied().flatten() {
+                    Some(ticker) => ticker,
+                    None if !self.tickers_committed => {
+                        let symbol = cx.store.markets()[market as usize].symbol.clone();
+                        let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
+                            return;
+                        };
+                        if !self.staged_tickers.contains(&symbol) {
+                            self.staged_tickers.push(symbol);
                         }
-                        None => return,
-                    };
-                    let step = cx.store.markets()[market as usize].precision.price;
-                    let mut mask = (1 << 3) | (1 << 4) | (1 << 7);
-                    if row.trade_price > 0.0 {
-                        mask |= 7;
+                        ticker as usize
                     }
-                    if row.change_percentage.is_some() {
-                        mask |= 1 << 5;
+                    None => return,
+                };
+                let step = cx.store.markets()[market as usize].precision.price;
+                let mut mask = (1 << 3) | (1 << 4) | (1 << 7);
+                if row.trade_price > 0.0 {
+                    mask |= 7;
+                }
+                if row.change_percentage.is_some() {
+                    mask |= 1 << 5;
+                }
+                if row.volume.is_some() {
+                    mask |= 1 << 9;
+                }
+                if row.value.is_some() {
+                    mask |= 1 << 10;
+                }
+                cx.store.update_ticker_at(ticker as u32, |t| {
+                    if row.trade_price > 0. {
+                        t.last = row.trade_price;
+                        (t.bid, t.ask) = touch(row.trade_price, step)
                     }
-                    if row.volume.is_some() {
-                        mask |= 1 << 9;
-                    }
-                    if row.value.is_some() {
-                        mask |= 1 << 10;
-                    }
-                    cx.store.update_ticker_at(ticker as u32, |t| {
-                        if row.trade_price > 0. {
-                            t.last = row.trade_price;
-                            (t.bid, t.ask) = touch(row.trade_price, step)
-                        }
-                        t.mark = row.fair_price;
-                        t.index = row.index_price;
-                        t.funding_rate = row.funding_rate / 100.;
-                        t.percentage = row.change_percentage.unwrap_or_default();
-                        t.volume = row.volume.unwrap_or_default();
-                        t.quote_volume = row.value.unwrap_or_default();
-                        t.funding_time = 0.;
-                    });
-                    let symbol = &cx.store.markets()[market as usize].symbol;
-                    self.live_tickers.record(cx.store, symbol, mask);
-                    if self.live_priced.len() <= market as usize {
-                        self.live_priced.resize(cx.store.markets().len(), false);
-                    }
-                    self.live_priced[market as usize] = true;
-                },
-            );
+                    t.mark = row.fair_price;
+                    t.index = row.index_price;
+                    t.funding_rate = row.funding_rate / 100.;
+                    t.percentage = row.change_percentage.unwrap_or_default();
+                    t.volume = row.volume.unwrap_or_default();
+                    t.quote_volume = row.value.unwrap_or_default();
+                    t.funding_time = 0.;
+                });
+                let symbol = &cx.store.markets()[market as usize].symbol;
+                self.trading.observe_reference(
+                    symbol,
+                    StopTriggerType::MarkPrice,
+                    row.fair_price,
+                    cx.now,
+                );
+                if row.trade_price > 0.0 {
+                    self.trading.observe_reference(
+                        symbol,
+                        StopTriggerType::LastPrice,
+                        row.trade_price,
+                        cx.now,
+                    );
+                }
+                self.live_tickers.record(cx.store, symbol, mask);
+                if self.live_priced.len() <= market as usize {
+                    self.live_priced.resize(cx.store.markets().len(), false);
+                }
+                self.live_priced[market as usize] = true;
+            };
+            let result = if let Some(rows) = message.tickers {
+                rows.into_iter().for_each(&mut update);
+                Ok(true)
+            } else if let Some(data) = message.data {
+                safe_cex_engine::json::each_in_field::<LiveTicker<'_>>(
+                    data.get(),
+                    "contracts",
+                    update,
+                )
+            } else {
+                return;
+            };
             if result.is_err() {
                 cx.notice(
                     Level::Warn,
@@ -533,6 +573,7 @@ impl Bingx {
             }
             return;
         }
+        let Some(data) = message.data else { return };
         if let Some(rest) = message.data_type.strip_prefix("market.depth.") {
             let Some(id) = rest.strip_suffix(".step0.level100") else {
                 return;
@@ -582,6 +623,96 @@ impl Bingx {
                     cx.candle(&symbol, interval, candle)
                 }
             }
+        }
+    }
+}
+
+impl Bingx {
+    fn request_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: &str,
+        typed: Option<&safe_cex_engine::VenueError>,
+    ) {
+        let discovery = matches!(
+            &pending,
+            Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
+        );
+        match pending {
+            Pending::Clock(probe) => {
+                self.clock_failed(cx, probe, error);
+                return;
+            }
+            Pending::Metadata(leg) => {
+                // A failing private read surfaces as an Error at the retried-failure cadence.
+                cx.retried_failure(
+                    "bingx.lib:private",
+                    format!("BingX private request failed: {error}"),
+                );
+                account::fail_metadata_plan(cx, &leg, account::metadata_error(error));
+                return;
+            }
+            Pending::Signed(signed) => {
+                if let Some(context) = signed.context()
+                    && matches!(&signed.inner, Pending::Candles { .. })
+                {
+                    let _ = cx.command_error_context(context, error.to_owned());
+                    let _ = cx.fail_context(context, error);
+                    managed::finish(cx, signed.context().cloned());
+                    return;
+                }
+                let context = signed.context().cloned();
+                self.request_failed(cx, signed.inner, error, typed);
+                managed::finish(cx, context);
+                return;
+            }
+            Pending::Identity(read) => {
+                self.identity_failed(cx, read, error.into());
+                return;
+            }
+            Pending::History(request) => {
+                self.history.on_failed(cx, request, error);
+                return;
+            }
+            Pending::Trade(request) => {
+                self.trading
+                    .on_failed(cx, self.credentials.as_ref(), request, error);
+                return;
+            }
+            Pending::Account(request) => {
+                if let Some(c) = &self.credentials {
+                    self.account.request_failed(cx, request, error, typed, c);
+                }
+                return;
+            }
+            // Only a refused read admission leaves candles without custody.
+            Pending::Candles { command, .. } => {
+                cx.command_error(command, error);
+                refuse_candle_query(cx, error);
+                return;
+            }
+            Pending::Markets { .. } => self.retry_list(cx, List::Markets),
+            Pending::Daily { .. } => self.retry_list(cx, List::Daily),
+            Pending::Premium { .. } => {
+                if !self.tickers_committed {
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "BingX funding read failed; starting without funding rates",
+                    );
+                    self.commit_tickers(cx, true);
+                }
+                self.retry_list(cx, List::Premium)
+            }
+        }
+        let level = if discovery { Level::Warn } else { Level::Error };
+        if let Some(refused) =
+            typed.filter(|error| error.kind == Some(safe_cex_engine::ErrorKind::RateLimited))
+        {
+            cx.notice_error(level, code::REQUEST_FAILED, refused);
+        } else {
+            cx.notice(level, code::REQUEST_FAILED, error);
         }
     }
 }
@@ -665,6 +796,11 @@ const BAN_LONGEST_MS: f64 = 24.0 * 3_600_000.0;
 /// A 100410 envelope or HTTP 429: how long to wait, from the unblock time the
 /// response names (an epoch in the message, or Retry-After), else BAN_FLOOR_MS.
 pub(crate) fn ban_wait_ms(response: &Response<'_>, now: f64) -> Option<f64> {
+    named_ban_wait_ms(response, now).map(|named| named.unwrap_or(BAN_FLOOR_MS))
+}
+
+/// A 100410 envelope or HTTP 429, with the unblock wait the response names, if any.
+fn named_ban_wait_ms(response: &Response<'_>, now: f64) -> Option<Option<f64>> {
     #[derive(Deserialize)]
     struct Envelope {
         code: i64,
@@ -682,11 +818,44 @@ pub(crate) fn ban_wait_ms(response: &Response<'_>, now: f64) -> Option<f64> {
         .and_then(|seconds| seconds.trim().parse::<f64>().ok())
         .map(|seconds| seconds * 1000.0)
         .or_else(|| unblock_at(&envelope?.msg).map(|at| at - now));
-    Some(
-        named
-            .filter(|wait| *wait > 0.0 && *wait <= BAN_LONGEST_MS)
-            .unwrap_or(BAN_FLOOR_MS),
+    Some(named.filter(|wait| *wait > 0.0 && *wait <= BAN_LONGEST_MS))
+}
+
+/// Classify the envelope before any list codec, using the discovery ban policy.
+pub(crate) fn read_rate_limit(
+    response: &Response<'_>,
+    now: f64,
+) -> Option<safe_cex_engine::VenueError> {
+    rate_limit_error(response, Some(ban_wait_ms(response, now)?))
+}
+
+/// A chart history refusal carries only the wait BingX names: an unnamed 100410
+/// ("please try again later") leaves the backoff to the chart, not a 5 min floor.
+fn candle_rate_limit(response: &Response<'_>, now: f64) -> Option<safe_cex_engine::VenueError> {
+    rate_limit_error(response, named_ban_wait_ms(response, now)?)
+}
+
+fn rate_limit_error(
+    response: &Response<'_>,
+    wait: Option<f64>,
+) -> Option<safe_cex_engine::VenueError> {
+    let envelope = serde_json::from_str::<wire::Rejection<'_>>(response.body).ok();
+    let mut error = safe_cex_engine::VenueError::new(
+        success(*response)
+            .err()
+            .unwrap_or_else(|| "BingX rate limit".into()),
     )
+    .kind(safe_cex_engine::ErrorKind::RateLimited);
+    if let Some(wait) = wait {
+        error = error.retry_after_ms(wait);
+    }
+    if let Some(envelope) = envelope {
+        if let Some(code) = envelope.code.filter(|code| *code != 0) {
+            error = error.venue_code(code.to_string());
+        }
+        error = error.venue_message(envelope.msg.into_owned());
+    }
+    Some(error)
 }
 
 /// The first epoch (13-digit milliseconds or 10-digit seconds) in a ban message.
@@ -720,6 +889,26 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    /// Its native trigger kind decides, and it refuses a trigger that fires before canceling.
+    fn judges_protective_amend(
+        &self,
+        _store: &safe_cex_engine::store::Store,
+        _order: &safe_cex_engine::model::Order,
+    ) -> bool {
+        true
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        match pending {
+            Pending::Trade(request) => self.trading.protective_release(store, request, release),
+            Pending::Signed(signed) => self.http_release_veto(store, &signed.inner, release),
+            _ => Ok(()),
+        }
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -736,6 +925,7 @@ impl Venue for Bingx {
             account: safe_cex_engine::AccountLookup::Query,
             leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
             fresh_positions: true,
+            order_read_covers: self.refreshes_orders(),
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -806,6 +996,17 @@ impl Venue for Bingx {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Signed(request) => Self::startup_reads(&request.inner),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Daily { .. } | Pending::Premium { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn export_venue_state(&self) -> Option<Vec<u8>> {
         Some(self.trading.export_venue_state(self.account.mode_known()))
     }
@@ -928,9 +1129,14 @@ impl Venue for Bingx {
                     }
                 }
             }
-            Pending::Daily { rows, skipped } => match serde_json::from_str::<Daily<'_>>(item) {
+            Pending::Daily {
+                rows,
+                skipped,
+                references,
+            } => match serde_json::from_str::<Daily<'_>>(item) {
                 Ok(d) => {
                     if let Some(m) = cx.store.market_by_id(&d.symbol) {
+                        references.push((m.symbol.clone(), d.last_price, cx.now));
                         let (bid, ask) = touch(d.last_price, m.precision.price);
                         rows.push(Ticker {
                             id: m.id.clone(),
@@ -950,7 +1156,10 @@ impl Venue for Bingx {
                     skipped.push(row_symbol(item).unwrap_or_default().into_owned())
                 }
             },
-            Pending::Premium { skipped } => match serde_json::from_str::<Premium<'_>>(item) {
+            Pending::Premium {
+                skipped,
+                references,
+            } => match serde_json::from_str::<Premium<'_>>(item) {
                 Ok(p) => {
                     let Some(i) = self.ticker_slot(cx, &p.symbol) else {
                         return;
@@ -969,9 +1178,12 @@ impl Venue for Bingx {
                             .unwrap_or(false);
                         if !live {
                             cx.store.update_ticker_at(i as u32, apply);
+                            let symbol = &cx.store.tickers()[i].symbol;
+                            references.push((symbol.clone(), p.mark_price, cx.now));
                         }
                     } else {
                         apply(&mut self.seed[i]);
+                        references.push((self.seed[i].symbol.clone(), p.mark_price, cx.now));
                         self.seed_reported[i] = true
                     }
                 }
@@ -1083,8 +1295,13 @@ impl Venue for Bingx {
             pending => pending,
         };
         if let Err(error) = success(response) {
+            let typed = if matches!(pending, Pending::Candles { .. }) {
+                candle_rate_limit(&response, cx.protocol_now())
+            } else {
+                read_rate_limit(&response, cx.protocol_now())
+            };
             self.note_ban(cx, &response);
-            self.on_request_failed(cx, pending, &error);
+            self.request_failed(cx, pending, &error, typed.as_ref());
             self.ban_wait_ms = None;
             return;
         }
@@ -1139,10 +1356,19 @@ impl Venue for Bingx {
                     Pending::Daily {
                         rows: Vec::with_capacity(cx.store.markets().len()),
                         skipped: Vec::new(),
+                        references: Vec::new(),
                     },
                 )
             }
-            Pending::Daily { mut rows, skipped } => {
+            Pending::Daily {
+                mut rows,
+                skipped,
+                references,
+            } => {
+                for (symbol, value, at) in references {
+                    self.trading
+                        .observe_reference(&symbol, StopTriggerType::LastPrice, value, at);
+                }
                 log_skipped(cx, "ticker", &skipped);
                 // A market whose daily row was malformed still gets a slot, filled
                 // later by funding and the ticker stream.
@@ -1177,10 +1403,18 @@ impl Venue for Bingx {
                     paths::PREMIUM,
                     Pending::Premium {
                         skipped: Vec::new(),
+                        references: Vec::new(),
                     },
                 )
             }
-            Pending::Premium { skipped } => {
+            Pending::Premium {
+                skipped,
+                references,
+            } => {
+                for (symbol, value, at) in references {
+                    self.trading
+                        .observe_reference(&symbol, StopTriggerType::MarkPrice, value, at);
+                }
                 log_skipped(cx, "funding", &skipped);
                 if self.tickers_committed {
                     self.retries.succeeded(cx, &List::Premium);
@@ -1192,7 +1426,10 @@ impl Venue for Bingx {
                     // rather than publishing an empty set, and retry funding.
                     self.on_request_failed(
                         cx,
-                        Pending::Premium { skipped },
+                        Pending::Premium {
+                            skipped,
+                            references: Vec::new(),
+                        },
                         "BingX funding read named no seeded market",
                     );
                 }
@@ -1219,13 +1456,22 @@ impl Venue for Bingx {
             }
             Pending::Signed(signed) => {
                 if signed.context().is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
+                    if let Some(error) = candle_rate_limit(&response, cx.protocol_now()) {
+                        let context = signed.context().expect("checked candle custody");
+                        let _ = cx.command_error_context(context, error.message.clone());
+                        let _ = cx.fail_context(context, error);
+                        managed::finish(cx, signed.context().cloned());
+                        return;
+                    }
                     self.on_request_failed(
                         cx,
                         Pending::Signed(signed),
-                        &format!(
-                            "response did not contain the expected list: {}",
-                            response.body
-                        ),
+                        &success(response).err().unwrap_or_else(|| {
+                            format!(
+                                "response did not contain the expected list: {}",
+                                response.body
+                            )
+                        }),
                     );
                 } else {
                     let context = signed.context().cloned();
@@ -1250,15 +1496,18 @@ impl Venue for Bingx {
                 {
                     cx.startup_read_refused(&error);
                 }
-                self.account.read_error = account::read_refusal(&response);
+                let typed = account::read_refusal(&response, cx.protocol_now());
                 self.note_ban(cx, &response);
-                self.on_request_failed(
+                self.request_failed(
                     cx,
                     pending,
-                    &format!(
-                        "response did not contain the expected list: {}",
-                        response.body
-                    ),
+                    &success(response).err().unwrap_or_else(|| {
+                        format!(
+                            "response did not contain the expected list: {}",
+                            response.body
+                        )
+                    }),
+                    typed.as_ref(),
                 );
                 self.ban_wait_ms = None;
             }
@@ -1278,11 +1527,7 @@ impl Venue for Bingx {
                 self.trading
                     .on_sign_failed(cx, self.credentials.as_ref(), request, error)
             }
-            pending => {
-                self.account.read_error = Some(error.clone());
-                self.on_request_failed(cx, pending, &error.message);
-                self.account.read_error = None;
-            }
+            pending => self.request_failed(cx, pending, &error.message, Some(&error)),
         }
     }
     fn on_http_owner_retired(
@@ -1290,6 +1535,10 @@ impl Venue for Bingx {
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
     ) {
         self.trading.retired(owner);
+    }
+    // Every open-orders read commits its cover (`Account::on_response`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
         if let Some(credentials) = &self.credentials {
@@ -1322,121 +1571,48 @@ impl Venue for Bingx {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         pending: Pending,
-        mut error: safe_cex_engine::VenueError,
+        error: safe_cex_engine::VenueError,
     ) {
-        match pending {
-            Pending::Signed(signed) => {
-                if let Some(context) = signed.context()
-                    && matches!(&signed.inner, Pending::Candles { .. })
-                {
-                    let _ = cx.command_error_context(context, error.message.clone());
-                    let _ = cx.fail_context(context, error);
-                    managed::finish(cx, signed.context().cloned());
-                    return;
+        cx.with_startup_request_failure(pending, error, |cx, pending, mut error| {
+            match pending {
+                Pending::Signed(signed) => {
+                    if let Some(context) = signed.context()
+                        && matches!(&signed.inner, Pending::Candles { .. })
+                    {
+                        let _ = cx.command_error_context(context, error.message.clone());
+                        let _ = cx.fail_context(context, error);
+                        managed::finish(cx, signed.context().cloned());
+                        return;
+                    }
+                    if signed.resent && matches!(&signed.inner, Pending::Trade(_)) {
+                        // Only the retry was refused before release. The original
+                        // write reached the venue, so reconciliation is still required.
+                        error.outcome = Some(safe_cex_engine::Outcome::Unknown);
+                    }
+                    let context = signed.context().cloned();
+                    self.on_sign_error(cx, signed.inner, error);
+                    managed::finish(cx, context);
                 }
-                if signed.resent && matches!(&signed.inner, Pending::Trade(_)) {
-                    // Only the retry was refused before release. The original
-                    // write reached the venue, so reconciliation is still required.
-                    error.outcome = Some(safe_cex_engine::Outcome::Unknown);
+                Pending::Clock(probe) => self.clock_failed(cx, probe, &error.message),
+                Pending::Identity(read) => self.identity_failed(cx, read, error),
+                Pending::History(request) => self.history.on_sign_failed(cx, request, error),
+                Pending::Trade(request) => {
+                    self.trading
+                        .on_sign_failed(cx, self.credentials.as_ref(), request, error)
                 }
-                let context = signed.context().cloned();
-                self.on_sign_error(cx, signed.inner, error);
-                managed::finish(cx, context);
-            }
-            Pending::Clock(probe) => self.clock_failed(cx, probe, &error.message),
-            Pending::Identity(read) => self.identity_failed(cx, read, error),
-            Pending::History(request) => self.history.on_sign_failed(cx, request, error),
-            Pending::Trade(request) => {
-                self.trading
-                    .on_sign_failed(cx, self.credentials.as_ref(), request, error)
-            }
-            Pending::Account(request) => {
-                if let Some(credentials) = &self.credentials {
-                    self.account.on_sign_failed(cx, request, error, credentials);
+                Pending::Account(request) => {
+                    if let Some(credentials) = &self.credentials {
+                        self.account.on_sign_failed(cx, request, error, credentials);
+                    }
                 }
+                // Provider refusal is typed and is never venue-auth evidence.
+                Pending::Metadata(leg) => account::fail_metadata_plan(cx, &leg, error),
+                pending => self.request_failed(cx, pending, &error.message, Some(&error)),
             }
-            // Provider refusal is typed and is never venue-auth evidence.
-            Pending::Metadata(leg) => account::fail_metadata_plan(cx, &leg, error),
-            pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        let discovery = matches!(
-            &pending,
-            Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
-        );
-        match pending {
-            Pending::Clock(probe) => {
-                self.clock_failed(cx, probe, error);
-                return;
-            }
-            Pending::Metadata(leg) => {
-                // A failing private read surfaces as an Error at the retried-failure cadence.
-                cx.retried_failure(
-                    "bingx.lib:private",
-                    format!("BingX private request failed: {error}"),
-                );
-                account::fail_metadata_plan(cx, &leg, account::metadata_error(error));
-                return;
-            }
-            Pending::Signed(signed) => {
-                if let Some(context) = signed.context()
-                    && matches!(&signed.inner, Pending::Candles { .. })
-                {
-                    let _ = cx.command_error_context(context, error.to_owned());
-                    let _ = cx.fail_context(context, error);
-                    managed::finish(cx, signed.context().cloned());
-                    return;
-                }
-                let context = signed.context().cloned();
-                self.on_request_failed(cx, signed.inner, error);
-                managed::finish(cx, context);
-                return;
-            }
-            Pending::Identity(read) => {
-                self.identity_failed(cx, read, error.into());
-                return;
-            }
-            Pending::History(request) => {
-                self.history.on_failed(cx, request, error);
-                return;
-            }
-            Pending::Trade(request) => {
-                self.trading
-                    .on_failed(cx, self.credentials.as_ref(), request, error);
-                return;
-            }
-            Pending::Account(request) => {
-                if let Some(c) = &self.credentials {
-                    self.account.on_request_failed(cx, request, error, c);
-                }
-                return;
-            }
-            // Only a refused read admission leaves candles without custody.
-            Pending::Candles { command, .. } => {
-                cx.command_error(command, error);
-                refuse_candle_query(cx, error);
-                return;
-            }
-            Pending::Markets { .. } => self.retry_list(cx, List::Markets),
-            Pending::Daily { .. } => self.retry_list(cx, List::Daily),
-            Pending::Premium { .. } => {
-                if !self.tickers_committed {
-                    cx.notice(
-                        Level::Warn,
-                        code::REQUEST_FAILED,
-                        "BingX funding read failed; starting without funding rates",
-                    );
-                    self.commit_tickers(cx, true);
-                }
-                self.retry_list(cx, List::Premium)
-            }
-        }
-        cx.notice(
-            if discovery { Level::Warn } else { Level::Error },
-            code::REQUEST_FAILED,
-            error,
-        );
+        self.request_failed(cx, pending, error, None);
     }
     fn read_root_retired(
         &mut self,
@@ -1469,12 +1645,14 @@ impl Venue for Bingx {
                     Pending::Daily {
                         rows: Vec::with_capacity(cx.store.markets().len()),
                         skipped: Vec::new(),
+                        references: Vec::new(),
                     },
                 ),
                 List::Premium => (
                     paths::PREMIUM,
                     Pending::Premium {
                         skipped: Vec::new(),
+                        references: Vec::new(),
                     },
                 ),
             };
@@ -1548,7 +1726,7 @@ impl Venue for Bingx {
                     refuse_candle_query(cx, interval.unsupported("BingX"));
                     return;
                 };
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let start = if limit.is_none() {
                     from_ms.unwrap_or(end - step * 500.)
                 } else {
@@ -1687,7 +1865,7 @@ fn reread_partial<P>(
 }
 
 fn candle_data(mut rows: Vec<Candle>) -> Result<String, String> {
-    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+    safe_cex_engine::model::sort_candles_by_time(&mut rows);
     serde_json::to_string(&rows).map_err(|error| error.to_string())
 }
 

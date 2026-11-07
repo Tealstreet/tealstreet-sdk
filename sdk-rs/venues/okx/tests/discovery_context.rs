@@ -10,8 +10,8 @@ use safe_cex_engine::{Action, Engine, Event, HttpRequest, RequestId, TimerId};
 use safe_cex_venue_okx::Okx;
 use std::collections::HashSet;
 
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.0;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.0;
 const PUBLIC_MARKETS: &str = "/api/v5/public/instruments?instType=SWAP";
 const PRIVATE_MARKETS: &str = "/api/v5/account/instruments?instType=SWAP";
 

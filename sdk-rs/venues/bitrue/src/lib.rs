@@ -848,7 +848,7 @@ impl Bitrue {
                                             && to.is_none_or(|t| c.timestamp * 1000.0 <= t)
                                     })
                                     .collect();
-                                result.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                                safe_cex_engine::model::sort_candles_by_time(&mut result);
                                 result.dedup_by(|a, b| a.timestamp == b.timestamp);
                                 if result.len() > limit as usize {
                                     result.drain(..result.len() - limit as usize);
@@ -877,6 +877,24 @@ impl Venue for Bitrue {
     }
     fn guard_order_mutations(&self) -> bool {
         true
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        match &pending.job {
+            Job::Trade(request) => self.trade_release_veto(store, request, release),
+            _ => Ok(()),
+        }
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
     }
     fn capture_http_reconciliation(
         &self,
@@ -911,6 +929,15 @@ impl Venue for Bitrue {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &pending.job {
+            Job::Markets { .. } => S::MARKETS,
+            Job::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
@@ -1327,20 +1354,22 @@ impl Venue for Bitrue {
     fn on_sign_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        mut pending: Pending,
-        mut error: safe_cex_engine::VenueError,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
     ) {
-        Self::finish_custody(cx, &mut pending);
-        if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job {
-            error.outcome = None;
-            let _ = cx.fail_context(root.context(), error);
-            return;
-        }
-        match pending.job {
-            Job::Trade(request) => self.trade_call_failed(cx, request, error, false),
-            Job::History(request) => request.sign_failed(cx, error),
-            _ => self.on_request_failed(cx, pending, &error.message),
-        }
+        cx.with_startup_request_failure(pending, error, |cx, mut pending, mut error| {
+            Self::finish_custody(cx, &mut pending);
+            if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job {
+                error.outcome = None;
+                let _ = cx.fail_context(root.context(), error);
+                return;
+            }
+            match pending.job {
+                Job::Trade(request) => self.trade_call_failed(cx, request, error, false),
+                Job::History(request) => request.sign_failed(cx, error),
+                _ => self.on_request_failed(cx, pending, &error.message),
+            }
+        });
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
         Self::finish_custody(cx, &mut pending);

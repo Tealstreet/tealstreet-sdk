@@ -1241,7 +1241,7 @@ mod owned_history {
         assert_eq!(gaps.len(), 1, "one shared coverage marker: {output:?}");
         assert_eq!(gaps[0].level, Level::Warn);
         assert!(
-            matches!(gaps[0].fields.as_slice(), [("command", Value::Num(owner))] if *owner == 99.)
+            matches!(gaps[0].fields.as_slice(), [("command", Value::Num(owner)), ("reason", Value::Str(_))] if *owner == 99.)
         );
         let (terminal, result) = output
             .iter()

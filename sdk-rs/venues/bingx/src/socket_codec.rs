@@ -40,6 +40,7 @@ fn policy(role: SocketChannel) -> FeedPolicy {
         },
         subscription_interval_ms: 0.,
         close_floors: &[],
+        data_silence: None,
     }
 }
 impl Bingx {

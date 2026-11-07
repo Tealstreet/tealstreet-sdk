@@ -1,6 +1,7 @@
 //! Startup read retry policy, public discovery and private gates alike. Venues
 //! rebuild requests to refresh signatures.
 use crate::log::code;
+pub use crate::startup_causes::Sections;
 use crate::{Cx, Level, TimerId};
 
 struct Read<K> {
@@ -140,6 +141,13 @@ impl PublicRetries {
         minimum_ms: f64,
         error: crate::VenueError,
     ) {
+        cx.startup_read_failure(
+            match read {
+                DiscoveryRead::Markets => Sections::MARKETS,
+                DiscoveryRead::Tickers => Sections::TICKERS,
+            },
+            &error,
+        );
         self.ready(cx);
         let waiting = self.retry.waiting(&read);
         self.retry.failed_after(cx, read, minimum_ms);

@@ -7,6 +7,9 @@ import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, OrderBook, UpdateOrderOpts } from '../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 import { createHmac } from 'node:crypto';
 
 import { BaseExchange } from '../exchanges/base';
@@ -1458,6 +1461,7 @@ describe('RustEngineExchange', () => {
     const topics: string[] = [];
     let token = 0;
     const transport: Transport = {
+      prepareHttp: prepareRecordedHttp,
       now: () => Date.now(),
       connect: (url, handlers) => {
         expect(url).toMatch(/^wss:\/\/kucoin.test\/socket\?token=token-/);
@@ -1525,6 +1529,7 @@ describe('RustEngineExchange', () => {
     exchange.listenOrderBook('BTCUSDT', () => {});
     await until(() => books.length > 0);
     expect(books[0].bids[0].amount).toBe(3);
+    expect(requests.map(({ url }) => new URL(url).pathname)).not.toContain('/api/v1/timestamp');
     main.dispose();
   });
 

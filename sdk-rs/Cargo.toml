@@ -176,9 +176,6 @@ opt-level = "z"
 [profile.release.package.safe-cex-venue-blofin]
 opt-level = "z"
 
-[profile.release.package.safe-cex-venue-breakoutprop]
-opt-level = "z"
-
 [profile.release.package.safe-cex-venue-cryptocom]
 opt-level = "z"
 

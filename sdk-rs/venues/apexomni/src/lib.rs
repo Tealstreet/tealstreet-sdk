@@ -293,10 +293,20 @@ impl Venue for ApexOmni {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        self.failed(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.failed(cx, pending, error);
+        });
     }
     fn guard_order_mutations(&self) -> bool {
         true
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.trading_release_veto(store, pending, release)
     }
     // reconcile_uncertain starts a fresh open-orders read at once, or owes one.
     fn fence_uncertain_placements(&self) -> bool {
@@ -312,6 +322,15 @@ impl Venue for ApexOmni {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Public(_, _) => S::MARKETS,
+            Pending::Account(_, request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
@@ -410,11 +429,11 @@ impl Venue for ApexOmni {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Candles(pending) => Self::candle_failed(cx, pending, error),
             Pending::Trade(request) => self.trading_failed(cx, request, error),
             pending => self.on_sign_error(cx, pending, error),
-        }
+        });
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if !self.public_timer(cx, timer) && !self.account_timer(cx, timer) {

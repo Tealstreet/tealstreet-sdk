@@ -30,6 +30,119 @@ are ignored. Shared ticker input updates native state without replacing local
 market metadata or account settings. Shared quote changes invoke native account
 revaluation so UPNL and available margin follow provider prices.
 
+## Rust queued write intent
+
+Native writes capture the original caller wait before entering the venue queue;
+an amend caps it at five seconds in that same capture. Read owner/deadline
+bindings, read timers and both final Claim guards copy this one bound.
+Unsent queued or builder/prerequisite-waiting jobs expire through bounded owner
+custody, and the first physical Claim checks the same exclusive deadline even
+when the timer has not fired. Queue, preparation, signing and pacing never renew
+it. An already released write keeps its response window and serial continuation;
+an amend whose cancel landed must still place its replacement after that bound.
+
+Queued independent cancels and protective placements may pass older placements
+only when their markets and order/client identities are disjoint from every
+older job. Same-market work and account-wide schedule controls remain barriers.
+The active owner is never preempted; nonce custody and 334 ms release pacing are
+unchanged. Expiry is a typed Timeout/NotSent for an entirely unsent command.
+Retirement has no I/O authority: retired intent timer IDs are cleared at the next
+trading or timer callback, without clearing a surviving owner's timer. Missing
+command receipts use the shared unstamped-command refusal.
+
+## Rust amendments
+
+An amend resolves account identity and fresh partial-fill sizing within the
+exclusive deadline, at most five seconds and capped by the caller's original
+remaining wait, before cancelling. Read
+receipts and the final cancel claim enforce it independently of timer order.
+The deadline never abandons a replacement after a cancel already left. Identity
+and sizing reads/timers retain the genuine amend preflight owner and original
+deadline; retired replies cannot resolve or release a newer edit of the same order. It captures the optional builder fee
+from the startup/source cache before cancel; unknown approval uses the existing
+no-builder fallback immediately. A replacement never starts or waits for a fee
+check, and a late approval cannot add a fee to that amend. A later refusal may
+omit the captured fee. Standalone placements retain their existing approval wait.
+`transport.http.timing` distinguishes identity, builder approval, order status,
+cancel and place using closed labels derived from the final bound packet; ordinary info reads remain aggregated.
+
+Rust SL/TP edits use guarded cancel/place. Hyperliquid's modify contract excludes
+trigger replacements without `always_place`; that flag can place after failed
+cancellation, so it is never used. The owner-bound sizing read verifies source
+identity and native execution parameters. The final cancel claim requires an
+own-symbol mark observed within five seconds, unchanged fills/identity, and a
+loaded live closing-side position. A veto preserves the original. The old
+pre-cancel deadline never abandons replacement after a cancel already left.
+
+A documented definitive replacement refusal permits one original-parameter
+restore only for a proven full-position `isPositionTpsl` source. An unknown
+replacement never restores or resends. Partial and attached edits remain available
+with the same final veto. When their original grouping is unproven, definitive
+replacement refusal reports typed `Protection::Unprotected` and “stop removed,
+please re-place”, with no invented restore. Exact recovery rechecks position,
+newer protection, late fills and the original fresh trigger at its final claim.
+Its terminal carries `Protection::Restored` after an accepted put-back, or
+`Protection::Unprotected` only after a definitive put-back refusal. Unknown or
+rate-limited put-back carries no protection claim and says its outcome is unknown,
+with a request to check Open Orders. Replacement 429 uses the same uncertain
+wording and never restores/resends. The serial root refusal remains intact.
+Put-back preserves economic parameters but mints a fresh cloid: HL documents its
+format, not reuse after cancellation. Obsolete recovery is refused visibly.
+Replacement preserves native execution type/price and the fresh remaining size. Complete native stream fields take precedence over stale cached
+placement fields. ACKs reconcile accepted parameters into an existing row while
+retaining newer stream fills, remaining quantity, status and observation time.
+
+## Rust startup reads
+
+Open-order snapshot failures retry per DEX scope with jittered backoff, including
+when another scope already loaded orders. A successful scope clears its own retry;
+429 responses retain the header-proven Retry-After delay. An unusable metadata
+join preserves orders and retries instead of silently ending the read.
+
+The SDK transport admits all `/info` reads through one weighted token bucket per
+API origin, including metadata, candles and history. Its initial 1,000-weight
+capacity permits cold discovery immediately, then refills at 1,000 weight/minute.
+Native pending metadata promotes amend identity/sizing and order-fence reads to
+explicit critical; account State/Orders, reconnect snapshots and Role/Mode/Spot
+are financial reconciliation, below explicit critical but above normal work.
+Both classes may use the same 200-weight reserve. Caller history and candles are bulk. Noncritical work has an 800-weight
+ceiling, leaving 200 for critical work within the same total. Native and shared
+queues keep FIFO within each class, and native refill is continuous. Queued
+candles retain their original 20 s bound, shortened by a smaller caller wait.
+Startup-only fees/builder wait for pending financial reads before their managed
+20 s deadline starts. A live placement may release its queued builder check;
+this does not promote it to critical. Catalogue completion refreshes its own DEX,
+but any shared identity/index remap retains a conservative all-DEX refresh.
+Spot catalogue joins keep their broad refresh. The source census epoch, revision
+and row-coverage guards remain unchanged.
+A 429 empties the bucket and pauses refill until Retry-After ends. Immediately
+before dispatch, an atomic shared-state check refuses prepared reads whose grant
+generation changed or whose origin is paused. Managed claim and send execute
+synchronously within that check, before the transaction releases its lock.
+Atomic IndexedDB transactions share admission and 429 pauses across account
+workers/tabs; runtimes without
+IndexedDB share a budget within their JS realm. Storage operations have a 1.5-second
+timeout and retry once on timeout before degrading. Hard errors or repeated
+timeouts use a shared local budget, retaining known pacing state. Local admission
+keeps normal speed until IndexedDB has opened successfully in this realm; later
+storage failures use one-quarter speed because shared and local budgets may split.
+After a 30-second cooldown, reads retry IndexedDB and max-merge local
+reservations and 429 pauses back into shared state, invalidating prior grants.
+While storage is unavailable, independent realms cannot share their 429 pauses.
+If IDB never opens, each realm has its own full 1,000-weight initial bucket.
+Only pacing timestamps and retry counters are stored, never account or request
+data. Persisted pauses/reservations are
+bounded relative to the current clock, and Retry-After pauses cap at five minutes.
+Admission and pauses spend the existing HTTP deadline and abort signal before
+managed send claim. Response bookkeeping never rejects a received answer; a
+successful response does not wait for it. Storage degradation logs once per realm.
+
+The nonterminal `startup.incomplete` notice exposes a closed stage name, elapsed
+startup time, the original 60-second warning threshold, the 20-second read timeout
+and this engine's observed `/info` 429 count. The SDK forwards only these stage
+and numeric facts as Sentry tags; wallet identities and request data are excluded.
+Nonfinite transport clocks omit timing fields rather than publishing invalid numbers.
+
 ## Rust margin settings and standalone spot orders
 
 HIP-3 assets get no `activeAssetData` subscription (channel limit), so the Rust
@@ -1583,3 +1696,39 @@ zero balance. Valid pending live snapshots fence older REST reads immediately.
 A real live/shared/context quote or the first core snapshot rechecks that native
 collateral and derives wallet principal using current proven position PnL.
 Ordinary successful private snapshots keep the existing valuation cadence.
+
+## Rust fast public depth
+
+Fast depth is opt-in through SDK `ExchangeOptions.hyperliquidFastBook: true`
+(registry JSON `hyperliquidFastBook`, native `Options.fast_book`). The default
+keeps slow `l2Book` plus BBO: two topics per unique perpetual book. Opt-in adds
+`l2Book {fast:true}`, making three; duplicate consumers share the same topics.
+Shared public-feed identities separate opted-in and default-off sources.
+Standalone spot retains its five native significant-figure topics regardless.
+
+Live fast responses carry `data.fast: true` and at most five levels per side.
+Slow depth remains the deeper baseline. Fast coverage replaces its whole covered
+range and permanently prunes conflicting baseline rows until a new slow snapshot.
+Fast sides shorter than five rows clear the old tail, including empty sides.
+Older timestamps cannot regress depth; equal-time fast data wins in either order.
+Newer BBO replaces the top. Retirement clears both baselines before replay.
+
+New book or candle demand above 1,000 desired topics is visibly refused without
+retaining its key/refcount or changing accepted references. The accepted feed
+stays live; reconnect replays only accepted demand. Catalogue/private-topic
+growth is capped before core submission: existing admitted keys keep their slots,
+only new excess topics are refused with a Capacity notice. Initial projection
+keeps baseline and caller topics before implicit activeAssetData. Only selected
+private keys gate handoff; metadata and HTTP reads remain complete. The encoder
+covers every admitted key and never rejects the whole sync because of excess demand.
+
+Hyperliquid's 1,000-subscription limit is per IP across connections, not per
+account. The per-connection check cannot enforce it across accounts/tabs/clients.
+With `M` core markets, `D` HIP-3 scopes, `B` books, `C` candles, keyed Direct feeds
+use `9 + M + 5D + (2+F)B + C` topics, plus one for spotState when needed;
+public-only uses `2 + (2+F)B + C`, where F is 1 only with fast depth enabled.
+At illustrative M=235, D=0, four keyed engines with 20 books each already use
+1,136 by default; enabling fast depth makes 1,216. Three such keyed engines with
+20 candles each plus a public engine with 20 books use 954 default or 1,034
+opted in. Keep fast depth off unless the caller budgets aggregate demand; the
+subscription-diet/shared-public-feed follow-up addresses the existing overage.

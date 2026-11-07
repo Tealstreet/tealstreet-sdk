@@ -1,6 +1,8 @@
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
+
+import { exchangeMetadata } from '../../exchangeMetadata';
 import { deriveRemoteSigningPolicy } from './construction';
 
 /** The Rust-only beta build's complete venue policy, including saved aliases. */
@@ -27,6 +29,8 @@ export const BETA_VENUES = Object.freeze([
   'hyperliquid',
   'hyperliquidspot',
   'lighter',
+  // Robinhood shares Lighter's beta family and existing Hosted signing policy.
+  'lighter-robinhood',
   'paradex',
   'bitunix',
   'phemex',
@@ -67,7 +71,10 @@ export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeO
     (options.remoteSigner || options.payloadSigner) &&
     deriveRemoteSigningPolicy(name)?.enabled !== true
   ) {
-    const message = `${name} delegated signing is unsupported in this build`;
+    const prettyName = exchangeMetadata[name].prettyName;
+    const message = options.remoteSigner
+      ? `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
+      : `${prettyName} delegated signing is unsupported in this build`;
     throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
   }
 };

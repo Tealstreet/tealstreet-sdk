@@ -6,7 +6,7 @@ import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex
 
 export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
 export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
-export type ExtraKeyPolicy = { key: 'zklinkSeed' | 'l1Wallet'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
+export type ExtraKeyPolicy = { key: 'zklinkSeed' | 'l1Wallet' | 'kucoinBroker'; field?: 'optional' | 'requiredForPrivate' | 'aliasPrimary'; encoding?: KeyEncoding; trim?: boolean };
 /** Asymmetric only: a declared signing ref may answer public operations (P4). */
 export type SigningAlgorithm = 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest';
 export type IdentitySetupPolicy = {
@@ -53,6 +53,10 @@ export const deriveSignerSetupPolicy = (name: ExchangeName): SignerSetupPolicy =
 
 export const deriveSignerSetupMapping = (name: ExchangeName): Rule['setupMapping'] =>
   (rules.venues as Record<string, Rule>)[name]?.setupMapping;
+
+/** Hyro mode selects configured endpoints in both SDK and native construction. */
+export const deriveEndpointSetupPolicy = (name: ExchangeName): 'hyrotrader' | undefined =>
+  (rules.venues as Record<string, Rule>)[name]?.bridge?.demo === 'hyroMode' ? 'hyrotrader' : undefined;
 
 export const deriveRemoteSigningPolicy = (name: ExchangeName): RemoteSigningPolicy | undefined =>
   (rules.venues as Record<string, Rule>)[name]?.remoteSigning;

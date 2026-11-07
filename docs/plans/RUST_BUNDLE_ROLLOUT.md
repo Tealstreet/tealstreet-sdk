@@ -351,8 +351,6 @@ run. Refresh the immutable source inventory and evidence after relevant landings
 | paradex           | paradex      | TS          |                       56 | no  | unverified / unverified / BLOCKED |
 | phemex            | phemex       | TS          |                       50 | no  | unverified / unverified / BLOCKED |
 | polymarket        | polymarket   | TS          |                       35 | no  | unverified / unverified / BLOCKED |
-| salsadex          | orderly      | Rust        |                       29 | no  | unverified / unverified / BLOCKED |
-| tealstreet-dex    | orderly      | Rust        |                       29 | no  | unverified / unverified / BLOCKED |
 | txflow            | txflow       | Rust        |                       25 | no  | unverified / unverified / BLOCKED |
 | weex              | weex         | TS          |                       51 | yes | unverified / unverified / BLOCKED |
 | what              | orderly      | Rust        |                       29 | no  | unverified / unverified / BLOCKED |

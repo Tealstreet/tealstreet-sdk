@@ -13,7 +13,7 @@ use support::{INSTRUMENTS, TICKERS, jittered};
 type TestEngine = Engine<Cryptocom>;
 const SYMBOL: &str = "BTCUSD-PERP";
 /// Startup catalogue and ticker reads get the engine's discovery deadline, not the 20 s read bound.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 
 fn new() -> TestEngine {
     support::fixture::engine(Options {

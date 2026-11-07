@@ -1,5 +1,6 @@
 #![cfg(feature = "spot")]
 //! Local Read authority through genuine callbacks; native private fallthrough stays legacy.
+mod support;
 use safe_cex_engine::model::{
     Limits, MarginType, Market, MinMax, Order, OrderSide, OrderStatus, OrderType, Precision,
 };
@@ -8,8 +9,9 @@ use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, HttpRequest, Method, Notice,
     Outcome, Query, Response, SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options, spot::KucoinSpot};
+use safe_cex_venue_kucoin::{Kucoin, spot::KucoinSpot};
 use serde_json::{Value, json};
+use support::credentials::Options;
 
 const SYMBOL: &str = "BTC-USDT";
 const COMMAND: u32 = 71;
@@ -105,9 +107,8 @@ impl<V: Venue> Venue for Probe<V> {
             match symbols.first().map(String::as_str) {
                 Some("saturate") => {
                     assert!(self.held.is_empty());
-                    for _ in 0..256 {
-                        self.held
-                            .push(cx.http_context(Scope::Background, policy()).unwrap());
+                    while let Ok(context) = cx.http_context(Scope::Background, policy()) {
+                        self.held.push(context);
                     }
                 }
                 Some("hold-next") => self.hold_next = true,
@@ -172,13 +173,20 @@ fn order() -> Order {
         extra: None,
     }
 }
-fn seeded<V: Venue>(inner: V) -> Engine<Probe<V>> {
+fn seeded<V: Venue>(
+    options: Options,
+    constructor: impl FnOnce(safe_cex_venue_kucoin::Options) -> V,
+) -> Engine<Probe<V>> {
+    let (options, provider, identities) = options.prepare();
+    let inner = constructor(options);
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
         inner,
         held: vec![],
         hold_next: false,
         original: None,
     });
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
     e.store_mut().set_markets(vec![Market {
         id: SYMBOL.into(),
         symbol: SYMBOL.into(),
@@ -220,11 +228,14 @@ fn seeded<V: Venue>(inner: V) -> Engine<Probe<V>> {
     e
 }
 fn spot(keyed: bool) -> Engine<Probe<KucoinSpot>> {
-    seeded(KucoinSpot::new(options(keyed)))
+    seeded(options(keyed), KucoinSpot::new)
 }
 fn run<V: Venue>(e: &mut Engine<Probe<V>>, now: f64, command: Command) -> Vec<Action> {
     e.handle(now, Event::Command(command));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(
+        e,
+        safe_cex_engine::test_support::dispatch_now(e),
+    )
 }
 fn control<V: Venue>(e: &mut Engine<Probe<V>>, tag: Option<&str>) -> Vec<Action> {
     run(
@@ -264,6 +275,12 @@ fn failure(a: &[Action]) -> &VenueError {
     }
 }
 fn done(a: &[Action]) -> Value {
+    let substantive: Vec<_> = a
+        .iter()
+        .filter(|a| !matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .cloned()
+        .collect();
+    let a = substantive.as_slice();
     assert_eq!(a.len(), 1, "one local result without opaque work: {a:?}");
     match &a[0] {
         Action::Notice(Notice::CommandDone {
@@ -358,8 +375,16 @@ fn check(a: &[Action], expected: &Expected) {
 }
 /// The first of the leverage read's steps, signed, with nothing settled yet.
 fn futures_margin_read(a: &[Action]) {
-    assert_eq!(a.len(), 1, "one signed read and no terminal: {a:?}");
-    let Action::Http(r) = &a[0] else {
+    let substantive: Vec<_> = a
+        .iter()
+        .filter(|a| !matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect();
+    assert_eq!(
+        substantive.len(),
+        1,
+        "one signed read and no terminal: {a:?}"
+    );
+    let Action::Http(r) = substantive[0] else {
         panic!("expected the margin mode read: {a:?}");
     };
     assert_eq!(r.method, Method::Get);
@@ -383,14 +408,14 @@ fn local_spot_errors_gain_typed_metadata_without_changing_credential_precedence(
 }
 #[test]
 fn futures_leverage_refusals_stay_local_with_typed_authority() {
-    let mut e = seeded(Kucoin::new(options(false)));
+    let mut e = seeded(options(false), Kucoin::new);
     typed(
         &run(&mut e, 100., leverage(SYMBOL)),
         "KuCoin leverage requires credentials",
         ErrorKind::InvalidInput,
         Some(Outcome::NotSent),
     );
-    let mut e = seeded(Kucoin::new(options(true)));
+    let mut e = seeded(options(true), Kucoin::new);
     typed(
         &run(&mut e, 100., leverage("UNKNOWN")),
         "unknown market UNKNOWN",
@@ -463,7 +488,7 @@ fn nonfinite_clock_refuses_every_local_spot_path_before_projection_or_publicatio
 }
 #[test]
 fn nonfinite_clock_refuses_futures_leverage_before_any_read() {
-    let mut e = invalid_clocks(seeded(Kucoin::new(options(true))), || {
+    let mut e = invalid_clocks(seeded(options(true), Kucoin::new), || {
         vec![leverage(SYMBOL)]
     });
     futures_margin_read(&run(&mut e, 100., leverage(SYMBOL)));
@@ -513,7 +538,7 @@ fn genuine_capacity_refusal_covers_every_local_spot_path_and_same_clock_recovery
 #[test]
 fn genuine_capacity_refusal_covers_futures_leverage_and_recovery() {
     saturated(
-        seeded(Kucoin::new(options(true))),
+        seeded(options(true), Kucoin::new),
         || vec![leverage(SYMBOL)],
         leverage(SYMBOL),
         Expected::FuturesMarginRead,
@@ -592,7 +617,7 @@ fn fixed_clock_reuse_retires_all_local_owners_beyond_registry_capacity() {
             }
         }
     }
-    let mut e = seeded(Kucoin::new(options(true)));
+    let mut e = seeded(options(true), Kucoin::new);
     for _ in 0..270 {
         typed(
             &run(&mut e, 100., leverage("UNKNOWN")),
@@ -668,7 +693,10 @@ fn reply<V: Venue>(
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(
+        e,
+        safe_cex_engine::test_support::dispatch_now(e),
+    )
 }
 #[test]
 fn private_fill_and_identity_fallthrough_keep_native_wire_and_completion() {
@@ -698,20 +726,20 @@ fn private_fill_and_identity_fallthrough_keep_native_wire_and_completion() {
         assert!(control(&mut e, Some("saturate")).is_empty());
         assert_eq!(
             e.venue().held.len(),
-            256,
-            "native pending HTTP owns no Read root"
+            254,
+            "the command root and its physical read retain two contexts"
         );
         assert_eq!(
             done(&reply(&mut e, id, body)),
             expected,
-            "numeric native completion remains unfenced"
+            "the managed read completes under its original root"
         );
         assert!(control(&mut e, None).is_empty());
         assert!(e.venue().held.is_empty());
     }
 }
 #[test]
-fn cache_misses_and_sentinel_ids_keep_native_pager_without_new_owner() {
+fn cache_misses_and_sentinel_ids_keep_native_pager_under_original_root() {
     for (symbol, id) in [
         (SYMBOL, ""),
         (SYMBOL, "0"),
@@ -739,8 +767,8 @@ fn cache_misses_and_sentinel_ids_keep_native_pager_without_new_owner() {
         assert!(control(&mut e, Some("saturate")).is_empty());
         assert_eq!(
             e.venue().held.len(),
-            256,
-            "native pending pager owns no Read root"
+            254,
+            "the command root and its physical page retain two contexts"
         );
         assert_eq!(
             done(&reply(

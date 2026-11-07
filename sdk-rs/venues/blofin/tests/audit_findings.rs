@@ -27,7 +27,8 @@ fn fire_next_timer(h: &mut Harness) {
     h.collect();
 }
 
-fn stop_amend_to_replacement(h: &mut Harness) {
+/// A stop on a standalone tpsl order, edited in place by amend-tpsl.
+fn stop_amend_native(h: &mut Harness) {
     h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"last","state":"live"}]}"#);
@@ -49,11 +50,16 @@ fn stop_amend_to_replacement(h: &mut Harness) {
         }),
     );
     h.collect();
-    h.reply(
-        "cancel-tpsl",
-        r#"{"code":"0","data":[{"tpslId":"91","code":"0","msg":null}]}"#,
+}
+
+fn no_cancel_or_placement(h: &Harness) {
+    assert!(
+        !h.pending
+            .iter()
+            .any(|r| r.url.contains("cancel") || r.url.contains("order-tpsl")),
+        "{:?}",
+        h.pending.iter().map(|r| &r.url).collect::<Vec<_>>()
     );
-    fire_next_timer(h);
 }
 
 fn seed_limit(h: &mut Harness, id: &str, extra: &str) {
@@ -61,44 +67,55 @@ fn seed_limit(h: &mut Harness, id: &str, extra: &str) {
 }
 
 #[test]
-fn an_internal_error_on_a_stop_replacement_says_it_may_be_live() {
+fn an_internal_error_on_a_stop_edit_says_its_outcome_is_unknown() {
     let mut h = Harness::new();
-    stop_amend_to_replacement(&mut h);
-    let r = h.take("order-tpsl");
+    stop_amend_native(&mut h);
+    let r = h.take("amend-tpsl");
     h.respond(
         r,
         r#"{"code":"103013","msg":"Internal error; unable to process your request. Please try again.","data":null}"#,
     );
     let e = failure(&h).expect("failure");
-    assert!(e.message.contains("may have no stop"), "{}", e.message);
-    assert!(!e.message.contains("refused"), "{}", e.message);
+    assert!(e.message.contains("is unknown"), "{}", e.message);
+    assert_eq!(e.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    no_cancel_or_placement(&h);
 }
 
 #[test]
-fn a_row_internal_error_on_a_stop_replacement_says_it_may_be_live() {
+fn a_row_internal_error_on_a_stop_edit_says_its_outcome_is_unknown() {
     let mut h = Harness::new();
-    stop_amend_to_replacement(&mut h);
-    let r = h.take("order-tpsl");
+    stop_amend_native(&mut h);
+    let r = h.take("amend-tpsl");
     h.respond(
         r,
         r#"{"code":"0","msg":"success","data":{"tpslId":null,"clientOrderId":null,"code":"103013","msg":"Internal error; unable to process your request. Please try again."}}"#,
     );
     let e = failure(&h).expect("failure");
-    assert!(e.message.contains("may have no stop"), "{}", e.message);
-    assert!(!e.message.contains("refused"), "{}", e.message);
+    assert!(e.message.contains("is unknown"), "{}", e.message);
+    no_cancel_or_placement(&h);
 }
 
 #[test]
-fn a_documented_refusal_on_a_stop_replacement_still_says_refused() {
+fn a_documented_refusal_on_a_stop_edit_leaves_the_stop_unchanged() {
     let mut h = Harness::new();
-    stop_amend_to_replacement(&mut h);
-    let r = h.take("order-tpsl");
+    stop_amend_native(&mut h);
+    let r = h.take("amend-tpsl");
     h.respond(
         r,
         r#"{"code":"102049","msg":"stop loss trigger price must be higher than the best bid price","data":null}"#,
     );
     let e = failure(&h).expect("failure");
-    assert!(e.message.contains("has no stop"), "{}", e.message);
+    assert!(
+        e.message.contains("stop is unchanged") && e.message.contains("refused"),
+        "{}",
+        e.message
+    );
+    assert_eq!(e.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert_eq!(
+        e.protection, None,
+        "nothing was removed, so nothing needs restoring"
+    );
+    no_cancel_or_placement(&h);
 }
 
 #[test]
@@ -149,7 +166,7 @@ fn a_tpsl_blofin_says_is_already_gone_is_a_done_cancel() {
 }
 
 #[test]
-fn a_stop_already_gone_before_its_move_says_no_replacement_was_sent() {
+fn a_stop_already_gone_before_its_edit_says_nothing_was_edited() {
     let mut h = Harness::new();
     h.open_private();
     h.seed();
@@ -164,11 +181,14 @@ fn a_stop_already_gone_before_its_move_says_no_replacement_was_sent() {
         }),
     );
     h.collect();
-    h.reply("cancel-tpsl", r#"{"code":"1","data":[{"tpslId":"91","code":"1000","msg":"The order has been canceled."}]}"#);
+    h.reply("amend-tpsl", r#"{"code":"1","data":[{"tpslId":"91","code":"1000","msg":"The order has been canceled."}]}"#);
     let e = failure(&h);
-    let message = e.expect("the move fails").message;
-    assert!(message.contains("no replacement was sent"), "{message}");
-    assert!(!message.contains("replacement refused"), "{message}");
+    let message = e.expect("the edit fails").message;
+    assert!(
+        message.contains("already filled, triggered or canceled"),
+        "{message}"
+    );
+    no_cancel_or_placement(&h);
 }
 
 fn sized_bracket(h: &mut Harness) {

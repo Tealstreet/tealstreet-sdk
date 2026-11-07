@@ -19,14 +19,13 @@ import {
   validateApexRequest,
 } from './apexomni-protocol.mjs';
 import { createRequire } from 'node:module';
-import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
+import { createBinanceSpotSocketAudit, prepareBinanceSpot, prepareBinancePmPublic, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { hyperliquidspot } from './hyperliquidspot.mjs';
 import { createHyperliquidRequestValidator } from './hyperliquid-protocol.mjs';
 import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
 import { kucoinspot } from './kucoinspot.mjs';
-import { breakoutprop } from './breakoutprop-requests.mjs';
 import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import {
@@ -200,18 +199,14 @@ export const ORDERLY_REPLAY = {
   publicApplicationId: 'OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY',
 };
 export const ORDERLY_BROKERS = {
-  'tealstreet-dex': 'TEALSTREET',
   kodiakfi: 'TEALKODIAK',
   mode: 'TEALMODE',
-  salsadex: 'TEALSALSA',
   what: 'TEALWHAT',
   woofi: 'TEALSTREET',
 };
 const orderlyClasses = {
-  'tealstreet-dex': 'TealstreetDEXExchange',
   kodiakfi: 'KodiakFIExchange',
   mode: 'MODEExchange',
-  salsadex: 'SalsaDEXExchange',
   what: 'WhatExchange',
   woofi: 'WoofiExchange',
 };
@@ -265,7 +260,7 @@ const orderlyAuth = (message) => {
   );
 };
 const orderly = (alias) => {
-  const name = alias === 'orderly' ? 'tealstreet-dex' : alias;
+  const name = alias === 'orderly' ? 'woofi' : alias;
   return {
     family: 'orderly',
     virtualPrivateClock: true,
@@ -858,7 +853,6 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) => exchange.nodeSocket?.bookListeners.size >= count,
     tsSettings: (_exchange, store) => Object.entries(store.fetchedLeverage).map(([symbol, setting]) => ({ symbol, ...setting })),
   },
-  breakoutprop,
   grvt: (() => {
     // Public deterministic replay key. Never use this well-known key for funds.
     const secret = '0x' + '01'.repeat(32);
@@ -1994,6 +1988,7 @@ export const VENUES = {
     privateSocket: name === 'binancespot' ? '/ws-api/v3' : name === 'binancepm' ? '/pm/ws' : name === 'binanceinverse' ? '/ws/' : '/private/ws',
     volatileBodyFields: true,
     ...(name === 'binanceinverse' ? { coinNativeAmounts: true } : {}),
+    ...(name === 'binancepm' ? { prepareTs: prepareBinancePmPublic } : {}),
     ...(name === 'binancespot' ? {
       compareFillPrices: true,
       compareCoins: true,

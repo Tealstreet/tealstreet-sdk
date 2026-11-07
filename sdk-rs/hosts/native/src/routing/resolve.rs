@@ -14,6 +14,11 @@ use std::sync::OnceLock;
 #[serde(rename_all = "camelCase")]
 struct Table {
     hosts: Hosts,
+    /// The host of `PROXY_PRIVATE_URL`: the fleet's load balancer, which admits by network
+    /// only and forwards every header to the venue. Our proxy JWT must never ride a route to
+    /// it, whichever override (private or public) points there.
+    #[serde(skip)]
+    fleet_host: Option<String>,
     rest_headers: BTreeMap<String, String>,
     ws_headers: BTreeMap<String, String>,
     exchanges: HashMap<String, Exchange>,
@@ -91,11 +96,7 @@ fn loaded() -> Result<&'static Table, RoutingError> {
         .get_or_init(|| {
             let mut table: Table =
                 serde_json::from_str(include_str!("table.json")).map_err(|e| e.to_string())?;
-            apply_proxy_overrides(
-                &mut table.hosts,
-                std::env::var("PROXY_PRIVATE_URL").ok(),
-                std::env::var("PROXY_PUBLIC_URL").ok(),
-            )?;
+            BaseOverrides::from_env().apply(&mut table)?;
             for pool in ["jp", "asia", "tiny"] {
                 if !table.hosts.private_proxy.contains_key(pool) {
                     return Err(format!("no private proxy pool {pool}"));
@@ -119,51 +120,163 @@ fn loaded() -> Result<&'static Table, RoutingError> {
         .map_err(|e| RoutingError::InvalidTable(e.clone()))
 }
 
-/// The deployment's proxy hosts: `PROXY_PRIVATE_URL` replaces every whitelisted
-/// private pool and `PROXY_PUBLIC_URL` the public CORS proxy. Unset or empty keeps
-/// the table's value; a trailing `/` is dropped because routes append `/<origin>`.
-/// Anything but an https `tealstreet.io` host refuses at table load.
-fn apply_proxy_overrides(
-    hosts: &mut Hosts,
-    private: Option<String>,
-    public: Option<String>,
-) -> Result<(), String> {
-    let parse = |name: &str, value: Option<String>| -> Result<Option<String>, String> {
-        let Some(value) = value.map(|v| v.trim().trim_end_matches('/').to_owned()) else {
-            return Ok(None);
-        };
-        if value.is_empty() {
-            return Ok(None);
+/// The deployment's Tealstreet hosts, read once from the environment.
+/// `PROXY_PRIVATE_URL` replaces every whitelisted private pool, `PROXY_PUBLIC_URL`
+/// the public CORS proxy and `PROXY_TUNNEL_URL` every tunnel egress, including the
+/// table's routes that name it. Unset or empty keeps the table's value; a trailing
+/// `/` is dropped. A trust root for these hosts belongs here when one is added.
+#[derive(Default)]
+struct BaseOverrides {
+    private_proxy: Option<String>,
+    public_proxy: Option<String>,
+    tunnel: Option<String>,
+}
+
+impl BaseOverrides {
+    fn from_env() -> Self {
+        Self {
+            private_proxy: std::env::var("PROXY_PRIVATE_URL").ok(),
+            public_proxy: std::env::var("PROXY_PUBLIC_URL").ok(),
+            tunnel: std::env::var("PROXY_TUNNEL_URL").ok(),
         }
-        // These hosts receive users' proxy JWTs: only a Tealstreet host is accepted.
-        let host = value
-            .strip_prefix("https://")
-            // WHATWG URLs also split https paths on `\`; refuse it anywhere.
-            .filter(|_| !value.contains(['?', '#', '\\']))
-            .and_then(|rest| rest.split('/').next())
-            // Host and port only: no userinfo or other authority characters.
-            .filter(|authority| {
-                authority
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':'))
-            })
-            .and_then(|authority| authority.split(':').next());
-        if !host.is_some_and(|host| host == "tealstreet.io" || host.ends_with(".tealstreet.io")) {
-            return Err(format!(
-                "{name} must be an https URL on a tealstreet.io host, without query or fragment"
-            ));
+    }
+
+    fn apply(self, table: &mut Table) -> Result<(), String> {
+        if let Some(private) = tealstreet_base("PROXY_PRIVATE_URL", "https", self.private_proxy)? {
+            for host in table.hosts.private_proxy.values_mut() {
+                host.clone_from(&private);
+            }
+            table.fleet_host = Some(url_host(&private).to_owned());
         }
-        Ok(Some(value))
+        if let Some(public) = tealstreet_base("PROXY_PUBLIC_URL", "https", self.public_proxy)? {
+            table.hosts.public_cors_proxy = public;
+        }
+        if let Some(tunnel) = tealstreet_base("PROXY_TUNNEL_URL", "wss", self.tunnel)? {
+            let replaced: Vec<String> = table.hosts.tunnel.values().cloned().collect();
+            for strategy in table
+                .exchanges
+                .values_mut()
+                .flat_map(|e| e.routing.ws.all_mut())
+            {
+                for url in strategy.urls_mut() {
+                    for from in &replaced {
+                        rebase(url, from, &tunnel);
+                    }
+                }
+            }
+            for host in table.hosts.tunnel.values_mut() {
+                host.clone_from(&tunnel);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The authority of `scheme://host/...`, or the whole text when it has no scheme.
+fn url_host(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    rest.split(['/', '?', '#']).next().unwrap_or(rest)
+}
+
+/// An override value, or `None` when unset or empty. These hosts receive users'
+/// proxy JWTs, so anything but a `scheme://` URL on a `tealstreet.io` host refuses.
+fn tealstreet_base(
+    name: &str,
+    scheme: &str,
+    value: Option<String>,
+) -> Result<Option<String>, String> {
+    let Some(value) = value.map(|v| v.trim().trim_end_matches('/').to_owned()) else {
+        return Ok(None);
     };
-    if let Some(private) = parse("PROXY_PRIVATE_URL", private)? {
-        for host in hosts.private_proxy.values_mut() {
-            host.clone_from(&private);
-        }
+    if value.is_empty() {
+        return Ok(None);
     }
-    if let Some(public) = parse("PROXY_PUBLIC_URL", public)? {
-        hosts.public_cors_proxy = public;
+    let host = value
+        .strip_prefix(scheme)
+        .and_then(|rest| rest.strip_prefix("://"))
+        // WHATWG URLs also split special-scheme paths on `\`; refuse it anywhere.
+        .filter(|_| !value.contains(['?', '#', '\\']))
+        .and_then(|rest| rest.split('/').next())
+        // Host and port only: no userinfo or other authority characters.
+        .filter(|authority| {
+            authority
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':'))
+        })
+        .and_then(|authority| authority.split(':').next());
+    if !host.is_some_and(|host| host == "tealstreet.io" || host.ends_with(".tealstreet.io")) {
+        return Err(format!(
+            "{name} must be a {scheme} URL on a tealstreet.io host, without query or fragment"
+        ));
     }
-    Ok(())
+    Ok(Some(value))
+}
+
+/// Moves `url` from base `from` to `to` when it is that base, or a path or query under it.
+fn rebase(url: &mut String, from: &str, to: &str) {
+    if let Some(rest) = url.strip_prefix(from)
+        && (rest.is_empty() || rest.starts_with(['/', '?']))
+    {
+        *url = format!("{to}{rest}");
+    }
+}
+
+impl WsSpecs {
+    fn all_mut(&mut self) -> impl Iterator<Item = &mut Strategy> {
+        [
+            &mut self.public,
+            &mut self.private,
+            &mut self.business,
+            &mut self.private_uta,
+        ]
+        .into_iter()
+        .flatten()
+    }
+}
+
+impl Strategy {
+    /// Every Tealstreet or venue URL the strategy names.
+    fn urls_mut(&mut self) -> impl Iterator<Item = &mut String> {
+        let kind: Vec<&mut String> = match &mut self.kind {
+            Kind::AlwaysProxy { host }
+            | Kind::ProxyConditional { host }
+            | Kind::MainnetProxyConditional { host }
+            | Kind::BybitBrazilConditional { host } => vec![host],
+            Kind::RegionConditional { ja, other } => vec![ja, other],
+            Kind::WsRouteCandidates { proxy } => vec![proxy],
+            Kind::Direct | Kind::FallbackOnly => Vec::new(),
+        };
+        kind.into_iter()
+            .chain(self.fallback.as_mut())
+            .chain(self.direct_urls.iter_mut().flatten())
+    }
+}
+
+/// The hosts every route is built from, after the deployment's overrides.
+pub struct RouteBases {
+    pub private_proxy: BTreeMap<String, String>,
+    pub public_proxy: String,
+    pub tunnel: BTreeMap<String, String>,
+}
+
+/// Loads and validates the table, so a malformed override fails the caller's startup.
+pub fn route_bases() -> Result<RouteBases, RoutingError> {
+    let hosts = &loaded()?.hosts;
+    Ok(RouteBases {
+        private_proxy: hosts.private_proxy.clone().into_iter().collect(),
+        public_proxy: hosts.public_cors_proxy.clone(),
+        tunnel: hosts.tunnel.clone().into_iter().collect(),
+    })
+}
+
+impl std::fmt::Display for RouteBases {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "private proxy {:?}, public proxy {}, tunnel {:?}",
+            self.private_proxy, self.public_proxy, self.tunnel
+        )
+    }
 }
 
 fn table() -> &'static Table {
@@ -532,7 +645,7 @@ fn venue_headers(name: &str, o: &RoutingInputs) -> BTreeMap<String, String> {
 }
 
 fn proxy_authorization_header(name: &str) -> &'static str {
-    if matches!(name, "grvt" | "mexc" | "paradex" | "breakoutprop") {
+    if matches!(name, "grvt" | "mexc" | "paradex") {
         "Tealstreet-Authorization"
     } else {
         "Authorization"
@@ -677,8 +790,16 @@ pub fn resolve_routing_plan(
             return Err(RoutingError::UnsupportedRewrite);
         }
         let how = uses_tunnel(name, o) && tealstreet;
+        let prefix = if target == base_url {
+            String::new()
+        } else {
+            target[..target.len() - base_url.len() - 1].to_owned()
+        };
+        // The fleet forwards headers as sent: a Bearer of ours reached OKX as an OAuth token
+        // (53000 on third-party-app keys), and the edge's Coinbase rename does not happen there.
+        let fleet = proxied && table().fleet_host.as_deref() == Some(url_host(&prefix));
         let mut header_aliases = BTreeMap::new();
-        if matches!(name, "coinbase" | "coinbasespot") && proxied && !how {
+        if matches!(name, "coinbase" | "coinbasespot") && proxied && !how && !fleet {
             header_aliases.insert("Authorization".into(), "Coinbase-Authorization".into());
         }
         let mut headers = venue_headers(name, o);
@@ -691,12 +812,8 @@ pub fn resolve_routing_plan(
             } else {
                 HttpRouteMode::Direct
             },
-            prefix: if target == base_url {
-                String::new()
-            } else {
-                target[..target.len() - base_url.len() - 1].into()
-            },
-            authorize: proxied,
+            prefix,
+            authorize: proxied && !fleet,
             authorization_header: proxy_authorization_header(name).into(),
             headers,
             header_aliases,
@@ -754,6 +871,7 @@ pub fn resolve_routing_plan(
         public_http: if binance { Some(http(true)?) } else { None },
         read_http: None,
         read_public_http: None,
+        public_read_http: None,
         read_header: None,
         read_public: false,
         public_cors_http,
@@ -779,17 +897,51 @@ pub fn resolve_routing_plan(
 mod tests {
     use super::*;
 
-    fn hosts() -> Hosts {
-        serde_json::from_str::<Table>(include_str!("table.json"))
-            .unwrap()
-            .hosts
+    const TABLE_TUNNEL: &str = "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel";
+
+    fn table() -> Table {
+        serde_json::from_str::<Table>(include_str!("table.json")).unwrap()
+    }
+
+    fn overridden(overrides: BaseOverrides) -> Result<Table, String> {
+        let mut table = table();
+        overrides.apply(&mut table)?;
+        Ok(table)
+    }
+
+    fn private(value: &str) -> BaseOverrides {
+        BaseOverrides {
+            private_proxy: Some(value.into()),
+            ..Default::default()
+        }
+    }
+
+    fn tunnel(value: &str) -> BaseOverrides {
+        BaseOverrides {
+            tunnel: Some(value.into()),
+            ..Default::default()
+        }
+    }
+
+    fn urls(table: &mut Table) -> Vec<String> {
+        table
+            .exchanges
+            .values_mut()
+            .flat_map(|e| e.routing.ws.all_mut())
+            .flat_map(|s| s.urls_mut().map(|u| u.clone()).collect::<Vec<_>>())
+            .collect()
     }
 
     #[test]
     fn proxy_env_overrides_replace_every_pool_and_the_public_proxy() {
-        let mut hosts = hosts();
         let url = "https://proxies.tyo.tealstreet.io/api/exchange_proxy/";
-        apply_proxy_overrides(&mut hosts, Some(url.into()), Some(url.into())).unwrap();
+        let hosts = overridden(BaseOverrides {
+            private_proxy: Some(url.into()),
+            public_proxy: Some(url.into()),
+            tunnel: None,
+        })
+        .unwrap()
+        .hosts;
         let expected = "https://proxies.tyo.tealstreet.io/api/exchange_proxy";
         assert!(hosts.private_proxy.values().all(|host| host == expected));
         assert_eq!(hosts.private_proxy.len(), 3);
@@ -798,17 +950,17 @@ mod tests {
 
     #[test]
     fn unset_or_empty_overrides_keep_the_table_and_bad_ones_refuse() {
-        let table = hosts();
-        let mut kept = hosts();
-        apply_proxy_overrides(&mut kept, None, Some(" ".into())).unwrap();
-        assert_eq!(kept.private_proxy, table.private_proxy);
-        assert_eq!(kept.public_cors_proxy, table.public_cors_proxy);
-        apply_proxy_overrides(
-            &mut hosts(),
-            Some("https://tealstreet.io:8443/p".into()),
-            None,
-        )
+        let table = table();
+        let kept = overridden(BaseOverrides {
+            private_proxy: None,
+            public_proxy: Some(" ".into()),
+            tunnel: Some("".into()),
+        })
         .unwrap();
+        assert_eq!(kept.hosts.private_proxy, table.hosts.private_proxy);
+        assert_eq!(kept.hosts.public_cors_proxy, table.hosts.public_cors_proxy);
+        assert_eq!(kept.hosts.tunnel, table.hosts.tunnel);
+        overridden(private("https://tealstreet.io:8443/p")).unwrap();
         for bad in [
             "http://plain.invalid",
             "https://x.invalid/?a=1",
@@ -820,11 +972,80 @@ mod tests {
             "https://evil.invalid\\.tealstreet.io/api",
             "https://evil.invalid%2F.tealstreet.io/api",
             "https://evil.invalid\t.tealstreet.io/api",
+            "wss://proxies.tyo.tealstreet.io/api",
         ] {
+            assert!(overridden(private(bad)).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_tunnel_override_moves_every_egress_and_every_route_under_it() {
+        let to = "wss://tunnel.vpc.tealstreet.io:8443/tunnel";
+        let mut table = overridden(tunnel(&format!("{to}/"))).unwrap();
+        assert_eq!(table.hosts.tunnel.len(), 2);
+        assert!(table.hosts.tunnel.values().all(|host| host == to));
+        let urls = urls(&mut table);
+        assert!(
+            !urls.iter().any(|u| u.starts_with(TABLE_TUNNEL)),
+            "{urls:?}"
+        );
+        // 14 strategy hosts and 6 fallbacks, each a relay under the tunnel.
+        let relayed = urls
+            .iter()
+            .filter(|u| u.starts_with(&format!("{to}?ts-relay=")))
+            .count();
+        assert_eq!(relayed, 20);
+        // Other services on the tunnel's host keep their own paths.
+        assert_eq!(
+            urls.iter()
+                .filter(|u| u.starts_with("wss://fsjnpy143pbz-tyo.tealstreet.io/"))
+                .count(),
+            11
+        );
+    }
+
+    #[test]
+    fn a_tunnel_override_must_be_wss_on_a_tealstreet_host() {
+        for bad in [
+            "https://tunnel.vpc.tealstreet.io/tunnel",
+            "ws://tunnel.vpc.tealstreet.io/tunnel",
+            "wss://tunnel.vpc.internal/tunnel",
+            "wss://10.0.0.5/tunnel",
+            "wss://tunnel.vpc.tealstreet.io/tunnel?x=1",
+        ] {
+            let error = overridden(tunnel(bad)).err().expect(bad);
             assert!(
-                apply_proxy_overrides(&mut hosts(), Some(bad.into()), None).is_err(),
-                "{bad}"
+                error.starts_with("PROXY_TUNNEL_URL must be a wss URL"),
+                "{error}"
             );
+        }
+    }
+
+    #[test]
+    fn rebase_moves_only_the_base_and_what_sits_under_it() {
+        for (url, expected) in [
+            ("wss://a.tealstreet.io/tunnel", "wss://b.tealstreet.io/t"),
+            (
+                "wss://a.tealstreet.io/tunnel?ts-relay=x",
+                "wss://b.tealstreet.io/t?ts-relay=x",
+            ),
+            (
+                "wss://a.tealstreet.io/tunnel/sub",
+                "wss://b.tealstreet.io/t/sub",
+            ),
+            (
+                "wss://a.tealstreet.io/tunnels",
+                "wss://a.tealstreet.io/tunnels",
+            ),
+            ("wss://a.tealstreet.io/grvt", "wss://a.tealstreet.io/grvt"),
+        ] {
+            let mut url = url.to_owned();
+            rebase(
+                &mut url,
+                "wss://a.tealstreet.io/tunnel",
+                "wss://b.tealstreet.io/t",
+            );
+            assert_eq!(url, expected);
         }
     }
 }

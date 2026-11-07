@@ -388,6 +388,71 @@ fn flat_leverage_uses_legacy_oneway_cross_and_updates_both_rails() {
     )));
 }
 #[test]
+fn flat_leverage_without_margin_mode_preserves_margin_knowledge() {
+    use safe_cex_engine::model::MarginType;
+    for margin_type in [None, Some(MarginType::Cross), Some(MarginType::Isolated)] {
+        let (mut e, _, _, _) = start();
+        e.store_mut()
+            .update_setting("BTCUSDT", |s| s.margin_type = margin_type);
+        e.handle(
+            30.0,
+            Event::Command(Command::FetchLeverage {
+                command: 7,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let read = requests(&mut e).remove(0);
+        response(
+            &mut e,
+            &read,
+            40.0,
+            r#"{"success":true,"data":{"symbol":"PERP_BTC_USDT","position_mode":"ONE_WAY","details":[{"position_side":"BOTH","leverage":"12"}]}}"#,
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let result = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandDone { command: 7, result }) => Some(result),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing leverage confirmation: {actions:?}"));
+        let result: serde_json::Value = serde_json::from_str(result).unwrap();
+        assert_eq!(result["buyLeverage"], 12.0);
+        assert_eq!(result["sellLeverage"], 12.0);
+        assert!(result.get("marginType").is_none(), "{result}");
+        let setting = e.store().setting("BTCUSDT").unwrap();
+        assert_eq!(setting.leverage, 12.0);
+        assert_eq!(setting.margin_type, margin_type);
+    }
+}
+
+#[test]
+fn flat_leverage_explicitly_wrong_margin_mode_is_not_published() {
+    let (mut e, _, _, _) = start();
+    e.store_mut()
+        .update_setting("BTCUSDT", |s| s.leverage = 10.0);
+    e.handle(
+        30.0,
+        Event::Command(Command::FetchLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let read = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &read,
+        40.0,
+        r#"{"success":true,"data":{"symbol":"PERP_BTC_USDT","margin_mode":"ISOLATED","position_mode":"ONE_WAY","details":[{"position_side":"BOTH","leverage":"12"}]}}"#,
+    );
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+    );
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+}
+
+#[test]
 fn non_futures_account_never_marks_balance_or_positions_loaded() {
     let (mut e, _, mut reads, _) = start();
     let r = take(&mut reads, "accountinfo");

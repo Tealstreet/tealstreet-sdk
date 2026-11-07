@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -22,6 +22,35 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 /// How often one notice code of one account reaches stderr while clients are attached.
 const MIRROR_EVERY: Duration = Duration::from_secs(60);
 const START_FAILED_CODE: &str = "hosted.start_failed";
+
+/// Notices the journal gets at any level, unthrottled: each subscription repair's outcome,
+/// and the per-account subscription counts a box sums against a venue's per-IP cap.
+fn always_journaled(code: Option<&str>) -> bool {
+    matches!(
+        code,
+        Some(
+            safe_cex_engine::log::code::SUBSCRIPTION_REPAIRED
+                | safe_cex_engine::log::code::SUBSCRIPTION_COUNT
+        )
+    )
+}
+
+/// Only these bounded per-account/per-failure events need their fields in Loki.
+/// Reuse the browser notice encoder: JSON escapes native messages and field values.
+fn bitget_journal_line(
+    label: &str,
+    level: &str,
+    code: Option<&str>,
+    message: &str,
+    encode: &impl Fn(&str) -> Arc<str>,
+) -> Option<String> {
+    let code =
+        code.filter(|code| matches!(*code, "bitget.account.mode" | "bitget.close.diagnostic"))?;
+    Some(format!(
+        "safe-cex {level} {code} [{label}]: {}",
+        encode(message)
+    ))
+}
 
 /// `safe-cex warn hosted.start_failed [user account venue]: kind=… venue_code=… signing_mode=… message="…"`:
 /// fields an alert can match on. The message is the venue's refusal, cut to 200 characters.
@@ -55,6 +84,8 @@ pub struct ServerConfig {
     /// Who signs this account (`hosted_cosign`, or `public` with no key), named on
     /// its start-failure line; None outside the Hosted server.
     pub signing_mode: Option<&'static str>,
+    /// Optional deployment-owned observation of actual upstream socket topics.
+    pub interest_observer: Option<safe_cex_engine::socket_lifecycle::InterestObserver>,
 }
 
 impl Default for ServerConfig {
@@ -73,6 +104,7 @@ impl Default for ServerConfig {
             io_timeout: Duration::from_secs(5),
             log_label: None,
             signing_mode: None,
+            interest_observer: None,
         }
     }
 }
@@ -317,10 +349,18 @@ impl Drop for FrameServer {
 pub struct AccountHandle {
     commands: mpsc::Sender<Control>,
     stop: Arc<watch::Sender<bool>>,
+    disposal: Arc<OnceLock<DisposalCause>>,
     config: ServerConfig,
     capabilities: safe_cex_engine::Capabilities,
     events: crate::Events,
     sockets: Arc<std::sync::Mutex<crate::SocketHealth>>,
+}
+
+/// The first disposal request or unrequested actor termination owns this cause.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisposalCause {
+    Stopped,
+    Moving,
 }
 
 /// One book's levels, best first, as `(symbol, bids, asks)`.
@@ -337,7 +377,7 @@ pub struct ClientLink {
 /// Starts an account actor without a frame-server listener. The task ends after
 /// `dispose` or when every handle is dropped; await it to observe teardown.
 pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
-    host: Host<V, T>,
+    mut host: Host<V, T>,
     config: ServerConfig,
 ) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
     config.validate()?;
@@ -346,12 +386,19 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
             "account engine must not receive commands before server registration",
         ));
     }
+    if let Some(observer) = &config.interest_observer {
+        host.engine.set_interest_observer(observer.clone());
+        if !V::managed_sockets() {
+            host.legacy_interest_observer = Some(observer.clone());
+        }
+    }
     let capabilities = host.engine.capabilities();
     let events = host.event_sender();
     let sockets = host.socket_health.cell();
     let (commands, inbox) = mpsc::channel(256);
     let (stop, stopped) = watch::channel(false);
     let actor = Account::new(host, config.clone());
+    let disposal = actor.disposal.clone();
     let task = tokio::task::spawn_local(async move {
         #[cfg(not(feature = "address-nonce"))]
         {
@@ -364,6 +411,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
     let handle = AccountHandle {
         commands,
         stop: Arc::new(stop),
+        disposal,
         config,
         capabilities,
         events,
@@ -544,8 +592,25 @@ impl AccountHandle {
         let _ = self.commands.try_send(Control::Leave(client));
     }
 
+    /// Bind the first disposal before host-owned algo cleanup; this does not stop I/O.
+    /// Actor termination or an earlier disposal cannot be relabeled by a later request.
+    pub fn begin_disposal(&self, cause: DisposalCause) {
+        self.disposal.get_or_init(|| {
+            if self.commands.is_closed() || *self.stop.borrow() {
+                DisposalCause::Stopped
+            } else {
+                cause
+            }
+        });
+    }
+
+    pub fn disposal_cause(&self) -> Option<DisposalCause> {
+        self.disposal.get().copied()
+    }
+
     /// Stops the actor: clients are canceled, venue sockets close, timers end.
     pub fn dispose(&self) {
+        self.begin_disposal(DisposalCause::Stopped);
         self.stop.send_replace(true);
     }
 }
@@ -606,6 +671,61 @@ struct Pending {
     client: Option<u64>,
     original: u32,
 }
+
+struct StartupFailure {
+    notice: Arc<str>,
+    private_pending: bool,
+    recheck: Option<StartupRecheck>,
+}
+
+struct StartupRecheck {
+    attempts: u8,
+    next: Option<tokio::time::Instant>,
+    floor: Duration,
+}
+
+impl StartupRecheck {
+    fn new(now: tokio::time::Instant, floor: Duration, jitter: Duration) -> Self {
+        Self {
+            attempts: 0,
+            next: now.checked_add(Duration::from_secs(300).max(floor) + jitter),
+            floor,
+        }
+    }
+    fn defer(&mut self, now: tokio::time::Instant, floor: Duration) {
+        self.floor = self.floor.max(floor);
+        if let Some(next) = &mut self.next {
+            let Some(floor) = now.checked_add(floor) else {
+                self.next = None;
+                return;
+            };
+            *next = (*next).max(floor);
+        }
+    }
+    fn claim(&mut self, now: tokio::time::Instant, jitter: impl FnOnce() -> Duration) -> bool {
+        if self.next.is_none_or(|next| now < next) {
+            return false;
+        }
+        self.attempts += 1;
+        self.next = (self.attempts < 3)
+            .then(|| {
+                now.checked_add(
+                    Duration::from_secs(300 << self.attempts).max(self.floor) + jitter(),
+                )
+            })
+            .flatten();
+        true
+    }
+}
+
+fn startup_recheck_jitter() -> Duration {
+    let mut bytes = [0; 4];
+    if getrandom::getrandom(&mut bytes).is_err() {
+        return Duration::from_secs(30);
+    }
+    Duration::from_millis(u64::from(u32::from_le_bytes(bytes)) % 30_001)
+}
+
 struct Account<V: Venue, T: Transport> {
     #[cfg(feature = "address-nonce")]
     host: crate::SetupRunOwner<V, T>,
@@ -618,10 +738,11 @@ struct Account<V: Venue, T: Transport> {
     pending: HashMap<u32, Pending>,
     next_command: u32,
     /// Replayed to clients that join after startup failed, so none waits on it.
-    startup_failure: Option<Arc<str>>,
+    startup_failure: Option<StartupFailure>,
     /// Warn+ notices mirrored to stderr while clients are attached: per code, the
     /// last line written and how many were held back since.
     mirrored: HashMap<String, (std::time::Instant, u32)>,
+    disposal: Arc<OnceLock<DisposalCause>>,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -643,6 +764,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             next_command: 0,
             startup_failure: None,
             mirrored: HashMap::new(),
+            disposal: Arc::default(),
         }
     }
 
@@ -659,6 +781,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             let result = std::panic::AssertUnwindSafe(self.drive(&mut inbox, &mut shutdown))
                 .catch_unwind()
                 .await;
+            self.disposal.get_or_init(|| DisposalCause::Stopped);
             self.host.stop();
             let cleanup = self
                 .host
@@ -761,10 +884,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     let gone: Vec<_> = self.peers.iter().filter(|(_, peer)| peer.outgoing.is_closed()).map(|(id, _)| *id).collect();
                     for client in gone { self.leave(client); }
                     self.flush();
+                    self.recheck_startup();
                 }
             }
             self.execute();
         }
+        self.disposal.get_or_init(|| DisposalCause::Stopped);
         for (_, peer) in self.peers.drain() {
             peer.cancel.send_replace(true);
         }
@@ -799,7 +924,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             return Err("snapshot exceeds connection limits");
         }
         if let Some(failure) = &self.startup_failure {
-            let _ = outgoing.try_send(Outgoing::Text(failure.clone()));
+            let _ = outgoing.try_send(Outgoing::Text(failure.notice.clone()));
         }
         self.peers.insert(
             client,
@@ -873,8 +998,17 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     })),
                     |peer| peer.account_auth,
                 ),
-                Notice::StartupFailed { error } => {
-                    self.note_start_failure(&error);
+                Notice::StartupFailed {
+                    error,
+                    read_refusal,
+                } => {
+                    let engine = &self.host.engine;
+                    let unloaded = first_unloaded(
+                        engine.store().loaded(),
+                        engine.public_feed_policy() != safe_cex_engine::PublicFeedPolicy::Disabled,
+                        engine.account_startup(),
+                    );
+                    self.note_start_failure(&error, unloaded, read_refusal);
                     let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     if text.len() > self.config.max_frame_bytes {
                         // Late peers replay this notice, so keep a deliverable failure.
@@ -886,7 +1020,41 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         bounded.outcome = error.outcome;
                         text = encode_notice(ServerNotice::StartupFailed { detail: &bounded });
                     }
-                    self.startup_failure = Some(text.clone());
+                    let private_pending =
+                        read_refusal && self.host.engine.private_startup_pending();
+                    let mut recheck = self
+                        .startup_failure
+                        .take()
+                        .filter(|_| private_pending)
+                        .and_then(|failure| failure.recheck);
+                    if private_pending
+                        && matches!(
+                            error.kind,
+                            Some(
+                                safe_cex_engine::ErrorKind::AuthInvalid
+                                    | safe_cex_engine::ErrorKind::AuthExpired
+                                    | safe_cex_engine::ErrorKind::AuthPermission
+                            )
+                        )
+                    {
+                        let floor = error
+                            .retry_after_ms
+                            .filter(|ms| ms.is_finite() && *ms >= 0.)
+                            .map_or(Duration::ZERO, |ms| Duration::from_millis(ms.ceil() as u64));
+                        let now = tokio::time::Instant::now();
+                        match &mut recheck {
+                            Some(recheck) => recheck.defer(now, floor),
+                            None => {
+                                recheck =
+                                    Some(StartupRecheck::new(now, floor, startup_recheck_jitter()))
+                            }
+                        }
+                    }
+                    self.startup_failure = Some(StartupFailure {
+                        notice: text.clone(),
+                        private_pending,
+                        recheck,
+                    });
                     self.broadcast(Outgoing::Text(text))
                 }
                 Notice::Deactivate => {
@@ -985,9 +1153,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
         }
     }
 
-    /// A Hosted account's start failure, one line per account per MIRROR_EVERY. The
-    /// server has no Sentry client, so the journal is where these are alerted on.
-    fn note_start_failure(&mut self, error: &VenueError) {
+    /// A Hosted account's start failure, one line per account per MIRROR_EVERY, also
+    /// handed to the host's error sink (`report`).
+    fn note_start_failure(
+        &mut self,
+        error: &VenueError,
+        unloaded: Option<&'static str>,
+        refused: bool,
+    ) {
         let Some(label) = self.config.log_label.as_deref() else {
             return;
         };
@@ -1004,6 +1177,16 @@ impl<V: Venue, T: Transport> Account<V, T> {
             "{}",
             start_failure_line(label, self.config.signing_mode, error)
         );
+        crate::report::report(&crate::report::ErrorReport {
+            kind: crate::report::ErrorKind::AccountStartFailed,
+            label: Some(label),
+            target: None,
+            error_kind: error.kind.map(|kind| kind.as_str()),
+            venue_code: error.venue_code.as_deref(),
+            venue: None,
+            startup_unloaded: unloaded,
+            startup_refused: Some(refused),
+        });
     }
 
     /// Log notices never disconnect peers: an oversized one is cut to fit, and
@@ -1018,8 +1201,23 @@ impl<V: Venue, T: Transport> Account<V, T> {
         code: Option<&str>,
     ) {
         let label = self.config.log_label.as_deref().unwrap_or("-");
+        let structured =
+            if let Some(line) = bitget_journal_line(label, level, code, message, &encode) {
+                eprintln!("{line}");
+                true
+            } else {
+                false
+            };
+        // Each repair says whether it resubscribed or reconnected; the server rate-limits
+        // repairs per account and topic already, so every one reaches the journal.
+        if always_journaled(code) {
+            eprintln!(
+                "safe-cex {level} {} [{label}]: {message}",
+                code.unwrap_or("log")
+            );
+        }
         if self.peers.is_empty() {
-            if warn {
+            if warn && !structured {
                 eprintln!(
                     "safe-cex {level} {} [{label}]: {message}",
                     code.unwrap_or("log")
@@ -1029,7 +1227,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
         }
         // The browser gets every notice, but the journal needs warnings too: a venue
         // retrying forever logged nowhere the server could alert on.
-        if warn {
+        if warn && !structured {
             let code = code.unwrap_or("log");
             let now = std::time::Instant::now();
             match self.mirrored.get_mut(code) {
@@ -1077,6 +1275,15 @@ impl<V: Venue, T: Transport> Account<V, T> {
     }
 
     fn flush(&mut self) {
+        if self
+            .startup_failure
+            .as_ref()
+            .is_some_and(|failure| failure.private_pending)
+            && self.host.terminal.is_none()
+            && self.host.engine.private_startup_complete()
+        {
+            self.startup_failure = None;
+        }
         let frame = self.host.turn(|host| {
             host.engine
                 .take_frame((host.clock)())
@@ -1084,6 +1291,27 @@ impl<V: Venue, T: Transport> Account<V, T> {
         });
         if let Some(Some(frame)) = frame {
             self.broadcast(Outgoing::Frame(frame));
+        }
+    }
+
+    fn recheck_startup(&mut self) {
+        let Some(failure) = &mut self.startup_failure else {
+            return;
+        };
+        if !failure.private_pending || self.host.terminal.is_some() {
+            return;
+        }
+        let Some(recheck) = &mut failure.recheck else {
+            return;
+        };
+        if !recheck.claim(tokio::time::Instant::now(), startup_recheck_jitter) {
+            return;
+        }
+        let supported = self
+            .host
+            .turn(|host| host.engine.recheck_startup_reads((host.clock)()));
+        if supported != Some(true) {
+            recheck.next = None;
         }
     }
 
@@ -1450,6 +1678,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
 
 impl<V: Venue, T: Transport> Drop for Account<V, T> {
     fn drop(&mut self) {
+        self.disposal.get_or_init(|| DisposalCause::Stopped);
         self.host.stop();
     }
 }
@@ -1542,6 +1771,25 @@ enum ServerNotice<'a> {
     },
 }
 
+/// The first startup section not yet loaded, in the engine's own order and
+/// requirements (`watch_startup`): what had not loaded when a start failed.
+fn first_unloaded(
+    loaded: safe_cex_engine::model::Loaded,
+    tickers: bool,
+    account: bool,
+) -> Option<&'static str> {
+    [
+        ("markets", loaded.markets, true),
+        ("tickers", loaded.tickers, tickers),
+        ("balance", loaded.balance, account),
+        ("orders", loaded.orders, account),
+        ("positions", loaded.positions, account),
+    ]
+    .into_iter()
+    .find(|(_, done, required)| *required && !done)
+    .map(|(name, ..)| name)
+}
+
 struct NoticeFields<'a>(&'a [(&'static str, Value)]);
 
 impl NoticeFields<'_> {
@@ -1556,7 +1804,8 @@ impl Serialize for NoticeFields<'_> {
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for (key, value) in self.0 {
             match value {
-                Value::Str(text) => map.serialize_entry(key, text)?,
+                Value::Str(text) => map.serialize_entry(key, text.as_str())?,
+                Value::StaticStr(text) => map.serialize_entry(key, *text)?,
                 Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
                 Value::Num(_) => map.serialize_entry(key, &())?,
                 Value::Bool(flag) => map.serialize_entry(key, flag)?,
@@ -1575,6 +1824,8 @@ fn section_parent(kind: u16) -> Option<u16> {
         | section::INSTRUMENT_CLASSIFICATIONS
         | section::DERIVATIVE_PRODUCTS => Some(section::MARKETS),
         section::POSITION_GREEKS | section::PREDICTION_HOLDINGS => Some(section::POSITIONS),
+        // A segment of ORDERS never arrives without how fresh its rows are.
+        section::ORDERS_READ => Some(section::ORDERS),
         _ => None,
     }
 }
@@ -1834,6 +2085,154 @@ fn valid_symbol(symbol: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{Events, HostEvent};
+
+    #[test]
+    fn a_start_failure_names_the_first_section_not_yet_loaded() {
+        use safe_cex_engine::model::Loaded;
+        let loaded = |markets, tickers, balance, orders, positions| Loaded {
+            markets,
+            tickers,
+            balance,
+            orders,
+            positions,
+        };
+        assert_eq!(
+            first_unloaded(Loaded::default(), true, true),
+            Some("markets")
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, false, false, false, false), true, true),
+            Some("tickers")
+        );
+        // A disabled public feed never waits for tickers; a public-only engine never for the account.
+        assert_eq!(
+            first_unloaded(loaded(true, false, false, true, false), false, true),
+            Some("balance")
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, true, true, true, false), true, true),
+            Some("positions")
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, true, false, false, false), true, false),
+            None
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, true, true, true, true), true, true),
+            None
+        );
+    }
+
+    #[test]
+    fn bitget_diagnostics_journal_the_original_structured_fields_once() {
+        for (level, code) in [
+            ("info", "bitget.account.mode"),
+            ("warn", "bitget.close.diagnostic"),
+        ] {
+            let encoded = std::cell::Cell::new(0);
+            let fields = vec![
+                ("accountMode", Value::from("uta")),
+                ("requestedSize", Value::from("0.6")),
+                ("nativeCode", Value::from("040757")),
+                ("nativeMsg", Value::from("native\n\"msg\"")),
+            ];
+            let encode = |message: &str| {
+                encoded.set(encoded.get() + 1);
+                encode_notice(ServerNotice::Event {
+                    level,
+                    code,
+                    message,
+                    fields: NoticeFields(&fields),
+                })
+            };
+            let line =
+                bitget_journal_line("fixture-tag", level, Some(code), "native\nmessage", &encode)
+                    .unwrap();
+            assert_eq!(encoded.get(), 1);
+            assert_eq!(
+                line.lines().count(),
+                1,
+                "native text must remain JSON-escaped"
+            );
+            let value: serde_json::Value =
+                serde_json::from_str(line.split_once(": ").unwrap().1).unwrap();
+            assert_eq!(value["fields"]["nativeCode"], "040757");
+            assert_eq!(value["fields"]["nativeMsg"], "native\n\"msg\"");
+            assert_eq!(value["fields"]["requestedSize"], "0.6");
+            assert_eq!(value["fields"]["accountMode"], "uta");
+            assert_eq!(value["message"], "native\nmessage");
+            assert_eq!(value["code"], code);
+            // The bool returned by this actual journal path suppresses both old warn mirrors.
+            assert!(
+                bitget_journal_line(
+                    "fixture-tag",
+                    level,
+                    Some("request.failed"),
+                    "unchanged",
+                    &encode
+                )
+                .is_none()
+            );
+            assert_eq!(encoded.get(), 1);
+        }
+    }
+
+    #[test]
+    fn bitget_diagnostics_route_once_with_or_without_a_browser_peer() {
+        for attached in [false, true] {
+            for (level, code) in [
+                ("info", "bitget.account.mode"),
+                ("warn", "bitget.close.diagnostic"),
+            ] {
+                let mut actor = stub_account(8192);
+                let mut receiver = attached.then(|| peer(&mut actor, 1).0);
+                let encodes = std::cell::Cell::new(0);
+                let fields = vec![
+                    ("accountMode", Value::from("uta")),
+                    ("nativeMsg", Value::from("native\nmessage")),
+                ];
+                actor.route_log(
+                    None,
+                    level,
+                    level == "warn",
+                    |message| {
+                        encodes.set(encodes.get() + 1);
+                        encode_notice(ServerNotice::Event {
+                            level,
+                            code,
+                            message,
+                            fields: NoticeFields(&fields),
+                        })
+                    },
+                    "fixture",
+                    Some(code),
+                );
+                // One journal encoding; an attached peer gets exactly one further wire encoding.
+                assert_eq!(encodes.get(), if attached { 2 } else { 1 });
+                assert!(
+                    !actor.mirrored.contains_key(code),
+                    "no second legacy warning mirror"
+                );
+                if let Some(receiver) = &mut receiver {
+                    let Outgoing::Text(text) = receiver.try_recv().unwrap() else {
+                        panic!("event notice");
+                    };
+                    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    assert_eq!(json["fields"]["accountMode"], "uta");
+                    assert_eq!(json["fields"]["nativeMsg"], "native\nmessage");
+                    assert!(receiver.try_recv().is_err(), "one browser event only");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_subscription_repair_outcome_reaches_the_journal() {
+        assert!(always_journaled(Some("subscription.repaired")));
+        assert!(always_journaled(Some("subscription.count")));
+        assert!(!always_journaled(Some("subscription.rejected")));
+        assert!(!always_journaled(None));
+    }
 
     #[test]
     fn a_hosted_start_failure_line_names_its_kind_code_and_signing_mode() {
@@ -2690,6 +3089,34 @@ mod tests {
         assert!(segment_frame(&orphan, 900).is_none());
     }
 
+    /// H6 (codex-hcmq3f): a segment carrying ORDERS without ORDERS_READ would
+    /// reach a page before the cover that says how fresh its rows are.
+    #[test]
+    fn orders_never_segment_apart_from_their_read_cover() {
+        use safe_cex_engine::wire::section::*;
+        let frame = kinded_frame(&[(TICKERS, 400), (ORDERS, 400), (ORDERS_READ, 8), (BOOK, 400)]);
+        // Every limit that splits the frame, including those whose boundary
+        // would fall between ORDERS and its cover.
+        let mut split = 0;
+        for max in (400..frame.len()).step_by(8) {
+            let Some(segments) = segment_frame(&frame, max) else {
+                continue;
+            };
+            split += usize::from(segments.len() > 1);
+            for segment in &segments {
+                let kinds: Vec<u16> = safe_cex_engine::wire::sections(segment)
+                    .map(|(kind, _)| kind)
+                    .collect();
+                assert_eq!(
+                    kinds.contains(&ORDERS),
+                    kinds.contains(&ORDERS_READ),
+                    "ORDERS travels with its cover at {max}: {kinds:?}"
+                );
+            }
+        }
+        assert!(split > 0);
+    }
+
     fn peer(
         actor: &mut Account<Stub, NoTransport>,
         client: u64,
@@ -2750,6 +3177,27 @@ mod tests {
     }
 
     #[test]
+    fn static_startup_fields_encode_identically_to_owned_strings() {
+        let borrowed = [
+            ("state", Value::StaticStr("neverStarted")),
+            ("kind", Value::StaticStr("timeout")),
+        ];
+        let owned = [
+            ("state", Value::from("neverStarted")),
+            ("kind", Value::from("timeout")),
+        ];
+        let expected = r#"{"state":"neverStarted","kind":"timeout"}"#;
+        assert_eq!(
+            serde_json::to_string(&NoticeFields(&borrowed)).unwrap(),
+            expected
+        );
+        assert_eq!(
+            serde_json::to_string(&NoticeFields(&owned)).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
     fn oversized_notices_are_replaced_for_that_message_only() {
         let mut actor = stub_account(256);
         let (mut a, a_canceled) = peer(&mut actor, 1);
@@ -2798,16 +3246,80 @@ mod tests {
         );
     }
 
-    struct FailsStartup;
+    #[derive(Default)]
+    struct FailsStartup {
+        rechecks: Rc<std::cell::Cell<u8>>,
+        can_recheck: bool,
+        recover: bool,
+    }
     impl Venue for FailsStartup {
         type Pending = ();
+        fn rechecks_startup_reads() -> bool {
+            true
+        }
         fn start(&mut self, cx: &mut Cx<'_, ()>) {
-            cx.startup_failed(
-                VenueError::new("key rejected").kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            cx.store.set_markets(vec![safe_cex_engine::model::Market {
+                id: "BTC".into(),
+                symbol: "BTCUSDT".into(),
+                pretty_symbol: None,
+                base: "BTC".into(),
+                quote: "USDT".into(),
+                active: true,
+                precision: safe_cex_engine::model::Precision {
+                    amount: 0.001,
+                    price: 0.1,
+                },
+                limits: safe_cex_engine::model::Limits {
+                    amount: safe_cex_engine::model::MinMax {
+                        min: 0.001,
+                        max: 100.,
+                    },
+                    leverage: safe_cex_engine::model::MinMax { min: 1., max: 50. },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: Some(true),
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            }]);
+            cx.startup_read_refused(
+                &VenueError::new("key rejected").kind(safe_cex_engine::ErrorKind::AuthInvalid),
             );
         }
+        fn recheck_startup_reads(&mut self, cx: &mut Cx<'_, ()>) -> bool {
+            if !self.can_recheck {
+                return false;
+            }
+            self.rechecks.set(self.rechecks.get() + 1);
+            cx.request(
+                safe_cex_engine::Method::Get,
+                "https://fixture/account".into(),
+                vec![],
+                None,
+                (),
+            );
+            if self.recover {
+                cx.store
+                    .set_balance(safe_cex_engine::model::Balance::default());
+                cx.store.set_positions(vec![]);
+                cx.store.set_orders(vec![]);
+            }
+            true
+        }
         fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            let error =
+                VenueError::new("key rejected again").kind(safe_cex_engine::ErrorKind::AuthInvalid);
+            if text == "refuse again" {
+                cx.startup_read_refused(&error);
+            } else {
+                cx.startup_failed(error);
+            }
+        }
         fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
         fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
         fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
@@ -2819,6 +3331,49 @@ mod tests {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn first_disposal_cause_survives_cloned_handles_cleanup_and_actor_abort() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for mode in ["moving", "stopped", "aborted"] {
+                    let (handle, task) = spawn_account(
+                        Host::new(
+                            safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                            NoTransport,
+                        ),
+                        ServerConfig::default(),
+                    )
+                    .unwrap();
+                    let later = handle.clone();
+                    let expected = if mode == "moving" {
+                        handle.begin_disposal(DisposalCause::Moving);
+                        assert!(
+                            handle.snapshot_frame().await.is_some(),
+                            "algo cleanup can still use the live actor"
+                        );
+                        handle.dispose();
+                        task.await.unwrap().unwrap();
+                        DisposalCause::Moving
+                    } else if mode == "stopped" {
+                        handle.dispose();
+                        later.begin_disposal(DisposalCause::Moving);
+                        task.await.unwrap().unwrap();
+                        DisposalCause::Stopped
+                    } else {
+                        task.abort();
+                        assert!(task.await.unwrap_err().is_cancelled());
+                        later.begin_disposal(DisposalCause::Moving);
+                        DisposalCause::Stopped
+                    };
+                    later.begin_disposal(DisposalCause::Moving);
+                    later.begin_disposal(DisposalCause::Stopped);
+                    assert_eq!(handle.disposal_cause(), Some(expected), "{mode}");
+                    assert_eq!(later.disposal_cause(), Some(expected), "{mode}");
+                }
+            })
+            .await;
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2848,7 +3403,7 @@ mod tests {
     async fn a_startup_failure_reaches_clients_that_join_later() {
         let mut actor = Account::new(
             Host::new(
-                safe_cex_engine::test_support::seeded_engine(FailsStartup),
+                safe_cex_engine::test_support::seeded_engine(FailsStartup::default()),
                 NoTransport,
             ),
             ServerConfig::default(),
@@ -2870,6 +3425,303 @@ mod tests {
         );
     }
 
+    struct SignerMissingAtStartup;
+    impl Venue for SignerMissingAtStartup {
+        type Pending = ();
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            cx.store.set_markets(vec![safe_cex_engine::model::Market {
+                id: "BTC".into(),
+                symbol: "BTCUSDT".into(),
+                pretty_symbol: None,
+                base: "BTC".into(),
+                quote: "USDT".into(),
+                active: true,
+                precision: safe_cex_engine::model::Precision {
+                    amount: 0.001,
+                    price: 0.1,
+                },
+                limits: safe_cex_engine::model::Limits {
+                    amount: safe_cex_engine::model::MinMax {
+                        min: 0.001,
+                        max: 100.,
+                    },
+                    leverage: safe_cex_engine::model::MinMax { min: 1., max: 50. },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: Some(true),
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            }]);
+            // As SigningLatch::missing_key reports it: primary material can never sign.
+            cx.startup_failed(
+                VenueError::new("Signing key is not installed")
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput)
+                    .outcome(safe_cex_engine::Outcome::NotSent),
+            );
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_a_non_read_startup_failure_survives_unsigned_read_completion() {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(SignerMissingAtStartup);
+        engine.set_account_startup(true);
+        let mut actor = Account::new(Host::new(engine, NoTransport), ServerConfig::default());
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        let failure = actor.startup_failure.as_ref().unwrap();
+        assert!(!failure.private_pending);
+        assert!(failure.recheck.is_none());
+        // Unsigned (or secondary-key) account reads then load every section.
+        actor
+            .host
+            .engine
+            .store_mut()
+            .set_balance(safe_cex_engine::model::Balance::default());
+        actor.host.engine.store_mut().set_positions(vec![]);
+        actor.host.engine.store_mut().set_orders(vec![]);
+        let (outgoing, mut late) = mpsc::channel(4);
+        actor
+            .join(9, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(matches!(late.try_recv(), Ok(Outgoing::Frame(_))));
+        assert!(
+            matches!(late.try_recv(), Ok(Outgoing::Text(_))),
+            "a signing/config startup failure was retired by read completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovered_private_startup_does_not_replay_its_old_failure_to_late_joins() {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(FailsStartup::default());
+        engine.set_account_startup(true);
+        let mut actor = Account::new(Host::new(engine, NoTransport), ServerConfig::default());
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        let (outgoing, mut early) = mpsc::channel(4);
+        actor
+            .join(1, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(matches!(early.try_recv(), Ok(Outgoing::Frame(_))));
+        assert!(matches!(early.try_recv(), Ok(Outgoing::Text(_))));
+        actor
+            .host
+            .engine
+            .store_mut()
+            .set_balance(safe_cex_engine::model::Balance::default());
+        let (outgoing, mut partial) = mpsc::channel(4);
+        actor
+            .join(2, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(matches!(partial.try_recv(), Ok(Outgoing::Frame(_))));
+        assert!(
+            matches!(partial.try_recv(), Ok(Outgoing::Text(_))),
+            "balance alone must not clear the refusal"
+        );
+        while early.try_recv().is_ok() {}
+        actor.host.engine.store_mut().set_positions(vec![]);
+        actor.host.engine.store_mut().set_orders(vec![]);
+        let (outgoing, mut recovered) = mpsc::channel(4);
+        actor
+            .join(3, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(matches!(recovered.try_recv(), Ok(Outgoing::Frame(_))));
+        assert!(
+            recovered.try_recv().is_err(),
+            "same-actor recovery must retire obsolete StartupFailed replay"
+        );
+        assert!(actor.host.engine.private_startup_complete());
+        assert!(
+            matches!(early.try_recv(), Ok(Outgoing::Frame(_))),
+            "connected peers must receive the frame whose loaded flags clear NX health"
+        );
+        assert!(
+            early.try_recv().is_err(),
+            "obsolete failure must not follow recovery"
+        );
+    }
+    #[tokio::test(start_paused = true)]
+    async fn startup_recheck_schedule_preserves_floors_jitter_and_three_attempt_budget() {
+        let now = tokio::time::Instant::now();
+        let jitter = Duration::from_secs(30);
+        let mut recheck = StartupRecheck::new(now, Duration::ZERO, jitter);
+        assert_eq!(recheck.next, Some(now + Duration::from_secs(330)));
+        assert!(!recheck.claim(now + Duration::from_secs(329), || panic!(
+            "early jitter must not run"
+        )));
+        recheck.defer(now, Duration::from_secs(400));
+        assert_eq!(recheck.next, Some(now + Duration::from_secs(400)));
+        let mut at = recheck.next.unwrap();
+        for expected in 1..=3 {
+            assert!(recheck.claim(at, || jitter));
+            assert_eq!(recheck.attempts, expected);
+            if expected < 3 {
+                let next = recheck.next.unwrap();
+                assert_eq!(next - at, Duration::from_secs(300 << expected) + jitter);
+                at = next;
+            }
+        }
+        assert_eq!(recheck.next, None);
+        recheck.defer(at, Duration::from_secs(9999));
+        assert!(!recheck.claim(at + Duration::from_secs(99999), || jitter));
+        assert_eq!(recheck.attempts, 3);
+        for _ in 0..16 {
+            assert!(startup_recheck_jitter() <= jitter);
+        }
+    }
+    struct ReadTransport(Rc<RefCell<Vec<HttpRequest>>>);
+    impl Transport for ReadTransport {
+        fn connect(&self, _: SocketId, _: String, _: Events) -> mpsc::UnboundedSender<String> {
+            mpsc::unbounded_channel().0
+        }
+        fn request(&self, request: HttpRequest, _: Events) {
+            self.0.borrow_mut().push(request);
+        }
+    }
+    #[tokio::test(start_paused = true)]
+    async fn startup_rechecks_are_bounded_reads_and_repeated_refusals_do_not_restart_the_budget() {
+        let count = Rc::new(std::cell::Cell::new(0));
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(FailsStartup {
+            rechecks: count.clone(),
+            can_recheck: true,
+            recover: false,
+        });
+        engine.set_account_startup(true);
+        let mut actor = Account::new(
+            Host::new(engine, ReadTransport(requests.clone())),
+            ServerConfig::default(),
+        );
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        actor.recheck_startup();
+        assert_eq!(count.get(), 0);
+        for attempt in 1..=3 {
+            let due = actor
+                .startup_failure
+                .as_ref()
+                .unwrap()
+                .recheck
+                .as_ref()
+                .unwrap()
+                .next
+                .unwrap();
+            tokio::time::advance(due - tokio::time::Instant::now()).await;
+            actor.recheck_startup();
+            actor.execute();
+            assert_eq!(count.get(), attempt);
+            assert_eq!(requests.borrow().len(), usize::from(attempt));
+            actor.host.engine.handle(
+                now,
+                Event::WsMessage {
+                    socket: SocketId(0),
+                    text: "refuse again",
+                },
+            );
+            actor.execute();
+            assert_eq!(
+                actor
+                    .startup_failure
+                    .as_ref()
+                    .unwrap()
+                    .recheck
+                    .as_ref()
+                    .unwrap()
+                    .attempts,
+                attempt
+            );
+        }
+        tokio::time::advance(Duration::from_secs(100_000)).await;
+        actor.recheck_startup();
+        actor.execute();
+        assert_eq!(count.get(), 3);
+        assert!(requests.borrow().iter().all(|request| request.method
+            == safe_cex_engine::Method::Get
+            && request.body.is_none()));
+        assert!(
+            !actor.pending.values().any(|_| true),
+            "rechecks create no command receipts"
+        );
+    }
+    #[tokio::test(start_paused = true)]
+    async fn startup_recheck_recovery_stops_further_attempts_without_replacing_the_actor() {
+        let count = Rc::new(std::cell::Cell::new(0));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(FailsStartup {
+            rechecks: count.clone(),
+            can_recheck: true,
+            recover: true,
+        });
+        engine.set_account_startup(true);
+        let mut actor = Account::new(Host::new(engine, NoTransport), ServerConfig::default());
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        tokio::time::advance(Duration::from_secs(331)).await;
+        actor.recheck_startup();
+        actor.execute();
+        actor.flush();
+        assert_eq!(count.get(), 1);
+        assert!(actor.startup_failure.is_none());
+        tokio::time::advance(Duration::from_secs(100_000)).await;
+        actor.recheck_startup();
+        assert_eq!(count.get(), 1);
+        actor.host.engine.handle(
+            now,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "new refusal",
+            },
+        );
+        actor.execute();
+        actor.flush();
+        assert!(
+            actor.startup_failure.is_some(),
+            "existing loaded flags cannot erase a newer refusal"
+        );
+    }
+    #[tokio::test]
+    async fn startup_failure_is_not_cleared_by_public_only_data() {
+        let mut actor = Account::new(
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(FailsStartup::default()),
+                NoTransport,
+            ),
+            ServerConfig::default(),
+        );
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        actor
+            .host
+            .engine
+            .store_mut()
+            .set_balance(safe_cex_engine::model::Balance::default());
+        actor.host.engine.store_mut().set_positions(vec![]);
+        actor.host.engine.store_mut().set_orders(vec![]);
+        actor.flush();
+        assert!(actor.startup_failure.is_some());
+        assert!(!actor.host.engine.recheck_startup_reads(now));
+    }
     #[tokio::test]
     async fn oversized_log_notice_is_truncated_instead_of_disconnecting_peers() {
         let mut actor = Account::new(

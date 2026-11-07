@@ -1028,7 +1028,11 @@ impl Coinbase {
                 .credentials
                 .as_ref()
                 .ok_or("Coinbase credentials missing".to_string())
-                .and_then(|c| c.jwt(cx.now, None, |bytes| cx.fill_signing_entropy(bytes)));
+                .and_then(|c| {
+                    c.jwt(cx.protocol_now(), None, |bytes| {
+                        cx.fill_signing_entropy(bytes)
+                    })
+                });
             match signed {
                 Ok(jwt) => cx.send(
                     socket,
@@ -1741,9 +1745,12 @@ impl Coinbase {
                     }
                 }
                 Request::DetectCfm { portfolio } => {
-                    let _: wire::CfmBalance =
-                        serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                    self.select_portfolio(cx, portfolio, ProductKind::Cfm)
+                    let kind = if wire::cfm_balance(response.body)?.is_some() {
+                        ProductKind::Cfm
+                    } else {
+                        ProductKind::Spot
+                    };
+                    self.select_portfolio(cx, portfolio, kind)
                 }
                 Request::Balance => {
                     self.account.inflight[0] = false;
@@ -1756,12 +1763,13 @@ impl Coinbase {
                             committed_upnl(cx.store),
                         )
                     } else {
-                        let r: wire::CfmBalance =
-                            serde_json::from_str(response.body).map_err(|e| e.to_string())?;
+                        let r = wire::cfm_balance(response.body)?.ok_or(
+                            "Coinbase unknown balance: path `/api/v3/brokerage/cfm/balance_summary`, field `balance_summary`",
+                        )?;
                         (
-                            r.balance_summary.total_usd_balance.value.0,
-                            r.balance_summary.available_margin.value.0,
-                            r.balance_summary.unrealized_pnl.map_or(0.0, |n| n.value.0),
+                            r.total_usd_balance.value.0,
+                            r.available_margin.value.0,
+                            r.unrealized_pnl.map_or(0.0, |n| n.value.0),
                         )
                     };
                     if total < 0.0 || free < 0.0 || !upnl.is_finite() || !(total - free).is_finite()
@@ -1777,13 +1785,38 @@ impl Coinbase {
                 }
                 Request::SpotBalance => {
                     self.account.inflight[1] = false;
-                    let r: wire::Breakdown =
+                    let r: wire::Breakdown<'_> =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
                     if r.breakdown.spot_positions.len() > 1000 {
-                        return Err("Coinbase spot balance limit".into());
+                        return Err(
+                            "Coinbase invalid field `spot_positions`: balance row limit".into()
+                        );
                     }
+                    let mut spot_rows = Vec::new();
+                    for raw in r.breakdown.spot_positions {
+                        let account: wire::SpotAccount =
+                            serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
+                        if !account.is_spot_wallet() {
+                            let kind = account.excluded_type();
+                            self.account.skip_logged.report(
+                                cx,
+                                format!("holding-type:{kind}"),
+                                Level::Info,
+                                format!("Coinbase excluded spot account type {kind}"),
+                            );
+                            continue;
+                        }
+                        spot_rows.push(
+                            serde_json::from_str::<wire::SpotBalance>(raw.get())
+                                .map_err(|e| e.to_string())?,
+                        );
+                    }
+                    let cash = (self.account.kind == Some(ProductKind::Spot))
+                        .then(|| wire::cash_balance(&spot_rows))
+                        .transpose()?;
                     let mut coins = SnapshotBuilder::default();
-                    let mut seen = HashSet::new();
+                    let mut sums = HashMap::<String, Balance>::new();
+                    let mut rejected = HashSet::new();
                     let held = |cx: &Cx<'_, Pending>, asset: Option<&str>| {
                         cx.store
                             .currency_balances()
@@ -1791,7 +1824,7 @@ impl Coinbase {
                             .iter()
                             .any(|c| asset.is_none_or(|a| c.currency == a))
                     };
-                    for b in r.breakdown.spot_positions {
+                    for b in spot_rows {
                         if b.asset.is_empty() {
                             self.account.skip_logged.report(
                                 cx,
@@ -1801,9 +1834,6 @@ impl Coinbase {
                             );
                             coins.reject(None);
                             continue;
-                        }
-                        if !seen.insert(b.asset.clone()) {
-                            return Err("Coinbase duplicate spot holding".into());
                         }
                         if b.total_balance_crypto.0 < 0.0
                             || b.available_to_trade_crypto.0 < 0.0
@@ -1815,18 +1845,22 @@ impl Coinbase {
                                 skip_level(held(cx, Some(&b.asset))),
                                 format!("Coinbase skipped invalid spot holding {}", b.asset),
                             );
+                            rejected.insert(b.asset.clone());
                             coins.reject(Some(b.asset));
                             continue;
                         }
-                        coins.push(CurrencyBalance {
-                            currency: b.asset,
-                            balance: Balance {
-                                total: b.total_balance_crypto.0,
-                                free: b.available_to_trade_crypto.0,
-                                used: b.total_balance_crypto.0 - b.available_to_trade_crypto.0,
-                                upnl: 0.0,
-                            },
-                        });
+                        let sum = sums.entry(b.asset).or_default();
+                        sum.total += b.total_balance_crypto.0;
+                        sum.free += b.available_to_trade_crypto.0;
+                        sum.used = sum.total - sum.free;
+                        if !sum.total.is_finite() || !sum.free.is_finite() {
+                            return Err("Coinbase invalid field `spot_positions.total_balance_crypto`: aggregate overflow".into());
+                        }
+                    }
+                    for (currency, balance) in sums {
+                        if !rejected.contains(&currency) {
+                            coins.push(CurrencyBalance { currency, balance });
+                        }
                     }
                     self.account.skip_logged.rearm_namespace(
                         "holding:",
@@ -1836,8 +1870,8 @@ impl Coinbase {
                     let current = cx.store.currency_balances().unwrap_or_default().to_vec();
                     cx.store
                         .set_currency_balances(coins.commit(current, |c| c.currency.clone()));
-                    if self.account.kind == Some(ProductKind::Spot) {
-                        cx.store.set_balance(Balance::default());
+                    if let Some(cash) = cash {
+                        cx.store.set_balance(cash);
                     }
                 }
                 Request::Positions {
@@ -2479,6 +2513,22 @@ impl Coinbase {
         }
     }
 }
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance => S::BALANCE,
+            Self::SpotBalance => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders(_) => S::ORDERS,
+            Self::Portfolios | Self::Probe { .. } => S::ACCOUNT,
+            Self::KeyPermissions { .. } => S::ACCOUNT,
+            Self::DetectCfm { .. } => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2543,4 +2593,16 @@ mod tests {
             assert!(proof.is_none());
         }
     }
+}
+
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    let read = Request::Probe {
+        portfolios: vec![],
+        index: 0,
+    };
+    assert_eq!(
+        read.startup_sections(),
+        safe_cex_engine::startup::Sections::ACCOUNT
+    );
 }

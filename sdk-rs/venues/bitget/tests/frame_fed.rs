@@ -7,6 +7,10 @@ use safe_cex_engine::{Command, Event, HttpRequest, Method};
 use support::*;
 
 fn page() -> Harness {
+    page_with_contracts(CONTRACTS)
+}
+
+fn page_with_contracts(contracts: &str) -> Harness {
     let mut h = Harness::started_configure(
         FixtureOptions {
             key: Some("key".into()),
@@ -17,8 +21,37 @@ fn page() -> Harness {
         false,
         |engine| engine.set_frame_fed().unwrap(),
     );
-    h.respond("/contracts", 200, CONTRACTS);
+    h.respond("/contracts", 200, contracts);
     h
+}
+
+#[test]
+fn frame_fed_market_close_keeps_its_native_market_cap_after_source_frames() {
+    let mut h = page_with_contracts(&CONTRACTS.replace(
+        "\"maxOrderQty\":\"120\"",
+        "\"maxOrderQty\":\"120\",\"maxMarketOrderQty\":\"40\"",
+    ));
+    let mut source = Harness::classic();
+    let frame = source.engine.snapshot_frame(source.now).to_vec();
+    h.engine.apply_frame(h.now, &frame, true).unwrap();
+    h.collect();
+    let order: PlaceOrderOpts = serde_json::from_str(
+        r#"{"symbol":"BTCUSDT","type":"market","side":"sell","amount":100,"reduceOnly":true}"#,
+    )
+    .unwrap();
+    h.command(Command::PlaceOrders {
+        command: 11,
+        orders: vec![order],
+    });
+    let request = h.take("/batch-place-order");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let children = body["orderList"].as_array().unwrap();
+    let quantities: Vec<f64> = children
+        .iter()
+        .map(|child| child["size"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(quantities, vec![40.0, 40.0, 20.0]);
+    assert!(children.iter().all(|child| child["reduceOnly"] == "YES"));
 }
 
 /// A page engine fed a classic data source's snapshot (open order "1").

@@ -13,12 +13,18 @@ use safe_cex_engine::{
 use std::collections::{BTreeMap, HashMap};
 const INTX: &str = "https://api.international.coinbase.com/api/v1/instruments/";
 const WS: &str = "wss://advanced-trade-ws.coinbase.com";
+#[path = "public_drb.rs"]
+mod drb_public;
 
 #[cfg(test)]
 #[path = "../tests/support/deferred_generation.rs"]
 mod deferred_generation_tests;
 
 pub enum Request {
+    Drb {
+        sequence: u64,
+        startup: bool,
+    },
     Instruments {
         markets: Vec<Market>,
         tickers: Vec<Ticker>,
@@ -46,12 +52,22 @@ pub enum Request {
         invalid: bool,
     },
 }
+struct CandleRange {
+    symbol: String,
+    granularity: &'static str,
+    seconds: f64,
+    cursor: f64,
+    end: f64,
+    page_end: f64,
+    rows: BTreeMap<u64, Candle>,
+}
 #[derive(Default)]
 pub(crate) struct Depth {
     pub book: Book,
     pub live: bool,
     subscribers: u32,
     waiting_since: f64,
+    change_id: Option<u64>,
 }
 #[derive(Default)]
 struct Daily {
@@ -64,6 +80,7 @@ struct Daily {
 }
 #[derive(Default)]
 pub(crate) struct Public {
+    drb: drb_public::Public,
     socket: Option<SocketId>,
     open: bool,
     recover: bool,
@@ -77,6 +94,7 @@ pub(crate) struct Public {
     candles: HashMap<(String, Interval), (u32, Option<Candle>)>,
     products: HashMap<String, (f64, f64)>,
     daily: HashMap<String, Daily>,
+    candle_ranges: HashMap<CommandId, Box<CandleRange>>,
     daily_generation: u64,
     generation: u64,
     seeding: bool,
@@ -218,8 +236,7 @@ impl Coinbase {
         if self.options.spot_only {
             self.private_ready(ProductKind::Spot, cx);
         } else {
-            self.public.kind = Some(ProductKind::Intx);
-            self.instruments(cx, true);
+            self.drb_start(cx);
         }
     }
     pub(crate) fn private_ready(&mut self, kind: ProductKind, cx: &mut Cx<'_, Pending>) {
@@ -332,9 +349,13 @@ impl Coinbase {
         }
         self.public.socket = Some(
             cx.connect(
-                safe_cex_engine::SocketSpec::new(WS)
-                    .channel(SocketChannel::Public)
-                    .feed("market", self.public.recover),
+                safe_cex_engine::SocketSpec::new(if self.public.drb.active {
+                    crate::drb::PUBLIC_WS_URL
+                } else {
+                    WS
+                })
+                .channel(SocketChannel::Public)
+                .feed("market", self.public.recover),
             ),
         );
         // Suppressed public feeds never open; supervising them would only churn retries.
@@ -380,10 +401,13 @@ impl Coinbase {
     /// Level2 resubscribes answer with a fresh snapshot, which replaces the book;
     /// the socket-wide sequence continues across the resubscribe.
     pub(crate) fn public_repair(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         topic: &SubscriptionTopic,
     ) -> Result<(), String> {
+        if self.public.drb.active {
+            return self.drb_repair(cx, topic);
+        }
         type Resubscribe = fn(&Coinbase, &mut Cx<'_, Pending>, Vec<String>, bool);
         let (symbol, live, channel, resubscribe): (_, _, _, Resubscribe) = match topic {
             SubscriptionTopic::Candles { symbol, interval } => (
@@ -422,6 +446,10 @@ impl Coinbase {
         if self.public.socket != Some(socket) {
             return false;
         }
+        if self.public.drb.active {
+            self.drb_open(cx);
+            return true;
+        }
         self.public.open = true;
         self.public.supervisor.opened(cx);
         self.public.sequence = None;
@@ -459,7 +487,7 @@ impl Coinbase {
             .iter()
             .filter_map(|(symbol, state)| state.refresh.then_some(symbol.clone()))
             .collect();
-        let day = (cx.now / 86400000.).floor() * 86400.;
+        let day = (cx.protocol_now() / 86400000.).floor() * 86400.;
         for symbol in refresh {
             let state = self.public.daily.get_mut(&symbol).unwrap();
             state.refresh = false;
@@ -474,6 +502,7 @@ impl Coinbase {
     fn invalidate(&mut self, cx: &mut Cx<'_, Pending>) {
         for (symbol, book) in &mut self.public.books {
             book.live = false;
+            book.change_id = None;
             book.book.clear();
             cx.book_changed(symbol);
         }
@@ -486,6 +515,8 @@ impl Coinbase {
         self.public.open = false;
         self.public.sequence = None;
         self.invalidate(cx);
+        self.public.drb.closed();
+        self.drb.disconnected(socket);
         // A reconnect only supplies the current five-minute bucket.
         self.public.daily_generation = self.public.daily_generation.wrapping_add(1);
         for state in self.public.daily.values_mut() {
@@ -511,7 +542,7 @@ impl Coinbase {
             return;
         };
         let generation = state.generation;
-        let end = (cx.now / 1000.).min(day + 86400.).max(day + 1.);
+        let end = (cx.protocol_now() / 1000.).min(day + 86400.).max(day + 1.);
         let path = format!(
             "/api/v3/brokerage/market/products/{}/candles?granularity=FIVE_MINUTE&start={day:.0}&end={end:.0}&limit=300",
             ws_symbol(symbol)
@@ -611,6 +642,7 @@ impl Coinbase {
         item: &str,
     ) {
         match pending {
+            Request::Drb { .. } => {}
             Request::Instruments {
                 markets,
                 tickers,
@@ -832,20 +864,25 @@ impl Coinbase {
     pub(crate) fn public_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Request,
+        mut pending: Request,
         response: Response<'_>,
     ) {
+        if let Request::Drb { sequence, .. } = pending {
+            self.drb_response(cx, sequence, response);
+            return;
+        }
         if !(200..300).contains(&response.status) {
             // INTX can return a valid root array with an error status.
             if matches!(pending, Request::Instruments { .. })
                 && response.body.trim_start().starts_with('[')
             {
-                let mut pending = pending;
                 let parsed = safe_cex_engine::json::each::<&serde_json::value::RawValue>(
                     response.body,
                     |r| self.public_item(cx, &mut pending, r.get()),
                 );
-                if parsed.is_ok() {
+                let usable =
+                    matches!(&pending, Request::Instruments { markets, .. } if !markets.is_empty());
+                if parsed.is_ok() && (usable || !super::unavailable(response.status)) {
                     self.public_response(
                         cx,
                         pending,
@@ -857,13 +894,21 @@ impl Coinbase {
                     );
                     return;
                 }
-                self.public_failed(cx, pending, "Invalid INTX response");
+                if !super::unavailable(response.status) {
+                    self.public_failed(cx, pending, "Invalid INTX response");
+                    return;
+                }
+            }
+            let intx = matches!(pending, Request::Instruments { initial: true, .. });
+            if super::unavailable(response.status) && self.fail_moved_intx_startup(cx, intx) {
+                self.public_failed(cx, pending, super::INTX_MOVED);
                 return;
             }
             self.public_failed(cx, pending, &format!("Coinbase HTTP {}", response.status));
             return;
         }
         match pending {
+            Request::Drb { .. } => unreachable!("handled before legacy public replies"),
             Request::Instruments {
                 markets,
                 tickers,
@@ -1116,16 +1161,30 @@ impl Coinbase {
             }
             Request::Candles {
                 command,
-                mut rows,
+                rows,
                 invalid,
             } => {
+                let Some(mut walk) = self.public.candle_ranges.remove(&command) else {
+                    return;
+                };
                 if invalid {
                     cx.fail(command, "Malformed Coinbase candles");
                 } else {
-                    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
-                        Ok(data) => cx.done(command, data),
-                        Err(error) => cx.fail(command, error),
+                    for row in rows {
+                        if row.timestamp >= walk.cursor && row.timestamp < walk.page_end {
+                            walk.rows.insert(row.timestamp as u64, row);
+                        }
+                    }
+                    walk.cursor = walk.page_end;
+                    if walk.cursor < walk.end {
+                        self.public.candle_ranges.insert(command, walk);
+                        self.candle_page(cx, command);
+                    } else {
+                        let rows = walk.rows.into_values().collect::<Vec<_>>();
+                        match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
+                            Ok(data) => complete_public(cx, command, data),
+                            Err(error) => fail_public(cx, command, error),
+                        };
                     };
                 }
             }
@@ -1137,6 +1196,10 @@ impl Coinbase {
         pending: Request,
         error: &str,
     ) {
+        if let Request::Drb { sequence, .. } = pending {
+            self.drb_failed(cx, sequence, error);
+            return;
+        }
         if let Request::Products { generation, .. } = &pending
             && *generation != self.public.generation
         {
@@ -1145,6 +1208,7 @@ impl Coinbase {
         let mut failures = vec![];
         match pending {
             Request::Candles { command, .. } => {
+                self.public.candle_ranges.remove(&command);
                 failures.push((command, safe_cex_engine::VenueError::new(error)));
             }
             Request::Daily {
@@ -1191,6 +1255,9 @@ impl Coinbase {
         }
     }
     pub(crate) fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.public.drb.active {
+            return self.drb_timer(cx, timer);
+        }
         if let Some(symbol) = self
             .public
             .daily
@@ -1263,6 +1330,10 @@ impl Coinbase {
     ) -> bool {
         if self.public.socket != Some(socket) {
             return false;
+        }
+        if self.public.drb.active {
+            self.drb_message(cx, text);
+            return true;
         }
         let Ok(envelope) = serde_json::from_str::<Envelope<'_>>(text) else {
             return true;
@@ -1483,6 +1554,9 @@ impl Coinbase {
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Option<Command> {
+        if self.public.drb.active {
+            return self.drb_command(cx, command);
+        }
         if !cx.store.loaded().markets
             && matches!(
                 &command,
@@ -1570,7 +1644,7 @@ impl Coinbase {
                     .0 += 1;
                 if daily && !self.public.daily.contains_key(&symbol) {
                     self.public.daily_generation = self.public.daily_generation.wrapping_add(1);
-                    let day = (cx.now / 86400000.).floor() * 86400.;
+                    let day = (cx.protocol_now() / 86400000.).floor() * 86400.;
                     self.public.daily.insert(
                         symbol.clone(),
                         Daily {
@@ -1630,40 +1704,83 @@ impl Coinbase {
                     cx.fail(command, "Unknown Coinbase market");
                     return None;
                 }
-                let end = to_ms.unwrap_or(cx.now) / 1000.;
+                let end = (to_ms.unwrap_or(cx.protocol_now()).min(cx.protocol_now()) / 1000.)
+                    .round()
+                    .max(0.);
                 let start = from_ms
-                    .map(|n| n / 1000.)
-                    .unwrap_or(end - seconds * f64::from(limit.unwrap_or(300).clamp(1, 300)));
-                if !start.is_finite() || !end.is_finite() || start < 0. || end <= start {
+                    .map(|n| (n / 1000.).round())
+                    .unwrap_or(end - seconds * f64::from(limit.unwrap_or(300).max(1)))
+                    .max(0.);
+                if !start.is_finite() || !end.is_finite() {
                     cx.fail(command, "Invalid Coinbase candle range");
                     return None;
                 }
-                let path = format!(
-                    "/api/v3/brokerage/market/products/{}/candles?granularity={granularity}&start={:.0}&end={:.0}&limit={}",
-                    ws_symbol(&symbol),
-                    start,
-                    end,
-                    limit.unwrap_or(300).clamp(1, 300)
-                );
-                if let Err(error) = self.request(
-                    cx,
-                    Method::Get,
-                    path,
-                    None,
-                    Some(ArrayAt::Field("candles")),
-                    Pending::Public(Request::Candles {
-                        command,
-                        rows: vec![],
-                        invalid: false,
-                    }),
-                ) {
-                    cx.fail(command, error);
+                if end <= start {
+                    crate::local_context::complete(
+                        cx,
+                        safe_cex_engine::request_context::Operation::Read,
+                        Ok("[]".into()),
+                    );
+                    return None;
                 }
+                self.public.candle_ranges.insert(
+                    command,
+                    Box::new(CandleRange {
+                        symbol: ws_symbol(&symbol),
+                        granularity,
+                        seconds,
+                        cursor: start,
+                        end,
+                        page_end: start,
+                        rows: BTreeMap::new(),
+                    }),
+                );
+                self.candle_page(cx, command);
             }
             Command::SetTickerSymbols { .. } => {}
             other => return Some(other),
         }
         None
+    }
+}
+
+impl Coinbase {
+    fn candle_page(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        let Some(walk) = self.public.candle_ranges.get_mut(&command) else {
+            return;
+        };
+        walk.page_end = (walk.cursor + walk.seconds * 300.).min(walk.end);
+        let limit = ((walk.page_end - walk.cursor) / walk.seconds)
+            .ceil()
+            .clamp(1., 300.) as u32;
+        // Treat each page as half-open, even if Coinbase includes its end second.
+        let path = format!(
+            "/api/v3/brokerage/market/products/{}/candles?granularity={}&start={:.0}&end={:.0}&limit={limit}",
+            walk.symbol,
+            walk.granularity,
+            walk.cursor,
+            (walk.page_end - 1.).max(walk.cursor + 1.)
+        );
+        let result = if walk.page_end <= walk.cursor {
+            Err("Coinbase candle range cannot advance".into())
+        } else {
+            self.request(
+                cx,
+                Method::Get,
+                path,
+                None,
+                Some(ArrayAt::Field("candles")),
+                Pending::Public(Request::Candles {
+                    command,
+                    rows: vec![],
+                    invalid: false,
+                }),
+            )
+        };
+        if let Err(error) = result {
+            self.public.candle_ranges.remove(&command);
+            cx.fail(command, error);
+        }
     }
 }
 // Live candles are built from the ticker, so every interval is served.
@@ -1692,4 +1809,16 @@ fn display_round(value: f64) -> f64 {
     };
     let scale = 10f64.powi(digits);
     (value * scale).round() / scale
+}
+
+/// Common command completion boundaries for both public wire codecs.
+fn complete_public(cx: &mut Cx<'_, Pending>, command: CommandId, data: String) {
+    cx.done(command, data);
+}
+fn fail_public(
+    cx: &mut Cx<'_, Pending>,
+    command: CommandId,
+    error: impl Into<safe_cex_engine::VenueError>,
+) {
+    cx.fail(command, error);
 }

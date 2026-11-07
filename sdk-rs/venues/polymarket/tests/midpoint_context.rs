@@ -5,8 +5,8 @@ use safe_cex_venue_polymarket::{Options, Polymarket};
 
 type Driver = Engine<Polymarket>;
 const ADMITTED: f64 = 10.;
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const DEADLINE: f64 = ADMITTED + DISCOVERY_DEADLINE_MS;
 
 fn catalogue(tokens: usize) -> Driver {

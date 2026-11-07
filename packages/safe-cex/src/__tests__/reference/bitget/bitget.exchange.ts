@@ -1293,7 +1293,10 @@ export class BitgetExchange extends BaseExchange {
         const priceDecimals = 10 / 10 ** (parseFloat(m.pricePlace) + 1);
         const pricePrecision = priceDecimals * parseFloat(m.priceEndStep);
         const maxOrderQty =
-          parseFloat(m.maxOrderQty) || parseFloat(m.maxMarketOrderQty) || parseFloat(m.maxTradeNum) || Infinity;
+          [m.maxOrderQty, m.maxMarketOrderQty, m.maxTradeNum]
+            .map((value) => parseFloat(value))
+            .find((value) => Number.isFinite(value) && value > 0) ?? Infinity;
+        const marketCap = parseFloat(m.maxMarketOrderQty);
 
         return {
           id: m.symbol,
@@ -1308,7 +1311,7 @@ export class BitgetExchange extends BaseExchange {
           limits: {
             amount: {
               min: parseFloat(m.minTradeNum) || 0,
-              max: maxOrderQty,
+              max: Number.isFinite(marketCap) && marketCap > 0 ? Math.min(maxOrderQty, marketCap) : maxOrderQty,
             },
             leverage: {
               min: parseFloat(m.minLever) || 1,

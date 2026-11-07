@@ -58,7 +58,7 @@ const code = (value, expected = '0') => String(value) === expected;
 const matches = (row, market, ...keys) => keys.some((key) => typeof row?.[key] === 'string' &&
   row[key] !== '' && [market.id, market.symbol].includes(row[key]));
 const familyOf = (name) => {
-  if (['orderly', 'tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'].includes(name)) return 'orderly';
+  if (['orderly', 'kodiakfi', 'mode', 'what', 'woofi'].includes(name)) return 'orderly';
   if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo'].includes(name)) return 'bybit';
   if (['bitget', 'bitgetusdc', 'bitgetinverse'].includes(name)) return 'bitget';
   if (['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(name)) return 'okx';

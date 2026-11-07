@@ -11,7 +11,7 @@ use safe_cex_venue_lighter::{Lighter, Pending};
 use support::Options;
 use support::{NOW, reply_at};
 // Startup catalog reads before markets and tickers load get the engine's discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const META: &str = r#"{"code":200,"order_book_details":[{"market_id":1,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2,"symbol":"BTC","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot"}]}"#;
 fn engine(robinhood: bool, testnet: bool) -> Engine<Lighter> {
     support::engine(Options {
