@@ -13,6 +13,12 @@ register('binance', 'BINANCE', modes(
   endpoints('https://demo-fapi.binance.com', 'wss://demo-fstream.binance.com'),
   endpoints('https://fapi.binance.com', 'wss://fstream.binance.com'),
 ));
+// COIN-M shares the futures demo keys. The demo REST and binancefuture socket
+// pairing mirrors the engine and TS reference paths.
+register('binanceinverse', 'BINANCE', modes(
+  endpoints('https://demo-dapi.binance.com', 'wss://dstream.binancefuture.com'),
+  endpoints('https://dapi.binance.com', 'wss://dstream.binance.com'),
+));
 // Spot testnet keys are separate from futures demo keys, so Spot has its own env family.
 register('binancespot', 'BINANCESPOT', modes(
   endpoints('https://testnet.binance.vision', 'wss://stream.testnet.binance.vision wss://ws-api.testnet.binance.vision'),

@@ -78,6 +78,7 @@ pub type Writable<T> = T;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WritableStoreData {
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
     pub latency: Option<f64>,
     pub balance: Balance,
     pub markets: Vec<Market>,
