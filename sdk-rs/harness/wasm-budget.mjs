@@ -236,7 +236,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   polymarket: 1_611_776,
   txflow: 1_852_416,
   weex: 1_948_672,
-  woo: 2_416_640,
+  // #3221 hosted signing: CI run 42326429701, job 128263754389 measured 2,568,081 B; + 10 KiB exactly.
+  woo: 2_578_321,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
