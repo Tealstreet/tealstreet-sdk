@@ -2498,12 +2498,8 @@ impl Okx {
                 // its activePx while activation is pending, else the current last (the
                 // row's own `last` is its placement-time fill price, not today's).
                 let trigger = num::parse(o.move_trigger_px);
-                let activation = num::parse(o.active_px);
-                let base = if activation > 0.0 {
-                    activation
-                } else {
-                    cx.store.ticker(&m.symbol).map_or(0.0, |t| t.last)
-                };
+                let base = pending_activation(o.active_px)
+                    .unwrap_or_else(|| cx.store.ticker(&m.symbol).map_or(0.0, |t| t.last));
                 let price = if trigger > 0.0 {
                     trigger
                 } else if base > 0.0 {
