@@ -19,7 +19,7 @@ import {
   validateApexRequest,
 } from './apexomni-protocol.mjs';
 import { createRequire } from 'node:module';
-import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
+import { createBinanceSpotSocketAudit, prepareBinanceSpot, prepareBinancePmPublic, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { hyperliquidspot } from './hyperliquidspot.mjs';
 import { createHyperliquidRequestValidator } from './hyperliquid-protocol.mjs';
@@ -1990,6 +1990,7 @@ export const VENUES = {
     privateSocket: name === 'binancespot' ? '/ws-api/v3' : name === 'binancepm' ? '/pm/ws' : name === 'binanceinverse' ? '/ws/' : '/private/ws',
     volatileBodyFields: true,
     ...(name === 'binanceinverse' ? { coinNativeAmounts: true } : {}),
+    ...(name === 'binancepm' ? { prepareTs: prepareBinancePmPublic } : {}),
     ...(name === 'binancespot' ? {
       compareFillPrices: true,
       compareCoins: true,

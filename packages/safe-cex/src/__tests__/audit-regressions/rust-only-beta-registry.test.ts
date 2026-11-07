@@ -165,6 +165,34 @@ describe('Rust-only beta construction', () => {
     expect(() => assertBetaAccount('lighter-robinhood', options)).not.toThrow();
     await expect(createExchange('lighter-robinhood', options)).resolves.toBeInstanceOf(state.Rust);
   });
+  it.each(['remoteSigner', 'payloadSigner'] as const)(
+    'explains refused %s accounts before clock or constructor work',
+    async (signerKind) => {
+      const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
+      const payloadSigner = vi.fn();
+      const signing = signerKind === 'remoteSigner' ? { remoteSigner } : { payloadSigner };
+      for (const name of BETA_VENUES.filter((venue) => deriveRemoteSigningPolicy(venue)?.enabled !== true)) {
+        const prettyName = exchangeMetadata[name].prettyName;
+        const message = signerKind === 'remoteSigner'
+          ? `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
+          : `${prettyName} delegated signing is unsupported in this build`;
+        await expect(createExchange(name, { key: 'public-key', secret: '', ...signing })).rejects.toMatchObject({
+          message,
+          kind: 'unsupported',
+          outcome: 'notSent',
+        });
+      }
+      await expect(createExchange('unknown' as ExchangeName, { key: '', secret: '' })).rejects.toMatchObject({
+        message: 'unknown is unsupported in this build',
+        kind: 'unsupported',
+        outcome: 'notSent',
+      });
+      expect(remoteSigner.sign).not.toHaveBeenCalled();
+      expect(payloadSigner).not.toHaveBeenCalled();
+      expect(virtualClock.start).not.toHaveBeenCalled();
+      expect(state.calls).toEqual([]);
+    },
+  );
   it('refuses unsupported delegated modes without fallback', async () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
     // Hyperliquid's, Lighter's and Paradex's structured remote signing is pinned in

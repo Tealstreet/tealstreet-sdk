@@ -64,10 +64,11 @@ fn boot(approved: bool) -> (Engine<Hyperliquid>, SocketId, Vec<HttpRequest>) {
         &mut e,
         socket,
         1500.,
-        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","triggerPx":"80","origSz":"0","sz":"0","reduceOnly":true,"orderType":"Stop Market"},"status":"open"}]}"#,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"120","triggerPx":"120","origSz":"0","sz":"0","reduceOnly":true,"orderType":"Take Profit Market","isPositionTpsl":true},"status":"open"}]}"#,
     );
+    fresh_mark(&mut e, socket, NOW);
     e.drain_actions().for_each(drop);
-    assert_eq!(e.store().order("9").unwrap().kind, OrderType::StopLoss);
+    assert_eq!(e.store().order("9").unwrap().kind, OrderType::TakeProfit);
     (e, socket, held)
 }
 
@@ -277,7 +278,7 @@ fn review_sizing_receipt_deadline(delay: f64, may_cancel: bool) {
         request: read.id,
         response: safe_cex_engine::Response {
             status: 200, headers: "",
-            body: r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"0","sz":"0"},"status":"open"}}"#,
+            body: r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"120","triggerPx":"120","origSz":"0","sz":"0","reduceOnly":true,"orderType":"Take Profit Market","isPositionTpsl":true},"status":"open"}}"#,
         },
     });
     let actions = prepared_now(&mut e);
@@ -340,6 +341,7 @@ fn review_3098_unknown_fee_does_not_wait_for_any_amend_kind_or_partial_fill() {
                 _ => None,
             })
             .expect("cancel after sizing");
+        assert_eq!(body(&cancel)["action"]["type"], "cancel");
         let order = replacement(&mut e, &cancel);
         assert!(body(&order)["action"].get("builder").is_none(), "{kind:?}");
         assert_eq!(body(&order)["action"]["orders"][0]["s"], "1", "{kind:?}");
@@ -451,7 +453,7 @@ fn review_sizing_owner(use_current: bool) {
     review_sizing_owner_response(use_current, 200);
 }
 fn review_sizing_owner_response(use_current: bool, status: u16) {
-    let (mut e, _, _) = boot(false);
+    let (mut e, socket, _) = boot(false);
     let actions = begin_amend(&mut e);
     let old = actions
         .iter()
@@ -471,6 +473,7 @@ fn review_sizing_owner_response(use_current: bool, status: u16) {
     let failed = prepared_now(&mut e);
     assert!(failed.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: OWNER, error }) if error.outcome == Some(Outcome::NotSent))));
     assert_eq!(e.store().order("9").unwrap().status, OrderStatus::Open);
+    fresh_mark(&mut e, socket, NOW + 5100.);
     e.handle(
         NOW + 5100.,
         Event::Command(Command::AmendOrder {
@@ -500,7 +503,7 @@ fn review_sizing_owner_response(use_current: bool, status: u16) {
     e.handle(NOW + 5200., Event::HttpResponse {
         request: response,
         response: safe_cex_engine::Response { status, headers: "",
-            body: r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"0","sz":"0"},"status":"open"}}"#,
+            body: r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"120","triggerPx":"120","origSz":"0","sz":"0","reduceOnly":true,"orderType":"Take Profit Market","isPositionTpsl":true},"status":"open"}}"#,
         },
     });
     let actions = prepared_now(&mut e);
@@ -521,7 +524,7 @@ fn review_sizing_owner_response(use_current: bool, status: u16) {
             Action::Notice(Notice::CommandFailed { .. })
                 | Action::Notice(Notice::CommandDone { .. })
         )));
-        e.handle(7300., Event::HttpResponse {request: current.id, response: safe_cex_engine::Response {status:200, headers:"", body:r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"0","sz":"0"},"status":"open"}}"#}});
+        e.handle(7300., Event::HttpResponse {request: current.id, response: safe_cex_engine::Response {status:200, headers:"", body:r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"120","triggerPx":"120","origSz":"0","sz":"0","reduceOnly":true,"orderType":"Take Profit Market","isPositionTpsl":true},"status":"open"}}"#}});
         assert!(
             prepared_now(&mut e)
                 .iter()
@@ -563,4 +566,12 @@ fn a_retired_sizing_reply_after_timeout_alone_does_not_change_the_order() {
         serde_json::to_value(e.store().order("9").unwrap()).unwrap(),
         before
     );
+}
+
+fn fresh_mark(e: &mut Engine<Hyperliquid>, socket: SocketId, now: f64) {
+    use base64::Engine as _;
+    let raw = br#"{"BTC":{"markPx":"100"}}"#;
+    let zipped = miniz_oxide::deflate::compress_to_vec(raw, 6);
+    let text = serde_json::json!({"channel":"fastAssetCtxs","data":base64::engine::general_purpose::STANDARD.encode(zipped)}).to_string();
+    message(e, socket, now, &text);
 }

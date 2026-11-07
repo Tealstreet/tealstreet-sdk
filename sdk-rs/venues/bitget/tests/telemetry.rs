@@ -234,7 +234,7 @@ fn rest_order_read_reports_the_booking_without_rewriting_it() {
 
 #[test]
 fn frame_fed_account_modes_and_native_booking_are_logged_once() {
-    let mut source = Harness::classic();
+    let mut source = split_account();
     let mut page = Harness::started_configure(
         FixtureOptions {
             key: Some("key".into()),
@@ -269,7 +269,12 @@ fn frame_fed_account_modes_and_native_booking_are_logged_once() {
         page.collect();
     }
     assert_eq!(events(&page, "bitget.account.mode").len(), 1);
-    assert_eq!(events(&page, "bitget.close.diagnostic").len(), 1);
+    let rows = events(&page, "bitget.close.diagnostic");
+    assert_eq!(rows.len(), 1);
+    // Frames carry the financial row, not the source engine's private split receipt.
+    for key in ["positionAvailable", "positionLocked"] {
+        assert!(!rows[0].fields.iter().any(|(name, _)| *name == key));
+    }
 }
 
 #[test]
@@ -298,7 +303,7 @@ fn a_native_stop_amend_refusal_retains_the_raw_close_diagnostic() {
 #[test]
 fn hedge_batch_failure_is_attributed_only_to_its_own_close_or_marked_ambiguous() {
     for identity in [Some("short-close"), None, Some("foreign-client")] {
-        let mut h = Harness::classic();
+        let mut h = split_account();
         h.engine.store_mut().set_hedged(true);
         h.command(Command::PlaceOrders {
             command: 73,
@@ -322,6 +327,10 @@ fn hedge_batch_failure_is_attributed_only_to_its_own_close_or_marked_ambiguous()
             assert_eq!(field(rows[0], "requestAttribution"), &Value::from("exact"));
             assert_eq!(field(rows[0], "side"), &Value::from("short"));
             assert_eq!(field(rows[0], "requestedSize"), &Value::from("0.2"));
+            // The admitted split is long; a short failure must not borrow it.
+            for key in ["positionAvailable", "positionLocked"] {
+                assert!(!rows[0].fields.iter().any(|(name, _)| *name == key));
+            }
         } else {
             assert_eq!(
                 field(rows[0], "requestAttribution"),
@@ -334,6 +343,8 @@ fn hedge_batch_failure_is_attributed_only_to_its_own_close_or_marked_ambiguous()
                 "positionTotal",
                 "reduceOnlyOrderCount",
                 "planOrderSize",
+                "positionAvailable",
+                "positionLocked",
             ] {
                 assert!(
                     !rows[0].fields.iter().any(|(key, _)| *key == name),
@@ -410,4 +421,124 @@ fn summed_reservations_are_emitted_as_native_lot_formatted_sizes() {
     assert_eq!(field(rows[0], "planOrderSize"), &Value::from("0.9"));
     assert_eq!(field(rows[0], "reduceOnlyOrderCount"), &Value::from(2.0));
     assert_eq!(field(rows[0], "planOrderCount"), &Value::from(2.0));
+}
+
+const SPLIT_POSITION: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","holdSide":"long","total":"0.749","available":"0.197","locked":"0.552","openPriceAvg":"90","markPrice":"100","leverage":"20","marginMode":"crossed","posMode":"one_way_mode","uTime":"100"}]}"#;
+
+fn split_account() -> Harness {
+    let mut h = Harness::private_started();
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, SPLIT_POSITION);
+    h.respond("/account/accounts", 200, ACCOUNT);
+    h.orders(OPEN_ORDER);
+    h.login();
+    while h.requests.iter().any(|r| r.url.contains("/all-position")) {
+        h.respond("/all-position", 200, SPLIT_POSITION);
+    }
+    h
+}
+
+fn assert_split(event: &LogEvent) {
+    assert_eq!(field(event, "positionAvailable"), &Value::from("0.197"));
+    assert_eq!(field(event, "positionLocked"), &Value::from("0.552"));
+    assert!(event.fields.len() <= 20, "only two bounded fields added");
+    for (_, value) in &event.fields {
+        if let Some(text) = value.as_str() {
+            assert!(text.len() <= safe_cex_engine::log::MAX_LOG_BYTES);
+        }
+    }
+}
+
+#[test]
+fn close_refusal_diagnostic_includes_only_the_admitted_split_as_formatted_fields() {
+    let mut h = split_account();
+    let r = place(&mut h, true);
+    h.reply(
+        r.id,
+        200,
+        r#"{"code":"40757","msg":"Not enough position is available","data":null}"#,
+    );
+    let rows = events(&h, "bitget.close.diagnostic");
+    assert_eq!(rows.len(), 1);
+    assert_split(rows[0]);
+    assert_eq!(field(rows[0], "positionTotal"), &Value::from("0.749"));
+    assert_eq!(field(rows[0], "nativeCode"), &Value::from("40757"));
+    assert_eq!(
+        field(rows[0], "nativeMsg"),
+        &Value::from("Not enough position is available")
+    );
+}
+
+#[test]
+fn booked_size_diagnostic_includes_the_admitted_split_once() {
+    let mut h = split_account();
+    let r = place(&mut h, true);
+    h.reply(r.id, 200, r#"{"code":"00000","data":{"successList":[{"orderId":"42","clientOid":"close-telemetry"}],"failureList":[]}}"#);
+    booking(&mut h, "0.4");
+    booking(&mut h, "0.3");
+    let rows = events(&h, "bitget.close.diagnostic");
+    assert_eq!(rows.len(), 1);
+    assert_split(rows[0]);
+    assert_eq!(
+        field(rows[0], "reason"),
+        &Value::from("booked-size-mismatch")
+    );
+    assert_eq!(
+        h.engine.store().order("42").unwrap().amount,
+        0.3,
+        "diagnostic never changes the native booking"
+    );
+}
+
+#[test]
+fn close_diagnostic_omits_the_split_when_the_accessor_cannot_bind_its_row() {
+    for invalid in ["missing", "absent", "contracts", "timestamp", "duplicates"] {
+        let mut h = split_account();
+        let r = place(&mut h, true);
+        match invalid {
+            "missing" => {
+                let mut response: serde_json::Value = serde_json::from_str(SPLIT_POSITION).unwrap();
+                let mut row = response["data"][0].take();
+                row.as_object_mut().unwrap().remove("available");
+                row.as_object_mut().unwrap().remove("locked");
+                h.private_message(
+                    &json!({"arg":{"channel":"positions"},"action":"update","data":[row]})
+                        .to_string(),
+                );
+            }
+            "absent" => h.engine.store_mut().set_positions(vec![]),
+            "contracts" => h
+                .engine
+                .store_mut()
+                .update_positions(|p| p.contracts = 0.748),
+            "timestamp" => h
+                .engine
+                .store_mut()
+                .update_positions(|p| p.last_update = Some(101.0)),
+            "duplicates" => {
+                let row = h.engine.store().positions()[0].clone();
+                let mut duplicate = row.clone();
+                duplicate.id = "ambiguous-position".into();
+                h.engine.store_mut().set_positions(vec![row, duplicate]);
+            }
+            _ => unreachable!(),
+        }
+        h.reply(
+            r.id,
+            200,
+            r#"{"code":"40757","msg":"Not enough position is available","data":null}"#,
+        );
+        let rows = events(&h, "bitget.close.diagnostic");
+        assert_eq!(rows.len(), 1, "{invalid}");
+        for key in ["positionAvailable", "positionLocked"] {
+            assert!(
+                !rows[0].fields.iter().any(|(name, _)| *name == key),
+                "{invalid}: no inferred {key}"
+            );
+        }
+    }
 }

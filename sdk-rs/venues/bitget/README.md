@@ -101,5 +101,15 @@ The Rust adapter serializes exactly these two events in the ordinary browser log
 string, so the worker bridge and terminal logging retain every field. The native
 host journals their JSON-escaped event notices once, including startup without a
 browser peer; other event logging retains its existing behavior. No new Sentry
-tags are introduced. Numeric available/locked receipt binding is a separate
-post-cut follow-up; this telemetry change does not guess those values from total.
+tags are introduced.
+
+Exact-attribution close diagnostics also include `positionAvailable` and
+`positionLocked` as native-lot-formatted decimal strings when `admitted_split`
+returns a receipt for that symbol/side. This accessor certifies the exact
+admitted row occurrence, unique Store row, update time, contracts and current
+position epoch. A missing, retired, stale, ambiguous or otherwise unbound receipt
+omits both fields; they are never inferred from position total. Ambiguous batch
+failures carry neither field. Frame-fed consumers without their own native split
+receipt also omit them; frame/model quantities never stand in for a receipt.
+The same read-only binding applies to refusals and first-booking size mismatches
+and adds no event or request.

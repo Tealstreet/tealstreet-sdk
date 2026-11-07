@@ -66,6 +66,32 @@ omit the captured fee. Standalone placements retain their existing approval wait
 `transport.http.timing` distinguishes identity, builder approval, order status,
 cancel and place using closed labels derived from the final bound packet; ordinary info reads remain aggregated.
 
+Rust SL/TP edits use guarded cancel/place. Hyperliquid's modify contract excludes
+trigger replacements without `always_place`; that flag can place after failed
+cancellation, so it is never used. The owner-bound sizing read verifies source
+identity and native execution parameters. The final cancel claim requires an
+own-symbol mark observed within five seconds, unchanged fills/identity, and a
+loaded live closing-side position. A veto preserves the original. The old
+pre-cancel deadline never abandons replacement after a cancel already left.
+
+A documented definitive replacement refusal permits one original-parameter
+restore only for a proven full-position `isPositionTpsl` source. An unknown
+replacement never restores or resends. Partial and attached edits remain available
+with the same final veto. When their original grouping is unproven, definitive
+replacement refusal reports typed `Protection::Unprotected` and “stop removed,
+please re-place”, with no invented restore. Exact recovery rechecks position,
+newer protection, late fills and the original fresh trigger at its final claim.
+Its terminal carries `Protection::Restored` after an accepted put-back, or
+`Protection::Unprotected` only after a definitive put-back refusal. Unknown or
+rate-limited put-back carries no protection claim and says its outcome is unknown,
+with a request to check Open Orders. Replacement 429 uses the same uncertain
+wording and never restores/resends. The serial root refusal remains intact.
+Put-back preserves economic parameters but mints a fresh cloid: HL documents its
+format, not reuse after cancellation. Obsolete recovery is refused visibly.
+Replacement preserves native execution type/price and the fresh remaining size. Complete native stream fields take precedence over stale cached
+placement fields. ACKs reconcile accepted parameters into an existing row while
+retaining newer stream fills, remaining quantity, status and observation time.
+
 ## Rust startup reads
 
 Open-order snapshot failures retry per DEX scope with jittered backoff, including

@@ -328,8 +328,10 @@ impl Hyperliquid {
         }
         let plan = custody.plan.as_ref().unwrap().clone();
         let slot = custody.slot.as_ref().unwrap().clone();
-        let context = cx
-            .plan_leg_context_with_intent(
+        let context = if matches!(effect, Effect::Cancel(_)) && job.protection.is_some() {
+            cx.plan_protection_cancel_leg_context(&plan, &slot)
+        } else {
+            cx.plan_leg_context_with_intent(
                 &plan,
                 &slot,
                 match &effect {
@@ -348,7 +350,8 @@ impl Hyperliquid {
                     _ => safe_cex_engine::classify::Intent::Place,
                 },
             )
-            .map_err(|e| e.venue_error())?;
+        }
+        .map_err(|e| e.venue_error())?;
         custody.context = Some(context.clone());
         let committed_effect = effect.clone();
         let command = job.command;
@@ -675,7 +678,14 @@ impl Hyperliquid {
         };
         cx.http_write_failure(
             &request.context,
-            &NATIVE_ERROR,
+            if !error.uncertain
+                && (self.protective_replacement_active()
+                    && known_protective_refusal(&error.message))
+            {
+                &PROTECTIVE_REFUSAL
+            } else {
+                &NATIVE_ERROR
+            },
             Some(&native),
             error.message.clone(),
             None,
@@ -761,7 +771,7 @@ impl Hyperliquid {
             .collect();
         cx.http_write_batch(
             &request.context,
-            &BATCH,
+            if statuses.iter().all(|s| matches!(s, Status::Error { .. })) && (self.protective_replacement_active() && statuses.iter().all(|s| matches!(s, Status::Error { error } if known_protective_refusal(error)))) { &PROTECTIVE_REFUSAL } else { &BATCH },
             statuses.len(),
             &items,
             if message.is_empty() && statuses.iter().any(|status| matches!(status, Status::Text(_))) {
@@ -831,4 +841,21 @@ impl Hyperliquid {
 /// waitingForFill, a filled parent's says waitingForTrigger.
 fn deferred_child(text: &str) -> bool {
     text == "waitingForFill" || text == "waitingForTrigger"
+}
+
+const PROTECTIVE_REFUSAL: safe_cex_engine::classify::CodeTable =
+    safe_cex_engine::classify::CodeTable {
+        rows: &[],
+        success: &[],
+        status: &[],
+        unlisted: safe_cex_engine::classify::Verdict::Refused(ErrorKind::Rejected),
+    };
+pub(super) fn known_protective_refusal(message: &str) -> bool {
+    let message = table_message(message);
+    matches!(
+        message,
+        "Invalid TP/SL price." | "Price must be divisible by tick size."
+    ) || BATCH.rows.iter().any(
+        |row| matches!(row.key, safe_cex_engine::classify::Key::Message(text) if text == message),
+    )
 }

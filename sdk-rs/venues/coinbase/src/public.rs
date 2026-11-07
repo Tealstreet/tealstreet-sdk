@@ -864,7 +864,7 @@ impl Coinbase {
     pub(crate) fn public_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Request,
+        mut pending: Request,
         response: Response<'_>,
     ) {
         if let Request::Drb { sequence, .. } = pending {
@@ -876,12 +876,13 @@ impl Coinbase {
             if matches!(pending, Request::Instruments { .. })
                 && response.body.trim_start().starts_with('[')
             {
-                let mut pending = pending;
                 let parsed = safe_cex_engine::json::each::<&serde_json::value::RawValue>(
                     response.body,
                     |r| self.public_item(cx, &mut pending, r.get()),
                 );
-                if parsed.is_ok() {
+                let usable =
+                    matches!(&pending, Request::Instruments { markets, .. } if !markets.is_empty());
+                if parsed.is_ok() && (usable || !super::unavailable(response.status)) {
                     self.public_response(
                         cx,
                         pending,
@@ -893,7 +894,14 @@ impl Coinbase {
                     );
                     return;
                 }
-                self.public_failed(cx, pending, "Invalid INTX response");
+                if !super::unavailable(response.status) {
+                    self.public_failed(cx, pending, "Invalid INTX response");
+                    return;
+                }
+            }
+            let intx = matches!(pending, Request::Instruments { initial: true, .. });
+            if super::unavailable(response.status) && self.fail_moved_intx_startup(cx, intx) {
+                self.public_failed(cx, pending, super::INTX_MOVED);
                 return;
             }
             self.public_failed(cx, pending, &format!("Coinbase HTTP {}", response.status));

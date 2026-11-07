@@ -7,7 +7,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
     (0.75 * nominal..=nominal).contains(&actual)
 }
 
-// A transport failure must yield to the host clock; malformed individual rows
+// A rate limit must yield to the host clock; malformed individual rows
 // cannot discard valid neighbours from the subsequent successful catalogue.
 #[test]
 fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
@@ -31,9 +31,13 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         let original_url = request.url.clone();
         engine.handle(
             now,
-            Event::HttpFailed {
+            Event::HttpResponse {
                 request: request.id,
-                error: "scripted public failure",
+                response: Response {
+                    status: 429,
+                    headers: "",
+                    body: "{}",
+                },
             },
         );
         let actions = support::actions(&mut engine)
