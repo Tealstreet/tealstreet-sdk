@@ -112,6 +112,9 @@ test('loopback server serves exact public allowlist with WASM MIME and no-store'
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(hash(Buffer.from(await response.arrayBuffer())), assets[0].files['_bg.wasm'].sha256);
   assert.equal((await fetch(origin + '/sdk-rs/hosts/wasm/js/engine.web.mjs')).headers.get('content-type'), 'text/javascript');
+  // venues.mjs statically imports host.mjs; every host module must be served or the engine import 404s.
+  for (const name of ['host.mjs', 'venues.mjs', 'family-loader.mjs'])
+    assert.equal((await fetch(origin + `/sdk-rs/hosts/wasm/js/${name}`)).status, 200, name);
   for (const path of ['/.env', '/package.json', '/sdk-rs/Cargo.toml', '/%2e%2e/%2e%2e/etc/passwd'])
     assert.equal((await fetch(origin + path)).status, 404);
   assert.equal((await fetch(origin + path, { method: 'POST' })).status, 404);
