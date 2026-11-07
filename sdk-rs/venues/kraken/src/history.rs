@@ -411,7 +411,7 @@ impl Kraken {
             ),
             Query::PublicTrades { .. } => return false,
         };
-        let to = to.unwrap_or(cx.now);
+        let to = to.unwrap_or(cx.protocol_now());
         let from = from.unwrap_or((to - WEEK).max(0.0));
         if !from.is_finite()
             || !to.is_finite()

@@ -23,3 +23,9 @@ live candle frames. Reconnects, repairs, and a new subscription after the final
 unsubscribe each discard history again. Requested history is available through
 `FetchCandles`. Both live and fetched candles convert Crypto.com's millisecond
 start times to Unix seconds, preserving fractional seconds.
+
+Released writes answered with HTTP 408, 429 or 5xx remain `Unknown`, even when
+the body carries a native refusal or signature code. Such a response cannot
+authorize another physical attempt of that write or release its uncertainty
+fence. Documented signature refusals at non-ambiguous statuses keep their bounded
+retry; account and prerequisite read retries are unchanged.

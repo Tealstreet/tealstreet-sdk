@@ -2552,3 +2552,31 @@ fn cumulative_fallback_seeds_raw_rest_prefix_not_newer_cached_display() {
     );
     assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
 }
+
+#[test]
+fn a_missing_book_timestamp_uses_protocol_utc_after_a_host_correction() {
+    let mut h = H::new(false);
+    h.command(Command::SubscribeOrderBook {
+        symbol: "BTC-USDT".into(),
+    });
+    h.ws(
+        false,
+        "/spotMarket/level2Depth50:BTC-USDT",
+        json!({"timestamp":h.now,"bids":[[99,2]],"asks":[[101,3]]}),
+    );
+    let utc = h.now + 162. * 86_400_000.;
+    assert!(h.e.sync_host_time(h.now, utc));
+    h.ws(
+        false,
+        "/spotMarket/level2Depth50:BTC-USDT",
+        json!({"bids":[[98,1]],"asks":[[102,2]]}),
+    );
+    assert_eq!(h.e.venue().book("BTC-USDT").unwrap().bids(), &[(98., 1.)]);
+    // An explicitly older UTC page cannot replace the missing-timestamp page.
+    h.ws(
+        false,
+        "/spotMarket/level2Depth50:BTC-USDT",
+        json!({"timestamp":h.now+1.,"bids":[[97,1]],"asks":[[103,2]]}),
+    );
+    assert_eq!(h.e.venue().book("BTC-USDT").unwrap().bids(), &[(98., 1.)]);
+}

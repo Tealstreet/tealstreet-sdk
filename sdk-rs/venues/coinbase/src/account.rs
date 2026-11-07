@@ -1045,7 +1045,11 @@ impl Coinbase {
                 .credentials
                 .as_ref()
                 .ok_or("Coinbase credentials missing".to_string())
-                .and_then(|c| c.jwt(cx.now, None, |bytes| cx.fill_signing_entropy(bytes)));
+                .and_then(|c| {
+                    c.jwt(cx.protocol_now(), None, |bytes| {
+                        cx.fill_signing_entropy(bytes)
+                    })
+                });
             match signed {
                 Ok(jwt) => cx.send(
                     socket,

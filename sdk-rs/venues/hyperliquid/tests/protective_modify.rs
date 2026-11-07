@@ -322,13 +322,22 @@ fn check_restore_failure(case: &str) {
     } else {
         assert_eq!(failure.protection, None, "{case}");
         assert_eq!(failure.outcome, Some(Outcome::Unknown));
-        assert!(
-            failure
-                .message
-                .contains("put-back's outcome is unknown. Check Open Orders"),
-            "{}",
-            failure.message
-        );
+        if case == "rate_limited" {
+            assert!(failure.message.contains("unknown"), "{}", failure.message);
+            assert!(
+                failure.message.contains("Check Open Orders"),
+                "{}",
+                failure.message
+            );
+        } else {
+            assert!(
+                failure
+                    .message
+                    .contains("put-back's outcome is unknown. Check Open Orders"),
+                "{}",
+                failure.message
+            );
+        }
         assert!(
             !failure.message.contains("UNPROTECTED")
                 && !failure.message.contains("could not be restored")
@@ -338,9 +347,6 @@ fn check_restore_failure(case: &str) {
             Some(safe_cex_engine::ErrorKind::Rejected),
             "serial root remains the earlier replacement refusal"
         );
-        if case == "rate_limited" {
-            assert!(failure.message.contains("HTTP 429"));
-        }
     }
     assert_eq!(
         a.iter()

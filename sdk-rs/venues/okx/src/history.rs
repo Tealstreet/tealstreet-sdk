@@ -482,7 +482,7 @@ impl Okx {
                 to_ms,
                 limit,
             } => (
-                if from_ms.is_some_and(|from| cx.now - from > RECENT_MS) {
+                if from_ms.is_some_and(|from| cx.protocol_now() - from > RECENT_MS) {
                     "/api/v5/account/bills-archive"
                 } else {
                     "/api/v5/account/bills"

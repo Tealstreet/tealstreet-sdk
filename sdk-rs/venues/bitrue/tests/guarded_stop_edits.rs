@@ -503,6 +503,7 @@ fn directly_edited_attached_legs_are_refused_before_cancel() {
 #[test]
 fn ordinary_amend_refusal_wire_and_outcome_match_master() {
     // Recorded before this fix on master 06a9b1326ac, using only synthetic keys.
+    // Ambiguous-status rows reflect #3245's unproven-write rule; all other rows retain master's result.
     let expected: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/ordinary-amend-master.json")).unwrap();
     let mut records = Vec::new();

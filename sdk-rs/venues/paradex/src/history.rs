@@ -496,7 +496,7 @@ impl History {
                 to_ms,
                 ..
             } => {
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 (
                     "/fills",
                     symbol.as_deref(),

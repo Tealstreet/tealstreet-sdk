@@ -1287,7 +1287,7 @@ impl Lighter {
                             a.account_index.integer() == Some(builder.account_index)
                                 && a.approval_expiry
                                     .integer()
-                                    .is_some_and(|expiry| expiry as f64 > cx.now)
+                                    .is_some_and(|expiry| expiry as f64 > cx.protocol_now())
                                 && a.max_perps_maker_fee
                                     .as_ref()
                                     .and_then(Number::integer)
