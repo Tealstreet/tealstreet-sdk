@@ -103,7 +103,7 @@ impl Account {
         let fills: Vec<_> = self
             .fill_order
             .iter()
-            .filter_map(|id| Some((id, self.fills.get(id)?.baseline)))
+            .filter_map(|id| Some((id, self.fills.get(id)?.baseline?)))
             .collect();
         out.extend_from_slice(&(fills.len() as u32).to_le_bytes());
         for (id, (qty, value)) in fills {
@@ -133,7 +133,7 @@ impl Account {
                 .insert(
                     id.clone(),
                     ExecutionPrefix {
-                        baseline: progress,
+                        baseline: Some(progress),
                         live: false,
                     },
                 )
@@ -226,6 +226,7 @@ mod tests {
         );
         account.store_execution_prefix("order-1", 2., None);
         account.fills.get_mut("order-1").unwrap().live = true;
+        account.observe_live_order("unknown-prefix");
         let bytes = account.export_venue_state();
 
         let mut copy = Account::new();
@@ -244,8 +245,9 @@ mod tests {
             (70_000., (0.5, Some(30_000.)))
         );
         assert!(source.sl.is_nan());
-        assert_eq!(copy.fills["order-1"].baseline, (2., None));
+        assert_eq!(copy.fills["order-1"].baseline, Some((2., None)));
         assert!(!copy.execution_is_live("order-1"));
+        assert!(!copy.fills.contains_key("unknown-prefix"));
         assert_eq!(
             copy.export_venue_state(),
             bytes,

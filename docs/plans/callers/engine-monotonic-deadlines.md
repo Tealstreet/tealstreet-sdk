@@ -80,13 +80,15 @@ rollback cannot permanently admit historical fills. Forward corrections never
 advance boundaries past their captured UTC, so accumulated live fills after a
 sleep remain live even when scheduling stopped.
 
-After a validated live execution, the order's bounded cumulative prefix records
-that live provenance. Later clock corrections or sleeps cannot reclassify its
-progress as historical or consume unpriceable live quantity into a historical
-floor. Pricing and deduplication still use the last validated cumulative prefix.
-Provenance is evicted with that prefix; frame-fed writers receive cumulative
-quantities without inheriting authority to report native live executions. An
-unseen order still passes through the historical-prefix guard.
+An accepted open order on the authenticated stream records live provenance,
+even before its first fill. A validated live execution also establishes this
+provenance. Later clock corrections or sleeps cannot reclassify its progress as
+historical or consume unpriceable live quantity into a historical floor. Pricing
+and deduplication still use the last validated cumulative prefix; live admission
+alone does not imply a zero quantity when the stream omits it. Provenance and
+optional quantity are bounded and evicted together. Frame-fed writers receive
+only observed cumulative quantities without inheriting authority to report native
+live executions. An unseen order still passes through the historical-prefix guard.
 
 Controls reproduce both directions of a 162-day correction through the default
 SDK clock, a late initial worker sync, missing worker sync, disposal, explicit

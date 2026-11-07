@@ -95,9 +95,10 @@ struct Execution {
 
 #[derive(Clone, Copy)]
 struct ExecutionPrefix {
-    baseline: (f64, Option<f64>),
-    // Once this order has emitted a proven live delta, clock corrections may
-    // not classify its subsequent cumulative progress as historical.
+    // Liveness does not imply that a cumulative quantity has been observed.
+    baseline: Option<(f64, Option<f64>)>,
+    // An accepted authenticated live order retains this provenance across
+    // later clock corrections, independently of whether it has filled yet.
     live: bool,
 }
 
@@ -165,10 +166,29 @@ pub(crate) enum StartupRead {
 }
 impl Account {
     fn execution_baseline(&self, id: &str) -> Option<(f64, Option<f64>)> {
-        self.fills.get(id).map(|prefix| prefix.baseline)
+        self.fills.get(id).and_then(|prefix| prefix.baseline)
     }
     fn execution_is_live(&self, id: &str) -> bool {
         self.fills.get(id).is_some_and(|prefix| prefix.live)
+    }
+    fn observe_live_order(&mut self, id: &str) {
+        if let Some(prefix) = self.fills.get_mut(id) {
+            prefix.live = true;
+        } else {
+            self.store_execution_record(
+                id,
+                ExecutionPrefix {
+                    baseline: None,
+                    live: true,
+                },
+            );
+        }
+    }
+    fn execution_order_is_new(&self, cx: &Cx<'_, Pending>, created: f64, updated: f64) -> bool {
+        let (session_started, _) = self.execution_marks(cx.now, cx.protocol_now());
+        created > 0.0
+            && (session_started..=cx.protocol_now()).contains(&created)
+            && (updated == 0.0 || created <= updated)
     }
     fn execution_marks(&self, now: f64, utc: f64) -> (f64, f64) {
         // Derive boundaries from immutable captures: a temporary rollback must
@@ -198,13 +218,16 @@ impl Account {
     }
     fn store_execution_prefix(&mut self, id: &str, qty: f64, value: Option<f64>) {
         let live = self.execution_is_live(id);
-        self.fills.insert(
-            id.to_owned(),
+        self.store_execution_record(
+            id,
             ExecutionPrefix {
-                baseline: (qty, value),
+                baseline: Some((qty, value)),
                 live,
             },
         );
+    }
+    fn store_execution_record(&mut self, id: &str, prefix: ExecutionPrefix) {
+        self.fills.insert(id.to_owned(), prefix);
         self.fill_order.retain(|key| key != id);
         self.fill_order.push_back(id.to_owned());
         while self.fill_order.len() > 500 {
@@ -2096,7 +2119,7 @@ impl Blofin {
                         if filled.is_some_and(|qty| qty.0 == 0.0)
                             && let Some(order) = orders.first()
                             && matches!(order.kind, OrderType::Limit | OrderType::Market)
-                            && !self.account.fills.contains_key(&order.id)
+                            && self.account.execution_baseline(&order.id).is_none()
                         {
                             self.account.execution_progress(&order.id, 0.0, Some(0.0));
                         }
@@ -2131,6 +2154,19 @@ impl Blofin {
                                 })
                             {
                                 continue;
+                            }
+                            if matches!(order.kind, OrderType::Limit | OrderType::Market) {
+                                // Only accepted, authenticated open rows admit liveness.
+                                // A new-session creation proves a zero starting prefix;
+                                // otherwise a missing quantity remains unknown.
+                                if self.account.execution_baseline(&order.id).is_none()
+                                    && self
+                                        .account
+                                        .execution_order_is_new(cx, created.0, updated.0)
+                                {
+                                    self.account.execution_progress(&order.id, 0.0, Some(0.0));
+                                }
+                                self.account.observe_live_order(&order.id);
                             }
                             self.account
                                 .sources
@@ -2262,15 +2298,12 @@ impl Blofin {
             contract,
             updated,
         };
-        let session_order = created > 0.0
-            && created >= session_started
-            && created <= cx.protocol_now()
-            && (updated == 0.0 || created <= updated);
-        let known_prefix = self.account.fills.contains_key(id.as_ref());
-        if !proven_live
+        let session_order = self.account.execution_order_is_new(cx, created, updated);
+        let known_prefix = self.account.execution_baseline(id.as_ref()).is_some();
+        if !(proven_live && known_prefix)
             && !session_order
             && (!self.account.orders_seeded || !known_prefix)
-            && !(updated > 0.0 && updated < session_started)
+            && (proven_live || !(updated > 0.0 && updated < session_started))
         {
             if self.account.orders_seeded {
                 // A delayed terminal row absent from the startup open-order census
@@ -2339,7 +2372,7 @@ impl Blofin {
         for order in rows {
             if matches!(order.kind, OrderType::Limit | OrderType::Market)
                 && let Some(source) = sources.get(&order.id)
-                && !self.account.fills.contains_key(&order.id)
+                && self.account.execution_baseline(&order.id).is_none()
             {
                 let (qty, value) = source.execution_baseline;
                 self.seed_execution_prefix(cx, &order.id, qty, value);
@@ -2348,7 +2381,11 @@ impl Blofin {
         let pending = std::mem::take(&mut self.account.startup_executions);
         let mut unknown = HashMap::<String, (f64, f64)>::new();
         for execution in &pending {
-            if !self.account.fills.contains_key(&execution.fill.order_id) {
+            if self
+                .account
+                .execution_baseline(&execution.fill.order_id)
+                .is_none()
+            {
                 let previous = unknown
                     .get(&execution.fill.order_id)
                     .map(|&(qty, value)| (qty, Some(value)));
@@ -2368,7 +2405,11 @@ impl Blofin {
         self.account.reporting_started = cx.protocol_now();
         self.account.reporting_started_at = cx.now;
         for execution in pending {
-            if !self.account.fills.contains_key(&execution.fill.order_id) {
+            if self
+                .account
+                .execution_baseline(&execution.fill.order_id)
+                .is_none()
+            {
                 // The bounded tracker may have evicted a queued order while
                 // seeding a large census. Never turn that eviction into a zero prefix.
                 if let Some(source) = sources.get(&execution.fill.order_id) {
@@ -2464,9 +2505,7 @@ impl Blofin {
             .execution_progress(&fill.order_id, next.quantity(), next.value());
         // Provenance belongs to the bounded prefix, so it survives updates but
         // cannot outlive eviction or a replacement source's state.
-        if let Some(prefix) = self.account.fills.get_mut(&fill.order_id) {
-            prefix.live = true;
-        }
+        self.account.observe_live_order(&fill.order_id);
         fill.price = prepared.price();
         fill.amount = prepared.amount();
         cx.fill(fill);
