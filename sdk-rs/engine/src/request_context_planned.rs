@@ -1087,7 +1087,9 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
     ) -> Result<Context, Error> {
-        let leg = self.make_plan_leg_context(plan, slot, intent, false, true)?;
+        let leg = self
+            .core()
+            .make_plan_leg_context(plan, slot, intent, false, true)?;
         self.note_session_resume(plan, &leg);
         Ok(leg)
     }
@@ -1098,7 +1100,8 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, None, false, false)
+        self.core()
+            .make_plan_leg_context(plan, slot, None, false, false)
     }
 
     /// Narrow a write leg using the common engine intent rules before its first
@@ -1109,7 +1112,8 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: crate::classify::Intent,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(intent), false, false)
+        self.core()
+            .make_plan_leg_context(plan, slot, Some(intent), false, false)
     }
 
     /// The Plan form of `http_write_protection_cancel_leg`: an amend's cancel
@@ -1120,7 +1124,7 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         slot: &Slot,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(
+        self.core().make_plan_leg_context(
             plan,
             slot,
             Some(crate::classify::Intent::Cancel),
@@ -1129,6 +1133,13 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    #[inline]
+    fn plan_issue_custody(&self, plan: &Plan, body: &Body) -> bool {
+        self.core_ref().plan_issue_custody(plan, body)
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
     /// Handoff, initial or ready custody over this Plan's next issue.
     fn plan_issue_custody(&self, plan: &Plan, body: &Body) -> bool {
         self.io
@@ -1149,7 +1160,9 @@ impl<P> Cx<'_, P> {
                     .as_ref()
                     .is_some_and(|ready| ready.same_plan(plan)))
     }
+}
 
+impl crate::engine::CoreCx<'_> {
     /// A parked Slot's resume stands in for Plan custody; nothing else may
     /// issue a parked Slot.
     fn make_plan_leg_context(
@@ -1184,7 +1197,7 @@ impl<P> Cx<'_, P> {
                 .available()
                 .any(|candidate| body.schedule.ordinal(&candidate) == Ok(index))
             || !entry.eligible_at.is_some_and(|at| at <= self.now)
-            || !(resumed || self.plan_issue_custody(plan, body))
+            || !(resumed || self.core_ref().plan_issue_custody(plan, body))
         {
             return Err(Error::Revoked);
         }
@@ -1308,7 +1321,9 @@ impl<P> Cx<'_, P> {
             .insert(context.leg(), context.clone());
         Ok(context)
     }
+}
 
+impl<P> Cx<'_, P> {
     #[inline]
     pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
         self.core_ref().validate_plan_delivery(plan, context)
@@ -1548,6 +1563,53 @@ impl<P> Cx<'_, P> {
         self.fail_plan_checked(plan, error.into(), Some(note))
     }
 
+    #[inline]
+    fn fail_plan_checked(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        note: Option<&str>,
+    ) -> Result<(), Error> {
+        self.core().fail_plan_checked(plan, error, note)
+    }
+
+    #[inline]
+    pub(in crate::engine) fn fail_plan_owned(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+    ) -> Result<(), Error> {
+        self.core().fail_plan_owned(plan, error)
+    }
+
+    #[inline]
+    fn seal_plan(
+        &mut self,
+        plan: &Plan,
+        result: Option<String>,
+        error: Option<VenueError>,
+        note: Option<&str>,
+    ) -> Result<(), Error> {
+        self.core().seal_plan(plan, result, error, note)
+    }
+
+    #[inline]
+    fn commit_plan_terminal(
+        &mut self,
+        plan: &Plan,
+        result: Option<String>,
+        prepared: conditional::PreparedPlanSeal,
+    ) -> Result<(), Error> {
+        self.core().commit_plan_terminal(plan, result, prepared)
+    }
+
+    #[inline]
+    fn rearm_plan(&mut self, plan: &Plan) {
+        self.core().rearm_plan(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     fn fail_plan_checked(
         &mut self,
         plan: &Plan,
@@ -1608,86 +1670,6 @@ impl<P> Cx<'_, P> {
         self.commit_plan_terminal(plan, result, prepared)
     }
 
-    fn prepare_plan_terminal(
-        &mut self,
-        plan: &Plan,
-        error: Option<VenueError>,
-        note: Option<&str>,
-        result: Option<&str>,
-    ) -> Result<conditional::PreparedPlanSeal, Error> {
-        // Ready-loop custody first: no effect before the owner is confirmed.
-        self.validate_preflight_ready_owner(plan.owner())?;
-        let physical = matches!(plan.owner(), Owner::Execution { .. });
-        // Observers already past their own bound expire against the live
-        // journal before any terminal preparation (host callbacks seal first).
-        if physical {
-            self.sweep_executions();
-        }
-        let mut prepared = self.io.core.request_contexts.prepare_plan_seal(
-            plan,
-            self.now,
-            self.io.core.http_delivery.as_ref(),
-            error,
-            note,
-        )?;
-        if physical {
-            // Every observer's terminal and reports, cloned before the seal.
-            let projection = match (&prepared.journal, &prepared.legacy) {
-                (Some(journal), _) => journal
-                    .failure()
-                    .cloned()
-                    .map_or_else(|| Ok(result.unwrap_or_default().to_owned()), Err),
-                (None, Some(error)) => Err(error.clone()),
-                (None, None) => Ok(result.unwrap_or_default().to_owned()),
-            };
-            let observers = self.io.core.request_contexts.planned_observer_count(plan);
-            prepared
-                .fanout
-                .try_reserve_exact(observers)
-                .map_err(|_| Error::Capacity)?;
-            prepared
-                .sealed
-                .try_reserve_exact(observers)
-                .map_err(|_| Error::Capacity)?;
-            // Each observer's reports and terminal notice, plus the
-            // execution timer rearm (clear and set).
-            let notices = observers
-                .checked_mul(prepared.reports.len() + 1)
-                .and_then(|n| n.checked_add(2))
-                .ok_or(Error::Capacity)?;
-            // One reservation covers the notices and the owner's cleanup.
-            prepared.retired = self.io.prepare_owner_retirement(plan.owner(), notices)?;
-            for _ in 0..observers {
-                let mut reports = Vec::new();
-                if projection.is_err() {
-                    reports
-                        .try_reserve_exact(prepared.reports.len())
-                        .map_err(|_| Error::Capacity)?;
-                    reports.extend(prepared.reports.iter().cloned());
-                }
-                prepared.fanout.push((projection.clone(), reports));
-            }
-        }
-        Ok(prepared)
-    }
-
-    #[inline]
-    fn commit_plan_terminal(
-        &mut self,
-        plan: &Plan,
-        result: Option<String>,
-        prepared: conditional::PreparedPlanSeal,
-    ) -> Result<(), Error> {
-        self.core().commit_plan_terminal(plan, result, prepared)
-    }
-
-    #[inline]
-    fn rearm_plan(&mut self, plan: &Plan) {
-        self.core().rearm_plan(plan)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     /// A resume drained with no delivery is the resumed attempt's custody for
     /// the rest of this event only.
     fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {
@@ -2511,5 +2493,71 @@ impl ContextRegistry {
             .as_mut()
             .expect("queued keyless serial")
             .wire_fingerprint = Some(fingerprint);
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    fn prepare_plan_terminal(
+        &mut self,
+        plan: &Plan,
+        error: Option<VenueError>,
+        note: Option<&str>,
+        result: Option<&str>,
+    ) -> Result<conditional::PreparedPlanSeal, Error> {
+        // Ready-loop custody first: no effect before the owner is confirmed.
+        self.core_ref()
+            .validate_preflight_ready_owner(plan.owner())?;
+        let physical = matches!(plan.owner(), Owner::Execution { .. });
+        // Observers already past their own bound expire against the live
+        // journal before any terminal preparation (host callbacks seal first).
+        if physical {
+            self.sweep_executions();
+        }
+        let mut prepared = self.io.core.request_contexts.prepare_plan_seal(
+            plan,
+            self.now,
+            self.io.core.http_delivery.as_ref(),
+            error,
+            note,
+        )?;
+        if physical {
+            // Every observer's terminal and reports, cloned before the seal.
+            let projection = match (&prepared.journal, &prepared.legacy) {
+                (Some(journal), _) => journal
+                    .failure()
+                    .cloned()
+                    .map_or_else(|| Ok(result.unwrap_or_default().to_owned()), Err),
+                (None, Some(error)) => Err(error.clone()),
+                (None, None) => Ok(result.unwrap_or_default().to_owned()),
+            };
+            let observers = self.io.core.request_contexts.planned_observer_count(plan);
+            prepared
+                .fanout
+                .try_reserve_exact(observers)
+                .map_err(|_| Error::Capacity)?;
+            prepared
+                .sealed
+                .try_reserve_exact(observers)
+                .map_err(|_| Error::Capacity)?;
+            // Each observer's reports and terminal notice, plus the
+            // execution timer rearm (clear and set).
+            let notices = observers
+                .checked_mul(prepared.reports.len() + 1)
+                .and_then(|n| n.checked_add(2))
+                .ok_or(Error::Capacity)?;
+            // One reservation covers the notices and the owner's cleanup.
+            prepared.retired = self.io.prepare_owner_retirement(plan.owner(), notices)?;
+            for _ in 0..observers {
+                let mut reports = Vec::new();
+                if projection.is_err() {
+                    reports
+                        .try_reserve_exact(prepared.reports.len())
+                        .map_err(|_| Error::Capacity)?;
+                    reports.extend(prepared.reports.iter().cloned());
+                }
+                prepared.fanout.push((projection.clone(), reports));
+            }
+        }
+        Ok(prepared)
     }
 }
