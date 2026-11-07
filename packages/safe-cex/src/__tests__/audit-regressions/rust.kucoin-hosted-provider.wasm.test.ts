@@ -45,7 +45,7 @@ function fixture(options: Partial<ExchangeOptions> = {}) {
     new DefaultStore(),
   );
   const logs: string[] = [];
-  exchange.emitter.on('log', (message) => {
+  exchange.emitter.on('log', (message: string) => {
     logs.push(message);
   });
   live.push(exchange);
