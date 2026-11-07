@@ -723,6 +723,34 @@ The rate limit system is VIP-level aware and adjusts batch order limits dynamica
 - Income history: 50 per page (the venue's own cap, clamped), max 10 pages safety limit, 1000-record cap (`fetchBybitIncomeHistory` in `bybit.income.ts`)
 - OHLCV: max 1000 candles per request (`bybit.exchange.ts:773`)
 
+### Terminal order history after 2026-11-12
+
+The Bybit Tech Bot API announcement, effective 2026-11-12 (supplied by
+Tealstreet ops), says unfiltered `/v5/order/history` and
+`/v5/spread/order/history` no longer return recent `Cancelled`, `Rejected` or
+`Deactivated` orders. Each status remains queryable explicitly for 24 hours.
+This announcement is not present in the checked v5 changelog. The standard
+history docs list a single string `orderStatus`; the spread history docs do
+not list that request parameter. Neither stack currently calls spread history.
+
+The TS replay reference's `fetchHistoricalOrders` and Rust's shared Bybit
+history walker read the default history plus separate `Cancelled`, `Rejected`
+and `Deactivated` histories. Each status/category/window owns its cursor and
+page budget. Merge by order ID, sort newest first, then apply the caller's
+global limit. Keep the existing seven-day windows; explicit status requests
+do not extend Bybit's terminal-order retention.
+
+Hyro lost-create recovery checks realtime, default history and all three
+explicit terminal statuses before treating the identity as absent. A matched
+cancelled/deactivated order proves acceptance without restoring an open row;
+a matched rejection follows the existing rejection path. A failed filtered
+lookup leaves the outcome unknown and cannot justify a create retry.
+
+See `docs/plans/callers/bybit-order-history-status.md` for the caller census
+and replay coverage. The Bybit private gate now checks a history result whose
+cancelled orders exist only in filtered pages, including duplicate IDs and
+independent reuse of the same cursor token.
+
 ## State Reconciliation
 
 ### Position Merge Strategy (`bybit.exchange.ts:294-334`)

@@ -2,9 +2,9 @@ import { AxiosError } from 'axios';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { Market, OrderSide, OrderStatus, OrderType } from '../../types';
+import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 
 class TestHyroExchange extends HyrotraderExchange {
   getBybitRestBaseUrl() {
@@ -135,7 +135,7 @@ describe('HyroTrader deadline and transport recovery', () => {
     expect(await pending).toEqual(['completed-during-gap']);
     expect(store.orders).toEqual([]);
     expect(post).toHaveBeenCalledTimes(1);
-    expect(get.mock.calls.filter(([path]) => path === ENDPOINTS.USER_ORDERS)).toHaveLength(1);
+    expect(get.mock.calls.filter(([path]) => path === ENDPOINTS.USER_ORDERS)).toHaveLength(4);
   });
 
   it.each([10014, 110072])('preserves an unresolved duplicate identity after code %s', async (code) => {
@@ -146,6 +146,9 @@ describe('HyroTrader deadline and transport recovery', () => {
       .mockResolvedValue({ data: { retCode: code, retMsg: 'OrderLinkedID is duplicate' } });
     const get = vi
       .fn()
+      .mockResolvedValueOnce(empty())
+      .mockResolvedValueOnce(empty())
+      .mockResolvedValueOnce(empty())
       .mockResolvedValueOnce(empty())
       .mockResolvedValueOnce(empty())
       .mockRejectedValue(new Error('lookup unavailable'));
@@ -330,7 +333,7 @@ describe('HyroTrader deadline and transport recovery', () => {
     expect(post).toHaveBeenCalledTimes(1);
     expect(get).toHaveBeenCalledWith(ENDPOINTS.UNFILLED_ORDERS, expect.anything());
   });
-  it('checks both complete axes before retrying with the same ID', async () => {
+  it('checks realtime and every history status before retrying with the same ID', async () => {
     const { exchange } = setup();
     const post = vi
       .fn()
@@ -339,7 +342,10 @@ describe('HyroTrader deadline and transport recovery', () => {
     const get = vi.fn().mockResolvedValue(empty());
     exchange.xhr = { post, get } as any;
     expect(await exchange.placeOrder(order)).toEqual(['retried']);
-    expect(get.mock.calls.map(([path]) => path)).toEqual([ENDPOINTS.UNFILLED_ORDERS, ENDPOINTS.USER_ORDERS]);
+    expect(get.mock.calls.map(([path]) => path)).toEqual([
+      ENDPOINTS.UNFILLED_ORDERS,
+      ...Array(4).fill(ENDPOINTS.USER_ORDERS),
+    ]);
     expect(post.mock.calls[0][1].orderLinkId).toBe(post.mock.calls[1][1].orderLinkId);
   });
   it('walks history cursors and does not resurrect a recovered filled limit', async () => {
