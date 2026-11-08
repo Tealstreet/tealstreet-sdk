@@ -841,6 +841,11 @@ impl Backpack {
                 return;
             }
         };
+        record_failure(
+            &mut job.write_plan,
+            &job.elements[write],
+            &VenueError::new("Backpack write awaiting response").outcome(Outcome::Unknown),
+        );
         job.waiting = true;
         let managed = ManagedWrite {
             plan: plan.clone(),
