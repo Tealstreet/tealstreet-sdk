@@ -161,8 +161,6 @@ pub struct Account {
     poll: Option<TimerId>,
     heal: Option<TimerId>,
     emitted_fills: RecentIds<8192>,
-    /// Account startup, then the newest emitted execution time; survives reconnects.
-    snapshot_fill_floor: f64,
     payloads: HashMap<String, f64>,
     snapshot_orders_revision: u64,
     snapshot_settings_revision: u64,
@@ -659,7 +657,6 @@ impl Kraken {
             return;
         }
         self.account.started = true;
-        self.account.snapshot_fill_floor = cx.now;
         cx.store.set_hedged(false);
         let defaults: Vec<_> = cx
             .store
@@ -929,9 +926,6 @@ impl Kraken {
                     let decoded = json::each::<Execution<'_>>(raw.get(), |e| executions.push(e));
                     if decoded.is_ok() {
                         self.account.payloads.insert("fills".into(), cx.now);
-                        // One cutoff for the whole batch: history can be newest-first
-                        // and different executions can share a timestamp.
-                        let snapshot_floor = self.account.snapshot_fill_floor;
                         for e in executions {
                             if e.fill_id.is_empty()
                                 || e.order_id.is_empty()
@@ -941,10 +935,10 @@ impl Kraken {
                             {
                                 continue;
                             }
+                            // Timestamps cannot prove delivery: reconnect snapshots may
+                            // contain unseen executions at or before the last emitted fill.
                             if self.account.emitted_fills.contains(&e.fill_id)
                                 || cx.store.market(&e.instrument).is_none()
-                                || (msg.feed == "fills_snapshot"
-                                    && e.time.is_none_or(|time| time <= snapshot_floor))
                             {
                                 continue;
                             }
@@ -984,10 +978,6 @@ impl Kraken {
                                 amount: e.qty,
                             });
                             self.account.emitted_fills.insert(e.fill_id.to_string());
-                            self.account.snapshot_fill_floor = self
-                                .account
-                                .snapshot_fill_floor
-                                .max(e.time.unwrap_or(cx.now));
                         }
                         self.account_schedule_heal(cx);
                     }

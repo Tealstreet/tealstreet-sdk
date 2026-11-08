@@ -55,7 +55,7 @@ fn only_emitted_execution_ids_deduplicate_live_replays_and_reconnects() {
         NOW,
         &format!(r#"{{"feed":"fills_snapshot","fills":[{fill}]}}"#),
     );
-    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 0);
+    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 1);
     message(
         &mut e,
         socket,
@@ -67,8 +67,8 @@ fn only_emitted_execution_ids_deduplicate_live_replays_and_reconnects() {
     );
     assert_eq!(
         e.take_frame(NOW).map_or(0, fill_count),
-        2,
-        "an un-emitted snapshot ID cannot suppress its first live delivery"
+        1,
+        "only the execution already emitted from the snapshot is deduplicated"
     );
     message(
         &mut e,
@@ -135,7 +135,7 @@ fn execution_message(
 }
 
 #[test]
-fn startup_snapshot_emits_only_executions_after_account_start() {
+fn startup_snapshot_emits_unseen_executions_regardless_of_timestamp() {
     let (mut e, socket) = ready();
     let history = execution("history", Some(NOW - 1.), "PF_XBTUSD");
     let unstamped = execution("unstamped", None, "PF_XBTUSD");
@@ -148,7 +148,7 @@ fn startup_snapshot_emits_only_executions_after_account_start() {
             "fills_snapshot",
             &[history.clone(), unstamped.clone(), current.clone()]
         ),
-        1
+        3
     );
     assert_eq!(
         execution_message(
@@ -158,17 +158,23 @@ fn startup_snapshot_emits_only_executions_after_account_start() {
             "fills",
             &[history, unstamped, current]
         ),
-        2,
-        "ignored history must not enter the emitted-ID cache"
+        0,
+        "startup snapshot executions must not emit twice on live replay"
     );
 }
 
 #[test]
-fn snapshot_recovery_uses_last_emission_and_accepts_unordered_same_time_rows() {
+fn snapshot_recovery_uses_identity_and_accepts_unordered_same_time_rows() {
     let (mut e, socket) = ready();
     let emitted = execution("emitted", Some(NOW + 10.), "PF_XBTUSD");
     assert_eq!(
-        execution_message(&mut e, socket, NOW + 20., "fills", &[emitted.clone()]),
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 20.,
+            "fills",
+            std::slice::from_ref(&emitted)
+        ),
         1
     );
     let older = execution("older", Some(NOW + 9.), "PF_XBTUSD");
@@ -179,21 +185,21 @@ fn snapshot_recovery_uses_last_emission_and_accepts_unordered_same_time_rows() {
     let fills = [emitted, older, equal, newest, middle, same_time];
     assert_eq!(
         execution_message(&mut e, socket, NOW + 40., "fills_snapshot", &fills),
-        3,
-        "the cutoff is fixed for the batch, independent of history order"
+        5,
+        "all unseen identities emit, independent of timestamps or history order"
     );
     assert_eq!(
         execution_message(&mut e, socket, NOW + 41., "fills_snapshot", &fills),
         0
     );
     assert_eq!(
-        execution_message(&mut e, socket, NOW + 42., "fills", &fills[3..]),
+        execution_message(&mut e, socket, NOW + 42., "fills", &fills),
         0
     );
 }
 
 #[test]
-fn unmapped_snapshot_execution_neither_poison_ids_nor_advances_cutoff() {
+fn unmapped_snapshot_execution_does_not_poison_emitted_ids() {
     let (mut e, socket) = ready();
     let unmapped = execution("unmapped", Some(NOW + 1_000.), "UNKNOWN");
     assert_eq!(
@@ -213,7 +219,13 @@ fn unmapped_snapshot_execution_neither_poison_ids_nor_advances_cutoff() {
     );
     let mapped = execution("unmapped", Some(NOW + 1_000.), "PF_XBTUSD");
     assert_eq!(
-        execution_message(&mut e, socket, NOW + 2_002., "fills", &[mapped.clone()]),
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 2_002.,
+            "fills",
+            std::slice::from_ref(&mapped)
+        ),
         1
     );
     assert_eq!(
@@ -789,6 +801,15 @@ fn execution_remaining_updates_orders_without_counting_cumulative_progress_twice
     message(&mut e, s, NOW + 4.0, &delayed);
     assert_eq!(e.store().orders()[0].filled, 1.0);
     assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 1);
+    let delayed_snapshot = delayed
+        .replace("\"feed\":\"fills\"", "\"feed\":\"fills_snapshot\"")
+        .replace("f2", "f3");
+    message(&mut e, s, NOW + 5.0, &delayed_snapshot);
+    let order = &e.store().orders()[0];
+    assert_eq!((order.filled, order.remaining), (1.0, 1.0));
+    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 1);
+    message(&mut e, s, NOW + 6.0, &delayed_snapshot);
+    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 0);
 }
 #[test]
 fn cumulative_order_before_execution_does_not_double_count_and_final_remaining_closes() {

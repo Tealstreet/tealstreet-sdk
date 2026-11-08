@@ -57,14 +57,14 @@ Heartbeats prove socket liveness only. Separate venue-owned clocks watch data:
   maintain that connection; inactivity does not unsubscribe or reconnect it.
   Keep the live subscription uninterrupted while it is healthy.
 
-After a required reconnect, `fills_snapshot` executions newer than the last
-emitted execution are emitted as live fills and can advance order progress.
-The initial cutoff is account startup, so old startup history stays quiet.
-The cutoff is fixed for each snapshot batch to accept newest-first history and
-distinct executions sharing a timestamp. Only emitted fill IDs enter the bounded
-deduplication cache, which survives reconnects; skipped history, missing snapshot
-timestamps and unmapped markets cannot suppress a later live delivery. Live
-deltas without timestamps still emit and use receipt time for the next cutoff.
+Both `fills` and `fills_snapshot` emit valid, mapped executions whose fill IDs
+are absent from the bounded emitted-ID cache, which survives reconnects.
+This includes unseen startup history and executions without timestamps.
+Equal or older execution timestamps cannot suppress a previously unseen fill;
+snapshot and live replays of a cached ID do not emit again. Only emitted fill
+IDs enter that cache, so invalid or unmapped executions cannot suppress a later
+valid delivery. Execution timestamps still guard order-progress updates against
+stale data; emitting an older fill cannot roll an order's progress backward.
 
 The existing five-second venue timer checks these clocks independently of the
 scaled account REST poll. Ticker expiry is also checked before accepting late

@@ -528,6 +528,68 @@ fn futures_reconnect_live_execution_control_emits_once() {
     assert_eq!(reconnect_execution_delivery(false), (1, 0, 1.5));
 }
 
+fn review_reconnect_boundary(offset: f64) -> (u32, u32) {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let old = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, old);
+    h.wait(100.);
+    let emitted_at = h.now;
+    let emitted = format!(
+        r#"{{"fill_id":"review-earlier","order_id":"review-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"time":{emitted_at}}}"#
+    );
+    h.message(old, &format!(r#"{{"feed":"fills","fills":[{emitted}]}}"#));
+    assert_eq!(h.engine.take_frame(h.now).map_or(0, support::fill_count), 1);
+    h.wait(20_000.);
+    assert!(h.closed.contains(&old));
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(old, replacement);
+    authenticate(&mut h, replacement);
+    let _ = h.engine.take_frame(h.now);
+    let time = emitted_at + offset;
+    assert!(time > support::NOW);
+    let unseen = format!(
+        r#"{{"fill_id":"review-unseen","order_id":"review-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"time":{time}}}"#
+    );
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{emitted},{unseen}]}}"#),
+    );
+    let first = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{unseen},{emitted}]}}"#),
+    );
+    assert_eq!(
+        h.engine.take_frame(h.now).map_or(0, support::fill_count),
+        0,
+        "snapshot replay must not re-emit either execution"
+    );
+    h.now += 1.;
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills","fills":[{emitted},{unseen}]}}"#),
+    );
+    let replay = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    println!("REVIEW offset={offset} snapshot_first={first} live_replay={replay}");
+    (first, replay)
+}
+
+#[test]
+fn review_reconnect_unseen_same_timestamp() {
+    assert_eq!(review_reconnect_boundary(0.), (1, 0));
+}
+
+#[test]
+fn review_reconnect_unseen_older_timestamp() {
+    assert_eq!(review_reconnect_boundary(-1.), (1, 0));
+}
+
+#[test]
+fn review_reconnect_unseen_newer_timestamp_control() {
+    assert_eq!(review_reconnect_boundary(1.), (1, 0));
+}
+
 fn ticker(h: &mut H<Kraken>, socket: SocketId, symbol: &str) {
     h.message(
         socket,
