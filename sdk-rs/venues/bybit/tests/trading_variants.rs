@@ -1956,6 +1956,9 @@ fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
                 }
             };
             h.reply(request.id, 200, reply);
+            if failed == Some(filter) {
+                break;
+            }
         }
         for (id, filter) in [
             ("ordinary", "Order"),
@@ -1965,7 +1968,11 @@ fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
         ] {
             assert_eq!(
                 h.engine.store().order(id).unwrap().status,
-                if failed == Some(filter) {
+                if failed.is_some_and(|failed| {
+                    let filters = ["Order", "StopOrder", "tpslOrder"];
+                    filters.iter().position(|item| *item == filter)
+                        >= filters.iter().position(|item| *item == failed)
+                }) {
                     safe_cex_engine::model::OrderStatus::Open
                 } else {
                     safe_cex_engine::model::OrderStatus::Canceled
@@ -4532,9 +4539,9 @@ fn a_position_stop_quantity_rounding_to_zero_is_refused() {
     );
 }
 
-// B3: one coin refusing leaves the other coins to be tried.
+// A native refusal leaves the remaining coin effects unsent.
 #[test]
-fn inverse_position_mode_tries_every_coin_past_a_refusal() {
+fn inverse_position_mode_refusal_stops_the_remaining_coins() {
     let mut h = ready(Variant::Inverse);
     let mut second = h.engine.store().markets()[0].clone();
     second.base = "ZZZ".into();
@@ -4555,7 +4562,12 @@ fn inverse_position_mode_tries_every_coin_past_a_refusal() {
         r#"{"retCode":10001,"retMsg":"refused"}"#,
     );
     h.advance(250.0);
-    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
+    assert!(
+        !h.has_request("/v5/position/switch-mode"),
+        "{:?}",
+        h.paths()
+    );
+    assert!(matches!(h.result(1), Some(Err(_))));
 }
 
 #[test]
@@ -5776,5 +5788,297 @@ fn engine_ambiguity_429_clock_code_cannot_replay() {
         assert!(!h.notices.iter().any(
             |n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == "bybit.clock.corrected")
         ));
+    }
+}
+
+fn applied_failure(h: &Harness, command: u32) -> &safe_cex_engine::VenueError {
+    h.notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: own,
+                error,
+            } if *own == command => Some(error),
+            _ => None,
+        })
+        .expect("indexed terminal failure")
+}
+
+fn seed_applied_cancel_orders(h: &mut Harness) {
+    let category = if h
+        .engine
+        .store()
+        .market("BTCUSDT")
+        .is_some_and(|market| market.is_spot == Some(true))
+    {
+        "spot"
+    } else {
+        "linear"
+    };
+    let frame = r#"{"topic":"order","data":[{"category":"spot","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}]}"#.replace("\"category\":\"spot\"", &format!("\"category\":\"{category}\""));
+    h.message("/v5/private", &frame);
+    let base = h
+        .engine
+        .store()
+        .order("parent")
+        .expect("native seed")
+        .clone();
+    let mut orders = vec![base.clone()];
+    for index in 0..3 {
+        let mut order = base.clone();
+        order.id = format!("cancel-{index}");
+        orders.push(order);
+    }
+    let mut attached = base;
+    attached.id = "parent__stop_loss".into();
+    attached.parent_id = Some("parent".into());
+    attached.kind = OrderType::StopLoss;
+    attached.price = 90.0;
+    orders.push(attached);
+    h.engine.store_mut().set_orders(orders);
+}
+
+#[test]
+fn applied_cancel_prefix_is_reported_with_targets_and_stops_the_suffix() {
+    let mut h = ready(Variant::Spot);
+    seed_applied_cancel_orders(&mut h);
+    h.command(Command::CancelOrders {
+        command: 151,
+        ids: (0..3).map(|i| format!("cancel-{i}")).collect(),
+    });
+    let first = h.take("/v5/order/cancel");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"cancel-0"}}"#,
+    );
+    let second = h.take("/v5/order/cancel");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"native refusal"}"#,
+    );
+    let elements = applied_failure(&h, 151)
+        .elements
+        .as_ref()
+        .expect("cancel outcomes");
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    assert_eq!(elements.len(), 3);
+    assert!(
+        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), position_key: None } if id == "cancel-0")
+    );
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+    );
+    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+    h.advance(1_201.0);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post)
+    );
+}
+
+#[test]
+fn applied_amend_prefix_names_existing_parent_without_placing_an_order() {
+    let mut h = ready(Variant::Spot);
+    seed_applied_cancel_orders(&mut h);
+    h.command(Command::CancelOrders {
+        command: 152,
+        ids: vec![
+            "parent__stop_loss".into(),
+            "cancel-0".into(),
+            "cancel-1".into(),
+        ],
+    });
+    let first = h.take("/v5/order/amend");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"parent"}}"#,
+    );
+    let second = h.take("/v5/order/cancel");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"native refusal"}"#,
+    );
+    let elements = applied_failure(&h, 152)
+        .elements
+        .as_ref()
+        .expect("amend outcomes");
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    assert!(
+        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Amend, target_order_id: Some(id), .. } if id == "parent")
+    );
+    assert!(
+        !elements
+            .iter()
+            .any(|row| matches!(row.result, ElementResult::Placed { .. }))
+    );
+    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post)
+    );
+}
+
+#[test]
+fn applied_settings_prefix_has_a_native_coin_scope_and_no_fabricated_order_id() {
+    let mut h = ready(Variant::Inverse);
+    let mut markets = h.engine.store().markets().to_vec();
+    let mut third = markets[0].clone();
+    third.id = "SOLUSD".into();
+    third.symbol = "SOLUSD".into();
+    third.base = "SOL".into();
+    markets.push(third);
+    h.engine.store_mut().set_markets(markets);
+    h.command(Command::SetPositionMode {
+        command: 153,
+        hedged: true,
+        symbol: None,
+    });
+    let first = h.take("/v5/position/switch-mode");
+    assert!(body(&first).contains("BTC"));
+    h.reply(first.id, 200, r#"{"retCode":0,"result":{}}"#);
+    h.advance(251.0);
+    let second = h.take("/v5/position/switch-mode");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"native refusal"}"#,
+    );
+    let error = applied_failure(&h, 153);
+    let elements = error.elements.as_ref().expect("settings outcomes");
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    assert_eq!(elements.len(), 3);
+    assert!(
+        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Settings, target_order_id: None, position_key: Some(key) } if key.contains("BTC"))
+    );
+    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    h.advance(1_201.0);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post)
+    );
+}
+
+#[test]
+fn applied_trading_stop_prefix_survives_a_rejected_create_without_an_order_id() {
+    let mut h = ready(Variant::Hyrotrader);
+    h.message("/v5/private", r#"{"topic":"position","data":[{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"1","avgPrice":"100","markPrice":"100","positionValue":"100","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}]}"#);
+    let mut stop = order("BTCUSDT", 1.0);
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = Some(90.0);
+    place(
+        &mut h,
+        154,
+        vec![stop, order("BTCUSDT", 1.0), order("ETHUSDT", 1.0)],
+    );
+    let first = h.take("/v5/position/trading-stop");
+    h.reply(first.id, 200, r#"{"retCode":0,"result":{}}"#);
+    let second = h.take("/v5/order/create");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"native refusal"}"#,
+    );
+    let error = applied_failure(&h, 154);
+    let elements = error.elements.as_ref().expect("trading-stop outcomes");
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    assert_eq!(elements.len(), 3);
+    assert!(
+        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::TradingStop, target_order_id: None, position_key: Some(key) } if key.contains("BTCUSDT"))
+    );
+    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post)
+    );
+}
+
+#[test]
+fn applied_cancel_batch_keeps_native_target_rows_and_stops_later_chunks() {
+    for code in [10001, 10016] {
+        let mut h = ready(Variant::Demo);
+        seed_applied_cancel_orders(&mut h);
+        let base = h
+            .engine
+            .store()
+            .order("parent")
+            .expect("native cancel seed")
+            .clone();
+        let orders = (0..12)
+            .map(|index| {
+                let mut order = base.clone();
+                order.id = format!("batch-cancel-{index}");
+                order
+            })
+            .collect();
+        h.engine.store_mut().set_orders(orders);
+        h.command(Command::CancelOrders {
+            command: 155,
+            ids: (0..12)
+                .map(|index| format!("batch-cancel-{index}"))
+                .collect(),
+        });
+        let request = h.take("/v5/order/cancel-batch");
+        let rows: Vec<_> = (0..10)
+            .map(|index| serde_json::json!({"orderId":format!("batch-cancel-{index}")}))
+            .collect();
+        let statuses: Vec<_> = (0..10).map(|index| serde_json::json!({"code":if index == 1 {code} else {0},"msg":"native cancel row"})).collect();
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({"retCode":0,"result":{"list":rows},"retExtInfo":{"list":statuses}})
+                .to_string(),
+        );
+        let elements = applied_failure(&h, 155)
+            .elements
+            .as_ref()
+            .expect("native cancel row outcomes");
+        assert_eq!(elements.len(), 12);
+        use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+        for (index, row) in elements.iter().enumerate() {
+            match index {
+                1 if code == 10001 => assert!(
+                    matches!(&row.result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+                ),
+                1 => assert!(
+                    matches!(&row.result, ElementResult::Unknown { error } if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+                ),
+                10.. => assert_eq!(row.result, ElementResult::NotSent { error: None }),
+                _ => assert!(
+                    matches!(&row.result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == &format!("batch-cancel-{index}"))
+                ),
+            }
+        }
+        assert!(
+            !elements
+                .iter()
+                .any(|row| matches!(row.result, ElementResult::Placed { .. }))
+        );
+        h.advance(1_201.0);
+        assert!(
+            !h.requests
+                .iter()
+                .any(|request| request.method == safe_cex_engine::Method::Post)
+        );
     }
 }

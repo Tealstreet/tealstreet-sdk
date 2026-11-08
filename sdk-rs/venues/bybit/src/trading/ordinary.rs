@@ -86,12 +86,11 @@ enum Stage {
 
 struct Run {
     plan: Plan,
-    writes: Option<WritePlan<write_plan::CreateWrite>>,
+    writes: Option<WritePlan<write_plan::NativeWrite>>,
     partial: Option<Box<partial::Flow>>,
     /// Logical calls in native dispatch order.
     queue: VecDeque<Leg>,
     active: Option<Active>,
-    continue_on_error: bool,
     ids: Vec<String>,
     error: Option<VenueError>,
     /// Live rows a cancel-all did not list. The stream can lag a venue-side
@@ -127,6 +126,7 @@ struct Active {
     local: Option<LocalWrite>,
     write_index: Option<usize>,
     results: Option<Vec<ElementResult>>,
+    effects: Vec<write_plan::EffectTarget>,
 }
 
 impl Run {
@@ -151,8 +151,6 @@ enum Decision {
     Unlisted(Vec<String>),
     Failed(VenueError),
     Resend(ResendGrant),
-    /// A Partial stop's replacement was refused: put the old stop back, once.
-    Restore(Call),
     /// The engine refused the fact; the plan cannot continue.
     Lost,
 }
@@ -496,7 +494,7 @@ impl BybitLinear {
                 // Every trading-stop leg is a position TP/SL setting (D1).
                 Call::TradingStop => LegIntent::Setting,
                 Call::Amend if amend_virtual => LegIntent::Setting,
-                Call::PartialStop { .. } | Call::RestorePartialStop { .. } => LegIntent::Setting,
+                Call::PartialStop { .. } => LegIntent::Setting,
                 Call::CancelPartialStop { .. } | Call::ClearAttachedLeg { .. } => {
                     LegIntent::ProtectionCancel
                 }
@@ -561,7 +559,6 @@ impl BybitLinear {
             partial,
             queue: legs,
             active: None,
-            continue_on_error: job.continue_on_error,
             ids: Vec::new(),
             error: None,
             unlisted: Vec::new(),
@@ -718,14 +715,16 @@ impl BybitLinear {
             let _ = cx.fail_plan(&run.plan, error);
             return;
         }
-        let write_index = if matches!(leg.planned.call, Call::PlaceOne | Call::PlaceBatch) {
+        let mut effects = Vec::new();
+        let write_index = if !matches!(leg.planned.call, Call::PartialProof(_)) {
             let next = run.writes.as_mut().and_then(WritePlan::next_write);
             let Some((index, write)) = next else {
-                let error = run.failure(internal("Bybit write plan refused its next create"));
+                let error = run.failure(internal("Bybit write plan refused its next mutation"));
                 let _ = cx.fail_plan(&run.plan, error);
                 return;
             };
             leg.planned.body.clone_from(&write.payload.body);
+            effects.clone_from(&write.payload.effects);
             Some(index)
         } else {
             None
@@ -755,10 +754,7 @@ impl BybitLinear {
         if run.partial.is_some()
             && matches!(
                 leg.planned.call,
-                Call::CancelPartialStop { .. }
-                    | Call::PartialProof(_)
-                    | Call::PartialStop { .. }
-                    | Call::RestorePartialStop { .. }
+                Call::CancelPartialStop { .. } | Call::PartialProof(_) | Call::PartialStop { .. }
             )
         {
             let _ = cx.present_plan_failure(
@@ -774,6 +770,7 @@ impl BybitLinear {
             local,
             write_index,
             results: None,
+            effects,
         });
         self.park(id, entry);
         if !self.send_ordinary(cx, id, context, method, path, body) {
@@ -1099,16 +1096,6 @@ impl BybitLinear {
                             run.queue.pop_front();
                         }
                     }
-                    if matches!(axis, partial::Axis::Live | partial::Axis::History)
-                        && !run.partial.as_ref().unwrap().restorable()
-                        && run.partial.as_ref().unwrap().history_done()
-                    {
-                        for leg in &mut run.queue {
-                            if let Call::PartialStop { restore, .. } = &mut leg.planned.call {
-                                *restore = None;
-                            }
-                        }
-                    }
                     Decision::Next(Vec::new())
                 }
                 Err(error) => {
@@ -1119,16 +1106,6 @@ impl BybitLinear {
         } else {
             self.leg_decision(cx, &mut active, response)
         };
-        // The logical replacement has settled (a resend is the same write, still
-        // open), so the already-gone mark has served.
-        if !matches!(decision, Decision::Resend(_))
-            && let Call::PartialStop {
-                restore: Some((replaced, _)),
-                ..
-            } = &active.leg.planned.call
-        {
-            self.trading.gone_before_cancel.remove(replaced);
-        }
         if let (Some(call), Some(lot)) = (&entry.hyro, active.leg.lot) {
             self.hyro_leg_decided(&call.key, lot, &decision);
         }
@@ -1143,6 +1120,16 @@ impl BybitLinear {
                 writes.settle(index, results)
             } else {
                 match &decision {
+                    Decision::Next(_) | Decision::Unlisted(_) if !active.effects.is_empty() => {
+                        writes.settle(
+                            index,
+                            active
+                                .effects
+                                .iter()
+                                .map(write_plan::EffectTarget::applied)
+                                .collect(),
+                        )
+                    }
                     Decision::Next(ids) => writes.settle(
                         index,
                         vec![ElementResult::Placed {
@@ -1152,7 +1139,7 @@ impl BybitLinear {
                     Decision::Failed(error) => writes.fail(index, error.clone()),
                     _ => writes.fail(
                         index,
-                        internal("Bybit create outcome is unproven").outcome(Outcome::Unknown),
+                        internal("Bybit mutation outcome is unproven").outcome(Outcome::Unknown),
                     ),
                 }
             };
@@ -1196,29 +1183,6 @@ impl BybitLinear {
                 return;
             }
             Decision::Next(ids) => {
-                // The old stop is back: the edit failed, but nothing is unprotected.
-                if let Call::RestorePartialStop {
-                    stop: (symbol, _, kind),
-                    refusal,
-                } = &active.leg.planned.call
-                {
-                    let what = if *kind == safe_cex_engine::model::OrderType::TakeProfit {
-                        "take profit"
-                    } else {
-                        "stop"
-                    };
-                    let presented = VenueError {
-                        kind: Some(safe_cex_engine::error::ErrorKind::Rejected),
-                        outcome: Some(Outcome::Rejected),
-                        protection: Some(safe_cex_engine::error::Protection::Restored),
-                        ..VenueError::new(format!(
-                            "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was put back as a new order: {refusal}"
-                        ))
-                    };
-                    let _ = cx.finish_plan_call(&plan, &active.slot, &active.context);
-                    let _ = cx.fail_plan(&plan, presented);
-                    return;
-                }
                 run.ids.extend(ids);
                 let continued = if run.partial.is_some() && !run.queue.is_empty() {
                     let next = &run.queue.front().unwrap().planned.call;
@@ -1253,11 +1217,6 @@ impl BybitLinear {
                 }
             }
             Decision::Failed(mut error) => {
-                if run.writes.is_some() {
-                    let error = run.failure(error);
-                    let _ = cx.fail_plan(&plan, error);
-                    return;
-                }
                 if matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
                     && error.outcome != Some(Outcome::Unknown)
                 {
@@ -1279,63 +1238,18 @@ impl BybitLinear {
                         *kind,
                         error.outcome == Some(Outcome::Unknown),
                     )),
-                    // The old stop could not be put back either: say so as loudly as before.
-                    Call::RestorePartialStop {
-                        stop: (symbol, side, kind),
-                        refusal,
-                    } => {
-                        let gone = safe_cex_engine::error::stop_gone_text(
-                            symbol,
-                            *side,
-                            *kind,
-                            error.outcome == Some(Outcome::Unknown),
-                        );
-                        // A put-back of unknown outcome may have landed: claim neither.
-                        let unknown = error.outcome == Some(Outcome::Unknown);
-                        let presented = VenueError {
-                            protection: (!unknown)
-                                .then_some(safe_cex_engine::error::Protection::Unprotected),
-                            presents: true,
-                            ..VenueError::new(if unknown {
-                                format!(
-                                    "{gone}: {refusal}; putting it back has an unknown outcome: {}",
-                                    error.message
-                                )
-                            } else {
-                                format!(
-                                    "{gone}: {refusal}; putting it back failed too: {}",
-                                    error.message
-                                )
-                            })
-                        };
-                        if entry.hyro.is_none() {
-                            cx.command_error(id, error.message.clone());
-                        }
-                        let _ = cx.fail_plan(&plan, presented);
-                        return;
-                    }
                     _ => None,
                 };
                 // An execution's journal reports each failure to every observer.
                 if entry.hyro.is_none() {
                     cx.command_error(id, error.message.clone());
                 }
-                if !run.continue_on_error {
-                    // Its cancel landed and nothing replaced it.
-                    let _ = match &stop_lost {
-                        Some(note) => cx.fail_plan_noted(&plan, error, note),
-                        None => cx.fail_plan(&plan, error),
-                    };
-                    return;
-                }
-                run.error.get_or_insert(error);
-                if cx
-                    .finish_plan_call(&plan, &active.slot, &active.context)
-                    .is_err()
-                {
-                    let _ = cx.fail_plan(&plan, internal("Bybit trading plan lost its call"));
-                    return;
-                }
+                let error = run.failure(error);
+                let _ = match &stop_lost {
+                    Some(note) => cx.fail_plan_noted(&plan, error, note),
+                    None => cx.fail_plan(&plan, error),
+                };
+                return;
             }
             Decision::Resend(grant) => {
                 let mut active = active;
@@ -1369,38 +1283,6 @@ impl BybitLinear {
                 run.active = Some(active);
                 self.park(id, entry);
                 return;
-            }
-            Decision::Restore(call) => {
-                let continued = cx.continue_serial_plan(
-                    &plan,
-                    &active.slot,
-                    &active.context,
-                    partial_call(Operation::Mutation, 1),
-                );
-                if continued.is_err() {
-                    let _ = cx.fail_plan(&plan, internal("Bybit stop restore was refused"));
-                    return;
-                }
-                let Call::RestorePartialStop { .. } = &call else {
-                    unreachable!("a restore names its stop")
-                };
-                let body = match &active.leg.planned.call {
-                    Call::PartialStop {
-                        restore: Some((_, body)),
-                        ..
-                    } => body.clone(),
-                    _ => unreachable!("only a Partial stop restores"),
-                };
-                run.queue.push_front(Leg {
-                    planned: Planned {
-                        receipts: Vec::new(),
-                        path: "/v5/position/trading-stop",
-                        body,
-                        call,
-                    },
-                    intent: LegIntent::Setting,
-                    lot: None,
-                });
             }
             Decision::Lost => {
                 run.fail(cx, internal("Bybit write fact was refused"));
@@ -1482,9 +1364,7 @@ impl BybitLinear {
         true
     }
 
-    /// A leg the engine failed before or after release (provider refusal,
-    /// transport loss). Independent orders of one batch (`continue_on_error`)
-    /// retire only that leg and continue; otherwise the engine seals the plan.
+    /// A failed leg seals the complete indexed mutation plan.
     pub(crate) fn on_ordinary_leg_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1500,59 +1380,30 @@ impl BybitLinear {
             self.after_hyro(cx, &key, request.command);
             return;
         }
-        if let Stage::Plan(run) = &mut entry.stage
-            && let Some(index) = run
-                .active
-                .as_ref()
-                .filter(|active| active.context == request.context)
-                .and_then(|active| active.write_index)
-            && let Some(writes) = &mut run.writes
-        {
-            let _ = writes.fail(index, error.clone());
-            let error = run.failure(error);
-            let _ = cx.fail_plan(&run.plan, error);
-            return;
-        }
         let Stage::Plan(run) = &mut entry.stage else {
             self.park(request.command, entry);
             return;
         };
-        let matches = run
+        let Some(active) = run
             .active
             .as_ref()
-            .is_some_and(|active| active.context == request.context);
-        if matches
-            && error.outcome == Some(Outcome::NotSent)
-            && run.active.as_ref().is_some_and(|active| {
-                matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
-            })
+            .filter(|active| active.context == request.context)
+        else {
+            self.park(request.command, entry);
+            return;
+        };
+        if error.outcome == Some(Outcome::NotSent)
+            && matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
         {
             let _ = cx.present_plan_failure(&run.plan, error.message.clone());
         }
-        if matches
-            && run
-                .active
-                .as_ref()
-                .is_some_and(|active| matches!(active.leg.planned.call, Call::PartialProof(_)))
-        {
+        if matches!(active.leg.planned.call, Call::PartialProof(_)) {
             let _ = cx.inherit_plan_uncertainty(&run.plan);
         }
-        if !matches || !run.continue_on_error {
-            self.park(request.command, entry);
-            return;
+        if let (Some(writes), Some(index)) = (&mut run.writes, active.write_index) {
+            let _ = writes.fail(index, error.clone());
         }
-        let active = run.active.take().expect("matched active leg");
-        if cx
-            .finish_plan_failed_call(&run.plan, &active.slot, &active.context)
-            .is_err()
-        {
-            run.active = Some(active);
-            self.park(request.command, entry);
-            return;
-        }
-        cx.command_error(request.command, error.message.clone());
-        run.error.get_or_insert(error);
-        self.continue_ordinary(cx, request.command, entry);
+        run.fail(cx, error);
     }
 
     pub(crate) fn partial_stop_release_veto(
@@ -1581,14 +1432,10 @@ impl BybitLinear {
             guard.validate_original(store, release.time.raw_ms)?;
             guard.validate(store, release.time.raw_ms)?;
         }
-        if let Some(flow) = &run.partial {
-            match active.leg.planned.call {
-                Call::PartialStop { .. } => flow.validate(store, release.time.raw_ms, false)?,
-                Call::RestorePartialStop { .. } => {
-                    flow.validate(store, release.time.raw_ms, true)?
-                }
-                _ => {}
-            }
+        if let Some(flow) = &run.partial
+            && let Call::PartialStop { .. } = active.leg.planned.call
+        {
+            flow.validate(store, release.time.raw_ms)?;
         }
         Ok(())
     }
@@ -1663,9 +1510,7 @@ impl BybitLinear {
         let context = &active.context;
         if matches!(
             active.leg.planned.call,
-            Call::CancelPartialStop { .. }
-                | Call::PartialStop { .. }
-                | Call::RestorePartialStop { .. }
+            Call::CancelPartialStop { .. } | Call::PartialStop { .. }
         ) && !(200..300).contains(&response.status)
         {
             return match Self::record_failure(cx, context, &PROTECTIVE, None,
@@ -1779,9 +1624,7 @@ impl BybitLinear {
         };
         let table = if matches!(
             planned.call,
-            Call::CancelPartialStop { .. }
-                | Call::PartialStop { .. }
-                | Call::RestorePartialStop { .. }
+            Call::CancelPartialStop { .. } | Call::PartialStop { .. }
         ) {
             &PROTECTIVE
         } else if code == 110026 && matches!(planned.call, Call::MarginMode { .. }) {
@@ -1809,9 +1652,7 @@ impl BybitLinear {
         // absent-order answer must only echo its own targets.
         let protective_rate_limit = matches!(
             planned.call,
-            Call::CancelPartialStop { .. }
-                | Call::PartialStop { .. }
-                | Call::RestorePartialStop { .. }
+            Call::CancelPartialStop { .. } | Call::PartialStop { .. }
         ) && probe.verdict().kind() == Some(ErrorKind::RateLimited);
         let weaken = protective_rate_limit
             || match probe.verdict() {
@@ -1846,7 +1687,9 @@ impl BybitLinear {
         if let (Verdict::RefusedResend(_), Some(server)) = (verdict, server) {
             Self::observe_clock(cx, server);
         }
-        if active.write_index.is_some() && !matches!(verdict, Verdict::RefusedResend(_)) {
+        if active.write_index.is_some()
+            && !matches!(verdict, Verdict::Satisfied(_) | Verdict::RefusedResend(_))
+        {
             return Decision::Failed(error);
         }
         match (verdict, &planned.call) {
@@ -1856,35 +1699,6 @@ impl BybitLinear {
             }
             (Verdict::RefusedResend(_), _) if grant.is_some() => {
                 Decision::Resend(grant.expect("checked above"))
-            }
-            // Definitively refused after its cancel landed: the old stop goes back.
-            (
-                Verdict::Refused(_) | Verdict::RefusedResend(_),
-                Call::PartialStop {
-                    stop,
-                    restore: Some((replaced, _)),
-                },
-            ) if !self.trading.gone_before_cancel.contains(replaced) => {
-                Decision::Restore(Call::RestorePartialStop {
-                    stop: stop.clone(),
-                    refusal: error.message.clone(),
-                })
-            }
-            (
-                Verdict::Refused(_) | Verdict::RefusedResend(_),
-                Call::PartialStop {
-                    stop: (symbol, side, kind),
-                    restore: None,
-                },
-            ) => {
-                let mut error = error;
-                error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
-                error.message = format!(
-                    "{}: the replacement was refused and standalone provenance is unproven; re-place protection on Bybit. {}",
-                    safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, false),
-                    error.message
-                );
-                Decision::Failed(error)
             }
             _ => Decision::Failed(error),
         }
@@ -1898,10 +1712,6 @@ impl BybitLinear {
             Call::PositionMode { hedged } => self.apply_position_mode(cx, *hedged),
             Call::MarginMode { isolated } => self.apply_margin_mode(cx, *isolated),
             Call::PartialStop { .. } => self.schedule_partial_stop_refresh(cx),
-            // Already gone when we canceled it: a refused replacement never puts it back.
-            Call::CancelPartialStop { id, .. } => {
-                self.trading.gone_before_cancel.insert(id.clone());
-            }
             _ => {}
         }
     }
@@ -1971,6 +1781,49 @@ impl BybitLinear {
             .collect()
     }
 
+    fn native_row_results(
+        cx: &Cx<'_, Pending>,
+        context: &Context,
+        table: &CodeTable,
+        rows: &[Row],
+        effects: &[write_plan::EffectTarget],
+    ) -> Result<Vec<ElementResult>, ContextError> {
+        rows.iter()
+            .enumerate()
+            .map(|(index, row)| match row {
+                Row::Accepted(id) => Ok(match effects.get(index) {
+                    Some(target) => target.applied(),
+                    None => ElementResult::Placed {
+                        order_ids: vec![id.clone()],
+                    },
+                }),
+                Row::Refused { code, message } => {
+                    let native = Native {
+                        code: NativeCode::Int(*code),
+                        message,
+                    };
+                    let fact = cx.classify_write(
+                        context,
+                        table,
+                        Some(&native),
+                        describe((*code, message.clone())),
+                    )?;
+                    if matches!(fact.verdict(), Verdict::Satisfied(_))
+                        && let Some(target) = effects.get(index)
+                    {
+                        return Ok(target.applied());
+                    }
+                    let error = Box::new(fact.error().clone());
+                    Ok(if fact.verdict().is_refusal() {
+                        ElementResult::NotSent { error: Some(error) }
+                    } else {
+                        ElementResult::Unknown { error }
+                    })
+                }
+            })
+            .collect()
+    }
+
     fn accepted_leg(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -2022,35 +1875,7 @@ impl BybitLinear {
                     );
                 };
                 let items = Self::batch_items(&rows);
-                let results: Result<Vec<_>, _> = rows
-                    .iter()
-                    .map(|row| match row {
-                        Row::Accepted(id) => Ok(ElementResult::Placed {
-                            order_ids: vec![id.clone()],
-                        }),
-                        Row::Refused { code, message } => {
-                            let native = Native {
-                                code: NativeCode::Int(*code),
-                                message,
-                            };
-                            cx.classify_write(
-                                context,
-                                &BYBIT,
-                                Some(&native),
-                                describe((*code, message.clone())),
-                            )
-                            .map(|fact| {
-                                let error = Box::new(fact.error().clone());
-                                if fact.verdict().is_refusal() {
-                                    ElementResult::NotSent { error: Some(error) }
-                                } else {
-                                    ElementResult::Unknown { error }
-                                }
-                            })
-                        }
-                    })
-                    .collect();
-                match results {
+                match Self::native_row_results(cx, context, &BYBIT, &rows, &active.effects) {
                     Ok(results) => active.results = Some(results),
                     Err(_) => return Decision::Lost,
                 }
@@ -2143,6 +1968,10 @@ impl BybitLinear {
                         &[],
                     );
                 };
+                match Self::native_row_results(cx, context, &BYBIT, &rows, &active.effects) {
+                    Ok(results) => active.results = Some(results),
+                    Err(_) => return Decision::Lost,
+                }
                 let items = Self::batch_items(&rows);
                 let Ok(outcome) = cx.http_write_batch(
                     context,
@@ -2194,6 +2023,10 @@ impl BybitLinear {
                     );
                 };
                 let rows = [row];
+                match Self::native_row_results(cx, context, &PROTECTIVE, &rows, &active.effects) {
+                    Ok(results) => active.results = Some(results),
+                    Err(_) => return Decision::Lost,
+                }
                 let items = Self::batch_items(&rows);
                 let Ok(outcome) = cx.http_write_batch(
                     context,
@@ -2206,12 +2039,7 @@ impl BybitLinear {
                     return Decision::Lost;
                 };
                 match outcome {
-                    WriteResult::Accepted { .. } => {
-                        if !matches!(rows[0], Row::Accepted(_)) {
-                            self.trading.gone_before_cancel.insert(id.clone());
-                        }
-                        Decision::Next(Vec::new())
-                    }
+                    WriteResult::Accepted { .. } => Decision::Next(Vec::new()),
                     WriteResult::Rejected(error)
                     | WriteResult::KnownPartial(error)
                     | WriteResult::PartialUnknown(error)
@@ -2305,7 +2133,7 @@ impl BybitLinear {
                 }
                 Decision::Next(vec![target])
             }
-            Call::TradingStop | Call::PartialStop { .. } | Call::RestorePartialStop { .. } => {
+            Call::TradingStop | Call::PartialStop { .. } => {
                 if !matches!(planned.call, Call::TradingStop)
                     && ack::position_setting(result, ext).is_err()
                 {
@@ -2320,10 +2148,7 @@ impl BybitLinear {
                     return Decision::Lost;
                 }
                 // No order id comes back; the stop's row arrives on the stream.
-                if matches!(
-                    planned.call,
-                    Call::PartialStop { .. } | Call::RestorePartialStop { .. }
-                ) {
+                if matches!(planned.call, Call::PartialStop { .. }) {
                     self.schedule_partial_stop_refresh(cx);
                 }
                 Decision::Next(Vec::new())

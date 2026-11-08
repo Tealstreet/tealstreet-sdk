@@ -517,7 +517,6 @@ impl BybitLinear {
             partial: None,
             queue: legs,
             active: None,
-            continue_on_error: false,
             unlisted: Vec::new(),
             unlisted_read: None,
             unlisted_landed: None,

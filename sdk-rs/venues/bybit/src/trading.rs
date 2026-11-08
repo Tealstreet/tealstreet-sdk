@@ -53,17 +53,6 @@ enum Call {
             safe_cex_engine::model::OrderSide,
             safe_cex_engine::model::OrderType,
         ),
-        /// That stop's id and own trading-stop body: sent once if this write is refused.
-        restore: Option<(String, String)>,
-    },
-    /// Puts back the stop a refused replacement left the position without.
-    RestorePartialStop {
-        stop: (
-            String,
-            safe_cex_engine::model::OrderSide,
-            safe_cex_engine::model::OrderType,
-        ),
-        refusal: String,
     },
     Amend,
     /// Clears an attached TP/SL, a field of its parent, by amending the field to 0.
@@ -221,8 +210,6 @@ struct Step {
 #[derive(Default)]
 struct Job {
     steps: VecDeque<Step>,
-    /// Run every step even after a failure (independent orders of one batch).
-    continue_on_error: bool,
 }
 
 #[derive(Default)]
@@ -232,9 +219,6 @@ pub struct TradingState {
     /// Settles cancel-alls whose order read has landed.
     unlisted_timer: Option<safe_cex_engine::TimerId>,
     pub(crate) hyro: crate::hyro::State,
-    /// Partial stops whose cancel found them already gone (filled or triggered):
-    /// a refused replacement never puts these back.
-    gone_before_cancel: std::collections::HashSet<String>,
 }
 
 fn side_text(side: OrderSide) -> &'static str {
@@ -360,7 +344,6 @@ fn single(path: &'static str, body: String, call: Call) -> Job {
                 receipts: Vec::new(),
             }],
         }]),
-        ..Job::default()
     }
 }
 
@@ -505,10 +488,7 @@ impl BybitLinear {
                     return Some(Ok(self.plan_cancel(&orders)));
                 }
                 if self.variant.is_spot() {
-                    let mut job = Job {
-                        continue_on_error: true,
-                        ..Job::default()
-                    };
+                    let mut job = Job::default();
                     // Spot defaults to ordinary orders; every trigger family
                     // needs its own cancel, even when absent from our snapshot.
                     for filter in ["Order", "StopOrder", "tpslOrder"] {
@@ -576,7 +556,7 @@ impl BybitLinear {
                 let hedged = *hedged;
                 if self.category == Category::Inverse {
                     // Inverse modes switch per symbol or per base coin; a named symbol
-                    // switches alone. Every coin is tried: one refusal leaves the rest.
+                    // switches alone. A refusal leaves later coins unsent.
                     if let Some(symbol) = symbol {
                         let body = Body::new()
                             .str("category", self.paths.category)
@@ -593,10 +573,7 @@ impl BybitLinear {
                     for market in cx.store.markets() {
                         coins.insert(market.base.clone());
                     }
-                    let mut job = Job {
-                        continue_on_error: true,
-                        ..Job::default()
-                    };
+                    let mut job = Job::default();
                     for (index, coin) in coins.into_iter().enumerate() {
                         let body = Body::new()
                             .str("category", self.paths.category)
@@ -681,10 +658,7 @@ impl BybitLinear {
 
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
         self.check_ids(cx, orders)?;
-        let mut job = Job {
-            continue_on_error: true,
-            ..Job::default()
-        };
+        let mut job = Job::default();
         let mut lots = Vec::new();
         for opts in orders {
             let category = self.category_for(&opts.symbol);
@@ -1363,16 +1337,6 @@ impl BybitLinear {
                 .and_then(|()| guard.validate_original(cx.store, cx.now))
                 .and_then(|()| guard.validate(cx.store, cx.now))
                 .map_err(|error| error.message)?;
-            // The stop as it stands, to put back exactly if its replacement is refused.
-            let (restore, _) = self.trading_stop_body(
-                cx,
-                order,
-                order.kind,
-                order.price,
-                order.trigger_type,
-                order.amount,
-                limit,
-            );
             let mut job = self.plan_cancel(std::slice::from_ref(order));
             for planned in job.steps.iter_mut().flat_map(|step| &mut step.requests) {
                 planned.call = Call::CancelPartialStop {
@@ -1403,7 +1367,6 @@ impl BybitLinear {
                     body,
                     call: Call::PartialStop {
                         stop: (order.symbol.clone(), order.side, order.kind),
-                        restore: Some((order.id.clone(), restore)),
                     },
                 }],
             });

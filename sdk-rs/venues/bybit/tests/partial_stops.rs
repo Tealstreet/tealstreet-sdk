@@ -306,13 +306,13 @@ fn replacement(h: &mut Harness, profile: Profile) -> StopWrite {
 }
 
 #[test]
-fn partial_drag_cancels_before_replacing_and_projects_raw_price_without_changing_side() {
+fn partial_drag_cancels_before_replacing_and_preserves_valid_price_and_side() {
     for profile in PROFILES {
         for (side, kind, price, field, by) in [
-            ("Sell", "StopLoss", 100.049, "takeProfit", "tpTriggerBy"),
-            ("Sell", "TakeProfit", 99.95, "stopLoss", "slTriggerBy"),
-            ("Buy", "StopLoss", 99.95, "takeProfit", "tpTriggerBy"),
-            ("Buy", "TakeProfit", 100.049, "stopLoss", "slTriggerBy"),
+            ("Sell", "StopLoss", 100.1, "takeProfit", "tpTriggerBy"),
+            ("Sell", "TakeProfit", 99.9, "stopLoss", "slTriggerBy"),
+            ("Buy", "StopLoss", 99.9, "takeProfit", "tpTriggerBy"),
+            ("Buy", "TakeProfit", 100.1, "stopLoss", "slTriggerBy"),
         ] {
             let mut h = ready(profile);
             seed(&mut h, profile, side, kind, "IndexPrice", false, true);
@@ -373,13 +373,7 @@ fn a_refused_replacement_names_the_lost_stop() {
         200,
         r#"{"retCode":10001,"retMsg":"StopLoss would trigger immediately","result":{}}"#,
     );
-    // Putting the old stop back is refused too.
-    let restore = h.take("/v5/position/trading-stop");
-    h.reply(
-        restore.id,
-        200,
-        r#"{"retCode":10001,"retMsg":"StopLoss would trigger immediately","result":{}}"#,
-    );
+    assert_applied_partial_failure(&h);
     let error = h.result(91).unwrap().as_ref().unwrap_err();
     assert!(
         error.contains(profile.symbol()) && error.contains("long position has no stop"),
@@ -1211,7 +1205,7 @@ fn a_partial_drag_that_stands_as_neither_kind_is_refused_before_its_cancel() {
 }
 
 #[test]
-fn a_refused_partial_replacement_puts_the_exact_old_stop_back() {
+fn a_refused_partial_replacement_reports_cancel_applied_without_rollback() {
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -1235,15 +1229,7 @@ fn a_refused_partial_replacement_puts_the_exact_old_stop_back() {
         200,
         r#"{"retCode":10001,"retMsg":"StopLoss would trigger immediately","result":{}}"#,
     );
-    let restore = h.take("/v5/position/trading-stop");
-    assert_eq!(
-        body(&restore),
-        r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Partial","stopLoss":"90","slTriggerBy":"MarkPrice","slSize":"7"}"#
-    );
-    h.reply(restore.id, 200, OK);
-    let error = h.result(91).unwrap().as_ref().unwrap_err();
-    assert!(error.contains("put back"), "{error}");
-    assert!(!h.has_request("/v5/position/trading-stop"), "never loops");
+    assert_applied_partial_failure(&h);
 }
 
 /// codex-mxb4mq's P1: the cancel finds the old stop already gone (110001); the
@@ -1375,12 +1361,12 @@ fn review_3018_gone_cancel_does_not_replay_a_refused_replacement() {
     assert!(matches!(h.result(91), Some(Err(_))));
 }
 #[test]
-fn review_3018_exact_partial_restore_working_control() {
-    a_refused_partial_replacement_puts_the_exact_old_stop_back();
+fn review_3018_partial_refusal_without_rollback_control() {
+    a_refused_partial_replacement_reports_cancel_applied_without_rollback();
 }
 
 #[test]
-fn review_3018_limit_partial_restore_preserves_execution_type_and_price() {
+fn review_3018_limit_partial_refusal_does_not_restore() {
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -1402,18 +1388,12 @@ fn review_3018_limit_partial_restore_preserves_execution_type_and_price() {
         200,
         r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
     );
-    let restore = h.take("/v5/position/trading-stop");
-    assert!(
-        body(&restore).contains(r#""slOrderType":"Limit""#)
-            && body(&restore).contains(r#""slLimitPrice":"89""#),
-        "restoring a native Limit Partial stop must preserve its execution type and limit price, got {}",
-        body(&restore)
-    );
+    assert_applied_partial_failure(&h);
 }
 
-// codex-mxb4mq #3018 recheck: a put-back of unknown outcome claims no protection.
+// An unknown replacement outcome cannot claim proven protection.
 
-fn review_recheck_restore_failure(code: i64) -> safe_cex_engine::VenueError {
+fn review_recheck_replacement_failure(code: i64) -> safe_cex_engine::VenueError {
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -1428,37 +1408,28 @@ fn review_recheck_restore_failure(code: i64) -> safe_cex_engine::VenueError {
     amend(&mut h, Some(95.), None);
     accept_cancel(&mut h, profile);
     let replacement = h.take("/v5/position/trading-stop");
-    h.reply(
-        replacement.id,
-        200,
-        r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
-    );
-    let restore = h.take("/v5/position/trading-stop");
-    let payload = format!(r#"{{"retCode":{code},"retMsg":"put back failed","result":{{}}}}"#);
-    h.reply(restore.id, 200, &payload);
-    let errors = h
-        .notices
+    let payload = format!(r#"{{"retCode":{code},"retMsg":"replacement failed","result":{{}}}}"#);
+    h.reply(replacement.id, 200, &payload);
+    assert_applied_partial_failure(&h);
+    h.notices
         .iter()
-        .filter_map(|a| match a {
+        .find_map(|notice| match notice {
             safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error.clone()),
             _ => None,
         })
-        .collect::<Vec<_>>();
-    assert_eq!(errors.len(), 1, "{:?}", h.notices);
-    assert!(!h.has_request("/v5/position/trading-stop"), "no loops");
-    errors.into_iter().next().unwrap()
+        .expect("terminal replacement failure")
 }
 #[test]
-fn review_recheck_unknown_restore_does_not_claim_proven_unprotected() {
-    let error = review_recheck_restore_failure(10000);
+fn review_recheck_unknown_replacement_does_not_claim_proven_unprotected() {
+    let error = review_recheck_replacement_failure(10000);
     assert_eq!(
         error.protection, None,
-        "an uncertain restoration may be live; {error:?}"
+        "an uncertain replacement may be live; {error:?}"
     );
 }
 #[test]
-fn review_recheck_definitive_restore_refusal_is_unprotected_control() {
-    let error = review_recheck_restore_failure(10001);
+fn review_recheck_definitive_replacement_refusal_is_unprotected_control() {
+    let error = review_recheck_replacement_failure(10001);
     assert_eq!(
         error.protection,
         Some(safe_cex_engine::error::Protection::Unprotected),
@@ -1468,7 +1439,7 @@ fn review_recheck_definitive_restore_refusal_is_unprotected_control() {
 
 // DK2: a long's Partial LastPrice stop at 79124.9 exceeds last 79110.8, below mark.
 // Fresh unsafe or stale evidence now refuses before cancel.
-// A later move after valid cancellation still exercises exact old-stop restore.
+// A later move after valid cancellation still exercises replacement refusal.
 fn dk2_long_partial_last_stop() -> (Harness, Profile) {
     let profile = PROFILES[0];
     let mut h = ready(profile);
@@ -1499,7 +1470,7 @@ fn dk2_stop_above_a_fresh_last_is_refused_before_its_cancel() {
 }
 
 #[test]
-fn dk2_venue_refusal_after_the_cancel_puts_the_exact_old_stop_back() {
+fn dk2_venue_refusal_after_cancel_preserves_applied_outcome_without_rollback() {
     let (mut h, profile) = dk2_long_partial_last_stop();
     set_reference_prices(&mut h, 79130.0, 79130.0);
     amend(&mut h, Some(79124.9), None);
@@ -1516,15 +1487,7 @@ fn dk2_venue_refusal_after_the_cancel_puts_the_exact_old_stop_back() {
         200,
         r#"{"retCode":10001,"retMsg":"PartialStopLoss:791249000 set for Buy position should lower than base_price:791108000 LastPrice","result":{}}"#,
     );
-    let restore = h.take("/v5/position/trading-stop");
-    assert_eq!(
-        body(&restore),
-        r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Partial","stopLoss":"78900","slTriggerBy":"LastPrice","slSize":"7"}"#
-    );
-    h.reply(restore.id, 200, OK);
-    let error = h.result(91).unwrap().as_ref().unwrap_err();
-    assert!(error.contains("put back"), "{error}");
-    assert!(!h.has_request("/v5/position/trading-stop"), "never loops");
+    assert_applied_partial_failure(&h);
 }
 
 // codex-mxb4mq #3018 DK2 review probes.
@@ -1562,7 +1525,7 @@ fn review_dk2_concurrent_same_stop_amend_does_not_restore_over_the_newer_edit() 
 }
 
 #[test]
-fn review_dk2_duplicate_refusal_and_restore_ack_never_place_twice() {
+fn review_dk2_duplicate_refusal_never_places_or_rolls_back() {
     let (mut h, profile) = dk2_long_partial_last_stop();
     set_reference_prices(&mut h, 79130.0, 79130.0);
     amend(&mut h, Some(79124.9), None);
@@ -1570,15 +1533,8 @@ fn review_dk2_duplicate_refusal_and_restore_ack_never_place_twice() {
     let replacement = h.take("/v5/position/trading-stop");
     let refused = r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#;
     h.reply(replacement.id, 200, refused);
-    let restore = h.take("/v5/position/trading-stop");
     h.reply(replacement.id, 200, refused);
-    assert!(
-        !h.has_request("/v5/position/trading-stop"),
-        "duplicate replacement response must not issue a second restore"
-    );
-    h.reply(restore.id, 200, OK);
-    h.reply(restore.id, 200, OK);
-    assert!(!h.has_request("/v5/position/trading-stop"));
+    assert_applied_partial_failure(&h);
     assert_eq!(h.done.iter().filter(|(id, _)| *id == 91).count(), 1);
 }
 
@@ -1600,15 +1556,15 @@ fn review_dk2_fresh_last_boundary_and_stale_last_both_refuse_before_cancel() {
 }
 
 #[test]
-fn review_dk2_definitively_refused_restore_is_serialized_as_unprotected_and_does_not_loop() {
-    let error = review_recheck_restore_failure(10001);
+fn review_dk2_definitive_replacement_refusal_is_unprotected_and_does_not_loop() {
+    let error = review_recheck_replacement_failure(10001);
     assert_eq!(
         error.protection,
         Some(safe_cex_engine::error::Protection::Unprotected)
     );
     assert!(
         error.message.contains("long position has no stop")
-            && error.message.contains("putting it back failed too"),
+            && error.message.contains("re-place protection"),
         "{error:?}"
     );
     let wire = serde_json::to_string(&error).unwrap();
@@ -1617,7 +1573,7 @@ fn review_dk2_definitively_refused_restore_is_serialized_as_unprotected_and_does
 }
 
 /// While an edit of a Partial stop is in flight, a cancel of that stop (or of every
-/// order on its symbol) waits its turn as refused, so a later put-back cannot undo it.
+/// order on its symbol) is refused until the edit settles.
 #[test]
 fn a_cancel_of_a_stop_whose_edit_is_in_flight_is_refused_before_it_is_sent() {
     for cancel in [
@@ -2222,7 +2178,7 @@ fn partial_edits_refuse_filled_or_unprotected_orders_before_cancel() {
 }
 
 #[test]
-fn partial_restore_requires_positive_standalone_provenance() {
+fn partial_refusal_never_restores_even_with_standalone_provenance() {
     for shape in [
         "standalone",
         "attached",
@@ -2271,12 +2227,7 @@ fn partial_restore_requires_positive_standalone_provenance() {
             200,
             r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
         );
-        if shape == "standalone" {
-            assert!(h.has_request("/v5/position/trading-stop"));
-            h.respond("/v5/position/trading-stop", 200, OK);
-        } else {
-            assert!(!h.has_request("/v5/position/trading-stop"), "{shape}");
-        }
+        assert_applied_partial_failure(&h);
         let error = h
             .notices
             .iter()
@@ -2284,24 +2235,16 @@ fn partial_restore_requires_positive_standalone_provenance() {
                 safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
                 _ => None,
             })
-            .unwrap();
+            .expect("failure for every lineage shape");
         assert_eq!(
             error.protection,
-            Some(if shape == "standalone" {
-                safe_cex_engine::error::Protection::Restored
-            } else {
-                safe_cex_engine::error::Protection::Unprotected
-            }),
-            "{shape}: {error:?}"
+            Some(safe_cex_engine::error::Protection::Unprotected)
         );
-        if shape != "standalone" {
-            assert!(error.message.contains("re-place"), "{error:?}");
-        }
     }
 }
 
 #[test]
-fn partial_put_back_never_rounds_the_original_native_size_to_current_precision() {
+fn partial_refusal_never_restores_the_unrounded_original_native_size() {
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -2324,9 +2267,7 @@ fn partial_put_back_never_rounds_the_original_native_size_to_current_precision()
         200,
         r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
     );
-    let restore = h.take("/v5/position/trading-stop");
-    let payload: serde_json::Value = serde_json::from_str(body(&restore)).unwrap();
-    assert_eq!(payload["slSize"], "7.0004");
+    assert_applied_partial_failure(&h);
 }
 
 #[test]
@@ -2402,32 +2343,7 @@ fn partial_history_census_uses_proved_creation_time_and_keeps_incomplete_or_pair
                 200,
                 r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
             );
-            assert_eq!(
-                h.has_request("/v5/position/trading-stop"),
-                census == "complete",
-                "{profile:?}/{census}: only proved standalone lineage may put back"
-            );
-            if census == "complete" && h.has_request("/v5/position/trading-stop") {
-                h.respond("/v5/position/trading-stop", 200, OK);
-            }
-            let error = h
-                .notices
-                .iter()
-                .find_map(|notice| match notice {
-                    safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
-                    _ => None,
-                })
-                .unwrap();
-            let expected = if census == "complete" {
-                safe_cex_engine::error::Protection::Restored
-            } else {
-                safe_cex_engine::error::Protection::Unprotected
-            };
-            assert_eq!(
-                error.protection,
-                Some(expected),
-                "{profile:?}/{census}: {error:?}"
-            );
+            assert_applied_partial_failure(&h);
             assert!(
                 bounded,
                 "history must use native createdTime, not Store last_update: {}",
@@ -2673,8 +2589,8 @@ fn partial_unproved_creation_time_allows_replacement_without_history_or_put_back
 }
 
 #[test]
-fn partial_unknown_replacement_or_put_back_never_restores_or_resends() {
-    for leg in ["replacement", "put-back"] {
+fn partial_unknown_replacement_never_restores_or_resends() {
+    for leg in ["replacement"] {
         for (status, reply) in [
             (429, OK),
             (408, OK),
@@ -2709,13 +2625,6 @@ fn partial_unknown_replacement_or_put_back_never_restores_or_resends() {
             );
             amend(&mut h, Some(95.0), None);
             accept_cancel(&mut h, profile);
-            if leg == "put-back" {
-                h.respond(
-                    "/v5/position/trading-stop",
-                    200,
-                    r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
-                );
-            }
             h.respond("/v5/position/trading-stop", status, reply);
             assert!(
                 !h.has_request("/v5/position/trading-stop"),
@@ -2796,9 +2705,9 @@ fn partial_final_cancel_veto_rechecks_fill_identity_and_protected_position() {
 }
 
 #[test]
-fn partial_final_veto_covers_a_resigned_cancel_replacement_and_put_back() {
+fn partial_final_veto_covers_a_resigned_cancel_and_replacement() {
     use safe_cex_engine::{Response, request_context::Prepared};
-    for leg in ["resigned-cancel", "replacement", "put-back"] {
+    for leg in ["resigned-cancel", "replacement"] {
         let profile = PROFILES[0];
         let mut h = ready(profile);
         seed(
@@ -2817,13 +2726,6 @@ fn partial_final_veto_covers_a_resigned_cancel_replacement_and_put_back() {
                 h.take(profile.cancel_path()),
                 r#"{"retCode":10002,"retMsg":"recv window refusal","result":{}}"#.to_owned(),
                 "/v5/order/cancel",
-            )
-        } else if leg == "put-back" {
-            accept_cancel(&mut h, profile);
-            (
-                h.take("/v5/position/trading-stop"),
-                r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#.to_owned(),
-                "/v5/position/trading-stop",
             )
         } else {
             h.respond(profile.cancel_path(), 200, r#"{"retCode":0,"result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
@@ -3055,7 +2957,7 @@ fn partial_stop_stale_mark_is_not_renewed_by_its_fresh_last_source() {
 }
 
 #[test]
-fn partial_replacement_and_put_back_preserve_each_native_trigger_source() {
+fn partial_replacement_preserves_each_native_trigger_source_and_never_rolls_back() {
     for profile in PROFILES {
         for kind in ["StopLoss", "TakeProfit"] {
             for source in ["LastPrice", "MarkPrice", "IndexPrice"] {
@@ -3092,10 +2994,65 @@ fn partial_replacement_and_put_back_preserve_each_native_trigger_source() {
                     200,
                     r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
                 );
-                let restore = h.take("/v5/position/trading-stop");
-                let payload: serde_json::Value = serde_json::from_str(body(&restore)).unwrap();
-                assert_eq!(payload[field], source, "put-back {profile:?}/{kind}");
+                assert_applied_partial_failure(&h);
             }
         }
     }
+}
+
+fn assert_applied_partial_failure(h: &Harness) {
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+            _ => None,
+        })
+        .expect("partial edit failure");
+    let elements = error
+        .elements
+        .as_ref()
+        .expect("partial edit indexed outcomes");
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    assert_eq!(elements.len(), 2);
+    assert!(
+        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == "partial")
+    );
+    assert!(matches!(
+        &elements[1].result,
+        ElementResult::NotSent { error: Some(_) } | ElementResult::Unknown { .. }
+    ));
+    assert!(
+        !elements
+            .iter()
+            .any(|row| matches!(row.result, ElementResult::Placed { .. }))
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post),
+        "no suffix, resend or rollback write"
+    );
+}
+
+#[test]
+fn partial_off_tick_replacement_refuses_the_entire_plan_before_cancel() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    amend(&mut h, Some(95.049), None);
+    assert!(h.requests.is_empty());
+    assert!(matches!(h.result(91), Some(Err(_))));
+    assert!(
+        h.outcomes
+            .contains(&(91, Some(safe_cex_engine::Outcome::NotSent)))
+    );
 }
