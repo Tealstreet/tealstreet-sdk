@@ -2871,3 +2871,100 @@ fn foreign_cancel_row_echoes_are_unknown_for_every_code() {
         }
     }
 }
+
+fn cancel_batch_unknown_row_has_no_created_target_ids(algo: bool) {
+    use safe_cex_engine::model::{OrderStatus, OrderType};
+    use safe_cex_engine::{Method, Outcome};
+    let mut e = trading_engine();
+    let (kind, ids, field, native_ids, endpoint) = if algo {
+        (
+            OrderType::StopLoss,
+            ["91_sl", "92_sl"],
+            "algoId",
+            ["91", "92"],
+            "/cancel-algos",
+        )
+    } else {
+        (
+            OrderType::Limit,
+            ["1", "2"],
+            "ordId",
+            ["1", "2"],
+            "/cancel-batch-orders",
+        )
+    };
+    for id in ids {
+        e.store_mut().upsert_order(stored(id, kind));
+    }
+    e.handle(
+        5.0,
+        Event::Command(Command::CancelOrders {
+            command: 401,
+            ids: ids.iter().map(|id| (*id).into()).collect(),
+        }),
+    );
+    let released = prepared(&mut e, 5.0);
+    let writes: Vec<_> = released
+        .iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        .collect();
+    assert_eq!(writes.len(), 1);
+    assert!(matches!(writes[0], Action::Http(r) if r.url.ends_with(endpoint)));
+    let rows: Vec<serde_json::Value> = serde_json::from_str(body(writes[0])).unwrap();
+    assert_eq!(rows.len(), 2);
+    for (row, native_id) in rows.iter().zip(native_ids) {
+        assert_eq!(row[field], native_id);
+    }
+    reply(
+        &mut e,
+        writes[0],
+        &format!(
+            r#"{{"code":"2","data":[{{"{field}":"{}","sCode":"0"}},{{"{field}":"{}","sCode":"51412","sMsg":"Cancellation timed out"}}]}}"#,
+            native_ids[0], native_ids[1]
+        ),
+        6.0,
+    );
+    let mut after = prepared(&mut e, 6.0);
+    let terminal = terminals(&after, 401);
+    assert_eq!(
+        terminal.len(),
+        1,
+        "one journal-projected cancellation terminal"
+    );
+    let error = terminal[0]
+        .as_ref()
+        .expect_err("an unconfirmed cancellation stays Unknown");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty()),
+        "existing cancellation targets are never created-order evidence: {error:?}"
+    );
+    for id in ids {
+        assert_eq!(
+            e.store().order(id).unwrap().status,
+            OrderStatus::Canceling,
+            "only reconciliation can establish the target's terminal state"
+        );
+    }
+    after.extend(fire_armed(&mut e, &after.clone(), 30_000.0));
+    assert!(
+        !after
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+        "an Unknown cancellation must not retry or release another write"
+    );
+    assert_eq!(terminals(&after, 401).len(), 1);
+}
+
+#[test]
+fn regular_cancel_batch_with_unknown_row_journals_no_created_target_ids() {
+    cancel_batch_unknown_row_has_no_created_target_ids(false);
+}
+
+#[test]
+fn algo_cancel_batch_with_unknown_row_journals_no_created_target_ids() {
+    cancel_batch_unknown_row_has_no_created_target_ids(true);
+}

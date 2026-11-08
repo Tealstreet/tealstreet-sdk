@@ -1786,14 +1786,28 @@ impl Okx {
                     }
                 })
                 .collect();
-            cx.http_write_batch(
-                &request.context,
-                &CODES,
-                expected,
-                &items,
-                errors.join_with("; "),
-                None,
-            )
+            if matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            ) {
+                cx.http_write_applied_batch(
+                    &request.context,
+                    &CODES,
+                    expected,
+                    &items,
+                    errors.join_with("; "),
+                    None,
+                )
+            } else {
+                cx.http_write_batch(
+                    &request.context,
+                    &CODES,
+                    expected,
+                    &items,
+                    errors.join_with("; "),
+                    None,
+                )
+            }
         } else {
             let accepted = WriteFact::Accepted { order_ids: vec![] };
             cx.http_write_fact(&request.context, accepted, None)
