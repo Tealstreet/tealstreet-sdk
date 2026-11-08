@@ -132,7 +132,7 @@ impl SignStep for Envelope {
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
         self.transport(outbound)?;
         let work = self.prepared.as_ref().ok_or(SignError::InvalidResult)?;
-        work.validate_result(result)?;
+        work.validate_result_with_policy(result, self.result_header_policy())?;
         if self.unsigned.as_ref() != Some(outbound) {
             return Err(SignError::InvalidRequest);
         }
@@ -167,5 +167,12 @@ impl SignStep for Envelope {
     }
     fn freshness_ms(&self) -> f64 {
         5000.
+    }
+    fn result_header_policy(&self) -> safe_cex_engine::signing_headers::ResultHeaderPolicy {
+        if self.params.is_some() {
+            safe_cex_engine::signing_headers::ResultHeaderPolicy::Http { protected: &[] }
+        } else {
+            safe_cex_engine::signing_headers::ResultHeaderPolicy::Deny
+        }
     }
 }
