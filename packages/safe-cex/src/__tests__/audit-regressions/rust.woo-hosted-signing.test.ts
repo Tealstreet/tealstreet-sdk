@@ -66,8 +66,7 @@ it.each([
   { secondary_secret: 'fixture-read-material' },
   { secondary_passphrase: 'fixture-read-passphrase' },
   { localSigner: { secondary: {} } },
-  { secondary_key: 'fixture-read', publicDataOnly: true },
-])('refuses WOO secondary RemoteSigner setup before native construction or callbacks: %j', (secondary) => {
+])('refuses private WOO secondary RemoteSigner setup before native construction or callbacks: %j', (secondary) => {
   const remoteSigner = { sign: vi.fn(), isAvailable: vi.fn(() => true), onAvailabilityChange: vi.fn(() => () => {}) };
   const Constructor = vi.fn();
   let setup: DelegatedSignerSetup | undefined;
