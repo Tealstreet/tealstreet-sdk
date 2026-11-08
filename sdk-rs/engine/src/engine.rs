@@ -4078,7 +4078,21 @@ impl PublicFeedWatch {
     }
 }
 
+#[path = "unknown_outcome.rs"]
+mod unknown_outcome;
+pub use unknown_outcome::{
+    EngineUnknownOutcome, UNKNOWN_HTTP_OUTCOME_TEXT, UNKNOWN_OUTCOME_TEXT, UnknownOutcomeTelemetry,
+};
+
 pub trait Venue {
+    /// Optional static telemetry for an engine-sealed Unknown. Receives no venue,
+    /// Cx, Store, Context or journal authority; returns only a bounded log event.
+    fn unknown_outcome_telemetry() -> Option<UnknownOutcomeTelemetry>
+    where
+        Self: Sized,
+    {
+        None
+    }
     fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
         None
     }
@@ -5914,6 +5928,21 @@ impl<V: Venue> Engine<V> {
         let delivery = request
             .and_then(|request| self.io.core.managed_http.get(&request))
             .map(|managed| managed.delivery());
+        let unknown_start = (V::unknown_outcome_telemetry().is_some()
+            && matches!(event, Event::HttpFailed { .. }))
+        .then_some(delivery.as_ref())
+        .flatten()
+        .filter(|delivery| {
+            delivery.context.operation() == crate::request_context::Operation::Mutation
+                && request.is_some_and(|request| {
+                    self.io
+                        .core
+                        .managed_http
+                        .get(&request)
+                        .is_some_and(|managed| managed.released_delivery(delivery))
+                })
+        })
+        .map(|_| self.io.core.actions.len());
         if let Event::HttpFailed { error, .. } = &event
             && let Some(delivery) = delivery.as_ref()
             && delivery.context.operation() == crate::request_context::Operation::Mutation
@@ -5953,6 +5982,16 @@ impl<V: Venue> Engine<V> {
             _ => None,
         });
         self.handle_event_scoped(now, event, physical_timeout);
+        if let Some(first_action) = unknown_start {
+            let delivery = delivery.as_ref().expect("released mutation delivery");
+            self.emit_engine_unknown(
+                now,
+                delivery.attempt.request,
+                delivery.context.owner(),
+                None,
+                first_action,
+            );
+        }
         self.io.core.startup_delivery = previous_startup;
         #[cfg(feature = "repair-mutations")]
         self.end_repair_data(previous_data);

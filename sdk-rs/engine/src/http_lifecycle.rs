@@ -369,7 +369,6 @@ impl Managed {
         }
     }
 
-    #[cfg(feature = "http-plans")]
     pub(super) fn released_delivery(&self, delivery: &request_context_registry::Delivery) -> bool {
         self.delivery() == *delivery
             && self.lifecycle.release().is_some()
@@ -2765,6 +2764,7 @@ impl<V: Venue> Engine<V> {
                     },
                 );
                 if recorded.is_ok() {
+                    let unknown_start = self.io.core.actions.len();
                     self.venue
                         .observe_unproven_http_response(now, &pending.value, response);
                     #[cfg(feature = "http-plans")]
@@ -2804,6 +2804,13 @@ impl<V: Venue> Engine<V> {
                         self.venue
                             .discard_unproven_http_command(delivery.context.owner());
                     }
+                    self.emit_engine_unknown(
+                        now,
+                        request,
+                        delivery.context.owner(),
+                        Some(response.status),
+                        unknown_start,
+                    );
                 }
             } else {
                 observe_account_auth(

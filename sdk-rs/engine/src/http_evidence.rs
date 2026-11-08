@@ -35,7 +35,7 @@ impl ResponseProof {
         match self {
             Self::NativeCodec => None,
             Self::Unproven(kind) => Some(
-                VenueError::new("HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders")
+                VenueError::new(crate::UNKNOWN_HTTP_OUTCOME_TEXT)
                     .kind(kind)
                     .outcome(Outcome::Unknown),
             ),
