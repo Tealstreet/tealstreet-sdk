@@ -55,8 +55,8 @@ it('admits Woo RemoteSigner through its declaration, while an undeclared venue s
   expect(deriveRemoteSigningPolicy('woo')?.enabled).toBe(true);
   expect(deriveBridgeConstruction('woo', {} as ExchangeOptions).dispatchSigning).toBe(true);
   expect(() => assertBetaAccount('woo', { key: 'fixture-public', secret: '', remoteSigner })).not.toThrow();
-  expect(deriveRemoteSigningPolicy('kraken')?.enabled).not.toBe(true);
-  expect(() => assertBetaAccount('kraken', { key: 'fixture-public', secret: '', remoteSigner })).toThrow();
+  expect(deriveRemoteSigningPolicy('weex')?.enabled).not.toBe(true);
+  expect(() => assertBetaAccount('weex', { key: 'fixture-public', secret: '', remoteSigner })).toThrow();
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 
