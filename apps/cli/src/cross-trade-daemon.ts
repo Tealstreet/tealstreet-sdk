@@ -3,6 +3,7 @@ import {
   getStorageEpoch,
   isStorageSessionCurrent,
   assertStorageSession,
+  captureStorageSession,
 } from './storage-context';
 // Headless cross-trade engine driver for the CLI.
 //
@@ -167,6 +168,7 @@ export interface RunCrossTradeDaemonOpts {
  * has finished its current loop iteration.
  */
 export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): Promise<void> {
+  const ownerSession = captureStorageSession();
   const ownerEpoch = getStorageEpoch();
   if (currentContext) {
     throw new Error('cross-trade daemon already running in this process');
@@ -227,9 +229,11 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
     }
   }
 
-  const placeOrder = crossTradeCliPlaceOrder((account) => exchangeManager.getExchange(account));
+  const getExchange = (account: string) =>
+    ownerSession.isCurrent() ? exchangeManager.getExchange(account) : undefined;
+  const placeOrder = crossTradeCliPlaceOrder(getExchange);
   const manager = new CrossTradeManager({
-    getExchange: (account) => exchangeManager.getExchange(account) as Exchange | undefined,
+    getExchange: (account) => getExchange(account) as Exchange | undefined,
     placeOrder,
   });
 
@@ -253,7 +257,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
   // sees the running state before the daemon yields back to the loop.
   writeHeartbeat({ startedAt, configCount: configs.length });
   ctx.heartbeatTimer = setInterval(() => {
-    if (ctx.stopped) return;
+    if (ctx.stopped || !ownerSession.isCurrent()) return;
     try {
       writeHeartbeat({ startedAt, configCount: configs.length });
     } catch (err) {
@@ -264,7 +268,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
   console.log(chalk.green(`\n${G.ok} Cross-trade engine running. Press Ctrl+C to stop.\n`));
 
   ctx.statusTimer = setInterval(() => {
-    if (ctx.stopped) return;
+    if (ctx.stopped || !ownerSession.isCurrent()) return;
     console.log(
       chalk.gray(
         `[cross-trade] ${configs.length} active config(s), ` +
@@ -278,7 +282,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
       if (ctx.stopped) return;
       ctx.stopped = true;
       console.log(chalk.yellow(`\n${signal} received — stopping cross-trade engine…`));
-      recordCrossTradeEvent('stop', { ok: true });
+      if (ownerSession.isCurrent()) recordCrossTradeEvent('stop', { ok: true });
       try {
         manager.stop();
         if (ctx.statusTimer) {
@@ -294,7 +298,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
       } catch (err) {
         logger.warn(`cross-trade daemon shutdown error: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
-        currentContext = null;
+        if (currentContext === ctx) currentContext = null;
         console.log(chalk.green(`${G.ok} Cross-trade engine stopped.\n`));
         resolve();
       }
