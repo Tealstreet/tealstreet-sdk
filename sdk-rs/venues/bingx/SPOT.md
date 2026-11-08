@@ -98,9 +98,16 @@ any write. Caller IDs are preserved verbatim and must match `[A-Za-z0-9_]{1,40}`
 placement uses `newClientOrderId`, lookup uses `clientOrderID`. Native order and
 trade IDs never pass through floating point.
 
-Batches are completely preflighted before serial dispatch. Released HTTP
-408/429/5xx, transport failures, malformed or contradictory acknowledgements and
-unlisted errors remain **Unknown**. There is no write resend or fallback-domain
+Batches are completely preflighted before serial dispatch. Every row must satisfy
+native quantity bounds, quantity steps, notional bounds and, for LIMIT orders,
+price ticks. Invalid rows refuse the entire batch as InvalidInput/NotSent before
+any request. Quantities and limit prices are never resized or split to make an
+invalid intent fit; only floating-point noise is normalized. Market SELL needs
+a caller price or a positive bid to validate notional; market BUY retains its
+caller conversion reference without applying a limit-price tick.
+
+Released HTTP 408/429/5xx, transport failures, malformed or contradictory
+acknowledgements and unlisted errors remain **Unknown**. There is no write resend or fallback-domain
 retry. Fresh primary-key open-order reads reconcile uncertain outcomes through
 engine read covers. Symbol cancellation uses the native endpoint, including
 orders not yet present in the store; the symbol is always explicit. Unsupported amendments and derivative settings fail locally.

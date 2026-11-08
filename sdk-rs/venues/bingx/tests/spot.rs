@@ -58,11 +58,18 @@ fn request(actions: &[Action], suffix: &str) -> HttpRequest {
         .unwrap_or_else(|| panic!("missing request {suffix}"))
 }
 fn seed(private: bool) -> (Engine<BingxSpot>, Vec<(SocketId, String)>) {
+    seed_with_fixtures(private, MARKETS, TICKERS)
+}
+fn seed_with_fixtures(
+    private: bool,
+    markets: &str,
+    tickers: &str,
+) -> (Engine<BingxSpot>, Vec<(SocketId, String)>) {
     let mut e = engine(private);
     e.start(NOW);
     let first = collect(&mut e);
     let r = request(&first, "/common/symbols");
-    reply(&mut e, &r, 200, MARKETS);
+    reply(&mut e, &r, 200, markets);
     let mut sockets = vec![];
     for _ in 0..8 {
         let actions = collect(&mut e);
@@ -74,7 +81,7 @@ fn seed(private: bool) -> (Engine<BingxSpot>, Vec<(SocketId, String)>) {
                     count += 1;
                     let p = r.url.split('?').next().unwrap();
                     let body = if p.ends_with("/quote/ticker") {
-                        TICKERS
+                        tickers
                     } else if p.ends_with("/account/balance") {
                         BALANCES
                     } else if p.ends_with("/trade/openOrders") {
@@ -626,6 +633,210 @@ fn complete_batch_validation_prevents_partial_dispatch() {
             .any(|a| matches!(a,Action::Http(r)if r.method==Method::Post))
     );
     assert!(a.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:60,error})if error.outcome==Some(Outcome::NotSent))));
+}
+
+fn batch_order(amount: f64, price: f64, client: &str) -> Value {
+    json!({"symbol":"BTCUSDT","type":"limit","side":"buy",
+        "amount":amount,"price":price,"clientOrderId":client})
+}
+
+fn submit_batch(e: &mut Engine<BingxSpot>, orders: Vec<Value>) -> Vec<Action> {
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 70,
+            orders: serde_json::from_value(json!(orders)).expect("batch fixture"),
+        }),
+    );
+    collect(e)
+}
+
+fn assert_batch_not_sent(e: &mut Engine<BingxSpot>, orders: Vec<Value>) {
+    let mut actions = submit_batch(e, orders);
+    for _ in 0..3 {
+        actions.extend(collect(e));
+    }
+    assert!(
+        actions.iter().all(|a| !matches!(a, Action::Http(_))),
+        "invalid batch reached the transport"
+    );
+    assert!(
+        actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed {command:70,error})
+                if error.kind == Some(safe_cex_engine::ErrorKind::InvalidInput)
+                    && error.outcome == Some(Outcome::NotSent)
+        )),
+        "invalid batch must fail InvalidInput/NotSent"
+    );
+}
+
+#[test]
+fn spot_batch_later_quantity_below_native_minimum_prevents_every_write() {
+    let (mut e, _) = seed(true);
+    assert_batch_not_sent(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "valid_first"),
+            batch_order(0.00013, 41000., "invalid_second"),
+        ],
+    );
+}
+
+#[test]
+fn spot_batch_later_quantity_above_native_maximum_prevents_every_write() {
+    let (mut e, _) = seed(true);
+    assert_batch_not_sent(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "valid_first"),
+            batch_order(20., 1., "invalid_second"),
+        ],
+    );
+}
+
+#[test]
+fn spot_batch_invalid_first_quantity_prevents_every_write() {
+    let (mut e, _) = seed(true);
+    assert_batch_not_sent(
+        &mut e,
+        vec![
+            batch_order(0.00013, 41000., "invalid_first"),
+            batch_order(0.002, 41000., "valid_second"),
+        ],
+    );
+}
+
+#[test]
+fn spot_batch_invalid_last_of_many_prevents_every_write() {
+    let (mut e, _) = seed(true);
+    let mut orders: Vec<_> = (0..5)
+        .map(|i| batch_order(0.002, 41000., &format!("valid_{i}")))
+        .collect();
+    orders.push(batch_order(20., 1., "invalid_last"));
+    assert_batch_not_sent(&mut e, orders);
+}
+
+#[test]
+fn spot_batch_below_step_quantity_is_not_rounded_up() {
+    let markets = MARKETS.replace("0.0001826", "0");
+    let (mut e, _) = seed_with_fixtures(true, &markets, TICKERS);
+    assert_batch_not_sent(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "valid_first"),
+            batch_order(0.000006, 1_000_000., "below_step"),
+        ],
+    );
+}
+
+#[test]
+fn spot_batch_misaligned_quantity_is_not_rebalanced() {
+    let (mut e, _) = seed(true);
+    assert_batch_not_sent(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "valid_first"),
+            batch_order(0.002004, 41000., "off_step"),
+        ],
+    );
+}
+
+#[test]
+fn spot_batch_below_notional_intent_is_not_rounded_up_to_the_minimum() {
+    let (mut e, _) = seed(true);
+    assert_batch_not_sent(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "valid_first"),
+            batch_order(0.002, 2499.999, "below_notional"),
+        ],
+    );
+}
+
+#[test]
+fn spot_batch_aligned_below_notional_prevents_every_write() {
+    let (mut e, _) = seed(true);
+    assert_batch_not_sent(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "valid_first"),
+            batch_order(0.002, 2000., "below_notional"),
+        ],
+    );
+}
+
+#[test]
+fn spot_batch_off_tick_limit_price_is_not_changed() {
+    let (mut e, _) = seed(true);
+    assert_batch_not_sent(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "valid_first"),
+            batch_order(0.002, 41000.005, "off_tick"),
+        ],
+    );
+}
+
+#[test]
+fn spot_batch_market_sell_without_notional_reference_prevents_every_write() {
+    let (mut e, _) = seed_with_fixtures(true, MARKETS, r#"{"code":0,"data":[]}"#);
+    assert_batch_not_sent(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "valid_first"),
+            json!({"symbol":"BTCUSDT","type":"market","side":"sell",
+            "amount":0.002,"clientOrderId":"unpriced_sell"}),
+        ],
+    );
+}
+
+#[test]
+fn spot_batch_valid_native_boundaries_place_every_row_exactly_once() {
+    let (mut e, _) = seed(true);
+    let expected = [(0.00019, 41000.), (18.26637, 1.), (0.002, 2500.)];
+    let orders = expected
+        .iter()
+        .enumerate()
+        .map(|(i, (amount, price))| batch_order(*amount, *price, &format!("valid_{i}")))
+        .collect();
+    let mut actions = submit_batch(&mut e, orders);
+    for (i, (amount, price)) in expected.iter().enumerate() {
+        let requests: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) if r.method == Method::Post => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            requests.len(),
+            1,
+            "exactly one row may be dispatched at a time"
+        );
+        let r = requests[0];
+        assert_eq!(r.method, Method::Post);
+        assert!(r.url.ends_with("/spot/v1/trade/order"));
+        let body: Value =
+            serde_json::from_str(r.body.as_deref().expect("order body")).expect("order JSON");
+        assert_eq!(body["quantity"], *amount);
+        assert_eq!(body["price"], *price);
+        assert_eq!(body["newClientOrderId"], format!("valid_{i}"));
+        let ack = json!({"code":0,"data":{"orderId":format!("900{i}"),
+            "symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"NEW"}});
+        reply(&mut e, r, 200, &ack.to_string());
+        actions = collect(&mut e);
+    }
+    assert_eq!(done(&actions, 70), json!(["9000", "9001", "9002"]));
+    assert!(
+        actions
+            .iter()
+            .all(|a| !matches!(a, Action::Http(r) if r.method == Method::Post))
+    );
+    assert!(
+        collect(&mut e)
+            .iter()
+            .all(|a| !matches!(a, Action::Http(r) if r.method == Method::Post))
+    );
 }
 
 #[test]

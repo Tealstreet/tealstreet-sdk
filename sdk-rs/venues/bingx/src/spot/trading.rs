@@ -175,11 +175,14 @@ impl BingxSpot {
             .market(&o.symbol)
             .filter(|m| m.active && m.is_spot == Some(true) && m.is_read_only != Some(true))
             .ok_or_else(|| not_sent("Active BingX Spot market required"))?;
-        let rules = self.rules.get(&o.symbol);
-        if rules.is_some_and(|r| match o.side {
-            OrderSide::Buy => r.api_state_buy == Some(false),
-            OrderSide::Sell => r.api_state_sell == Some(false),
-        }) {
+        let rules = self
+            .rules
+            .get(&o.symbol)
+            .ok_or_else(|| not_sent("Native BingX Spot trading rules required"))?;
+        if match o.side {
+            OrderSide::Buy => rules.api_state_buy == Some(false),
+            OrderSide::Sell => rules.api_state_sell == Some(false),
+        } {
             return Err(not_sent("BingX Spot market disables this side"));
         }
         if !o.amount.is_finite()
@@ -189,8 +192,19 @@ impl BingxSpot {
             return Err(not_sent("Invalid Spot amount or price"));
         }
         let amount = safe_cex_engine::num::adjust(o.amount, m.precision.amount);
-        if !amount.is_finite() || amount <= 0. {
-            return Err(not_sent("Spot amount rounds to zero"));
+        // Only floating-point noise may be normalized; caller intent cannot be resized.
+        if !m.precision.amount.is_finite()
+            || m.precision.amount <= 0.
+            || !amount.is_finite()
+            || amount <= 0.
+            || (amount - o.amount).abs() > m.precision.amount * 1e-8
+        {
+            return Err(not_sent(
+                "Spot amount must be a positive native step multiple",
+            ));
+        }
+        if amount < m.limits.amount.min || amount > m.limits.amount.max {
+            return Err(not_sent("Spot amount exceeds native quantity limits"));
         }
         let needs_price =
             o.kind == OrderType::Limit || (o.kind == OrderType::Market && o.side == OrderSide::Buy);
@@ -201,23 +215,34 @@ impl BingxSpot {
                 .or_else(|| cx.store.ticker(&o.symbol).map(|t| t.bid))
                 .unwrap_or(0.)
         };
-        let price = safe_cex_engine::num::adjust(reference, m.precision.price);
-        if needs_price && price <= 0. {
-            return Err(not_sent("Spot price rounds to zero"));
+        let price = if o.kind == OrderType::Limit {
+            safe_cex_engine::num::adjust(reference, m.precision.price)
+        } else {
+            reference
+        };
+        if !price.is_finite() || price <= 0. {
+            return Err(not_sent(
+                "Positive Spot price reference required for notional limits",
+            ));
+        }
+        if o.kind == OrderType::Limit
+            && (!m.precision.price.is_finite()
+                || m.precision.price <= 0.
+                || (price - reference).abs() > m.precision.price * 1e-8)
+        {
+            return Err(not_sent("Spot limit price must be a native tick multiple"));
         }
         let cost = amount * price;
         if !cost.is_finite() {
             return Err(not_sent("Spot order notional overflow"));
         }
-        if let Some(r) = rules {
-            let max = if o.kind == OrderType::Market && r.max_market_notional > 0. {
-                r.max_market_notional
-            } else {
-                r.max_notional
-            };
-            if price > 0. && (cost < r.min_notional || cost > max) {
-                return Err(not_sent("Spot order exceeds native notional limits"));
-            }
+        let max = if o.kind == OrderType::Market && rules.max_market_notional > 0. {
+            rules.max_market_notional
+        } else {
+            rules.max_notional
+        };
+        if cost < rules.min_notional || cost > max {
+            return Err(not_sent("Spot order exceeds native notional limits"));
         }
         let client = if let Some(id) = &o.client_order_id {
             if !(1..=40).contains(&id.len())
