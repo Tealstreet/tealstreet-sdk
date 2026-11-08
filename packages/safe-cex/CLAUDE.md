@@ -602,6 +602,9 @@ bridge-fixes plan; caller IDs alone do not establish complete attribution.
 Native rejections retain known partial-order results. SDK worker and outer CLI
 executor error boundaries copy an explicit allowlist of command fields, including IDs and
 partial counts, instead of flattening them or copying arbitrary error objects.
+Validated `elements` retain each write-plan row's index, optional client order ID,
+placed IDs, refusal or unknown detail through host errors and worker/CLI clones.
+Malformed arrays are discarded whole; nested errors copy only declared venue fields.
 Cancellation commands retain the caller's id, symbol and type alongside legacy
 ID dispatch; venue unknown-ID behavior is a separate native contract.
 

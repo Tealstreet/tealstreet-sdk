@@ -167,6 +167,9 @@ pub struct VenueError {
     pub retry_after_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial: Option<Box<Partial>>,
+    /// Complete indexed outcomes supplied by a validated multi-write plan.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elements: Option<Box<crate::write_plan::ElementOutcomes>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub builder_authorization: Option<Box<BuilderAuthorization>>,
     /// A stop or take-profit edit whose replacement was refused after its cancel landed.
