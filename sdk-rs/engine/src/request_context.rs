@@ -1404,10 +1404,18 @@ impl std::fmt::Debug for RejectionReports {
     }
 }
 
+/// One live, executed placement awaiting native IDs from an authoritative read/stream.
+/// The receipt is engine-bound and cannot be constructed by a host.
+pub struct PendingPlacement {
+    pub(super) context: Context,
+    pub(super) attempt: RequestId,
+}
+
 struct WriteAttempt {
     id: RequestId,
     // A classified RefusedResend verdict: the only evidence one resend may use.
     resend_granted: bool,
+    pending_identity: bool,
     leg: u64,
     released: bool,
     result: Option<WriteResult>,
@@ -1549,6 +1557,7 @@ impl CommandWrites {
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
+            pending_identity: false,
         });
         Ok(())
     }
@@ -1572,6 +1581,7 @@ impl CommandWrites {
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
+            pending_identity: false,
         });
         Ok(())
     }
@@ -1813,6 +1823,50 @@ impl CommandWrites {
         Ok(&mut attempt.released)
     }
 
+    pub(super) fn pending_placement(&mut self, id: RequestId) -> Result<(), Error> {
+        self.result(id, WriteResult::Accepted { order_ids: vec![] })?;
+        self.attempts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or(Error::State)?
+            .pending_identity = true;
+        Ok(())
+    }
+    pub(super) fn resolve_placement(
+        &mut self,
+        id: RequestId,
+        ids: Vec<String>,
+    ) -> Result<(), Error> {
+        if ids.len() > evidence::ID_COUNT {
+            return Err(Error::Capacity);
+        }
+        if self.sealed
+            || ids.is_empty()
+            || ids.iter().any(String::is_empty)
+            || ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len()
+        {
+            return Err(Error::Invalid);
+        }
+        let index = self
+            .attempts
+            .iter()
+            .position(|a| a.id == id && a.pending_identity)
+            .ok_or(Error::Revoked)?;
+        if self.latest(self.attempts[index].leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        let (budget, result, overflow) = self
+            .evidence
+            .result(WriteResult::Accepted { order_ids: ids });
+        if overflow {
+            return Err(Error::Capacity);
+        }
+        self.evidence = budget;
+        self.attempts[index].result = Some(result);
+        self.attempts[index].pending_identity = false;
+        Ok(())
+    }
+
     /// Mark a recorded effects-free refusal as resendable once. Only the
     /// engine classifier calls this, for a `RefusedResend` verdict.
     pub(crate) fn grant_resend(&mut self, id: RequestId) -> Result<(), Error> {
@@ -2037,6 +2091,9 @@ impl CommandWrites {
     }
 
     fn validate_success(&self) -> Result<(), Error> {
+        if self.attempts.iter().any(|a| a.pending_identity) {
+            return Err(Error::State);
+        }
         #[cfg(feature = "serial-plans")]
         if let Some(stream) = &self.stream {
             return self.validate_streamed_success(stream);
@@ -2118,15 +2175,19 @@ impl CommandWrites {
         let any_released = self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
-                && (match &a.result {
-                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_)) => true,
-                    Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
-                        error.outcome == Some(Outcome::Unknown)
+                && (a.pending_identity
+                    || match &a.result {
+                        None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_)) => {
+                            true
+                        }
+                        Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
+                            error.outcome == Some(Outcome::Unknown)
+                        }
+                        Some(WriteResult::Accepted { .. }) => false,
                     }
-                    Some(WriteResult::Accepted { .. }) => false,
-                } || self.attempts[index + 1..]
-                    .iter()
-                    .any(|later| later.leg == a.leg && !later.released))
+                    || self.attempts[index + 1..]
+                        .iter()
+                        .any(|later| later.leg == a.leg && !later.released))
         }) || self.legs.iter().any(|leg| {
             !leg.superseded
                 && leg.parent.is_some()
@@ -2410,6 +2471,7 @@ impl CommandWrites {
         self.inherited_uncertain
             || self.attempts.iter().any(|attempt| {
                 attempt.id_overflow
+                    || attempt.pending_identity
                     || (attempt.released
                         && matches!(
                             attempt.result,
