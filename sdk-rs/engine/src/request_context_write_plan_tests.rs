@@ -215,3 +215,85 @@ fn batch_refusal_then_single_refusal_acceptance_and_http_503_keeps_latest_journa
     assert_eq!(error.message, UNKNOWN_AFTER_REFUSAL);
     assert_eq!(writes.attempts.len(), 4, "single 3 was never sent");
 }
+
+#[test]
+fn latest_journal_follows_callback_completion_not_registration() {
+    for attached in [true, false] {
+        for order in [[1, 2, 3], [3, 1, 2]] {
+            let mut writes = CommandWrites::new(3).unwrap();
+            let mut plan = journal(3);
+            for id in 1..=3 {
+                released(&mut writes, id);
+                pending(&mut plan, (id - 1) as usize);
+            }
+            for id in order {
+                let result = if id == 1 {
+                    plan.record(0, placed("accepted")).unwrap();
+                    WriteResult::Accepted {
+                        order_ids: vec!["accepted".into()],
+                    }
+                } else {
+                    let error = VenueError::new(format!("refusal-{id}")).outcome(Outcome::Rejected);
+                    plan.record(
+                        (id - 1) as usize,
+                        ElementResult::NotSent {
+                            error: Some(Box::new(error.clone())),
+                        },
+                    )
+                    .unwrap();
+                    WriteResult::Rejected(plan.attach(error))
+                };
+                writes.result(RequestId(id), result).unwrap();
+            }
+            let fallback = VenueError::new("terminal fallback");
+            let fallback = if attached {
+                plan.attach(fallback)
+            } else {
+                fallback
+            };
+            let error = assert_projection(&mut writes, &plan, fallback);
+            assert_eq!(error.message, "refusal-2");
+            assert_eq!(error.outcome, None);
+            assert_eq!(error.partial.unwrap().order_ids, ["accepted"]);
+        }
+    }
+}
+
+#[test]
+fn latest_unproven_journal_follows_callback_completion_not_registration() {
+    for order in [[1, 2, 3], [3, 1, 2]] {
+        let mut writes = CommandWrites::new(3).unwrap();
+        let mut plan = journal(3);
+        for id in 1..=3 {
+            released(&mut writes, id);
+            pending(&mut plan, (id - 1) as usize);
+        }
+        for id in order {
+            if id == 1 {
+                plan.record(0, placed("accepted")).unwrap();
+                writes
+                    .result(
+                        RequestId(id),
+                        WriteResult::Accepted {
+                            order_ids: vec!["accepted".into()],
+                        },
+                    )
+                    .unwrap();
+            } else {
+                plan.record(
+                    (id - 1) as usize,
+                    ElementResult::Unknown {
+                        error: Box::new(ResponseProof::from_status(503).error().unwrap()),
+                    },
+                )
+                .unwrap();
+                writes
+                    .unproven_result(RequestId(id), 503, |evidence| evidence.write_plan(&plan))
+                    .unwrap();
+            }
+        }
+        let error = assert_projection(&mut writes, &plan, VenueError::new("terminal fallback"));
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.partial.unwrap().order_ids, ["accepted"]);
+    }
+}
