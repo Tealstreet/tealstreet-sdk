@@ -1205,6 +1205,10 @@ fn an_unknown_replacement_is_never_read_or_put_back() {
         reply(&mut e, &place, status, REFUSED);
         let out = actions(&mut e);
         let error = failure(&out);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(error.message.contains("outcome is unknown"));
+        assert!(error.message.contains("Check Open Orders"));
+        assert!(!error.message.to_ascii_lowercase().contains("rejected"));
         assert_eq!(error.protection, None, "{status}");
         assert!(
             !out.iter().any(|a| matches!(a, Action::Http(r) if r.method == Method::Get && r.url.contains("/api/v1/orders?"))),
@@ -1623,6 +1627,7 @@ fn an_unknown_put_back_says_check_open_orders_never_re_place() {
         }
         let out = actions(&mut e);
         let error = failure(&out);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(
             error.message.contains("put-back's outcome is unknown")
                 && error.message.contains("Check Open Orders")

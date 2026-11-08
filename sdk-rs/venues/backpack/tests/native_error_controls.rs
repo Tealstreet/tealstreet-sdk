@@ -538,6 +538,76 @@ fn single_reply(status: Option<u16>, body: &str) -> Result {
 fn standalone_transport_failure_guides_unknown() -> Result {
     single_reply(None, "")
 }
+
+fn nonplacement_transport_failure(command: Command, method: Method, path: &str) -> Result {
+    let (mut engine, _) = ready_orders(&format!("[{ORDER}]"));
+    engine.handle(2000., Event::Command(command));
+    let sent = requests(&mut engine);
+    assert_eq!(sent.len(), 1);
+    let request = sent.first().ok_or("missing mutation")?;
+    assert_eq!(request.method, method);
+    assert!(request.url.ends_with(path));
+    engine.handle(
+        2000.,
+        Event::HttpFailed {
+            request: request.id,
+            error: "ambiguous transport loss",
+        },
+    );
+    let out = actions(&mut engine);
+    let error = out
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 908,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .ok_or("missing mutation failure")?;
+    assert_unknown(error);
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    assert!(requests(&mut engine).is_empty());
+    Ok(())
+}
+
+#[test]
+fn cancel_transport_failure_guides_unknown() -> Result {
+    nonplacement_transport_failure(
+        Command::CancelOrders {
+            command: 908,
+            ids: vec!["123".into()],
+        },
+        Method::Delete,
+        "/api/v1/order",
+    )
+}
+
+#[test]
+fn cancel_all_transport_failure_guides_unknown() -> Result {
+    nonplacement_transport_failure(
+        Command::CancelSymbolOrders {
+            command: 908,
+            symbol: SYMBOL.into(),
+        },
+        Method::Delete,
+        "/api/v1/orders",
+    )
+}
+
+#[test]
+fn leverage_transport_failure_guides_unknown() -> Result {
+    nonplacement_transport_failure(
+        Command::SetLeverage {
+            command: 908,
+            symbol: SYMBOL.into(),
+            leverage: 20.,
+            side: None,
+        },
+        Method::Patch,
+        "/api/v1/account",
+    )
+}
 #[test]
 fn unproven_http200_ack_guides_unknown() -> Result {
     for body in ["", "{", "[]", r#"{"id":""}"#] {
