@@ -317,6 +317,10 @@ fn cancel_batch_with_an_unknown_row_journals_no_unconfirmed_cancellations() {
             .is_none_or(|partial| partial.order_ids.is_empty()),
         "cancellation targets must not enter created-order evidence: {error:?}"
     );
+    assert_eq!(
+        serde_json::to_value(error).unwrap()["partial"],
+        serde_json::json!({"orderIds": [], "total": 2, "failedIndex": 1})
+    );
     assert!(
         requests(&mut e)
             .iter()

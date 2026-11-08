@@ -177,6 +177,45 @@ it('retains applied cancel batch counts and the unknown index without created or
   expect(r.errors).toHaveBeenCalledTimes(1);
 });
 
+it('Bitunix applied cancel Unknown retains attempted counts without created IDs', async () => {
+  const r = await fixture('bitunix');
+  const detail: VenueErrorDetail = {
+    message: 'Bitunix cancellation not acknowledged for every order; replacement was not placed',
+    kind: 'network',
+    outcome: 'unknown',
+    venueCode: '10001',
+    venueMessage: 'Network Error',
+    partial: { orderIds: [], total: 2, failedIndex: 1 },
+  };
+  r.onCommand(({ command }) => [{ op: 'done', command, error: detail.message, detail }]);
+  const targets = ['confirmed', 'uncertain'].map((id) => ({
+    ...order, id, status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+  }));
+  const error = await r.exchange.cancelOrders(targets).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ExchangeError);
+  expect(r.commands.filter(({ command }) => command !== undefined)).toEqual([
+    expect.objectContaining({ op: 'cancelOrders', ids: ['confirmed', 'uncertain'] }),
+  ]);
+  const expected = {
+    message: detail.message,
+    kind: 'network',
+    outcome: 'unknown',
+    venueCode: '10001',
+    venueMessage: 'Network Error',
+    partialOrderIds: [],
+    // This counts created IDs, not confirmed cancellation effects.
+    partialOrderCount: 0,
+    totalOrderCount: 2,
+    failedOrderIndex: 1,
+    errorReported: true,
+  };
+  expect(error).toMatchObject(expected);
+  expect(serializeCommandError(error)).toMatchObject(expected);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+  expect(r.errors.mock.calls[0][0]).toBe(detail.message);
+  expect(r.errors.mock.calls[0][1].classified).toEqual({ kind: 'network', outcome: 'unknown', venueCode: '10001' });
+});
+
 it('keeps populated placement error output byte-identical to master 343e38cbe96', () => {
   const detail: VenueErrorDetail = {
     message: 'Second placement acknowledgement lost',
