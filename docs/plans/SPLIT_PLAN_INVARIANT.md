@@ -11,6 +11,16 @@ The legacy TypeScript adapters define the correct behaviour. It has been tuned o
 - Where the TypeScript also places a split order partially, or leaves another known gap, that is recorded as a known issue for a separate product decision, not changed in a port fix.
 - After a refused or failed element, Rust does what the TypeScript does for that path: where the TypeScript continues with the remaining writes, Rust continues; where it stops, Rust stops. No shared helper imposes stop-at-first-failure.
 
+## Exception: stop after an unknown outcome
+
+One recorded exception to TypeScript parity: when an element's outcome cannot be known (an ambiguous venue reply, a timeout, a lost transport after a possible send), Rust halts further writes for that action, even where the TypeScript continued. In that case it:
+
+- returns a clear outcome naming what was placed and what is unknown, with "check Open Orders, then try again";
+- records the event in the outcome journal and telemetry;
+- never retries or continues automatically, and leaves any retry to the user.
+
+The reason: a missed order is recoverable, while an accidental double position is not. After a definite refusal, TypeScript parity applies as above. Every path that takes this exception is listed with its TypeScript reference.
+
 ## Outcome reporting
 
 Per-element outcome reporting (`placed`, `applied`, `notSent`, `unknown`) records what happened for whatever writes the venue's TypeScript-parity path sends. The reporting layer never decides which writes are sent, never stops dispatch, and never refuses a plan the TypeScript would send:
