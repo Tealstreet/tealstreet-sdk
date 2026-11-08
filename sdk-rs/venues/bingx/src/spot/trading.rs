@@ -518,6 +518,24 @@ impl BingxSpot {
     ) {
         if !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
             error.message = UNKNOWN_TEXT.into();
+            // Pending delivery is engine-owned and happens once. Report the
+            // venue-decoded uncertainty separately from journal completion;
+            // neither this event nor late callbacks grant another send.
+            let operation = match r.step.kind {
+                Call::Place { .. } => "place",
+                Call::Cancel { .. } => "cancel",
+                Call::CancelAll => "cancelAll",
+            };
+            cx.event(
+                Level::Error,
+                "order.outcome_unknown",
+                UNKNOWN_TEXT,
+                vec![
+                    ("command", r.command.into()),
+                    ("outcome", "unknown".into()),
+                    ("operation", operation.into()),
+                ],
+            );
         }
         error.presents = true;
         let _ = cx.fail_plan(&r.plan, error);
@@ -604,7 +622,7 @@ impl BingxSpot {
             if envelope.as_ref().is_some_and(|e| e.data.is_some()) {
                 fact = fact.unproven();
             }
-            let mut error = fact.error().clone();
+            let error = fact.error().clone();
             if let Err(e) = cx.http_write_fact(
                 &r.context,
                 WriteFact::Failed {
@@ -622,9 +640,7 @@ impl BingxSpot {
                 }
                 self.finish_step(cx, &r);
             } else {
-                error.message = UNKNOWN_TEXT.into();
-                error.presents = true;
-                let _ = cx.fail_plan(&r.plan, error);
+                self.write_failed(cx, r, error);
             }
         }
     }

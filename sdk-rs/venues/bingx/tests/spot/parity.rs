@@ -38,12 +38,91 @@ fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        errors.len(),
-        1,
-        "one structured terminal journal/telemetry event"
-    );
+    assert_eq!(errors.len(), 1, "one command completion");
     errors[0]
+}
+
+fn unknown_outcome_and_journal(actions: &[Action], accepted: &[&str]) {
+    // The terminal's classification and native IDs are the engine journal's
+    // public projection. They are separate from the diagnostic below.
+    let error = failure(actions);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(
+        error.message.contains(ENGINE_UNKNOWN_TEXT),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.iter().map(String::as_str).collect::<Vec<_>>())
+            .unwrap_or_default(),
+        accepted,
+        "journal retains only proven native IDs"
+    );
+}
+
+fn unknown_telemetry(actions: &[Action], operation: &str) {
+    let events = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events.len(),
+        1,
+        "one independent Unknown diagnostic; observed codes: {:?}",
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(e)) => Some(e.code),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    );
+    let event = events[0];
+    assert_eq!(event.level, safe_cex_engine::Level::Error);
+    assert_eq!(event.message, ENGINE_UNKNOWN_TEXT);
+    assert_eq!(
+        event.fields,
+        vec![
+            ("command", 70u32.into()),
+            ("outcome", "unknown".into()),
+            ("operation", operation.into()),
+        ]
+    );
+}
+
+fn late_unknown_ack_is_inert(e: &mut Engine<BingxSpot>, request: &HttpRequest) {
+    reply(
+        e,
+        request,
+        200,
+        r#"{"code":0,"data":{"orderId":"late","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"NEW"}}"#,
+    );
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: request.id,
+            error: "late duplicate failure",
+        },
+    );
+    let late = collect(e);
+    assert!(writes(&late).is_empty());
+    assert!(!late.iter().any(|a| matches!(
+        a,
+        Action::Notice(
+            Notice::CommandDone { command: 70, .. } | Notice::CommandFailed { command: 70, .. }
+        )
+    )));
+    assert!(!late.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+    )));
 }
 
 fn partial_row(row: Value, quantity: f64, price: Option<f64>) {
@@ -80,6 +159,9 @@ fn partial_row(row: Value, quantity: f64, price: Option<f64>) {
     assert_eq!(error.venue_code.as_deref(), Some("100440"));
     assert_eq!(error.outcome, None);
     assert_eq!(error.partial.as_ref().unwrap().order_ids, ["1001", "1003"]);
+    assert!(!actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+    )));
 }
 
 // TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1485-1542,1854-1889.
@@ -180,6 +262,19 @@ fn missing_market_is_a_formatter_failure_before_any_write() {
 // packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1871-1889.
 #[test]
 fn unknown_middle_payload_halts_with_prefix_ids_and_a_terminal_event() {
+    // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
+    // Only telemetry is deferred; outcome, native IDs and no-resend stay pinned.
+    unknown_middle_payload(&[0, 1]);
+}
+
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1871-1889.
+#[test]
+fn venue_decoded_unknown_middle_emits_a_diagnostic_and_journal() {
+    unknown_middle_payload(&[2, 3]);
+}
+
+fn unknown_middle_payload(modes: &[u8]) {
     let paths = [
         (
             "quantity-minimum",
@@ -210,7 +305,7 @@ fn unknown_middle_payload_halts_with_prefix_ids_and_a_terminal_event() {
         ),
     ];
     for (path, row, split) in paths {
-        for mode in [0, 1, 2] {
+        for &mode in modes {
             let (mut e, _) = if path == "market-sell-reference" {
                 seed_with_fixtures(true, MARKETS, r#"{"code":0,"data":[]}"#)
             } else {
@@ -247,8 +342,10 @@ fn unknown_middle_payload_halts_with_prefix_ids_and_a_terminal_event() {
                     if mode == 1 { 503 } else { 200 },
                     if mode == 1 {
                         "upstream unavailable"
-                    } else {
+                    } else if mode == 2 {
                         "malformed"
+                    } else {
+                        r#"{"code":100500,"msg":"unlisted native refusal"}"#
                     },
                 );
             }
@@ -257,18 +354,11 @@ fn unknown_middle_payload_halts_with_prefix_ids_and_a_terminal_event() {
                 writes(&actions).is_empty(),
                 "{path}: Unknown cannot release the suffix"
             );
-            let error = failure(&actions);
-            assert_eq!(error.outcome, Some(Outcome::Unknown), "{path}");
-            assert_eq!(
-                error.partial.as_ref().unwrap().order_ids,
-                accepted,
-                "{path}"
-            );
-            assert!(
-                error.message.contains(ENGINE_UNKNOWN_TEXT),
-                "{path}: {}",
-                error.message
-            );
+            unknown_outcome_and_journal(&actions, &accepted);
+            if mode >= 2 {
+                unknown_telemetry(&actions, "place");
+            }
+            late_unknown_ack_is_inert(&mut e, &requests[0]);
         }
     }
 }
@@ -314,27 +404,59 @@ fn cancellation_continues_after_a_definite_refusal() {
     let actions = collect(&mut e);
     assert!(writes(&actions).is_empty());
     assert_eq!(failure(&actions).outcome, None);
+    assert!(!actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+    )));
 }
 
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
 // packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:940-962.
 #[test]
 fn cancellation_unknown_halts_the_action() {
-    let (mut e, _) = seed(true);
-    let first = writes(&cancels(&mut e));
-    assert_eq!(first.len(), 1);
-    e.handle(
-        NOW,
-        Event::HttpFailed {
-            request: first[0].id,
-            error: "lost cancel",
-        },
-    );
-    let actions = collect(&mut e);
-    assert!(writes(&actions).is_empty());
-    let error = failure(&actions);
-    assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+    // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
+    cancellation_unknown(&[0, 1]);
+}
+
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:940-962.
+#[test]
+fn venue_decoded_unknown_cancel_emits_a_diagnostic_and_journal() {
+    cancellation_unknown(&[2, 3]);
+}
+
+fn cancellation_unknown(modes: &[u8]) {
+    for &mode in modes {
+        let (mut e, _) = seed(true);
+        let first = writes(&cancels(&mut e));
+        assert_eq!(first.len(), 1);
+        if mode == 0 {
+            e.handle(
+                NOW,
+                Event::HttpFailed {
+                    request: first[0].id,
+                    error: "lost cancel",
+                },
+            );
+        } else {
+            reply(
+                &mut e,
+                &first[0],
+                if mode == 1 { 503 } else { 200 },
+                match mode {
+                    1 => "upstream unavailable",
+                    2 => "malformed",
+                    _ => r#"{"code":100500,"msg":"unlisted native refusal"}"#,
+                },
+            );
+        }
+        let actions = collect(&mut e);
+        assert!(writes(&actions).is_empty());
+        unknown_outcome_and_journal(&actions, &[]);
+        if mode >= 2 {
+            unknown_telemetry(&actions, "cancel");
+        }
+        late_unknown_ack_is_inert(&mut e, &first[0]);
+    }
 }
 
 // TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1544-1564,1854-1868.
@@ -375,6 +497,18 @@ fn explicit_client_id_cannot_be_reused_across_native_lots() {
 // packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1871-1889.
 #[test]
 fn gateway_after_refusal_preserves_native_prefix_and_unknown_text() {
+    // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
+    unknown_after_refusal(503, "upstream unavailable");
+}
+
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1871-1889.
+#[test]
+fn venue_decoded_unknown_after_refusal_emits_a_diagnostic_and_journal() {
+    unknown_after_refusal(200, r#"{"code":100500,"msg":"unlisted native refusal"}"#);
+}
+
+fn unknown_after_refusal(status: u16, body: &str) {
     let (mut e, _) = seed(true);
     let rows = (0..4)
         .map(|i| batch_order(0.002, 41000., &format!("row_{i}")))
@@ -390,13 +524,14 @@ fn gateway_after_refusal_preserves_native_prefix_and_unknown_text() {
     );
     let third = writes(&collect(&mut e));
     assert_eq!(third.len(), 1);
-    reply(&mut e, &third[0], 503, "upstream unavailable");
+    reply(&mut e, &third[0], status, body);
     let actions = collect(&mut e);
     assert!(writes(&actions).is_empty());
-    let error = failure(&actions);
-    assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["1001"]);
-    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+    unknown_outcome_and_journal(&actions, &["1001"]);
+    if status == 200 {
+        unknown_telemetry(&actions, "place");
+    }
+    late_unknown_ack_is_inert(&mut e, &third[0]);
 }
 
 // TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1544-1564,1854-1889.

@@ -115,6 +115,16 @@ refusals, delivered in the structured CommandFailed event. A genuine Unknown
 halts the action under the recorded stop-after-UNKNOWN parity exception, with
 "The outcome is unknown. Check Open Orders". No engine fence is bypassed and
 there is no per-venue outcome store or dependency on the draft WritePlan API.
+Venue-authored Unknown terminals also emit one `order.outcome_unknown` diagnostic
+with command correlation, operation and outcome. It carries the same canonical
+text, without response bodies, signing material or raw native messages. The
+diagnostic is separate from the engine journal's terminal projection; late
+callbacks emit neither a second diagnostic nor another completion.
+
+KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. Transport-loss
+and HTTP 503 cases sealed before Spot decoding retain their Unknown outcome,
+accepted-ID and no-resend pins; only their independent telemetry assertion is
+deferred to the shared engine work.
 
 Released HTTP 408/429/5xx, transport failures, malformed or contradictory
 acknowledgements and unlisted errors remain **Unknown**. There is no write resend or fallback-domain
