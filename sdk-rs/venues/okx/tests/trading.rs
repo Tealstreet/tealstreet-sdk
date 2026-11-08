@@ -2937,6 +2937,61 @@ fn cancel_batch_unknown_row_has_no_created_target_ids(algo: bool) {
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
         error
+            .message
+            .contains("The outcome is unknown. Check Open Orders"),
+        "Unknown cancellation must explain reconciliation: {error:?}"
+    );
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+    assert_eq!(error.venue_code.as_deref(), Some("51412"));
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("Cancellation timed out")
+    );
+    let elements =
+        serde_json::to_value(error.elements.as_ref().expect("indexed cancel outcomes")).unwrap();
+    assert_eq!(elements.as_array().unwrap().len(), 2);
+    assert_eq!(
+        elements[0],
+        serde_json::json!({
+            "index": 0, "status": "applied", "effect": "cancel", "targetOrderId": native_ids[0]
+        })
+    );
+    assert_eq!(elements[1]["index"], 1);
+    assert_eq!(elements[1]["status"], "unknown");
+    assert_eq!(elements[1]["error"]["outcome"], "unknown");
+    assert_eq!(elements[1]["error"]["venueCode"], "51412");
+    assert!(
+        elements[1]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("The outcome is unknown. Check Open Orders")
+    );
+    assert!(
+        elements[1]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("cancellation target {}:", native_ids[1]))
+    );
+    let events: Vec<_> = after
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1, "one correlated Unknown diagnostic");
+    assert_eq!(events[0].level, safe_cex_engine::log::Level::Warn);
+    assert!(events[0].fields.contains(&("command", 401_u32.into())));
+    assert!(events[0].fields.contains(&("index", 1_f64.into())));
+    assert!(
+        events[0]
+            .fields
+            .contains(&("targetOrderId", native_ids[1].to_owned().into()))
+    );
+    assert!(
+        error
             .partial
             .as_ref()
             .is_none_or(|partial| partial.order_ids.is_empty()),
@@ -2973,4 +3028,43 @@ fn regular_cancel_batch_with_unknown_row_journals_no_created_target_ids() {
 #[test]
 fn algo_cancel_batch_with_unknown_row_journals_no_created_target_ids() {
     cancel_batch_unknown_row_has_no_created_target_ids(true);
+}
+
+#[test]
+fn cancel_batch_unknown_reporting_distinguishes_satisfied_and_refused_rows() {
+    use safe_cex_engine::Outcome;
+    for code in ["51400", "51000"] {
+        let out = review_cancel_two_rows(&format!(
+            r#"[{{"ordId":"1","sCode":"{code}","sMsg":"first row"}},{{"ordId":"2","sCode":"51412","sMsg":"Cancellation timed out"}}]"#
+        ));
+        let terminal = terminals(&out, 2);
+        let error = terminal[0].as_ref().unwrap_err();
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert!(
+            error
+                .message
+                .contains("The outcome is unknown. Check Open Orders")
+        );
+        assert!(
+            error
+                .partial
+                .as_ref()
+                .is_none_or(|partial| partial.order_ids.is_empty())
+        );
+        let elements = serde_json::to_value(error.elements.as_ref().unwrap()).unwrap();
+        if code == "51400" {
+            assert_eq!(
+                elements[0],
+                serde_json::json!({
+                    "index": 0, "status": "applied", "effect": "cancel", "targetOrderId": "1"
+                })
+            );
+        } else {
+            assert_eq!(elements[0]["status"], "notSent");
+            assert_eq!(elements[0]["error"]["outcome"], "rejected");
+            assert_eq!(elements[0]["error"]["venueCode"], "51000");
+        }
+        assert_eq!(elements[1]["status"], "unknown");
+        assert_eq!(elements[1]["error"]["venueCode"], "51412");
+    }
 }

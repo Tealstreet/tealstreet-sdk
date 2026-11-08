@@ -4,6 +4,7 @@ use crate::{Okx, Pending, sign, wire};
 use safe_cex_engine::classify::{
     BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict, WriteFact,
 };
+use safe_cex_engine::log::Level;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
@@ -12,6 +13,9 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{
+    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult,
+};
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -19,6 +23,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const BROKER: &str = "e847386590ce4dBC";
+const UNKNOWN_GUIDANCE: &str = "The outcome is unknown. Check Open Orders";
 
 /// Every write is one call with its own 20 s bound; only a 50113 signature
 /// refusal, which executed nothing, is re-signed and sent once more.
@@ -1830,7 +1835,21 @@ impl Okx {
             } else {
                 errors.join_with("; ")
             };
-            let error = VenueError::new(message).outcome(Outcome::Unknown);
+            let mut error = VenueError::new(message).outcome(Outcome::Unknown);
+            if matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            ) {
+                error.message = format!("{}. {UNKNOWN_GUIDANCE}", error.message);
+                // Native facts still supply kind/code/partial; retain the venue's guidance.
+                error.presents = true;
+                error.elements = Some(Box::new(cancel_outcomes(
+                    cx,
+                    request.command,
+                    &acks,
+                    &requested,
+                )));
+            }
             return self.end(cx, request.command, Some(&request), error, true);
         }
         // An all-refused envelope (code 1) continues only when every row says its order
@@ -2141,6 +2160,75 @@ pub(crate) fn trade_reconciliation(
     request: &Request,
 ) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
     ReconciliationData::new(request.path.to_owned())
+}
+
+/// Passive outcomes for an identity-validated native cancellation batch.
+/// Indices match the batch's request rows and its partial.failed_index.
+fn cancel_outcomes(
+    cx: &mut Cx<'_, Pending>,
+    command: CommandId,
+    acks: &[Ack<'_>],
+    requested: &[Requested],
+) -> ElementOutcomes {
+    ElementOutcomes(
+        acks.iter()
+            .zip(requested)
+            .enumerate()
+            .map(|(index, (ack, target))| {
+                let verdict = CODES.verdict(&native(ack.s_code, ack.s_msg), Intent::Cancel);
+                let result = if matches!(ack.s_code, "" | "0")
+                    || verdict == Verdict::Satisfied(SatisfiedIntent::Cancel)
+                {
+                    ElementResult::Applied {
+                        effect: AppliedEffect::Cancel,
+                        target_order_id: Some(target.id().into()),
+                        position_key: None,
+                    }
+                } else {
+                    let mut error = VenueError::new(format!(
+                        "OKX cancellation target {}: {} (code {})",
+                        target.id(),
+                        ack.s_msg,
+                        ack.s_code
+                    ))
+                    .venue_code(ack.s_code)
+                    .venue_message(ack.s_msg);
+                    if let Some(kind) = verdict.kind() {
+                        error.kind = Some(kind);
+                    }
+                    if verdict.is_refusal() {
+                        ElementResult::NotSent {
+                            error: Some(Box::new(error.outcome(Outcome::Rejected))),
+                        }
+                    } else {
+                        error.outcome = Some(Outcome::Unknown);
+                        error.message = format!("{}. {UNKNOWN_GUIDANCE}", error.message);
+                        cx.event(
+                            Level::Warn,
+                            "order.outcome_unknown",
+                            &error.message,
+                            vec![
+                                ("command", command.into()),
+                                ("index", (index as f64).into()),
+                                ("targetOrderId", target.id().into()),
+                                ("venueCode", ack.s_code.into()),
+                            ],
+                        );
+                        ElementResult::Unknown {
+                            error: Box::new(error),
+                        }
+                    }
+                };
+                ElementOutcome {
+                    element: Element {
+                        index,
+                        client_order_id: None,
+                    },
+                    result,
+                }
+            })
+            .collect(),
+    )
 }
 
 /// A definitive OKX refusal. Its kind comes from the table (the native code,

@@ -477,15 +477,34 @@ it('keeps an unsupported history read quiet but still rejects it, typed', async 
 // Mirrors OKX's regular/algo recording pins: one accepted cancel and one 51412 row.
 it.each([false, true])('OKX applied cancel keeps Unknown counts without created IDs (algo=%s)', async (algo) => {
   const r = await fixture('okx');
+  const events = vi.fn();
+  r.exchange.on('engine-event', events);
+  const nativeIds = algo ? ['91', '92'] : ['1', '2'];
+  const unknownMessage = `OKX cancellation target ${nativeIds[1]}: Cancellation timed out (code 51412). The outcome is unknown. Check Open Orders`;
   const detail: VenueErrorDetail = {
-    message: 'Cancellation timed out',
+    message: 'Cancellation timed out (code 51412). The outcome is unknown. Check Open Orders',
     kind: 'timeout',
     outcome: 'unknown',
     venueCode: '51412',
     venueMessage: 'Cancellation timed out',
     partial: { orderIds: [], total: 2, failedIndex: 1 },
+    elements: [
+      { index: 0, status: 'applied', effect: 'cancel', targetOrderId: nativeIds[0] },
+      {
+        index: 1, status: 'unknown', error: {
+          message: unknownMessage, kind: 'timeout', outcome: 'unknown',
+          venueCode: '51412', venueMessage: 'Cancellation timed out',
+        },
+      },
+    ],
   };
-  r.onCommand(({ command }) => [{ op: 'done', command, error: detail.message, detail }]);
+  r.onCommand(({ command }) => [
+    {
+      op: 'event', level: 'warn', code: 'order.outcome_unknown', message: unknownMessage,
+      fields: { command, index: 1, targetOrderId: nativeIds[1], venueCode: '51412' },
+    },
+    { op: 'done', command, error: detail.message, detail },
+  ]);
   const targets = (algo ? ['91_sl', '92_sl'] : ['1', '2']).map((id) => ({
     ...order, id, type: algo ? OrderType.StopLoss : OrderType.Limit,
     status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
@@ -504,9 +523,15 @@ it.each([false, true])('OKX applied cancel keeps Unknown counts without created 
     partialOrderCount: 0,
     totalOrderCount: 2,
     failedOrderIndex: 1,
+    elements: detail.elements,
   };
   // The zero counts created IDs; the attempted cancellation remains uncertain.
   expect(error).toMatchObject(expected);
   expect(serializeCommandError(error)).toMatchObject(expected);
+  const unknownEvents = events.mock.calls.filter(([event]) => event.code === 'order.outcome_unknown');
+  expect(unknownEvents).toEqual([[expect.objectContaining({
+    level: 'warn', code: 'order.outcome_unknown', message: unknownMessage,
+    fields: expect.objectContaining({ index: 1, targetOrderId: nativeIds[1], venueCode: '51412' }),
+  })]]);
   expect(r.errors).toHaveBeenCalledTimes(1);
 });
