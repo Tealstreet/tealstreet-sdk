@@ -36,14 +36,15 @@ const request = (payload: string): SignRequest => ({
     algorithm: 'hmacSha256', payload: [{ kind: 'bytes', bytes: Array.from(new TextEncoder().encode(payload)) }] }],
 });
 
-it('admits Bitrue remote and payload signing through the shared declaration and keeps unknown families refused', () => {
+it('admits Bitrue and Crypto.com signing through the shared declaration and keeps unsupported custody refused', () => {
   const remoteSigner = remote();
   expect(deriveRemoteSigningPolicy('bitrue')).toMatchObject({ enabled: true, payloadSupported: true, payloadRestOnly: true,
     protectedHeaders: ['X-CH-APIKEY', 'X-CH-SIGN', 'X-CH-TS', 'recvWindow', 'Content-Type', 'X-Referer'] });
   expect(deriveBridgeConstruction('bitrue', {} as ExchangeOptions).dispatchSigning).toBe(true);
   expect(() => assertBetaAccount('bitrue', { key, secret: '', remoteSigner })).not.toThrow();
   expect(() => assertBetaAccount('bitrue', { key, payloadSigner: async () => ({ signature: '' }) })).not.toThrow();
-  expect(() => assertBetaAccount('cryptocom', { key, remoteSigner })).toThrow();
+  expect(() => assertBetaAccount('cryptocom', { key, remoteSigner })).not.toThrow();
+  expect(() => assertBetaAccount('polymarket', { key, remoteSigner })).toThrow();
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 

@@ -195,6 +195,7 @@ enum BadResult {
     Unchanged,
     Receipt,
     Headers,
+    InvalidHeaders,
     Count,
     Mac,
     Crlf,
@@ -231,6 +232,9 @@ impl Signer for CorruptProvider {
             BadResult::Headers => result
                 .headers
                 .push(("X-Provider".into(), "untrusted".into())),
+            BadResult::InvalidHeaders => result
+                .headers
+                .push(("X-Provider".into(), "invalid\r\nvalue".into())),
             BadResult::Count => result.values.push(vec![1]),
             BadResult::Mac => result.values[1].truncate(31),
             BadResult::Crlf => result.values[0] = b"provider-key\r\n".to_vec(),
@@ -245,6 +249,7 @@ fn malformed_provider_results_cannot_release_identity_or_leak_material() {
         BadResult::Unchanged,
         BadResult::Receipt,
         BadResult::Headers,
+        BadResult::InvalidHeaders,
         BadResult::Count,
         BadResult::Mac,
         BadResult::Crlf,
@@ -259,8 +264,16 @@ fn malformed_provider_results_cannot_release_identity_or_leak_material() {
         })))
         .unwrap();
         let actions = ask(&mut e, NOW);
-        if matches!(bad, BadResult::Unchanged) {
+        if matches!(bad, BadResult::Unchanged | BadResult::Headers) {
             let request = http(&actions, "private/get-accounts");
+            if matches!(bad, BadResult::Headers) {
+                assert!(
+                    request
+                        .signer_headers
+                        .iter()
+                        .any(|(name, value)| name == "X-Provider" && value == "untrusted")
+                );
+            }
             let delivered = respond(&mut e, NOW, &request, 200, IDENTITY);
             assert_eq!(
                 terminals(&delivered),
@@ -294,6 +307,7 @@ fn malformed_provider_results_cannot_release_ws_auth() {
         BadResult::Unchanged,
         BadResult::Receipt,
         BadResult::Headers,
+        BadResult::InvalidHeaders,
         BadResult::Count,
         BadResult::Mac,
         BadResult::Crlf,
