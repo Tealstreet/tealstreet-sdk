@@ -15,6 +15,8 @@ use safe_cex_engine::{
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
 const TIER_MESSAGE: &str = "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.";
 const APPROVAL_MESSAGE: &str = "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.";
 const POSITION_READ_TIMEOUT_MS: f64 = 10_000.0;
@@ -81,6 +83,34 @@ impl Job {
             .iter()
             .all(|id| self.group_seen.contains(id))
     }
+    fn unknown_journal(&self) -> serde_json::Value {
+        let (unknown, skip) = if self.settled || self.steps.is_empty() {
+            (
+                self.group_accepted
+                    .iter()
+                    .filter(|id| !self.group_seen.contains(*id))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                0,
+            )
+        } else {
+            (
+                self.steps
+                    .front()
+                    .map(Step::placement_ids)
+                    .unwrap_or_default(),
+                1,
+            )
+        };
+        let placed: Vec<_> = self.ids.iter().filter(|id| !unknown.contains(id)).collect();
+        let not_sent: Vec<_> = self
+            .steps
+            .iter()
+            .skip(skip)
+            .flat_map(Step::placement_ids)
+            .collect();
+        serde_json::json!({"placed":placed,"unknown":unknown,"notSent":not_sent})
+    }
 }
 enum Step {
     Position {
@@ -104,6 +134,17 @@ enum Step {
         isolated: Option<bool>,
     },
 }
+impl Step {
+    fn placement_ids(&self) -> Vec<String> {
+        match self {
+            Self::Place(orders) | Self::Group { orders, .. } => {
+                orders.iter().map(|p| p.order.id.clone()).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
 struct Prepared {
     native: sign::Order,
     order: Order,
@@ -1531,7 +1572,14 @@ impl Lighter {
                     };
                     let error = self.note_replacement_lost(&submission.effect, error);
                     if unknown {
-                        let _ = cx.http_write_unproven(&context, &error.message);
+                        let _ = cx.http_write_unproven_result(&context, |evidence| {
+                            if let Some(code) = &error.venue_code {
+                                evidence.venue_code(code);
+                            }
+                            evidence.venue_message(
+                                error.venue_message.as_deref().unwrap_or(&error.message),
+                            );
+                        });
                     } else if !self.trade_refusal(cx, &context, code.unwrap(), &error.message) {
                         return;
                     }
@@ -1816,12 +1864,6 @@ impl Lighter {
         if self.protective_finish(cx, &mut error) {
             return;
         }
-        if let Some(job) = &self.trading.active
-            && let Some(plan) = &job.plan
-            && job.protection.is_some()
-        {
-            let _ = cx.present_plan_failure(plan, error.message.clone());
-        }
         if let Some(wait) = self.trading.position_wait.take() {
             self.trading.retired_snapshot = Some(wait.serial);
         }
@@ -1831,7 +1873,52 @@ impl Lighter {
                 self.trading.next_nonce.invalidate();
             }
             let mut error = error;
-            if !job.ids.is_empty() {
+            let journal = (error.outcome == Some(Outcome::Unknown)).then(|| job.unknown_journal());
+            if error.outcome == Some(Outcome::Unknown) {
+                error
+                    .venue_message
+                    .get_or_insert_with(|| error.message.clone());
+                if job.protection.is_some() || job.amend.is_some() {
+                    if !error.message.contains(UNKNOWN_TEXT) {
+                        error.message.push_str(". ");
+                        error.message.push_str(UNKNOWN_TEXT);
+                    }
+                } else {
+                    error.message = UNKNOWN_TEXT.into();
+                }
+                if let Some(journal) = &journal
+                    && journal["unknown"]
+                        .as_array()
+                        .is_some_and(|ids| !ids.is_empty())
+                {
+                    error.message = format!(
+                        "{}; unknown order indexes: {}",
+                        error.message, journal["unknown"]
+                    );
+                    cx.event(
+                        safe_cex_engine::Level::Error,
+                        "order.outcome_unknown",
+                        error.message.clone(),
+                        vec![
+                            ("command", job.command.into()),
+                            ("outcome", "unknown".into()),
+                            ("journal", journal.to_string().into()),
+                        ],
+                    );
+                }
+            }
+
+            if let Some(journal) = &journal {
+                if journal["placed"]
+                    .as_array()
+                    .is_some_and(|ids| !ids.is_empty())
+                {
+                    error.message = format!(
+                        "{}; previously placed order indexes: {}",
+                        error.message, journal["placed"]
+                    );
+                }
+            } else if !job.ids.is_empty() {
                 let indexes = job.ids.join_with(",");
                 error.message = format!(
                     "{}; previously placed order indexes: {indexes}",
@@ -1842,6 +1929,11 @@ impl Lighter {
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             {
                 error.outcome = None;
+            }
+            if let Some(plan) = &job.plan
+                && (job.protection.is_some() || error.outcome == Some(Outcome::Unknown))
+            {
+                let _ = cx.present_plan_failure(plan, error.message.clone());
             }
             if let Some(plan) = &job.plan {
                 if let (Some(slot), Some(context)) = (&job.slot, &job.live) {

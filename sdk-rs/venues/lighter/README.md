@@ -8,3 +8,11 @@ This matches the [legacy grouped-order builder](https://github.com/Tealstreet/te
 Market minimum exemptions and remainder-based lot allocation retain legacy TS
 behavior. Ordinary non-market lots and native limit batches retain their existing
 minimum checks before submission.
+
+An Unknown placement halts remaining writes for that action. Its failure includes
+"The outcome is unknown. Check Open Orders", accepted order indexes and the
+indexes whose placement is uncertain. The engine's mutation journal retains the
+accepted prefix. For venue-reported uncertainty, `order.outcome_unknown` telemetry
+snapshots placed, unknown and unsent indexes from that journal and the dispatcher
+queue; engine-owned HTTP failures retain engine journal/telemetry. This is the approved
+stop-after-UNKNOWN parity exception; uncertain placements are never replayed.

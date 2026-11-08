@@ -20,6 +20,8 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
 #[derive(Serialize)]
 struct Placement {
     market: String,
@@ -128,6 +130,21 @@ enum Kind {
         leverage: f64,
     },
 }
+impl Kind {
+    fn placement_labels(&self) -> Vec<String> {
+        match self {
+            Self::Place { expected, leg, .. } => expected
+                .iter()
+                .map(|id| {
+                    id.clone()
+                        .unwrap_or_else(|| leg.unwrap_or("entry").to_owned())
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
 struct Operation {
     receipts: Vec<OrderIdentityReceipt>,
     /// The write's dispatch-time Stark step. It keeps the field name of the
@@ -1479,6 +1496,28 @@ impl Trading {
                     ..
                 } = &request.kind
                 {
+                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    if unknown && job.placement {
+                        let journal = serde_json::json!({
+                            "placed":job.results,
+                            "unknown":request.kind.placement_labels(),
+                            "notSent":job.operations.iter().flat_map(|op| op.kind.placement_labels()).collect::<Vec<_>>()
+                        });
+                        error.message = format!(
+                            "{}; placed order IDs: {}; unknown placements: {}",
+                            error.message, journal["placed"], journal["unknown"]
+                        );
+                        cx.event(
+                            Level::Error,
+                            "order.outcome_unknown",
+                            error.message.clone(),
+                            vec![
+                                ("command", job.command.into()),
+                                ("outcome", "unknown".into()),
+                                ("journal", journal.to_string().into()),
+                            ],
+                        );
+                    }
                     let message = match leg {
                         Some(leg) => format!("Paradex TP/SL {leg} placement failed: {error}"),
                         None => {
@@ -1521,7 +1560,9 @@ impl Trading {
                     } else {
                         Level::Error
                     };
-                    cx.notice(level, code, message);
+                    if !unknown || !job.placement {
+                        cx.notice(level, code, message);
+                    }
                 } else {
                     job.errors.push(error);
                     if !job.attempt_all || matches!(request.kind, Kind::Quotes(_)) {
@@ -2382,7 +2423,7 @@ fn write_failure(status: u16, message: String) -> VenueError {
 
 fn ambiguous_write(mut error: VenueError) -> VenueError {
     error.venue_message.get_or_insert(error.message);
-    error.message = "Paradex write outcome is unknown. Check Open Orders".into();
+    error.message = UNKNOWN_TEXT.into();
     error.outcome(Outcome::Unknown)
 }
 

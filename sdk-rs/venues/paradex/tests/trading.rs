@@ -583,7 +583,8 @@ fn reconcile_read_only(h: &mut Harness) {
 }
 
 fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
-    h.actions
+    let error = h
+        .actions
         .iter()
         .rev()
         .find_map(|a| match a {
@@ -594,7 +595,11 @@ fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
             }
             _ => None,
         })
-        .expect("command failed")
+        .expect("command failed");
+    if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    }
+    error
 }
 
 #[test]
@@ -1942,10 +1947,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         let request = h.take("/orders");
         h.respond(request, status, body);
         if matches!(status, 408 | 429 | 500..) {
-            assert_eq!(
-                h.result(8),
-                Err("Paradex write outcome is unknown. Check Open Orders")
-            );
+            assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
             assert_eq!(h.failures[0].venue_message.as_deref(), Some(text));
         } else {
             assert_eq!(h.result(8), Err(text), "{status} {body}");
@@ -1959,10 +1961,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
     let request = h.take("/orders");
     h.respond(request, 200, "{}");
     assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
-    assert_eq!(
-        h.result(8),
-        Err("Paradex write outcome is unknown. Check Open Orders")
-    );
+    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
     assert!(h.failures[0].venue_message.is_some());
     // Transport loss on a write is Unknown.
     let mut h = private();
@@ -1980,10 +1979,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
-    assert_eq!(
-        h.result(8),
-        Err("Paradex write outcome is unknown. Check Open Orders")
-    );
+    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
     assert_eq!(h.failures[0].venue_message.as_deref(), Some("reset"));
     // Unsupported controls were never sent.
     for command in [
@@ -3597,12 +3593,7 @@ fn unknown_exception_serial_entry_halts_the_action_with_accepted_ids() {
         let error = failed(&h, 91);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted-id"]);
-        assert!(
-            error
-                .message
-                .contains("outcome is unknown. Check Open Orders, then try again"),
-            "{error:?}"
-        );
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
         unknown_exception_journal_and_telemetry(&h);
     }
 }
@@ -3626,28 +3617,45 @@ fn unknown_exception_child_halts_later_children_and_independent_entries() {
         let error = failed(&h, 91);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["entry"]);
-        assert!(
-            error
-                .message
-                .contains("outcome is unknown. Check Open Orders, then try again"),
-            "{error:?}"
-        );
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
         unknown_exception_journal_and_telemetry(&h);
     }
 }
 
 fn unknown_exception_journal_and_telemetry(h: &Harness) {
     let error = failed(h, 91);
-    let serialized = serde_json::to_value(&error).unwrap();
-    let elements = serialized["elements"]
-        .as_array()
-        .expect("shared per-element journal");
-    assert!(elements.iter().any(|row| row["status"] == "placed"));
-    assert!(elements.iter().any(|row| row["status"] == "unknown"));
-    assert!(elements.iter().any(|row| row["status"] == "notSent"));
-    assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Event(event))
-            if event.message.contains("outcome is unknown. Check Open Orders, then try again")
-                && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
-    )), "missing Unknown telemetry");
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    let event = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "order.outcome_unknown" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("Unknown journal telemetry");
+    assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+    assert!(
+        event
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    );
+    let report = event
+        .fields
+        .iter()
+        .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten())
+        .expect("journal snapshot");
+    let report: serde_json::Value = serde_json::from_str(report).unwrap();
+    assert_eq!(
+        report["placed"],
+        serde_json::json!(error.partial.as_ref().unwrap().order_ids)
+    );
+    let unknown = report["unknown"].as_array().unwrap();
+    assert_eq!(unknown.len(), 1);
+    assert!(error.message.contains(unknown[0].as_str().unwrap()));
+    assert!(!report["notSent"].as_array().unwrap().is_empty());
 }

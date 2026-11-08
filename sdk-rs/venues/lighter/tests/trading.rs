@@ -95,7 +95,12 @@ fn failure(e: &mut Engine<Lighter>) -> String {
     safe_cex_engine::test_support::prepared_actions(e, NOW)
         .into_iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message),
+            Action::Notice(Notice::CommandFailed { error, .. }) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+                }
+                Some(error.message)
+            }
             _ => None,
         })
         .expect("command rejection")
@@ -269,7 +274,7 @@ fn plain_same_symbol_limits_use_batch_with_distinct_ids_and_sequential_nonces() 
     assert_eq!(a["Nonce"], 10);
     assert_eq!(b["Nonce"], 11);
     reply(&mut e, &r, 200, r#"{"code":200,"tx_hash":["one"]}"#);
-    assert!(failure(&mut e).contains("Uncertain"));
+    assert!(failure(&mut e).contains(ENGINE_UNKNOWN_TEXT));
 }
 
 #[test]
@@ -898,6 +903,9 @@ fn completion(e: &mut Engine<Lighter>) -> (String, Option<Outcome>) {
         .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+                }
                 Some((error.message, error.outcome))
             }
             _ => None,
@@ -1122,16 +1130,18 @@ fn released_http_throttles_are_unknown_and_never_replay() {
         if status == 429 {
             assert_eq!(error.kind, Some(ErrorKind::RateLimited));
             assert_eq!(error.outcome, Some(Outcome::Unknown));
-            assert_eq!(
-                error.message,
-                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
-            );
+            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
             assert_eq!(error.venue_code, None);
         } else {
             assert_eq!(error.kind, Some(ErrorKind::Internal));
             assert_eq!(error.outcome, Some(Outcome::Unknown));
-            assert!(error.message.contains("native throttle"));
-            assert!(error.message.contains("Check Open Orders"));
+            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert!(
+                error
+                    .venue_message
+                    .as_deref()
+                    .is_some_and(|text| text.contains("native throttle"))
+            );
         }
         assert!(!out.iter().any(
             |a| matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))
@@ -1547,13 +1557,24 @@ fn a_maker_only_key_refusal_says_what_the_key_allows() {
         reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
         let write = http(&mut e, "sendTx");
         reply(&mut e, &write, 400, body);
-        assert_eq!(
-            failure(&mut e),
-            "This Lighter API key is maker-only, which allows only post-only orders and cancels; \
-             change leverage or place market and stop orders from a key that is not maker-only: \
-             maker-only api key can only send 0ms delay transactions",
-            "{body}"
-        );
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let error = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 8, error }) => Some(error),
+                _ => None,
+            })
+            .expect("maker-only failure");
+        let diagnostic = "This Lighter API key is maker-only, which allows only post-only orders and cancels; change leverage or place market and stop orders from a key that is not maker-only: maker-only api key can only send 0ms delay transactions";
+        if error.outcome == Some(Outcome::Unknown) {
+            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert_eq!(
+                error.venue_message.as_deref(),
+                Some("maker-only api key can only send 0ms delay transactions")
+            );
+        } else {
+            assert_eq!(error.message, diagnostic, "{body}");
+        }
     }
 }
 
@@ -1914,37 +1935,42 @@ fn unknown_exception_empty_hash(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOp
         error.legacy_text().contains(&accepted),
         "accepted prefix missing: {error:?}"
     );
-    assert!(
-        error
-            .message
-            .contains("outcome is unknown. Check Open Orders, then try again"),
-        "{error:?}"
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids.as_slice(),
+        std::slice::from_ref(&accepted)
     );
-    let serialized = serde_json::to_value(error).unwrap();
-    let elements = serialized["elements"]
-        .as_array()
-        .expect("shared per-element journal");
-    assert!(elements.iter().any(|row| {
-        row["status"] == "placed"
-            && row["orderIds"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|id| id == &accepted)
-    }));
-    for identity in unknown_ids {
+    for identity in &unknown_ids {
         assert!(
-            elements
-                .iter()
-                .any(|row| row["status"] == "unknown" && row["clientOrderId"] == identity),
-            "{elements:?}"
+            error.message.contains(identity),
+            "unknown identity missing: {error:?}"
         );
     }
-    assert!(elements.iter().any(|row| row["status"] == "notSent"));
-    assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::Event(event)) if event.message.contains("outcome is unknown. Check Open Orders, then try again")
-            && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
-    )), "missing Unknown telemetry: {actions:?}");
+    let event = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("Unknown journal telemetry");
+    assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+    assert!(
+        event
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    );
+    let report = event
+        .fields
+        .iter()
+        .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten())
+        .expect("journal snapshot");
+    let report: Value = serde_json::from_str(report).unwrap();
+    assert_eq!(report["placed"], json!([accepted]));
+    assert_eq!(report["unknown"], json!(unknown_ids));
+    assert!(!report["notSent"].as_array().unwrap().is_empty());
 }
 
 #[test]
