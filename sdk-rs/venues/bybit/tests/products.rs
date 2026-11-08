@@ -246,6 +246,7 @@ fn native_options_chain_expiries_greeks_and_iv_order_keep_their_wire_contract() 
             .contains("\"theta\":-4.0")
     );
     let mut opts = order(OPTION, 0.12);
+    opts.price = None;
     opts.implied_volatility = Some(0.6);
     opts.client_order_id = Some("option-caller".into());
     h.command(Command::PlaceOrders {

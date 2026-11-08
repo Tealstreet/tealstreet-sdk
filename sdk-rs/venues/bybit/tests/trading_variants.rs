@@ -334,6 +334,146 @@ fn outcome(h: &Harness, command: u32) -> Option<safe_cex_engine::Outcome> {
         .and_then(|(_, outcome)| *outcome)
 }
 
+fn assert_plain_limit_plan_refused(price: Option<f64>, valid_rows: usize) {
+    for variant in [Variant::Spot, Variant::Hyrotrader] {
+        let mut h = ready(variant);
+        let mut orders = vec![order("BTCUSDT", 1.0); valid_rows];
+        let mut invalid = order("BTCUSDT", 1.0);
+        invalid.price = price;
+        orders.push(invalid);
+        place(&mut h, 141, orders);
+        assert_eq!(
+            h.requests.len(),
+            0,
+            "{variant:?}: invalid full plan reached transport"
+        );
+        assert!(matches!(h.result(141), Some(Err(_))));
+        assert_eq!(outcome(&h, 141), Some(safe_cex_engine::Outcome::NotSent));
+        assert!(!h.unknown.contains(&141));
+        assert!(h.engine.store().orders().is_empty());
+    }
+}
+
+#[test]
+fn plain_limit_plan_valid_first_unpriced_second_refuses_before_transport() {
+    assert_plain_limit_plan_refused(None, 1);
+}
+
+#[test]
+fn plain_limit_plan_valid_first_zero_price_second_refuses_before_transport() {
+    assert_plain_limit_plan_refused(Some(0.0), 1);
+}
+
+#[test]
+fn plain_limit_plan_positive_price_rounding_to_zero_refuses_before_transport() {
+    assert_plain_limit_plan_refused(Some(0.01), 1);
+}
+
+#[test]
+fn plain_limit_plan_unpriced_last_row_beyond_chunk_boundary_refuses_before_transport() {
+    assert_plain_limit_plan_refused(None, 11);
+}
+
+#[test]
+fn plain_limit_plan_invalid_second_batch_refuses_before_transport() {
+    for price in [None, Some(0.0)] {
+        let mut h = ready(Variant::Linear);
+        let mut prime = order("BTCUSDT", 1.0);
+        prime.client_order_id = Some("prime-mode".into());
+        place(&mut h, 144, vec![prime]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        h.reply(request.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"prime","orderLinkId":"prime-mode"}]},"retExtInfo":{"list":[{"code":0}]}}"#);
+        assert!(matches!(h.result(144), Some(Ok(_))));
+        assert!(h.requests.is_empty());
+        let mut orders = vec![order("BTCUSDT", 1.0); 10];
+        let mut invalid = order("BTCUSDT", 1.0);
+        invalid.price = price;
+        orders.push(invalid);
+        place(&mut h, 145, orders);
+        assert_eq!(
+            h.requests.len(),
+            0,
+            "invalid second batch released its valid first batch"
+        );
+        assert!(matches!(h.result(145), Some(Err(_))));
+        assert_eq!(outcome(&h, 145), Some(safe_cex_engine::Outcome::NotSent));
+        assert!(!h.unknown.contains(&145));
+    }
+}
+
+#[test]
+fn plain_limit_plan_all_valid_spot_rows_are_sent_once_in_order() {
+    let mut h = ready(Variant::Spot);
+    let orders = (0..12)
+        .map(|index| {
+            let mut opts = order("BTCUSDT", 1.0);
+            opts.client_order_id = Some(format!("preflight-{index}"));
+            opts
+        })
+        .collect();
+    place(&mut h, 142, orders);
+    let mut ids = Vec::new();
+    for index in 0..12 {
+        if h.requests.is_empty() {
+            h.advance(1_001.0);
+        }
+        assert_eq!(h.requests.len(), 1);
+        let request = h.take("/v5/order/create");
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).expect("create body");
+        assert_eq!(sent["price"], "100");
+        assert_eq!(sent["qty"], "1");
+        assert_eq!(sent["orderLinkId"], format!("preflight-{index}"));
+        let id = format!("accepted-{index}");
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({
+                "retCode":0,"result":{"orderId":id,"orderLinkId":format!("preflight-{index}")}
+            })
+            .to_string(),
+        );
+        ids.push(id);
+    }
+    assert_eq!(
+        h.result(142),
+        Some(&Ok(serde_json::to_string(&ids).expect("created ids")))
+    );
+    assert!(h.requests.is_empty());
+    assert!(!h.unknown.contains(&142));
+}
+
+#[test]
+fn plain_limit_plan_bbo_without_explicit_price_is_still_sent_once() {
+    let mut h = ready(Variant::Inverse);
+    let mut opts = order("BTCUSD", 1.0);
+    opts.price = None;
+    opts.reduce_only = Some(true);
+    opts.client_order_id = Some("bbo-control".into());
+    opts.bybit_bbo = Some(BybitBbo {
+        side_type: "Queue".into(),
+        level: 3.0,
+    });
+    place(&mut h, 143, vec![opts]);
+    assert_eq!(h.requests.len(), 1);
+    resolve_mode(&mut h, "BTCUSD");
+    assert_eq!(h.requests.len(), 1);
+    let request = h.take("/v5/order/create");
+    let sent: serde_json::Value = serde_json::from_str(body(&request)).expect("create body");
+    assert_eq!(sent["bboSideType"], "Queue");
+    assert_eq!(sent["bboLevel"], "3");
+    assert_eq!(sent["reduceOnly"], true);
+    assert_eq!(sent["orderLinkId"], "bbo-control");
+    assert!(sent.get("price").is_none());
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"bbo-accepted","orderLinkId":"bbo-control"}}"#,
+    );
+    assert_eq!(h.result(143), Some(&Ok("[\"bbo-accepted\"]".into())));
+    assert!(h.requests.is_empty());
+}
+
 #[test]
 fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
     let mut h = ready(Variant::Inverse);

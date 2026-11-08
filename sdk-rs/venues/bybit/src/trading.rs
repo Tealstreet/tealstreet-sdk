@@ -848,6 +848,11 @@ impl BybitLinear {
             && (opts.kind == OrderType::Limit || (conditional && price.is_some())))
         .then_some(price)
         .flatten();
+        // A missing price must not escape the normalized-price checks below.
+        // Options use their own price/IV formatter; BBO supplies its native price.
+        if opts.kind == OrderType::Limit && execution.bbo_side.is_none() && limit_price.is_none() {
+            return Err("Bybit limit orders require a price or BBO".into());
+        }
         let direction = match trigger_price.filter(|_| !self.variant.is_spot()) {
             Some(trigger) => {
                 let ticker = cx
