@@ -288,6 +288,65 @@ it('labels an interrupted read separately from uncertain writes', async () => {
   expect(((await failure) as Error).message).not.toContain('interrupted writes');
 });
 
+it('dispatches a write unchanged when its ready worker bridge stays attached', async () => {
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  const ownerA = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-A' });
+  });
+  exchange.on('callMethod', ownerA);
+  await expect(exchange.setLeverage('BTCUSDT', 3)).resolves.toBe('owner-A');
+  expect(ownerA).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    method: 'setLeverage', args: ['BTCUSDT', 3],
+  }));
+});
+
+it.each(['exchange', 'emitter'] as const)(
+  'drops a write when its ready worker bridge changes during the await through %s',
+  async (subscriptions) => {
+    const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+    const ownerA = vi.fn();
+    const ownerB = vi.fn(({ requestId }: { requestId: string }) => {
+      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
+    });
+    exchange.on('callMethod', ownerA);
+    const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+    expect(ownerA).not.toHaveBeenCalled();
+
+    // Replace the login on the retained mirror before the ready await resumes.
+    const events = subscriptions === 'exchange' ? exchange : exchange.emitter;
+    events.off('callMethod', ownerA);
+    events.on('callMethod', ownerB);
+    expect(await pending).toMatchObject({ command: 'setLeverage', outcome: 'notSent' });
+    expect(ownerA).not.toHaveBeenCalled();
+    expect(ownerB).not.toHaveBeenCalled();
+
+    await expect(exchange.setLeverage('BTCUSDT', 7)).resolves.toBe('owner-B');
+    expect(ownerB).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      method: 'setLeverage', args: ['BTCUSDT', 7],
+    }));
+  },
+);
+
+it('drops a write when a ready bridge callback is reattached for another owner', async () => {
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  const ownerA = { writes: vi.fn() };
+  const ownerB = { writes: vi.fn() };
+  const bridge = function (this: typeof ownerA, { requestId }: { requestId: string }) {
+    this.writes();
+    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'current-owner' });
+  };
+  exchange.emitter.on('callMethod', bridge, ownerA);
+  const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+  exchange.emitter.off('callMethod', bridge);
+  exchange.emitter.on('callMethod', bridge, ownerB);
+  expect(await pending).toMatchObject({ command: 'setLeverage', outcome: 'notSent' });
+  expect(ownerA.writes).not.toHaveBeenCalled();
+  expect(ownerB.writes).not.toHaveBeenCalled();
+
+  await expect(exchange.setLeverage('BTCUSDT', 7)).resolves.toBe('current-owner');
+  expect(ownerB.writes).toHaveBeenCalledOnce();
+});
+
 it('retries a worker candle read once on the replacement bridge and ignores the old reply', async () => {
   vi.useFakeTimers();
   // Lighter explicitly fetches candles in the worker.

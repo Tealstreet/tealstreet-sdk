@@ -530,6 +530,10 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+Before awaiting a ready worker bridge, forwarding captures its subscription
+identity and checks it again before dispatch. A removed or replaced bridge
+drops the pending call; an undispatched write rejects as `notSent`. Reattaching
+the same callback is a new subscription, even when the account name is reused.
 
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from

@@ -1835,7 +1835,14 @@ export class RustEngineExchange extends BaseExchange {
   private callWorker = async (method: string, ...args: unknown[]): Promise<unknown> => {
     const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
     timing?.mark('called');
-    await this.untilWorkerBridge();
+    const bridgeIsCurrent = await this.untilWorkerBridge();
+    if (this.isDisposed || !bridgeIsCurrent()) {
+      const message = `${this.name} ${method} was not sent: the account worker changed before dispatch`;
+      const clientOrderIds = workerCallClientOrderIds(method, args);
+      throw Object.assign(new ExchangeError(message, {
+        message, kind: 'internal', ...(WORKER_WRITE_METHODS.has(method) ? { outcome: 'notSent' as const } : {}),
+      }), { code: 'WORKER_STOPPED', command: method, ...(clientOrderIds ? { clientOrderIds } : {}) });
+    }
     const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
     return timing ? runWithWriteTiming(timing, call) : call();
   };
@@ -1875,13 +1882,14 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
-  private untilWorkerBridge = async (): Promise<void> => {
+  private untilWorkerBridge = async (): Promise<() => boolean> => {
     const deadline = Date.now() + WORKER_BRIDGE_WAIT_MS;
     while (!this.emitter.hasListeners('callMethod')) {
       if (this.isDisposed) throw new Error(`${this.name} disposed before its worker bridge was wired`);
       if (Date.now() >= deadline) throw new Error(`${this.name} worker bridge was not wired`);
       await new Promise((resolve) => setTimeout(resolve, WORKER_BRIDGE_POLL_MS));
     }
+    return this.emitter.captureListenerGuard('callMethod');
   };
 
   private refuseOnMirror() {
