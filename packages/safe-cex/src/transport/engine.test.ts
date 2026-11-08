@@ -27,6 +27,7 @@ import { createAPI as createKucoinAPI } from '../__tests__/reference/kucoin/kuco
 import { createKucoinSpotAPI } from '../__tests__/reference/kucoin/kucoinspot.api';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
+import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { SignedPublicProxyRefusal } from './publicProxyGuard';
 import { setDefaultTransport } from './registry';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
@@ -1947,6 +1948,76 @@ describe('managed engine HTTP preparation', () => {
     return { raw: { ...raw, prepareHttp }, cancel, dispatch, ready, bind, prepareHttp };
   };
   const packet = () => ({ ...request(), request: 77, headers: {}, intent: 'primary' as const });
+
+  it('preserves Axios scalar and omitted headers without changing signed text', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), raw);
+    const headers: Record<string, string> = { 'X-Venue-Signature': 'exact+%2F', 'X-Scalar': 'text' };
+    Reflect.set(headers, 'X-Number', 42);
+    Reflect.set(headers, 'X-False', false);
+    Reflect.set(headers, 'X-Null', null);
+    Reflect.set(headers, 'X-Undefined', undefined);
+    try {
+      await routed.request({ ...request(), headers });
+      const sent = raw.request.mock.lastCall?.[0];
+      expect(sent?.headers).toEqual({
+        'X-Venue-Signature': 'exact+%2F', 'X-Scalar': 'text', 'X-Number': '42',
+      });
+      expect(raw.request).toHaveBeenCalledTimes(1);
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it('retains the existing array-header refusal before a physical send', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), raw);
+    const headers: Record<string, string> = {};
+    Reflect.set(headers, 'X-Array', ['first', 'second']);
+    try {
+      await expect(routed.request({ ...request(), headers }))
+        .rejects.toMatchObject({ code: 'HTTP_PREPARATION_INVALID' });
+      expect(raw.request).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it('refuses a non-callable tunnel preparation hook without a legacy send', async () => {
+    const raw = makeRaw();
+    Reflect.set(mocks.adapter, 'prepare', 'not-callable');
+    const routed = createEngineTransport('bybit', options({ tealstreetTunnel: true }), raw);
+    try {
+      if (!routed.prepareHttp) throw new Error('Managed preparation unavailable');
+      await expect(routed.prepareHttp(packet()))
+        .rejects.toMatchObject({ code: 'HTTP_PREPARATION_UNSUPPORTED' });
+      expect(mocks.adapter).not.toHaveBeenCalled();
+      expect(raw.request).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+      Reflect.deleteProperty(mocks.adapter, 'prepare');
+    }
+  });
+
+  it('refuses missing quota-read state before admission without sending or retaining preparation', async () => {
+    const probe = managedRaw();
+    const begin = HyperliquidStartupFacts.prototype.begin;
+    Reflect.set(HyperliquidStartupFacts.prototype, 'begin', () => undefined);
+    const routed = createEngineTransport('hyperliquid', options({ transport: directTransport }), probe.raw);
+    try {
+      if (!routed.prepareHttp) throw new Error('Managed preparation unavailable');
+      await expect(routed.prepareHttp({
+        ...packet(), method: 'POST', url: 'https://api.hyperliquid.xyz/info',
+        body: '{"type":"clearinghouseState","user":"fixture"}',
+      })).rejects.toMatchObject({ code: 'HTTP_PREPARATION_INVALID' });
+      expect(probe.cancel).toHaveBeenCalledOnce();
+      expect(probe.dispatch).not.toHaveBeenCalled();
+      expect(probe.raw.request).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+      Reflect.set(HyperliquidStartupFacts.prototype, 'begin', begin);
+    }
+  });
 
   it('finishes proxy authorization before readiness and binds the exact signed packet without I/O', async () => {
     const probe = managedRaw();
