@@ -112,6 +112,23 @@ describe('native Balance frames into the generated contract', () => {
     expect(previous.coins.BTC.amount).toBe(0);
     expect(previous.currencies.USD.total).toBe(19);
   });
+  it.each(['zero', 'currencies-only'])('preserves separately fetched info while replacing maps with %s', (next) => {
+    const store = new DefaultStore();
+    const info = { accountType: 'UNIFIED', collateral: { BTC: true }, tiers: [{ tier: 1 }] };
+    store.update({ balance: { ...emptyBalance, info } });
+    const applier = new FrameApplier(store);
+    applier.apply(frame('rich'));
+    expect(store.balance.info).toBe(info);
+    assert.ok(store.balance.coins);
+    assert.ok(store.balance.currencies);
+
+    applier.apply(frame(next));
+    expect(store.balance.info).toBe(info);
+    expect(store.balance).toEqual({ ...requiredBalance(next), info });
+    expect(store.balance).not.toHaveProperty('coins');
+    expect(store.serialize().balance).toEqual({ ...requiredBalance(next), info });
+    if (next === 'zero') expect(store.balance).not.toHaveProperty('currencies');
+  });
   it('retains native nonfinite numbers and signed zero rather than fabricating display defaults', () => {
     const balance = requiredBalance('nonfinite');
     expect(Number.isNaN(balance.used)).toBe(true);
