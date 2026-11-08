@@ -15,6 +15,12 @@ pub enum Param {
 #[serde(transparent)]
 pub struct Params(BTreeMap<&'static str, Param>);
 impl Params {
+    pub(crate) fn text_value(&self, key: &str) -> Option<&str> {
+        match self.0.get(key) {
+            Some(Param::Text(value)) => Some(value),
+            _ => None,
+        }
+    }
     pub fn text(mut self, key: &'static str, value: impl Into<String>) -> Self {
         self.0.insert(key, Param::Text(value.into()));
         self

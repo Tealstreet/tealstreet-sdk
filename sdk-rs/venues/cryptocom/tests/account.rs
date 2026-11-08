@@ -1224,7 +1224,7 @@ fn snapshot_token_invalid_order_ack_does_not_invalidate_valid_identity_does() {
         h.load();
         let token = h.engine.store_mut().begin_orders_snapshot().unwrap();
         let order = serde_json::from_str(
-            r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.0021,"price":90.04}"#,
+            r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.002,"price":90.0}"#,
         )
         .unwrap();
         h.event(Event::Command(safe_cex_engine::Command::PlaceOrders {
