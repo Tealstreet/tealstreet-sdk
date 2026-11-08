@@ -1876,7 +1876,7 @@ impl Lighter {
             if error.outcome == Some(Outcome::Unknown) {
                 error
                     .venue_message
-                    .get_or_insert_with(|| error.message.clone());
+                    .get_or_insert_with(|| error.message.clone().into());
                 if job.protection.is_some() || job.amend.is_some() {
                     if !error.message.contains(UNKNOWN_TEXT) {
                         error.message.push_str(". ");

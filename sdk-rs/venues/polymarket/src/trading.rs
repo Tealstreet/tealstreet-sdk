@@ -958,7 +958,9 @@ fn write_failure(status: u16, message: String) -> VenueError {
 }
 
 fn ambiguous_write(mut error: VenueError) -> VenueError {
-    error.venue_message.get_or_insert(error.message);
+    error
+        .venue_message
+        .get_or_insert_with(|| error.message.into_boxed_str());
     error.message = "Polymarket write outcome is unknown. Check Open Orders".into();
     error.outcome(Outcome::Unknown)
 }
