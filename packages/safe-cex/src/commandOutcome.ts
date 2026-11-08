@@ -1,7 +1,7 @@
-import type { BuilderAuthorizationDetail, HistoryDecodeDetail, OrderIdentityReceipt } from '@tealstreet/safe-cex-wasm/host';
+import type { BuilderAuthorizationDetail, HistoryDecodeDetail, OrderIdentityReceipt, VenueErrorDetail } from '@tealstreet/safe-cex-wasm/host';
 import type { ErrorCategory } from './health/errorPatterns';
 
-import { builderAuthorizationOf, historyDecodeOf } from '@tealstreet/safe-cex-wasm/host';
+import { builderAuthorizationOf, historyDecodeOf, writePlanElementsOf } from '@tealstreet/safe-cex-wasm/host';
 
 // Frozen errors must retain their identity and command outcome. Weak membership
 // carries only reporting state and cannot keep completed operations alive.
@@ -97,6 +97,8 @@ export type SerializedCommandError = {
   partialOrderCount?: number;
   totalOrderCount?: number;
   failedOrderIndex?: number;
+  /** Complete validated logical outcomes, including the untouched suffix. */
+  elements?: VenueErrorDetail['elements'];
   errorReported?: boolean;
 };
 
@@ -109,6 +111,8 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   if (typeof source.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(source.causeCode)) result.causeCode = source.causeCode;
   const historyDecode = historyDecodeOf(source.historyDecode);
   if (historyDecode) result.historyDecode = historyDecode;
+  const elements = writePlanElementsOf(source.elements);
+  if (elements) result.elements = elements;
   const errorReported = isErrorReported(value) ? true : source.errorReported;
   if (typeof errorReported === 'boolean') result.errorReported = errorReported;
   for (const key of ['name', 'stack', 'command', 'clientOrderId', 'receiptKey', 'venueCode', 'venueMessage'] as const) {
