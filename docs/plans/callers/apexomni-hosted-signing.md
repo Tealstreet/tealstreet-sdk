@@ -36,6 +36,9 @@ result. Partial, malformed, foreign-account or canceled results refuse atomicall
 The trusted HTTP compatibility capture accepts contract-free canonical HMAC
 descriptors and returns the required passphrase header locally. HTTP packets
 that already contain contract signatures retain their exact serialized body.
+Every POST signs the native sorted semantic fields: serialized form and multipart
+bodies are decoded for signing, so boundary bytes and transport field order do
+not enter the MAC. Malformed bodies and non-text multipart fields refuse.
 Actual trading uses the native batch graph and never delegates order-body
 construction to the compatibility capture.
 
@@ -74,6 +77,9 @@ ownership, raw-wire redaction, provider errors, cancellation, unsupported modes
 and construction rules. Actual WASM tests exercise local/device and keyless
 origin custody, full HTTP packets, WS preimages and dependent contract/HMAC work
 with network access forbidden.
+Shared POST goldens are checked by both the native signer and the HTTP capture
+for leverage, ordinary/protective orders, cancel and cancel-all; batch placements
+and cancellations keep the same per-packet canonicalization.
 
 The venue README owns protocol restrictions. Scoped checks and any build
 limitations are recorded in the PR/report; deterministic tapes are not live

@@ -206,6 +206,8 @@ ApeX Omni admits RemoteSigner through `apexomni-batch`: device-held OmniKey
 contracts precede base64-text-key HMAC signing. Origins retain their API
 passphrase in Present-only provider custody; the secret and OmniKey stay on the
 device. Private PayloadSigner and secondary read keys refuse before I/O.
+ApeX HTTP POST captures sign sorted semantic form fields, decoding serialized
+form/multipart bodies while preserving transport bytes and existing zkLink signatures.
 See `docs/plans/callers/apexomni-hosted-signing.md` for the wire and parity contract.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.

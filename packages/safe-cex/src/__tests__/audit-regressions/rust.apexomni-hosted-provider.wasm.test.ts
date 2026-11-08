@@ -7,6 +7,7 @@ import { createRemoteSignerProvider } from '../../exchanges/rust/remoteSignerPro
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { prepareRecordedHttp } from '../support/managedHttp';
+import postVectors from '../fixtures/apexomni-post-signing.golden.json';
 
 const now = 1_700_000_000_123;
 const seed = `${'01'.repeat(64)}1b`;
@@ -24,6 +25,64 @@ function fixture(options: Partial<ExchangeOptions> = {}) {
     passphrase: 'fixture-pass', omniKeySeed: seed, ...options }, new DefaultStore());
   live.push(exchange); return { exchange, io };
 }
+
+it.each(postVectors)('actual WASM local and remote match the native POST golden: $label', async (vector) => {
+  const device = fixture();
+  const sign = vi.fn((input: RemoteSignerRequest) => device.exchange.signWsAuth(input));
+  const origin = fixture({ secret: '', omniKeySeed: undefined,
+    remoteSigner: { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} } });
+  for (const [data, contentType] of [
+    [vector.body, vector.contentType],
+    [new URLSearchParams([...vector.fields].sort(([a], [b]) => a < b ? 1 : -1) as [string, string][]).toString(), 'application/x-www-form-urlencoded'],
+  ]) {
+    const request: RemoteSignerRequest = { id: vector.label, type: 'http', exchangeName: 'apexomni', config: {
+      method: 'POST', url: vector.path, baseURL: 'https://omni.apex.exchange/api', data,
+      headers: { 'Content-Type': contentType },
+    } };
+    const local = await device.exchange.signHttpRequest(request);
+    const remote = await origin.exchange.signHttpRequest(request);
+    expect(local.error).toBeUndefined(); expect(remote.error).toBeUndefined();
+    expect(local.config?.headers['APEX-SIGNATURE']).toBe(vector.signature);
+    expect(remote.config).toEqual(local.config);
+    expect(remote.config?.data).toBe(data);
+  }
+  expect(sign).toHaveBeenCalledTimes(2);
+  expect(device.io).not.toHaveBeenCalled(); expect(origin.io).not.toHaveBeenCalled();
+});
+
+it('a shared signer preserves each native golden across a place/cancel batch', async () => {
+  const device = fixture();
+  const sign = vi.fn((input: RemoteSignerRequest) => device.exchange.signWsAuth(input));
+  const origin = fixture({ secret: '', omniKeySeed: undefined,
+    remoteSigner: { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} } });
+  for (const vector of postVectors.filter((item) => item.kind !== 'multipart')) {
+    const data = new URLSearchParams([...vector.fields].sort(([a], [b]) => a < b ? 1 : -1) as [string, string][]).toString();
+    const request: RemoteSignerRequest = { id: vector.label, type: 'http', exchangeName: 'apexomni', config: {
+      method: 'POST', url: vector.path, baseURL: 'https://omni.apex.exchange/api', data,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    } };
+    const local = await device.exchange.signHttpRequest(request);
+    const remote = await origin.exchange.signHttpRequest(request);
+    expect(local.error).toBeUndefined(); expect(remote.error).toBeUndefined();
+    expect(remote.config).toEqual(local.config);
+    expect(remote.config?.headers['APEX-SIGNATURE']).toBe(vector.signature);
+    expect(remote.config?.data).toBe(data);
+  }
+  expect(sign).toHaveBeenCalledTimes(4);
+  expect(device.io).not.toHaveBeenCalled(); expect(origin.io).not.toHaveBeenCalled();
+});
+
+it('malformed multipart refuses before device signing or I/O', async () => {
+  const sign = vi.fn();
+  const origin = fixture({ secret: '', omniKeySeed: undefined,
+    remoteSigner: { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} } });
+  const response = await origin.exchange.signHttpRequest({ id: 'malformed', type: 'http', exchangeName: 'apexomni', config: {
+    method: 'POST', url: '/v3/set-initial-margin-rate', baseURL: 'https://omni.apex.exchange/api',
+    data: postVectors[0].body, headers: { 'Content-Type': 'multipart/form-data' },
+  } });
+  expect(response.error).toBeTruthy(); expect(response.config).toBeUndefined();
+  expect(sign).not.toHaveBeenCalled(); expect(origin.io).not.toHaveBeenCalled();
+});
 
 it.each([
   { method: 'GET', url: '/v3/account', params: { memo: 'é/+%', zero: 0 }, payload: `${now}GET/api/v3/account?memo=%C3%A9%2F%2B%25&zero=0` },
