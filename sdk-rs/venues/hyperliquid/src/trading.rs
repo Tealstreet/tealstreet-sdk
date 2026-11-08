@@ -75,7 +75,6 @@ enum Step {
         time_ms: Option<u64>,
     },
     Place(PlaceOrderOpts),
-    Restore,
     Cancel(Vec<Order>),
     Leverage {
         symbol: String,
@@ -124,7 +123,7 @@ impl Job {
     }
     fn touches(&self, symbol: &str) -> bool {
         self.steps.iter().any(|step| match step {
-            Step::ScheduleCancel { .. } | Step::Restore => true,
+            Step::ScheduleCancel { .. } => true,
             Step::Place(order) => order.symbol == symbol,
             Step::Cancel(orders) => orders.iter().any(|order| order.symbol == symbol),
             Step::Leverage { symbol: market, .. } => market == symbol,
@@ -153,7 +152,7 @@ impl Job {
             return false;
         }
         self.steps.iter().all(|step| match step {
-            Step::ScheduleCancel { .. } | Step::Restore => false,
+            Step::ScheduleCancel { .. } => false,
             Step::Place(order) => {
                 !older.touches(&order.symbol)
                     && order
@@ -878,11 +877,8 @@ impl Hyperliquid {
             .steps
             .pop_front()
             .unwrap();
-        if let Some(job) = self.trading.active.as_mut()
-            && let Err(error) = job.journal.begin(&step)
-        {
-            self.finish_trade(cx, Err(error));
-            return;
+        if let Some(job) = self.trading.active.as_mut() {
+            job.journal.begin(&step);
         }
         let prepared = self.prepare_write(cx, step);
         let (action, effect) = match prepared {
@@ -896,11 +892,8 @@ impl Hyperliquid {
             self.pump_trades(cx);
             return;
         }
-        if let Some(job) = self.trading.active.as_mut()
-            && let Err(error) = job.journal.prepared(&effect)
-        {
-            self.finish_trade(cx, Err(error));
-            return;
+        if let Some(job) = self.trading.active.as_mut() {
+            job.journal.prepared(&effect);
         }
         if let Err(error) = self.submit_trade(cx, &action, effect) {
             self.finish_trade(cx, Err(error));
@@ -1081,7 +1074,6 @@ impl Hyperliquid {
                     Effect::Place(records),
                 ))
             }
-            Step::Restore => self.prepare_protective_restore(cx),
             Step::Cancel(orders) => {
                 let cancels = orders
                     .iter()
@@ -1187,17 +1179,14 @@ impl Hyperliquid {
                 self.finish_trade(cx, Err(error.venue_error()));
                 return;
             }
-            if outcome.is_ok()
-                && let Err(error) = self.settle_write_rows(&request, &[], status)
-            {
-                self.finish_trade(cx, Err(error));
-                return;
+            if outcome.is_ok() {
+                self.settle_write_rows(&request, &[], status);
             }
             self.finish_trade(cx, outcome);
             return;
         }
 
-        let idempotent_cancel = self.trading.active.as_ref().unwrap().amend_source.is_none();
+        let idempotent_cancel = !self.spot;
         let status = result.as_ref().ok().map(|r| r.status);
         let parsed = result.map_err(ReplyError::uncertain).and_then(|r| {
             if (200..300).contains(&r.status) {
@@ -1327,10 +1316,7 @@ impl Hyperliquid {
             self.finish_trade(cx, Err(error.venue_error()));
             return;
         }
-        if let Err(error) = self.settle_write_rows(&request, &statuses, status) {
-            self.finish_trade(cx, Err(error));
-            return;
-        }
+        self.settle_write_rows(&request, &statuses, status);
         let full_position = request.order_reply == OrderReply::FullPosition;
         match request.effect {
             Effect::ScheduleCancel => unreachable!(),
@@ -1552,37 +1538,16 @@ impl Hyperliquid {
             cx.clear_timer(timer);
         }
         self.trading.inflight = false;
-        let result = match result {
-            Err(error) => match self
-                .trading
-                .active
-                .as_mut()
-                .map(|job| job.journal.fail(error.clone()))
-            {
-                Some(Err(journal_error)) => Err(journal_error),
-                _ => Err(error),
-            },
-            other => other,
-        };
-        let result = match result {
-            Err(error) => match self.protective_trade_failure(cx, error) {
-                Some(error) => Err(error),
-                None => return,
-            },
-            other => other,
-        };
+        if let Err(error) = &result
+            && let Some(job) = self.trading.active.as_mut()
+        {
+            job.journal.fail(error.clone());
+        }
+        let result = result.map_err(|error| self.protective_trade_failure(cx, error));
         if let Some(mut job) = self.trading.active.take() {
             if let Some(timer) = self.trading.builder_wait.take() {
                 cx.clear_timer(timer);
             }
-            let result = if result.is_ok() {
-                job.protection
-                    .as_ref()
-                    .and_then(|p| p.restored_error())
-                    .map_or(result, Err)
-            } else {
-                result
-            };
             if let Err(mut error) = result {
                 error = error.partial_ids(&job.ids);
                 let unknown = error.outcome != Some(Outcome::Rejected)

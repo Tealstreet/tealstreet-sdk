@@ -7,11 +7,8 @@ use safe_cex_engine::error::Protection;
 pub(super) struct Amend {
     before: Order,
     original: OrderWire,
-    grouping: Option<&'static str>,
     target_kind: OrderType,
     target: f64,
-    restoring: bool,
-    refusal: Option<VenueError>,
     peers: Vec<String>,
 }
 impl Hyperliquid {
@@ -110,11 +107,6 @@ impl Hyperliquid {
         if row.limit_px <= 0. || (!original.c.is_empty() && !valid_cloid(&original.c)) {
             return Err("Hyperliquid original execution price or client identity is not proven; order unchanged".into());
         }
-        let grouping = (row.is_position_tpsl == Some(true)
-            && row.orig_sz == 0.
-            && row.sz == 0.
-            && row.reduce_only)
-            .then_some("positionTpsl");
         if !cx.store.loaded().positions || !has_position(cx.store, old) {
             return Err(
                 "Hyperliquid position not loaded or already closed; order unchanged".into(),
@@ -127,13 +119,10 @@ impl Hyperliquid {
         let captured = Amend {
             before,
             original,
-            grouping,
             target_kind: opts.kind,
             target: price_wire(opts.price.unwrap_or(0.), precision, false)?
                 .parse()
                 .map_err(|_| "Invalid trigger")?,
-            restoring: false,
-            refusal: None,
             peers: cx
                 .store
                 .orders()
@@ -241,53 +230,38 @@ impl Hyperliquid {
         let Some(protected) = job.protection.as_ref() else {
             return Ok(());
         };
-        let restoring = protected.restoring && matches!(trade.effect, Effect::Place(_));
-        if !restoring && !matches!(trade.effect, Effect::Cancel(_)) {
+        if !matches!(trade.effect, Effect::Cancel(_)) {
             return Ok(());
         }
         let now = release.time.raw_ms;
-        let source = if restoring {
-            if job.amend_filled || restore_obsolete(store, protected) {
-                return Err(not_sent(
-                    "Hyperliquid original protection is obsolete; restoration not sent",
-                ));
-            }
-            &protected.before
-        } else {
-            if !store.loaded().positions || !has_position(store, &protected.before) {
-                return Err(not_sent(
-                    "Hyperliquid position closed or is not loaded; original protection unchanged",
-                ));
-            }
-            let source = store.order(&protected.before.id).ok_or_else(|| {
-                not_sent("Hyperliquid original protection is no longer open; amendment not sent")
-            })?;
-            if source.symbol != protected.before.symbol
-                || source.side != protected.before.side
-                || source.kind != protected.before.kind
-                || source.price != protected.before.price
-                || source.filled != protected.before.filled
-                || source.client_order_id != protected.before.client_order_id
-                || !matches!(
-                    source.status,
-                    OrderStatus::Open | OrderStatus::Creating | OrderStatus::Canceling
-                )
-            {
-                return Err(not_sent(
-                    "Hyperliquid protection changed after sizing; order unchanged, retry the edit",
-                ));
-            }
-            source
-        };
+        if !store.loaded().positions || !has_position(store, &protected.before) {
+            return Err(not_sent(
+                "Hyperliquid position closed or is not loaded; original protection unchanged",
+            ));
+        }
+        let source = store.order(&protected.before.id).ok_or_else(|| {
+            not_sent("Hyperliquid original protection is no longer open; amendment not sent")
+        })?;
+        if source.symbol != protected.before.symbol
+            || source.side != protected.before.side
+            || source.kind != protected.before.kind
+            || source.price != protected.before.price
+            || source.filled != protected.before.filled
+            || source.client_order_id != protected.before.client_order_id
+            || !matches!(
+                source.status,
+                OrderStatus::Open | OrderStatus::Creating | OrderStatus::Canceling
+            )
+        {
+            return Err(not_sent(
+                "Hyperliquid protection changed after sizing; order unchanged, retry the edit",
+            ));
+        }
         let mark = store.reference_seen_at(&source.symbol, StopTriggerType::MarkPrice)
             .filter(|seen| now.is_finite() && *seen <= now)
             .and_then(|_| safe_cex_engine::protective_amend::fresh_reference(store, &source.symbol, StopTriggerType::MarkPrice, now))
             .ok_or_else(|| not_sent("Hyperliquid requires a fresh mark price before editing protection; order unchanged"))?;
-        let (kind, trigger) = if restoring {
-            (source.kind, source.price)
-        } else {
-            (protected.target_kind, protected.target)
-        };
+        let (kind, trigger) = (protected.target_kind, protected.target);
         let fires = match (source.side, kind) {
             (OrderSide::Sell, OrderType::StopLoss) | (OrderSide::Buy, OrderType::TakeProfit) => {
                 trigger >= mark
@@ -301,56 +275,8 @@ impl Hyperliquid {
         }
         Ok(())
     }
-    pub(super) fn prepare_protective_restore(
-        &self,
-        cx: &Cx<'_, Pending>,
-    ) -> Result<(Action, Effect), String> {
-        let p = self
-            .trading
-            .active
-            .as_ref()
-            .and_then(|j| j.protection.as_ref())
-            .ok_or("Original protection is unavailable")?;
-        let grouping = p
-            .grouping
-            .ok_or("Original placement semantics are unavailable")?;
-        // HL documents cloid format, without guaranteeing reuse after cancellation.
-        // Put-back preserves economic parameters but is a new order/identity.
-        let mut wire = p.original.clone();
-        wire.c = mint_cloid(cx)?;
-        let mut order = p.before.clone();
-        order.id.clear();
-        order.status = OrderStatus::Creating;
-        order.last_update = cx.now;
-        order.client_order_id = Some(wire.c.clone());
-        Ok((
-            Action::Order {
-                orders: vec![wire],
-                grouping,
-                builder: None,
-            },
-            Effect::Place(vec![Placement { at: cx.now, order }]),
-        ))
-    }
 }
 
-impl Amend {
-    pub(super) fn restored_error(&self) -> Option<VenueError> {
-        if !self.restoring {
-            return None;
-        }
-        let refusal = self.refusal.as_ref()?;
-        Some(VenueError {
-            kind: Some(ErrorKind::Rejected),
-            outcome: Some(Outcome::Rejected),
-            protection: Some(Protection::Restored),
-            ..VenueError::new(format!(
-                "Hyperliquid replacement refused; original {} protection restored unchanged as a new order: {}",
-                self.before.symbol, refusal.message
-            ))
-        })
-    }
-}
 impl Hyperliquid {
     pub(super) fn protective_replacement_active(&self) -> bool {
         self.trading
@@ -362,69 +288,31 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut error: VenueError,
-    ) -> Option<VenueError> {
+    ) -> VenueError {
         let Some(job) = self.trading.active.as_mut() else {
-            return Some(error);
+            return error;
         };
         let Some(p) = job.protection.as_mut() else {
-            return Some(error);
+            return error;
         };
-        if p.restoring {
-            if !matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-                || error.kind == Some(ErrorKind::RateLimited)
-            {
-                error.message = format!(
-                    "Hyperliquid {} put-back's outcome is unknown. Check Open Orders: {}",
-                    p.before.symbol, error.message
-                );
-                error.outcome = Some(Outcome::Unknown);
-                error.protection = None;
-                job.replacing_stop = None;
-                job.stop_note = Some(error.message.clone());
-                return Some(error);
-            }
-            if error.outcome == Some(Outcome::NotSent) && restore_obsolete(cx.store, p) {
-                job.stop_note = Some("Original protection was not restored because the position closed or newer protection superseded it".into());
-                job.replacing_stop = None;
-                return Some(error);
-            }
-            let prior = p
-                .refusal
-                .as_ref()
-                .map_or("replacement failed", |e| e.message.as_str());
-            error.message = format!(
-                "UNPROTECTED: original {} protection could not be restored after {prior}: {}",
-                p.before.symbol, error.message
-            );
-            error.protection = Some(Protection::Unprotected);
-            return Some(error);
-        }
         let definitive = error.kind != Some(ErrorKind::RateLimited)
             && (error.outcome == Some(Outcome::NotSent)
                 || (error.outcome == Some(Outcome::Rejected)
                     && custody::known_protective_refusal(&error.message)));
         if !job.effective || !definitive || job.amend_filled {
-            return Some(error);
+            return error;
         }
         if restore_obsolete(cx.store, p) {
             job.stop_note = Some("Original protection was not restored because the position closed or newer protection superseded it".into());
             job.replacing_stop = None;
-            return Some(error);
+            return error;
         }
-        if p.grouping.is_none() {
-            error.message = format!(
-                "UNPROTECTED: {} stop removed; please re-place protection. Replacement refused: {}",
-                p.before.symbol, error.message
-            );
-            error.protection = Some(Protection::Unprotected);
-            return Some(error);
-        }
-        p.refusal = Some(error);
-        p.restoring = true;
-        job.steps.clear();
-        job.steps.push_back(Step::Restore);
-        self.pump_trades(cx);
-        None
+        error.message = format!(
+            "UNPROTECTED: {} stop removed; please re-place protection. Replacement refused: {}",
+            p.before.symbol, error.message
+        );
+        error.protection = Some(Protection::Unprotected);
+        error
     }
 }
 

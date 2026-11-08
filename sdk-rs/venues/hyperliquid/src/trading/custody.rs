@@ -95,13 +95,7 @@ impl Hyperliquid {
                 return;
             }
         };
-        job.journal = match write_plan::Journal::new(&job.steps) {
-            Ok(journal) => journal,
-            Err(error) => {
-                cx.refuse_command(Operation::Mutation, error);
-                return;
-            }
-        };
+        job.journal = write_plan::Journal::new(&job.steps);
         let remaining = if job.amend_source.is_some() {
             remaining.min(AMEND_READ_MS as u32)
         } else {
@@ -713,9 +707,7 @@ impl Hyperliquid {
             None,
         )?;
         if let Some(job) = self.trading.active.as_mut() {
-            job.journal
-                .fail(fact.error().clone())
-                .map_err(|_| safe_cex_engine::request_context::Error::Invalid)?;
+            job.journal.fail(fact.error().clone());
         }
         Ok(())
     }
@@ -724,16 +716,16 @@ impl Hyperliquid {
         request: &Request,
         statuses: &[Status],
         status: Option<u16>,
-    ) -> Result<(), VenueError> {
+    ) {
         use safe_cex_engine::classify::{self, Intent, Native, NativeCode, Released};
         use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
         let Some(job) = self.trading.active.as_ref() else {
-            return Ok(());
+            return;
         };
         if !job.journal.pending() {
-            return Ok(());
+            return;
         }
-        let idempotent_cancel = job.amend_source.is_none();
+        let idempotent_cancel = !self.spot;
         let intent = match &request.effect {
             Effect::Place(_) if request.order_reply == OrderReply::FullPosition => Intent::Setting,
             Effect::Place(_) if job.amend_source.is_some() => Intent::Amend,
@@ -747,8 +739,14 @@ impl Hyperliquid {
             Effect::Cancel(orders) => orders.len(),
             Effect::ScheduleCancel | Effect::Leverage { .. } => 1,
         };
+        let Some(status) = status else {
+            if let Some(job) = self.trading.active.as_mut() {
+                job.journal.fail(unproven("Missing native reply"));
+            }
+            return;
+        };
         let response = Response {
-            status: status.ok_or_else(|| unproven("Missing native reply"))?,
+            status,
             headers: "",
             body: "",
         };
@@ -841,9 +839,8 @@ impl Hyperliquid {
             results.push(result);
         }
         if let Some(job) = self.trading.active.as_mut() {
-            job.journal.settle(results)?;
+            job.journal.settle(results);
         }
-        Ok(())
     }
 
     pub(super) fn report_trade_batch(

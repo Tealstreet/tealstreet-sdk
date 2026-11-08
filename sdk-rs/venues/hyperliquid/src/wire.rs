@@ -285,8 +285,6 @@ pub struct OrderRow<'a> {
     #[serde(default)]
     pub is_trigger: bool,
     #[serde(default)]
-    pub is_position_tpsl: Option<bool>,
-    #[serde(default)]
     pub timestamp: f64,
 }
 #[derive(Deserialize)]

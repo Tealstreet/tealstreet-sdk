@@ -1957,3 +1957,45 @@ fn a_trade_print_does_not_move_a_spot_market_order_price() {
         "mid 0.209265 + 5%"
     );
 }
+
+#[test]
+fn spot_cancel_errors_stop_before_replacement_including_terminal_misses() {
+    // TS hyperliquidspot.api.ts:78-95 throws; spot exchange:1205-1209 has no catch.
+    for error in [
+        "Cannot cancel this order",
+        "Order was never placed, already canceled, or filled. asset=10001",
+    ] {
+        let (mut e, _) = placed();
+        e.handle(
+            5000.,
+            Event::Command(Command::AmendOrder {
+                command: 2,
+                id: "101".into(),
+                price: Some(0.002),
+                amount: Some(6000.),
+            }),
+        );
+        let read = take_http(&mut e);
+        support::answer_order_status(&mut e, &read);
+        let cancel = take_http(&mut e);
+        let body: serde_json::Value =
+            serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["action"]["type"], "cancel");
+        acknowledge(&mut e, &cancel, 5001., &serde_json::json!({"status":"ok","response":{"type":"cancel","data":{"statuses":[{"error":error}]}}}).to_string());
+        let actions = prepared_now(&mut e);
+        let actions = support::advance_packet_timers(&mut e, actions, 20_000.);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange"))),
+            "no replacement or retry after cancel failure"
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
+                .count(),
+            1
+        );
+    }
+}
