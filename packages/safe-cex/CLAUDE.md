@@ -225,6 +225,12 @@ Explicit `publicDataOnly: true` in delegated setup preserves raw mode-intent
 flags but ignores signing callbacks, credentials and setup metadata. It installs
 no provider or identity, advertises no algorithms, and cannot sign. Private-mode
 callback validation, primary/secondary selection and mode refusals remain strict.
+Construction snapshots outer signer fields and their methods together under one
+guard before mode resolution. Admission, asynchronous factories and signer setup
+share that immutable snapshot, preserving receivers without further caller reads.
+Its opaque construction token is stripped before generic options are retained.
+Throwing getters or Proxy traps refuse with a fixed, redacted `invalidInput` /
+`notSent` error before transport; caller errors are never retained.
 
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.
@@ -602,7 +608,7 @@ bridge-fixes plan; caller IDs alone do not establish complete attribution.
 Native rejections retain known partial-order results. SDK worker and outer CLI
 executor error boundaries copy an explicit allowlist of command fields, including IDs and
 partial counts, instead of flattening them or copying arbitrary error objects.
-Validated `elements` retain each write-plan row's index, optional client order ID,
+Recorded `elements` retain each logical row's index, optional client order ID,
 placed IDs, applied effects with existing-target references, refusal or unknown
 detail through host errors and worker/CLI clones. Applied effects create no IDs;
 accepted partial IDs without row attribution remain unknown.
