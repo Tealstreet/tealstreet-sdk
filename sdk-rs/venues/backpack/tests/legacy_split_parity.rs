@@ -127,7 +127,7 @@ fn legacy_does_not_gate_price_caps_before_placement_or_cancel() -> Result {
 
 #[test]
 fn legacy_serial_failure_continues_with_complete_reporting() -> Result {
-    for status in [400, 200, 503] {
+    for status in [Some(400), Some(200), Some(503), None] {
         let (mut engine, _) = ready();
         place(
             &mut engine,
@@ -142,12 +142,22 @@ fn legacy_serial_failure_continues_with_complete_reporting() -> Result {
         let prefix = packet(&mut engine)?;
         reply(&mut engine, &prefix, 200, r#"{"id":"prefix"}"#);
         let middle = packet(&mut engine)?;
-        reply(
-            &mut engine,
-            &middle,
-            status,
-            r#"{"code":"ORDER_REJECTED","message":"scripted failure"}"#,
-        );
+        if let Some(status) = status {
+            reply(
+                &mut engine,
+                &middle,
+                status,
+                r#"{"code":"ORDER_REJECTED","message":"scripted failure"}"#,
+            );
+        } else {
+            engine.handle(
+                2000.,
+                Event::HttpFailed {
+                    request: middle.id,
+                    error: "lost reply",
+                },
+            );
+        }
         let suffix = packet(&mut engine)?;
         assert_ne!(suffix.id, middle.id);
         reply(&mut engine, &suffix, 200, r#"{"id":"suffix"}"#);
@@ -249,5 +259,36 @@ fn legacy_cancel_failure_continues_without_inventing_ids() -> Result {
             .is_none_or(|partial| partial.order_ids.is_empty())
     );
     assert!(requests(&mut engine).is_empty());
+    Ok(())
+}
+
+#[test]
+fn legacy_amend_preserves_requested_total_after_cancel_fills() -> Result {
+    for (amount, expected) in [(None,"5.00"),(Some(4.),"4.00"),(Some(1.),"1.00")] {
+        let old=ORDER.replace("\"executedQuantity\":\"0\"","\"executedQuantity\":\"2\"");
+        let (mut engine,_)=ready_orders(&format!("[{old}]"));
+        engine.handle(2000.,Event::Command(Command::AmendOrder {
+            command:901,id:"123".into(),price:Some(142.),amount,
+        }));
+        let cancel=packet(&mut engine)?;
+        assert_eq!(cancel.method,Method::Delete);
+        reply(&mut engine,&cancel,200,r#"{"id":"123","status":"Cancelled","executedQuantity":"3"}"#);
+        let replacement=packet(&mut engine)?;
+        let row:Value=serde_json::from_str(replacement.body.as_deref().ok_or("missing replacement")?)?;
+        assert_eq!(row["quantity"],expected);
+    }
+    Ok(())
+}
+
+#[test]
+fn legacy_stop_amend_does_not_add_a_position_or_reference_gate() -> Result {
+    let stop=ORDER.replace("\"orderType\":\"Limit\"","\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\",\"reduceOnly\":true")
+        .replace("\"side\":\"Bid\"","\"side\":\"Ask\"");
+    let (mut engine,_)=ready_orders(&format!("[{stop}]"));
+    engine.store_mut().set_positions(vec![]);
+    engine.handle(2000.,Event::Command(Command::AmendOrder {
+        command:901,id:"123".into(),price:Some(125.),amount:None,
+    }));
+    assert_eq!(packet(&mut engine)?.method,Method::Delete);
     Ok(())
 }
