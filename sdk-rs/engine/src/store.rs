@@ -46,6 +46,9 @@ pub struct Store {
     #[cfg(feature = "repair-mutations")]
     snapshot_begins: u64,
     positions: Vec<Position>,
+    /// Parallel to positions. Frame-fed metadata is authoritative, including
+    /// absent values; venue-owned rows compute their metadata at output time.
+    position_native_extras: Vec<Option<[Option<f64>; 2]>>,
     position_ids: bool,
     balance: Balance,
     coin_balances: Option<Vec<CoinBalance>>,
@@ -785,6 +788,7 @@ impl Store {
         self.orders_revision = self.orders_revision.saturating_add(1);
         self.read_covers.reset();
         self.positions.clear();
+        self.position_native_extras.clear();
         self.balance = Balance::default();
         self.coin_balances = None;
         self.currency_balances = None;
@@ -871,6 +875,7 @@ impl Store {
     }
 
     pub fn set_positions(&mut self, positions: Vec<Position>) {
+        self.position_native_extras = vec![None; positions.len()];
         self.positions = positions;
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
@@ -878,6 +883,18 @@ impl Store {
         self.prune_prediction_holdings();
         self.changes.positions = true;
         self.set_loaded(|loaded| loaded.positions = true);
+    }
+
+    /// Keep the producer's native values and presence bits instead of deriving
+    /// them again from the receiving store's possibly missing/stale catalogue.
+    pub(crate) fn set_frame_positions(
+        &mut self,
+        positions: Vec<Position>,
+        native_extras: Vec<[Option<f64>; 2]>,
+    ) {
+        assert_eq!(positions.len(), native_extras.len());
+        self.set_positions(positions);
+        self.position_native_extras = native_extras.into_iter().map(Some).collect();
     }
 
     #[cfg(feature = "prediction")]
@@ -905,10 +922,17 @@ impl Store {
         match (index, position.contracts == 0.0) {
             (Some(index), true) => {
                 self.positions.remove(index);
+                self.position_native_extras.remove(index);
             }
-            (Some(index), false) => self.positions[index] = position,
+            (Some(index), false) => {
+                self.positions[index] = position;
+                self.position_native_extras[index] = None;
+            }
             (None, true) => return,
-            (None, false) => self.positions.push(position),
+            (None, false) => {
+                self.positions.push(position);
+                self.position_native_extras.push(None);
+            }
         }
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
@@ -923,6 +947,8 @@ impl Store {
             update(position);
         }
         self.positions.retain(|p| p.contracts != 0.0);
+        // Native venue updates own the quantities again; no stale frame values.
+        self.position_native_extras = vec![None; self.positions.len()];
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
         #[cfg(feature = "prediction")]
@@ -1777,12 +1803,15 @@ impl Store {
         let positions = &self.positions;
         let extras: Vec<_> = positions
             .iter()
-            .map(|position| {
-                let market = self
-                    .market_by_symbol
-                    .get(position.symbol.as_str())
-                    .map(|index| &self.markets[*index as usize]);
-                crate::position_output::native_extras(position, market, self.quantity_units)
+            .zip(&self.position_native_extras)
+            .map(|(position, native)| {
+                native.unwrap_or_else(|| {
+                    let market = self
+                        .market_by_symbol
+                        .get(position.symbol.as_str())
+                        .map(|index| &self.markets[*index as usize]);
+                    crate::position_output::native_extras(position, market, self.quantity_units)
+                })
             })
             .collect();
         w.begin_revision(section::POSITIONS, 2);

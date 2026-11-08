@@ -310,12 +310,18 @@ test('Position revision two decodes null and absence but refuses invalid native 
   view.setFloat64(start + 4 * 16, NaN, true);
   assert.equal(frame.positions().liquidationPrice[0], null);
   assert.equal(frame.positions().realizedPnl[0], undefined);
-  const badNative = positionFrame(true);
-  const section = badNative.first(SECTION.POSITIONS);
-  const nativeView = new DataView(badNative.buffer);
-  nativeView.setUint32(section.offset + 12, 1 << 24, true);
-  nativeView.setFloat64(section.offset + 24 + 9 * 16, NaN, true);
-  assert.throws(() => badNative.positions(), /invalid Position contractsNative/);
+  for (const [column, bit, key] of [[9, 24, 'contractsNative'], [10, 25, 'unrealizedPnlNative']]) {
+    for (const value of [NaN, Infinity, -Infinity]) {
+      const badNative = positionFrame(true);
+      const section = badNative.first(SECTION.POSITIONS);
+      const nativeView = new DataView(badNative.buffer);
+      nativeView.setUint32(section.offset + 12, 1 << bit, true);
+      nativeView.setFloat64(section.offset + 24 + column * 16, value, true);
+      assert.throws(() => badNative.positions(), new RegExp(`invalid Position ${key}`));
+      nativeView.setUint32(section.offset + 12, 0, true);
+      assert.equal(badNative.positions()[key][0], undefined);
+    }
+  }
   for (const [column, value] of [[2, Infinity], [3, NaN], [4, Infinity], [6, 0], [6, -1], [6, Infinity]]) {
     const bad = positionFrame(true);
     new DataView(bad.buffer).setFloat64(bad.first(SECTION.POSITIONS).offset + 24 + column * 16, value, true);
