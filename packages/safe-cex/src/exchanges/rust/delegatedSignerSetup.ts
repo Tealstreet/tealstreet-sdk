@@ -5,7 +5,7 @@ import type { CredentialPresence } from './construction';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { nanoid } from 'nanoid';
 
-import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
+import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy, resolveEffectivePublicDataOnly } from './construction';
 import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
 import { createRemoteSignerProvider, remoteSignerAlgorithms } from './remoteSignerProvider';
 
@@ -48,13 +48,13 @@ export class DelegatedSignerSetup {
 
   constructor(name: ExchangeName, options: ExchangeOptions) {
     this.#venue = name;
-    this.#publicOnly = options.publicDataOnly === true;
+    this.#publicOnly = resolveEffectivePublicDataOnly(name, options);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
     this.#publicMode = Object.freeze({ requested: options.publicDataOnly ?? null,
       ...this.intent, apiKeyIndexPresent: Boolean(options.apiKeyIndex) });
     this.usesPayloadSigner = !this.#publicOnly && selectDelegatedSigningMode(options) === 'payload';
     this.signerAlgorithms = this.#publicOnly ? [] : remoteSignerAlgorithms(name);
-    // Explicit public mode grants no signing authority. Do not validate or retain
+    // Effective public mode grants no signing authority. Do not validate or retain
     // callbacks, keys, passphrases or setup metadata that this account cannot use.
     if (this.#publicOnly) {
       this.#identities = Object.freeze({});

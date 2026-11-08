@@ -1,11 +1,14 @@
 import type { SignRequest, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { expect, it, vi } from 'vitest';
 
 import { BETA_VENUES } from '../../exchanges/rust/betaVenues';
+import { exchangeMetadata } from '../../exchangeMetadata';
 import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
+import rules from '../../exchanges/rust/construction-rules.json';
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
+import { LocalSignerSetup } from '../../exchanges/rust/localSignerSetup';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
@@ -15,6 +18,138 @@ const unusedSigners = () => ({
     sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn(),
   },
   payloadSigner: vi.fn(),
+});
+
+type VenueCase = { name: ExchangeName; label: string; version?: 'v1' | 'v3' };
+const matrixVenues = BETA_VENUES.flatMap((name): VenueCase[] => name === 'asterdex'
+  ? [{ name, label: 'asterdex-v1', version: 'v1' }, { name, label: 'asterdex-v3', version: 'v3' }]
+  : [{ name, label: name }]);
+const publicModes: Array<{ label: string; publicDataOnly?: boolean; omitKey?: boolean }> = [
+  { label: 'explicit', publicDataOnly: true }, { label: 'keyless-empty' },
+  { label: 'keyless-absent', omitKey: true }, { label: 'keyless-false', publicDataOnly: false },
+];
+// A keyless account whose callback alone satisfies the venue's declared canSign and
+// privateEligible rules is private, in TS and in the Rust registry (same rules file).
+const callbackCredentials: Partial<Record<ExchangeName, 'remote' | 'payload'>> = { hyperliquidspot: 'remote' };
+const isExchangeName = (name: string): name is ExchangeName => Object.hasOwn(exchangeMetadata, name);
+const outsideBeta = Object.keys(rules.venues).filter(isExchangeName)
+  .filter((name) => !BETA_VENUES.some((venue) => venue === name));
+const privateRefusal = ({ name, version }: VenueCase, kind: 'remote' | 'payload'): string | undefined => {
+  const policy = deriveRemoteSigningPolicy(name);
+  if (policy?.enabled !== true) return kind === 'remote'
+    ? `${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
+    : `${exchangeMetadata[name].prettyName} delegated signing is unsupported in this build`;
+  if (kind === 'remote') return undefined;
+  if (name === 'asterdex' && version === 'v3') return 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only';
+  if (policy.payloadSupported === true) return undefined;
+  if (name === 'grvt') return 'GRVT PayloadSigner is unsupported';
+  if (name === 'kucoin' || name === 'kucoinspot') return 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
+  if (name === 'backpack') return 'Backpack requires RemoteSigner Ed25519 custody';
+  return 'This Rust account has no REST-only PayloadSigner lifecycle';
+};
+
+it.each(matrixVenues)('$label resolves the complete public matrix before custody and preserves private controls', async (venue) => {
+  const { name, version } = venue;
+  const { remoteSigner, payloadSigner } = unusedSigners();
+  const callbacks: Array<{ kind: 'remote' | 'payload'; options: Partial<ExchangeOptions> }> = [
+    { kind: 'remote', options: { remoteSigner } }, { kind: 'payload', options: { payloadSigner } },
+  ];
+  const results = new Map<string, boolean>();
+  for (const mode of publicModes) {
+    let passed = true;
+    for (const callback of callbacks) {
+      const label = `${venue.label} ${mode.label} ${callback.kind}`;
+      const options: ExchangeOptions = { key: '', secret: '', extra: { asterdexApiVersion: version },
+        ...callback.options, ...(mode.publicDataOnly === undefined ? {} : { publicDataOnly: mode.publicDataOnly }) };
+      if (mode.omitKey) Reflect.deleteProperty(options, 'key');
+      if (mode.publicDataOnly !== true && callbackCredentials[name] === callback.kind) {
+        const exchange = new RustEngineExchange(name, options, new DefaultStore());
+        try { expect(exchange.isPublicDataOnly, label).toBe(false); }
+        finally { exchange.dispose(); }
+        continue;
+      }
+      let exchange: RustEngineExchange | undefined;
+      try { exchange = new RustEngineExchange(name, options, new DefaultStore()); }
+      catch (error) { passed = false; expect.soft(error, label).toBeUndefined(); }
+      if (exchange) {
+        try {
+          passed = passed && exchange.isPublicDataOnly;
+          expect.soft(exchange.isPublicDataOnly, label).toBe(true);
+          expect.soft(exchange.privateWebsocket, label).toBeUndefined();
+          const setup: unknown = Reflect.get(exchange, 'signerSetup');
+          if (setup instanceof LocalSignerSetup || setup instanceof DelegatedSignerSetup)
+            expect.soft(setup.primaryComplete, label).toBe(false);
+          if (setup instanceof DelegatedSignerSetup) {
+            const noAuthority = setup.primaryComplete === false && setup.credentialPresence.key === false
+              && setup.credentialPresence.secret === false && setup.signerAlgorithms.length === 0;
+            passed = passed && noAuthority;
+            expect.soft(noAuthority, label).toBe(true);
+            await expect.soft(setup.signer({ receipt: {}, context: { venue: name, method: 'GET', host: 'fixture.invalid', path: '/' },
+              operations: [] }, { signal: new AbortController().signal }), label)
+              .rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent', message: 'Public-only accounts cannot sign' });
+          }
+        } finally { exchange.dispose(); }
+      }
+    }
+    results.set(mode.label, passed);
+  }
+  let privateControl = true;
+  for (const callback of callbacks) {
+    // Aster V3 resolves private only with a complete (synthetic) API-wallet context.
+    const options: ExchangeOptions = { key: `0x${'11'.repeat(20)}`,
+      secret: version === 'v3' ? `0x${'33'.repeat(32)}` : 'unused-private-material',
+      passphrase: 'fixture-passphrase', apiKeyIndex: '2', applicationId: `0x${'22'.repeat(20)}`,
+      paradexAddress: 'fixture-paradex-account', subkeyAddress: 'fixture-paradex-subkey',
+      extra: { asterdexApiVersion: version }, ...callback.options };
+    const refusal = privateRefusal(venue, callback.kind);
+    let outcome: unknown;
+    try {
+      const exchange = new RustEngineExchange(name, options, new DefaultStore());
+      outcome = exchange.isPublicDataOnly ? 'public' : 'private';
+      exchange.dispose();
+    } catch (error) { outcome = error; }
+    const expected = refusal ? expect.objectContaining({ kind: 'unsupported', outcome: 'notSent', message: refusal }) : 'private';
+    expect.soft(outcome, `${venue.label} private ${callback.kind}`).toEqual(expected);
+    privateControl &&= refusal ? outcome instanceof Error && outcome.message === refusal : outcome === 'private';
+  }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+  const keyless = publicModes.filter(({ label }) => label !== 'explicit').every(({ label }) => results.get(label));
+  // The unit setup mocks console; stdout keeps the matrix visible in CI logs.
+  process.stdout.write(`MATRIX-TS ${venue.label}: ts-explicit=${results.get('explicit') ? 'pass' : 'fail'} ts-keyless=${keyless ? 'pass' : 'fail'} private-control=${privateControl ? 'pass' : 'fail'}\n`);
+});
+
+it('enumerates every declared venue outside the beta roster', () => {
+  expect(outsideBeta.sort()).toEqual(['bitrue', 'polymarket', 'txflow', 'weex']);
+  expect(rules.venues.hyperliquidspot).toMatchObject({ canSign: [['secret', 'remoteSigner']] });
+  expect(rules.venues.hyperliquidspot).not.toHaveProperty('privateEligible');
+});
+
+it.each(outsideBeta)('%s remains outside beta admission in every public form', (name) => {
+  const { remoteSigner, payloadSigner } = unusedSigners();
+  for (const mode of publicModes) {
+    for (const callbacks of [{}, { remoteSigner }, { payloadSigner }]) {
+      const options: ExchangeOptions = { key: '', secret: '', ...callbacks,
+        ...(mode.publicDataOnly === undefined ? {} : { publicDataOnly: mode.publicDataOnly }) };
+      if (mode.omitKey) Reflect.deleteProperty(options, 'key');
+      expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrowError(expect.objectContaining({
+        kind: 'unsupported', outcome: 'notSent', message: `${name} is unsupported in this build`,
+      }));
+    }
+  }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+it('a private Polymarket account keeps its protocol-specific custody refusal', () => {
+  const { remoteSigner, payloadSigner } = unusedSigners();
+  for (const callbacks of [{ remoteSigner }, { payloadSigner }]) {
+    expect(() => new RustEngineExchange('polymarket', { key: `0x${'44'.repeat(32)}`, secret: '', ...callbacks }, new DefaultStore()))
+      .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
+        message: 'Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply' }));
+  }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
 });
 
 it.each(['kucoin', 'kucoinspot'] as const)('%s constructs explicitly public-only accounts with an unused PayloadSigner', (name) => {

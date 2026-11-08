@@ -110,3 +110,13 @@ export const derivePublicMode = (
     publicDataOnly: options.publicDataOnly === true || !matches(rule?.privateEligible ?? rules.default.privateEligible),
   };
 };
+
+/** Public mode resolved from caller input, before any custody, callback or admission check.
+ * A delegated callback stands in for the secret only beside a primary key, as the delegated
+ * primary signing identity does in the Rust registry; unused callbacks never make an account private. */
+export const resolveEffectivePublicDataOnly = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean => {
+  const key = Boolean(options.key);
+  const delegated = Boolean(options.remoteSigner || options.payloadSigner);
+  return derivePublicMode(name, { key: '', secret: '', ...options }, undefined,
+    { key, secret: Boolean(options.secret) || (key && delegated) }).publicDataOnly;
+};

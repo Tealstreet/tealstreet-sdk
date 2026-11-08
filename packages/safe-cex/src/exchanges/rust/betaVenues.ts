@@ -4,7 +4,7 @@ import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { unsupportedVenueError } from '../../unsupportedVenue';
-import { deriveRemoteSigningPolicy } from './construction';
+import { deriveRemoteSigningPolicy, resolveEffectivePublicDataOnly } from './construction';
 
 /** The Rust-only beta build's complete venue policy, including saved aliases. */
 export const BETA_VENUES = Object.freeze([
@@ -65,13 +65,15 @@ export const assertBetaVenue = (name: string): void => {
 
 /** Unsupported signing modes cannot fall through to a TypeScript venue. */
 export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeOptions>): void => {
-  if (name === 'polymarket' && options.publicDataOnly !== true && (options.remoteSigner || options.payloadSigner)) {
+  // Effective public first: unused callbacks on a public account are not custody.
+  const publicDataOnly = resolveEffectivePublicDataOnly(name, options);
+  if (name === 'polymarket' && !publicDataOnly && (options.remoteSigner || options.payloadSigner)) {
     const message = 'Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply';
     throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
   }
   assertBetaVenue(name);
   if (
-    options.publicDataOnly !== true &&
+    !publicDataOnly &&
     (options.remoteSigner || options.payloadSigner) &&
     deriveRemoteSigningPolicy(name)?.enabled !== true
   ) {
