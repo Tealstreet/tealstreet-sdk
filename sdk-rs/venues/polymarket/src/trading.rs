@@ -125,6 +125,41 @@ struct CancelAck {
     not_canceled: HashMap<String, String>,
 }
 
+fn decimal_size(amount: f64, precision: f64) -> Result<f64, String> {
+    let digits = if precision.is_nan() {
+        0.0
+    } else {
+        precision.trunc()
+    };
+    if !(0.0..=100.0).contains(&digits) {
+        return Err("Invalid Polymarket amount decimal precision".into());
+    }
+    let digits = digits as usize;
+    let bits = amount.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i32;
+    let significand = (bits & ((1u64 << 52) - 1)) | if exponent == 0 { 0 } else { 1u64 << 52 };
+    let exponent = if exponent == 0 {
+        -1074
+    } else {
+        exponent - 1075
+    };
+    // Formatting rounds binary floats exactly but uses ties-to-even. TS toFixed
+    // chooses the larger positive value at exact ties; powers of five are odd,
+    // so the reduced binary exponent identifies decimal midpoints without scaling.
+    let midpoint = exponent + significand.trailing_zeros() as i32 + digits as i32 == -1;
+    let round = |amount: f64| {
+        format!("{amount:.digits$}")
+            .parse::<f64>()
+            .map_err(|_| "Invalid Polymarket rounded amount".to_owned())
+    };
+    let rounded = round(amount)?;
+    if midpoint && rounded < amount {
+        round(amount.next_up())
+    } else {
+        Ok(rounded)
+    }
+}
+
 impl Polymarket {
     fn prepare(&self, cx: &Cx<'_, Pending>, options: PlaceOrderOpts) -> Result<Prepared, String> {
         // Caller identity rejection is first, including present-but-empty IDs.
@@ -172,15 +207,16 @@ impl Polymarket {
         let price = options.price.ok_or("Polymarket limit price is required")?;
         if !options.amount.is_finite()
             || options.amount <= 0.0
-            || options.amount > market.limits.amount.max
             || !price.is_finite()
             || !(0.0..=1.0).contains(&price)
         {
             return Err("Polymarket order amount is outside market limits".into());
         }
         let price = safe_cex_engine::num::adjust(price, metadata.tick_size);
-        let size = safe_cex_engine::num::adjust(options.amount, 0.01);
-        if size < market.limits.amount.min || size > market.limits.amount.max {
+        // Legacy TS polymarket.exchange.ts:660 rounds decimal digits and sends one order,
+        // including above-max sizes; the venue owns that refusal.
+        let size = decimal_size(options.amount, market.precision.amount)?;
+        if size <= 0.0 || size < market.limits.amount.min {
             return Err("Polymarket rounded amount is outside market limits".into());
         }
         let side = u8::from(options.side == OrderSide::Sell);

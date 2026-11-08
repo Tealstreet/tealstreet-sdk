@@ -30,3 +30,12 @@ Protocol references:
 The local signing module retains independent official-client golden vectors
 for L1, L2 and all four order signature types. No remote signing vector or WS
 signature is claimed for a mode that cannot authenticate this protocol.
+
+Order sizing follows the legacy TS connector at
+`packages/safe-cex/src/__tests__/reference/polymarket/polymarket.exchange.ts:660`:
+`precision.amount` counts decimal digits for `Number(amount.toFixed(...))`,
+followed by the official builder's share rounding. Each input produces one
+payload, including sizes above the market maximum; the venue supplies any
+refusal. Minimum-size and supported-order checks remain before dispatch.
+KNOWN-ISSUE: TS sends above-max; venue refuses. Decimal rounding can also
+under-allocate; the exact TS result is retained for parity per Sam, decision pending.

@@ -158,6 +158,122 @@ fn ack(id: &str) -> String {
 }
 
 #[test]
+fn legacy_ts_above_max_sends_one_payload_and_surfaces_native_refusal() {
+    // TS packages/safe-cex/src/__tests__/reference/polymarket/polymarket.exchange.ts:660,680-698.
+    // Decimal toFixed followed by one postOrder, with no maximum check.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses.
+    for (amount, maximum, precision, shares, collateral) in [
+        (26.0, 5.0, 1.0, "26000000", "13000000"),
+        (11.0, 5.0, 1.0, "11000000", "5500000"),
+        (12.0, 5.0, 1.0, "12000000", "6000000"),
+        (10.0, 5.0, 1.0, "10000000", "5000000"),
+        (7.0, 3.0, 0.5, "7000000", "3500000"),
+        (
+            1_000_001.0,
+            1_000_000.0,
+            2.0,
+            "1000001000000",
+            "500000500000",
+        ),
+        (5.125, 5.0, 2.0, "5130000", "2565000"),
+    ] {
+        for side in [OrderSide::Buy, OrderSide::Sell] {
+            let mut h = H::new();
+            h.e.store_mut().update_markets(|market| {
+                market.precision.amount = precision;
+                market.limits.amount.min = 0.01;
+                market.limits.amount.max = maximum;
+            });
+            let mut input = order();
+            input.amount = amount;
+            input.side = side;
+            h.command(Command::PlaceOrders {
+                command: 81,
+                orders: vec![input],
+            });
+            assert_eq!(
+                h.writes(),
+                1,
+                "amount={amount}, max={maximum}, side={side:?}"
+            );
+            let request = h.take("/order");
+            assert_eq!(request.method, Method::Post);
+            let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+            let (maker, taker) = if side == OrderSide::Buy {
+                (collateral, shares)
+            } else {
+                (shares, collateral)
+            };
+            assert_eq!(body["order"]["makerAmount"], maker);
+            assert_eq!(body["order"]["takerAmount"], taker);
+            assert_eq!(body["orderType"], "GTC");
+            h.respond(request, 200, r#"{"success":false,"orderID":"","errorMsg":"fixture maximum exceeded","status":""}"#);
+            assert!(
+                h.done
+                    .last()
+                    .unwrap()
+                    .1
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("fixture maximum exceeded")
+            );
+            assert_eq!(
+                h.failures.last().unwrap().outcome,
+                None,
+                "preserve the existing native false-ack classification"
+            );
+            assert_eq!(h.writes(), 0, "native refusal must not split or resend");
+        }
+    }
+}
+
+#[test]
+fn legacy_ts_to_fixed_precision_and_midpoints_precede_builder_rounding() {
+    // TS packages/safe-cex/src/__tests__/reference/polymarket/polymarket.exchange.ts:660.
+    // Precision is decimal digits, not a step.
+    for (amount, precision, maximum, shares, collateral) in [
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 5 of requested 5.005);
+        // kept for parity per Sam; decision pending.
+        (5.005, 2.0, 5.0, "5000000", "2500000"),
+        (5.125, 2.0, 10.0, "5130000", "2565000"),
+        (5.25, 1.0, 10.0, "5300000", "2650000"),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 5.12 of requested 5.129);
+        // kept for parity per Sam; decision pending (official builder floors to 2dp).
+        (5.129, 3.0, 10.0, "5120000", "2560000"),
+        (5.6, 0.001, 10.0, "6000000", "3000000"),
+        (6.5, 0.0, 10.0, "7000000", "3500000"),
+    ] {
+        let mut h = H::new();
+        h.e.store_mut().update_markets(|market| {
+            market.precision.amount = precision;
+            market.limits.amount.max = maximum;
+        });
+        let mut input = order();
+        input.amount = amount;
+        h.command(Command::PlaceOrders {
+            command: 82,
+            orders: vec![input],
+        });
+        assert_eq!(h.writes(), 1);
+        let request = h.take("/order");
+        let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            body["order"]["takerAmount"], shares,
+            "amount={amount}, precision={precision}"
+        );
+        assert_eq!(
+            body["order"]["makerAmount"], collateral,
+            "amount={amount}, precision={precision}"
+        );
+        h.respond(request, 200, &ack("rounded"));
+        assert!(h.done.last().unwrap().1.is_ok());
+        let sum = shares.parse::<f64>().unwrap() / 1e6;
+        assert_eq!(h.e.store().order("rounded").unwrap().amount, sum);
+        assert_eq!(h.writes(), 0);
+    }
+}
+
+#[test]
 fn dispatched_ambiguous_writes_are_unknown_without_resend_or_replacement() {
     // No native rate-code table, protective orders, or remote settings exist
     // for this venue. Exercise every supported dispatched mutation instead.
@@ -315,7 +431,6 @@ fn whole_batch_rejects_unsupported_shapes_before_any_write() {
         json!({"price":0}),
         json!({"price":1}),
         json!({"amount":1}),
-        json!({"amount":1000001}),
         json!({"symbol":"unknown"}),
     ];
     for mutation in mutations {
@@ -628,12 +743,14 @@ fn inactive_market_and_nonfinite_batch_member_fail_before_write() {
 }
 
 #[test]
-fn financial_price_tick_and_share_rounding_precede_official_builder_rounding() {
-    // Price aligns to the native tick and shares to the 0.01 precision.
-    // Decimal midpoint amounts use the engine's common financial half-up rule.
+fn price_tick_and_ts_decimal_share_rounding_precede_official_builder_rounding() {
+    // TS reference/polymarket/polymarket.exchange.ts:659-660 aligns price to the tick
+    // and uses Number(amount.toFixed(precision.amount)) for shares.
     for (raw_size, expected_shares, expected_collateral) in [
         (5.999, "6000000", "3180000"),
-        (5.005, "5010000", "2655300"),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 5 of requested 5.005);
+        // kept for parity per Sam; decision pending.
+        (5.005, "5000000", "2650000"),
         (5.125, "5130000", "2718900"),
         (5.129, "5130000", "2718900"),
     ] {
