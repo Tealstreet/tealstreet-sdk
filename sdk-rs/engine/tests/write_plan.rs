@@ -1,4 +1,4 @@
-use safe_cex_engine::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, PlannedWrite, WritePlan};
 use safe_cex_engine::{ErrorKind, Outcome, VenueError};
 
 fn writes(values: &[u32]) -> Vec<PlannedWrite<u32>> {
@@ -370,22 +370,48 @@ fn serialized_fixture_matches_the_wasm_declaration_contract() {
         vec![
             PlannedWrite {
                 payload: 1,
-                elements: vec![element(0, Some("first"))],
+                elements: vec![
+                    element(0, Some("first")),
+                    element(1, Some("cancel")),
+                    element(2, None),
+                    element(3, Some("deferred")),
+                ],
             },
             PlannedWrite {
                 payload: 2,
-                elements: vec![element(1, Some("second")), element(2, Some("third"))],
+                elements: vec![element(4, Some("second")), element(5, Some("third"))],
             },
             PlannedWrite {
                 payload: 3,
-                elements: vec![element(3, None)],
+                elements: vec![element(6, None)],
             },
         ],
         validate,
     )
     .unwrap();
     plan.next_write().unwrap();
-    plan.settle(0, vec![placed(0)]).unwrap();
+    plan.settle(
+        0,
+        vec![
+            placed(0),
+            ElementResult::Applied {
+                effect: AppliedEffect::Cancel,
+                target_order_id: Some("old-order".into()),
+                position_key: None,
+            },
+            ElementResult::Applied {
+                effect: AppliedEffect::Settings,
+                target_order_id: None,
+                position_key: Some("BTCUSD:long".into()),
+            },
+            ElementResult::Applied {
+                effect: AppliedEffect::DeferredChild,
+                target_order_id: None,
+                position_key: None,
+            },
+        ],
+    )
+    .unwrap();
     plan.next_write().unwrap();
     plan.settle(
         1,
@@ -403,8 +429,188 @@ fn serialized_fixture_matches_the_wasm_declaration_contract() {
         ],
     )
     .unwrap();
-    let actual = serde_json::to_value(plan.failure(VenueError::new("stopped"))).unwrap();
+    let actual = serde_json::to_value(plan.failure(VenueError::new("stopped").partial(
+        &["native-0".into()],
+        3,
+        1,
+    )))
+    .unwrap();
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/write-plan-error.json")).unwrap();
     assert_eq!(actual, fixture);
+}
+
+#[test]
+fn unattributed_partial_acceptance_keeps_dispatched_rows_unknown() {
+    let mut batch = writes(&[1, 2]);
+    batch[0].elements.push(Element {
+        index: 1,
+        client_order_id: Some("second".into()),
+    });
+    batch[1].elements[0].index = 2;
+    let mut plan = WritePlan::validate(batch, validate).unwrap();
+    plan.next_write().unwrap();
+    let native = VenueError::new("partial batch refusal")
+        .outcome(Outcome::Rejected)
+        .partial_ids(&["accepted-native".into()]);
+    plan.fail(0, native.clone()).unwrap();
+    let error = plan.failure(native);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.unwrap().order_ids, ["accepted-native"]);
+    let rows = error.elements.unwrap();
+    for row in &rows[..2] {
+        assert!(matches!(&row.result, ElementResult::Unknown { error }
+            if error.outcome == Some(Outcome::Unknown)));
+    }
+    assert_eq!(rows[2].result, ElementResult::NotSent { error: None });
+    assert!(plan.next_write().is_none());
+}
+
+#[test]
+fn attributed_partial_batch_preserves_two_acceptances_and_one_refusal() {
+    let mut batch = writes(&[1, 2]);
+    batch[0].elements.extend([
+        Element {
+            index: 1,
+            client_order_id: Some("second".into()),
+        },
+        Element {
+            index: 2,
+            client_order_id: Some("third".into()),
+        },
+    ]);
+    batch[1].elements[0].index = 3;
+    let mut plan = WritePlan::validate(batch, validate).unwrap();
+    plan.next_write().unwrap();
+    let refusal = VenueError::new("row 3 refused").outcome(Outcome::Rejected);
+    plan.settle(
+        0,
+        vec![
+            placed(0),
+            placed(1),
+            ElementResult::NotSent {
+                error: Some(Box::new(refusal.clone())),
+            },
+        ],
+    )
+    .unwrap();
+    let error = plan.failure(refusal.partial_ids(&["native-0".into(), "native-1".into()]));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.unwrap().order_ids, ["native-0", "native-1"]);
+    let rows = error.elements.unwrap();
+    assert_eq!(rows[0].result, placed(0));
+    assert_eq!(rows[1].result, placed(1));
+    assert!(
+        matches!(&rows[2].result, ElementResult::NotSent { error: Some(e) }
+        if e.outcome == Some(Outcome::Rejected))
+    );
+    assert_eq!(rows[3].result, ElementResult::NotSent { error: None });
+    assert!(plan.next_write().is_none());
+}
+
+#[test]
+fn failed_write_ids_and_native_partial_metadata_reach_the_legacy_result() {
+    let mut plan = WritePlan::validate(writes(&[1, 2, 3]), validate).unwrap();
+    plan.next_write().unwrap();
+    plan.settle(0, vec![placed(0)]).unwrap();
+    plan.next_write().unwrap();
+    plan.fail(
+        1,
+        VenueError::new("partial acknowledgement")
+            .outcome(Outcome::Rejected)
+            .partial(&["accepted-native".into()], 2, 1),
+    )
+    .unwrap();
+    let error = plan.failure(VenueError::new("stopped").outcome(Outcome::NotSent));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    let partial = error.partial.unwrap();
+    assert_eq!(partial.order_ids, ["native-0", "accepted-native"]);
+    assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
+}
+
+#[test]
+fn terminal_partial_metadata_is_preserved_when_merging_a_placed_prefix() {
+    let mut plan = WritePlan::validate(writes(&[1, 2]), validate).unwrap();
+    plan.next_write().unwrap();
+    plan.settle(0, vec![placed(0)]).unwrap();
+    let error = plan.failure(VenueError::new("stopped").partial(&["native-1".into()], 3, 1));
+    let partial = error.partial.unwrap();
+    assert_eq!(partial.order_ids, ["native-1", "native-0"]);
+    assert_eq!((partial.total, partial.failed_index), (Some(3), Some(1)));
+}
+
+#[test]
+fn venue_error_keeps_the_pre_journal_native_layout_budget() {
+    assert!(std::mem::size_of::<VenueError>() <= 112);
+}
+
+#[test]
+fn applied_effects_continue_without_manufacturing_placed_identities() {
+    for effect in [
+        AppliedEffect::Cancel,
+        AppliedEffect::Amend,
+        AppliedEffect::TradingStop,
+        AppliedEffect::Settings,
+        AppliedEffect::DeferredChild,
+        AppliedEffect::PositionTrigger,
+    ] {
+        let mut plan = WritePlan::validate(writes(&[1, 2, 3]), validate).unwrap();
+        plan.next_write().unwrap();
+        let applied = ElementResult::Applied {
+            effect,
+            target_order_id: Some("existing-order".into()),
+            position_key: None,
+        };
+        plan.settle(0, vec![applied.clone()]).unwrap();
+        assert_eq!(plan.next_write().unwrap().0, 1);
+        plan.fail(1, VenueError::new("refused").outcome(Outcome::Rejected))
+            .unwrap();
+        let error = plan.failure(VenueError::new("stopped").outcome(Outcome::Rejected));
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert!(
+            error.partial.is_none(),
+            "applied targets are never newly placed IDs"
+        );
+        assert_eq!(error.elements.unwrap()[0].result, applied);
+        assert!(plan.next_write().is_none());
+    }
+}
+
+#[test]
+fn empty_applied_targets_and_placed_ids_are_rejected_atomically() {
+    let mut plan = WritePlan::validate(writes(&[1, 2]), validate).unwrap();
+    plan.next_write().unwrap();
+    for invalid in [
+        ElementResult::Applied {
+            effect: AppliedEffect::Cancel,
+            target_order_id: Some(String::new()),
+            position_key: None,
+        },
+        ElementResult::Applied {
+            effect: AppliedEffect::Settings,
+            target_order_id: None,
+            position_key: Some(String::new()),
+        },
+        ElementResult::Placed { order_ids: vec![] },
+        ElementResult::Placed {
+            order_ids: vec![String::new()],
+        },
+    ] {
+        assert!(plan.settle(0, vec![invalid]).is_err());
+        assert!(plan.next_write().is_none());
+        assert!(matches!(
+            plan.outcomes()[0].result,
+            ElementResult::Unknown { .. }
+        ));
+    }
+    plan.settle(
+        0,
+        vec![ElementResult::Applied {
+            effect: AppliedEffect::DeferredChild,
+            target_order_id: None,
+            position_key: None,
+        }],
+    )
+    .unwrap();
+    assert_eq!(plan.next_write().unwrap().0, 1);
 }
