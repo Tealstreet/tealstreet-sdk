@@ -9,6 +9,9 @@ mod support;
 use safe_cex_venue_kucoin::Kucoin;
 use support::credentials::Options;
 
+#[path = "trading/allocation.rs"]
+mod allocation;
+
 struct Harness {
     engine: Engine<Kucoin>,
     actions: Vec<Action>,
@@ -472,7 +475,7 @@ fn late_batch_format_failure_sends_no_writes() {
     let mut h = Harness::new();
     let mut second = order();
     second.client_order_id = None;
-    second.amount = 2000.0;
+    second.amount = 0.1; // Rounds to zero; above-max sizes are sent for TS parity.
     place(&mut h, vec![order(), second]);
     h.metadata(false, "CROSS");
     assert!(!h.has("/api/v1/orders"));
