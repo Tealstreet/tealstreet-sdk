@@ -607,6 +607,21 @@ impl Hyperliquid {
             }
         }
         cx.store.set_markets(all);
+        let facts = cx
+            .store
+            .markets()
+            .iter()
+            .map(|market| {
+                (
+                    market.symbol.clone(),
+                    safe_cex_engine::market_facts::MarketOrderFacts {
+                        min_notional: Some(trading::MIN_ORDER_VALUE),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        cx.store.set_market_order_facts(facts);
         // `set_markets` clears the table; its rows index the new market snapshot.
         if !self.underlying.is_empty() {
             let rows = cx

@@ -738,6 +738,37 @@ impl BinanceFutures {
             }
             cx.store.set_markets(merged);
         }
+        let facts = cx
+            .store
+            .markets()
+            .iter()
+            .map(|market| {
+                let notional_basis = if self.is_inverse() {
+                    safe_cex_engine::market_facts::NotionalBasis::Quote {
+                        per_amount: market.contract_size.unwrap_or(f64::NAN),
+                    }
+                } else {
+                    safe_cex_engine::market_facts::NotionalBasis::Base
+                };
+                (
+                    market.symbol.clone(),
+                    safe_cex_engine::market_facts::MarketOrderFacts {
+                        min_notional: self.trading.min_notional.get(&market.symbol).copied(),
+                        reduce_only_exempt: !self.is_spot(),
+                        market_notional_exempt: self
+                            .trading
+                            .min_notional_market_exempt
+                            .get(&market.symbol)
+                            .copied()
+                            .unwrap_or(false),
+                        notional_basis,
+                        market_amount: self.trading.market_amount.get(&market.symbol).copied(),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        cx.store.set_market_order_facts(facts);
         self.catalogue_partial = rejected;
         if rejected {
             self.discovery
@@ -1800,20 +1831,56 @@ impl Venue for BinanceFutures {
                     }
                 {
                     let market = market_from_wire(&m, self.options.variant);
-                    if let Some(notional) = m
-                        .filters
-                        .iter()
-                        .find(|f| f.filter_type == "MIN_NOTIONAL")
-                        .and_then(|f| f.notional.as_deref())
-                    {
-                        self.trading
-                            .min_notional
-                            .insert(market.symbol.clone(), num::parse(notional));
-                    }
                     if !market.precision.is_tradable() {
                         *rejected = true;
                         safe_cex_engine::startup::skipped_row(cx);
                         return;
+                    }
+                    let filter = m
+                        .filters
+                        .iter()
+                        .find(|filter| matches!(&*filter.filter_type, "MIN_NOTIONAL" | "NOTIONAL"));
+                    if let Some(notional) = filter.and_then(|filter| filter.notional.as_deref()) {
+                        self.trading
+                            .min_notional
+                            .insert(market.symbol.clone(), num::parse(notional));
+                        self.trading.min_notional_market_exempt.insert(
+                            market.symbol.clone(),
+                            filter.is_some_and(|filter| filter.apply_to_market == Some(false)),
+                        );
+                    } else {
+                        self.trading.min_notional.remove(&market.symbol);
+                        self.trading
+                            .min_notional_market_exempt
+                            .remove(&market.symbol);
+                    }
+                    if let Some(lot) = m
+                        .filters
+                        .iter()
+                        .find(|filter| filter.filter_type == "MARKET_LOT_SIZE")
+                    {
+                        let positive = |value: Option<&str>| {
+                            value.map(num::parse).filter(|value| *value > 0.0)
+                        };
+                        let minimum = positive(lot.min_qty.as_deref())
+                            .map(|minimum| minimum.max(market.limits.amount.min));
+                        let maximum = positive(lot.max_qty.as_deref()).map(|maximum| {
+                            if market.limits.amount.max > 0.0 {
+                                maximum.min(market.limits.amount.max)
+                            } else {
+                                maximum
+                            }
+                        });
+                        self.trading.market_amount.insert(
+                            market.symbol.clone(),
+                            safe_cex_engine::model::MarketAmountRules {
+                                minimum,
+                                maximum,
+                                step: positive(lot.step_size.as_deref()),
+                            },
+                        );
+                    } else {
+                        self.trading.market_amount.remove(&market.symbol);
                     }
                     markets.push(market);
                 }

@@ -561,3 +561,22 @@ fn ticker_data_arrays_still_warn_instead_of_reading_as_struct_sequences() {
         );
     }
 }
+
+#[test]
+fn native_notional_facts_use_contract_identity_and_absence_stays_unknown() {
+    let e = seeded();
+    assert_eq!(e.store().market_order_facts()["BTCUSDT"].min_notional, None);
+    let mut e = support::engine(Options {
+        public_data_only: true,
+        ..Default::default()
+    });
+    e.start(0.0);
+    respond(
+        &mut e,
+        1.0,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinQuantity":"0.0001","tradeMinUSDT":"5","maxLongLeverage":125}]}"#,
+    );
+    let facts = e.store().market_order_facts()["BTCUSDT"];
+    assert_eq!(facts.min_notional, Some(5.0));
+    assert!(facts.reduce_only_exempt);
+}

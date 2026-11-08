@@ -1262,6 +1262,30 @@ impl Venue for AsterDex {
                 }
                 self.startup.succeeded(cx, &true);
                 cx.store.set_markets(markets);
+                let facts = self
+                    .market_rules
+                    .iter()
+                    .map(|(symbol, rule)| {
+                        (
+                            symbol.clone(),
+                            safe_cex_engine::market_facts::MarketOrderFacts {
+                                min_notional: (rule.min_notional != 0.0)
+                                    .then_some(rule.min_notional),
+                                reduce_only_exempt: true,
+                                price_tick: Some(rule.tick_size),
+                                market_amount: Some(safe_cex_engine::model::MarketAmountRules {
+                                    minimum: (rule.market_lot.min != 0.0)
+                                        .then_some(rule.market_lot.min),
+                                    maximum: (rule.market_lot.max != 0.0)
+                                        .then_some(rule.market_lot.max),
+                                    step: Some(rule.market_lot.step),
+                                }),
+                                ..Default::default()
+                            },
+                        )
+                    })
+                    .collect();
+                cx.store.set_market_order_facts(facts);
                 if self.is_private() {
                     self.start_account(cx);
                 }

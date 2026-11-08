@@ -16,6 +16,7 @@ pub struct Snapshot {
     pub positions: Vec<Position>,
     pub tickers: Vec<Ticker>,
     pub markets: Vec<Market>,
+    pub market_order_facts: HashMap<String, safe_cex_engine::market_facts::MarketOrderFacts>,
     pub balance: Balance,
     pub loaded: Loaded,
     pub classifications: Option<Vec<InstrumentClassification>>,
@@ -28,6 +29,7 @@ pub fn project(store: &safe_cex_engine::Store) -> Snapshot {
         positions: store.positions().to_vec(),
         tickers: store.tickers().to_vec(),
         markets: store.markets().to_vec(),
+        market_order_facts: store.market_order_facts().clone(),
         balance: store.balance().clone(),
         loaded: store.loaded(),
         #[cfg(feature = "product-semantics")]
@@ -79,6 +81,7 @@ pub fn apply(
         .map(|market| (market.symbol.clone(), market))
         .collect();
     store.coins = snapshot.coins;
+    store.market_order_facts = snapshot.market_order_facts;
     store.loaded = Some(snapshot.loaded);
     if snapshot.loaded.balance {
         store.balance = Some(snapshot.balance);
@@ -138,6 +141,7 @@ mod tests {
             positions: Vec::new(),
             tickers: Vec::new(),
             markets: vec![market("BTCUSDT"), market("ETHUSDT")],
+            market_order_facts: HashMap::new(),
             balance: Balance::default(),
             loaded: Loaded {
                 balance: balance_loaded,
@@ -201,5 +205,39 @@ mod tests {
         );
         assert!(!change.orders && !change.positions && !change.tickers);
         assert_eq!(store.update_ids.orders, 0);
+    }
+
+    #[test]
+    fn native_order_facts_project_without_changing_wire_frames() {
+        use safe_cex_engine::market_facts::{MarketOrderFacts, NotionalBasis};
+        let mut source = safe_cex_engine::Store::default();
+        source.set_markets(vec![market("BTCUSDT")]);
+        let frame = |source: &safe_cex_engine::Store| {
+            let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.0);
+            source.write(&source.everything(), &mut writer);
+            writer.finish()
+        };
+        let before = frame(&source);
+        let facts = MarketOrderFacts {
+            min_notional: Some(20.0),
+            reduce_only_exempt: true,
+            notional_basis: NotionalBasis::Quote { per_amount: 100.0 },
+            ..Default::default()
+        };
+        source.set_market_order_facts(HashMap::from([("BTCUSDT".to_owned(), facts)]));
+        assert_eq!(
+            frame(&source),
+            before,
+            "native planning facts never enter frames/TS"
+        );
+        let mut destination = AlgoStore::default();
+        apply(&mut destination, project(&source), Vec::new(), false);
+        assert_eq!(destination.market_order_facts["BTCUSDT"], facts);
+        source.set_markets(vec![market("ETHUSDT")]);
+        apply(&mut destination, project(&source), Vec::new(), false);
+        assert!(
+            destination.market_order_facts.is_empty(),
+            "no stale native facts after catalogue replacement"
+        );
     }
 }

@@ -1032,3 +1032,15 @@ fn unchanged_fast_context_exports_its_real_receipt_time_for_shared_accounts() {
     assert_eq!(times[2], 8_000.);
     assert_eq!(source.store().ticker("BTC-PERP").unwrap().mark, 97_500.5);
 }
+
+#[test]
+fn native_notional_facts_expose_the_existing_native_value_minimum() {
+    let (e, _) = start();
+    assert!(!e.store().market_order_facts().is_empty());
+    assert!(
+        e.store()
+            .market_order_facts()
+            .values()
+            .all(|facts| facts.min_notional == Some(10.0))
+    );
+}

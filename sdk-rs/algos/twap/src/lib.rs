@@ -75,6 +75,12 @@ pub trait TwapMarketView {
     fn order_rules(&self, _request: &TwapOrderRequest) -> Option<plan::OrderRules> {
         None
     }
+    fn prepare_order(&self, request: TwapOrderRequest) -> Result<plan::PlannedOrder, VenueError> {
+        let rules = self
+            .order_rules(&request)
+            .ok_or_else(|| plan::invalid("TWAP native market rules are unavailable"))?;
+        Ok(plan::PlannedOrder { request, rules })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

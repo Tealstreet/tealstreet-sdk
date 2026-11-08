@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const TIER_MESSAGE: &str = "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.";
 const APPROVAL_MESSAGE: &str = "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.";
 const POSITION_READ_TIMEOUT_MS: f64 = 10_000.0;
+pub(crate) const MARKET_SLIPPAGE: f64 = 0.02;
 // Provisional: no recorded Lighter private tape measures the ACK-to-stream gap,
 // so the group proof bound matches POSITION_READ_TIMEOUT_MS; refine at live smoke.
 const GROUP_PROOF_BOUND_MS: u32 = 10_000;
@@ -2070,9 +2071,9 @@ impl Lighter {
             .find(|p| p.is_finite() && *p > 0.0)
             .ok_or("No live Lighter price available for market-style order")?
                 * if opts.side == OrderSide::Buy {
-                    1.02
+                    1.0 + MARKET_SLIPPAGE
                 } else {
-                    0.98
+                    1.0 - MARKET_SLIPPAGE
                 }
         } else if conditional {
             let slip = opts

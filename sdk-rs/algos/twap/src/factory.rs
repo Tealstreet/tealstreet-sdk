@@ -386,13 +386,80 @@ impl TwapMarketView for CxView<'_> {
     fn order_rules(&self, request: &TwapOrderRequest) -> Option<crate::plan::OrderRules> {
         let store = self.cx.port.store();
         let market = store.markets.get(&request.symbol)?;
+        let facts = store.market_order_facts.get(&request.symbol);
+        let amount_rules = facts.and_then(|facts| {
+            (request.kind == OrderKind::Market)
+                .then_some(facts.market_amount)
+                .flatten()
+        });
+        let tick = facts
+            .and_then(|facts| facts.price_tick)
+            .unwrap_or(market.precision.price);
+        let side = match request.side {
+            OrderSide::Buy => EngineSide::Buy,
+            OrderSide::Sell => EngineSide::Sell,
+        };
+        let wire_price = facts
+            .filter(|facts| request.kind == OrderKind::Market && facts.market_slippage.is_some())
+            .map(|facts| {
+                facts.value_per_amount(None, side, store.tickers.get(&request.symbol), tick)
+            });
+        let notional =
+            match facts.and_then(|facts| facts.min_notional.map(|minimum| (facts, minimum))) {
+                None => crate::plan::NotionalCheck::Unknown,
+                Some((facts, _))
+                    if facts.min_notional == Some(0.0)
+                        || (request.reduce_only && facts.reduce_only_exempt)
+                        || (request.kind == OrderKind::Market && facts.market_notional_exempt) =>
+                {
+                    crate::plan::NotionalCheck::Exempt
+                }
+                Some((facts, minimum)) => {
+                    let per_unit = facts.value_per_amount(
+                        request.price,
+                        side,
+                        store.tickers.get(&request.symbol),
+                        tick,
+                    );
+                    crate::plan::NotionalCheck::Required(crate::plan::NotionalRule {
+                        minimum,
+                        per_unit,
+                    })
+                }
+            };
         Some(crate::plan::OrderRules {
-            minimum_amount: market.limits.amount.min,
-            maximum_amount: market.limits.amount.max,
-            amount_step: Some(market.precision.amount),
-            price_tick: (market.precision.price != 0.0).then_some(market.precision.price),
-            notional: None,
+            minimum_amount: amount_rules
+                .and_then(|rules| rules.minimum)
+                .unwrap_or(market.limits.amount.min),
+            maximum_amount: amount_rules
+                .and_then(|rules| rules.maximum)
+                .unwrap_or(market.limits.amount.max),
+            amount_step: Some(
+                amount_rules
+                    .and_then(|rules| rules.step)
+                    .unwrap_or(market.precision.amount),
+            ),
+            price_tick: Some(tick),
+            wire_price,
+            notional,
         })
+    }
+
+    fn prepare_order(
+        &self,
+        mut request: TwapOrderRequest,
+    ) -> Result<crate::plan::PlannedOrder, VenueError> {
+        let tick = self
+            .order_rules(&request)
+            .and_then(|rules| rules.price_tick)
+            .ok_or_else(|| crate::plan::invalid("TWAP native price tick is unavailable"))?;
+        request.price = request
+            .price
+            .map(|price| safe_cex_engine::model::MarketOrderFacts::round_price(price, tick));
+        let rules = self
+            .order_rules(&request)
+            .ok_or_else(|| crate::plan::invalid("TWAP native market rules are unavailable"))?;
+        Ok(crate::plan::PlannedOrder { request, rules })
     }
 
     /// As the chaser's: only the account's markets, never an order the venue would split.

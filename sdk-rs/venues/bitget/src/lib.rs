@@ -1255,6 +1255,34 @@ impl Venue for BitgetFutures {
                             .map(|(symbol, (limit, market))| (symbol, OrderCaps { limit, market }))
                             .collect();
                         cx.store.set_markets(rows);
+                        let facts = cx
+                            .store
+                            .markets()
+                            .iter()
+                            .map(|market| {
+                                (
+                                    market.symbol.clone(),
+                                    safe_cex_engine::market_facts::MarketOrderFacts {
+                                        min_notional: self
+                                            .trading
+                                            .min_order_value
+                                            .get(&market.symbol)
+                                            .copied()
+                                            .filter(|value| *value != 0.0),
+                                        reduce_only_exempt: true,
+                                        notional_basis: if self.inverse() {
+                                            safe_cex_engine::market_facts::NotionalBasis::Quote {
+                                                per_amount: 1.0,
+                                            }
+                                        } else {
+                                            safe_cex_engine::market_facts::NotionalBasis::Base
+                                        },
+                                        ..Default::default()
+                                    },
+                                )
+                            })
+                            .collect();
+                        cx.store.set_market_order_facts(facts);
                     }
                     Discovered::Tickers(mut rows) => {
                         for row in &rows {

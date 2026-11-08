@@ -723,3 +723,344 @@ async fn caller_market_cannot_replace_missing_native_rules() {
         })
         .await;
 }
+
+fn native_notional_port(minimum: f64, exempt: bool) -> Rc<Port> {
+    let port = Rc::new(Port::default());
+    {
+        let mut store = port.store.borrow_mut();
+        store.market_order_facts.insert(
+            "BTCUSDT".to_owned(),
+            safe_cex_engine::model::MarketOrderFacts {
+                min_notional: Some(minimum),
+                reduce_only_exempt: exempt,
+                ..Default::default()
+            },
+        );
+        store.tickers.insert(
+            "BTCUSDT".to_owned(),
+            Ticker {
+                symbol: "BTCUSDT".to_owned(),
+                last: 10.0,
+                ..Default::default()
+            },
+        );
+    }
+    port
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_notional_last_child_refuses_before_a_valid_prefix() {
+    LocalSet::new()
+        .run_until(async {
+            let port = native_notional_port(20.0, false);
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            let options: Value = serde_json::from_str(&twap_options(json!({ "size": 4 }))).unwrap();
+            let state = json!({ "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" },
+            "size": 4, "ordersSizes": [3, 1], "side": "buy", "status": "paused",
+            "ordersCount": 2, "ordersExecuted": 0, "nextOrderAt": 0 });
+            factory
+                .handle(
+                    "twap:state",
+                    &json!([{ "id": "value-tail", "options": options, "state": state }])
+                        .to_string(),
+                    &cx,
+                )
+                .unwrap();
+            factory
+                .handle("twap:resume", r#""value-tail""#, &cx)
+                .unwrap();
+            settle().await;
+            tokio::time::advance(Duration::from_secs(31)).await;
+            settle().await;
+            assert!(
+                port.commands.borrow().is_empty(),
+                "last child is worth10, below native20; first is worth30"
+            );
+            assert!(factory.active_twaps("a").is_empty());
+            assert!(port.emits.borrow().iter().any(|(op, data)| op == "error"
+                && data.as_str().is_some_and(|text| text.contains("notional"))));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_notional_missing_reference_is_typed_not_sent() {
+    LocalSet::new()
+        .run_until(async {
+            let port = native_notional_port(20.0, false);
+            port.store.borrow_mut().tickers.clear();
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+            let options = serde_json::from_str(&twap_options(json!({ "size": 4 }))).unwrap();
+            let error = factory
+                .start(options)
+                .expect_err("known minimum requires a native reference");
+            assert_eq!(
+                error.kind,
+                Some(safe_cex_engine::error::ErrorKind::InvalidInput)
+            );
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::error::Outcome::NotSent)
+            );
+            settle().await;
+            assert!(port.commands.borrow().is_empty());
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_notional_all_valid_and_explicit_close_exemption_controls() {
+    LocalSet::new()
+        .run_until(async {
+            for (minimum, exempt, reduce_only) in [(20.0, false, false), (30.0, true, true)] {
+                let port = native_notional_port(minimum, exempt);
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+                let options = serde_json::from_str(&twap_options(
+                    json!({ "size": 4, "reduceOnly": reduce_only }),
+                ))
+                .unwrap();
+                factory.start(options).unwrap();
+                settle().await;
+                tokio::time::advance(Duration::from_secs(31)).await;
+                settle().await;
+                assert_eq!(placed_amounts(&port), [2.0, 2.0]);
+                assert_eq!(port.commands.borrow().len(), 2);
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_tick_is_checked_even_when_notional_is_unknown_or_exempt() {
+    LocalSet::new()
+        .run_until(async {
+            for minimum in [None, Some(20.0)] {
+                let port = native_notional_port(20.0, true);
+                port.store
+                    .borrow_mut()
+                    .market_order_facts
+                    .get_mut("BTCUSDT")
+                    .unwrap()
+                    .min_notional = minimum;
+                port.store
+                    .borrow_mut()
+                    .tickers
+                    .get_mut("BTCUSDT")
+                    .unwrap()
+                    .bid = 0.2;
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+                let options = serde_json::from_str(&twap_options(
+                    json!({ "size": 4, "useLimitOrders": true, "reduceOnly": true }),
+                ))
+                .unwrap();
+                let error = factory
+                    .start(options)
+                    .expect_err("notional status cannot bypass the price tick");
+                assert_eq!(
+                    error.outcome,
+                    Some(safe_cex_engine::error::Outcome::NotSent)
+                );
+                assert!(error.message.contains("price"));
+                settle().await;
+                assert!(port.commands.borrow().is_empty());
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_quote_units_do_not_use_price_and_exemption_is_not_blanket_reduce_only() {
+    LocalSet::new()
+        .run_until(async {
+            for (per_amount, succeeds) in [(10.0, true), (1.0, false)] {
+                let port = native_notional_port(20.0, false);
+                port.store.borrow_mut().tickers.clear();
+                port.store
+                    .borrow_mut()
+                    .market_order_facts
+                    .get_mut("BTCUSDT")
+                    .unwrap()
+                    .notional_basis = safe_cex_engine::model::NotionalBasis::Quote { per_amount };
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+                let options =
+                    serde_json::from_str(&twap_options(json!({ "size": 4, "reduceOnly": true })))
+                        .unwrap();
+                let result = factory.start(options);
+                assert_eq!(result.is_ok(), succeeds);
+                settle().await;
+                assert_eq!(port.commands.borrow().len(), usize::from(succeeds));
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_marketable_limit_price_is_checked_even_when_notional_is_unknown() {
+    LocalSet::new()
+        .run_until(async {
+            let port = native_notional_port(20.0, false);
+            {
+                let mut store = port.store.borrow_mut();
+                let facts = store.market_order_facts.get_mut("BTCUSDT").unwrap();
+                facts.min_notional = None;
+                facts.market_slippage = Some(0.02);
+                store.tickers.clear();
+            }
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+            let options = serde_json::from_str(&twap_options(json!({ "size": 4 }))).unwrap();
+            let error = factory
+                .start(options)
+                .expect_err("native marketable limit still requires an execution price");
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::error::Outcome::NotSent)
+            );
+            settle().await;
+            assert!(port.commands.borrow().is_empty());
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_market_notional_uses_the_rounded_execution_price_and_side() {
+    LocalSet::new()
+        .run_until(async {
+            for (side, succeeds) in [("buy", true), ("sell", false)] {
+                let port = native_notional_port(200.0, false);
+                {
+                    let mut store = port.store.borrow_mut();
+                    store
+                        .market_order_facts
+                        .get_mut("BTCUSDT")
+                        .unwrap()
+                        .market_slippage = Some(0.02);
+                    let ticker = store.tickers.get_mut("BTCUSDT").unwrap();
+                    ticker.last = 0.0;
+                    ticker.mark = 100.0;
+                }
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+                let options =
+                    serde_json::from_str(&twap_options(json!({ "size": 4, "side": side })))
+                        .unwrap();
+                let result = factory.start(options);
+                assert_eq!(result.is_ok(), succeeds, "2 units at102 or98, minimum200");
+                settle().await;
+                assert_eq!(port.commands.borrow().len(), usize::from(succeeds));
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_limit_notional_is_checked_at_the_exact_normalized_wire_price() {
+    LocalSet::new()
+        .run_until(async {
+            for (minimum, succeeds) in [(200.0, true), (200.2, false)] {
+                let port = native_notional_port(minimum, false);
+                port.store
+                    .borrow_mut()
+                    .tickers
+                    .get_mut("BTCUSDT")
+                    .unwrap()
+                    .bid = 100.2;
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+                let options = serde_json::from_str(&twap_options(
+                    json!({ "size": 4, "useLimitOrders": true }),
+                ))
+                .unwrap();
+                let result = factory.start(options);
+                assert_eq!(result.is_ok(), succeeds, "2 at rounded100, not raw100.2");
+                settle().await;
+                let commands = port.commands.borrow();
+                assert_eq!(commands.len(), usize::from(succeeds));
+                if succeeds {
+                    let Command::PlaceOrders { orders, .. } = &commands[0] else {
+                        panic!("placement command")
+                    };
+                    assert_eq!(orders[0].price, Some(100.0));
+                    assert_eq!(orders[0].amount, 2.0);
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_market_exemption_does_not_exempt_limit_children() {
+    LocalSet::new()
+        .run_until(async {
+            for limit in [false, true] {
+                let port = native_notional_port(1000.0, false);
+                {
+                    let mut store = port.store.borrow_mut();
+                    store
+                        .market_order_facts
+                        .get_mut("BTCUSDT")
+                        .unwrap()
+                        .market_notional_exempt = true;
+                    store.tickers.get_mut("BTCUSDT").unwrap().bid = 10.0;
+                }
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+                let options = serde_json::from_str(&twap_options(
+                    json!({ "size": 4, "useLimitOrders": limit }),
+                ))
+                .unwrap();
+                assert_eq!(factory.start(options).is_ok(), !limit);
+                settle().await;
+                assert_eq!(port.commands.borrow().len(), usize::from(!limit));
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_market_lot_grid_is_used_before_any_child_and_does_not_change_limits() {
+    LocalSet::new()
+        .run_until(async {
+            for limit in [false, true] {
+                let port = native_notional_port(0.0, false);
+                {
+                    let mut store = port.store.borrow_mut();
+                    store
+                        .market_order_facts
+                        .get_mut("BTCUSDT")
+                        .unwrap()
+                        .market_amount = Some(safe_cex_engine::model::MarketAmountRules {
+                        minimum: Some(1.0),
+                        maximum: Some(10.0),
+                        step: Some(1.0),
+                    });
+                    store.tickers.get_mut("BTCUSDT").unwrap().bid = 10.0;
+                }
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+                let options = serde_json::from_str(&twap_options(
+                    json!({ "size": 3, "useLimitOrders": limit }),
+                ))
+                .unwrap();
+                factory.start(options).unwrap();
+                settle().await;
+                tokio::time::advance(Duration::from_secs(31)).await;
+                settle().await;
+                assert_eq!(
+                    placed_amounts(&port),
+                    if limit {
+                        vec![1.5, 1.5]
+                    } else {
+                        vec![1.0, 2.0]
+                    }
+                );
+                assert_eq!(port.commands.borrow().len(), 2);
+            }
+        })
+        .await;
+}

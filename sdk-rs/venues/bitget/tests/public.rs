@@ -574,3 +574,31 @@ fn unreadable_public_messages_log_once_a_minute() {
         2
     );
 }
+
+#[test]
+fn native_notional_facts_keep_base_and_inverse_quote_units() {
+    let h = Harness::public();
+    let facts = h.engine.store().market_order_facts()["BTCUSDT"];
+    assert_eq!(facts.min_notional, Some(5.0));
+    assert!(facts.reduce_only_exempt);
+    assert_eq!(
+        facts.notional_basis,
+        safe_cex_engine::market_facts::NotionalBasis::Base
+    );
+    let mut inverse = Harness::started(Options {
+        public_data_only: true,
+        product: Product::Inverse,
+        ..Default::default()
+    });
+    inverse.respond(
+        "/contracts",
+        200,
+        &CONTRACTS
+            .replace("BTCUSDT", "BTCUSD")
+            .replace("\"USDT\"", "\"USD\""),
+    );
+    assert_eq!(
+        inverse.engine.store().market_order_facts()["BTCUSD"].notional_basis,
+        safe_cex_engine::market_facts::NotionalBasis::Quote { per_amount: 1.0 }
+    );
+}

@@ -191,7 +191,7 @@ pub struct Trading {
     /// Frame-fed: the data source knows the position mode (VENUE_STATE).
     mode_known: bool,
     /// tradeMinUSDT by contract id. Market limits carry no value minimum.
-    min_order_value: HashMap<String, f64>,
+    pub(crate) min_order_value: HashMap<String, f64>,
 }
 
 #[derive(Deserialize)]

@@ -47,6 +47,8 @@ pub struct Filter<'a> {
     pub max_qty: Option<Str<'a>>,
     #[serde(borrow, default, alias = "minNotional")]
     pub notional: Option<Str<'a>>,
+    #[serde(default, alias = "applyMinToMarket")]
+    pub apply_to_market: Option<bool>,
 }
 
 #[derive(Deserialize)]

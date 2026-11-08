@@ -729,3 +729,13 @@ fn catalogue_starts_ticker_hydration_before_the_socket_opens() {
     );
     assert_eq!(e.store().ticker("ETH").unwrap().last, 2333.21);
 }
+
+#[test]
+fn native_notional_facts_keep_quote_minimum_and_market_price_policy() {
+    let (e, _) = seeded();
+    let eth = e.store().market_order_facts()["ETH"];
+    assert_eq!(eth.min_notional, Some(10.0));
+    assert_eq!(eth.market_slippage, Some(0.02));
+    assert_eq!(e.store().market_order_facts()["BTC"].min_notional, None);
+    assert!(!eth.reduce_only_exempt);
+}

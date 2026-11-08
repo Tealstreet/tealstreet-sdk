@@ -1755,6 +1755,21 @@ impl Venue for Lighter {
                         .collect(),
                 );
                 cx.store.set_markets(rows);
+                let facts = self
+                    .metadata
+                    .iter()
+                    .map(|(symbol, meta)| {
+                        (
+                            symbol.clone(),
+                            safe_cex_engine::market_facts::MarketOrderFacts {
+                                min_notional: (meta.min_quote != 0.0).then_some(meta.min_quote),
+                                market_slippage: Some(trading::MARKET_SLIPPAGE),
+                                ..Default::default()
+                            },
+                        )
+                    })
+                    .collect();
+                cx.store.set_market_order_facts(facts);
                 let _ = cx.finish_http_context(&context);
                 // Frame-fed engines load only the market catalogue: no ticker
                 // seed, socket or poll; their data source streams the rest.
