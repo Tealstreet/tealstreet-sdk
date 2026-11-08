@@ -65,17 +65,17 @@ fn assert_ts_split(kind: &str, amount: f64, max: f64, step: f64, expected: &[f64
 
 #[test]
 fn ts_split_26_5_1_preserves_legacy_underallocation() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
     assert_ts_split("market", 26., 5., 1., &[4., 4., 4., 4., 4., 4., 1.], 25.);
 }
 #[test]
 fn ts_split_11_5_1_preserves_legacy_underallocation() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
     assert_ts_split("market", 11., 5., 1., &[3., 3., 3., 1.], 10.);
 }
 #[test]
 fn ts_split_12_5_1_preserves_legacy_underallocation() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
     assert_ts_split("market", 12., 5., 1., &[3., 3., 3., 2.], 11.);
 }
 #[test]
@@ -130,7 +130,7 @@ fn ts_split_does_not_add_a_thousand_lot_limit_before_first_request() {
 }
 #[test]
 fn ts_split_sends_a_below_minimum_tail_and_surfaces_native_refusal() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
     // TS :1180-1196 formats the tail; :1283-1304 propagates the native refusal.
     let mut h = Harness::new();
     h.e.store_mut().update_markets(|market| {
