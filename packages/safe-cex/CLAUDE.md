@@ -1,6 +1,9 @@
 # CLAUDE.md - safe-cex Package
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
+Polymarket explicitly refuses hosted/delegated signing before construction:
+its private user WebSocket needs the L2 API secret, not a signature. See
+`sdk-rs/venues/polymarket/README.md`; callback payloads must never export it.
 SDK factories and workers have no TypeScript venue fallback; OUT names refuse
 with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
 and test-only replay/reference implementations remain independent dependencies.
