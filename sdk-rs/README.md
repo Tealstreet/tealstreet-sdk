@@ -17,6 +17,12 @@ owner parameter is absent. This compatibility exception is interim; explicit
 null/invalid ownership never selects it. Bound restores require both original
 persisted tags; untagged saved rows do not resume.
 
+The native server binds TWAPs to the verified authenticated user and the
+server-owned signing-socket generation. Reconnect or handover to another socket
+advances the generation and drops pending slices from the retired binding.
+Bound restores refuse pre-release-8 untagged rows with a visible error; see the
+[TWAP ownership contract](algos/twap/README.md) for the exact messages.
+
 | Crate | Purpose |
 | --- | --- |
 | `safe-cex-crypto` | Signing primitives: HMAC, Ed25519, P-256, EIP-712, Starknet SNIP-12, Lighter Poseidon2/Schnorr, zkLink |

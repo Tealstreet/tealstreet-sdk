@@ -182,6 +182,17 @@ impl TwapBook {
         }
     }
 
+    /// A host binding changed: drop its pending schedule without relabelling saved rows.
+    pub fn rebind_owner(&mut self, owner: Option<TwapOwner>) -> bool {
+        if self.owner == owner {
+            return false;
+        }
+        self.owner = owner;
+        self.legacy_restore = false;
+        self.entries.clear();
+        true
+    }
+
     /// Apply one `twap:*` op from the hosted protocol.
     pub fn handle(
         &mut self,

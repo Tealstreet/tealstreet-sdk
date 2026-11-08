@@ -81,6 +81,7 @@ pub struct Account {
     pub metadata_refreshes: Arc<tokio::sync::Semaphore>,
     /// Chases and TWAPs its algo host is running; none for public accounts.
     pub running: Arc<crate::algos::Running>,
+    pub twap_owner: Arc<crate::twap_owner::Binding>,
 }
 
 /// Concurrent waiting store reads per account; more are refused, not queued.
@@ -267,6 +268,7 @@ impl Account {
 
     /// Signing and the proxy token follow `id` (the newest init or resume).
     fn sign_through(&self, holders: &mut Holders, id: u64, live: &Live) {
+        self.twap_owner.rebind();
         holders.signing = Some(id);
         self.held.store(true, Ordering::Relaxed);
         self.token.set(live.token.clone());
@@ -1171,6 +1173,8 @@ impl Registry {
             (Some(tx), Some(rx))
         };
         let algo_client = self.next_id();
+        let twap_owner = Arc::new(crate::twap_owner::Binding::new(user));
+        let algo_twap_owner = twap_owner.clone();
         let algo_signer = link.clone();
         let owner = algo_owner.clone();
         let (emit, broadcast) = algo_reach(owner);
@@ -1209,6 +1213,7 @@ impl Registry {
                                 algo_placed,
                                 algo_held,
                                 algo_running,
+                                algo_twap_owner,
                                 inbox,
                             ));
                         }
@@ -1239,6 +1244,7 @@ impl Registry {
             reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
             metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
             running,
+            twap_owner,
         };
         Ok((account, remote))
     }
@@ -1916,6 +1922,7 @@ pub mod testing {
             reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
             metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
             running,
+            twap_owner: Arc::new(crate::twap_owner::Binding::new(user)),
         });
         (account, inbox)
     }
@@ -1954,6 +1961,7 @@ pub mod testing {
             op: op.into(),
             data: data.into(),
             origin: "test".into(),
+            twap_owner: account.twap_owner.snapshot(),
         };
         let sent = account.algos.as_ref().map(|algos| algos.send(input));
         assert!(
@@ -2199,6 +2207,7 @@ pub mod testing {
             account.placed.clone(),
             account.held.clone(),
             account.running.clone(),
+            account.twap_owner.clone(),
             inbox,
         ));
         account
@@ -3955,8 +3964,18 @@ pub(crate) mod tests {
                     .await
                     .unwrap();
                 assert_eq!(account.token.provider()().await.unwrap(), "first");
+                let first = account.twap_owner.snapshot();
                 account.sign_through_socket(2, Arc::new(|_| true), token("second"));
                 assert_eq!(account.token.provider()().await.unwrap(), "second");
+                let second = account.twap_owner.snapshot();
+                assert_eq!(first.owner_id, "u");
+                assert_eq!(second.owner_id, first.owner_id);
+                assert!(second.generation > first.generation);
+                account.sign_through_socket(2, Arc::new(|_| true), token("refreshed"));
+                let refreshed = account.twap_owner.snapshot();
+                assert!(refreshed.generation > second.generation);
+                account.sign_through_socket(1, Arc::new(|_| true), token("returned"));
+                assert!(account.twap_owner.snapshot().generation > refreshed.generation);
                 registry.dispose(&account, Disposal::SettingsChanged);
             })
             .await;

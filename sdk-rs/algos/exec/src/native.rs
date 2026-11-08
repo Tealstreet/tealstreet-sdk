@@ -129,7 +129,7 @@ impl AlgoFactory for ExecFactory {
             nuking: self.nuking.clone(),
             account_name: self.account_name.clone(),
             chasers: self.chasers.clone(),
-            twap: self.twap.clone(),
+            twap: self.twap.as_ref().map(TwapFactory::capture_owner),
             cancel_all: self.cancel_all.clone(),
         };
         exec.borrow_mut().handle(&payload, &mut host);

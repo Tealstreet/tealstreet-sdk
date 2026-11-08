@@ -1604,6 +1604,7 @@ mod tests {
                         op: op.into(),
                         data: data.into(),
                         origin: "test".into(),
+                        twap_owner: account.twap_owner.snapshot(),
                     };
                     account.algos.as_ref().unwrap().send(input).unwrap();
                 };

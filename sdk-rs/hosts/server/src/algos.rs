@@ -23,6 +23,7 @@ pub enum AlgoInput {
         data: String,
         /// The socket that sent it, for the order audit line.
         origin: String,
+        twap_owner: safe_cex_algo_twap::TwapOwner,
     },
     /// A hosted `nuke`/`nukePositions`/`nukeOrders` call: exec's nuke, answered
     /// with `callMethod:done` once every leg has settled.
@@ -847,6 +848,7 @@ pub async fn run(
     placed: crate::accounts::PlacedSymbols,
     held: Arc<AtomicBool>,
     running: Arc<Running>,
+    twap_owner: Arc<crate::twap_owner::Binding>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     // An algo host that cannot run never takes the account with it: the account's
@@ -883,11 +885,16 @@ pub async fn run(
     let cx = AlgoCx::new(port.clone(), scope.clone());
     let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
     let book = chasers.book();
-    let twap = Rc::new(safe_cex_algo_twap::factory::TwapFactory::new(
-        &name,
-        cx.clone(),
-        Rc::new(book.clone()),
-    ));
+    let binding = twap_owner.clone();
+    let twap = Rc::new(
+        safe_cex_algo_twap::factory::TwapFactory::with_owner(
+            &name,
+            twap_owner.snapshot(),
+            cx.clone(),
+            Rc::new(book.clone()),
+        )
+        .guard_owner(Rc::new(move || binding.snapshot())),
+    );
     // Exec's chase/TWAP handoff shares this account's book and TWAP schedule,
     // under the server's trusted account name, never one from the payload.
     // A nuke ends with the venue's cancel-all, scoped as hosted `cancelAllOrders`.
@@ -1000,7 +1007,11 @@ pub async fn run(
                     if let Some(signer) = &link_signer { signer.mark_unavailable(); }
                     return;
                 }
-                Some(AlgoInput::Op { op, mut data, origin }) => {
+                Some(AlgoInput::Op { op, mut data, origin, twap_owner: captured_owner }) => {
+                    if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
+                        port.emit("error", serde_json::json!("Algo operation cancelled-for-owner-change: authenticated connection binding changed").to_string());
+                        continue;
+                    }
                     if !running.io_allowed() {
                         port.emit("error", crate::user_drain::refusal().to_string());
                         continue;
@@ -1013,6 +1024,10 @@ pub async fn run(
                     }
                     if !running.io_allowed() {
                         port.emit("error", crate::user_drain::refusal().to_string());
+                        continue;
+                    }
+                    if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
+                        port.emit("error", serde_json::json!("Algo operation cancelled-for-owner-change: authenticated connection binding changed").to_string());
                         continue;
                     }
                     let epoch = running.restore_epoch();

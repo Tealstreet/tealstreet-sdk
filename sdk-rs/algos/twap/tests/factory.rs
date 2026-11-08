@@ -114,6 +114,71 @@ async fn settle() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn binding_changes_during_slice_deferral_drop_the_retired_schedule() {
+    LocalSet::new()
+        .run_until(async {
+            for settle_before_rebind in [false, true] {
+                for (owner_id, generation, expected) in [("A", 7, 2), ("B", 7, 1), ("A", 8, 1)] {
+                    let owner = Rc::new(RefCell::new(safe_cex_algo_twap::TwapOwner {
+                        owner_id: "A".into(),
+                        generation: 7,
+                    }));
+                    let port = Rc::new(Port::default());
+                    // Exercise a deferred completion and, separately, a scheduled next slice.
+                    port.answer_ms.set(100);
+                    let cx = AlgoCx::new(port.clone(), Scope::new());
+                    let factory = TwapFactory::with_owner(
+                        "a",
+                        owner.borrow().clone(),
+                        cx.clone(),
+                        Rc::new(Chasers::default()),
+                    )
+                    .guard_owner(Rc::new({
+                        let owner = owner.clone();
+                        move || owner.borrow().clone()
+                    }));
+                    factory
+                        .handle("twap:start", &twap_options(json!({"duration": 0.5})), &cx)
+                        .unwrap();
+                    settle().await;
+                    assert_eq!(placed_amounts(&port), vec![0.5]);
+                    if settle_before_rebind {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        settle().await;
+                    }
+                    *owner.borrow_mut() = safe_cex_algo_twap::TwapOwner {
+                        owner_id: owner_id.into(),
+                        generation,
+                    };
+                    let before = port.emits.borrow().len();
+                    if !settle_before_rebind {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        settle().await;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15_001)).await;
+                    settle().await;
+                    assert_eq!(placed_amounts(&port), vec![0.5; expected]);
+                    if expected == 1 {
+                        assert!(factory.active_twaps("a").is_empty());
+                        assert!(
+                            port.emits.borrow()[before..].iter().all(|(op, data)| {
+                                op != "twap:stateUpdate" || data == &json!({})
+                            }),
+                            "retired completion must not republish the saved row"
+                        );
+                        assert!(port.emits.borrow().iter().any(|(op, data)| {
+                            op == "error"
+                                && data == "TWAPs stopped: authenticated connection binding changed"
+                        }));
+                    }
+                    cx.scope.dispose();
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn same_name_different_owner_cannot_restore_a_pending_slice() {
     LocalSet::new()
         .run_until(async {

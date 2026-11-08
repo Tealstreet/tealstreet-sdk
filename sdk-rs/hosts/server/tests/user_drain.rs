@@ -336,7 +336,10 @@ async fn self_fence_parks_and_same_box_reconnect_gets_the_retained_notice() {
         let state = json!({"accountName":"acct","activeMarket":market,"size":0.1,"ordersSizes":[0.01,0.01,0.01],
             "side":"buy","status":"running","ordersCount":10,"ordersExecuted":7,"nextOrderAt":now+60_000,
             "origin":"web","createdAt":now-180_000,"startedAt":now-180_000});
-        returned.op("acct", "twap:state", json!([{"id":"parked-twap","options":options,"state":state}])).await;
+        // A valid current-binding row still receives the router's pause protection.
+        let owner = _fresh.twap_owner.snapshot();
+        returned.op("acct", "twap:state", json!([{"id":"parked-twap","ownerId":owner.owner_id,
+            "ownerGeneration":owner.generation,"options":options,"state":state}])).await;
         let store = returned.until("store", |d| d["data"]["activeTWAPs"].as_array().is_some_and(|rows| !rows.is_empty())).await;
         assert_eq!(store["data"]["activeTWAPs"][0]["status"], "paused");
         assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"], 7);

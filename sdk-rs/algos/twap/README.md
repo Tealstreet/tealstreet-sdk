@@ -4,7 +4,8 @@ Use `TwapFactory::with_owner` or `TwapBook::with_owner` with the authenticated
 host's `TwapOwner { owner_id, generation }` to enable persisted restores.
 The owner must come from the host session, independently of account names and
 incoming saved rows. Dispose the old account scope and construct a new factory
-when that owner or generation changes.
+when that owner or generation changes, or use `guard_owner` in a shared host
+to drop retired schedules and ignore their deferred placement completions.
 
 New TWAPs persist `ownerId` and `ownerGeneration` from that trusted snapshot.
 A restore must match both tags and the account name. Foreign rows, stale
@@ -24,6 +25,21 @@ including untagged rows; it never invents missing tags. The separate
 `algoStartOwned(accountName, twapOwnerJson, now, wall)` requires both persisted
 tags to match its trusted owner. Invalid or unavailable explicit ownership
 never falls back to compatibility mode.
+
+The native server binds the verified authenticated user and a server-owned
+generation of the account's signing attachment. Every attachment advances the
+generation, including same-socket reinit, reconnects, and signing handovers.
+Queued TWAP ops captured before rebind are refused, and remaining slices from
+the retired generation are dropped. EXEC captures the binding before a sleep
+or wait and cannot start a TWAP after it changes. Already-issued venue writes are not undone;
+existing slice chasers retain their normal lifecycle.
+
+When ownership is bound, pre-release-8 untagged rows do not resume. The native
+restore reports `TWAP <symbol> not restored: persisted TWAP owner or generation
+does not match`; the server forwards it as an error with `forceToast: true`.
+The TypeScript restore wrapper refuses a missing owner ID earlier with
+`TWAP <symbol> restore cancelled-for-owner-change: persisted ownerId is missing`.
+Neither path assigns missing ownership evidence from the current binding.
 
 The native `actual_worker_round_trip_preserves_native_restore_ownership` test
 runs the real TypeScript restore wrapper before restoring its JSON into the

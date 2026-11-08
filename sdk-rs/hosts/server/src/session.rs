@@ -821,6 +821,7 @@ impl Session {
                             op: op.to_owned(),
                             data: msg.data.to_string(),
                             origin: format!("socket:{}", self.socket),
+                            twap_owner: self.joined[&name].account.twap_owner.snapshot(),
                         })
                         .is_ok()
                 });
@@ -1838,6 +1839,7 @@ mod tests {
                 op: op.into(),
                 data: data.into(),
                 origin: "test".into(),
+                twap_owner: account.twap_owner.snapshot(),
             })
             .unwrap();
     }
@@ -2347,6 +2349,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            twap_owner: account.twap_owner.snapshot(),
                         })
                         .unwrap();
                 };
@@ -2697,6 +2700,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            twap_owner: account.twap_owner.snapshot(),
                         })
                         .unwrap();
                 };
@@ -2771,6 +2775,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            twap_owner: account.twap_owner.snapshot(),
                         })
                         .unwrap();
                 };
@@ -2853,6 +2858,7 @@ mod tests {
                         op: "chaser:start".into(),
                         data: "not a chase".into(),
                         origin: "test".into(),
+                        twap_owner: account.twap_owner.snapshot(),
                     })
                     .unwrap();
                 settle().await;
