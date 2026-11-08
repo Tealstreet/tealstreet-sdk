@@ -1022,11 +1022,7 @@ impl Backpack {
             {
                 match pair_fact(cx, managed, orders, response.body) {
                     Ok((result, elements)) => {
-                        if let Err(reason) = self.settle_write(&request, elements) {
-                            let error = self.plan_failure(&request, VenueError::new(reason), false);
-                            let _ = cx.fail_plan(&managed.plan, error);
-                            return;
-                        }
+                        self.record_write(&request, elements);
                         match result {
                             WriteResult::Accepted { .. } => recorded = true,
                             WriteResult::Rejected(error)
@@ -1081,12 +1077,12 @@ impl Backpack {
                     }
                     accept_trade(cx, &request, vec![row.id.into()])?;
                     recorded = request.managed.is_some();
-                    self.settle_write(
+                    self.record_write(
                         &request,
                         vec![ElementResult::Placed {
                             order_ids: vec![row.id.into()],
                         }],
-                    )?;
+                    );
                     cx.store.invalidate_order_snapshots();
                     if let Some(job) = self.trading.jobs.get_mut(&request.command) {
                         job.ids.push(row.id.into());
@@ -1145,14 +1141,14 @@ impl Backpack {
                     validate_ack(response.body)?;
                     accept_trade(cx, &request, vec![])?;
                     recorded = request.managed.is_some();
-                    self.settle_write(
+                    self.record_write(
                         &request,
                         vec![ElementResult::Applied {
                             effect: AppliedEffect::Cancel,
                             target_order_id: Some(id.clone()),
                             position_key: None,
                         }],
-                    )?;
+                    );
                     cx.store.invalidate_order_snapshots();
                     self.finish_trade_cancel(request.command, id);
                     let unchanged = request
@@ -1173,14 +1169,14 @@ impl Backpack {
                     }
                     accept_trade(cx, &request, vec![])?;
                     recorded = request.managed.is_some();
-                    self.settle_write(
+                    self.record_write(
                         &request,
                         vec![ElementResult::Applied {
                             effect: AppliedEffect::Cancel,
                             target_order_id: None,
                             position_key: None,
                         }],
-                    )?;
+                    );
                     cx.store.invalidate_order_snapshots();
                     for (id, stamp) in &request.targets {
                         let unchanged = self.order_stream_time(id) == *stamp;
@@ -1200,14 +1196,14 @@ impl Backpack {
                     }
                     accept_trade(cx, &request, vec![])?;
                     recorded = request.managed.is_some();
-                    self.settle_write(
+                    self.record_write(
                         &request,
                         vec![ElementResult::Applied {
                             effect: AppliedEffect::Settings,
                             target_order_id: None,
                             position_key: None,
                         }],
-                    )?;
+                    );
                     if request.leverage_revision == self.account.leverage_revision {
                         self.account.leverage_revision += 1;
                         self.account.leverage = *leverage;
@@ -1320,27 +1316,16 @@ impl Backpack {
         cx.notice(Level::Warn, code::ORDER_REJECTED, &error.message);
     }
 
-    fn settle_write(
-        &mut self,
-        request: &Request,
-        results: Vec<ElementResult>,
-    ) -> Result<(), String> {
-        let job = self
-            .trading
-            .jobs
-            .get_mut(&request.command)
-            .ok_or("Backpack write plan unavailable")?;
-        let indices = job
-            .elements
-            .get(request.write)
-            .ok_or("missing write elements")?;
-        if indices.len() != results.len() {
-            return Err("Backpack reporting arity mismatch".into());
-        }
+    fn record_write(&mut self, request: &Request, results: Vec<ElementResult>) {
+        let Some(job) = self.trading.jobs.get_mut(&request.command) else {
+            return;
+        };
+        let Some(indices) = job.elements.get(request.write) else {
+            return;
+        };
         for (index, result) in indices.iter().zip(results) {
             let _ = job.write_plan.record(*index, result);
         }
-        Ok(())
     }
 
     fn plan_failure(
