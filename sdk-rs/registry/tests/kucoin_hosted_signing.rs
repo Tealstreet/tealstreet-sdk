@@ -1,4 +1,7 @@
-#![cfg(all(feature = "kucoin", feature = "hosted-signing"))]
+#![cfg(all(
+    any(feature = "kucoin", feature = "kucoinspot"),
+    feature = "hosted-signing"
+))]
 
 use safe_cex_crypto::signer::LocalSigner;
 use safe_cex_engine::signing::{ExtraKey, Identities, Identity, KeyRef, SignError};
@@ -27,13 +30,12 @@ fn fixture() -> (LocalSigner, Identities) {
     )
 }
 
-#[test]
-fn kucoin_hosted_batch_keeps_passphrase_and_broker_in_device_custody() {
+fn kucoin_hosted_batch_keeps_passphrase_and_broker_in_device_custody(venue: &str) {
     let (signer, ids) = fixture();
     let format: OutputFormat = serde_json::from_str("\"kucoin-batch\"").unwrap();
     let descriptor = r#"{"payload":"1700000000123POST/api/v1/orders{\"size\":1}","brokerPrefix":"1700000000123partner"}"#;
     let (work, kind) = hosted_signing::prepare(
-        "kucoin",
+        venue,
         &ids,
         Input::WsAuth {
             to_sign: descriptor.into(),
@@ -42,6 +44,7 @@ fn kucoin_hosted_batch_keeps_passphrase_and_broker_in_device_custody() {
     )
     .unwrap();
     work.validate().unwrap();
+    assert_eq!(work.context.venue, venue);
     assert_eq!(work.operations.len(), 4);
     let result = signer.sign_now(&work).unwrap();
     let output = hosted_signing::finish(kind, &result).unwrap();
@@ -64,13 +67,12 @@ fn kucoin_hosted_batch_keeps_passphrase_and_broker_in_device_custody() {
     assert!(output.credential.is_none());
 }
 
-#[test]
-fn kucoin_missing_device_passphrase_refuses_before_provider_work() {
+fn kucoin_missing_device_passphrase_refuses_before_provider_work(venue: &str) {
     let (_, mut ids) = fixture();
     ids.primary.as_mut().unwrap().passphrase = None;
     assert!(matches!(
         hosted_signing::prepare(
-            "kucoin",
+            venue,
             &ids,
             Input::Http {
                 payload: r#"{"payload":"1700000000123GET/api/v1/positions"}"#.into(),
@@ -82,8 +84,7 @@ fn kucoin_missing_device_passphrase_refuses_before_provider_work() {
     ));
 }
 
-#[test]
-fn kucoin_captures_are_clock_fenced_and_refuse_malformed_or_unknown_work() {
+fn kucoin_captures_are_clock_fenced_and_refuse_malformed_or_unknown_work(venue: &str) {
     use safe_cex_engine::signing_capture::Capture;
     let (signer, ids) = fixture();
     let http = |stamp: f64| Input::Http {
@@ -93,7 +94,7 @@ fn kucoin_captures_are_clock_fenced_and_refuse_malformed_or_unknown_work() {
     };
     let stamp = 1_700_000_000_123.;
     let mut capture = Capture::default();
-    let (work, kind) = hosted_signing::prepare("kucoin", &ids, http(stamp)).unwrap();
+    let (work, kind) = hosted_signing::prepare(venue, &ids, http(stamp)).unwrap();
     let first = capture.prepare(work, kind, 0., stamp, 0, 5000).unwrap();
     let old = signer.sign_now(&first.work).unwrap();
     assert!(
@@ -102,7 +103,7 @@ fn kucoin_captures_are_clock_fenced_and_refuse_malformed_or_unknown_work() {
             .is_err()
     );
     assert!(capture.is_empty());
-    let (work, kind) = hosted_signing::prepare("kucoin", &ids, http(stamp + 1000.)).unwrap();
+    let (work, kind) = hosted_signing::prepare(venue, &ids, http(stamp + 1000.)).unwrap();
     let next = capture
         .prepare(work, kind, 1., stamp + 1000., 1, 5000)
         .unwrap();
@@ -123,7 +124,7 @@ fn kucoin_captures_are_clock_fenced_and_refuse_malformed_or_unknown_work() {
     ] {
         assert!(
             hosted_signing::prepare(
-                "kucoin",
+                venue,
                 &ids,
                 Input::Http {
                     payload: payload.into(),
@@ -134,12 +135,10 @@ fn kucoin_captures_are_clock_fenced_and_refuse_malformed_or_unknown_work() {
             .is_err()
         );
     }
-    for venue in ["kucoinspot", "unknown"] {
-        assert!(hosted_signing::prepare(venue, &ids, http(stamp)).is_err());
-    }
+    assert!(hosted_signing::prepare("unknown", &ids, http(stamp)).is_err());
     assert!(
         hosted_signing::prepare(
-            "kucoin",
+            venue,
             &ids,
             Input::WsAuth {
                 to_sign: "raw-passphrase-must-not-be-admitted".into(),
@@ -148,4 +147,18 @@ fn kucoin_captures_are_clock_fenced_and_refuse_malformed_or_unknown_work() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn hosted_signing_for_each_enabled_kucoin_family() {
+    for (enabled, venue) in [
+        (cfg!(feature = "kucoin"), "kucoin"),
+        (cfg!(feature = "kucoinspot"), "kucoinspot"),
+    ] {
+        if enabled {
+            kucoin_hosted_batch_keeps_passphrase_and_broker_in_device_custody(venue);
+            kucoin_missing_device_passphrase_refuses_before_provider_work(venue);
+            kucoin_captures_are_clock_fenced_and_refuse_malformed_or_unknown_work(venue);
+        }
+    }
 }
