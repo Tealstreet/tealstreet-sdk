@@ -12,6 +12,8 @@
 
 The helper validates the complete plan supplied by the venue; it cannot detect a child the planner omitted. Adopters must include every lot, batch, TP/SL child and predictable cancel-replace write before the first transport write. Dynamic account changes still require the venue's existing final release checks. Engine lifecycle ownership remains authoritative for actual transport release.
 
+Native batches that do not create orders can record their physical facts through `Cx::http_write_applied_batch`. It retains the existing batch classifier and absent-order reconciliation fences while omitting cancelled or amended target IDs from created-order IDs. The logical journal separately records those existing targets in `Applied` results; the entry point refuses placement and read intents.
+
 ## Public error shape and NX
 
 `VenueError.elements` is optional. When present it is an ordered JSON array:

@@ -98,9 +98,24 @@ fn a_refused_replacement_never_restores_the_original() {
     h.respond(replacement, REFUSED);
     let error = failure(&h).expect("replacement refused");
     let elements = error.elements.as_ref().expect("placement outcome");
-    assert_eq!(elements.len(), 1);
+    assert_eq!(elements.len(), 2);
+    assert_eq!(
+        elements[0].result,
+        safe_cex_engine::write_plan::ElementResult::Applied {
+            effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
+            target_order_id: Some("12".into()),
+            position_key: None,
+        }
+    );
     assert!(
-        matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+        matches!(&elements[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty()),
+        "cancelled targets are not newly placed orders"
     );
     assert!(writes(&h).is_empty(), "no automatic restore or rollback");
 }
@@ -115,7 +130,7 @@ fn a_refused_replacement_preserves_native_refusal_detail() {
     let error = failure(&h).expect("replacement refused");
     let outcomes = error.elements.as_ref().expect("native placement outcome");
     assert!(
-        matches!(&outcomes[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.venue_code.as_deref() == Some("102014"))
+        matches!(&outcomes[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.venue_code.as_deref() == Some("102014"))
     );
     assert!(writes(&h).is_empty());
 }
@@ -381,7 +396,7 @@ fn an_unproven_replacement_stays_unknown_without_restoration() {
         let error = failure(&h).expect("the engine seals the Plan");
         assert_eq!(error.outcome, Some(Outcome::Unknown));
         assert!(matches!(
-            &error.elements.as_ref().expect("complete placement outcome")[0].result,
+            &error.elements.as_ref().expect("complete placement outcome")[1].result,
             safe_cex_engine::write_plan::ElementResult::Unknown { .. }
         ));
         assert!(writes(&h).is_empty());

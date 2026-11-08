@@ -247,7 +247,12 @@ fn an_amend_whose_read_back_lacks_the_kept_leg_stops_without_repair() {
     );
     let read = h.take("tpslId=500");
     h.respond(read, r#"{"code":"0","data":[]}"#);
-    assert_eq!(failure(&h).expect("unverified accepted edit").outcome, None);
+    let error = failure(&h).expect("unverified accepted edit");
+    assert_eq!(error.outcome, None);
+    assert!(
+        matches!(&error.elements.as_ref().expect("applied leg-removal effect")[0].result,
+        safe_cex_engine::write_plan::ElementResult::Applied { effect: safe_cex_engine::write_plan::AppliedEffect::Amend, target_order_id: Some(id), .. } if id == "500")
+    );
     no_cancel_or_placement(&h);
 }
 

@@ -584,3 +584,30 @@ fn shuffled_batch_acknowledgements_keep_their_caller_element_indices() {
     );
     assert_eq!(h.requests.len(), 1);
 }
+
+#[test]
+fn native_amend_invalid_wire_size_is_refused_before_transport() {
+    for amount in [3.0, 4.5, 6.0] {
+        let mut h = harness(4.0, 5.0, 1.0);
+        h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"500","side":"sell","size":"4","marginMode":"cross","positionSide":"net","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"last","state":"live"}]}"#);
+        h.handle(
+            h.now,
+            Event::Command(Command::AmendOrder {
+                command: 7,
+                id: "500__stop_loss".into(),
+                price: None,
+                amount: Some(amount),
+            }),
+        );
+        h.collect();
+        not_sent(&h);
+        let elements = h.failures[0]
+            .elements
+            .as_ref()
+            .expect("full gate rejected native amendment");
+        assert_eq!(elements.len(), 1);
+        assert!(
+            matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::NotSent))
+        );
+    }
+}

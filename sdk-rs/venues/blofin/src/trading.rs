@@ -1,7 +1,9 @@
 //! Trading command jobs: each command owns a Preflight root and one streamed
 //! serial Plan. A lost write response is never retried.
 use super::*;
+mod effects;
 mod preflight;
+use effects::{EffectRow, EffectRules, EffectWrite};
 use preflight::{PlacementWrite, validate_placement_write};
 use safe_cex_engine::classify::{
     BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
@@ -14,7 +16,7 @@ use safe_cex_engine::request_context::{
     HttpOwnerRetirement, Plan, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData,
 };
 use safe_cex_engine::setting_holds::SettingKey;
-use safe_cex_engine::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, PlannedWrite, WritePlan};
 use safe_cex_engine::{CommandWait, ErrorKind, Outcome, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -169,6 +171,7 @@ pub struct Request {
     context: Context,
     step: Step,
     write_index: Option<usize>,
+    effect_write: Option<EffectWrite>,
 }
 /// Where the active job is driven from: entry custody, the current call's
 /// DATA, or a Plan-ready callback holding the next slot.
@@ -181,7 +184,7 @@ struct Job {
     command: CommandId,
     intent: Intent,
     steps: VecDeque<Step>,
-    writes: Option<WritePlan<PlannedPlacement>>,
+    writes: Option<WritePlan<PlannedMutation>>,
     pending_write: Option<usize>,
     ids: Vec<String>,
     /// Store rows issued so far, restored on every terminal.
@@ -263,6 +266,25 @@ struct Step {
     body: String,
     effect: Effect,
     delay: f64,
+}
+#[derive(Clone)]
+enum PlannedMutation {
+    Placement(PlannedPlacement),
+    Effect(EffectWrite),
+}
+impl PlannedMutation {
+    fn body(&self) -> &str {
+        match self {
+            Self::Placement(write) => &write.body,
+            Self::Effect(write) => &write.body,
+        }
+    }
+    fn validate(&self) -> Result<(), VenueError> {
+        match self {
+            Self::Placement(write) => write.validate(),
+            Self::Effect(write) => write.validate(),
+        }
+    }
 }
 #[derive(Clone)]
 struct PlannedPlacement {
@@ -532,31 +554,53 @@ fn positive(value: f64, label: &str) -> Result<(), String> {
     }
 }
 impl Job {
-    fn prepare_writes(&mut self) -> Result<(), VenueError> {
+    fn settle_applied(&mut self, request: &Request) -> Result<(), VenueError> {
+        let write = request.effect_write.as_ref().ok_or_else(|| {
+            unknown("BloFin accepted effect has no validated plan entry").kind(ErrorKind::Internal)
+        })?;
+        self.settle_write(
+            request.write_index,
+            (0..write.targets.len())
+                .map(|index| write.applied(index))
+                .collect(),
+        )
+    }
+    fn prepare_writes(&mut self, venue: &Blofin, cx: &Cx<'_, Pending>) -> Result<(), VenueError> {
         let mut index = 0;
         let mut writes = Vec::new();
         for step in &self.steps {
-            if let Some(payload) = &step.placement {
-                let elements = payload
-                    .payloads
-                    .iter()
-                    .map(|row| {
-                        let element = Element {
-                            index,
-                            client_order_id: Some(row.client_order_id.clone()),
-                        };
-                        index += 1;
-                        element
-                    })
-                    .collect();
-                writes.push(PlannedWrite {
-                    payload: payload.clone(),
-                    elements,
-                });
+            if step.read() {
+                continue;
             }
+            let (payload, correlations) = if let Some(placement) = &step.placement {
+                (
+                    PlannedMutation::Placement(placement.clone()),
+                    placement
+                        .payloads
+                        .iter()
+                        .map(|row| Some(row.client_order_id.clone()))
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                let effect = venue.plan_effect(cx, step)?;
+                let correlations = vec![None; effect.targets.len()];
+                (PlannedMutation::Effect(effect), correlations)
+            };
+            let elements = correlations
+                .into_iter()
+                .map(|client_order_id| {
+                    let element = Element {
+                        index,
+                        client_order_id,
+                    };
+                    index += 1;
+                    element
+                })
+                .collect();
+            writes.push(PlannedWrite { payload, elements });
         }
         if !writes.is_empty() {
-            self.writes = Some(WritePlan::validate(writes, PlannedPlacement::validate)?);
+            self.writes = Some(WritePlan::validate(writes, PlannedMutation::validate)?);
         }
         Ok(())
     }
@@ -631,6 +675,73 @@ impl Step {
     }
 }
 impl Blofin {
+    fn plan_effect(&self, cx: &Cx<'_, Pending>, step: &Step) -> Result<EffectWrite, VenueError> {
+        let build = || -> Result<EffectWrite, String> {
+            let body: Option<EffectRow> = if matches!(step.effect, Effect::Cancel(_)) {
+                None
+            } else {
+                Some(serde_json::from_str(&step.body).map_err(|error| error.to_string())?)
+            };
+            let (effect, targets) = match &step.effect {
+                Effect::Cancel(targets) => (
+                    AppliedEffect::Cancel,
+                    targets
+                        .iter()
+                        .map(|target| Some(target.id.clone()))
+                        .collect(),
+                ),
+                Effect::AmendTpsl(_) | Effect::NativeAmend { .. } => {
+                    let target = body.as_ref().and_then(EffectRow::target).map(str::to_owned);
+                    (AppliedEffect::Amend, vec![target])
+                }
+                Effect::Setting => (AppliedEffect::Settings, vec![None]),
+                _ => return Err("BloFin read or placement is not an applied-effect write".into()),
+            };
+            let position_key = body.as_ref().and_then(|row| row.inst_id.clone());
+            let rules = if effect != AppliedEffect::Cancel {
+                position_key
+                    .as_deref()
+                    .map(|id| {
+                        let market = cx
+                            .store
+                            .market_by_id(id)
+                            .ok_or("Missing BloFin effect market")?;
+                        let sizes = self
+                            .size_rules
+                            .get(id)
+                            .ok_or("Missing BloFin effect size rules")?;
+                        let limit = body
+                            .as_ref()
+                            .and_then(|row| row.algo_id.as_deref())
+                            .and_then(|id| self.account.sources.get(id))
+                            .is_some_and(|source| source.order_price > 0.0);
+                        Ok::<_, String>(EffectRules {
+                            market: market.clone(),
+                            sizes: sizes.clone(),
+                            maximum: if limit {
+                                sizes.max_limit
+                            } else {
+                                sizes.max_market
+                            },
+                        })
+                    })
+                    .transpose()?
+            } else {
+                None
+            };
+            Ok(EffectWrite {
+                path: step.path,
+                body: step.body.clone(),
+                effect,
+                targets,
+                position_key,
+                rules,
+                remove_leg: matches!(step.effect, Effect::AmendTpsl(_)),
+            })
+        };
+        build().map_err(|message| not_sent(message).kind(ErrorKind::InvalidInput))
+    }
+
     pub(crate) fn capture_trade_write_plan(
         &self,
         request: &Request,
@@ -2115,7 +2226,7 @@ impl Blofin {
                 return self.next_job(cx);
             }
         };
-        if let Err(error) = job.prepare_writes() {
+        if let Err(error) = job.prepare_writes(self, cx) {
             let _ = cx.fail_preflight(&preflight, error);
             return self.next_job(cx);
         }
@@ -2209,12 +2320,16 @@ impl Blofin {
     /// Queues one Plan call, applying native optimistic status after admission
     /// and before release.
     fn issue(&mut self, cx: &mut Cx<'_, Pending>, mut active: Active, slot: Slot, step: Step) {
-        let write_index = if step.is_place() {
+        let mut effect_write = None;
+        let write_index = if !step.read() {
             if let Some(writes) = active.job.writes.as_mut() {
                 match writes.next_write() {
                     Some((index, write)) => {
                         active.job.pending_write = Some(index);
-                        if write.payload.body != step.body {
+                        if let PlannedMutation::Effect(write) = &write.payload {
+                            effect_write = Some(write.clone());
+                        }
+                        if write.payload.body() != step.body {
                             return self.end(
                                 cx,
                                 active,
@@ -2339,6 +2454,7 @@ impl Blofin {
             context: context.clone(),
             step,
             write_index,
+            effect_write,
         };
         self.trading.active = Some(active);
         if let Err((pending, reason)) = cx.request_signed_managed(
@@ -2377,6 +2493,7 @@ impl Blofin {
         current: Option<(&Slot, &Context)>,
         error: VenueError,
     ) {
+        let unknown = !definite_refusal(&error);
         let error = active.job.failure(error);
         self.cleanup_job(cx, &active.job);
         match &active.plan {
@@ -2390,7 +2507,6 @@ impl Blofin {
                     debug_assert!(finished.is_ok(), "Plan call seal stranded");
                 }
                 // Its row ended only because the cancel landed: nothing replaced it.
-                let unknown = !definite_refusal(&error);
                 let order_gone = active
                     .job
                     .replacing_order
@@ -2991,8 +3107,12 @@ impl Blofin {
             Effect::Cancel(targets) => {
                 if reply.code != "0" && rows.is_empty() {
                     let message = format!("BloFin cancellation rejected: {}", reply.msg);
-                    record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
-                    return Err(VenueError::new(message));
+                    return Err(record_failed(
+                        cx,
+                        context,
+                        Some(native(&reply.code, &reply.msg)),
+                        &message,
+                    ));
                 }
                 let mut matched: Vec<Option<&ResultRow<'_>>> = vec![None; targets.len()];
                 let mut unproven = rows.len() != targets.len();
@@ -3026,8 +3146,16 @@ impl Blofin {
                     }
                 }
                 let mut items = Vec::with_capacity(targets.len());
-                for (target, row) in targets.iter().zip(&matched) {
+                let mut results = Vec::with_capacity(targets.len());
+                let effect_write = request
+                    .effect_write
+                    .as_ref()
+                    .ok_or_else(|| unknown("BloFin cancellation lacks its validated effect"))?;
+                for (index, (target, row)) in targets.iter().zip(&matched).enumerate() {
                     let Some(row) = row else {
+                        results.push(ElementResult::Unknown {
+                            error: Box::new(unknown("Missing BloFin cancel acknowledgement")),
+                        });
                         continue;
                     };
                     // BloFin's tpsl and algo cancels answer code 500 with this text for an order
@@ -3050,6 +3178,16 @@ impl Blofin {
                             "The order was already filled, triggered or canceled before the move; no replacement was sent"
                                 .into(),
                         );
+                    }
+                    if accepted || gone {
+                        results.push(effect_write.applied(index));
+                    } else {
+                        results.push(failed_element(
+                            cx,
+                            context,
+                            native(&row.code, &row.msg),
+                            &row.msg,
+                        ));
                     }
                     if accepted || (gone_text && !replacing) {
                         items.push(BatchItem::Accepted(&target.id));
@@ -3093,13 +3231,20 @@ impl Blofin {
                 if rows.iter().any(|row| row.code == "429") {
                     error = Some(UNKNOWN_RATE.to_owned());
                 }
+                job.settle_write(request.write_index, results)?;
                 if unproven {
                     let message = error.clone().unwrap_or_default();
                     let _ = cx.http_write_unproven(context, message);
                 } else {
                     let message = error.clone().unwrap_or_default();
-                    let _ =
-                        cx.http_write_batch(context, &CODES, targets.len(), &items, message, None);
+                    let _ = cx.http_write_applied_batch(
+                        context,
+                        &CODES,
+                        targets.len(),
+                        &items,
+                        message,
+                        None,
+                    );
                 }
                 match error {
                     Some(error) if unproven => Err(unknown(error)),
@@ -3116,9 +3261,14 @@ impl Blofin {
                     };
                     let error =
                         setting_failure(request.step.path, response.status, Some((code, message)));
-                    record_failed(cx, context, Some(native(code, message)), &error.message);
-                    return Err(error);
+                    return Err(record_failed(
+                        cx,
+                        context,
+                        Some(native(code, message)),
+                        &error.message,
+                    ));
                 }
+                job.settle_applied(request)?;
                 let accepted = WriteFact::Accepted { order_ids: vec![] };
                 let _ = cx.http_write_fact(context, accepted, None);
                 Ok(())
@@ -3126,6 +3276,7 @@ impl Blofin {
             Effect::AmendTpsl(removed) => {
                 let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
                 if reply.code == "0" && refused.is_none() {
+                    job.settle_applied(request)?;
                     let _ = cx.http_write_fact(
                         context,
                         WriteFact::Accepted { order_ids: vec![] },
@@ -3145,18 +3296,19 @@ impl Blofin {
                     _ => (&*reply.code, &*reply.msg),
                 };
                 let message = format!("BloFin TP/SL amend {code}: {msg}");
-                record_failed(cx, context, Some(native(code, msg)), &message);
-                // Only a definite refusal falls back; one that may have landed must not stack a cancel.
+                let classified = record_failed(cx, context, Some(native(code, msg)), &message);
+                // An ambiguous amend cannot authorize any subsequent mutation.
                 if outcome_unknown(code, msg) {
                     return Err(unknown(format!(
                         "{message}; whether the leg was removed is unknown. Check Open Orders"
                     )));
                 }
-                Err(VenueError::new(message).outcome(Outcome::Rejected))
+                Err(classified)
             }
             Effect::NativeAmend { symbol } => {
                 let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
                 if reply.code == "0" && refused.is_none() {
+                    job.settle_applied(request)?;
                     let _ = cx.http_write_fact(
                         context,
                         WriteFact::Accepted { order_ids: vec![] },
@@ -3187,14 +3339,14 @@ impl Blofin {
                 } else {
                     format!("Your {symbol} is unchanged: BloFin refused the edit ({code}: {msg})")
                 };
-                record_failed(cx, context, Some(native(code, msg)), &message);
+                let classified = record_failed(cx, context, Some(native(code, msg)), &message);
                 if gone {
                     self.reconcile_orders(cx);
                 }
-                Err(if unknown_outcome {
-                    unknown(message)
+                Err(if gone {
+                    classified.outcome(Outcome::Rejected)
                 } else {
-                    VenueError::new(message).outcome(Outcome::Rejected)
+                    classified
                 })
             }
             Effect::Verify(_) | Effect::VerifyTpsl { .. } | Effect::VerifyAmend(_) => {
