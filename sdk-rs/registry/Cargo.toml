@@ -68,9 +68,10 @@ kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot", "dispat
 bybit = ["dep:safe-cex-venue-bybit", "dispatch-signing", "hosted-signing"]
 hyperliquid = ["dep:safe-cex-venue-hyperliquid", "address-nonce", "dep:serde_json", "hosted-wallet"]
 okx = ["dep:safe-cex-venue-okx", "dispatch-signing", "hosted-signing"]
-orderly = ["dep:safe-cex-venue-orderly", "dispatch-signing", "safe-cex-crypto/ed25519"]
+orderly = ["dep:safe-cex-venue-orderly", "dispatch-signing", "safe-cex-crypto/ed25519", "dep:serde_json", "dep:bs58"]
 
 [dependencies]
+bs58 = { version = "0.5", optional = true }
 serde_json = { workspace = true, optional = true }
 safe-cex-crypto = { workspace = true, optional = true }
 safe-cex-engine.workspace = true
