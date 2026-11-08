@@ -4,19 +4,19 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 });
 
 // @vitest-environment node
-import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { Transport, VenueErrorDetail, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { isErrorReported, markErrorReported, serializeCommandError } from '../../commandOutcome';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { setTelemetrySink } from '../../telemetry';
-import { LogSeverity, OrderSide, OrderType } from '../../types';
+import { LogSeverity, OrderSide, OrderStatus, OrderType } from '../../types';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
@@ -141,6 +141,62 @@ it('reports pure native DoneErr once and preserves the original host rejection a
   });
   expect(r.errors).toHaveBeenCalledTimes(1);
   expect(serializeCommandError(error)).toMatchObject({ message: 'venue rejected', errorReported: true, commandId: 1 });
+});
+
+it('retains applied cancel batch counts and the unknown index without created order IDs', async () => {
+  const r = await fixture();
+  const detail: VenueErrorDetail = {
+    message: 'Cancellation acknowledgement lost',
+    kind: 'internal',
+    outcome: 'unknown',
+    partial: { orderIds: [], total: 3, failedIndex: 1 },
+    elements: [
+      { index: 0, status: 'applied', effect: 'cancel', targetOrderId: 'canceled' },
+      { index: 1, status: 'unknown', error: { message: 'Acknowledgement lost', outcome: 'unknown' } },
+      { index: 2, status: 'notSent' },
+    ],
+  };
+  r.onCommand(({ command }) => [{ op: 'done', command, error: detail.message, detail }]);
+  const targets = ['canceled', 'uncertain', 'untouched'].map((id) => ({
+    ...order, id, status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+  }));
+  const error = await r.exchange.cancelOrders(targets).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ExchangeError);
+  const expected = {
+    message: detail.message,
+    kind: 'internal',
+    outcome: 'unknown',
+    elements: detail.elements,
+    partialOrderIds: [],
+    partialOrderCount: 0,
+    totalOrderCount: 3,
+    failedOrderIndex: 1,
+  };
+  expect(error).toMatchObject(expected);
+  expect(serializeCommandError(error)).toMatchObject(expected);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+});
+
+it('keeps populated placement error output byte-identical to master 343e38cbe96', () => {
+  const detail: VenueErrorDetail = {
+    message: 'Second placement acknowledgement lost',
+    kind: 'internal',
+    outcome: 'unknown',
+    venueCode: '50004',
+    partial: { orderIds: ['accepted'], total: 2, failedIndex: 1 },
+    elements: [
+      { index: 0, status: 'placed', orderIds: ['accepted'] },
+      { index: 1, status: 'unknown', error: { message: 'Acknowledgement lost', outcome: 'unknown' } },
+    ],
+  };
+  const error = new ExchangeError(detail.message, detail);
+  // Captured and passed on master before changing the host mapper.
+  expect(JSON.stringify(error)).toBe(
+    '{"kind":"internal","outcome":"unknown","venueCode":"50004","elements":[{"index":0,"status":"placed","orderIds":["accepted"]},{"index":1,"status":"unknown","error":{"message":"Acknowledgement lost","outcome":"unknown"}}],"partialOrderIds":["accepted"],"partialOrderCount":1,"totalOrderCount":2,"failedOrderIndex":1}',
+  );
+  expect(error.message).toBe(detail.message);
+  expect(String(error)).toBe(`Error: ${detail.message}`);
+  expect(error.partialOrderIds).not.toBe(detail.partial!.orderIds);
 });
 
 it.each([false, true])('reports attributed native diagnostics and DoneErr once (deferred=%s)', async (deferred) => {
