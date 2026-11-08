@@ -15,6 +15,7 @@ pub enum Request {
     Markets {
         rows: Vec<Market>,
         bands: HashMap<String, f64>,
+        min_notionals: HashMap<String, f64>,
         excluded: HashSet<String>,
         invalid: bool,
     },
@@ -251,6 +252,7 @@ impl Paradex {
                 Request::Markets {
                     rows: vec![],
                     bands: HashMap::new(),
+                    min_notionals: HashMap::new(),
                     excluded: HashSet::new(),
                     invalid: false,
                 },
@@ -809,6 +811,7 @@ impl Paradex {
             Request::Markets {
                 rows,
                 bands,
+                min_notionals,
                 excluded,
                 invalid,
             } => {
@@ -857,6 +860,7 @@ impl Paradex {
                         if band > 1. { band / 100. } else { band },
                     );
                 }
+                min_notionals.insert(m.market.to_string(), m.min_notional.0);
                 rows.push(Market {
                     id: m.market.to_string(),
                     symbol: m.market.into_owned(),
@@ -978,6 +982,7 @@ impl Paradex {
             Request::Markets {
                 rows,
                 bands,
+                min_notionals,
                 excluded,
                 invalid: false,
             } => {
@@ -985,6 +990,7 @@ impl Paradex {
                 self.public.failed_market_reads = 0;
                 self.public.first_market_failure = None;
                 self.public.price_bands = bands;
+                self.trading.min_notionals = min_notionals;
                 self.account.excluded_perps = excluded;
                 cx.store.set_markets(rows);
                 self.public
@@ -1715,7 +1721,7 @@ mod tests {
     use super::*;
     use safe_cex_engine::{Action, Event};
     #[test]
-    fn price_bands_are_normalized_and_only_committed_with_a_valid_market_snapshot() {
+    fn price_bands_and_notionals_only_commit_with_a_valid_market_snapshot() {
         let mut e = safe_cex_engine::test_support::seeded_engine(Paradex::new(crate::Options {
             public_data_only: true,
             ..Default::default()
@@ -1731,7 +1737,7 @@ mod tests {
                 }
             })
             .unwrap();
-        e.handle(0.,Event::HttpResponse{request:id,response:Response{status:200,headers:"",body:r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","price_bands_width":"5","max_slippage":"0.01"},{"symbol":"ETH-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","max_slippage":"0.03"},{"symbol":"SOL-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","price_bands_width":"0.07"}]}"#}});
+        e.handle(0.,Event::HttpResponse{request:id,response:Response{status:200,headers:"",body:r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","price_bands_width":"5","max_slippage":"0.01","min_notional":"10"},{"symbol":"ETH-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","max_slippage":"0.03"},{"symbol":"SOL-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","price_bands_width":"0.07"}]}"#}});
         assert_eq!(
             e.venue().public.price_bands.get("BTC-USD-PERP"),
             Some(&0.05)
@@ -1743,6 +1749,10 @@ mod tests {
         assert_eq!(
             e.venue().public.price_bands.get("SOL-USD-PERP"),
             Some(&0.07)
+        );
+        assert_eq!(
+            e.venue().trading.min_notionals.get("BTC-USD-PERP"),
+            Some(&10.0)
         );
         let mut failed =
             safe_cex_engine::test_support::seeded_engine(Paradex::new(crate::Options {

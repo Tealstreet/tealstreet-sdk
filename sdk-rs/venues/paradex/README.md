@@ -30,6 +30,13 @@ Transport loss and unusable write acknowledgements carry the same warning before
 aggregation, while preserving the original diagnostic separately.
 Joined failures retain the first uncertain leg's structured diagnostics and
 classification alongside the public messages from every failed leg.
+Before any placement or protective cancel, the complete intent validates its
+serialized sizes, prices and triggers against market minima, maxima and grids.
+Discovery retains `min_notional` separately from base size. Frame-fed hosts
+supply a positive mark in source frames before placing an order when this minimum
+applies. Minimum notional uses
+mark price; only an exact reduce-only close of the current offsetting position
+is exempt, as documented in [Paradex order instructions](https://docs.paradex.trade/trading/orders/order-instructions).
 Independent placement operations continue after a failure, preserving accepted
 IDs in the result and reporting failed client identities at Error level. Failed
 entries skip their attached children; a rejected TP/SL child reports an Error

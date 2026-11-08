@@ -44,6 +44,7 @@ pub struct Instrument<'a> {
     /// `min_notional` is dollars, not a size: 10 read as 10 SOL, about 940 dollars.
     #[serde(default)]
     pub min_order_size: Number,
+    pub min_notional: Number,
     pub max_order_size: Number,
     pub price_bands_width: Number,
     pub max_slippage: Number,

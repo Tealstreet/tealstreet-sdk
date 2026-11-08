@@ -1,3 +1,6 @@
+mod validation;
+use validation::{Rules, validate_write};
+
 use crate::{
     Pending,
     account::{Account, AmendTarget, NativeOrder},
@@ -22,6 +25,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Serialize)]
 struct Placement {
+    #[serde(skip)]
+    rules: Rules,
     market: String,
     side: &'static str,
     #[serde(rename = "type")]
@@ -242,6 +247,7 @@ impl Request {
 }
 #[derive(Default)]
 pub struct Trading {
+    pub(crate) min_notionals: HashMap<String, f64>,
     next: u64,
     jobs: HashMap<u64, Job>,
     amend_locks: HashSet<String>,
@@ -322,6 +328,7 @@ fn prepare(
     o: &PlaceOrderOpts,
     child: bool,
     execution: Option<f64>,
+    min_notionals: &HashMap<String, f64>,
 ) -> Result<Placement, String> {
     if !positive(o.amount) {
         return Err("Paradex order requires a finite positive amount".into());
@@ -369,7 +376,8 @@ fn prepare(
     let size = num::format(o.amount);
     let price = matches!(kind, "LIMIT" | "STOP_LIMIT")
         .then(|| num::format(execution.or(o.price).expect("validated execution price")));
-    Ok(Placement {
+    let payload = Placement {
+        rules: rules(cx, &o.symbol, min_notionals)?,
         market: o.symbol.clone(),
         side: side(o.side),
         kind,
@@ -394,7 +402,36 @@ fn prepare(
                     .map_or_else(|| client_id(cx), Ok)?,
             )
         },
-    })
+    };
+    validate_write(std::slice::from_ref(&payload)).map_err(|e| e.message)?;
+    Ok(payload)
+}
+fn rules(
+    cx: &Cx<'_, Pending>,
+    symbol: &str,
+    min_notionals: &HashMap<String, f64>,
+) -> Result<Rules, String> {
+    let market = cx
+        .store
+        .market(symbol)
+        .ok_or_else(|| format!("unknown market {symbol}"))?;
+    let mut rules = Rules {
+        step: market.precision.amount,
+        tick: market.precision.price,
+        min: market.limits.amount.min,
+        max: market.limits.amount.max,
+        min_notional: min_notionals.get(symbol).copied().unwrap_or(0.0),
+        mark: cx.store.ticker(symbol).map_or(0.0, |t| t.mark),
+        long: 0.0,
+        short: 0.0,
+    };
+    for position in cx.store.positions().iter().filter(|p| p.symbol == symbol) {
+        match position.side {
+            safe_cex_engine::model::PositionSide::Long => rules.long = position.contracts,
+            safe_cex_engine::model::PositionSide::Short => rules.short = position.contracts,
+        }
+    }
+    Ok(rules)
 }
 fn validate_caller_ids(orders: &[PlaceOrderOpts], cx: &Cx<'_, Pending>) -> Result<(), String> {
     let mut seen = HashSet::new();
@@ -426,6 +463,7 @@ fn place_operations(
     account: &Account,
     quotes: &HashMap<String, Quote>,
     bands: &HashMap<String, f64>,
+    min_notionals: &HashMap<String, f64>,
     require_quotes: bool,
 ) -> Result<VecDeque<Operation>, String> {
     if orders
@@ -448,6 +486,7 @@ fn place_operations(
             if chunk.is_empty() {
                 return Ok(());
             }
+            validate_write(chunk).map_err(|e| e.message)?;
             let expected = chunk.iter().map(|p| p.client_id.clone()).collect();
             let receipts = chunk.iter().filter_map(placement_receipt).collect();
             let (body, step) = signed(
@@ -495,14 +534,14 @@ fn place_operations(
             None
         };
         if native_batch(o) {
-            chunk.push(prepare(cx, o, false, execution)?);
+            chunk.push(prepare(cx, o, false, execution, min_notionals)?);
             if chunk.len() == 10 {
                 flush(&mut chunk, &mut operations)?;
             }
             continue;
         }
         flush(&mut chunk, &mut operations)?;
-        let payload = prepare(cx, o, false, execution)?;
+        let payload = prepare(cx, o, false, execution, min_notionals)?;
         let expected = vec![payload.client_id.clone()];
         let receipts = placement_receipt(&payload).into_iter().collect();
         let (body, step) = signed(
@@ -544,7 +583,7 @@ fn place_operations(
                 child.stop_loss = None;
                 child.reduce_only = Some(true);
                 child.time_in_force = None;
-                let mut payload = prepare(cx, &child, true, None)?;
+                let mut payload = prepare(cx, &child, true, None, min_notionals)?;
                 if kind == OrderType::StopLoss {
                     payload.kind = "STOP_LOSS_MARKET";
                 }
@@ -624,9 +663,15 @@ impl Trading {
         if let Command::PlaceOrders { command, orders } = &command
             && orders.iter().any(capped)
         {
-            if let Err(error) =
-                place_operations(orders, cx, account, &HashMap::new(), price_bands, false)
-            {
+            if let Err(error) = place_operations(
+                orders,
+                cx,
+                account,
+                &HashMap::new(),
+                price_bands,
+                &self.min_notionals,
+                false,
+            ) {
                 cx.fail(*command, not_sent(error));
                 return true;
             }
@@ -698,7 +743,15 @@ impl Trading {
         let (command, operations, attempt_all, placement) = match command {
             Command::PlaceOrders { command, orders } => (
                 command,
-                place_operations(&orders, cx, account, &HashMap::new(), price_bands, true),
+                place_operations(
+                    &orders,
+                    cx,
+                    account,
+                    &HashMap::new(),
+                    price_bands,
+                    &self.min_notionals,
+                    true,
+                ),
                 true,
                 true,
             ),
@@ -961,6 +1014,7 @@ impl Trading {
                 account,
                 &preparation.quotes,
                 &preparation.price_bands,
+                &self.min_notionals,
                 true,
             ) {
                 Ok(operations) => {
@@ -1729,8 +1783,27 @@ impl Trading {
             return Err("Paradex amendment size or price invalid".into());
         }
         if trigger {
-            return replace_trigger(cx, account, raw, order, id, size, price, trigger_price);
+            return replace_trigger(
+                cx,
+                account,
+                raw,
+                order,
+                id,
+                size,
+                price,
+                trigger_price,
+                &self.min_notionals,
+            );
         }
+        validation::validate_values(
+            &rules(cx, &raw.market, &self.min_notionals)?,
+            side(order.side),
+            &num::format(size),
+            limit.then(|| num::format(price)).as_deref(),
+            trigger_price.map(num::format).as_deref(),
+            order.reduce_only,
+        )
+        .map_err(|e| e.message)?;
         if id.is_empty() {
             return Err("Cannot sign a Paradex amendment without an order ID".into());
         }
@@ -1791,9 +1864,10 @@ fn replace_trigger(
     size: f64,
     price: f64,
     trigger_price: Option<f64>,
+    min_notionals: &HashMap<String, f64>,
 ) -> Result<(VecDeque<Operation>, Option<Operation>), String> {
     let unchanged = || format!("Your {} stop was not changed", order.symbol);
-    let restore = restore_operation(cx, account, raw).ok_or_else(|| {
+    let restore = restore_operation(cx, account, raw, min_notionals).ok_or_else(|| {
         format!(
             "{}: its exact native parameters are not reconciled",
             unchanged()
@@ -1831,6 +1905,7 @@ fn replace_trigger(
         account,
         &HashMap::new(),
         &HashMap::new(),
+        min_notionals,
         false,
     )?;
     for operation in &mut operations {
@@ -1865,6 +1940,7 @@ fn restore_operation(
     cx: &Cx<'_, Pending>,
     account: &Account,
     raw: &NativeOrder,
+    min_notionals: &HashMap<String, f64>,
 ) -> Option<Operation> {
     // Only shapes the signer admits (hosted::OrderType): a market stop carries
     // REDUCE_ONLY, a stop limit carries no flag. Anything else is refused
@@ -1897,6 +1973,7 @@ fn restore_operation(
         return None;
     }
     let payload = Placement {
+        rules: rules(cx, &raw.market, min_notionals).ok()?,
         market: raw.market.clone(),
         side: if raw.side == "BUY" { "BUY" } else { "SELL" },
         kind,
@@ -1912,6 +1989,7 @@ fn restore_operation(
         signature_timestamp: 0,
         client_id: Some(client_id(cx).ok()?),
     };
+    validate_write(std::slice::from_ref(&payload)).ok()?;
     let receipts = placement_receipt(&payload).into_iter().collect();
     let expected = vec![payload.client_id.clone()];
     let signer = account.credentials()?;
