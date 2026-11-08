@@ -6,6 +6,8 @@ use serde_json::{Value, json};
 use std::collections::{BTreeSet, VecDeque};
 use support::managed::*;
 
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Default)]
@@ -78,78 +80,118 @@ fn native_max_price_uses_rounded_wire_value_with_inclusive_bound() -> Result {
     Ok(())
 }
 
-// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1096-1142.
+// TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1121-1141 cancels, replaces, then rethrows.
+// Master's extra proof read and put-back are absent from this legacy path.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | AmendOrder pre-cancel wire validation and class-A restore
 #[test]
 fn protective_rejection_never_reads_proof_or_puts_back_original_stop() -> Result {
-    let stop = ORDER
+    for (old_trigger, new_trigger) in [("130", 125.), ("150", 155.)] {
+        for status in [400, 200, 503] {
+            let stop = ORDER
         .replace("\"orderType\":\"Limit\"", "\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\",\"reduceOnly\":true")
-        .replace("\"side\":\"Bid\"", "\"side\":\"Ask\"");
-    let (mut engine, _, _) = ready_catalogue(PRICE_CAPPED_MARKETS, &format!("[{stop}]"));
-    engine.store_mut().update_ticker(SYMBOL, |ticker| {
-        ticker.last = 140.;
-        ticker.mark = 140.;
-        ticker.index = 140.;
-    });
-    engine.handle(
-        2000.,
-        Event::Command(Command::AmendOrder {
-            command: 901,
-            id: "123".into(),
-            price: Some(125.),
-            amount: None,
-        }),
-    );
-    let mut transport = ScriptedTransport {
-        responses: [
-            (
-                200,
-                r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#.into(),
-            ),
-            (400, r#"{"code":"INVALID_ORDER","message":"bad"}"#.into()),
-            (200, "[]".into()),
-        ]
-        .into(),
-        ..Default::default()
-    };
-    transport.poll(&mut engine);
-    assert_eq!(transport.requests[0].method, Method::Delete);
-    transport.poll(&mut engine);
-    let replacement = transport
-        .requests
-        .get(1)
-        .ok_or("missing replacement")?
-        .clone();
-    assert_eq!(replacement.method, Method::Post);
-    let row: Value = serde_json::from_str(replacement.body.as_deref().ok_or("missing body")?)?;
-    assert_eq!(row["triggerPrice"], "125.00");
-    assert_eq!(row["triggerQuantity"], "5.00");
-    let out = transport.poll(&mut engine);
-    let error = failed(&out)?;
-    assert_eq!(error.outcome, Some(Outcome::Unknown));
-    let elements = error
-        .elements
-        .as_ref()
-        .ok_or("missing protective outcomes")?;
-    assert_eq!(elements.len(), 2);
-    assert!(matches!(&elements[0].result, ElementResult::Applied {
+        .replace("\"side\":\"Bid\"", "\"side\":\"Ask\"")
+        .replace("\"triggerPrice\":\"130\"", &format!("\"triggerPrice\":\"{old_trigger}\""));
+            let (mut engine, _, _) = ready_catalogue(PRICE_CAPPED_MARKETS, &format!("[{stop}]"));
+            engine.store_mut().update_ticker(SYMBOL, |ticker| {
+                ticker.last = 140.;
+                ticker.mark = 140.;
+                ticker.index = 140.;
+            });
+            engine.handle(
+                2000.,
+                Event::Command(Command::AmendOrder {
+                    command: 901,
+                    id: "123".into(),
+                    price: Some(new_trigger),
+                    amount: None,
+                }),
+            );
+            let mut transport = ScriptedTransport {
+                responses: [
+                    (
+                        200,
+                        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#.into(),
+                    ),
+                    (status, r#"{"code":"INVALID_ORDER","message":"bad"}"#.into()),
+                    (200, "[]".into()),
+                    (200, r#"{"id":"unwanted-restoration"}"#.into()),
+                ]
+                .into(),
+                ..Default::default()
+            };
+            transport.poll(&mut engine);
+            let cancel = transport.requests.first().ok_or("missing cancel")?;
+            assert_eq!(cancel.method, Method::Delete);
+            assert!(cancel.url.ends_with("/api/v1/order"));
+            assert_eq!(
+                serde_json::from_str::<Value>(
+                    cancel.body.as_deref().ok_or("missing cancel body")?
+                )?,
+                json!({"orderId":"123","symbol":SYMBOL})
+            );
+            transport.poll(&mut engine);
+            let replacement = transport
+                .requests
+                .get(1)
+                .ok_or("missing replacement")?
+                .clone();
+            assert_eq!(replacement.method, Method::Post);
+            let row: Value =
+                serde_json::from_str(replacement.body.as_deref().ok_or("missing body")?)?;
+            assert!(replacement.url.ends_with("/api/v1/order"));
+            assert_eq!(
+                row,
+                json!({
+                    "symbol":SYMBOL, "side":"Ask", "orderType":"Market",
+                    "triggerPrice":format!("{new_trigger:.2}"), "triggerQuantity":"5.00",
+                    "triggerBy":"MarkPrice", "reduceOnly":true,
+                })
+            );
+            let out = transport.poll(&mut engine);
+            let error = failed(&out)?;
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert_eq!(error.protection, None);
+            assert_eq!(
+                out.iter()
+                    .filter(|action| matches!(
+                        action,
+                        Action::Notice(Notice::CommandFailed { command: 901, .. })
+                    ))
+                    .count(),
+                1
+            );
+            let elements = error
+                .elements
+                .as_ref()
+                .ok_or("missing protective outcomes")?;
+            assert_eq!(elements.len(), 2);
+            assert!(matches!(&elements[0].result, ElementResult::Applied {
         effect: AppliedEffect::Cancel, target_order_id: Some(id), ..
     } if id == "123"));
-    assert!(
-        matches!(&elements[1].result, ElementResult::Unknown { error }
+            assert!(
+                matches!(&elements[1].result, ElementResult::Unknown { error }
         if error.venue_code.as_deref() == Some("INVALID_ORDER"))
-    );
-    transport.poll(&mut engine);
-    assert_eq!(transport.requests.len(), 2);
-    assert_eq!(transport.responses, [(200, "[]".into())]);
-    reply(&mut engine, &replacement, 200, "[]");
-    let late = transport.poll(&mut engine);
-    assert!(!late.iter().any(|action| matches!(
-        action,
-        Action::Notice(Notice::CommandDone { command: 901, .. })
-            | Action::Notice(Notice::CommandFailed { command: 901, .. })
-    )));
-    assert_eq!(transport.requests.len(), 2);
+            );
+            transport.poll(&mut engine);
+            assert_eq!(transport.requests.len(), 2);
+            assert_eq!(
+                transport.responses,
+                [
+                    (200, "[]".into()),
+                    (200, r#"{"id":"unwanted-restoration"}"#.into())
+                ]
+            );
+            reply(&mut engine, &replacement, 200, "[]");
+            let late = transport.poll(&mut engine);
+            assert!(!late.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 901, .. })
+                    | Action::Notice(Notice::CommandFailed { command: 901, .. })
+            )));
+            assert_eq!(transport.requests.len(), 2);
+        }
+    }
     Ok(())
 }
 
