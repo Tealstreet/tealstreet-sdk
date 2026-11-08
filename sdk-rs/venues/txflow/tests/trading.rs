@@ -1,4 +1,5 @@
 //! Signed request/acknowledgement behavior, independent of a live account.
+use account_support::signer;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Outcome, Response};
 use safe_cex_venue_txflow::{Options, TxFlow};
@@ -11,10 +12,10 @@ fn engine() -> Engine<TxFlow> {
     let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some("0x0000000000000000000000000000000000000001".into()),
-        secret: Some(format!("0x{}", "ab".repeat(32))),
+        credentials: signer::identity(),
         ..Default::default()
     }));
-    e.start(NOW);
+    signer::start(&mut e, NOW);
     let request = e
         .drain_plain()
         .find_map(|a| {
@@ -37,7 +38,7 @@ fn engine() -> Engine<TxFlow> {
             },
         },
     );
-    let mut startup = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    let mut startup = signer::prepared_actions(&mut e, NOW);
     let ticker = startup
         .iter()
         .find_map(|action| match action {
@@ -64,10 +65,7 @@ fn engine() -> Engine<TxFlow> {
         })
         .unwrap();
     e.handle(NOW + 25.0, Event::TimerFired { timer });
-    startup.extend(safe_cex_engine::test_support::prepared_actions(
-        &mut e,
-        NOW + 25.0,
-    ));
+    startup.extend(signer::prepared_actions(&mut e, NOW + 25.0));
     let initial = startup;
     let node = initial
         .iter()
@@ -300,7 +298,8 @@ fn authoritative_read_resolves_native_ids_in_requested_order() {
     let order = |oid: u64, cloid: &str| json!({"asset":1,"oid":oid,"side":"B","orderType":"Limit","limitPx":"50000","origSz":"0.01","sz":"0.01","timestamp":NOW,"cloid":cloid,"state":"Open","tif":"GTC","children":null});
     let body = json!({"success":true,"code":0,"data":[order(22,"second"),order(11,"first")],"hasMore":false}).to_string();
     ack(&mut e, &read, 200, &body);
-    assert!(e.drain_plain().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:ids}) if ids == r#"["11","22"]"#)));
+    let observed = e.drain_plain().collect::<Vec<_>>();
+    assert!(observed.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:ids}) if ids == r#"["11","22"]"#)), "{observed:?}");
 }
 #[test]
 fn pending_execution_never_retries_write_and_releases_command_as_uncertain() {
@@ -352,10 +351,7 @@ fn explicit_rejections_are_rejected_and_lost_responses_are_unknown() {
         r#"{"status":"err","message":"Insufficient margin"}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(
-        error.legacy_text(),
-        "Insufficient margin; reconcile before any resubmission"
-    );
+    assert_eq!(error.legacy_text(), "Insufficient margin");
     // A top-level `status: "err"` is TxFlow's explicit refusal.
     assert_eq!(error.outcome, Some(Outcome::Rejected));
 
@@ -370,10 +366,7 @@ fn explicit_rejections_are_rejected_and_lost_responses_are_unknown() {
         },
     );
     let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(
-        error.message,
-        "connection reset; reconcile before any resubmission"
-    );
+    assert_eq!(error.message, "connection reset");
     assert_eq!(
         (error.kind, error.outcome),
         (
@@ -597,10 +590,7 @@ fn a_single_action_error_status_is_a_rejection() {
         r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":[{"error":"Insufficient margin"}]}}}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(
-        error.legacy_text(),
-        "Insufficient margin; reconcile before any resubmission"
-    );
+    assert_eq!(error.legacy_text(), "Insufficient margin");
     assert_eq!(error.outcome, Some(Outcome::Rejected));
 }
 
@@ -657,4 +647,44 @@ fn cancel_all_sends_stops_with_the_rest() {
     );
     let body = write(&mut e).body.unwrap();
     assert!(body.contains("11") && body.contains("22"), "{body}");
+}
+
+#[test]
+fn unapproved_revoked_or_expired_agent_cannot_release_an_exchange_write() {
+    let mut e = engine();
+    place(&mut e, 771, vec![limit("not-approved")]);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.0);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+    let authorization = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r)
+                if r.body
+                    .as_deref()
+                    .is_some_and(|body| body.contains("approvedAgents")) =>
+            {
+                Some(r)
+            }
+            _ => None,
+        })
+        .expect("read current approval before any signing");
+    let owner =
+        serde_json::from_str::<Value>(authorization.body.as_deref().unwrap()).unwrap()["user"]
+            .clone();
+    let absent = json!({"success":true,"code":0,"data":{"user":owner,"agents":[]}}).to_string();
+    ack(&mut e, authorization, 200, &absent);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.0);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+    assert!(actions.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 771, error })
+        if error.kind == Some(safe_cex_engine::ErrorKind::AuthInvalid))
+    ));
 }

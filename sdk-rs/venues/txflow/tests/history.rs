@@ -158,10 +158,10 @@ fn ready_with_retired(relisted: bool) -> Engine<TxFlow> {
         safe_cex_engine::test_support::seeded_engine(TxFlow::new(safe_cex_venue_txflow::Options {
             testnet: true,
             application_id: Some(WALLET.into()),
-            secret: Some(format!("0x{:064x}", 1)),
+            credentials: signer::identity(),
             ..Default::default()
         }));
-    e.start(NOW);
+    signer::start(&mut e, NOW);
     let r = requests(&mut e).pop().unwrap();
     let mut meta: Value = serde_json::from_str(META).unwrap();
     let mut old = meta["data"]["universe"][0].clone();

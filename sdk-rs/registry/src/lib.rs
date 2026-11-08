@@ -56,6 +56,8 @@ mod hyperliquid_setup;
 mod lighter_setup;
 #[cfg(feature = "paradex")]
 mod paradex_setup;
+#[cfg(feature = "txflow")]
+mod txflow_setup;
 pub use construction::{
     BridgeConstruction, PublicMode, remote_signing_policy, signer_setup_policy,
     signer_setup_public_data_only,
@@ -525,6 +527,7 @@ pub fn supported(venue: &str) -> bool {
         "cryptocom" => true,
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => true,
+
         #[cfg(feature = "okx")]
         "okx" | "okxeu" | "okxdemo" | "okxeudemo" => true,
         _ => false,
@@ -680,6 +683,10 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "txflow")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Txflow) {
+        return txflow_setup::native(venue, options, signer_setup_policy_for(venue, options));
+    }
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
         return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
@@ -1100,6 +1107,15 @@ pub fn local_signer_from_json_for_mode(
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
         drop(zeroize::Zeroizing::new(input));
         return Err(invalid("Invalid Paradex local signer setup"));
+    }
+    #[cfg(feature = "txflow")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Txflow) {
+        return txflow_setup::json(
+            venue,
+            input,
+            signer_setup_policy_for(venue, options),
+            options,
+        );
     }
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
@@ -1656,26 +1672,29 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "txflow")]
         "txflow" => {
-            let mut options = safe_cex_venue_txflow::Options {
+            if options.secret.is_some()
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid("TxFlow signing material belongs in signer setup"));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() || identities.primary.is_some() && signer.is_none() {
+                return Err(invalid("TxFlow requires its primary signing provider"));
+            }
+            let config = safe_cex_venue_txflow::Options {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key.take(),
-                secret: options.secret.take(),
+                credentials: identities.primary.clone(),
                 application_id: options.application_id.take(),
                 vault: options.vault.take(),
             };
-            options.validate().map_err(|error| {
-                use zeroize::Zeroize;
-                options.key.zeroize();
-                options.secret.zeroize();
-                invalid(&error)
-            })?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(safe_cex_venue_txflow::TxFlow::new(options), entropy)?,
-            )
+            config.validate().map_err(|error| invalid(&error))?;
+            let mut engine = Engine::new(safe_cex_venue_txflow::TxFlow::new(config), entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "kraken")]
         "kraken" => finish(

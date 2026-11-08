@@ -27,15 +27,15 @@ does not enable production, preview, Outcome, spot, TxRelay or fund transfers.
 
 ## Authentication and signing
 
-`applicationId` is the main account wallet, `secret` its already-approved
-agent private key. An optional `vault` selects the queried/traded vault.
-Unsigned reads/subscriptions use that account identity, never the agent's
-address. Private startup validates the account and local signing key before
-I/O. This connector does not approve agents, builders or fund accounts.
-
-TxFlow has no CEX-style API keys; the venue-side `key` field is unused. TxFlow never returns an agent private key. Tealstreet must generate the agent wallet locally, send only the agent address in `approveAgent`, and have the owner wallet sign that approval. TxFlow records the approved agent address for the account; day-to-day trading is signed with the locally stored agent private key.
-
-Private/trading support therefore requires a custom wallet + agent-key onboarding flow, not the generic API-key paste form. Do not expose a generic TxFlow API-key field unless TxFlow later ships a real venue-issued key model.
+`applicationId` is the main account wallet; `key` is the approved agent address.
+The browser approval helper returns the generated key to the caller, whose
+persistence follows the existing HL application path. The Rust venue takes
+provider identities rather than raw `secret`. Hosted servers get only signing
+references; the browser device reconstructs the allowlisted statement and signs.
+No server generation, persistence or recovery is added. Before each queued
+command, verify the agent's current authorization; an absent agent fails closed.
+Private reads/subscriptions use the owner or vault address, never the agent.
+See the adjacent README for exact schemas, measured testnet evidence and NX work.
 
 The testnet EIP-712 domain is `TxFlow-Testnet`, version `1`, chain ID `2511`,
 zero verifying contract. Agent schema:
@@ -121,8 +121,8 @@ orders and terminal replay fences.
 
 Supported placement is plain Limit/Market (`Gtc`, `Ioc`, `Alo`, native
 `FrontendMarket`/`bbo`) within documented size/precision limits. Serialize
-commands, validate whole batches before any write, and recheck queued intent
-against current state before dispatch.
+commands (at most 50 placements per command), validate whole batches before any
+write, and recheck queued intent against current state before dispatch.
 
 Caller IDs are honored verbatim on one plain native order: nonempty, at most
 64 UTF-8 bytes, and no `0x` prefix (reserved by TxFlow for LP accounts).

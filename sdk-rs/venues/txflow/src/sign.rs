@@ -1,4 +1,7 @@
 //! TxFlow's agent schema is distinct from Hyperliquid; only the preimage is shared.
+pub mod dispatch;
+pub mod statement;
+
 use safe_cex_crypto::{eip712, ethereum};
 pub use safe_cex_venue_hyperliquid::sign::{Signature, action_hash};
 use serde::Serialize;

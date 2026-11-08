@@ -301,7 +301,7 @@ export const signHostedWsAuth = async (
 ): Promise<RemoteSignerResponse> => {
   const { toSign, outputFormat } = request.wsAuth ?? {};
   if (!toSign || !outputFormat) return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
-  if (outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address' || outputFormat === 'lighter-tx'
+  if (outputFormat === 'txflow-agent' || outputFormat === 'txflow-address' || outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address' || outputFormat === 'lighter-tx'
     || outputFormat === 'grvt-order' || outputFormat === 'grvt-address'
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
