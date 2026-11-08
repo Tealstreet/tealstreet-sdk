@@ -62,6 +62,7 @@ const signedRequest = (): HttpPacket => ({
 const harness = (
   response: () => HttpResponse = () => ({ status: 200, body: new TextEncoder().encode('{"ok":1}') }),
   label = 'binance',
+  diagnosticEvents = true,
 ) => {
   const events: Array<[RequestsLogEvent, string]> = [];
   const diagnostics: WsDiagnosticEvent[] = [];
@@ -84,7 +85,7 @@ const harness = (
     inner,
     label,
     (event, message) => events.push([event, message]),
-    (event) => diagnostics.push(event),
+    diagnosticEvents ? (event) => diagnostics.push(event) : undefined,
   );
   return { inner, transport, events, sockets, diagnostics };
 };
@@ -147,6 +148,107 @@ const diagnosticMarkers = ['fixture-challenge-marker', 'fixture-signature-marker
   Buffer.from(marker).toString('hex'),
   Buffer.from(marker).toString('base64'),
 ]);
+
+const encodedEchoMarkers = ['fixture-challenge:/+?=\u00ff', 'fixture-signature:/+?=\u00ff'].flatMap((marker, material) => [
+  { material, encoding: 'raw', value: marker },
+  { material, encoding: 'hex', value: Buffer.from(marker).toString('hex') },
+  { material, encoding: 'base64', value: Buffer.from(marker).toString('base64') },
+  { material, encoding: 'base64url', value: Buffer.from(marker).toString('base64url') },
+  { material, encoding: 'url', value: encodeURIComponent(marker) },
+  { material, encoding: 'json', value: Array.from(marker, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`).join('') },
+]);
+const echoShapes: Array<{ name: string; wrap: (leaf: Record<string, unknown>) => Record<string, unknown> }> = [
+  { name: 'top', wrap: (leaf) => leaf },
+  { name: 'result', wrap: (leaf) => ({ result: leaf }) },
+  { name: 'nested', wrap: (leaf) => ({ data: { result: leaf } }) },
+  { name: 'array', wrap: (leaf) => ({ data: [{ result: [leaf] }] }) },
+];
+const retainedEchoCases = encodedEchoMarkers.flatMap(({ material, encoding, value }) =>
+  ['id', 'code', 'data', 'topic', 'message', 'orderId', 'count'].flatMap((field) =>
+    echoShapes.flatMap(({ name: shape, wrap }) => ['error', 'subscribe'].map((event) => ({
+      material, encoding, field, shape, event,
+      wire: JSON.stringify({ event, ...wrap({ [field]: `signed_challenge=${value};original_challenge=${value}` }) }),
+    })))));
+
+it.each(retainedEchoCases)(
+  'withholds retained-field echoes ($material/$encoding/$field/$shape/$event) in serialized outputs',
+  async ({ wire }) => {
+    setWsDiagnosticsEnabled(true);
+    const { transport, sockets, diagnostics, events } = harness(undefined, 'kraken');
+    const received: string[] = [];
+    const socket = transport.connect('wss://fixture.invalid/', {
+      channel: 'private', onOpen() {}, onMessage: (message) => received.push(message), onClose() {},
+    });
+    socket.send(wire);
+    sockets[0].handlers.onMessage(wire);
+    await tick();
+    expect(sockets[0].sent).toEqual([wire]);
+    expect(received).toEqual([wire]);
+    expect(diagnostics.map(({ direction }) => direction)).toEqual(['send', 'receive']);
+    expect(events.map(([event]) => event)).toEqual(['grafana-pws-sub', 'grafana-pws']);
+    const output = JSON.stringify({ diagnostics, events });
+    for (const { value } of encodedEchoMarkers) {
+      expect(output.includes(value)).toBe(false);
+      expect(output.includes(JSON.stringify(value).slice(1, -1))).toBe(false);
+    }
+  },
+);
+
+it('retains closed protocol codes and bounded counts while withholding free-form values', async () => {
+  setWsDiagnosticsEnabled(true);
+  const { transport, sockets, diagnostics, events } = harness();
+  transport.connect('wss://fixture.invalid/', {
+    channel: 'private', onOpen() {}, onMessage() {}, onClose() {},
+  });
+  sockets[0].handlers.onMessage(JSON.stringify({
+    event: 'error', code: 'AUTH_FAILED', message: 'untrusted echo',
+    result: { code: 401, count: 3, success: false, id: 'untrusted-id' },
+  }));
+  await tick();
+  const expected = { event: 'error', code: 'AUTH_FAILED', redacted: '[redacted]',
+    result: { code: 401, count: 3, success: false, id: '[redacted]' } };
+  expect(diagnostics).toHaveLength(1);
+  expect(events).toHaveLength(1);
+  expect(diagnostics[0].message).toBe(JSON.stringify(expected));
+  expect(events[0][1]).toBe(diagnostics[0].message);
+});
+
+it('uses the same value-safe sanitizer for legacy private logs without a diagnostic event listener', async () => {
+  setWsDiagnosticsEnabled(true);
+  const { transport, sockets, diagnostics, events } = harness(undefined, 'kraken', false);
+  const socket = transport.connect('wss://fixture.invalid/', {
+    channel: 'private', onOpen() {}, onMessage() {}, onClose() {},
+  });
+  for (const { wire } of retainedEchoCases.filter(({ shape, event }) => shape === 'nested' && event === 'subscribe')) {
+    socket.send(wire);
+    sockets[0].handlers.onMessage(wire);
+  }
+  await tick();
+  expect(diagnostics).toEqual([]);
+  expect(events).toHaveLength(encodedEchoMarkers.length * 7 * 2);
+  const output = JSON.stringify(events);
+  for (const { value } of encodedEchoMarkers) {
+    expect(output.includes(value)).toBe(false);
+    expect(output.includes(JSON.stringify(value).slice(1, -1))).toBe(false);
+  }
+});
+
+it('withholds unknown enum strings, positional scalars and invalid numeric summaries', async () => {
+  setWsDiagnosticsEnabled(true);
+  const { transport, sockets, diagnostics, events } = harness();
+  transport.connect('wss://fixture.invalid/', {
+    channel: 'private', onOpen() {}, onMessage() {}, onClose() {},
+  });
+  const frame = { op: 'subscribe-echo', event: 'arbitrary-event', code: 'UNKNOWN_CODE',
+    count: -1, length: 0.5, ts: 2_147_483_648, id: Number.MAX_SAFE_INTEGER,
+    data: [42, true, 'AUTH_FAILED', { code: 401.5, count: 2_147_483_647 }] };
+  sockets[0].handlers.onMessage(JSON.stringify(frame));
+  await tick();
+  expect(diagnostics[0].message).toBe(JSON.stringify({ op: '[redacted]', event: '[redacted]', code: '[redacted]',
+    count: '[redacted]', length: '[redacted]', ts: '[redacted]', id: '[redacted]',
+    data: ['[redacted]', '[redacted]', '[redacted]', { code: '[redacted]', count: 2_147_483_647 }] }));
+  expect(events[0][1]).toBe(diagnostics[0].message);
+});
 
 it.each(diagnosticMarkers)('withholds auth-error and echo material in every diagnostic sink: %s', async (marker) => {
   setWsDiagnosticsEnabled(true);
@@ -299,7 +401,8 @@ it.each(privateSocketLocations)(
     const logged = JSON.stringify({ diagnostics, events });
     for (const value of [endpoint, ...Object.values(authMaterials), ...Object.keys(headers)])
       expect(logged).not.toContain(value);
-    expect(logged).toContain('fixture-order');
+    expect(logged).not.toContain('fixture-order');
+    expect(diagnostics.every(({ message }) => message.includes('"orderId":"[redacted]"'))).toBe(true);
     expect(sockets[0].sent).toEqual([wire, wire]);
     expect(sockets[0].handlers.headers).toEqual(headers);
   },
@@ -415,7 +518,9 @@ it.each(['hyrotrader', 'binance', 'okx'])('opts %s into diagnostics for every so
   expect(diagnostics.map(({ venue, channel, direction }) => ({ venue, channel, direction }))).toEqual(
     ['public', 'private', 'business'].map((channel) => ({ venue: label, channel, direction: 'receive' })),
   );
-  expect(diagnostics.every(({ message }) => message.includes('50001'))).toBe(true);
+  expect(diagnostics.map(({ message }) => message)).toEqual(
+    sockets.map(() => JSON.stringify({ topic: '[redacted]', data: { lastPrice: '[redacted]' } })),
+  );
 });
 
 it('redacts auth payloads, keys, signatures and listen keys in both WS directions', async () => {
@@ -471,7 +576,8 @@ it('redacts auth payloads, keys, signatures and listen keys in both WS direction
   ]) {
     expect(logged).not.toContain(secret);
   }
-  expect(logged).toContain('order-1');
+  expect(logged).not.toContain('order-1');
+  expect(diagnostics[1].message).toContain('"orderId":"[redacted]"');
   expect(logged).toContain('[redacted]');
 });
 

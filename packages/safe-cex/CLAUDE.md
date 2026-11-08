@@ -1782,11 +1782,12 @@ realm; worker hosts use the existing `__workerConfig.wsDiagnosticsEnabled` flag.
 `ExchangeWorker` forwards `{ op: 'ws-diagnostic', data: [event] }`; consuming web
 controllers must handle that op and re-emit it before rendering Requests Log rows.
 
-Diagnostics run after socket I/O and allow only protocol/trading fields.
-Auth/error frames, free-form messages, echoes and unknown fields are withheld;
-connection URLs/headers and binary contents are never included.
-Challenge fields withhold the containing object even when its operation is
-`subscribe`; incoming challenge replies are also withheld. Opaque,
+Diagnostics run after socket I/O and validate both field names and values.
+Only closed protocol/status/error enums, bounded integers and success booleans
+survive. IDs, topics, scalar data, messages and other free-form strings become
+fixed placeholders, including nested/encoded echoes inside retained fields.
+Arrays retain at most 32 sanitized entries. Challenge/signature material,
+connection URLs/headers and binary contents are never included. Opaque,
 malformed, oversized and excessive-depth content is withheld. Heartbeats are
 omitted, output is capped and frames are sampled per socket. Disabling the
 switch drops queued entries too. Existing private grafana events remain available

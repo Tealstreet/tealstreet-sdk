@@ -73,9 +73,10 @@ The SDK emits opt-in `ws-diagnostic` events for Hyro and every Rust venue:
 `{ venue, channel, direction, message }`, with sanitized text for public/private/
 business sockets. Enable `setWsDiagnosticsEnabled(true)` in the exchange's realm
 or send the existing `__workerConfig.wsDiagnosticsEnabled` worker setting. The
-default is off. Only protocol/trading fields are allowed; auth/error frames,
-free-form messages, echoes and unknown fields are withheld. Connection URLs,
-headers and binary contents are omitted. `WsDiagnosticEvent` is exported from
+default is off. Fields and values are both allowlisted: only closed protocol/
+status/error enums, bounded integers and success booleans survive. Free-form
+IDs, topics, scalar data, messages and nested echoes become fixed placeholders.
+Connection URLs, headers and binary contents are omitted. `WsDiagnosticEvent` is exported from
 the SDK, and the worker posts `{ op: 'ws-diagnostic', data: [event] }`.
 
 Account UX, consuming that event in the web Requests Log, and the beta user

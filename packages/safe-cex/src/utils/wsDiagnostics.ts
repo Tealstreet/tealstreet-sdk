@@ -149,27 +149,47 @@ const isAuthOperationObject = (value: object): boolean =>
     ['op', 'method', 'type', 'event', 'action'].includes(key)
       && typeof field === 'string' && AUTH_OPERATION_RE.test(field));
 
-// Diagnostics retain only protocol and trading fields, never free-form error
-// text, echoes, arbitrary field names or positional response strings.
+// Field names and values are independently allowlisted. Even an id or topic
+// can contain a venue's authentication echo; no free-form string is safe.
+const DIAGNOSTIC_OPERATIONS = new Set([
+  'auth', 'login', 'challenge', 'error', 'echo', 'subscribe', 'subscribed', 'unsubscribe', 'unsubscribed',
+  'SUBSCRIBE', 'UNSUBSCRIBE', 'snapshot', 'delta', 'update',
+]);
+const DIAGNOSTIC_ENUMS: Readonly<Record<string, ReadonlySet<string> | undefined>> = {
+  op: DIAGNOSTIC_OPERATIONS, method: DIAGNOSTIC_OPERATIONS, type: DIAGNOSTIC_OPERATIONS,
+  event: DIAGNOSTIC_OPERATIONS, action: DIAGNOSTIC_OPERATIONS,
+  e: new Set(['ORDER_TRADE_UPDATE', 'ACCOUNT_UPDATE', 'executionReport', 'outboundAccountPosition']),
+  channel: new Set(['public', 'private', 'business']),
+  code: new Set(['AUTH_FAILED', 'INVALID_SIGNATURE', 'INVALID_API_KEY', 'RATE_LIMITED', 'UNAUTHORIZED',
+    'FORBIDDEN', 'INVALID_REQUEST', 'INTERNAL_ERROR']),
+  side: new Set(['Buy', 'Sell', 'buy', 'sell', 'BUY', 'SELL']),
+  orderType: new Set(['Market', 'Limit', 'market', 'limit', 'MARKET', 'LIMIT']),
+  orderStatus: new Set(['New', 'Filled', 'Canceled', 'Cancelled', 'PartiallyFilled', 'Rejected', 'Untriggered', 'Triggered']),
+};
+const DIAGNOSTIC_NUMBERS = new Set([
+  'code', 'count', 'length', 'i', 'id', 'price', 'qty', 'size', 'amount', 'lastPrice', 'bidPrice', 'askPrice',
+  'timestamp', 'ts',
+]);
 const DIAGNOSTIC_FIELDS = new Set([
   'op', 'method', 'type', 'event', 'action', 'e', 'topic', 'channel', 'feed',
-  'args', 'params', 'data', 'result', 'o', 'i', 'id', 'code', 'success',
+  'args', 'params', 'data', 'result', 'o', 'i', 'id', 'code', 'success', 'count', 'length',
   'symbol', 'orderId', 'orderLinkId', 'clientOrderId', 'orderStatus', 'side', 'orderType',
   'price', 'qty', 'size', 'amount', 'lastPrice', 'bidPrice', 'askPrice', 'timestamp', 'ts',
 ]);
 
 const diagnosticJsonValue = (value: unknown, depth = 0, field = ''): unknown => {
   if (depth > MAX_JSON_REDACTION_DEPTH) return REDACTED;
-  if (typeof value === 'string') {
-    if (!field || /(?:https?|wss?):\/\/|%3a%2f%2f|[\[{]/i.test(value)) return REDACTED;
-    return value.replace(HEX_SECRET_RE, REDACTED);
+  if (typeof value === 'string') return DIAGNOSTIC_ENUMS[field]?.has(value) ? value : REDACTED;
+  if (typeof value === 'number') return DIAGNOSTIC_NUMBERS.has(field)
+    && Number.isSafeInteger(value) && Math.abs(value) <= 2_147_483_647
+    && (!(field === 'count' || field === 'length') || value >= 0) ? value : REDACTED;
+  if (typeof value === 'boolean') return field === 'success' ? value : REDACTED;
+  if (Array.isArray(value)) {
+    const entries = value.slice(0, 32).map((child) => diagnosticJsonValue(child, depth + 1));
+    if (value.length > 32) entries.push(REDACTED);
+    return entries;
   }
-  if (Array.isArray(value)) return value.map((child) => diagnosticJsonValue(child, depth + 1));
-  if (!value || typeof value !== 'object') return value;
-  if (isAuthOperationObject(value) || Object.entries(value).some(([key, child]) =>
-    /^(?:error|echo|message|msg|ret_msg|retMsg)$/i.test(key)
-      || (['op', 'method', 'type', 'event', 'action'].includes(key)
-        && typeof child === 'string' && /error|echo/i.test(child)))) return REDACTED;
+  if (!value || typeof value !== 'object') return REDACTED;
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
     if (DIAGNOSTIC_FIELDS.has(key)) result[key] = diagnosticJsonValue(child, depth + 1, key);
