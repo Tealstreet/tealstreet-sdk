@@ -30,9 +30,16 @@ Heartbeats prove socket liveness only. Separate venue-owned clocks watch data:
 - Private fills, open orders and positions can legitimately stay quiet after
   their initial snapshots. Heartbeats and the 20-second socket receive watchdog
   maintain that connection; inactivity does not unsubscribe or reconnect it.
-  In particular, a routine fills unsubscribe could hide a new execution in a
-  replacement history snapshot, suppressing its live fill notification and
-  order progress. Keep the live subscription uninterrupted while it is healthy.
+  Keep the live subscription uninterrupted while it is healthy.
+
+After a required reconnect, `fills_snapshot` executions newer than the last
+emitted execution are emitted as live fills and can advance order progress.
+The initial cutoff is account startup, so old startup history stays quiet.
+The cutoff is fixed for each snapshot batch to accept newest-first history and
+distinct executions sharing a timestamp. Only emitted fill IDs enter the bounded
+deduplication cache, which survives reconnects; skipped history, missing snapshot
+timestamps and unmapped markets cannot suppress a later live delivery. Live
+deltas without timestamps still emit and use receipt time for the next cutoff.
 
 The existing five-second venue timer checks these clocks independently of the
 scaled account REST poll. Ticker expiry is also checked before accepting late

@@ -46,7 +46,7 @@ fn mapped_orders_keep_trigger_provenance_and_never_emit_cumulative_fills() {
     assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 0);
 }
 #[test]
-fn executions_dedup_by_native_fill_id_across_snapshot_and_reconnect() {
+fn only_emitted_execution_ids_deduplicate_live_replays_and_reconnects() {
     let (mut e, socket) = ready();
     let fill = r#"{"fill_id":"exec-1","order_id":"order-1","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":false}"#;
     message(
@@ -65,7 +65,11 @@ fn executions_dedup_by_native_fill_id_across_snapshot_and_reconnect() {
             fill.replace("exec-1", "exec-2")
         ),
     );
-    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 1);
+    assert_eq!(
+        e.take_frame(NOW).map_or(0, fill_count),
+        2,
+        "an un-emitted snapshot ID cannot suppress its first live delivery"
+    );
     message(
         &mut e,
         socket,
@@ -104,6 +108,117 @@ fn executions_dedup_by_native_fill_id_across_snapshot_and_reconnect() {
         e.take_frame(NOW + 1003.0).map_or(0, fill_count),
         0,
         "recent execution replay after a fresh challenge must stay deduplicated"
+    );
+}
+
+fn execution(id: &str, time: Option<f64>, instrument: &str) -> serde_json::Value {
+    serde_json::json!({
+        "fill_id": id, "order_id": "order-1", "instrument": instrument,
+        "qty": 0.5, "price": 100, "buy": true, "time": time
+    })
+}
+
+fn execution_message(
+    e: &mut Engine<Kraken>,
+    socket: SocketId,
+    now: f64,
+    feed: &str,
+    fills: &[serde_json::Value],
+) -> u32 {
+    message(
+        e,
+        socket,
+        now,
+        &serde_json::json!({"feed": feed, "fills": fills}).to_string(),
+    );
+    e.take_frame(now).map_or(0, fill_count)
+}
+
+#[test]
+fn startup_snapshot_emits_only_executions_after_account_start() {
+    let (mut e, socket) = ready();
+    let history = execution("history", Some(NOW - 1.), "PF_XBTUSD");
+    let unstamped = execution("unstamped", None, "PF_XBTUSD");
+    let current = execution("current", Some(NOW + 1.), "PF_XBTUSD");
+    assert_eq!(
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 10.,
+            "fills_snapshot",
+            &[history.clone(), unstamped.clone(), current.clone()]
+        ),
+        1
+    );
+    assert_eq!(
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 11.,
+            "fills",
+            &[history, unstamped, current]
+        ),
+        2,
+        "ignored history must not enter the emitted-ID cache"
+    );
+}
+
+#[test]
+fn snapshot_recovery_uses_last_emission_and_accepts_unordered_same_time_rows() {
+    let (mut e, socket) = ready();
+    let emitted = execution("emitted", Some(NOW + 10.), "PF_XBTUSD");
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 20., "fills", &[emitted.clone()]),
+        1
+    );
+    let older = execution("older", Some(NOW + 9.), "PF_XBTUSD");
+    let equal = execution("equal", Some(NOW + 10.), "PF_XBTUSD");
+    let newest = execution("newest", Some(NOW + 30.), "PF_XBTUSD");
+    let middle = execution("middle", Some(NOW + 25.), "PF_XBTUSD");
+    let same_time = execution("same-time", Some(NOW + 30.), "PF_XBTUSD");
+    let fills = [emitted, older, equal, newest, middle, same_time];
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 40., "fills_snapshot", &fills),
+        3,
+        "the cutoff is fixed for the batch, independent of history order"
+    );
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 41., "fills_snapshot", &fills),
+        0
+    );
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 42., "fills", &fills[3..]),
+        0
+    );
+}
+
+#[test]
+fn unmapped_snapshot_execution_neither_poison_ids_nor_advances_cutoff() {
+    let (mut e, socket) = ready();
+    let unmapped = execution("unmapped", Some(NOW + 1_000.), "UNKNOWN");
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 2_000., "fills_snapshot", &[unmapped]),
+        0
+    );
+    let recoverable = execution("recoverable", Some(NOW + 20.), "PF_XBTUSD");
+    assert_eq!(
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 2_001.,
+            "fills_snapshot",
+            &[recoverable]
+        ),
+        1
+    );
+    let mapped = execution("unmapped", Some(NOW + 1_000.), "PF_XBTUSD");
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 2_002., "fills", &[mapped.clone()]),
+        1
+    );
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 2_003., "fills", &[mapped]),
+        0
     );
 }
 #[test]

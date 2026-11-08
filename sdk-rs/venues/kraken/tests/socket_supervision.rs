@@ -458,6 +458,76 @@ fn futures_live_execution_control_at_the_quiet_window_emits_once() {
     assert_eq!(quiet_window_execution(false), (1, 0, 0.5, 1.5));
 }
 
+fn reconnect_execution_delivery(snapshot_first: bool) -> (u32, u32, f64) {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let old = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, old);
+    h.wait(10_000.);
+    heartbeat(&mut h, old);
+    let last_live = h.now;
+    let _ = h.engine.take_frame(h.now);
+    h.wait(20_000.);
+    assert!(h.closed.contains(&old));
+    let executed_at = h.now + 1.;
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(old, replacement);
+    h.message(
+        replacement,
+        r#"{"event":"challenge","message":"fresh-execution-recovery"}"#,
+    );
+    for feed in ["fills", "open_orders", "open_positions"] {
+        h.message(
+            replacement,
+            &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
+        );
+    }
+    assert!(executed_at > last_live && executed_at < h.now);
+    h.message(replacement, &format!(r#"{{"feed":"open_orders_snapshot","orders":[{{"instrument":"PF_XBTUSD","order_id":"reconnect-order","qty":1.5,"filled":0.5,"type":"limit","direction":0,"limit_price":100,"last_update_time":{executed_at}}}]}}"#));
+    let _ = h.engine.take_frame(h.now);
+    let fill = format!(
+        r#"{{"fill_id":"new-offline-execution","order_id":"reconnect-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"remaining_order_qty":1.5,"time":{executed_at}}}"#
+    );
+    let feed = if snapshot_first {
+        "fills_snapshot"
+    } else {
+        "fills"
+    };
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"{feed}","fills":[{fill}]}}"#),
+    );
+    let first = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    h.now += 1.;
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills","fills":[{fill}]}}"#),
+    );
+    let replay = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    let remaining = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .find(|order| order.id == "reconnect-order")
+        .unwrap()
+        .remaining;
+    println!(
+        "RECONNECT snapshot_first={snapshot_first} first={first} replay={replay} remaining={remaining}"
+    );
+    (first, replay, remaining)
+}
+
+#[test]
+fn futures_reconnect_snapshot_execution_emits_once() {
+    assert_eq!(reconnect_execution_delivery(true), (1, 0, 1.5));
+}
+
+#[test]
+fn futures_reconnect_live_execution_control_emits_once() {
+    assert_eq!(reconnect_execution_delivery(false), (1, 0, 1.5));
+}
+
 fn ticker(h: &mut H<Kraken>, socket: SocketId, symbol: &str) {
     h.message(
         socket,
