@@ -1,5 +1,5 @@
 import type { SignAlgorithm, Signer, SigningIdentities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { CredentialPresence } from './construction';
 
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
@@ -8,6 +8,9 @@ import { nanoid } from 'nanoid';
 import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
 import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveEffectivePublicDataOnly, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
 import { createRemoteSignerProvider, remoteSignerAlgorithms } from './remoteSignerProvider';
+import { capturedDelegatedCallbacks, snapshotDelegatedSigningOptions } from './delegatedSigningSnapshot';
+
+export { delegatedCallbacksWellFormed } from './delegatedSigningSnapshot';
 
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
 const invalid = (message = 'Invalid delegated signer setup'): never => {
@@ -25,41 +28,6 @@ export const selectDelegatedSigningMode = (
   options: Pick<ExchangeOptions, 'remoteSigner' | 'payloadSigner'>,
 ): 'remote' | 'payload' | undefined => options.remoteSigner !== undefined ? 'remote'
   : options.payloadSigner !== undefined ? 'payload' : undefined;
-
-type DelegatedCallbacks = Pick<ExchangeOptions, 'remoteSigner' | 'payloadSigner'>;
-
-// Inspect caller-owned accessors and traps only here. Providers retain captured
-// methods with their original receiver, never a second view of those members.
-const captureDelegatedCallbacks = (options: DelegatedCallbacks): DelegatedCallbacks | undefined => {
-  try {
-    const { remoteSigner, payloadSigner } = options;
-    let remote: RemoteSigner | undefined;
-    if (remoteSigner !== undefined) {
-      if (!remoteSigner || (typeof remoteSigner !== 'object' && typeof remoteSigner !== 'function')
-        || !('sign' in remoteSigner) || !('isAvailable' in remoteSigner) || !('onAvailabilityChange' in remoteSigner)) return undefined;
-      const { sign, isAvailable, onAvailabilityChange, accountName } = remoteSigner;
-      if (typeof sign !== 'function' || typeof isAvailable !== 'function' || typeof onAvailabilityChange !== 'function') return undefined;
-      remote = {
-        sign: (request) => Reflect.apply(sign, remoteSigner, [request]),
-        isAvailable: () => Reflect.apply(isAvailable, remoteSigner, []),
-        onAvailabilityChange: (callback) => Reflect.apply(onAvailabilityChange, remoteSigner, [callback]),
-        accountName,
-      };
-    }
-    let payload: PayloadSigner | undefined;
-    if (payloadSigner !== undefined) {
-      if (typeof payloadSigner !== 'function' || !('call' in payloadSigner)) return undefined;
-      const call = payloadSigner.call;
-      if (typeof call !== 'function') return undefined;
-      payload = function (this: unknown, request) { return Reflect.apply(call, payloadSigner, [this, request]); };
-    }
-    return { remoteSigner: remote, payloadSigner: payload };
-  } catch { return invalid(); }
-};
-
-/** Every configured callback (any value but undefined) has the shape its mode requires. */
-export const delegatedCallbacksWellFormed = (options: DelegatedCallbacks): boolean =>
-  captureDelegatedCallbacks(options) !== undefined;
 
 /** Trusted setup for aliases admitted by the shared caller policy. This capsule
  * does not enable a venue or retain a local signing secret. Remote authority
@@ -82,6 +50,7 @@ export class DelegatedSignerSetup {
   readonly signerAlgorithms: readonly SignAlgorithm[];
 
   constructor(name: ExchangeName, options: ExchangeOptions) {
+    options = snapshotDelegatedSigningOptions(name, options);
     this.#venue = name;
     this.#publicOnly = resolveEffectivePublicDataOnly(name, options);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
@@ -111,7 +80,7 @@ export class DelegatedSignerSetup {
       const message = 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    const callbacks = captureDelegatedCallbacks(options) ?? invalid();
+    const callbacks = capturedDelegatedCallbacks(options) ?? invalid();
     const remoteSigner = callbacks.remoteSigner;
     const payloadSigner = this.usesPayloadSigner ? callbacks.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');

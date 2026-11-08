@@ -5,7 +5,7 @@ import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { unsupportedVenueError } from '../../unsupportedVenue';
 import { deriveRemoteSigningPolicy } from './construction';
-import { delegatedCallbacksWellFormed } from './delegatedSignerSetup';
+import { delegatedCallbacksWellFormed, snapshotDelegatedSigningOptions } from './delegatedSigningSnapshot';
 import { hasPrimaryKey, resolveEffectivePublicDataOnly } from './localSignerSetup';
 
 /** The Rust-only beta build's complete venue policy, including saved aliases. */
@@ -67,6 +67,7 @@ export const assertBetaVenue = (name: string): void => {
 
 /** Unsupported signing modes cannot fall through to a TypeScript venue. */
 export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeOptions>): void => {
+  options = snapshotDelegatedSigningOptions(name, options);
   // Effective public first: unused callbacks on a public account are not custody.
   const publicDataOnly = resolveEffectivePublicDataOnly(name, options);
   // Configured means present, whatever its value: the same predicate as the resolver and setup.
