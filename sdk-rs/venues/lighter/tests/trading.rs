@@ -1556,3 +1556,86 @@ fn a_maker_only_key_refusal_says_what_the_key_allows() {
         );
     }
 }
+
+fn split_preflight_engine(min: f64, max: f64, min_quote: f64) -> Engine<Lighter> {
+    let mut metadata: Value = serde_json::from_str(META).unwrap();
+    let row = &mut metadata["order_book_details"][0];
+    row["supported_size_decimals"] = json!(0);
+    row["min_base_amount"] = json!(min.to_string());
+    row["min_quote_amount"] = json!(min_quote.to_string());
+    let mut options = options();
+    options.testnet = true;
+    let (mut e, _) = ready_with_meta(options, &metadata.to_string());
+    let mut markets = e.store().markets().to_vec();
+    markets.iter_mut().find(|m| m.symbol == "ETH").unwrap().limits.amount.max = max;
+    e.store_mut().set_markets(markets);
+    e
+}
+fn split_preflight_order(kind: OrderType, amount: f64) -> PlaceOrderOpts {
+    let mut opts = limit();
+    opts.kind = kind;
+    opts.amount = amount;
+    opts.price = Some(100.);
+    opts
+}
+fn split_preflight_refuses(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) {
+    place(&mut e, orders);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert_eq!(actions.iter().filter(|a| matches!(a, Action::Http(_))).count(), 0, "invalid whole plan released transport");
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(Outcome::NotSent))), "missing NotSent refusal");
+}
+#[test]
+fn split_preflight_market_open_below_min_qty_zero_writes() {
+    split_preflight_refuses(split_preflight_engine(3., 5., 1.), vec![split_preflight_order(OrderType::Market, 2.)]);
+}
+#[test]
+fn split_preflight_market_split_tail_below_min_quote_zero_writes() {
+    split_preflight_refuses(split_preflight_engine(1., 5., 400.), vec![split_preflight_order(OrderType::Market, 7.)]);
+}
+#[test]
+fn split_preflight_valid_first_invalid_market_tail_zero_writes() {
+    split_preflight_refuses(split_preflight_engine(3., 5., 1.), vec![split_preflight_order(OrderType::Limit, 3.), split_preflight_order(OrderType::Market, 2.)]);
+}
+fn split_preflight_lots(mut e: Engine<Lighter>, amount: f64) -> Vec<u64> {
+    let mut request = begin(&mut e, vec![split_preflight_order(OrderType::Limit, amount)]);
+    let mut sizes = Vec::new();
+    let mut ids = std::collections::HashSet::new();
+    let mut now = NOW;
+    for _ in 0..12 {
+        let tx = wire(&request);
+        sizes.push(tx["BaseAmount"].as_u64().unwrap());
+        assert!(ids.insert(tx["ClientOrderIndex"].as_u64().unwrap()), "duplicate lot identity");
+        ack_at(&mut e, now, &request);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+        if actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))) {
+            assert_eq!(sizes.len(), ids.len());
+            return sizes;
+        }
+        let (timer, at) = actions.into_iter().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms <= NOW + 1000. => Some((timer, at_ms)),
+            _ => None,
+        }).expect("next prepared lot pacing");
+        now = at;
+        e.handle(now, Event::TimerFired { timer });
+        request = http_at(&mut e, now, "sendTx");
+    }
+    panic!("prepared plan did not finish");
+}
+#[test]
+fn split_preflight_eight_units_cap_five_step_one_preserves_eight() {
+    let sizes = split_preflight_lots(split_preflight_engine(1., 5., 1.), 8.);
+    assert_eq!(sizes.iter().sum::<u64>(), 8);
+    assert_eq!(sizes.len(), 2, "one transport per native lot");
+    assert!(sizes.iter().all(|&q| (1..=5).contains(&q)));
+}
+#[test]
+fn split_preflight_remainder_merge_cannot_exceed_max() {
+    let sizes = split_preflight_lots(split_preflight_engine(3., 5., 1.), 17.);
+    assert_eq!(sizes.iter().sum::<u64>(), 17);
+    assert_eq!(sizes.len(), 4);
+    assert!(sizes.iter().all(|&q| (3..=5).contains(&q)));
+}
+#[test]
+fn split_preflight_valid_control_places_each_lot_once() {
+    assert_eq!(split_preflight_lots(split_preflight_engine(3., 5., 1.), 10.), vec![5, 5]);
+}

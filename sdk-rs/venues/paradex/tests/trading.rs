@@ -3179,3 +3179,93 @@ fn a_terminal_proof_cannot_override_an_observed_fill_or_a_new_cancel() {
         expire_cancel_proof(&mut h);
     }
 }
+
+fn split_preflight_limits(h: &mut Harness, min: f64, max: f64, step: f64, tick: f64) {
+    let mut markets = h.e.store().markets().to_vec();
+    let m = markets.iter_mut().find(|m| m.symbol == "BTC-USD-PERP").unwrap();
+    m.limits.amount.min = min;
+    m.limits.amount.max = max;
+    m.precision.amount = step;
+    m.precision.price = tick;
+    h.e.store_mut().set_markets(markets);
+}
+fn split_preflight_rows(last: PlaceOrderOpts) -> Vec<PlaceOrderOpts> {
+    let mut good = opts(OrderType::Limit);
+    good.client_order_id = None;
+    let mut orders = vec![good; 10];
+    orders.push(last);
+    orders
+}
+fn split_preflight_refused(h: &Harness) {
+    assert_eq!(h.pending.len(), 0, "invalid whole plan released transport");
+    assert_eq!(failed(h, 91).outcome, Some(safe_cex_engine::Outcome::NotSent));
+}
+#[test]
+fn split_preflight_eleventh_row_below_min_zero_writes() {
+    let mut h = private();
+    split_preflight_limits(&mut h, 1., 5., 0.1, 0.1);
+    let mut bad = opts(OrderType::Limit); bad.client_order_id = None; bad.amount = 0.5;
+    place(&mut h, 91, split_preflight_rows(bad));
+    split_preflight_refused(&h);
+}
+#[test]
+fn split_preflight_eleventh_row_off_step_zero_writes() {
+    let mut h = private();
+    split_preflight_limits(&mut h, 1., 5., 0.1, 0.1);
+    let mut bad = opts(OrderType::Limit); bad.client_order_id = None; bad.amount = 1.05;
+    place(&mut h, 91, split_preflight_rows(bad));
+    split_preflight_refused(&h);
+}
+#[test]
+fn split_preflight_eleventh_row_above_max_without_caller_id_zero_writes() {
+    let mut h = private();
+    split_preflight_limits(&mut h, 1., 5., 0.1, 0.1);
+    let mut bad = opts(OrderType::Limit); bad.client_order_id = None; bad.amount = 6.;
+    place(&mut h, 91, split_preflight_rows(bad));
+    split_preflight_refused(&h);
+}
+#[test]
+fn split_preflight_attached_trigger_off_tick_zero_writes() {
+    let mut h = private();
+    let mut parent = opts(OrderType::Limit); parent.client_order_id = None; parent.stop_loss = Some(90.05);
+    place(&mut h, 91, vec![parent]);
+    split_preflight_refused(&h);
+}
+#[test]
+fn split_preflight_undersized_protective_replacement_never_cancels() {
+    let mut h = with_untriggered_stop();
+    split_preflight_limits(&mut h, 1., 5., 0.1, 0.1);
+    h.command(Command::AmendOrder { command: 91, id: "123".into(), price: Some(91.), amount: Some(0.5) });
+    split_preflight_refused(&h);
+}
+#[test]
+fn split_preflight_last_row_below_min_notional_zero_writes() {
+    let mut h = private();
+    let mut bad = opts(OrderType::Limit); bad.client_order_id = None; bad.amount = 0.01;
+    place(&mut h, 91, split_preflight_rows(bad));
+    split_preflight_refused(&h);
+}
+#[test]
+fn split_preflight_all_valid_batches_place_each_element_once() {
+    let mut h = private();
+    let mut good = opts(OrderType::Limit); good.client_order_id = None;
+    place(&mut h, 91, vec![good; 11]);
+    let first = h.take("/orders/batch");
+    let rows: serde_json::Value = serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 10);
+    let mut ids = std::collections::HashSet::new();
+    let replies: Vec<_> = rows.iter().enumerate().map(|(i, row)| {
+        let id = row["client_id"].as_str().unwrap(); assert!(ids.insert(id.to_owned()));
+        serde_json::json!({"id":format!("native-{i}"),"client_id":id})
+    }).collect();
+    h.respond(first, 200, &serde_json::json!({"orders":replies}).to_string());
+    let second = h.take("/orders/batch");
+    let rows: serde_json::Value = serde_json::from_str(second.body.as_deref().unwrap()).unwrap();
+    let rows = rows.as_array().unwrap(); assert_eq!(rows.len(), 1);
+    let id = rows[0]["client_id"].as_str().unwrap(); assert!(ids.insert(id.to_owned()));
+    h.respond(second, 200, &serde_json::json!({"orders":[{"id":"native-last","client_id":id}]}).to_string());
+    assert_eq!(ids.len(), 11);
+    assert_eq!(h.pending.len(), 0, "valid plan resent an element");
+    assert!(h.result(91).is_ok());
+}

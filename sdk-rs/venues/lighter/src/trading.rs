@@ -2753,3 +2753,33 @@ mod client_index_parity_tests {
         engine.start(1_700_000_000_000.);
     }
 }
+
+#[cfg(test)]
+mod split_preflight_tests {
+    use super::*;
+    use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
+    use safe_cex_engine::test_support::{ProbeVenue, seeded_engine};
+
+    #[test]
+    fn split_preflight_count_includes_extra_tail() {
+        let mut venue = Lighter::new(crate::Options::default());
+        venue.metadata.insert("ETH".into(), crate::MarketMeta { min_quote: 1., ..Default::default() });
+        let mut e = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            let opts: PlaceOrderOpts = serde_json::from_value(serde_json::json!({"symbol":"ETH","type":"limit","side":"buy","amount":49999,"price":100})).unwrap();
+            let rows = venue.prepare_one(cx, &opts).unwrap();
+            assert_eq!(rows.len(), 10_000);
+            assert_eq!(rows.iter().map(|p| p.native.amount).sum::<u64>(), 49_999);
+            assert!(rows.iter().all(|p| (1..=5).contains(&p.native.amount)));
+        }));
+        e.store_mut().set_markets(vec![Market {
+            id: "1".into(), symbol: "ETH".into(), pretty_symbol: None,
+            base: "ETH".into(), quote: "USDC".into(), active: true,
+            precision: Precision { amount: 1., price: 1. },
+            limits: Limits { amount: MinMax { min: 1., max: 5. }, leverage: MinMax { min: 1., max: 10. }, price: None },
+            contract_size: Some(1.), is_expiring: None, is_inverse: None, is_spot: None,
+            is_perpetual: Some(true), is_read_only: None, taker_fee: None, maker_fee: None,
+        }]);
+        e.start(1000.);
+        assert_eq!(e.drain_actions().filter(|a| matches!(a, safe_cex_engine::Action::Http(_))).count(), 0);
+    }
+}
