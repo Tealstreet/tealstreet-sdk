@@ -28,6 +28,7 @@ let localUsername: string | undefined;
 let sessionKey = nanoid();
 let flushInterval: ReturnType<typeof setInterval> | undefined;
 let visibilityListener: (() => void) | undefined;
+let onlineListener: (() => void) | undefined;
 let uploadInProgress = false;
 let pendingLogBatches: LogBatch[] = [];
 let activeLogBatch: LogBatch | undefined;
@@ -215,7 +216,7 @@ function retireLoggingOwner() {
     origin &&
     isPageReadyForLogging(true)
   ) {
-    void sendToGrafana({ owner, entries }, { token, origin });
+    void sendToGrafana({ owner, entries }, { token: { ...token }, origin });
   }
 }
 
@@ -226,6 +227,8 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
   }
   localUserId = userId;
   localUsername = username;
+  const owner = { userId, epoch: logIngestTokenEpoch };
+  const isCurrentOwner = () => isLoggingOwnerCurrent(owner.userId, owner.epoch);
 
   if (flushInterval) {
     clearInterval(flushInterval);
@@ -233,8 +236,12 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
   if (visibilityListener && typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', visibilityListener);
   }
+  if (onlineListener && typeof window !== 'undefined') {
+    window.removeEventListener('online', onlineListener);
+  }
 
   const flushIfVisible = () => {
+    if (!isCurrentOwner()) return;
     if (typeof document === 'undefined' || document.visibilityState === 'visible') {
       dumpLogQueue();
     }
@@ -242,14 +249,18 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
 
   const activeFlushInterval = setInterval(flushIfVisible, LOG_FLUSH_INTERVAL_MS);
   const activeVisibilityListener = () => {
+    if (!isCurrentOwner()) return;
     if (document.visibilityState === 'visible') {
       flushIfVisible();
       void drainLogBatches();
     }
   };
-  const activeOnlineListener = () => void drainLogBatches();
+  const activeOnlineListener = () => {
+    if (isCurrentOwner()) void drainLogBatches();
+  };
   flushInterval = activeFlushInterval;
   visibilityListener = activeVisibilityListener;
+  onlineListener = activeOnlineListener;
 
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', activeVisibilityListener);
@@ -260,15 +271,20 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
     if (flushInterval === activeFlushInterval) {
       clearInterval(activeFlushInterval);
       flushInterval = undefined;
-      retireLoggingOwner();
-      localUserId = '';
-      localUsername = undefined;
-      resetLogIngestToken();
+      if (isCurrentOwner()) {
+        retireLoggingOwner();
+        localUserId = '';
+        localUsername = undefined;
+        resetLogIngestToken();
+      }
     }
     if (visibilityListener === activeVisibilityListener && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', activeVisibilityListener);
-      window.removeEventListener('online', activeOnlineListener);
       visibilityListener = undefined;
+    }
+    if (onlineListener === activeOnlineListener && typeof window !== 'undefined') {
+      window.removeEventListener('online', activeOnlineListener);
+      onlineListener = undefined;
     }
   };
 };
@@ -330,12 +346,17 @@ const getLogIngestToken = async (baseUrl: string, { userId, epoch }: LoggingOwne
 
 const drainLogBatches = async () => {
   if (uploadInProgress) return;
+  const owner = { userId: localUserId, epoch: logIngestTokenEpoch };
   uploadInProgress = true;
   try {
-    while (pendingLogBatches.length > 0) {
+    while (pendingLogBatches.length > 0 && isLoggingOwnerCurrent(owner.userId, owner.epoch)) {
       if (!isPageReadyForLogging()) return;
       const batch = pendingLogBatches[0];
       if (batch) {
+        if (!sameLoggingOwner(batch.owner, owner)) {
+          pendingLogBatches.shift();
+          continue;
+        }
         activeLogBatch = batch;
         const complete = await sendToGrafana(batch);
         activeLogBatch = undefined;
@@ -344,7 +365,11 @@ const drainLogBatches = async () => {
       }
     }
   } finally {
+    activeLogBatch = undefined;
     uploadInProgress = false;
+    if (!isLoggingOwnerCurrent(owner.userId, owner.epoch) && pendingLogBatches.length > 0) {
+      void drainLogBatches();
+    }
   }
 };
 
@@ -414,7 +439,7 @@ const sendToGrafana = async (
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (logIngestOrigin) {
         const token = retiring?.token.token ?? (await getLogIngestToken(baseUrl, batch.owner));
-        if (!token) return true;
+        if (!token || !isAuthorized()) return true;
         headers.Authorization = `Bearer ${token}`;
       }
 
@@ -425,13 +450,16 @@ const sendToGrafana = async (
         body,
         headers,
       });
+      if (!isAuthorized()) return true;
       if (!response.ok) throw new Error(`Logs API responded with status ${response.status}`);
-      loggingMetrics.uploadsSucceeded++;
-      if (metricsSnapshot) {
-        for (const key of loggingMetricNames) {
-          loggingMetrics[key] = Math.max(0, loggingMetrics[key] - metricsSnapshot[key]);
+      if (isLoggingOwnerCurrent(userId, ownerEpoch)) {
+        loggingMetrics.uploadsSucceeded++;
+        if (metricsSnapshot) {
+          for (const key of loggingMetricNames) {
+            loggingMetrics[key] = Math.max(0, loggingMetrics[key] - metricsSnapshot[key]);
+          }
+          lastMetricsReportAt = Date.now();
         }
-        lastMetricsReportAt = Date.now();
       }
       return true;
     } catch (error) {

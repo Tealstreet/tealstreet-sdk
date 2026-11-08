@@ -4,6 +4,11 @@ import { gunzipSync } from 'node:zlib';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@tealstreet/utils/src/compression', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tealstreet/utils/src/compression')>();
+  return { ...actual, compress: vi.fn(actual.compress) };
+});
+
 const A = 'synthetic-queue-A';
 const B = 'synthetic-queue-B';
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -42,6 +47,9 @@ describe('queued ingest ownership', () => {
   let minted: string[];
   let stops: Array<() => void>;
   let mint: (owner: string) => Promise<Response>;
+  let respond: (entry: { owner: string; lines: string[] }) => Promise<Response>;
+  let compression: typeof import('@tealstreet/utils/src/compression');
+  let realCompression: typeof import('@tealstreet/utils/src/compression');
   const start = (subject: string) => {
     owner = subject;
     const stop = utils.startLoggingToGrafana(subject);
@@ -66,6 +74,7 @@ describe('queued ingest ownership', () => {
     minted = [];
     stops = [];
     mint = async (subject) => tokenResponse(subject);
+    respond = async () => new Response(null, { status: 204 });
     vi.stubGlobal('navigator', online);
     vi.stubGlobal(
       'fetch',
@@ -91,16 +100,22 @@ describe('queued ingest ownership', () => {
         if (received.lines.some((line) => [...refusedLines].some((refused) => line.endsWith(refused)))) {
           return new Response(null, { status: 500 });
         }
-        stored.push(received);
-        return new Response(null, { status: 204 });
+        const response = await respond(received);
+        if (response.ok) stored.push(received);
+        return response;
       }),
     );
     utils = await import('./utils');
+    compression = await import('@tealstreet/utils/src/compression');
+    realCompression = await vi.importActual<typeof import('@tealstreet/utils/src/compression')>(
+      '@tealstreet/utils/src/compression',
+    );
   });
 
   afterEach(() => {
     utils.resetLoggingStateForTests();
     for (const stop of stops) stop();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -220,4 +235,235 @@ describe('queued ingest ownership', () => {
     await vi.waitFor(() => expect(event('unflushed-A')?.owner).toBe(A));
     expect(minted).toEqual([A]);
   });
+
+  it('drops a stale interval callback queued before the switch to B', async () => {
+    const intervals = vi.spyOn(globalThis, 'setInterval');
+    start(A);
+    utils.logInfo('timer-A');
+    const oldTick = intervals.mock.calls.at(-1)?.[0];
+    if (typeof oldTick !== 'function') throw new Error('A interval not registered');
+    start(B);
+    utils.logInfo('timer-B');
+    oldTick();
+    expect(minted).toEqual([]);
+    const currentTick = intervals.mock.calls.at(-1)?.[0];
+    if (typeof currentTick !== 'function') throw new Error('B interval not registered');
+    currentTick();
+    await vi.waitFor(() => expect(event('timer-B')?.owner).toBe(B));
+    expect(event('timer-A')).toBeUndefined();
+  });
+
+  it('drops a stale visibility callback queued before the switch to B', async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('document', page);
+    vi.stubGlobal('window', new EventTarget());
+    const listeners = vi.spyOn(page, 'addEventListener');
+    start(A);
+    utils.logInfo('visibility-A');
+    const oldListener = listeners.mock.calls.find(([type]) => type === 'visibilitychange')?.[1];
+    if (typeof oldListener !== 'function') throw new Error('A visibility listener not registered');
+    start(B);
+    utils.logInfo('visibility-B');
+    oldListener.call(page, new Event('visibilitychange'));
+    expect(minted).toEqual([]);
+    page.dispatchEvent(new Event('visibilitychange'));
+    await vi.waitFor(() => expect(event('visibility-B')?.owner).toBe(B));
+    expect(event('visibility-A')).toBeUndefined();
+  });
+
+  it('drops the first A timer after switching through B back to a new A epoch', async () => {
+    const intervals = vi.spyOn(globalThis, 'setInterval');
+    start(A);
+    utils.logInfo('old-epoch-A');
+    const oldTick = intervals.mock.calls.at(-1)?.[0];
+    if (typeof oldTick !== 'function') throw new Error('First A interval not registered');
+    start(B);
+    start(A);
+    utils.logInfo('new-epoch-A');
+    oldTick();
+    expect(minted).toEqual([]);
+    const currentTick = intervals.mock.calls.at(-1)?.[0];
+    if (typeof currentTick !== 'function') throw new Error('New A interval not registered');
+    currentTick();
+    await vi.waitFor(() => expect(event('new-epoch-A')?.owner).toBe(A));
+    expect(event('old-epoch-A')).toBeUndefined();
+  });
+
+  it('drops a stale online callback while an offline batch waits across the switch to B', async () => {
+    const browser = new EventTarget();
+    vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
+    vi.stubGlobal('window', browser);
+    const listeners = vi.spyOn(browser, 'addEventListener');
+    online.onLine = false;
+    start(A);
+    flush('offline-callback-A');
+    const oldListener = listeners.mock.calls.find(([type]) => type === 'online')?.[1];
+    if (typeof oldListener !== 'function') throw new Error('A online listener not registered');
+    start(B);
+    flush('offline-callback-B');
+    online.onLine = true;
+    oldListener.call(browser, new Event('online'));
+    expect(minted).toEqual([]);
+    browser.dispatchEvent(new Event('online'));
+    await vi.waitFor(() => expect(event('offline-callback-B')?.owner).toBe(B));
+    expect(event('offline-callback-A')).toBeUndefined();
+    expect(listeners).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops A while the token JSON body is pending and keeps B authorization', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    mint = async (subject) => {
+      const response = tokenResponse(subject);
+      if (subject === A) {
+        const read = response.json.bind(response);
+        vi.spyOn(response, 'json').mockImplementation(async () => {
+          entered.resolve();
+          await release.promise;
+          return read();
+        });
+      }
+      return response;
+    };
+    start(A);
+    flush('json-await-A');
+    await entered.promise;
+    start(B);
+    flush('json-await-B');
+    release.resolve();
+    await vi.waitFor(() => expect(event('json-await-B')?.owner).toBe(B));
+    expect(event('json-await-A')).toBeUndefined();
+    expect(minted).toEqual([A, B]);
+  });
+
+  it('ignores stale A cleanup while B token authorization is pending', async () => {
+    const staleStop = start(A);
+    const pending = Promise.withResolvers<Response>();
+    mint = async () => pending.promise;
+    start(B);
+    flush('cleanup-pending-B');
+    await vi.waitFor(() => expect(minted).toEqual([B]));
+    staleStop();
+    pending.resolve(tokenResponse(B));
+    await vi.waitFor(() => expect(event('cleanup-pending-B')?.owner).toBe(B));
+    flush('cleanup-cached-B');
+    await vi.waitFor(() => expect(event('cleanup-cached-B')?.owner).toBe(B));
+    expect(minted).toEqual([B]);
+  });
+
+  it('drops an ordinary A upload when B starts during compression', async () => {
+    start(A);
+    flush('warm-A');
+    await vi.waitFor(() => expect(event('warm-A')?.owner).toBe(A));
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    vi.mocked(compression.compress).mockImplementationOnce(async (data) => {
+      entered.resolve();
+      await release.promise;
+      return realCompression.compress(data);
+    });
+    flush('compressing-A');
+    await entered.promise;
+    start(B);
+    flush('compression-B');
+    release.resolve();
+    await vi.waitFor(() => expect(event('compression-B')?.owner).toBe(B));
+    expect(event('compressing-A')).toBeUndefined();
+    expect(minted).toEqual([A, B]);
+  });
+
+  it('uses only the captured A token when B starts during the final flush compression', async () => {
+    const stop = start(A);
+    flush('warm-A');
+    await vi.waitFor(() => expect(event('warm-A')?.owner).toBe(A));
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    vi.mocked(compression.compress).mockImplementationOnce(async (data) => {
+      entered.resolve();
+      await release.promise;
+      return realCompression.compress(data);
+    });
+    utils.logInfo('retiring-A');
+    stop();
+    await entered.promise;
+    start(B);
+    flush('retirement-B');
+    await vi.waitFor(() => expect(event('retirement-B')?.owner).toBe(B));
+    release.resolve();
+    await vi.waitFor(() => expect(event('retiring-A')?.owner).toBe(A));
+    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('retiring-A')))).toHaveLength(1);
+    expect(event('retiring-A')?.lines.some((line) => line.endsWith('retirement-B'))).toBe(false);
+    expect(event('retirement-B')?.lines.some((line) => line.endsWith('retiring-A'))).toBe(false);
+    expect(minted).toEqual([A, B]);
+  });
+
+  it('drops the final A flush if its captured token expires while B starts during compression', async () => {
+    const stop = start(A);
+    flush('warm-A');
+    await vi.waitFor(() => expect(event('warm-A')?.owner).toBe(A));
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const now = Date.now();
+    vi.mocked(compression.compress).mockImplementationOnce(async (data) => {
+      entered.resolve();
+      await release.promise;
+      return realCompression.compress(data);
+    });
+    utils.logInfo('expired-retiring-A');
+    stop();
+    await entered.promise;
+    const pendingCompression = vi.mocked(compression.compress).mock.results.at(-1);
+    if (!pendingCompression || pendingCompression.type !== 'return') throw new Error('A compression not pending');
+    start(B);
+    vi.spyOn(Date, 'now').mockReturnValue(now + 601_000);
+    flush('expiry-B');
+    await vi.waitFor(() => expect(event('expiry-B')?.owner).toBe(B));
+    release.resolve();
+    await pendingCompression.value;
+    flush('expiry-next-B');
+    await vi.waitFor(() => expect(event('expiry-next-B')?.owner).toBe(B));
+    expect(event('expired-retiring-A')).toBeUndefined();
+    expect(minted).toEqual([A, B]);
+  });
+
+  it('drops an A retry when B starts during its backoff timer', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    refusedLines.add('retry-A');
+    start(A);
+    flush('retry-A');
+    await vi.waitFor(() => expect(errors).toHaveBeenCalledWith(expect.stringContaining('Retrying in 1s')));
+    start(B);
+    flush('retry-B');
+    await vi.advanceTimersByTimeAsync(1_001);
+    await vi.waitFor(() => expect(event('retry-B')?.owner).toBe(B));
+    await vi.advanceTimersByTimeAsync(65_000);
+    expect(attempts.filter((entry) => entry.owner === A)).toHaveLength(1);
+    expect(event('retry-A')).toBeUndefined();
+    expect(minted).toEqual([A, B]);
+  });
+
+  for (const status of [204, 500]) {
+    it(`keeps B work when A's already-sent upload resolves ${status} after the switch`, async () => {
+      const entered = Promise.withResolvers<void>();
+      const response = Promise.withResolvers<Response>();
+      respond = async (entry) => {
+        if (entry.owner === A) {
+          entered.resolve();
+          return response.promise;
+        }
+        return new Response(null, { status: 204 });
+      };
+      start(A);
+      flush('response-await-A');
+      await entered.promise;
+      start(B);
+      flush('response-await-B');
+      response.resolve(new Response(null, { status }));
+      await vi.waitFor(() => expect(event('response-await-B')?.owner).toBe(B));
+      expect(attempts.map((entry) => entry.owner)).toEqual([A, B]);
+      expect(event('response-await-A')?.owner).toBe(status === 204 ? A : undefined);
+      expect(minted).toEqual([A, B]);
+    });
+  }
 });

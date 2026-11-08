@@ -76,6 +76,14 @@ dropped. An in-flight batch cannot remove a newer user's queued work on completi
 Restarting logging for the same active user preserves the queue and can reuse an
 unexpired token, and a stale cleanup cannot invalidate the current session.
 
+Intervals, visibility/online callbacks and upload drivers capture the same owner
+and epoch as their work; stale callbacks cannot flush a new owner's queue. Token
+reads, compression, retry backoff and HTTP responses recheck ownership before
+continuing. A final flush is the explicit exception: it retains its own captured
+authorization and entries, checks expiry after compression, and never reads a
+later owner's token. The two-user tests switch accounts while each deferral is
+pending, including while B's token is cached before A's final flush resumes.
+
 ### Web Worker Usage
 
 The debug logger works in Web Workers, but requires additional configuration since `process.env` is not available:
