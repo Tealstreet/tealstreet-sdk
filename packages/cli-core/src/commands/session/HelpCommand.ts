@@ -94,6 +94,8 @@ export class HelpCommand extends BaseCommand {
       'Trading:',
       '  buy (b)            Buy market/limit order',
       '  sell (s)           Sell market/limit order',
+      '    stop PRICE tp PRICE  Attach entry stop-loss / take-profit (no sl= or tp=)',
+      '    Unknown order arguments are refused before sending anything.',
       '  close (c)          Close position',
       '  cancel (x)         Cancel orders',
       '  scale              Scale into position',

@@ -381,7 +381,24 @@ fn advanced_released_http_failures_stay_unknown_for_ordinary_and_protective_writ
 
 #[test]
 fn advanced_native_rate_codes_do_not_prove_refusal_at_any_http_status() {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    // Detach on timeout: joining a stalled worker would hang the test again.
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(advanced_native_rate_code_matrix);
+        let _ = sender.send(result);
+    });
+    match receiver.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(Ok(())) => {}
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(error) => {
+            panic!("Coinbase native rate-code matrix did not complete within 30s: {error}")
+        }
+    }
+}
+
+fn advanced_native_rate_code_matrix() {
     use safe_cex_engine::ErrorKind;
+    let mut cases = 0;
     for operation in ADVANCED_WRITES {
         for status in [200, 400, 401, 403, 408, 429, 503] {
             for code in [
@@ -397,9 +414,11 @@ fn advanced_native_rate_codes_do_not_prove_refusal_at_any_http_status() {
                     _ => ErrorKind::RateLimited,
                 };
                 advanced_unknown(operation, status, &body, kind);
+                cases += 1;
             }
         }
     }
+    assert_eq!(cases, 105, "all operations, HTTP statuses and rate codes");
 }
 
 #[test]
