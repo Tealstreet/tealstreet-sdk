@@ -97,6 +97,8 @@ brackets, triggers, reduce-only, close and venue-specific controls fail before
 any write. Caller IDs are preserved verbatim and must match `[A-Za-z0-9_]{1,40}`;
 placement uses `newClientOrderId`, lookup uses `clientOrderID`. Native order and
 trade IDs never pass through floating point.
+Private execution reports read the documented uppercase `C` client-order ID;
+lowercase `c` remains accepted for existing fixtures and compatible senders.
 
 Sean's parity decision uses the legacy BingX perp formatting and dispatch policy
 for Spot's supported ordinary orders; there is no historical Spot TS adapter.
@@ -120,6 +122,9 @@ with command correlation, operation and outcome. It carries the same canonical
 text, without response bodies, signing material or raw native messages. The
 diagnostic is separate from the engine journal's terminal projection; late
 callbacks emit neither a second diagnostic nor another completion.
+Error codes are decoded independently of success-order data. Empty error data
+(`null`, `{}`, `[]` or an empty `orders` array) does not erase a known refusal;
+data claiming an order effect still makes a contradictory refusal Unknown.
 
 KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. Transport-loss
 and HTTP 503 cases sealed before Spot decoding retain their Unknown outcome,

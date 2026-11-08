@@ -108,6 +108,22 @@ enum Ack {
     Single(SingleAck),
     Many { orders: Vec<SingleAck> },
 }
+#[derive(serde::Deserialize)]
+struct AckClaims {
+    #[serde(rename = "orderId")]
+    order_id: Option<serde::de::IgnoredAny>,
+    order: Option<serde::de::IgnoredAny>,
+    orders: Option<Vec<serde::de::IgnoredAny>>,
+}
+fn has_effect_claim(data: &serde_json::value::RawValue) -> bool {
+    if let Ok(claims) = serde_json::from_str::<AckClaims>(data.get()) {
+        return claims.order_id.is_some()
+            || claims.order.is_some()
+            || claims.orders.is_some_and(|rows| !rows.is_empty());
+    }
+    !serde_json::from_str::<Vec<serde::de::IgnoredAny>>(data.get())
+        .is_ok_and(|rows| rows.is_empty())
+}
 fn proven_ids(call: &Call, native: &str, ack: &Ack) -> Option<Vec<String>> {
     let same = |a: &SingleAck| a.order_id.valid() && a.symbol == native;
     let canceled = |a: &SingleAck| same(a) && matches!(a.status.as_str(), "CANCELED" | "CANCELLED");
@@ -565,12 +581,16 @@ impl BingxSpot {
         if cx.validate_plan_delivery(&r.plan, &r.context).is_err() {
             return;
         }
-        let envelope = serde_json::from_str::<Envelope<Ack>>(response.body).ok();
+        let envelope =
+            serde_json::from_str::<Envelope<Box<serde_json::value::RawValue>>>(response.body).ok();
         let ack = envelope
             .as_ref()
             .filter(|e| e.code == 0)
-            .and_then(|e| e.data.as_ref());
-        let valid = ack.and_then(|ack| proven_ids(&r.step.kind, &r.step.native, ack));
+            .and_then(|e| e.data.as_ref())
+            .and_then(|data| serde_json::from_str::<Ack>(data.get()).ok());
+        let valid = ack
+            .as_ref()
+            .and_then(|ack| proven_ids(&r.step.kind, &r.step.native, ack));
         if let Some(proven) = valid.filter(|_| (200..300).contains(&response.status)) {
             let ids = if matches!(r.step.kind, Call::Place { .. }) {
                 proven.clone()
@@ -619,7 +639,11 @@ impl BingxSpot {
                     return;
                 }
             };
-            if envelope.as_ref().is_some_and(|e| e.data.is_some()) {
+            if envelope
+                .as_ref()
+                .and_then(|e| e.data.as_ref())
+                .is_some_and(|data| has_effect_claim(data))
+            {
                 fact = fact.unproven();
             }
             let error = fact.error().clone();

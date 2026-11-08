@@ -144,6 +144,14 @@ fn partial_row(row: Value, quantity: f64, price: Option<f64>) {
     assert_eq!(middle.len(), 1, "TS sends this numeric payload");
     let body: Value = serde_json::from_str(middle[0].body.as_deref().unwrap()).unwrap();
     assert_eq!(body["quantity"], quantity);
+    let sum: f64 = middle
+        .iter()
+        .map(|request| {
+            let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            body["quantity"].as_f64().unwrap()
+        })
+        .sum();
+    assert_eq!(sum, quantity);
     assert_eq!(body.get("price").and_then(Value::as_f64), price);
     reply(
         &mut e,
@@ -181,6 +189,8 @@ fn below_minimum_and_notional_rows_follow_the_prefix_and_refusal_continues() {
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx-spot | quantity-normalization
 #[test]
 fn rounded_quantity_is_sent_without_a_conservation_gate() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 0.002 of requested 0.002004);
+    // kept for exact TS parity per Sam's decision.
     partial_row(
         batch_order(0.002004, 41000., "rounded"),
         0.002,
@@ -407,6 +417,123 @@ fn cancellation_continues_after_a_definite_refusal() {
     assert!(!actions.iter().any(|a| matches!(a,
         Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
     )));
+}
+
+#[test]
+fn spot_followup_empty_refusal_data_preserves_classification_and_continuation() {
+    // TS: reference/bingx/bingx.exchange.ts:1854-1889 continues after native refusal.
+    for data in [
+        None,
+        Some(json!(null)),
+        Some(json!({})),
+        Some(json!([])),
+        Some(json!({"orders":[]})),
+    ] {
+        let (mut e, _) = seed(true);
+        let actions = submit_batch(
+            &mut e,
+            [0.002, 0.003, 0.004]
+                .into_iter()
+                .enumerate()
+                .map(|(i, amount)| batch_order(amount, 41000., &format!("row_{i}")))
+                .collect(),
+        );
+        let (_, actions) = ack(&mut e, &actions, "1001");
+        let middle = writes(&actions);
+        assert_eq!(middle.len(), 1);
+        let mut refusal = json!({"code":100440,"msg":"fixture known refusal"});
+        if let Some(data) = data {
+            refusal["data"] = data;
+        }
+        reply(&mut e, &middle[0], 200, &refusal.to_string());
+        let actions = collect(&mut e);
+        assert_eq!(
+            writes(&actions).len(),
+            1,
+            "definite refusal continues: {refusal}"
+        );
+        assert!(!actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+        )));
+        let (body, actions) = ack(&mut e, &actions, "1003");
+        assert_eq!(body["quantity"], 0.004);
+        let error = failure(&actions);
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+        assert_eq!(error.venue_code.as_deref(), Some("100440"));
+        assert_eq!(
+            error.venue_message.as_deref(),
+            Some("fixture known refusal")
+        );
+        assert_eq!(error.outcome, None);
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["1001", "1003"]);
+        assert!(writes(&actions).is_empty());
+        let actions = submit_batch(&mut e, vec![batch_order(0.002, 41000., "fresh")]);
+        let (_, actions) = ack(&mut e, &actions, "1004");
+        assert_eq!(done(&actions, 70), json!(["1004"]));
+    }
+}
+
+#[test]
+fn spot_followup_cancel_empty_refusal_data_continues() {
+    for data in [json!({}), json!([]), json!({"orders": []})] {
+        let (mut e, _) = seed(true);
+        let first = writes(&cancels(&mut e));
+        reply(
+            &mut e,
+            &first[0],
+            200,
+            &json!({
+                "code":100421,"msg":"definite refusal","data":data
+            })
+            .to_string(),
+        );
+        let second = writes(&collect(&mut e));
+        assert_eq!(second.len(), 1);
+        let body: Value = serde_json::from_str(second[0].body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["orderId"], "1002");
+        reply(
+            &mut e,
+            &second[0],
+            200,
+            r#"{"code":0,"data":{"orderId":"1002","symbol":"BTC-USDT","status":"CANCELED"}}"#,
+        );
+        let actions = collect(&mut e);
+        assert_eq!(failure(&actions).venue_code.as_deref(), Some("100421"));
+        assert_eq!(failure(&actions).outcome, None);
+        assert!(!actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+        )));
+    }
+}
+
+#[test]
+fn spot_followup_effect_claims_and_empty_success_stay_unknown() {
+    for body in [
+        json!({"code":100440,"data":{"orderId":"1002","symbol":"BTC-USDT","status":"NEW","side":"BUY","type":"LIMIT"}}),
+        json!({"code":100440,"data":{"orderId":"1002"}}),
+        json!({"code":100440,"data":{"order":{"orderId":"1002"}}}),
+        json!({"code":100440,"data":{"orders":[{"orderId":"1002"}]}}),
+        json!({"code":0,"data":{}}),
+        json!({"code":0,"data":{"orders":[]}}),
+    ] {
+        let (mut e, _) = seed(true);
+        let actions = submit_batch(
+            &mut e,
+            vec![
+                batch_order(0.002, 41000., "prefix"),
+                batch_order(0.003, 41000., "middle"),
+                batch_order(0.004, 41000., "suffix"),
+            ],
+        );
+        let (_, actions) = ack(&mut e, &actions, "1001");
+        let middle = writes(&actions);
+        reply(&mut e, &middle[0], 200, &body.to_string());
+        let actions = collect(&mut e);
+        assert!(writes(&actions).is_empty());
+        unknown_outcome_and_journal(&actions, &["1001"]);
+        unknown_telemetry(&actions, "place");
+        late_unknown_ack_is_inert(&mut e, &middle[0]);
+    }
 }
 
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
