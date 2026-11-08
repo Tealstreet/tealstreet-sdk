@@ -353,7 +353,89 @@ fn native_maximum_plain_split_returns_all_ten_thousand_accepted_ids() {
 }
 
 #[test]
-fn native_code_two_all_absent_cancels_continue_then_finish_empty_without_errors() {
+fn legacy_cancel_envelope_selects_continue_or_stop() {
+    for code in ["0", "1", "2"] {
+        for row_code in ["51000", "51400"] {
+            for algo in [false, true] {
+                let mut engine = trading_engine();
+                let mut ids = Vec::new();
+                for index in 1..=21 {
+                    let id = if algo {
+                        format!("{index}_sl")
+                    } else {
+                        index.to_string()
+                    };
+                    let mut row = stored(&id);
+                    if algo {
+                        row.kind = OrderType::StopLoss;
+                    }
+                    engine.store_mut().upsert_order(row);
+                    ids.push(id);
+                }
+                engine.handle(
+                    5.,
+                    Event::Command(Command::CancelOrders {
+                        command: OWNER,
+                        ids,
+                    }),
+                );
+                let first = prepared(&mut engine, 5.);
+                let Action::Http(request) = post(&first) else {
+                    panic!("one native cancel")
+                };
+                let payload: Vec<serde_json::Value> =
+                    serde_json::from_str(request.body.as_deref().expect("cancel payload"))
+                        .expect("cancel rows");
+                let replies: Vec<_> = payload
+                    .iter()
+                    .map(|row| {
+                        let mut reply = row.clone();
+                        reply["sCode"] = serde_json::json!(row_code);
+                        reply["sMsg"] = serde_json::json!("scripted refusal");
+                        reply
+                    })
+                    .collect();
+                reply(
+                    &mut engine,
+                    post(&first),
+                    &serde_json::json!({"code":code,"msg":"refused","data":replies}).to_string(),
+                    6.,
+                );
+                let mut output = prepared(&mut engine, 6.);
+                output.extend(prepared(&mut engine, 7.));
+                assert_eq!(
+                    output.iter().any(|action| matches!(action,
+                        Action::Http(request) if request.method != safe_cex_engine::Method::Get
+                    )),
+                    code == "0",
+                    "legacy TS continues only code-0 envelopes, row {row_code}, algo={algo}"
+                );
+                assert_eq!(
+                    output
+                        .iter()
+                        .filter(|action| matches!(
+                            action,
+                            Action::Notice(
+                                Notice::CommandDone { command: OWNER, .. }
+                                    | Notice::CommandFailed { command: OWNER, .. }
+                            )
+                        ))
+                        .count(),
+                    usize::from(code != "0")
+                );
+                if code != "0" {
+                    assert!(output.iter().any(|action| matches!(
+                        action,
+                        Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+                    )));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn native_code_zero_all_absent_cancels_continue_then_finish_empty_without_errors() {
     let mut engine = trading_engine();
     let ids: Vec<_> = (1..=21).map(|i| i.to_string()).collect();
     for id in &ids {
@@ -374,7 +456,7 @@ fn native_code_two_all_absent_cancels_continue_then_finish_empty_without_errors(
     reply(
         &mut engine,
         post(&first),
-        &format!(r#"{{"code":"2","data":[{rows}]}}"#),
+        &format!(r#"{{"code":"0","data":[{rows}]}}"#),
         6.,
     );
     let second = prepared(&mut engine, 6.);
@@ -384,7 +466,7 @@ fn native_code_two_all_absent_cancels_continue_then_finish_empty_without_errors(
     reply(
         &mut engine,
         post(&second),
-        r#"{"code":"2","data":[{"ordId":"21","sCode":"51400","sMsg":"Order does not exist"}]}"#,
+        r#"{"code":"0","data":[{"ordId":"21","sCode":"51400","sMsg":"Order does not exist"}]}"#,
         7.,
     );
     let output = prepared(&mut engine, 7.);
@@ -1297,7 +1379,7 @@ fn a_census_begun_before_a_mark_cannot_release_it_from_a_later_page() {
 }
 
 #[test]
-fn a_stale_regular_row_refused_with_code_1_still_sends_the_algo_cancels() {
+fn a_stale_regular_row_in_code_one_stops_before_the_algo_cancels() {
     let mut engine = trading_engine();
     engine.store_mut().upsert_order(stored("101"));
     engine.store_mut().upsert_order(Order {
@@ -1319,10 +1401,13 @@ fn a_stale_regular_row_refused_with_code_1_still_sends_the_algo_cancels() {
         6.,
     );
     let second = prepared(&mut engine, 6.);
-    let Action::Http(request) = post(&second) else {
-        unreachable!()
-    };
-    assert!(request.url.ends_with("/cancel-algos"));
+    assert!(!second.iter().any(|action| matches!(action,
+        Action::Http(request) if request.method != safe_cex_engine::Method::Get
+    )));
+    assert!(second.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+    )));
 }
 
 // OKX answers an accepted row with a non-empty sMsg; only sCode decides.

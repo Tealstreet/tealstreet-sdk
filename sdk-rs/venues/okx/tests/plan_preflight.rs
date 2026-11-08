@@ -226,7 +226,7 @@ fn legacy_standalone_algos_do_not_add_a_native_cap_gate() {
         let mut product = instrument();
         product["maxStopSz"] = json!("7");
         product["maxTriggerSz"] = json!("9");
-        let amount = if kind == "conditional" { 8. } else { 6. };
+        let amount = if kind == "conditional" { 10. } else { 8. };
         let (seen, requests) = finish(
             &mut ready(product),
             vec![
@@ -361,6 +361,58 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
 #[test]
 fn runtime_rejection_reports_prefix_failed_element_and_unsent_suffix() {
     runtime_failure(200, "51008", Outcome::Rejected);
+}
+
+#[test]
+fn legacy_native_placement_failure_stops_every_remaining_batch_and_algo() {
+    let mut bracket = limit(15.);
+    bracket["stopLoss"] = json!(36000);
+    bracket["takeProfit"] = json!(42000);
+    let mut cases = vec![vec![limit(11.)], vec![limit(5.); 21], vec![bracket]];
+    for kind in [
+        "conditional",
+        "stop_market",
+        "take_profit_market",
+        "trailing_stop_market",
+    ] {
+        let row = json!({"symbol":"BTCUSDT","type":kind,"side":"sell","amount":8,
+            "price":36000,"triggerPrice":37000});
+        cases.push(vec![row.clone(), row]);
+    }
+    for rows in cases {
+        let mut engine = ready(instrument());
+        let mut transport = ScriptedTransport::default();
+        let first = transport.record(&submit(&mut engine, rows));
+        let [request] = first.as_slice() else {
+            panic!("one initial native write")
+        };
+        let payload: Value =
+            serde_json::from_str(request.body.as_deref().expect("payload")).expect("native JSON");
+        let count = payload.as_array().map_or(1, Vec::len);
+        let algo = request.url.ends_with("/order-algo");
+        let replies: Vec<_> = (0..count)
+            .map(|index| {
+                if index + 1 == count {
+                    json!({"ordId":"","algoId":"","sCode":"51008","sMsg":"refused"})
+                } else if algo {
+                    json!({"algoId":format!("native{index}"),"sCode":"0"})
+                } else {
+                    json!({"ordId":format!("native{index}"),"sCode":"0"})
+                }
+            })
+            .collect();
+        reply(
+            &mut engine,
+            &Action::Http(request.clone()),
+            &json!({"code":"0","data":replies}).to_string(),
+            6.,
+        );
+        let mut output = prepared(&mut engine, 6.);
+        output.extend(prepared(&mut engine, 7.));
+        transport.record(&output);
+        assert_eq!(transport.write_count(), 1, "TS stops the native series");
+        assert!(matches!(terminals(&output, 17).as_slice(), [Err(_)]));
+    }
 }
 
 #[test]

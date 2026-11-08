@@ -33,4 +33,9 @@ its fail-stop dispatcher. Removed pre-existing put-back and resend code is
 restored. The legacy TS snapshot proves protective cancel/re-place, not a
 separate original-stop put-back algorithm.
 
+After failure, normal and algo placement series stop, as TS's serial placement
+helpers throw. Cancellation row errors inside a code-0 envelope continue; every
+nonzero envelope stops, matching `okx.api.ts:77-82`. Regular and algo cancellation
+tests cover both paths without imposing WritePlan's dispatch policy.
+
 This PR remains stacked on #3348; re-merge master after that dependency lands.

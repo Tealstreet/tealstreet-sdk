@@ -455,10 +455,10 @@ fn oco_amend_keeps_sibling_stop_and_amends_only_selected_native_leg() {
 #[test]
 fn an_idempotent_cancel_51400_completes_without_an_error_and_reconciles() {
     use safe_cex_engine::model::*;
-    for (kind, ids, code) in [
-        (OrderType::Limit, vec!["1"], "1"),
-        (OrderType::Limit, vec!["1", "2"], "2"),
-        (OrderType::StopLoss, vec!["91_sl"], "0"),
+    for (kind, ids) in [
+        (OrderType::Limit, vec!["1"]),
+        (OrderType::Limit, vec!["1", "2"]),
+        (OrderType::StopLoss, vec!["91_sl"]),
     ] {
         let mut e = trading_engine();
         for id in &ids {
@@ -486,7 +486,7 @@ fn an_idempotent_cancel_51400_completes_without_an_error_and_reconciles() {
         reply(
             &mut e,
             http(&out),
-            &format!(r#"{{"code":"{code}","data":[{}]}}"#, rows.join(",")),
+            &format!(r#"{{"code":"0","data":[{}]}}"#, rows.join(",")),
             6.,
         );
         let out = prepared(&mut e, 6.);
@@ -697,10 +697,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
         .map(|id| format!(r#"{{"ordId":"{id}","sCode":"0","sMsg":""}}"#))
         .collect();
     rows.push(r#"{"ordId":"19","sCode":"51000","sMsg":"Parameter error"}"#.into());
-    let mixed = format!(
-        r#"{{"code":"2","msg":"Bulk operation partially succeeded","data":[{}]}}"#,
-        rows.join(",")
-    );
+    let mixed = format!(r#"{{"code":"0","msg":"","data":[{}]}}"#, rows.join(","));
     reply(&mut e, http(&out), &mixed, 6.0);
     let out = prepared(&mut e, 6.0);
     assert!(out.iter().any(
@@ -2651,7 +2648,7 @@ fn a_gone_cancel_row_asks_for_a_read_because_its_frame_may_never_come() {
     reply(
         &mut e,
         http(&out),
-        r#"{"code":"2","msg":"Bulk operation partially succeeded","data":[{"ordId":"1","sCode":"51400","sMsg":"Order cancellation failed as the order has been filled, canceled or does not exist."},{"ordId":"2","sCode":"0","sMsg":""}]}"#,
+        r#"{"code":"0","msg":"","data":[{"ordId":"1","sCode":"51400","sMsg":"Order cancellation failed as the order has been filled, canceled or does not exist."},{"ordId":"2","sCode":"0","sMsg":""}]}"#,
         6.0,
     );
     let out = prepared(&mut e, 6.0);
@@ -2755,7 +2752,7 @@ fn review_cancel_two_rows(data: &str) -> Vec<Action> {
     reply(
         &mut e,
         http(&out),
-        &format!(r#"{{"code":"2","data":{data}}}"#),
+        &format!(r#"{{"code":"0","data":{data}}}"#),
         6.,
     );
     prepared(&mut e, 6.)

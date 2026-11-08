@@ -1918,19 +1918,10 @@ impl Okx {
             let error = VenueError::new(message).outcome(Outcome::Unknown);
             return self.end(cx, request.command, Some(&request), error, true);
         }
-        // An all-refused envelope (code 1) continues only when every row says its order
-        // is already gone: the sibling cancels still have live orders to reach.
-        let only_gone_rows = acks
-            .iter()
-            .filter(|a| !matches!(a.s_code, "" | "0"))
-            .all(|a| matches!(a.s_code, "51400" | "51401" | "51402"));
         let read_after =
             continue_cancel_errors && acks.iter().any(|a| !matches!(a.s_code, "" | "0"));
-        if envelope.code != "0"
-            && !(continue_cancel_errors
-                && (envelope.code == "2" || (envelope.code == "1" && only_gone_rows))
-                && acks.iter().any(|a| !matches!(a.s_code, "" | "0")))
-        {
+        // Legacy TS's response interceptor throws on every nonzero envelope.
+        if envelope.code != "0" {
             let error = if errors.is_empty() {
                 let error = format!("OKX {}: {}", envelope.code, envelope.msg);
                 rejection(error, Some(envelope.code), response.status)
