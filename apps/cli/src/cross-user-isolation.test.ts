@@ -64,7 +64,8 @@ describe('CLI cross-user isolation (synthetic data only)', () => {
     expect(config.getAccount()?.apiKey).toBe('B');
   });
 
-  it('isolates live vars, aliases, sync queue and all safety settings across a switch', async () => {
+  // Cold cli-core/safe-cex imports dominate this real-store test under concurrent CI load.
+  it('isolates live vars, aliases, sync queue and all safety settings across a switch', { timeout: 15_000 }, async () => {
     const { login } = await fixture();
     const { FilePreprocessStore } = await import('./preprocess-store');
     const store = new FilePreprocessStore();
