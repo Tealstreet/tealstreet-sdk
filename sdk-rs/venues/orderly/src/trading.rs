@@ -524,24 +524,28 @@ impl Orderly {
                 continue;
             }
             let amount = num::adjust(o.amount, market.precision.amount);
-            let units = (amount / market.precision.amount).round();
-            let cap = (market.limits.amount.max / market.precision.amount).floor();
-            if !units.is_finite()
-                || !cap.is_finite()
-                || cap < 1.0
-                || units > 9007199254740991.0
-                || (units / cap).ceil() > 100.0
+            // Legacy TS: orderly.exchange.ts:1073-1082. Equal rounded lots and
+            // a separate modulo tail intentionally preserve TS under-allocation.
+            let max = market.limits.amount.max;
+            let lots = if amount > max {
+                (amount / max).ceil()
+            } else {
+                1.0
+            };
+            let rest = if amount > max {
+                num::adjust(amount % max, market.precision.amount)
+            } else {
+                0.0
+            };
+            let qty = num::adjust((amount - rest) / lots, market.precision.amount);
+            let count = lots
+                .to_string()
+                .parse::<usize>()
+                .map_err(|_| "Orderly lot count exceeds addressable storage")?;
+            for (index, qty) in std::iter::repeat_n(qty, count)
+                .chain((rest != 0.0).then_some(rest))
+                .enumerate()
             {
-                return Err("Orderly order exceeds supported split bounds".into());
-            }
-            let mut remaining = units;
-            let mut index = 0;
-            while remaining > 0.0 {
-                let lot = remaining.min(cap);
-                let qty = num::adjust(lot * market.precision.amount, market.precision.amount);
-                if qty < market.limits.amount.min {
-                    return Err("Orderly split leaves a below-minimum remainder".into());
-                }
                 let price = (o.kind == OrderType::Limit)
                     .then(|| num::adjust(o.price.unwrap(), market.precision.price));
                 let order_type = if o.kind == OrderType::Market {
@@ -594,8 +598,6 @@ impl Orderly {
                     body: Some(body),
                     effect: Effect::Place(order),
                 });
-                remaining -= lot;
-                index += 1;
             }
             if o.stop_loss.is_some() || o.take_profit.is_some() {
                 if !positional.insert((o.symbol.clone(), mode_ == MarginType::Isolated)) {

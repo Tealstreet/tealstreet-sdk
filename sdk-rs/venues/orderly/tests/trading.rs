@@ -207,7 +207,9 @@ fn bybit_ticks_on_later_batch_item_reject_before_any_read_write_or_mutation() {
 }
 
 #[test]
-fn split_quantities_preserve_exact_amount_and_report_partial_acceptance() {
+fn split_quantities_match_legacy_ts_and_report_partial_acceptance() {
+    // TS: packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts:1073-1082.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 40.999 of requested 41); kept for parity per Sam.
     let (mut e, _) = ready();
     requests(&mut e);
     place(
@@ -216,7 +218,7 @@ fn split_quantities_preserve_exact_amount_and_report_partial_acceptance() {
         r#"[{"symbol":"BTCUSDC","type":"market","side":"buy","amount":41}]"#,
     );
     let r = requests(&mut e).pop().unwrap();
-    assert_eq!(body(&r)["order_quantity"], 20.0);
+    assert_eq!(body(&r)["order_quantity"], 13.333);
     reply(
         &mut e,
         &r,
@@ -224,7 +226,7 @@ fn split_quantities_preserve_exact_amount_and_report_partial_acceptance() {
         r#"{"success":true,"data":{"order_id":41}}"#,
     );
     let r = requests(&mut e).pop().unwrap();
-    assert_eq!(body(&r)["order_quantity"], 20.0);
+    assert_eq!(body(&r)["order_quantity"], 13.333);
     e.handle(
         2000.0,
         Event::HttpFailed {
