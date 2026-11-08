@@ -323,62 +323,6 @@ fn positive(v: f64, name: &str) -> Result<f64, String> {
     }
 }
 
-// Validate serialized payloads before a plan can release its first write.
-// Full-position protection omits quantities; partial legs keep native lot rules.
-fn validate_payload(payload: &Payload, market: &Market, maximum: f64) -> Result<(), VenueError> {
-    let invalid = || {
-        error::not_sent(
-            "Bitunix wire value violates native market rules",
-            ErrorKind::InvalidInput,
-        )
-    };
-    let native = |text: &str, step: f64| {
-        let value = num::parse_decimal(text)
-            .filter(|value| *value > 0.0)
-            .ok_or_else(invalid)?;
-        if !step.is_finite() || step <= 0.0 || num::format(num::adjust(value, step)) != text {
-            return Err(invalid());
-        }
-        Ok(value)
-    };
-    for quantity in [&payload.qty, &payload.tp_qty, &payload.sl_qty]
-        .into_iter()
-        .flatten()
-    {
-        let value = native(quantity, market.precision.amount)?;
-        if !market.limits.amount.min.is_finite()
-            || market.limits.amount.min < 0.0
-            || !maximum.is_finite()
-            || maximum <= 0.0
-            || value < market.limits.amount.min
-            || value > maximum
-        {
-            return Err(invalid());
-        }
-    }
-    for price in [
-        &payload.price,
-        &payload.tp_price,
-        &payload.sl_price,
-        &payload.tp_order_price,
-        &payload.sl_order_price,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let value = native(price, market.precision.price)?;
-        if market
-            .limits
-            .price
-            .as_ref()
-            .is_some_and(|limit| !limit.min.is_finite() || value < limit.min)
-        {
-            return Err(invalid());
-        }
-    }
-    Ok(())
-}
-
 fn split_quantities(
     amount: f64,
     step: f64,
@@ -887,7 +831,6 @@ impl BitunixFutures {
                     }
                 }
             }
-            validate_payload(&p, m, m.limits.amount.max).map_err(|error| error.legacy_text())?;
             return Ok(vec![(if full { FULL_TPSL } else { TPSL }, p)]);
         }
         let amount = positive(num::adjust(o.amount, m.precision.amount), "quantity")?;
@@ -940,7 +883,6 @@ impl BitunixFutures {
                 positive(qty, "split quantity")?;
                 let mut payload = p.clone();
                 payload.qty = Some(num::format(qty));
-                validate_payload(&payload, m, maximum).map_err(|error| error.legacy_text())?;
                 payload.client_id = Some(if let Some(id) = &o.client_order_id {
                     id.clone()
                 } else {
