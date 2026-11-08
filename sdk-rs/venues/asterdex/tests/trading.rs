@@ -1365,6 +1365,9 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                 h.reply_status(sweep, status, body);
                 let message = h.result(7).as_ref().expect_err(body);
                 let error = &h.failures.iter().find(|(id, _)| *id == 7).unwrap().1;
+                if status == 429 {
+                    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                }
                 if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
                     assert!(
                         error
