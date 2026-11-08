@@ -11,6 +11,12 @@ import { deriveBridgeConstruction, deriveRemoteSigningPolicy } from '../../excha
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
 import { prepareBitrueRequest, signHostedHttp } from '../../exchanges/rust/legacySigning';
 import { createRemoteSignerProvider } from '../../exchanges/rust/remoteSignerProvider';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { DefaultStore } from '../../store/store.base';
+
+// Preserve configured read keys at the constructor boundary; the global bypass
+// would otherwise discard them before delegated custody validation.
+vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 
 const stamp = 1_700_000_000_123;
 const key = 'fixture-bitrue-public';
@@ -76,10 +82,36 @@ it.each(vectors)('Bitrue $label: browser hosted HTTP preserves the native preima
 });
 
 it.each([{ secondary_key: 'read' }, { secondary_key: 'read', secondary_secret: 'unused' },
-  { secondary_secret: 'unused' }, { localSigner: { secondary: {} } },
-  { secondary_key: 'read', publicDataOnly: true }])('refuses unselectable hosted secondary custody before callbacks: %j', (extra) => {
+  { secondary_secret: 'unused' }, { localSigner: { secondary: {} } }])('refuses unselectable hosted secondary custody before callbacks: %j', (extra) => {
   const remoteSigner = remote();
   expect(() => new DelegatedSignerSetup('bitrue', { key, secret: '', remoteSigner, ...extra }))
+    .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('Bitrue secondary read keys') }));
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+});
+
+it('constructs explicitly public Bitrue accounts without using secondary custody or opening a private socket', () => {
+  const remoteSigner = remote();
+  const isAvailable = vi.spyOn(remoteSigner, 'isAvailable');
+  const onAvailabilityChange = vi.spyOn(remoteSigner, 'onAvailabilityChange');
+  const exchange = new RustEngineExchange('bitrue', {
+    key, secret: '', remoteSigner, secondary_key: 'read', publicDataOnly: true,
+  }, new DefaultStore());
+  try {
+    expect(exchange.isPublicDataOnly).toBe(true);
+    expect(exchange.privateWebsocket).toBeUndefined();
+    for (const field of ['key', 'secret', 'secondary_key', 'remoteSigner'])
+      expect(exchange.options).not.toHaveProperty(field);
+    expect(remoteSigner.sign).not.toHaveBeenCalled();
+    expect(isAvailable).not.toHaveBeenCalled();
+    expect(onAvailabilityChange).not.toHaveBeenCalled();
+  } finally { exchange.dispose(); }
+});
+
+it('still refuses keyed private Bitrue accounts with the same secondary key before callbacks', () => {
+  const remoteSigner = remote();
+  expect(() => new RustEngineExchange('bitrue', {
+    key, secret: '', remoteSigner, secondary_key: 'read', publicDataOnly: false,
+  }, new DefaultStore()))
     .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('Bitrue secondary read keys') }));
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
