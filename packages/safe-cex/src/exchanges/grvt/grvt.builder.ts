@@ -161,6 +161,13 @@ const resolveGrvtProxyHeaders = async (): Promise<Record<string, string>> =>
 
 const getStringField = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
 
+const isBuilderAuthorizationRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+// Preserve the existing iterable-string behavior along with array responses.
+const getBuilderAuthorizationRows = (value: unknown): Iterable<unknown> | undefined =>
+  Array.isArray(value) || typeof value === 'string' ? value : undefined;
+
 const getValidAddress = (...values: Array<string | undefined>): string | undefined =>
   values.find((value) => value !== undefined && isAddress(value));
 
@@ -518,15 +525,21 @@ export const checkGrvtBuilderAuthorized = async (
       return { authorized: false };
     }
 
-    const data = (await response.json()) as Record<string, any>;
+    const data: unknown = await response.json();
+    if (!isBuilderAuthorizationRecord(data)) return { authorized: false };
 
     // Check if our builder is in the list
     // Response format: { results: [{ builder_address, max_fee_rate, ... }] } or lite format { r: [...] }
-    const builders = data.results || data.r || [];
+    const builders = getBuilderAuthorizationRows(data.results || data.r || []);
+    if (builders === undefined) return { authorized: false };
 
-    for (const builderInfo of builders) {
+    for (const row of builders) {
+      if (row === null || row === undefined) return { authorized: false };
+      const builderInfo: Record<string, unknown> = isBuilderAuthorizationRecord(row) ? row : {};
       // Full format: builder_account_id, Lite format: ba
-      const addr = (builderInfo.builder_account_id || builderInfo.ba || '').toLowerCase();
+      const address = builderInfo.builder_account_id || builderInfo.ba || '';
+      if (typeof address !== 'string') return { authorized: false };
+      const addr = address.toLowerCase();
       if (addr === builder.toLowerCase()) {
         // Found our builder — get the max fee rate.
         // GRVT returns the percentage *string* that was originally sent during
