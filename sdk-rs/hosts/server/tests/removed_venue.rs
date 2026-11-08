@@ -7,7 +7,7 @@ use serde_json::json;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[tokio::test]
-async fn saved_bitmex_accounts_refuse_typed_without_disturbing_live_accounts() {
+async fn unavailable_hosted_accounts_refuse_typed_without_disturbing_live_accounts() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let app = support::app(
@@ -33,7 +33,7 @@ async fn saved_bitmex_accounts_refuse_typed_without_disturbing_live_accounts() {
             page.until("frame", |d| d["accountName"] == live.account_name)
                 .await;
 
-            for venue in ["bitmex", "bitmextestnet"] {
+            for venue in ["bitmex", "bitmextestnet", "bitrue", "polymarket"] {
                 for (public_only, same_name) in
                     [(true, false), (false, false), (true, true), (false, true)]
                 {

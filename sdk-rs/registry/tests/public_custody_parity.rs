@@ -97,7 +97,8 @@ fn outside_beta_native_accounts_refuse_before_public_or_private_custody() {
                 value[flag] = json!(true);
                 for injected in [false, true] {
                     let error = if injected {
-                        build_with_signer(
+                        safe_cex_venues::build_with_signer_in_context(
+                            safe_cex_venues::ConstructionContext::Hosted,
                             venue,
                             options(value.clone()),
                             None,
@@ -105,7 +106,13 @@ fn outside_beta_native_accounts_refuse_before_public_or_private_custody() {
                             Mode,
                         )
                     } else {
-                        build(venue, options(value.clone()), None, Mode)
+                        safe_cex_venues::build_in_context(
+                            safe_cex_venues::ConstructionContext::Hosted,
+                            venue,
+                            options(value.clone()),
+                            None,
+                            Mode,
+                        )
                     }
                     .expect_err("OUT venue must refuse");
                     assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
@@ -176,7 +183,7 @@ fn keyed_missing_callbacks_are_invalid_and_explicitly_not_sent() {
 
 #[test]
 fn valid_provider_keeps_disabled_private_remote_signing_unsupported() {
-    for venue in ["apexomni", "cryptocom", "mexc", "asterdex"] {
+    for venue in ["apexomni", "mexc", "asterdex"] {
         let value = json!({"remoteSigning": true,
             "publicMode": {"requested": false, "remoteSigner": true},
             "signing": {"primary": {"credential": "configured-key", "signing": "opaque-agent"}}});
@@ -184,5 +191,59 @@ fn valid_provider_keeps_disabled_private_remote_signing_unsupported() {
             .expect_err("valid provider cannot enable unsupported private custody");
         assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
         assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
+    }
+}
+
+#[test]
+fn client_beta_families_construct_public_engines() {
+    for venue in ["bitrue", "polymarket"] {
+        for value in [
+            json!({"publicMode": {"requested": null}}),
+            json!({"publicDataOnly": true}),
+            json!({"key": "unused-key", "publicMode": {"requested": true}}),
+        ] {
+            let entropy = Some(safe_cex_engine::test_support::seeded_entropy(17));
+            assert!(
+                !build(venue, options(value), entropy, Mode).expect("client family construction")
+            );
+        }
+    }
+}
+
+#[test]
+fn explicit_client_context_constructs_public_engines_with_unused_callback_intent() {
+    use safe_cex_venues::{ConstructionContext, build_in_context, build_with_signer_in_context};
+    for venue in ["bitrue", "polymarket"] {
+        for flag in ["remoteSigning", "payloadSigner"] {
+            for requested in [Value::Null, json!(true)] {
+                let mut value = json!({"key": "", "accountStartup": true,
+                    "publicMode": {"requested": requested}});
+                value[flag] = json!(true);
+                let entropy = Some(safe_cex_engine::test_support::seeded_entropy(17));
+                assert!(
+                    !build_in_context(
+                        ConstructionContext::Client,
+                        venue,
+                        options(value.clone()),
+                        entropy,
+                        Mode
+                    )
+                    .expect("public client")
+                );
+                value["key"] = Value::Null;
+                let entropy = Some(safe_cex_engine::test_support::seeded_entropy(17));
+                assert!(
+                    !build_with_signer_in_context(
+                        ConstructionContext::Client,
+                        venue,
+                        options(value),
+                        entropy,
+                        None,
+                        Mode
+                    )
+                    .expect("public client without provider")
+                );
+            }
+        }
     }
 }

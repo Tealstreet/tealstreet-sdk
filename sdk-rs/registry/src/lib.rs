@@ -265,7 +265,31 @@ fn resolved_public_data_only(venue: &str, options: &EngineOptions) -> bool {
         .map_or(options.public_data_only, |mode| mode.public_data_only)
 }
 
-fn private_custody_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
+/// The trusted host chooses admission; account JSON cannot change it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConstructionContext {
+    /// Client callers have their own SDK beta admission layer.
+    Client,
+    /// Hosted engines have no client admission layer above the registry.
+    Hosted,
+}
+
+impl ConstructionContext {
+    /// Refuse unavailable venues before host routing or signer setup.
+    pub fn validate_venue(self, venue: &str) -> Result<(), VenueError> {
+        if !supported(venue) || (self == Self::Hosted && !construction::beta_admitted(venue)) {
+            return Err(unsupported_venue(venue));
+        }
+        Ok(())
+    }
+}
+
+fn private_custody_rules(
+    context: ConstructionContext,
+    venue: &str,
+    options: &EngineOptions,
+) -> Result<(), VenueError> {
+    context.validate_venue(venue)?;
     let _ = options;
     #[cfg(feature = "polymarket")]
     if venue == "polymarket"
@@ -275,9 +299,6 @@ fn private_custody_rules(venue: &str, options: &EngineOptions) -> Result<(), Ven
         return Err(VenueError::new("Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply")
             .kind(ErrorKind::Unsupported)
             .outcome(safe_cex_engine::Outcome::NotSent));
-    }
-    if !supported(venue) || !construction::beta_admitted(venue) {
-        return Err(unsupported_venue(venue));
     }
     Ok(())
 }
@@ -1334,14 +1355,31 @@ fn payload_signing_rules_in_mode(
         .outcome(safe_cex_engine::Outcome::NotSent))
 }
 
-/// Constructs `venue`'s engine from `options`, enforcing its construction rules.
+/// Constructs a client engine; the caller owns SDK beta admission.
 pub fn build<T: Visit>(
+    venue: &str,
+    options: EngineOptions,
+    entropy: Option<safe_cex_engine::entropy::Entropy>,
+    visitor: T,
+) -> Result<T::Output, VenueError> {
+    build_in_context(
+        ConstructionContext::Client,
+        venue,
+        options,
+        entropy,
+        visitor,
+    )
+}
+
+/// Constructs an engine under the trusted host's explicit admission context.
+pub fn build_in_context<T: Visit>(
+    context: ConstructionContext,
     venue: &str,
     mut options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    private_custody_rules(venue, &options)?;
+    private_custody_rules(context, venue, &options)?;
     callback_rules(venue, &options, false)?;
     retain_delegated_public_mode(venue, &mut options);
     payload_signing_rules(venue, &options, false)?;
@@ -1367,7 +1405,7 @@ pub fn build<T: Visit>(
     };
     #[cfg(not(feature = "dispatch-signing"))]
     let signer = None;
-    build_with_signer(venue, options, entropy, signer, visitor)
+    build_with_signer_in_context(context, venue, options, entropy, signer, visitor)
 }
 
 /// The validation result travels only for a ValidateOnly family, never with
@@ -1481,15 +1519,34 @@ pub fn frame_fed_supported(venue: &str) -> bool {
     FRAME_FED_VENUES.contains(&venue)
 }
 
-/// Generic options contain opaque references; provider owns all credentials.
+/// Constructs a client engine with an injected provider and client admission.
 pub fn build_with_signer<T: Visit>(
+    venue: &str,
+    options: EngineOptions,
+    entropy: Option<safe_cex_engine::entropy::Entropy>,
+    signer: Option<safe_cex_engine::signing::Provider>,
+    visitor: T,
+) -> Result<T::Output, VenueError> {
+    build_with_signer_in_context(
+        ConstructionContext::Client,
+        venue,
+        options,
+        entropy,
+        signer,
+        visitor,
+    )
+}
+
+/// Generic options contain opaque references; the host chooses admission.
+pub fn build_with_signer_in_context<T: Visit>(
+    context: ConstructionContext,
     venue: &str,
     mut options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    private_custody_rules(venue, &options)?;
+    private_custody_rules(context, venue, &options)?;
     callback_rules(venue, &options, signer.is_some())?;
     retain_delegated_public_mode(venue, &mut options);
     let _ = &signer;

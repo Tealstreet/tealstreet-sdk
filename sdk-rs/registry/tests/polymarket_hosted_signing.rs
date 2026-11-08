@@ -15,9 +15,22 @@ fn refuse_public(value: serde_json::Value) {
         let options = serde_json::from_value(value.clone()).unwrap();
         let entropy = Some(safe_cex_engine::test_support::seeded_entropy(17));
         let error = if injected {
-            build_with_signer("polymarket", options, entropy, None, Reject)
+            safe_cex_venues::build_with_signer_in_context(
+                safe_cex_venues::ConstructionContext::Hosted,
+                "polymarket",
+                options,
+                entropy,
+                None,
+                Reject,
+            )
         } else {
-            build("polymarket", options, entropy, Reject)
+            safe_cex_venues::build_in_context(
+                safe_cex_venues::ConstructionContext::Hosted,
+                "polymarket",
+                options,
+                entropy,
+                Reject,
+            )
         }
         .expect_err("Polymarket remains outside beta admission");
         assert_eq!(error.kind, Some(ErrorKind::Unsupported));

@@ -237,7 +237,8 @@ impl FrameServer {
             transport,
         };
         let result = if let Some(signer) = signer {
-            safe_cex_venues::build_with_signer(
+            safe_cex_venues::build_with_signer_in_context(
+                safe_cex_venues::ConstructionContext::Hosted,
                 venue,
                 options,
                 Some(crate::production_entropy()),
@@ -245,7 +246,13 @@ impl FrameServer {
                 register,
             )
         } else {
-            safe_cex_venues::build(venue, options, Some(crate::production_entropy()), register)
+            safe_cex_venues::build_in_context(
+                safe_cex_venues::ConstructionContext::Hosted,
+                venue,
+                options,
+                Some(crate::production_entropy()),
+                register,
+            )
         };
         result.map_err(construction_refusal)?
     }
@@ -457,10 +464,21 @@ pub fn spawn_venue_account<T: Transport + 'static>(
     let spawn = Spawn { transport, config };
     let entropy = Some(crate::production_entropy());
     let result = match signer {
-        Some(signer) => {
-            safe_cex_venues::build_with_signer(venue, options, entropy, Some(signer), spawn)
-        }
-        None => safe_cex_venues::build(venue, options, entropy, spawn),
+        Some(signer) => safe_cex_venues::build_with_signer_in_context(
+            safe_cex_venues::ConstructionContext::Hosted,
+            venue,
+            options,
+            entropy,
+            Some(signer),
+            spawn,
+        ),
+        None => safe_cex_venues::build_in_context(
+            safe_cex_venues::ConstructionContext::Hosted,
+            venue,
+            options,
+            entropy,
+            spawn,
+        ),
     };
     result.map_err(construction_refusal)?
 }
@@ -3824,10 +3842,15 @@ mod tests {
                         Arc::new(signer),
                     )
                     .unwrap();
-                // Retired venues stay saved on accounts: they keep the typed
-                // unsupported/notSent refusal through this boundary.
-                for venue in ["nope", "bitmex", "bitmextestnet"] {
-                    for options in ["{}", r#"{"key":"k","secret":"s"}"#] {
+                // Unavailable hosted venues keep their typed refusal before
+                // raw or injected signing setup, including public accounts.
+                for venue in ["nope", "bitmex", "bitmextestnet", "bitrue", "polymarket"] {
+                    for options in [
+                        "{}",
+                        r#"{"publicDataOnly":true}"#,
+                        r#"{"key":"k","secret":"s"}"#,
+                        r#"{"key":"k","remoteSigning":true}"#,
+                    ] {
                         let error = server
                             .add_venue("b", "token-b", venue, options, NoTransport)
                             .unwrap_err();
@@ -3841,6 +3864,28 @@ mod tests {
                         )
                         .err()
                         .expect("spawn is refused");
+                        assert_unsupported_venue(&error, venue);
+                        let signer = Arc::new(safe_cex_crypto::signer::LocalSigner::new());
+                        let error = server
+                            .add_venue_with_signer(
+                                "b",
+                                "token-b",
+                                venue,
+                                options,
+                                NoTransport,
+                                signer.clone(),
+                            )
+                            .expect_err("injected hosted registration is refused");
+                        assert_unsupported_venue(&error, venue);
+                        let error = spawn_venue_account(
+                            venue,
+                            options,
+                            NoTransport,
+                            Some(signer),
+                            ServerConfig::default(),
+                        )
+                        .err()
+                        .expect("injected hosted spawn is refused");
                         assert_unsupported_venue(&error, venue);
                     }
                 }

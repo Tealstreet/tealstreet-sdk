@@ -1,8 +1,9 @@
 # Bitrue socket recovery
 
-The native registry refuses Bitrue with `unsupported` / `notSent` while it
-remains outside SDK beta admission, including public-only accounts. The
-standalone venue's catalogue, signing and socket codecs remain independently tested.
+Hosted construction refuses Bitrue with `unsupported` / `notSent` while it
+remains outside SDK beta admission, including public-only accounts. Client
+construction remains available behind the SDK beta layer, with catalogue,
+signing and socket codecs independently tested.
 
 Public and private sockets use independent engine `Supervisor` instances with
 10-second connect/token deadlines, 20-second receive watchdogs, and capped

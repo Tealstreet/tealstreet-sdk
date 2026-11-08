@@ -193,25 +193,48 @@ const WALLET: &str = "0x1111111111111111111111111111111111111111";
 const PRIVATE_KEY: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
 #[test]
-fn polymarket_accounts_remain_outside_native_beta_admission() {
+fn polymarket_private_accounts_need_a_wallet_key_and_coherent_l2_credentials() {
     let account =
         |polymarket: &str| format!(r#"{{"key":"{PRIVATE_KEY}","polymarket":{polymarket}}}"#);
-    for input in [
-        r#"{"key":"not-a-key"}"#.to_owned(),
-        account(r#"{"apiKey":"k"}"#),
-        account(r#"{"apiKey":"k","apiSecret":"s","apiPassphrase":" "}"#),
-        account(r#"{"signerType":4}"#),
-        account(r#"{"signerType":1}"#),
-        account(r#"{"funderAddress":"0x12"}"#),
-        account(r#"{"apiKey":"k","apiSecret":"s","apiPassphrase":"p"}"#),
-        account(&format!(r#"{{"signerType":2,"funderAddress":"{WALLET}"}}"#)),
-        format!(r#"{{"key":"{}"}}"#, &PRIVATE_KEY[2..]),
-        r#"{"publicDataOnly":true}"#.to_owned(),
+    assert_eq!(
+        rejected("polymarket", r#"{"key":"not-a-key"}"#),
+        "Polymarket requires a local 32-byte wallet private key"
+    );
+    for partial in [
+        r#"{"apiKey":"k"}"#,
+        r#"{"apiKey":"k","apiSecret":"s","apiPassphrase":" "}"#,
     ] {
-        let error = construct("polymarket", &input).expect_err("SDK OUT venue");
-        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
-        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert_eq!(
+            rejected("polymarket", &account(partial)),
+            "Polymarket requires all three L2 API credentials together"
+        );
     }
+    assert_eq!(
+        rejected("polymarket", &account(r#"{"signerType":4}"#)),
+        "Invalid Polymarket signature type"
+    );
+    for funder in [r#"{"signerType":1}"#, r#"{"funderAddress":"0x12"}"#] {
+        assert_eq!(
+            rejected("polymarket", &account(funder)),
+            "Polymarket requires a valid funder address for non-EOA signing"
+        );
+    }
+    construct(
+        "polymarket",
+        &account(r#"{"apiKey":"k","apiSecret":"s","apiPassphrase":"p"}"#),
+    )
+    .unwrap();
+    construct(
+        "polymarket",
+        &account(&format!(r#"{{"signerType":2,"funderAddress":"{WALLET}"}}"#)),
+    )
+    .unwrap();
+    construct(
+        "polymarket",
+        &format!(r#"{{"key":"{}"}}"#, &PRIVATE_KEY[2..]),
+    )
+    .unwrap();
+    construct("polymarket", r#"{"publicDataOnly":true}"#).unwrap();
 }
 
 #[test]
