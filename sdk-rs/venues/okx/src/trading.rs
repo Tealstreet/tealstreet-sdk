@@ -2474,14 +2474,28 @@ fn step<T: Serialize + ?Sized>(
 
 /// Presentation metadata only; never a dispatch, validation or retry decision.
 fn reporting_identity(step: &Step) -> Option<String> {
-    let payload: serde_json::Value = serde_json::from_str(&step.body).ok()?;
-    let row = match &payload {
-        serde_json::Value::Array(rows) => rows.get(step.unknown_row.unwrap_or(0))?,
-        row => row,
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Identity {
+        cl_ord_id: Option<String>,
+        algo_cl_ord_id: Option<String>,
+        ord_id: Option<String>,
+        algo_id: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Payload {
+        Rows(Vec<Identity>),
+        Row(Identity),
+    }
+    let row = match serde_json::from_str::<Payload>(&step.body).ok()? {
+        Payload::Rows(rows) => rows.into_iter().nth(step.unknown_row.unwrap_or(0))?,
+        Payload::Row(row) => row,
     };
-    ["clOrdId", "algoClOrdId", "ordId", "algoId"]
-        .into_iter()
-        .find_map(|field| row.get(field)?.as_str().map(str::to_owned))
+    row.cl_ord_id
+        .or(row.algo_cl_ord_id)
+        .or(row.ord_id)
+        .or(row.algo_id)
 }
 fn next_call(job: &Job) -> SerialCall {
     if job.lookup.is_some() {
