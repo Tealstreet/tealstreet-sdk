@@ -21,3 +21,12 @@ HTTP 200 is also unknown, including a row with order ID `0` under an
 authorize a protective put-back. Native rate failures direct the caller to
 Check Open Orders and retain the venue code/message as diagnostic evidence.
 Reads and documented definitive refusal codes on other statuses are unchanged.
+
+Placement plans validate every serialized contract quantity against native
+`minSize`, the applicable maximum and `lotSize`, including all split lots,
+grouped batches and cancel-replace/restore legs, before any write. Ordinary
+orders retain their conservative split cap; off-step maxima are floored before
+balanced allocation. Invalid plans return `NotSent` with zero transport requests.
+Final entry and protection prices must be positive and tick-aligned; explicit
+full-position TP/SL retains its native `size=-1` sentinel. BloFin discovery does
+not expose a separate minimum-notional rule to this adapter.

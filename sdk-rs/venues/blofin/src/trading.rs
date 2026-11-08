@@ -19,6 +19,37 @@ const BROKER: &str = "b3cdedc0a20880ba";
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
 
+pub struct SizeRules {
+    pub min: f64,
+    pub max_limit: f64,
+    pub max_market: f64,
+}
+
+impl SizeRules {
+    fn maximum(&self, payload: &Placement) -> f64 {
+        if matches!(payload.order_type, Some("limit" | "post_only"))
+            || (payload.order_type == Some("trigger")
+                && payload
+                    .order_price
+                    .as_deref()
+                    .is_some_and(|price| price != "-1"))
+        {
+            self.max_limit
+        } else {
+            self.max_market
+        }
+    }
+
+    fn validate(&self, quantity: f64, maximum: f64, step: f64) -> Result<(), String> {
+        positive(quantity, "native size")?;
+        positive(step, "native lot step")?;
+        if quantity < self.min || quantity > maximum || num::adjust(quantity, step) != quantity {
+            return Err("BloFin native size violates minSize, maximum size or lotSize".into());
+        }
+        Ok(())
+    }
+}
+
 /// BloFin's documented error codes (docs.blofin.com, "Errors", read
 /// 2026-10-26). Cited refusals are pre-execution; anything unlisted proves
 /// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
@@ -827,22 +858,55 @@ impl Blofin {
         } else {
             0
         };
-        let quantities = if family == 0 && amount > m.limits.amount.max {
-            positive(m.limits.amount.max, "maximum size")?;
-            let lots = (amount / m.limits.amount.max).ceil() as usize;
-            if lots > 1000 {
-                return Err("BloFin order requires too many splits".into());
-            }
-            let step = m.precision.amount;
-            let units = (amount / step).round() as u64;
-            let each = units / lots as u64;
-            let remainder = units % lots as u64;
+        let rules = self
+            .size_rules
+            .get(&m.id)
+            .ok_or("Missing BloFin native size rules")?;
+        let maximum = rules.maximum(&payload);
+        // Preserve the existing conservative allocation cap for ordinary orders.
+        let split_maximum = maximum.min(m.limits.amount.max);
+        let step = m.precision.amount;
+        positive(step, "native lot step")?;
+        let units = (amount / step).round();
+        if !units.is_finite() || units > 9_007_199_254_740_991.0 {
+            return Err("BloFin native size exceeds exact lot precision".into());
+        }
+        let quantities = if family == 0 && amount > split_maximum {
+            positive(split_maximum, "maximum size")?;
+            let rounded_max_units = (split_maximum / step).round();
+            let max_units = if num::adjust(rounded_max_units * step, step) > split_maximum {
+                rounded_max_units - 1.0
+            } else {
+                rounded_max_units
+            };
+            positive(max_units, "maximum lot count")?;
+            let lots = (1..=1000_u32)
+                .find(|count| units <= f64::from(*count) * max_units)
+                .ok_or("BloFin order requires too many splits")?;
+            let each = (units / f64::from(lots)).floor();
+            let remainder = units - each * f64::from(lots);
             (0..lots)
-                .map(|i| (each + u64::from((i as u64) < remainder)) as f64 * step)
+                .map(|index| {
+                    let extra = f64::from(u8::from(f64::from(index) < remainder));
+                    num::adjust((each + extra) * step, step)
+                })
                 .collect::<Vec<_>>()
         } else {
             vec![amount]
         };
+        let mut planned_units = 0.0;
+        for quantity in &quantities {
+            let wire = num::format(*quantity)
+                .parse::<f64>()
+                .map_err(|e| e.to_string())?;
+            if !protective || amount > 0.0 {
+                rules.validate(wire, maximum, step)?;
+            }
+            planned_units += (wire / step).round();
+        }
+        if planned_units != units {
+            return Err("BloFin split sizes do not preserve the native total".into());
+        }
         let mut result = Vec::new();
         for quantity in quantities {
             let mut p = payload.clone();
@@ -887,7 +951,62 @@ impl Blofin {
         }
         Ok(result)
     }
-    fn add_placements(job: &mut Job, rows: Vec<(u8, Placement, Order)>) {
+    fn add_placements(
+        &self,
+        cx: &Cx<'_, Pending>,
+        job: &mut Job,
+        rows: Vec<(u8, Placement, Order)>,
+    ) -> Result<(), String> {
+        for (family, payload, order) in &rows {
+            let market = cx
+                .store
+                .market(&order.symbol)
+                .ok_or("Unknown BloFin placement market")?;
+            let rules = self
+                .size_rules
+                .get(&market.id)
+                .ok_or("Missing BloFin native size rules")?;
+            let size = payload.size.parse::<f64>().map_err(|e| e.to_string())?;
+            if *family != 1 || size != -1.0 {
+                rules.validate(size, rules.maximum(payload), market.precision.amount)?;
+            }
+            let price = |text: &str, market_execution: bool| -> Result<(), String> {
+                let value = text.parse::<f64>().map_err(|e| e.to_string())?;
+                if market_execution && value == -1.0 {
+                    return Ok(());
+                }
+                positive(value, "wire price")?;
+                if num::adjust(value, market.precision.price) != value {
+                    return Err("BloFin wire price violates tickSize".into());
+                }
+                Ok(())
+            };
+            for value in [&payload.price, &payload.trigger_price]
+                .into_iter()
+                .flatten()
+            {
+                price(value, false)?;
+            }
+            if let Some(value) = &payload.order_price {
+                price(value, true)?;
+            }
+            for protection in
+                std::iter::once(&payload.protection).chain(&payload.attach_algo_orders)
+            {
+                for value in [&protection.tp_trigger_price, &protection.sl_trigger_price]
+                    .into_iter()
+                    .flatten()
+                {
+                    price(value, false)?;
+                }
+                for value in [&protection.tp_order_price, &protection.sl_order_price]
+                    .into_iter()
+                    .flatten()
+                {
+                    price(value, true)?;
+                }
+            }
+        }
         if !rows.is_empty() {
             job.replacement_targets = job
                 .steps
@@ -947,7 +1066,7 @@ impl Blofin {
                 receipts,
                 orders,
                 path: "/api/v1/trade/batch-orders",
-                body: serde_json::to_string(batch).unwrap(),
+                body: serde_json::to_string(batch).map_err(|e| e.to_string())?,
                 effect: Effect::Place {
                     family: 0,
                     count: batch.len(),
@@ -965,7 +1084,7 @@ impl Blofin {
                 } else {
                     "/api/v1/trade/order-algo"
                 },
-                body: serde_json::to_string(&payload).unwrap(),
+                body: serde_json::to_string(&payload).map_err(|e| e.to_string())?,
                 effect: Effect::Place {
                     family,
                     count: 1,
@@ -974,6 +1093,7 @@ impl Blofin {
                 delay: 350.0,
             });
         }
+        Ok(())
     }
     fn cancel_targets(&self, cx: &Cx<'_, Pending>, ids: &[String]) -> Result<Vec<Target>, String> {
         let mut out = Vec::new();
@@ -1093,7 +1213,11 @@ impl Blofin {
             .validate(cx.store, cx.now)
             .map_err(|error| error.message)?;
         let mut restore = Job::new(job.command, Intent::Place);
-        Self::add_placements(&mut restore, self.replacement(cx, original, None, None)?);
+        self.add_placements(
+            cx,
+            &mut restore,
+            self.replacement(cx, original, None, None)?,
+        )?;
         job.guard = Some(guard);
         job.restore = restore.steps;
         Ok(())
@@ -1677,7 +1801,7 @@ impl Blofin {
                         }
                     }
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &cancel_ids)?);
-                    Self::add_placements(&mut job, rows);
+                    self.add_placements(cx, &mut job, rows)?;
                 }
                 Command::CancelOrders { mut ids, .. } => {
                     for (old, new, _) in &self.trading.restored {
@@ -1736,7 +1860,7 @@ impl Blofin {
                     let targets = self.cancel_targets(cx, &ids)?;
                     let amend = Self::single_leg_amend(cx, &ids, &targets, !preserved.is_empty());
                     Self::add_cancels(&mut job, targets);
-                    Self::add_placements(&mut job, preserved);
+                    self.add_placements(cx, &mut job, preserved)?;
                     // Ruled: one amend drops the leg, so the other never leaves the venue; the
                     // cancel and re-place go only if BloFin refuses the amend outright.
                     if let Some((step, verify)) = amend {
@@ -1829,7 +1953,7 @@ impl Blofin {
                         }
                     }
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &[id])?);
-                    Self::add_placements(&mut job, rows);
+                    self.add_placements(cx, &mut job, rows)?;
                     self.guard_replacement(cx, &mut job, order, price)?;
                 }
                 Command::SetLeverage {
