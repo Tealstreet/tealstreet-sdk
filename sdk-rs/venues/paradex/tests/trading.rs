@@ -3573,3 +3573,81 @@ fn pin_native_amend_refusal_stops_without_replacing_or_restoring() {
         1
     );
 }
+
+#[test]
+fn unknown_exception_serial_entry_halts_the_action_with_accepted_ids() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at paradex.exchange.ts:1958-1965.
+    for lost in [false, true] {
+        let mut h = private();
+        let orders = ["accepted", "uncertain", "unsent"].map(|id| {
+            let mut order = opts(OrderType::Market);
+            order.client_order_id = Some(id.into());
+            order
+        });
+        place(&mut h, 91, orders.into());
+        h.reply("/orders", r#"{"id":"accepted-id","client_id":"accepted"}"#);
+        let second = take_method(&mut h, Method::Post, "/orders");
+        if lost {
+            after_failure_refuse(&mut h, second, true);
+        } else {
+            h.respond(second, 200, "{}");
+        }
+        after_failure_no_more_writes(&h);
+        let error = failed(&h, 91);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted-id"]);
+        assert!(
+            error
+                .message
+                .contains("outcome is unknown. Check Open Orders, then try again"),
+            "{error:?}"
+        );
+        unknown_exception_journal_and_telemetry(&h);
+    }
+}
+
+#[test]
+fn unknown_exception_child_halts_later_children_and_independent_entries() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at paradex.exchange.ts:1844-1850,1879-1898,1949-1965.
+    for lost in [false, true] {
+        let mut h = private();
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("unsent".into());
+        bracket_entry(&mut h, 91, Some(next));
+        let tp = take_method(&mut h, Method::Post, "/orders");
+        if lost {
+            after_failure_refuse(&mut h, tp, true);
+        } else {
+            h.respond(tp, 200, "{}");
+        }
+        after_failure_no_more_writes(&h);
+        let error = failed(&h, 91);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["entry"]);
+        assert!(
+            error
+                .message
+                .contains("outcome is unknown. Check Open Orders, then try again"),
+            "{error:?}"
+        );
+        unknown_exception_journal_and_telemetry(&h);
+    }
+}
+
+fn unknown_exception_journal_and_telemetry(h: &Harness) {
+    let error = failed(h, 91);
+    let serialized = serde_json::to_value(&error).unwrap();
+    let elements = serialized["elements"]
+        .as_array()
+        .expect("shared per-element journal");
+    assert!(elements.iter().any(|row| row["status"] == "placed"));
+    assert!(elements.iter().any(|row| row["status"] == "unknown"));
+    assert!(elements.iter().any(|row| row["status"] == "notSent"));
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message.contains("outcome is unknown. Check Open Orders, then try again")
+                && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    )), "missing Unknown telemetry");
+}

@@ -1875,3 +1875,132 @@ fn pin_grouped_parent_minimum_trigger_and_split_refuse_before_any_io() {
         parity_refuses(parity_engine_with_limits(3., 5., 1.), vec![parent]);
     }
 }
+
+fn unknown_exception_empty_hash(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) {
+    let first = begin(&mut e, orders);
+    let accepted = wire(&first)["ClientOrderIndex"].to_string();
+    let second = after_failure_next(&mut e, &first);
+    let payload = wire(&second);
+    let unknown_ids: Vec<String> = match payload["Orders"].as_array() {
+        Some(rows) => rows
+            .iter()
+            .map(|row| row["ClientOrderIndex"].to_string())
+            .collect(),
+        None => vec![payload["ClientOrderIndex"].to_string()],
+    };
+    reply_at(
+        &mut e,
+        NOW + 100.,
+        &second,
+        200,
+        r#"{"code":200,"tx_hash":""}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx"))),
+        "{actions:?}"
+    );
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .expect("Unknown terminal");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(
+        error.legacy_text().contains(&accepted),
+        "accepted prefix missing: {error:?}"
+    );
+    assert!(
+        error
+            .message
+            .contains("outcome is unknown. Check Open Orders, then try again"),
+        "{error:?}"
+    );
+    let serialized = serde_json::to_value(error).unwrap();
+    let elements = serialized["elements"]
+        .as_array()
+        .expect("shared per-element journal");
+    assert!(elements.iter().any(|row| {
+        row["status"] == "placed"
+            && row["orderIds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|id| id == &accepted)
+    }));
+    for identity in unknown_ids {
+        assert!(
+            elements
+                .iter()
+                .any(|row| row["status"] == "unknown" && row["clientOrderId"] == identity),
+            "{elements:?}"
+        );
+    }
+    assert!(elements.iter().any(|row| row["status"] == "notSent"));
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.message.contains("outcome is unknown. Check Open Orders, then try again")
+            && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    )), "missing Unknown telemetry: {actions:?}");
+}
+
+#[test]
+fn unknown_exception_market_lots_stop_after_an_empty_hash() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-market-minima
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2627-2660; api-client.ts:620-623.
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(4., 5., 1000.),
+        vec![parity_order(OrderType::Market, 8.)],
+    );
+}
+
+#[test]
+fn unknown_exception_allocation_and_tail_stop_after_an_empty_hash() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-allocation-and-tail
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2627-2660; api-client.ts:620-623.
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(3., 5., 1.),
+        vec![parity_order(OrderType::Limit, 17.)],
+    );
+}
+
+#[test]
+fn unknown_exception_valid_non_market_lots_stop_after_an_empty_hash() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2627-2660; api-client.ts:620-623.
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(1., 5., 1.),
+        vec![parity_order(OrderType::Limit, 8.)],
+    );
+}
+
+#[test]
+fn unknown_exception_serial_placements_stop_after_an_empty_hash() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2673-2683,2711-2716; api-client.ts:620-623.
+    let mut bracket = parity_order(OrderType::Market, 1.);
+    bracket.stop_loss = Some(90.);
+    bracket.take_profit = Some(110.);
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(1., 5., 1.),
+        vec![bracket, parity_order(OrderType::Limit, 1.)],
+    );
+}
+
+#[test]
+fn unknown_exception_grouped_protection_stops_after_an_empty_hash() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2605-2608,2711-2716; api-client.ts:620-623.
+    let mut bracket = parity_order(OrderType::Limit, 1.);
+    bracket.stop_loss = Some(90.);
+    bracket.take_profit = Some(110.);
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(1., 5., 1.),
+        vec![
+            parity_order(OrderType::Limit, 1.),
+            bracket,
+            parity_order(OrderType::Market, 1.),
+        ],
+    );
+}
