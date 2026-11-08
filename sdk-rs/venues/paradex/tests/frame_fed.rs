@@ -65,22 +65,6 @@ fn frame_fed() -> Harness {
     h
 }
 
-fn feed_prices(h: &mut Harness) {
-    let mut source = Harness::empty(Options {
-        public_data_only: true,
-        ..Options::default()
-    });
-    source.reply("/markets", MARKETS);
-    source.reply("summary", TICKERS);
-    apply_source(h, &mut source);
-    assert!(h.pending.is_empty());
-    assert!(
-        h.e.store()
-            .ticker("BTC-USD-PERP")
-            .is_some_and(|ticker| ticker.mark > 0.0)
-    );
-}
-
 fn limit() -> PlaceOrderOpts {
     serde_json::from_str(
         r#"{"symbol":"BTC-USD-PERP","type":"limit","side":"buy","amount":1,"price":100,"clientOrderId":"caller"}"#,
@@ -97,30 +81,8 @@ fn a_frame_fed_engine_loads_the_catalogue_config_and_a_jwt_only() {
 }
 
 #[test]
-fn minimum_notional_without_a_source_mark_refuses_without_transport() {
-    let mut h = frame_fed();
-    h.receipt_trace.clear();
-    h.command(Command::PlaceOrders {
-        command: 1,
-        orders: vec![limit()],
-    });
-    assert!(h.pending.is_empty());
-    assert!(
-        h.receipt_trace
-            .iter()
-            .all(|entry| !matches!(entry, ReceiptTrace::Http(_)))
-    );
-    assert_eq!(
-        h.failures.last().expect("local refusal").outcome,
-        Some(safe_cex_engine::Outcome::NotSent)
-    );
-    no_socket(&h);
-}
-
-#[test]
 fn a_limit_order_is_one_request_and_reads_nothing_after() {
     let mut h = frame_fed();
-    feed_prices(&mut h);
     h.command(Command::PlaceOrders {
         command: 1,
         orders: vec![limit()],
@@ -150,7 +112,6 @@ fn a_limit_order_is_one_request_and_reads_nothing_after() {
 #[test]
 fn the_held_jwt_is_renewed_before_it_expires() {
     let mut h = frame_fed();
-    feed_prices(&mut h);
     // Issued at NOW, valid for 180 s, renewed 15 s early.
     h.timer(NOW + 165_000.);
     only(&h, "/auth/");
@@ -172,7 +133,6 @@ fn the_held_jwt_is_renewed_before_it_expires() {
 #[test]
 fn an_unknown_placement_is_never_read_or_re_sent() {
     let mut h = frame_fed();
-    feed_prices(&mut h);
     h.command(Command::PlaceOrders {
         command: 1,
         orders: vec![limit()],

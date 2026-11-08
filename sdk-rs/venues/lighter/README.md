@@ -1,12 +1,10 @@
-# Lighter placement planning
+# Lighter grouped protection sizing
 
-Before requesting a nonce or submitting a placement, the venue prepares every
-native lot and attached child. Pure validation checks the encoded quantities,
-prices and triggers against the market grids, size bounds and minimum quote.
-Opening market orders obey the same minima. The existing dust-close path is
-limited to an unsplit reduce-only market order matching the offsetting position.
-Native grouped protection children retain their parent-fill sizing (amount zero).
+Grouped limit TP/SL orders check the parent minimums and child triggers before
+one OTO/OTOCO submission. Each protective child has native amount zero and closes
+the parent fill; it is not checked as a standalone minimum-quantity/notional lot.
+This matches the [legacy grouped-order builder](https://github.com/Tealstreet/tealstreet-sdk/blob/431ba3dd4aa8191ee27ef7a76fba30ae290b1ff4/packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts#L2514-L2562).
 
-Splitting balances integer step units across at most 10,000 lots, conserving the
-normalized total and respecting each lot's maximum. Ordinary batch writes contain
-at most 31 transactions; all chunks validate before the first request.
+Market minimum exemptions and remainder-based lot allocation retain legacy TS
+behavior. Ordinary non-market lots and native limit batches retain their existing
+minimum checks before submission.

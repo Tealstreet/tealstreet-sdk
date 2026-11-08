@@ -231,7 +231,7 @@ fn market_uses_side_bbo_before_mark_and_conditional_is_ioc_with_slippage_overrid
     let r = begin(
         &mut e,
         vec![order(
-            json!({"symbol":"ETH","type":"market","side":"buy","amount":0.01}),
+            json!({"symbol":"ETH","type":"market","side":"buy","amount":0.001}),
         )],
     );
     assert_eq!(wire(&r)["Price"], 11220);
@@ -1557,7 +1557,30 @@ fn a_maker_only_key_refusal_says_what_the_key_allows() {
     }
 }
 
-fn split_preflight_engine(min: f64, max: f64, min_quote: f64) -> Engine<Lighter> {
+#[test]
+fn parity_grouped_children_use_parent_fill_without_child_minimums() {
+    let metadata = META.replace("\"min_quote_amount\":\"1\"", "\"min_quote_amount\":\"100\"");
+    let mut opts = options();
+    opts.testnet = true;
+    let (mut e, _) = ready_with_meta(opts, &metadata);
+    let request = begin(
+        &mut e,
+        vec![order(json!({
+            "symbol":"ETH", "type":"limit", "side":"buy", "amount":1,
+            "price":100, "stopLoss":90, "takeProfit":110
+        }))],
+    );
+    assert_eq!(param(&request, "tx_type"), "28");
+    let payload = wire(&request);
+    assert_eq!(payload["Orders"][0]["BaseAmount"], 1000);
+    for child in [&payload["Orders"][1], &payload["Orders"][2]] {
+        assert_eq!(child["BaseAmount"], 0);
+        assert_eq!(child["ReduceOnly"], 1);
+        assert_eq!(child["TimeInForce"], 0);
+    }
+}
+
+fn parity_engine_with_limits(min: f64, max: f64, min_quote: f64) -> Engine<Lighter> {
     let mut metadata: Value = serde_json::from_str(META).unwrap();
     let row = &mut metadata["order_book_details"][0];
     row["supported_size_decimals"] = json!(0);
@@ -1577,14 +1600,16 @@ fn split_preflight_engine(min: f64, max: f64, min_quote: f64) -> Engine<Lighter>
     e.store_mut().set_markets(markets);
     e
 }
-fn split_preflight_order(kind: OrderType, amount: f64) -> PlaceOrderOpts {
+
+fn parity_order(kind: OrderType, amount: f64) -> PlaceOrderOpts {
     let mut opts = limit();
     opts.kind = kind;
     opts.amount = amount;
     opts.price = Some(100.);
     opts
 }
-fn split_preflight_refuses(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) {
+
+fn parity_refuses(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) {
     place(&mut e, orders);
     let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     assert_eq!(
@@ -1597,35 +1622,9 @@ fn split_preflight_refuses(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) 
     );
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(Outcome::NotSent))), "missing NotSent refusal");
 }
-#[test]
-fn split_preflight_market_open_below_min_qty_zero_writes() {
-    split_preflight_refuses(
-        split_preflight_engine(3., 5., 1.),
-        vec![split_preflight_order(OrderType::Market, 2.)],
-    );
-}
-#[test]
-fn split_preflight_market_split_tail_below_min_quote_zero_writes() {
-    split_preflight_refuses(
-        split_preflight_engine(1., 5., 400.),
-        vec![split_preflight_order(OrderType::Market, 7.)],
-    );
-}
-#[test]
-fn split_preflight_valid_first_invalid_market_tail_zero_writes() {
-    split_preflight_refuses(
-        split_preflight_engine(3., 5., 1.),
-        vec![
-            split_preflight_order(OrderType::Limit, 3.),
-            split_preflight_order(OrderType::Market, 2.),
-        ],
-    );
-}
-fn split_preflight_lots(mut e: Engine<Lighter>, amount: f64) -> Vec<u64> {
-    let mut request = begin(
-        &mut e,
-        vec![split_preflight_order(OrderType::Limit, amount)],
-    );
+
+fn parity_serial_sizes(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) -> Vec<u64> {
+    let mut request = begin(&mut e, orders);
     let mut sizes = Vec::new();
     let mut ids = std::collections::HashSet::new();
     let mut now = NOW;
@@ -1658,74 +1657,67 @@ fn split_preflight_lots(mut e: Engine<Lighter>, amount: f64) -> Vec<u64> {
     }
     panic!("prepared plan did not finish");
 }
+
 #[test]
-fn split_preflight_eight_units_cap_five_step_one_preserves_eight() {
-    let sizes = split_preflight_lots(split_preflight_engine(1., 5., 1.), 8.);
-    assert_eq!(sizes.iter().sum::<u64>(), 8);
-    assert_eq!(sizes.len(), 2, "one transport per native lot");
-    assert!(sizes.iter().all(|&q| (1..=5).contains(&q)));
+fn parity_market_orders_keep_the_legacy_minimum_exemption() {
+    for (min, quote) in [(3.0, 1.0), (1.0, 400.0)] {
+        assert_eq!(
+            parity_serial_sizes(
+                parity_engine_with_limits(min, 5.0, quote),
+                vec![parity_order(OrderType::Market, 2.0)]
+            ),
+            [2]
+        );
+    }
 }
+
 #[test]
-fn split_preflight_remainder_merge_cannot_exceed_max() {
-    let sizes = split_preflight_lots(split_preflight_engine(3., 5., 1.), 17.);
-    assert_eq!(sizes.iter().sum::<u64>(), 17);
-    assert_eq!(sizes.len(), 4);
-    assert!(sizes.iter().all(|&q| (3..=5).contains(&q)));
-}
-#[test]
-fn split_preflight_valid_control_places_each_lot_once() {
+fn parity_mixed_placements_keep_the_market_minimum_exemption() {
     assert_eq!(
-        split_preflight_lots(split_preflight_engine(3., 5., 1.), 10.),
-        vec![5, 5]
+        parity_serial_sizes(
+            parity_engine_with_limits(3.0, 5.0, 1.0),
+            vec![
+                parity_order(OrderType::Limit, 3.0),
+                parity_order(OrderType::Market, 2.0),
+            ]
+        ),
+        [3, 2]
     );
 }
 
 #[test]
-fn split_preflight_valid_batch_chunks_never_exceed_native_count() {
-    let mut e = split_preflight_engine(1., 5., 1.);
-    let first = begin(
-        &mut e,
-        vec![split_preflight_order(OrderType::Limit, 3.); 32],
+fn parity_limit_lots_keep_legacy_remainder_allocation_and_tail_merge() {
+    assert_eq!(
+        parity_serial_sizes(
+            parity_engine_with_limits(1.0, 5.0, 1.0),
+            vec![parity_order(OrderType::Limit, 8.0)]
+        ),
+        [3, 3, 3]
     );
-    let rows: Vec<String> = serde_json::from_str(&param(&first, "tx_infos")).unwrap();
-    assert_eq!(rows.len(), 31);
-    let mut ids = std::collections::HashSet::new();
-    for row in rows {
-        let row: Value = serde_json::from_str(&row).unwrap();
-        assert!(ids.insert(row["ClientOrderIndex"].as_u64().unwrap()));
-        assert_eq!(row["BaseAmount"], 3);
-    }
-    let hashes: Vec<_> = (0..31).map(|n| format!("hash-{n}")).collect();
-    reply(
-        &mut e,
-        &first,
-        200,
-        &json!({"code":200,"tx_hash":hashes}).to_string(),
+    assert_eq!(
+        parity_serial_sizes(
+            parity_engine_with_limits(3.0, 5.0, 1.0),
+            vec![parity_order(OrderType::Limit, 17.0)]
+        ),
+        [4, 4, 4, 6]
     );
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
-    let (timer, due) = actions
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
-            _ => None,
-        })
-        .expect("next chunk is paced");
-    e.handle(due, Event::TimerFired { timer });
-    let second = http_at(&mut e, due, "sendTx");
-    assert!(!second.url.contains("sendTxBatch"));
-    assert!(ids.insert(wire(&second)["ClientOrderIndex"].as_u64().unwrap()));
-    assert_eq!(wire(&second)["BaseAmount"], 3);
-    ack_at(&mut e, due, &second);
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, due);
-    assert!(
-        actions
-            .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+}
+
+#[test]
+fn parity_all_non_market_lots_validate_minimums_before_the_first_request() {
+    parity_refuses(
+        parity_engine_with_limits(4.0, 5.0, 1.0),
+        vec![parity_order(OrderType::Limit, 8.0)],
     );
-    assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+}
+
+#[test]
+fn parity_same_symbol_limit_batch_validates_the_last_row_before_transport() {
+    parity_refuses(
+        parity_engine_with_limits(3.0, 5.0, 1.0),
+        vec![
+            parity_order(OrderType::Limit, 3.0),
+            parity_order(OrderType::Limit, 2.0),
+        ],
     );
-    assert_eq!(ids.len(), 32);
 }

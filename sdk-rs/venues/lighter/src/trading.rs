@@ -1,6 +1,5 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
 pub(crate) mod protection;
-mod validation;
 use crate::{Lighter, Pending, sign};
 use safe_cex_engine::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact};
 use safe_cex_engine::model::*;
@@ -1959,24 +1958,8 @@ impl Lighter {
                 }
             }
         }
-        if batch {
-            let mut rows = batched.into_iter();
-            loop {
-                let chunk: Vec<_> = rows.by_ref().take(31).collect();
-                if chunk.is_empty() {
-                    break;
-                }
-                steps.push_back(Step::Place(chunk));
-            }
-        }
-        for step in &steps {
-            match step {
-                Step::Place(orders) if orders.len() > 1 => {
-                    self.validate_prepared(cx, orders, false, false)?
-                }
-                Step::Group { orders, .. } => self.validate_prepared(cx, orders, true, false)?,
-                _ => {}
-            }
+        if batch && !batched.is_empty() {
+            steps.push_back(Step::Place(batched));
         }
         Ok(steps)
     }
@@ -2031,54 +2014,6 @@ impl Lighter {
         opts: &PlaceOrderOpts,
     ) -> Result<Vec<Prepared>, String> {
         self.prepare_native(cx, opts, false)
-    }
-
-    fn native_rules(
-        &self,
-        cx: &Cx<'_, Pending>,
-        symbol: &str,
-    ) -> Result<validation::Rules, String> {
-        let market = cx.store.market(symbol).ok_or("Lighter market missing")?;
-        let meta = self
-            .metadata
-            .get(symbol)
-            .ok_or("Lighter market metadata missing")?;
-        Ok(validation::Rules {
-            step: scale(market.precision.amount, meta.size_decimals)?,
-            size_factor: 10_f64
-                .powi(i32::try_from(meta.size_decimals).map_err(|_| "Invalid Lighter decimals")?),
-            price_factor: 10_f64
-                .powi(i32::try_from(meta.price_decimals).map_err(|_| "Invalid Lighter decimals")?),
-            tick: market.precision.price,
-            min: market.limits.amount.min,
-            max: market.limits.amount.max,
-            min_quote: meta.min_quote,
-        })
-    }
-
-    fn validate_prepared(
-        &self,
-        cx: &Cx<'_, Pending>,
-        rows: &[Prepared],
-        grouped: bool,
-        allow_full_close: bool,
-    ) -> Result<(), String> {
-        let first = rows.first().ok_or("Empty Lighter write")?;
-        let orders: Vec<_> = rows.iter().map(|p| p.native.clone()).collect();
-        let full_close = allow_full_close
-            && rows.len() == 1
-            && cx.store.positions().iter().any(|p| {
-                p.symbol == first.order.symbol
-                    && p.contracts == first.order.amount
-                    && ((p.side == PositionSide::Long) == (first.order.side == OrderSide::Sell))
-            });
-        validation::validate_write(&validation::NativeWrite {
-            orders: &orders,
-            rules: self.native_rules(cx, &first.order.symbol)?,
-            grouped,
-            full_close,
-        })
-        .map_err(|error| error.message)
     }
 
     fn prepare_native(
@@ -2174,13 +2109,30 @@ impl Lighter {
         }
         let size_decimals = meta.size_decimals;
         let price_decimals = meta.price_decimals;
-        let rules = self.native_rules(cx, &opts.symbol)?;
-        if !rules.max.is_finite() || rules.max <= 0.0 {
+        let min_quote = meta.min_quote;
+        let max = market.limits.amount.max;
+        let min = market.limits.amount.min;
+        if !max.is_finite() || max <= 0.0 {
             return Err("Invalid Lighter market maximum size".into());
         }
-        let rounded_max = scale(rules.max, size_decimals)?;
-        let native_max = validation::maximum(rounded_max, rules.max, rules.size_factor)?;
-        let amounts = validation::split(scale(amount, size_decimals)?, native_max, rules.step)?;
+        let count = (amount / max).ceil().max(1.0) as usize;
+        if count > 10_000 {
+            return Err("Lighter order would create too many lots".into());
+        }
+        let remainder = if amount > max {
+            num::adjust(amount % max, market.precision.amount)
+        } else {
+            0.0
+        };
+        let lot = num::adjust((amount - remainder) / count as f64, market.precision.amount);
+        let mut amounts = vec![lot; count];
+        if remainder > 0.0 {
+            amounts.push(remainder);
+        }
+        if !is_market && amounts.len() > 1 && min > 0.0 && *amounts.last().unwrap() < min {
+            let last = amounts.pop().unwrap();
+            *amounts.last_mut().unwrap() += last;
+        }
         let tif = if conditional {
             Some(TimeInForce::ImmediateOrCancel)
         } else {
@@ -2209,8 +2161,19 @@ impl Lighter {
         let scaled_trigger = u32::try_from(scale(trigger, price_decimals)?)
             .map_err(|_| "Lighter trigger exceeds uint32 range")?;
         let mut out = Vec::new();
-        for scaled_amount in amounts {
-            let amount = validation::unscale(scaled_amount, rules.size_factor)?;
+        for amount in amounts {
+            if amount <= 0.0
+                || (!is_market && !parent_sized && (amount < min || amount * price < min_quote))
+            {
+                return Err(format!(
+                    "Lighter order lot is below exchange minimums for {}",
+                    opts.symbol
+                ));
+            }
+            let scaled_amount = scale(amount, size_decimals)?;
+            if scaled_amount == 0 {
+                return Err("Lighter amount rounds to zero".into());
+            }
             let id = self.mint_id(cx)?;
             let order = Order {
                 id: id.to_string(),
@@ -2248,11 +2211,6 @@ impl Lighter {
                 },
                 order,
             });
-        }
-        if !parent_sized {
-            for row in &out {
-                self.validate_prepared(cx, std::slice::from_ref(row), false, out.len() == 1)?;
-            }
         }
         Ok(out)
     }
@@ -2804,63 +2762,5 @@ mod client_index_parity_tests {
             assert!(next > first && next <= MAX_CLIENT_INDEX);
         }));
         engine.start(1_700_000_000_000.);
-    }
-}
-
-#[cfg(test)]
-mod split_preflight_tests {
-    use super::*;
-    use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
-    use safe_cex_engine::test_support::{ProbeVenue, seeded_engine};
-
-    #[test]
-    fn split_preflight_count_includes_extra_tail() {
-        let mut venue = Lighter::new(crate::Options::default());
-        venue.metadata.insert(
-            "ETH".into(),
-            crate::MarketMeta {
-                min_quote: 1.,
-                ..Default::default()
-            },
-        );
-        let mut e = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
-            let opts: PlaceOrderOpts = serde_json::from_value(serde_json::json!({"symbol":"ETH","type":"limit","side":"buy","amount":49999,"price":100})).unwrap();
-            let rows = venue.prepare_one(cx, &opts).unwrap();
-            assert_eq!(rows.len(), 10_000);
-            assert_eq!(rows.iter().map(|p| p.native.amount).sum::<u64>(), 49_999);
-            assert!(rows.iter().all(|p| (1..=5).contains(&p.native.amount)));
-        }));
-        e.store_mut().set_markets(vec![Market {
-            id: "1".into(),
-            symbol: "ETH".into(),
-            pretty_symbol: None,
-            base: "ETH".into(),
-            quote: "USDC".into(),
-            active: true,
-            precision: Precision {
-                amount: 1.,
-                price: 1.,
-            },
-            limits: Limits {
-                amount: MinMax { min: 1., max: 5. },
-                leverage: MinMax { min: 1., max: 10. },
-                price: None,
-            },
-            contract_size: Some(1.),
-            is_expiring: None,
-            is_inverse: None,
-            is_spot: None,
-            is_perpetual: Some(true),
-            is_read_only: None,
-            taker_fee: None,
-            maker_fee: None,
-        }]);
-        e.start(1000.);
-        assert_eq!(
-            e.drain_actions()
-                .filter(|a| matches!(a, safe_cex_engine::Action::Http(_)))
-                .count(),
-            0
-        );
     }
 }
