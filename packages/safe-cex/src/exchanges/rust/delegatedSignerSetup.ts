@@ -97,9 +97,10 @@ export class DelegatedSignerSetup {
       const message = 'Coinbase Hosted secondary signing is unsupported; remove the secondary credentials';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    // WOO's raw HMAC callback has no slot selector; never install unusable read refs.
-    if (name === 'woo' && remoteSigner && secondaryRequested) {
-      const message = 'WOO X secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser';
+    // Raw HMAC callbacks have no slot selector; never install unusable read refs.
+    if ((name === 'woo' || name === 'cryptocom') && remoteSigner && secondaryRequested) {
+      const venue = name === 'woo' ? 'WOO X' : 'Crypto.com';
+      const message = `${venue} secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     if (secondaryRequested && !secondary) invalid('Rust engine secondary delegated signing requires a nonempty public key');

@@ -9,7 +9,12 @@ const encode = (value: unknown) =>
     .replace(/\//g, '_');
 
 /** Only public JWT fields are rendered here; the device's provider owns the key. */
-export const signCoinbaseJwt = async (host: EngineHost, uri?: string) => {
+export const signCoinbaseJwt = async (
+  host: Pick<EngineHost, 'hostedSigning'> & Partial<Pick<EngineHost, 'coinbaseSigningMetadata' | 'hostedSigningClock'>>,
+  uri?: string,
+) => {
+  if (!host.coinbaseSigningMetadata || !host.hostedSigningClock)
+    throw new Error('Coinbase signing metadata is unavailable');
   const { keyName, algorithm } = host.coinbaseSigningMetadata();
   const { stampMs } = host.hostedSigningClock();
   const nbf = Math.floor(stampMs / 1000);

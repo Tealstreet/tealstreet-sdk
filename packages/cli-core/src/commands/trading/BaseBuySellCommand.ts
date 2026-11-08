@@ -362,7 +362,10 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
   }
 
   private async submitOrders(ctx: CommandContext, orders: PlaceOrderOpts[]): Promise<string[]> {
-    const exchange = ctx.exchange!;
+    const exchange = ctx.exchange;
+    if (!exchange) throw new Error('Not connected to exchange');
+    const placeOrder = exchange.placeOrder;
+    if (typeof placeOrder !== 'function') throw new Error('Exchange does not support placing orders');
     const prepared = prepareCliOrders(exchange, orders);
     const notionals = new Map<PlaceOrderOpts, number>();
     let pendingNotional = 0;
@@ -380,7 +383,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     let accepted = 0;
     for (const order of prepared) {
       try {
-        ids.push(...((await exchange.placeOrder!(order)) ?? []));
+        ids.push(...((await placeOrder.call(exchange, order)) ?? []));
       } catch (error) {
         if (accepted === 0) throw error;
         const details = serializeCommandError(error);

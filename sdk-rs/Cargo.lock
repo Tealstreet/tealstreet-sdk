@@ -4198,6 +4198,7 @@ version = "0.1.0"
 dependencies = [
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venues",
  "serde",
  "serde_json",
 ]
@@ -4371,6 +4372,7 @@ dependencies = [
 name = "safe-cex-venues"
 version = "0.1.0"
 dependencies = [
+ "bs58",
  "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-venue-apexomni",

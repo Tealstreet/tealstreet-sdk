@@ -3,6 +3,9 @@
 mod support;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::signing::Identity;
+use safe_cex_engine::signing::{
+    Algorithm, Capability, KeyRef, SignError, SignFuture, SignRequest, SignResult, Signer,
+};
 use safe_cex_engine::test_support::{ProbeVenue, prepared_actions};
 use safe_cex_engine::{Action, Engine, Method};
 use safe_cex_venue_cryptocom::Cryptocom;
@@ -36,8 +39,31 @@ fn params() -> Params {
         .strings("exec_inst", vec!["REDUCE_ONLY".into()])
 }
 
-#[test]
-fn rest_and_ws_auth_recipes_match_the_legacy_envelope_bytes() {
+struct MetadataSigner {
+    inner: Arc<LocalSigner>,
+    ws_headers: bool,
+}
+impl Signer for MetadataSigner {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        Some(self.inner.sign_now(request).map(|mut result| {
+            if self.ws_headers || request.context.method != "WS" {
+                result.headers.push(("X-Trace".into(), "keep".into()));
+            }
+            result
+        }))
+    }
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        Box::pin(std::future::ready(self.sign_ready(&request).unwrap()))
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+}
+
+fn signed_actions(metadata: Option<bool>) -> Vec<Action> {
     let (signer, identity) = provider();
     let ws_identity = identity.clone();
     let venue = ProbeVenue::new(
@@ -90,9 +116,67 @@ fn rest_and_ws_auth_recipes_match_the_legacy_envelope_bytes() {
         Some(safe_cex_engine::test_support::seeded_entropy(7)),
     )
     .unwrap();
+    let signer: safe_cex_engine::signing::Provider = match metadata {
+        Some(ws_headers) => Arc::new(MetadataSigner {
+            inner: signer,
+            ws_headers,
+        }),
+        None => signer,
+    };
     engine.set_signer(Some(signer)).unwrap();
     engine.start(NOW);
-    let actions = prepared_actions(&mut engine, NOW);
+    prepared_actions(&mut engine, NOW)
+}
+
+#[test]
+fn http_metadata_preserves_json_signature_and_ws_local_parity() {
+    let control = signed_actions(None);
+    let decorated = signed_actions(Some(false));
+    let http = |actions: &[Action]| {
+        actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Http(http) => Some(http.clone()),
+                _ => None,
+            })
+            .expect("one physical signed HTTP request")
+    };
+    let with_headers = http(&decorated);
+    assert_eq!(with_headers.body, http(&control).body);
+    assert!(
+        with_headers
+            .signer_headers
+            .iter()
+            .any(|(name, value)| name == "X-Trace" && value == "keep")
+    );
+    assert!(
+        !with_headers
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("sig"))
+    );
+    let ws = |actions: &[Action]| {
+        actions
+            .iter()
+            .find_map(|action| match action {
+                Action::WsSend { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .expect("signed WebSocket authentication")
+    };
+    assert_eq!(ws(&decorated), ws(&control));
+}
+
+#[test]
+fn ws_metadata_is_refused_without_publishing_a_partial_authentication() {
+    let actions = signed_actions(Some(true));
+    assert!(actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+}
+
+#[test]
+fn rest_and_ws_auth_recipes_match_the_legacy_envelope_bytes() {
+    let actions = signed_actions(None);
     let body = actions
         .iter()
         .find_map(|action| match action {

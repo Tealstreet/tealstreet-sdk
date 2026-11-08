@@ -134,3 +134,5 @@ c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-r
 7e157be6d6d3916000c253cee778ea3ab09838b0:packages/safe-cex/src/__tests__/audit-regressions/rust.coinbase-hosted-signing.test.ts:generic-api-key:12
 # Synthetic Coinbase hosted-provider CDP name in already-pushed history, PR #3301.
 7e157be6d6d3916000c253cee778ea3ab09838b0:packages/safe-cex/src/__tests__/audit-regressions/rust.coinbase-hosted-provider.wasm.test.ts:generic-api-key:15
+# Synthetic Crypto.com WS replay HMAC, independently recomputed from literal test inputs; PR #3298.
+e2df6efb8bc2ee3299f4ed473cf8ed93b686a3cc:packages/safe-cex/src/__tests__/audit-regressions/rust.cryptocom-hosted-signing.test.ts:generic-api-key:175

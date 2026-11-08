@@ -11,6 +11,8 @@ use tokio::sync::mpsc;
 
 use super::*;
 
+mod grvt;
+
 type Answer = Box<dyn Fn(&Value) -> Value + Send + Sync>;
 
 /// A device on the other end of the link: answers every sign-req with `answer`.
