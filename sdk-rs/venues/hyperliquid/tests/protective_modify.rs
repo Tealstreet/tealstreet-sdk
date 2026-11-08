@@ -184,6 +184,7 @@ fn fallback_place(e: &mut Engine<Hyperliquid>, row: &Value) -> HttpRequest {
 
 #[test]
 fn definitive_replacement_refusal_stops_and_reports_unprotected() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | protective-compensation
     // TS hyperliquid.exchange.ts:4411-4416 propagates replacement failure without put-back.
     for refusal in [
         "Order has invalid price.",

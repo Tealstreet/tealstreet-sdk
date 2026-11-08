@@ -1960,6 +1960,7 @@ fn a_trade_print_does_not_move_a_spot_market_order_price() {
 
 #[test]
 fn spot_cancel_errors_stop_before_replacement_including_terminal_misses() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
     // TS hyperliquidspot.api.ts:78-95 throws; spot exchange:1205-1209 has no catch.
     for error in [
         "Cannot cancel this order",
@@ -1997,5 +1998,73 @@ fn spot_cancel_errors_stop_before_replacement_including_terminal_misses() {
                 .count(),
             1
         );
+    }
+}
+
+#[test]
+fn spot_serial_rows_pin_native_partial_sends_and_stop_after_refusal() {
+    // TS spot exchange:1007-1016 posts each row; API:78-95 throws before flatMap.
+    // BaseExchange:1111-1114 stops the serial suffix after that throw.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
+    for reject_second in [false, true] {
+        let (mut e, _) = ready(true);
+        e.drain_plain().for_each(drop);
+        let mut first = order("HFUN/USDC");
+        first.client_order_id = None;
+        first.price = Some(0.002);
+        first.amount = 6000.;
+        let mut second = first.clone();
+        second.amount = 1.;
+        let orders = if reject_second {
+            vec![first.clone(), second, first]
+        } else {
+            vec![first, second]
+        };
+        e.handle(
+            5000.,
+            Event::Command(Command::PlaceOrders {
+                command: 72,
+                orders,
+            }),
+        );
+        let mut actions = prepared_now(&mut e);
+        let mut writes = Vec::new();
+        let mut terminals = Vec::new();
+        for _ in 0..8 {
+            for action in &actions {
+                match action {
+                    Action::Http(r) if r.url.ends_with("/exchange") => {
+                        let body: serde_json::Value =
+                            serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+                        writes.push(body["action"].clone());
+                        assert!(writes.len() <= 2, "no suffix or resend after refusal");
+                        let status = if writes.len() == 2 && reject_second {
+                            serde_json::json!({"error":"Order must have minimum value of $10."})
+                        } else {
+                            serde_json::json!({"resting":{"oid":90+writes.len()}})
+                        };
+                        support::reply(&mut e, r, 200, &serde_json::json!({"status":"ok","response":{"type":"order","data":{"statuses":[status]}}}).to_string());
+                    }
+                    Action::Notice(Notice::CommandDone { command: 72, .. }) => {
+                        terminals.push(false)
+                    }
+                    Action::Notice(Notice::CommandFailed { command: 72, .. }) => {
+                        terminals.push(true)
+                    }
+                    _ => {}
+                }
+            }
+            let next = prepared_now(&mut e);
+            actions = support::advance_packet_timers(&mut e, next, 20_000.);
+        }
+        assert_eq!(writes.len(), 2);
+        assert_eq!(terminals, vec![reject_second]);
+        for (wire, size) in writes.iter().zip(["6000", "1"]) {
+            assert_eq!(wire["type"], "order");
+            assert_eq!(wire["orders"].as_array().unwrap().len(), 1);
+            assert_eq!(wire["orders"][0]["a"], 10001);
+            assert_eq!(wire["orders"][0]["s"], size);
+            assert_eq!(wire["orders"][0]["p"], "0.002");
+        }
     }
 }

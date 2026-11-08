@@ -89,6 +89,7 @@ fn amend_trace(
 
 #[test]
 fn terminal_cancel_miss_continues_to_replacement_as_ts() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | cancel-replace/audit trading.rs:405
     // TS hyperliquid.exchange.ts:4227-4233,4411-4416 swallows this terminal state.
     amend_trace(
         false,
@@ -100,17 +101,31 @@ fn terminal_cancel_miss_continues_to_replacement_as_ts() {
 
 #[test]
 fn ordinary_cancel_error_stops_before_replacement_as_ts() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | cancel-replace/audit trading.rs:405
     // TS hyperliquid.api.ts:78-95 throws; hyperliquid.exchange.ts:4231-4232 rethrows.
     amend_trace(false, Some("Cannot cancel this order"), None, &["cancel"]);
 }
 
 #[test]
 fn full_position_replacement_refusal_stops_without_rust_only_restore() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | protective-compensation
     // TS hyperliquid.exchange.ts:4411-4416 has no catch/put-back after placement failure.
     amend_trace(
         true,
         None,
         Some("Invalid TP/SL price."),
+        &["cancel", "order"],
+    );
+}
+
+#[test]
+fn ordinary_replacement_refusal_pins_cancel_then_failed_place_without_suffix() {
+    // TS hyperliquid.exchange.ts:4411-4416 cancels before the rejected placement.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | cancel-replace/audit trading.rs:405
+    amend_trace(
+        false,
+        None,
+        Some("Order has invalid price."),
         &["cancel", "order"],
     );
 }

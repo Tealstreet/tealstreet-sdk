@@ -40,6 +40,8 @@ fn configured() -> Engine<Hyperliquid> {
 
 #[test]
 fn legacy_serial_dispatch_does_not_add_native_rule_gates() {
+    // TS hyperliquid.exchange.ts:3639,3727-3758,4439-4442.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | serial-placement-batch/audit trading.rs:367
     for last in [
         order(1.),
         order(0.4),
@@ -71,6 +73,7 @@ fn legacy_serial_dispatch_does_not_add_native_rule_gates() {
 
 #[test]
 fn caller_id_validation_still_refuses_entire_batch() {
+    // TS BaseExchange:1173-1200; hyperliquid.exchange.ts:4440 checks the whole batch before I/O.
     let mut engine = configured();
     let mut last = order(3.);
     last.client_order_id = Some("invalid".into());
@@ -146,6 +149,8 @@ fn submit_valid(orders: Vec<PlaceOrderOpts>) -> Vec<Value> {
 
 #[test]
 fn all_valid_rows_place_once_with_brackets_and_caller_id() {
+    // TS hyperliquid.exchange.ts:3639-3758.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | limit-attached-TP-SL/audit trading.rs:733
     let mut first = order(3.);
     first.client_order_id = Some("0x00000000000000000000000000000001".into());
     first.stop_loss = Some(80.);
@@ -190,12 +195,26 @@ fn final_wire_bounds_allow_rounding_to_exact_minimum_and_maximum() {
 }
 
 fn runtime_failure(status: u16, second_reply: &str, expected: &str) {
+    runtime_failure_orders(
+        vec![order(3.), order(3.), order(3.)],
+        status,
+        second_reply,
+        expected,
+    );
+}
+
+fn runtime_failure_orders(
+    orders: Vec<PlaceOrderOpts>,
+    status: u16,
+    second_reply: &str,
+    expected: &str,
+) {
     let mut engine = configured();
     engine.handle(
         2000.,
         Event::Command(Command::PlaceOrders {
             command: 77,
-            orders: vec![order(3.), order(3.), order(3.)],
+            orders,
         }),
     );
     let mut actions = prepared_now(&mut engine);
@@ -275,6 +294,8 @@ fn runtime_failure(status: u16, second_reply: &str, expected: &str) {
 
 #[test]
 fn runtime_rejection_retains_prefix_and_unsent_suffix() {
+    // TS hyperliquid.order-response.ts:104-124; hyperliquid.exchange.ts:4441.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | runtime-serial-failure
     runtime_failure(
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
@@ -308,6 +329,8 @@ fn runtime_server_failure_retains_complete_journal() {
 
 #[test]
 fn later_market_write_uses_current_price_without_frozen_plan_veto() {
+    // TS hyperliquid.exchange.ts:3891-3898,4441.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | live-price-freezing
     let mut engine = configured();
     let mut second = order(3.);
     second.kind = safe_cex_engine::model::OrderType::Market;
@@ -451,6 +474,8 @@ fn full_position_trigger_has_applied_outcome_before_later_rejection() {
 
 #[test]
 fn mixed_native_group_retains_placed_applied_refused_and_unsent_rows() {
+    // TS hyperliquid.exchange.ts:3727-3758; hyperliquid.order-response.ts:104-124.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | limit-attached-TP-SL/audit trading.rs:733
     let mut engine = configured();
     let mut first = order(3.);
     first.stop_loss = Some(80.);
@@ -567,6 +592,7 @@ fn settings_and_schedule_controls_have_journaled_runtime_refusals() {
 
 #[test]
 fn caller_id_size_gate_matches_ts_rounded_maximum() {
+    // TS BaseExchange:1211-1223 rounds before the positive-cap unsplit check.
     let mut accepted = order(5.1);
     accepted.client_order_id = Some("0x00000000000000000000000000000001".into());
     let payloads = submit_valid(vec![order(3.), accepted]);
@@ -594,4 +620,45 @@ fn caller_id_size_gate_matches_ts_rounded_maximum() {
     assert!(actions.iter().any(|action| matches!(action,
         Action::Notice(Notice::CommandFailed { command: 77, error })
         if error.outcome == Some(Outcome::NotSent) && error.message.contains("cannot be split"))));
+}
+
+#[test]
+fn market_row_refusal_pins_stop_before_next_live_price_preparation() {
+    // TS hyperliquid.exchange.ts:3891-3929 prepares the due row; :4441 stops on its failure.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | live-price-freezing
+    let mut market = order(3.);
+    market.kind = safe_cex_engine::model::OrderType::Market;
+    market.price = None;
+    runtime_failure_orders(
+        vec![order(3.), market.clone(), market],
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
+        "notSent",
+    );
+}
+
+#[test]
+fn serial_tail_pins_native_rounding_and_below_minimum_group_wire() {
+    // TS hyperliquid.exchange.ts:3639-3719 rounds the due row and builds all its children.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | serial-placement-batch/audit trading.rs:367
+    for (amount, expected_size) in [(0.4, "0"), (1., "1"), (6., "6")] {
+        let mut tail = order(amount);
+        tail.price = Some(3.);
+        tail.stop_loss = Some(2.);
+        tail.take_profit = Some(4.);
+        let payloads = submit_valid(vec![order(3.), tail]);
+        assert_eq!(payloads.len(), 2);
+        assert_eq!(payloads[0]["action"]["orders"][0]["s"], "3");
+        let action = &payloads[1]["action"];
+        assert_eq!(action["type"], "order");
+        assert_eq!(action["grouping"], "normalTpsl");
+        let rows = action["orders"].as_array().expect("group rows");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0]["p"], "3");
+        assert_eq!(rows[1]["t"]["trigger"]["triggerPx"], "2");
+        assert_eq!(rows[2]["t"]["trigger"]["triggerPx"], "4");
+        for row in rows {
+            assert_eq!(row["s"], expected_size);
+        }
+    }
 }
