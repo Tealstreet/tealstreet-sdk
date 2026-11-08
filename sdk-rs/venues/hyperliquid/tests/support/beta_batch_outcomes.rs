@@ -129,6 +129,73 @@ fn beta_mixed_cancel_removes_only_successful_legs_in_either_row_order() {
 }
 
 #[test]
+fn cancel_batch_with_unknown_row_journals_no_unconfirmed_cancellations() {
+    for unknown_index in [1, 0, 2] {
+        let (mut e, socket) = ready("disabled");
+        open_order(&mut e, socket, 1500.);
+        message(
+            &mut e,
+            socket,
+            1501.,
+            r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":10,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"},{"order":{"coin":"BTC","oid":11,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
+        );
+        e.drain_plain().for_each(drop);
+        e.handle(
+            2000.,
+            Event::Command(Command::CancelOrders {
+                command: 81,
+                ids: vec!["9".into(), "10".into(), "11".into()],
+            }),
+        );
+        let request = write(&mut e);
+        assert_eq!(
+            body(&request)["action"],
+            serde_json::json!({"type":"cancel","cancels":[
+                {"a":0,"o":9},{"a":0,"o":10},{"a":0,"o":11}
+            ]})
+        );
+        let mut statuses = vec![serde_json::json!("success"); 3];
+        statuses[unknown_index] = serde_json::json!({"error":"unclassified cancel result"});
+        reply_at(
+            &mut e,
+            &request,
+            2001.,
+            &serde_json::json!({"status":"ok","response":{
+                "type":"cancel","data":{"statuses":statuses}
+            }})
+            .to_string(),
+        );
+        let actions = e.drain_plain().collect::<Vec<_>>();
+        let error = failed(&actions);
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        for (index, id) in ["9", "10", "11"].into_iter().enumerate() {
+            if index == unknown_index {
+                assert_eq!(
+                    e.store().order(id).unwrap().status,
+                    safe_cex_engine::model::OrderStatus::Open
+                );
+            } else {
+                assert!(e.store().order(id).is_none(), "confirmed cancellation {id}");
+            }
+        }
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange"))),
+            "one cancellation batch, no retry or suffix write"
+        );
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
+        let partial = error.partial.as_ref().expect("classified batch detail");
+        assert_eq!(partial.total, Some(3));
+        assert_eq!(partial.failed_index, Some(unknown_index));
+        assert!(
+            partial.order_ids.is_empty(),
+            "cancellation targets are not created-order evidence: {error:?}"
+        );
+    }
+}
+
+#[test]
 fn beta_all_refused_rows_have_no_partial_ids_or_published_orders() {
     let (mut e, _) = ready("disabled");
     let request = pair(&mut e);

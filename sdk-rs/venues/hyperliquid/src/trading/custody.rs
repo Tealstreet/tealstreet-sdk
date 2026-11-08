@@ -769,18 +769,48 @@ impl Hyperliquid {
                 _ => BatchItem::Accepted(ids[index].as_str()),
             })
             .collect();
-        cx.http_write_batch(
-            &request.context,
-            if statuses.iter().all(|s| matches!(s, Status::Error { .. })) && (self.protective_replacement_active() && statuses.iter().all(|s| matches!(s, Status::Error { error } if known_protective_refusal(error)))) { &PROTECTIVE_REFUSAL } else { &BATCH },
-            statuses.len(),
-            &items,
-            if message.is_empty() && statuses.iter().any(|status| matches!(status, Status::Text(_))) {
-                if statuses.iter().any(|status| matches!(status, Status::Text(text) if text != "waitingForFill" && text != "waitingForTrigger")) {
-                    "Unknown Hyperliquid order status"
-                } else { "Hyperliquid pending order acknowledgement has no native order ID" }
-            } else { message },
-            None,
-        )
+        let table = if statuses.iter().all(|s| matches!(s, Status::Error { .. }))
+            && (self.protective_replacement_active()
+                && statuses.iter().all(
+                    |s| matches!(s, Status::Error { error } if known_protective_refusal(error)),
+                )) {
+            &PROTECTIVE_REFUSAL
+        } else {
+            &BATCH
+        };
+        let message = if message.is_empty()
+            && statuses
+                .iter()
+                .any(|status| matches!(status, Status::Text(_)))
+        {
+            if statuses.iter().any(|status| matches!(status, Status::Text(text) if text != "waitingForFill" && text != "waitingForTrigger")) {
+                "Unknown Hyperliquid order status"
+            } else {
+                "Hyperliquid pending order acknowledgement has no native order ID"
+            }
+        } else {
+            message
+        };
+        // Cancellation targets are existing orders, never created-order evidence.
+        if matches!(&request.effect, Effect::Cancel(_)) {
+            cx.http_write_applied_batch(
+                &request.context,
+                table,
+                statuses.len(),
+                &items,
+                message,
+                None,
+            )
+        } else {
+            cx.http_write_batch(
+                &request.context,
+                table,
+                statuses.len(),
+                &items,
+                message,
+                None,
+            )
+        }
         .map(drop)
     }
 
