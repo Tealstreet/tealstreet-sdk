@@ -926,9 +926,14 @@ impl BybitLinear {
             } else {
                 body.bool("reduceOnly", reduce_only)
             };
+            let body = body.opt_str("triggerPrice", trigger_price.map(number).as_deref());
+            let body = match direction {
+                Some(direction) if self.variant.is_hyro() => {
+                    body.int("triggerDirection", if direction == "1" { 1 } else { 2 })
+                }
+                _ => body.opt_str("triggerDirection", direction),
+            };
             let body = body
-                .opt_str("triggerPrice", trigger_price.map(number).as_deref())
-                .opt_str("triggerDirection", direction)
                 .opt_str(
                     "triggerBy",
                     (!self.variant.is_spot())

@@ -424,11 +424,12 @@ fn valid_hyro_position(row: &PositionRow<'_>) -> bool {
         && size.is_finite()
         && size >= 0.0
         && row.position_idx.unwrap_or(0) == 0
-        && float_of(&row.leverage) > 0.0
-        && float_of(&row.leverage).is_finite()
+        && (size == 0.0 || (float_of(&row.leverage) > 0.0 && float_of(&row.leverage).is_finite()))
         && [
             &row.avg_price,
+            &row.entry_price,
             &row.mark_price,
+            &row.leverage,
             &row.unrealised_pnl,
             &row.position_value,
             &row.position_im,
@@ -439,7 +440,10 @@ fn valid_hyro_position(row: &PositionRow<'_>) -> bool {
         .all(optional_numeric)
         && (size == 0.0
             || (order_side(row.side.as_deref()).is_some()
-                && [&row.avg_price, &row.mark_price, &row.unrealised_pnl]
+                && present(&row.avg_price)
+                    .or(present(&row.entry_price))
+                    .is_some_and(|value| float(value).is_finite())
+                && [&row.mark_price, &row.unrealised_pnl]
                     .into_iter()
                     .all(|value| float_of(value).is_finite())))
 }
