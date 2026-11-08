@@ -124,7 +124,7 @@ fn outside_beta_native_accounts_refuse_before_public_or_private_custody() {
 }
 
 #[test]
-fn keyed_missing_callbacks_are_invalid_and_explicitly_not_sent() {
+fn keyed_missing_callbacks_keep_adoption_and_configuration_refusals() {
     for venue in [
         "kraken",
         "krakenspot",
@@ -156,11 +156,22 @@ fn keyed_missing_callbacks_are_invalid_and_explicitly_not_sent() {
                         build(venue, options(value.clone()), None, Mode)
                     }
                     .expect_err("missing callback provider");
-                    assert_eq!(
-                        error.kind,
-                        Some(ErrorKind::InvalidInput),
-                        "{venue}/{version}/{flag}"
-                    );
+                    let unadopted_payload = flag == "payloadSigner"
+                        && matches!(venue, "kodiakfi" | "mode" | "what" | "woofi");
+                    let expected_kind = if unadopted_payload {
+                        ErrorKind::Unsupported
+                    } else {
+                        ErrorKind::InvalidInput
+                    };
+                    assert_eq!(error.kind, Some(expected_kind), "{venue}/{version}/{flag}");
+                    let expected_message = if unadopted_payload {
+                        format!(
+                            "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
+                        )
+                    } else {
+                        "Delegated signing requires a configured callback provider".to_owned()
+                    };
+                    assert_eq!(error.message, expected_message, "{venue}/{version}/{flag}");
                     assert_eq!(
                         error.outcome,
                         Some(Outcome::NotSent),
@@ -243,6 +254,58 @@ fn explicit_client_context_constructs_public_engines_with_unused_callback_intent
                     )
                     .expect("public client without provider")
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn unadopted_private_payload_admission_precedes_callback_configuration() {
+    use safe_cex_venues::{ConstructionContext, build_in_context, build_with_signer_in_context};
+    for venue in [
+        "coinbase",
+        "coinbasespot",
+        "txflow",
+        "kodiakfi",
+        "mode",
+        "what",
+        "woofi",
+    ] {
+        for context in [ConstructionContext::Client, ConstructionContext::Hosted] {
+            for local in ["", "unused-local"] {
+                for remote in [false, true] {
+                    let value = json!({"key": "configured-key", "secret": local,
+                        "payloadSigner": true, "remoteSigning": remote, "testnet": true,
+                        "publicMode": {"requested": false, "payloadSigner": true,
+                            "remoteSigner": remote}});
+                    for injected in [false, true] {
+                        let result = if injected {
+                            build_with_signer_in_context(
+                                context,
+                                venue,
+                                options(value.clone()),
+                                None,
+                                Some(Arc::new(NoIo)),
+                                Mode,
+                            )
+                        } else {
+                            build_in_context(context, venue, options(value.clone()), None, Mode)
+                        };
+                        let error = result.expect_err("unadopted private custody");
+                        assert_eq!(
+                            error.kind,
+                            Some(ErrorKind::Unsupported),
+                            "{venue}/{context:?}"
+                        );
+                        assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}/{context:?}");
+                        assert_eq!(
+                            error.message,
+                            format!(
+                                "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
+                            )
+                        );
+                    }
+                }
             }
         }
     }

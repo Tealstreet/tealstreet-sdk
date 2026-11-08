@@ -319,6 +319,12 @@ fn callback_rules(
     }
     let keyed = primary_key_present(venue, options);
     let public = resolved_public_data_only(venue, options);
+    // Families without either signing route refuse before callback validation.
+    if !construction::bridge(venue, options).dispatch_signing
+        && !remote_signing_policy(venue).enabled
+    {
+        payload_signing_rules_in_mode(venue, options, provider_ready, public)?;
+    }
     if !provider_ready && (keyed || !public) {
         return Err(
             invalid("Delegated signing requires a configured callback provider")
