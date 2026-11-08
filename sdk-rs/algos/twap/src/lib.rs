@@ -10,6 +10,7 @@
 pub mod factory;
 mod instance;
 mod math;
+pub mod plan;
 mod types;
 mod validate;
 
@@ -23,6 +24,7 @@ pub use types::{
 
 use std::collections::{HashSet, VecDeque};
 
+use safe_cex_engine::error::VenueError;
 use serde_json::{Map, Value};
 
 /// Clock, entropy and ids the host provides; tests substitute fixed values.
@@ -67,6 +69,10 @@ pub trait TwapMarketView {
     }
     /// The market's amount step: a slice the venue would round up overfills.
     fn amount_step(&self, _symbol: &str) -> Option<f64> {
+        None
+    }
+    /// Native facts for this exact write, never the client's activeMarket copy.
+    fn order_rules(&self, _request: &TwapOrderRequest) -> Option<plan::OrderRules> {
         None
     }
 }
@@ -171,19 +177,29 @@ impl TwapBook {
         match op {
             "twap:start" => match serde_json::from_value::<TwapOptions>(data.clone()) {
                 Ok(options) => {
-                    if let Err(message) = self.start_with(options, env, view, &mut effects) {
-                        effects.push(TwapEffect::Log { message });
+                    if let Err(error) = self.start_with(options, env, view, &mut effects) {
+                        effects.push(TwapEffect::Log {
+                            message: error.message,
+                        });
                     }
                 }
                 Err(error) => effects.push(TwapEffect::Diagnostic {
                     message: format!("twap:start options rejected: {error}"),
                 }),
             },
-            "twap:resume" => self.with_id(data, |instance| instance.resume(env)),
+            "twap:resume" => self.with_id(data, |instance| match instance.prepare(view) {
+                Ok(()) => instance.resume(env),
+                Err(error) => {
+                    effects.push(TwapEffect::Log {
+                        message: error.message,
+                    });
+                    instance.terminate();
+                }
+            }),
             "twap:cleanup" => self.with_id(data, TwapInstance::cleanup),
             "twap:pause" => self.with_id(data, TwapInstance::pause),
             "twap:stop" => self.with_id(data, TwapInstance::terminate),
-            "twap:state" => self.restore(data, env, &mut effects),
+            "twap:state" => self.restore(data, env, view, &mut effects),
             _ => {}
         }
         self.settle(&mut effects);
@@ -197,7 +213,7 @@ impl TwapBook {
         options: TwapOptions,
         env: &mut dyn TwapEnv,
         view: &dyn TwapMarketView,
-    ) -> (Result<String, String>, Vec<TwapEffect>) {
+    ) -> (Result<String, VenueError>, Vec<TwapEffect>) {
         let mut effects = Vec::new();
         let started = self.start_with(options, env, view, &mut effects);
         self.settle(&mut effects);
@@ -224,13 +240,16 @@ impl TwapBook {
         env: &mut dyn TwapEnv,
         view: &dyn TwapMarketView,
         effects: &mut Vec<TwapEffect>,
-    ) -> Result<String, String> {
+    ) -> Result<String, VenueError> {
         validate::options(&options)
             .and_then(|()| self.owns(&options))
             .and_then(|()| self.has_capacity())
-            .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
+            .map_err(|reason| {
+                plan::invalid(format!("TWAP {} rejected: {reason}", options.symbol()))
+            })?;
         let id = env.new_id();
-        let instance = TwapInstance::new(id.clone(), options, None, env);
+        let mut instance = TwapInstance::new(id.clone(), options, None, env);
+        instance.prepare(view)?;
         self.add(instance);
         if let Some(instance) = self.managed_mut(&id) {
             instance.start(env, view, effects);
@@ -424,7 +443,13 @@ impl TwapBook {
         }
     }
 
-    fn restore(&mut self, data: &Value, env: &mut dyn TwapEnv, effects: &mut Vec<TwapEffect>) {
+    fn restore(
+        &mut self,
+        data: &Value,
+        env: &mut dyn TwapEnv,
+        view: &dyn TwapMarketView,
+        effects: &mut Vec<TwapEffect>,
+    ) {
         let Some(persisted) = data.as_array() else {
             effects.push(TwapEffect::Diagnostic {
                 message: "twap:state expects an array".to_owned(),
@@ -467,12 +492,14 @@ impl TwapBook {
             }
             let running = entry.state.status == TwapStatus::Running;
             let id = entry.id.clone();
-            self.add(TwapInstance::new(
-                entry.id,
-                entry.options,
-                Some(entry.state),
-                env,
-            ));
+            let mut instance = TwapInstance::new(entry.id, entry.options, Some(entry.state), env);
+            if let Err(error) = instance.prepare(view) {
+                effects.push(TwapEffect::Log {
+                    message: error.message,
+                });
+                continue;
+            }
+            self.add(instance);
             if let Some(instance) = self.managed_mut(&id) {
                 // Persisted at once, so the host sees which rows it adopted.
                 instance.mark_state_changed();
