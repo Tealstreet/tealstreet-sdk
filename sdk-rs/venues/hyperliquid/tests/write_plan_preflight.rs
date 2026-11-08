@@ -268,3 +268,255 @@ fn final_wire_bounds_allow_rounding_to_exact_minimum_and_maximum() {
     assert_eq!(payloads[0]["action"]["orders"][0]["s"], "2");
     assert_eq!(payloads[1]["action"]["orders"][0]["s"], "5");
 }
+
+fn runtime_failure(status: u16, second_reply: &str, expected: &str) {
+    let mut engine = configured();
+    engine.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 77,
+            orders: vec![order(3.), order(3.), order(3.)],
+        }),
+    );
+    let mut actions = prepared_now(&mut engine);
+    let mut writes = Vec::new();
+    let mut failure = None;
+    for _ in 0..8 {
+        for action in &actions {
+            match action {
+                Action::Http(request) if request.url.ends_with("/exchange") => {
+                    writes.push(request.clone());
+                    assert!(
+                        writes.len() <= 2,
+                        "no suffix, retry or rollback: {writes:?}"
+                    );
+                    if writes.len() == 1 {
+                        reply(
+                            &mut engine,
+                            request,
+                            200,
+                            r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":91}}]}}}"#,
+                        );
+                    } else if status == 0 {
+                        engine.handle(
+                            2500.,
+                            Event::HttpFailed {
+                                request: request.id,
+                                error: "transport reply lost",
+                            },
+                        );
+                    } else {
+                        reply(&mut engine, request, status, second_reply);
+                    }
+                }
+                Action::Notice(Notice::CommandFailed { command: 77, error }) => {
+                    assert!(failure.is_none(), "one terminal failure");
+                    failure = Some(serde_json::to_value(error).expect("error JSON"));
+                }
+                Action::Notice(Notice::CommandDone { command: 77, .. }) => {
+                    panic!("failed intent reported whole")
+                }
+                _ => {}
+            }
+        }
+        let next = prepared_now(&mut engine);
+        actions = advance_packet_timers(&mut engine, next, 20_000.);
+    }
+    assert_eq!(writes.len(), 2);
+    let error = failure.expect("terminal failure");
+    if expected == "notSent" {
+        assert!(
+            error.get("outcome").is_none(),
+            "known partial execution: {error}"
+        );
+    } else {
+        assert_eq!(error["outcome"], "unknown", "{error}");
+    }
+    assert_eq!(error["partial"]["orderIds"], json!(["91"]));
+    let elements = error["elements"]
+        .as_array()
+        .expect("complete per-element outcomes");
+    assert_eq!(elements.len(), 3);
+    assert_eq!(elements[0]["index"], 0);
+    assert_eq!(elements[0]["status"], "placed");
+    assert_eq!(elements[0]["orderIds"], json!(["91"]));
+    assert_eq!(elements[1]["status"], expected);
+    assert_eq!(
+        elements[1]["error"]["outcome"],
+        if expected == "notSent" {
+            "rejected"
+        } else {
+            "unknown"
+        }
+    );
+    assert_eq!(elements[2]["status"], "notSent");
+    assert!(elements[2].get("error").is_none());
+}
+
+#[test]
+fn runtime_rejection_retains_prefix_and_unsent_suffix() {
+    runtime_failure(
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
+        "notSent",
+    );
+}
+
+#[test]
+fn runtime_unlisted_refusal_is_unknown() {
+    runtime_failure(
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"New undocumented failure"}]}}}"#,
+        "unknown",
+    );
+}
+
+#[test]
+fn runtime_malformed_reply_is_unknown() {
+    runtime_failure(200, "malformed reply", "unknown");
+}
+
+#[test]
+fn runtime_lost_reply_is_unknown() {
+    runtime_failure(0, "", "unknown");
+}
+
+#[test]
+fn runtime_server_failure_retains_complete_journal() {
+    runtime_failure(503, "service unavailable", "unknown");
+}
+
+#[test]
+fn local_veto_after_next_marks_pending_row_not_sent() {
+    let mut engine = configured();
+    engine.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 77,
+            orders: vec![order(3.), order(3.), order(3.)],
+        }),
+    );
+    let mut actions = prepared_now(&mut engine);
+    let mut writes = 0;
+    let mut failure = None;
+    for _ in 0..8 {
+        for action in &actions {
+            match action {
+                Action::Http(request) if request.url.ends_with("/exchange") => {
+                    writes += 1;
+                    assert_eq!(writes, 1, "local veto must not release another write");
+                    engine
+                        .store_mut()
+                        .update_markets(|market| market.limits.amount.max = 2.);
+                    reply(
+                        &mut engine,
+                        request,
+                        200,
+                        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":91}}]}}}"#,
+                    );
+                }
+                Action::Notice(Notice::CommandFailed { command: 77, error }) => {
+                    failure = Some(serde_json::to_value(error).expect("error JSON"));
+                }
+                Action::Notice(Notice::CommandDone { command: 77, .. }) => {
+                    panic!("local veto reported whole")
+                }
+                _ => {}
+            }
+        }
+        let next = prepared_now(&mut engine);
+        actions = advance_packet_timers(&mut engine, next, 20_000.);
+    }
+    assert_eq!(writes, 1);
+    let error = failure.expect("terminal failure");
+    let elements = error["elements"].as_array().expect("complete journal");
+    assert_eq!(elements.len(), 3);
+    assert_eq!(elements[0]["status"], "placed");
+    assert_eq!(elements[1]["status"], "notSent");
+    assert_eq!(elements[1]["error"]["outcome"], "notSent");
+    assert_eq!(elements[2]["status"], "notSent");
+    assert!(elements[2].get("error").is_none());
+}
+
+fn accepted_idless_prefix(first: PlaceOrderOpts, statuses: Value, expected: &[&str]) {
+    let mut engine = configured();
+    engine.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 77,
+            orders: vec![first, order(3.), order(3.)],
+        }),
+    );
+    let mut actions = prepared_now(&mut engine);
+    let mut writes = Vec::new();
+    let mut failure = None;
+    for _ in 0..8 {
+        for action in &actions {
+            match action {
+                Action::Http(request) if request.url.ends_with("/exchange") => {
+                    writes.push(request.clone());
+                    assert!(writes.len() <= 2, "no retry, suffix or rollback");
+                    let rows = if writes.len() == 1 {
+                        statuses.clone()
+                    } else {
+                        json!([{"error":"Insufficient margin to place order."}])
+                    };
+                    reply(&mut engine, request, 200, &json!({"status":"ok","response":{"type":"order","data":{"statuses":rows}}}).to_string());
+                }
+                Action::Notice(Notice::CommandFailed { command: 77, error }) => {
+                    failure = Some(serde_json::to_value(error).expect("error JSON"))
+                }
+                Action::Notice(Notice::CommandDone { command: 77, .. }) => {
+                    panic!("partial intent reported whole")
+                }
+                _ => {}
+            }
+        }
+        let next = prepared_now(&mut engine);
+        actions = advance_packet_timers(&mut engine, next, 20_000.);
+    }
+    assert_eq!(writes.len(), 2);
+    let error = failure.expect("terminal failure");
+    let elements = error["elements"]
+        .as_array()
+        .expect("every dispatched row journaled");
+    assert_eq!(elements.len(), expected.len());
+    for (index, (element, status)) in elements.iter().zip(expected).enumerate() {
+        assert_eq!(element["index"], index);
+        assert_eq!(element["status"], *status);
+        if *status == "applied" {
+            assert!(
+                element.get("orderIds").is_none(),
+                "no invented native order identity"
+            );
+        }
+    }
+    assert_eq!(elements[expected.len() - 2]["error"]["outcome"], "rejected");
+    assert!(elements[expected.len() - 1].get("error").is_none());
+}
+
+#[test]
+fn deferred_children_have_applied_outcomes_before_later_rejection() {
+    let mut first = order(3.);
+    first.stop_loss = Some(80.);
+    first.take_profit = Some(120.);
+    accepted_idless_prefix(
+        first,
+        json!([{"resting":{"oid":91}}, "waitingForFill", "waitingForFill"]),
+        &["placed", "applied", "applied", "notSent", "notSent"],
+    );
+}
+
+#[test]
+fn full_position_trigger_has_applied_outcome_before_later_rejection() {
+    let mut first = order(0.);
+    first.kind = safe_cex_engine::model::OrderType::StopLoss;
+    first.side = safe_cex_engine::model::OrderSide::Sell;
+    first.price = Some(80.);
+    first.reduce_only = Some(true);
+    accepted_idless_prefix(
+        first,
+        json!(["waitingForTrigger"]),
+        &["applied", "notSent", "notSent"],
+    );
+}

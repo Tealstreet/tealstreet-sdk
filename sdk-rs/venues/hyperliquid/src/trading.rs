@@ -2,6 +2,7 @@
 mod custody;
 mod protective;
 mod schedule;
+mod write_plan;
 pub(crate) use custody::PACING;
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
@@ -46,6 +47,9 @@ struct Job {
     command: CommandId,
     steps: VecDeque<Step>,
     ids: Vec<String>,
+    writes: Option<safe_cex_engine::write_plan::WritePlan<write_plan::PreparedWrite>>,
+    frozen: Option<VecDeque<write_plan::PreparedWrite>>,
+    pending_write: Option<usize>,
     replacement: Option<String>,
     amend_source: Option<String>,
     amend_filled: bool,
@@ -68,15 +72,18 @@ struct Job {
     stop_note: Option<String>,
     protection: Option<Box<protective::Amend>>,
 }
+#[derive(Clone)]
 struct PlacementPlan {
     opts: PlaceOrderOpts,
     native: NativePlacement,
 }
+#[derive(Clone)]
 struct NativePlacement {
     wires: Vec<OrderWire>,
     grouping: &'static str,
     rules: WireRules,
 }
+#[derive(Clone)]
 struct WireRules {
     step: f64,
     minimum: f64,
@@ -97,12 +104,12 @@ impl NativePlacement {
         }
     }
 }
+#[derive(Clone)]
 enum Step {
     ScheduleCancel {
         time_ms: Option<u64>,
     },
     Place(Box<PlacementPlan>),
-    Restore,
     Cancel(Vec<Order>),
     Leverage {
         symbol: String,
@@ -151,7 +158,7 @@ impl Job {
     }
     fn touches(&self, symbol: &str) -> bool {
         self.steps.iter().any(|step| match step {
-            Step::ScheduleCancel { .. } | Step::Restore => true,
+            Step::ScheduleCancel { .. } => true,
             Step::Place(plan) => plan.opts.symbol == symbol,
             Step::Cancel(orders) => orders.iter().any(|order| order.symbol == symbol),
             Step::Leverage { symbol: market, .. } => market == symbol,
@@ -180,7 +187,7 @@ impl Job {
             return false;
         }
         self.steps.iter().all(|step| match step {
-            Step::ScheduleCancel { .. } | Step::Restore => false,
+            Step::ScheduleCancel { .. } => false,
             Step::Place(plan) => {
                 let order = &plan.opts;
                 !older.touches(&order.symbol)
@@ -294,12 +301,12 @@ struct TriggerWire {
     trigger_px: String,
     tpsl: &'static str,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct CancelWire {
     a: u32,
     o: u64,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "type")]
 enum Action {
     #[serde(rename = "scheduleCancel")]
@@ -603,6 +610,9 @@ impl Hyperliquid {
                 command,
                 steps,
                 ids: Vec::new(),
+                writes: None,
+                frozen: None,
+                pending_write: None,
                 replacement,
                 amend_deadline: None,
                 amend_source,
@@ -905,6 +915,10 @@ impl Hyperliquid {
             return;
         }
         let job = self.trading.active.as_ref().unwrap();
+        if let Some(error) = job.writes.as_ref().and_then(write_plan::failure) {
+            self.finish_trade(cx, Err(error));
+            return;
+        }
         if job.steps.is_empty() {
             self.finish_trade(cx, Ok(()));
             return;
@@ -982,26 +996,21 @@ impl Hyperliquid {
             return;
         }
 
-        let step = self
-            .trading
-            .active
-            .as_mut()
-            .unwrap()
-            .steps
-            .pop_front()
-            .unwrap();
-        let prepared = self.prepare_write(cx, step);
-        let (action, effect) = match prepared {
-            Ok(v) => v,
+        if let Err(error) = self.finalize_writes(cx) {
+            self.finish_trade(cx, Err(error));
+            return;
+        }
+        let (action, effect) = match self.next_planned_write(cx) {
+            Ok(Some(prepared)) => prepared,
+            Ok(None) => {
+                self.pump_trades(cx);
+                return;
+            }
             Err(error) => {
-                self.finish_trade(cx, Err(not_sent(error)));
+                self.finish_trade(cx, Err(error));
                 return;
             }
         };
-        if matches!(&effect,Effect::Cancel(orders) if orders.is_empty()) {
-            self.pump_trades(cx);
-            return;
-        }
         if let Err(error) = self.submit_trade(cx, &action, effect) {
             self.finish_trade(cx, Err(error));
         }
@@ -1188,7 +1197,6 @@ impl Hyperliquid {
                     Effect::Place(records),
                 ))
             }
-            Step::Restore => self.prepare_protective_restore(cx),
             Step::Cancel(orders) => {
                 let cancels = orders
                     .iter()
@@ -1290,7 +1298,7 @@ impl Hyperliquid {
                 ),
             };
             if let Err(error) = reported {
-                self.finish_trade(cx, Err(error.venue_error()));
+                self.finish_trade(cx, Err(error.venue_error().outcome(Outcome::Unknown)));
                 return;
             }
             self.finish_trade(cx, outcome);
@@ -1327,7 +1335,7 @@ impl Hyperliquid {
                     )
                 } else {
                     if let Err(error) = self.report_trade_failure(cx, &request, &e, None) {
-                        self.finish_trade(cx, Err(error.venue_error()));
+                        self.finish_trade(cx, Err(error.venue_error().outcome(Outcome::Unknown)));
                         return;
                     }
                     self.restore_cancel(cx, &request.effect);
@@ -1424,7 +1432,11 @@ impl Hyperliquid {
             &errors.join_with(", "),
             idempotent_cancel,
         ) {
-            self.finish_trade(cx, Err(error.venue_error()));
+            self.finish_trade(cx, Err(error.venue_error().outcome(Outcome::Unknown)));
+            return;
+        }
+        if let Err(error) = self.settle_write_rows(&request, &statuses, status) {
+            self.finish_trade(cx, Err(error));
             return;
         }
         let full_position = request.order_reply == OrderReply::FullPosition;
@@ -1649,25 +1661,34 @@ impl Hyperliquid {
         }
         self.trading.inflight = false;
         let result = match result {
-            Err(error) => match self.protective_trade_failure(cx, error) {
-                Some(error) => Err(error),
-                None => return,
-            },
+            Err(error) => {
+                let error = self.fail_pending_write(error);
+                let error = match self
+                    .trading
+                    .active
+                    .as_ref()
+                    .and_then(|job| job.writes.as_ref())
+                    .and_then(write_plan::failure)
+                {
+                    Some(classified) => classified,
+                    None => error,
+                };
+                Err(error)
+            }
+            other => other,
+        };
+        let result = match result {
+            Err(error) => Err(self.protective_trade_failure(cx, error)),
             other => other,
         };
         if let Some(mut job) = self.trading.active.take() {
             if let Some(timer) = self.trading.builder_wait.take() {
                 cx.clear_timer(timer);
             }
-            let result = if result.is_ok() {
-                job.protection
-                    .as_ref()
-                    .and_then(|p| p.restored_error())
-                    .map_or(result, Err)
-            } else {
-                result
-            };
             if let Err(mut error) = result {
+                if let Some(plan) = job.writes.as_mut() {
+                    error = plan.failure(error);
+                }
                 error = error.partial_ids(&job.ids);
                 let unknown = error.outcome != Some(Outcome::Rejected)
                     || error.kind == Some(ErrorKind::RateLimited);

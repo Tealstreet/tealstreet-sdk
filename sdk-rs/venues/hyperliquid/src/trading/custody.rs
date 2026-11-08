@@ -655,9 +655,23 @@ impl Hyperliquid {
     }
     pub(crate) fn unproven_trade_evidence(
         &self,
+        request: &Request,
         response: Response<'_>,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
+        if let Some(plan) = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|job| {
+                job.command == request.command
+                    && job.custody.as_ref().and_then(|c| c.context.as_ref())
+                        == Some(&request.context)
+            })
+            .and_then(|job| job.writes.as_ref())
+        {
+            evidence.write_plan(plan);
+        }
         if let Ok(reply) = serde_json::from_str::<Reply<'_>>(response.body)
             && reply.status == "err"
             && let Ok(message) = serde_json::from_str::<String>(reply.response.get())
@@ -666,7 +680,7 @@ impl Hyperliquid {
         }
     }
     pub(super) fn report_trade_failure(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         request: &Request,
         error: &ReplyError,
@@ -676,7 +690,7 @@ impl Hyperliquid {
             code: safe_cex_engine::classify::NativeCode::None,
             message: table_message(native_message.unwrap_or(&error.message)),
         };
-        cx.http_write_failure(
+        let fact = cx.classify_write(
             &request.context,
             if !error.uncertain
                 && (self.protective_replacement_active()
@@ -688,10 +702,104 @@ impl Hyperliquid {
             },
             Some(&native),
             error.message.clone(),
+        )?;
+        cx.http_write_fact(
+            &request.context,
+            safe_cex_engine::classify::WriteFact::Failed {
+                fact: fact.clone(),
+                known_effects: false,
+            },
             None,
-        )
-        .map(drop)
+        )?;
+        if let Some(job) = self.trading.active.as_mut()
+            && let Some(index) = job.pending_write.take()
+            && let Some(plan) = job.writes.as_mut()
+        {
+            plan.fail(index, fact.error().clone())
+                .map_err(|_| safe_cex_engine::request_context::Error::Invalid)?;
+        }
+        Ok(())
     }
+    pub(super) fn settle_write_rows(
+        &mut self,
+        request: &Request,
+        statuses: &[Status],
+        status: Option<u16>,
+    ) -> Result<(), VenueError> {
+        use safe_cex_engine::classify::{self, Intent, Native, NativeCode, Released};
+        use safe_cex_engine::write_plan::ElementResult;
+        let Some(job) = self.trading.active.as_ref() else {
+            return Ok(());
+        };
+        let Some(index) = job.pending_write else {
+            return Ok(());
+        };
+        let count = match &request.effect {
+            Effect::Place(records) => records.len(),
+            _ => return Err(unproven("Unexpected journal effect")),
+        };
+        let intent = if job.amend_source.is_some() {
+            Intent::Amend
+        } else {
+            Intent::Place
+        };
+        let response = Response {
+            status: status.ok_or_else(|| unproven("Missing native reply"))?,
+            headers: "",
+            body: "",
+        };
+        let mut results = Vec::new();
+        for row in 0..count {
+            let status = if matches!(statuses, [Status::Error { .. }]) {
+                statuses.first()
+            } else {
+                statuses.get(row)
+            };
+            let result = match status {
+                Some(Status::Resting { resting }) => ElementResult::Placed {
+                    order_ids: vec![resting.oid.to_string()],
+                },
+                Some(Status::Filled { filled }) => ElementResult::Placed {
+                    order_ids: vec![filled.oid.to_string()],
+                },
+                Some(Status::Error { error }) => {
+                    let native = Native {
+                        code: NativeCode::None,
+                        message: table_message(error),
+                    };
+                    let table = if self.protective_replacement_active()
+                        && statuses.iter().all(|status| matches!(status, Status::Error { error } if known_protective_refusal(error)))
+                    { &PROTECTIVE_REFUSAL } else { &BATCH };
+                    // Native batch rows use table.verdict, matching classify::batch.
+                    let error = Box::new(classify::error(
+                        table.verdict(&native, intent),
+                        intent,
+                        Released::Response(&response),
+                        Some(&native),
+                        error.clone(),
+                    ));
+                    if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
+                        ElementResult::NotSent { error: Some(error) }
+                    } else {
+                        ElementResult::Unknown { error }
+                    }
+                }
+                _ => ElementResult::Unknown {
+                    error: Box::new(unproven("Unknown Hyperliquid order status")),
+                },
+            };
+            results.push(result);
+        }
+        if let Some(job) = self.trading.active.as_mut()
+            && let Some(plan) = job.writes.as_mut()
+        {
+            plan.settle(index, results)
+                .map_err(|e| unproven(e.to_string()))?;
+            job.pending_write = None;
+        }
+        Ok(())
+    }
+
     pub(super) fn report_trade_batch(
         &self,
         cx: &mut Cx<'_, Pending>,

@@ -1388,8 +1388,8 @@ impl Venue for Hyperliquid {
         response: Response<'_>,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
-        if matches!(pending, Pending::Trade(_)) {
-            self.unproven_trade_evidence(response, evidence);
+        if let Pending::Trade(request) = pending {
+            self.unproven_trade_evidence(request, response, evidence);
         }
     }
     fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
