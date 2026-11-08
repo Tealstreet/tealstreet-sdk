@@ -45,17 +45,6 @@ the original native `loss_plan` or `pos_loss` identity. Ambiguous writes are
 never retried. History reads page executions, orders, income and public trades
 into the engine query shapes and reject incomplete financial results.
 
-Placement and amend fallback planning snapshots native limits into each row.
-A pure validator checks every complete Classic batch or UTA write at its wire
-quantity and prices before the first write, including attached TP/SL. Invalid
-rows refuse the whole intent with `invalidInput/notSent`. Split tails borrow
-whole quantity steps from earlier lots when a valid allocation exists; valid
-existing allocations retain their sizes. A split replacement uses cancel/replace
-instead of an oversized native amend. Opening minimum value uses the rounded
-limit price or the market ticker reference. Reduce-only and protective orders
-retain the closing notional exemption while still obeying quantity limits;
-native full-position protective forms keep their omitted-quantity semantics.
-
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
 

@@ -148,7 +148,7 @@ fn order(amount: f64, caller: Option<&str>) -> PlaceOrderOpts {
 }
 
 #[test]
-fn zero_lot_row_refuses_the_whole_batch_with_or_without_a_caller_id() {
+fn zero_lot_row_is_skipped_but_caller_id_contract_still_preflights_entire_batch() {
     for uta_account in [false, true] {
         let mut h = if uta_account {
             uta()
@@ -158,16 +158,6 @@ fn zero_lot_row_refuses_the_whole_batch_with_or_without_a_caller_id() {
         h.command(Command::PlaceOrders {
             command: 1,
             orders: vec![order(0.0001, None), order(0.002, Some("valid"))],
-        });
-        assert!(h.done.last().unwrap().1.is_err());
-        assert_eq!(
-            h.failures.last().unwrap().outcome,
-            Some(safe_cex_engine::Outcome::NotSent)
-        );
-        assert!(h.requests.iter().all(|r| r.method == Method::Get));
-        h.command(Command::PlaceOrders {
-            command: 3,
-            orders: vec![order(0.002, Some("valid"))],
         });
         let request = h.take(if uta_account {
             "/place-order"
@@ -204,11 +194,7 @@ fn zero_lot_row_refuses_the_whole_batch_with_or_without_a_caller_id() {
         command: 1,
         orders: vec![order(0.0, None), order(0.0001, None)],
     });
-    assert!(h.done.last().unwrap().1.is_err());
-    assert_eq!(
-        h.failures.last().unwrap().outcome,
-        Some(safe_cex_engine::Outcome::NotSent)
-    );
+    assert_eq!(h.done.last().unwrap().1.as_ref().unwrap(), "[]");
     assert!(h.requests.iter().all(|r| r.method == Method::Get));
 }
 
