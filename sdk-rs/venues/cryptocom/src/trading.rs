@@ -1,4 +1,6 @@
 //! Commands are preflighted plans, then sent once in sequence.
+//! Venue-decoded Unknowns report accepted IDs, the uncertain request and withheld
+//! steps through passive command.unknown_inventory events before ending the job.
 use crate::account::id;
 use crate::sign::Params;
 use crate::wire::RestEnvelope;
@@ -21,6 +23,28 @@ use safe_cex_engine::{
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+fn unknown_inventory_row(
+    cx: &mut Cx<'_, Pending>,
+    command: u32,
+    scope: &'static str,
+    path: Option<&str>,
+    identity: Option<(&'static str, &str)>,
+) {
+    let mut fields = vec![("commandId", command.into()), ("scope", scope.into())];
+    if let Some(path) = path {
+        fields.push(("requestPath", path.into()));
+    }
+    if let Some((kind, id)) = identity {
+        fields.push((kind, id.into()));
+    }
+    cx.event(
+        safe_cex_engine::Level::Warn,
+        "command.unknown_inventory",
+        "The outcome is unknown. Check Open Orders",
+        fields,
+    );
+}
 
 fn local_mutation_policy() -> Policy {
     Policy {
@@ -800,6 +824,24 @@ impl Cryptocom {
             None
         }
     }
+    // No retained outcome state: read the current request and remaining queue once.
+    fn report_unknown(&self, cx: &mut Cx<'_, Pending>, request: &Request) {
+        let Some(job) = self.trading.jobs.get(&request.command) else {
+            return;
+        };
+        for id in &job.ids {
+            unknown_inventory_row(cx, request.command, "accepted", None, Some(("orderId", id)));
+        }
+        for (scope, step) in std::iter::once(("currentRequest", &request.step))
+            .chain(job.steps.iter().map(|step| ("withheld", step)))
+        {
+            let identity = match &step.call {
+                Call::Place(Some(receipt)) => Some(("clientOrderId", receipt.identity.as_str())),
+                _ => None,
+            };
+            unknown_inventory_row(cx, request.command, scope, Some(step.path), identity);
+        }
+    }
     pub(crate) fn trade_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -969,6 +1011,7 @@ impl Cryptocom {
             Err(_) => return,
         }
         if unknown {
+            self.report_unknown(cx, &request);
             let mut error = VenueError::new(format!(
                 "{}. The outcome is unknown. Check Open Orders",
                 diagnostic.as_deref().unwrap_or("Write was not confirmed")

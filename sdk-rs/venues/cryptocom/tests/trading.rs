@@ -15,11 +15,7 @@ fn assert_unknown(h: &Harness, command: u32, placed: &[&str]) {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        errors.len(),
-        1,
-        "one journal terminal reaches host telemetry"
-    );
+    assert_eq!(errors.len(), 1, "one journal terminal");
     assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
         errors[0].message.contains(ENGINE_UNKNOWN_TEXT),
@@ -32,6 +28,44 @@ fn assert_unknown(h: &Harness, command: u32, placed: &[&str]) {
         .map(|p| p.order_ids.iter().map(String::as_str).collect::<Vec<_>>())
         .unwrap_or_default();
     assert_eq!(ids, placed);
+}
+
+fn assert_unknown_inventory(actions: &[Action], command: u32, expected: &[(&str, &str, &str)]) {
+    let inventory: Vec<_> = actions
+        .iter()
+        .filter_map(|action| {
+            let Action::Notice(Notice::Event(event)) = action else {
+                return None;
+            };
+            if event.code != "command.unknown_inventory" {
+                return None;
+            }
+            assert_eq!(event.level, safe_cex_engine::Level::Warn);
+            assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert!(event.fields.iter().any(|(key, value)| *key == "commandId"
+                && *value == safe_cex_engine::Value::from(command)));
+            let field = |name| {
+                event
+                    .fields
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .and_then(|(_, value)| value.as_str())
+                    .unwrap_or("")
+            };
+            if field("scope") != "accepted" {
+                assert!(!field("requestPath").is_empty());
+            }
+            let (kind, identity) = ["orderId", "clientOrderId", "targetOrderId"]
+                .into_iter()
+                .find_map(|key| (!field(key).is_empty()).then_some((key, field(key))))
+                .unwrap_or(("", ""));
+            Some((field("scope"), kind, identity))
+        })
+        .collect();
+    assert_eq!(
+        inventory, expected,
+        "passive identity inventory, separate from the journal terminal"
+    );
 }
 
 #[test]
@@ -713,5 +747,14 @@ fn unknown_middle_native_error_or_malformed_ack_stops_after_accepted_prefix() {
                 .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("private/create-order")))
         );
         assert_unknown(&h, 1106, &["101"]);
+        assert_unknown_inventory(
+            &h.actions,
+            1106,
+            &[
+                ("accepted", "orderId", "101"),
+                ("currentRequest", "clientOrderId", "middle"),
+                ("withheld", "clientOrderId", "last"),
+            ],
+        );
     }
 }

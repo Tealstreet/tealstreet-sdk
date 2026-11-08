@@ -1,6 +1,6 @@
-//! Trading command jobs: each command owns a Preflight root, then one serial
-//! Plan. The venue decides which failures continue, with per-order locks.
-//! Every call signs Primary, and the journal retains all write outcomes.
+//! Each command owns a Preflight then serial Plan; the journal owns outcomes.
+//! Venue policy controls continuation and order locks. Calls sign Primary.
+//! Native Unknowns emit passive accepted/current-request/withheld identity events.
 use crate::account::{Axis, NativeOrder};
 use crate::sign::Params;
 use crate::wire::Str;
@@ -28,6 +28,28 @@ const CANCEL_TPSL: &str = "/api/v1/futures/tpsl/cancel_order";
 const AMEND: &str = "/api/v1/futures/trade/modify_order";
 const AMEND_TPSL: &str = "/api/v1/futures/tpsl/modify_order";
 const AMEND_FULL: &str = "/api/v1/futures/tpsl/position/modify_order";
+
+fn unknown_inventory_row(
+    cx: &mut Cx<'_, Pending>,
+    command: u32,
+    scope: &'static str,
+    path: Option<&str>,
+    identity: Option<(&'static str, &str)>,
+) {
+    let mut fields = vec![("commandId", command.into()), ("scope", scope.into())];
+    if let Some(path) = path {
+        fields.push(("requestPath", path.into()));
+    }
+    if let Some((kind, id)) = identity {
+        fields.push((kind, id.into()));
+    }
+    cx.event(
+        safe_cex_engine::Level::Warn,
+        "command.unknown_inventory",
+        "The outcome is unknown. Check Open Orders",
+        fields,
+    );
+}
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -158,6 +180,25 @@ impl Step {
     }
     fn single_place(&self) -> bool {
         matches!(self.call, Call::Place { batch: false, .. })
+    }
+    fn report_unknown(&self, cx: &mut Cx<'_, Pending>, command: u32, scope: &'static str) {
+        let mut report = |identity| {
+            unknown_inventory_row(cx, command, scope, Some(self.path), identity);
+        };
+        match &self.call {
+            Call::Place { clients, .. } if !clients.is_empty() => {
+                for id in clients {
+                    report(Some(("clientOrderId", id.as_str())));
+                }
+            }
+            Call::Cancel { ids, .. } if !ids.is_empty() => {
+                for id in ids {
+                    report(Some(("targetOrderId", id.as_str())));
+                }
+            }
+            Call::Amend { id, .. } => report(Some(("targetOrderId", id.as_str()))),
+            _ => report(None),
+        }
     }
     fn setting(&self) -> bool {
         matches!(
@@ -1777,6 +1818,21 @@ impl BitunixFutures {
             error.message = format!("{gone}: {}", error.message);
         }
     }
+    // This observes existing identities only; the engine journal owns outcomes.
+    fn report_unknown(&self, cx: &mut Cx<'_, Pending>, request: &Request) {
+        let Some(live) = self.trading.live.get(&request.command) else {
+            return;
+        };
+        for id in &live.job.ids {
+            unknown_inventory_row(cx, request.command, "accepted", None, Some(("orderId", id)));
+        }
+        request
+            .step
+            .report_unknown(cx, request.command, "currentRequest");
+        for step in &live.job.steps {
+            step.report_unknown(cx, request.command, "withheld");
+        }
+    }
     fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, mut error: VenueError) {
         self.kept_gone(command, &mut error);
         if error.outcome == Some(Outcome::Unknown) {
@@ -2146,6 +2202,9 @@ impl BitunixFutures {
                 self.advance(cx, command);
             }
             Err(Some(error)) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    self.report_unknown(cx, &request);
+                }
                 let continues = error.outcome != Some(Outcome::Unknown)
                     && self.failure_continues(&request, (200..300).contains(&response.status));
                 if let Some(live) = self.trading.live.get_mut(&command) {
@@ -2300,6 +2359,9 @@ impl BitunixFutures {
                 live.failure.get_or_insert(error);
             }
             return self.advance(cx, command);
+        }
+        if error.outcome == Some(Outcome::Unknown) {
+            self.report_unknown(cx, &request);
         }
         self.end(cx, command, error);
     }

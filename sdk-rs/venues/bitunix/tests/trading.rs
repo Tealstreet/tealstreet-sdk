@@ -16,11 +16,7 @@ fn assert_unknown_notice(actions: &[Action], command: u32, placed: &[&str]) {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        failures.len(),
-        1,
-        "one journal terminal reaches host telemetry"
-    );
+    assert_eq!(failures.len(), 1, "one journal terminal");
     let error = failures[0];
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
@@ -37,6 +33,44 @@ fn assert_unknown_notice(actions: &[Action], command: u32, placed: &[&str]) {
     assert!(!actions.iter().any(
         |a| matches!(a, Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command)
     ));
+}
+
+fn assert_unknown_inventory(actions: &[Action], command: u32, expected: &[(&str, &str, &str)]) {
+    let inventory: Vec<_> = actions
+        .iter()
+        .filter_map(|action| {
+            let Action::Notice(Notice::Event(event)) = action else {
+                return None;
+            };
+            if event.code != "command.unknown_inventory" {
+                return None;
+            }
+            assert_eq!(event.level, safe_cex_engine::Level::Warn);
+            assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert!(event.fields.iter().any(|(key, value)| *key == "commandId"
+                && *value == safe_cex_engine::Value::from(command)));
+            let field = |name| {
+                event
+                    .fields
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .and_then(|(_, value)| value.as_str())
+                    .unwrap_or("")
+            };
+            if field("scope") != "accepted" {
+                assert!(!field("requestPath").is_empty());
+            }
+            let (kind, identity) = ["orderId", "clientOrderId", "targetOrderId"]
+                .into_iter()
+                .find_map(|key| (!field(key).is_empty()).then_some((key, field(key))))
+                .unwrap_or(("", ""));
+            Some((field("scope"), kind, identity))
+        })
+        .collect();
+    assert_eq!(
+        inventory, expected,
+        "passive identity inventory, separate from the journal terminal"
+    );
 }
 
 fn after_failure_actions(e: &mut TestEngine) -> Vec<Action> {
@@ -93,6 +127,20 @@ fn unknown_chunk_stops(failure: &str) {
     let actions = after_failure_actions(&mut e);
     assert!(after_failure_writes(&actions).is_empty());
     assert_unknown_notice(&actions, 990, &[]);
+    if failure != "transport" {
+        assert_unknown_inventory(
+            &actions,
+            990,
+            &[
+                ("currentRequest", "clientOrderId", "after-failure-0"),
+                ("currentRequest", "clientOrderId", "after-failure-1"),
+                ("currentRequest", "clientOrderId", "after-failure-2"),
+                ("currentRequest", "clientOrderId", "after-failure-3"),
+                ("currentRequest", "clientOrderId", "after-failure-4"),
+                ("withheld", "clientOrderId", "after-failure-5"),
+            ],
+        );
+    }
 }
 
 #[test]
@@ -1767,11 +1815,7 @@ fn unknown_fallback_replacement_http503_keeps_engine_sealed_wording() {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        failures.len(),
-        1,
-        "one journal terminal reaches host telemetry"
-    );
+    assert_eq!(failures.len(), 1, "one journal terminal");
     assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert_eq!(
         failures[0].message,
@@ -1903,4 +1947,85 @@ fn alloc_ts_fractional_thousandth_step() {
 #[test]
 fn alloc_ts_at_maximum_control() {
     assert_ts_allocated_writes(5.0, 5.0, 1.0, &["5"], 5.0);
+}
+
+#[test]
+fn unknown_second_chunk_reports_accepted_ids_current_clients_and_withheld_tail() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1210,
+            orders: (0..11)
+                .map(|index| {
+                    let mut row = order("");
+                    row.client_order_id = Some(format!("inventory-{index}"));
+                    row
+                })
+                .collect(),
+        }),
+    );
+    let first = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&first);
+    assert_eq!(writes.len(), 1);
+    assert!(writes[0].url.ends_with("/batch_order"));
+    reply(
+        &mut e,
+        writes[0].id,
+        r#"{"code":0,"data":{"successList":[{"orderId":"1"},{"orderId":"2"},{"orderId":"3"},{"orderId":"4"},{"orderId":"5"}],"failureList":[]}}"#,
+    );
+    let paced = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&paced).is_empty());
+    let timer = paced
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("TS chunk pacing");
+    e.handle(1000.0, Event::TimerFired { timer });
+    let second = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&second);
+    assert_eq!(writes.len(), 1);
+    let body: serde_json::Value = serde_json::from_str(writes[0].body.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        body["orderList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["clientId"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "inventory-5",
+            "inventory-6",
+            "inventory-7",
+            "inventory-8",
+            "inventory-9"
+        ]
+    );
+    reply(
+        &mut e,
+        writes[0].id,
+        r#"{"code":20003,"msg":"Insufficient balance"}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    assert_unknown_notice(&actions, 1210, &["1", "2", "3", "4", "5"]);
+    assert_unknown_inventory(
+        &actions,
+        1210,
+        &[
+            ("accepted", "orderId", "1"),
+            ("accepted", "orderId", "2"),
+            ("accepted", "orderId", "3"),
+            ("accepted", "orderId", "4"),
+            ("accepted", "orderId", "5"),
+            ("currentRequest", "clientOrderId", "inventory-5"),
+            ("currentRequest", "clientOrderId", "inventory-6"),
+            ("currentRequest", "clientOrderId", "inventory-7"),
+            ("currentRequest", "clientOrderId", "inventory-8"),
+            ("currentRequest", "clientOrderId", "inventory-9"),
+            ("withheld", "clientOrderId", "inventory-10"),
+        ],
+    );
 }
