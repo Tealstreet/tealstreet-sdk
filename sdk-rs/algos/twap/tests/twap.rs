@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 
-use safe_cex_algo_twap::SliceFailure;
 use safe_cex_algo_twap::{
     ChaserProgress, OrderKind, OrderSide, TickerQuote, TwapBook, TwapEffect, TwapEnv,
     TwapMarketView, TwapStatus,
 };
+use safe_cex_engine::error::{Outcome, VenueError};
 use serde_json::{Value, json};
 
 struct Env {
@@ -175,10 +175,11 @@ fn state_updates(effects: &[TwapEffect]) -> Vec<&Value> {
 }
 
 /// Settle every slice placement in `effects` with `outcome`.
-fn refused(message: &str) -> Result<Vec<String>, SliceFailure> {
-    Err(SliceFailure {
+fn refused(message: &str) -> Result<Vec<String>, VenueError> {
+    Err(VenueError {
         message: message.to_owned(),
-        nothing_placed: true,
+        outcome: Some(Outcome::NotSent),
+        ..Default::default()
     })
 }
 
@@ -187,7 +188,7 @@ fn settle_all(
     env: &mut Env,
     id: &str,
     effects: &[TwapEffect],
-    outcome: Result<Vec<String>, SliceFailure>,
+    outcome: Result<Vec<String>, VenueError>,
 ) -> Vec<TwapEffect> {
     let mut out = Vec::new();
     for (token, _) in placements(effects) {
@@ -298,7 +299,13 @@ fn start_from_idle_sets_started_at_and_running() {
         &view,
         json!({ "size": 0.001, "ordersCount": 2 }),
     );
-    settle_all(&mut book, &mut env, &id, &effects, Ok(vec![]));
+    settle_all(
+        &mut book,
+        &mut env,
+        &id,
+        &effects,
+        Ok(vec!["native-order".into()]),
+    );
     let instance = book.get(&id).unwrap();
     assert_eq!(instance.state.started_at, Some(env.now));
     assert_eq!(instance.state.status, TwapStatus::Running);
@@ -371,7 +378,13 @@ fn slices_run_on_the_interval_and_complete() {
     loop {
         let amounts = market_amounts(&effects);
         placed += amounts.len();
-        let settled = settle_all(&mut book, &mut env, &id, &effects, Ok(vec![]));
+        let settled = settle_all(
+            &mut book,
+            &mut env,
+            &id,
+            &effects,
+            Ok(vec!["native-order".into()]),
+        );
         if book.get(&id).is_none() {
             let last = state_updates(&settled);
             assert_eq!(last.last().unwrap(), &&json!({}));
@@ -452,7 +465,13 @@ fn pause_stops_the_schedule_and_resume_keeps_next_order_at() {
     let (mut env, view) = (Env::new(), View::default());
     let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({}));
-    settle_all(&mut book, &mut env, &id, &effects, Ok(vec![]));
+    settle_all(
+        &mut book,
+        &mut env,
+        &id,
+        &effects,
+        Ok(vec!["native-order".into()]),
+    );
     let next = book.get(&id).unwrap().state.next_order_at;
     book.handle("twap:pause", &json!(id), &mut env, &view);
     assert_eq!(book.get(&id).unwrap().state.status, TwapStatus::Paused);
@@ -482,7 +501,13 @@ fn in_flight_placement_settling_after_terminate_does_not_resurrect() {
     assert_eq!(placements(&effects).len(), 1);
     book.handle("twap:stop", &json!(id), &mut env, &view);
     assert!(book.get(&id).is_none());
-    let settled = settle_all(&mut book, &mut env, &id, &effects, Ok(vec![]));
+    let settled = settle_all(
+        &mut book,
+        &mut env,
+        &id,
+        &effects,
+        Ok(vec!["native-order".into()]),
+    );
     assert!(placements(&settled).is_empty());
     env.advance(120_000.0);
     assert!(book.wake(&mut env, &view).is_empty());
@@ -869,9 +894,21 @@ fn serialize_state_skips_completed_twaps() {
     let mut book = TwapBook::new("test-account");
     assert_eq!(book.serialize_state(), json!({}));
     let (running, effects) = start(&mut book, &mut env, &view, json!({}));
-    settle_all(&mut book, &mut env, &running, &effects, Ok(vec![]));
+    settle_all(
+        &mut book,
+        &mut env,
+        &running,
+        &effects,
+        Ok(vec!["native-order".into()]),
+    );
     let (paused, effects) = start(&mut book, &mut env, &view, json!({}));
-    settle_all(&mut book, &mut env, &paused, &effects, Ok(vec![]));
+    settle_all(
+        &mut book,
+        &mut env,
+        &paused,
+        &effects,
+        Ok(vec!["native-order".into()]),
+    );
     book.handle("twap:pause", &json!(paused), &mut env, &view);
     let (stopped, _) = start(&mut book, &mut env, &view, json!({}));
     book.handle("twap:stop", &json!(stopped), &mut env, &view);
@@ -1108,9 +1145,10 @@ fn an_unknown_placement_outcome_still_advances_the_slice() {
         &mut env,
         &id,
         &effects,
-        Err(SliceFailure {
+        Err(VenueError {
             message: "outcome unknown, the order may be live: timeout".into(),
-            nothing_placed: false,
+            outcome: Some(Outcome::Unknown),
+            ..Default::default()
         }),
     );
     assert_eq!(

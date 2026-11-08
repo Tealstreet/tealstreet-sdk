@@ -101,14 +101,6 @@ pub struct TwapOrderRequest {
     pub client_order_id: Option<String>,
 }
 
-/// Why a slice placement failed, and whether that proves no order exists.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SliceFailure {
-    pub message: String,
-    /// False when an order may be live: the slice still counts as executed.
-    pub nothing_placed: bool,
-}
-
 /// The chaser a `useChaserOrders` slice starts, with the id TWAP tracks it by.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChaserRequest {
@@ -125,6 +117,12 @@ pub struct ChaserRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TwapEffect {
+    /// Complete indexed facts, emitted before a completed instance is retired.
+    Outcome {
+        twap_id: String,
+        elements: Vec<safe_cex_engine::write_plan::ElementOutcome>,
+        error: Option<Box<VenueError>>,
+    },
     /// Place through the engine. With a `settle_token`, report the outcome to
     /// [`TwapBook::placement_settled`]; without one the outcome is ignored.
     PlaceOrder {
@@ -298,7 +296,7 @@ impl TwapBook {
         &mut self,
         twap_id: &str,
         token: u64,
-        outcome: Result<Vec<String>, SliceFailure>,
+        outcome: Result<Vec<String>, VenueError>,
         env: &mut dyn TwapEnv,
     ) -> Vec<TwapEffect> {
         let mut effects = Vec::new();
@@ -526,6 +524,7 @@ impl TwapBook {
         let mut finished = Vec::new();
         for entry in &mut self.entries {
             changed |= entry.instance.take_state_changed();
+            entry.instance.report_outcomes(effects);
             if entry.managed && entry.instance.state.status == TwapStatus::Completed {
                 entry.managed = false;
                 finished.push(entry.instance.id.clone());

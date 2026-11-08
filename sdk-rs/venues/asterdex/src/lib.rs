@@ -1273,13 +1273,15 @@ impl Venue for AsterDex {
                                     .then_some(rule.min_notional),
                                 reduce_only_exempt: true,
                                 price_tick: Some(rule.tick_size),
-                                market_amount: Some(safe_cex_engine::model::MarketAmountRules {
-                                    minimum: (rule.market_lot.min != 0.0)
-                                        .then_some(rule.market_lot.min),
-                                    maximum: (rule.market_lot.max != 0.0)
-                                        .then_some(rule.market_lot.max),
-                                    step: Some(rule.market_lot.step),
-                                }),
+                                market_amount: Some(
+                                    safe_cex_engine::market_facts::MarketAmountRules {
+                                        minimum: (rule.market_lot.min != 0.0)
+                                            .then_some(rule.market_lot.min),
+                                        maximum: (rule.market_lot.max != 0.0)
+                                            .then_some(rule.market_lot.max),
+                                        step: Some(rule.market_lot.step),
+                                    },
+                                ),
                                 ..Default::default()
                             },
                         )

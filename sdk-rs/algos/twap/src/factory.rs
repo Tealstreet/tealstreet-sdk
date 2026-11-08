@@ -8,14 +8,14 @@ use std::rc::Rc;
 use safe_cex_algos::{AlgoCx, AlgoFactory};
 use safe_cex_chaser::{ChaserBook, ChaserOptions, ClientIdMinter};
 use safe_cex_engine::engine::Command;
-use safe_cex_engine::error::{Outcome, VenueError};
+use safe_cex_engine::error::{ErrorKind, Outcome, VenueError};
 use safe_cex_engine::model::{OrderSide as EngineSide, PlaceOrderOpts};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 
 use crate::{
-    ChaserProgress, ChaserRequest, OrderKind, OrderSide, SliceFailure, TickerQuote, TwapBook,
-    TwapEffect, TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest,
+    ChaserProgress, ChaserRequest, OrderKind, OrderSide, TickerQuote, TwapBook, TwapEffect,
+    TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest,
 };
 
 /// The account's chaser runtime, as TWAP slices use it.
@@ -229,6 +229,14 @@ impl Inner {
     fn run(inner: &Rc<Self>, cx: &AlgoCx, effects: Vec<TwapEffect>) {
         for effect in effects {
             match effect {
+                TwapEffect::Outcome {
+                    twap_id,
+                    elements,
+                    error,
+                } => cx.port.emit(
+                    "twap:outcome",
+                    json!({ "id": twap_id, "elements": elements, "error": error }).to_string(),
+                ),
                 TwapEffect::PlaceOrder {
                     twap_id,
                     settle_token,
@@ -256,10 +264,9 @@ impl Inner {
         let command = match place_command(cx, request) {
             Ok(command) => command,
             Err(message) => {
-                let failure = SliceFailure {
-                    message,
-                    nothing_placed: true,
-                };
+                let failure = VenueError::new(message)
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent);
                 match settle_token {
                     Some(token) => Self::settled(inner, cx, &twap_id, token, Err(failure)),
                     None => report_remainder(cx, &request.symbol, &failure.message),
@@ -288,7 +295,7 @@ impl Inner {
         cx: &AlgoCx,
         twap_id: &str,
         token: u64,
-        outcome: Result<Vec<String>, SliceFailure>,
+        outcome: Result<Vec<String>, VenueError>,
     ) {
         let effects = {
             let mut env = inner.env.borrow_mut();
@@ -306,21 +313,30 @@ impl Inner {
 /// A slice placement's ids, or its failure. Ids that cannot be read and unknown
 /// outcomes say the order may be live. Only a whole refusal proves nothing was
 /// placed; an unclassified error or a partial one does not.
-pub fn placement_outcome(result: Result<String, VenueError>) -> Result<Vec<String>, SliceFailure> {
+pub fn placement_outcome(result: Result<String, VenueError>) -> Result<Vec<String>, VenueError> {
     match result {
-        Ok(result) => serde_json::from_str::<Vec<String>>(&result).map_err(|_| SliceFailure {
-            message: format!("order ids unknown, the order may be live (result {result})"),
-            nothing_placed: false,
-        }),
-        Err(error) if error.outcome == Some(Outcome::Unknown) => Err(SliceFailure {
-            message: format!("outcome unknown, the order may be live: {}", error.message),
-            nothing_placed: false,
-        }),
-        Err(error) => Err(SliceFailure {
-            nothing_placed: matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-                && error.partial.is_none(),
-            message: error.message,
-        }),
+        Ok(result) => serde_json::from_str::<Vec<String>>(&result)
+            .ok()
+            .filter(|ids| !ids.is_empty() && ids.iter().all(|id| !id.is_empty()))
+            .ok_or_else(|| {
+                VenueError::new("order ids unknown, the order may be live")
+                    .outcome(Outcome::Unknown)
+            }),
+        Err(mut error) => {
+            if error.outcome.is_none()
+                || error
+                    .partial
+                    .as_ref()
+                    .is_some_and(|partial| !partial.order_ids.is_empty())
+            {
+                error.outcome = Some(Outcome::Unknown);
+            }
+            if error.outcome == Some(Outcome::Unknown) {
+                error.message =
+                    format!("outcome unknown, the order may be live: {}", error.message);
+            }
+            Err(error)
+        }
     }
 }
 
@@ -455,7 +471,7 @@ impl TwapMarketView for CxView<'_> {
             .ok_or_else(|| crate::plan::invalid("TWAP native price tick is unavailable"))?;
         request.price = request
             .price
-            .map(|price| safe_cex_engine::model::MarketOrderFacts::round_price(price, tick));
+            .map(|price| safe_cex_engine::market_facts::MarketOrderFacts::round_price(price, tick));
         let rules = self
             .order_rules(&request)
             .ok_or_else(|| crate::plan::invalid("TWAP native market rules are unavailable"))?;

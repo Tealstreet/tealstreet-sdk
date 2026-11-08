@@ -5,10 +5,9 @@ use crate::math::{add, lodash_random, multiply, subtract};
 use crate::types::{
     InFlightSlice, OrderSide, SliceAction, TwapOptions, TwapOrigin, TwapState, TwapStatus,
 };
-use crate::{
-    ChaserRequest, OrderKind, SliceFailure, TwapEffect, TwapEnv, TwapMarketView, TwapOrderRequest,
-};
-use safe_cex_engine::error::VenueError;
+use crate::{ChaserRequest, OrderKind, TwapEffect, TwapEnv, TwapMarketView, TwapOrderRequest};
+use safe_cex_engine::error::{Outcome, VenueError};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, PlannedWrite, WritePlan};
 use serde_json::Map;
 
 /// The chaser a slice spawns gives up after this many reprices, as in TS.
@@ -20,6 +19,7 @@ const SLICE_SETTLE_POLL_MS: f64 = 250.0;
 #[derive(Clone, Debug)]
 struct PendingSlice {
     token: u64,
+    write_index: usize,
     priced_limit: bool,
     executed_before: u32,
     next_order_at: f64,
@@ -34,7 +34,7 @@ struct SliceTimeout {
     market_when_settled: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct TwapInstance {
     pub id: String,
     pub options: TwapOptions,
@@ -48,6 +48,9 @@ pub struct TwapInstance {
     state_changed: bool,
     prepared: bool,
     planned_writes: Vec<crate::plan::PlannedOrder>,
+    write_plan: Option<WritePlan<crate::plan::PlannedOrder>>,
+    terminal_error: Option<VenueError>,
+    outcomes_reported: bool,
 }
 
 impl TwapInstance {
@@ -71,6 +74,9 @@ impl TwapInstance {
             state_changed: false,
             prepared: false,
             planned_writes: Vec::new(),
+            write_plan: None,
+            terminal_error: None,
+            outcomes_reported: false,
         }
     }
 
@@ -86,6 +92,31 @@ impl TwapInstance {
     /// Every admitted child, including explicit unknown notional facts.
     pub fn planned_writes(&self) -> &[crate::plan::PlannedOrder] {
         &self.planned_writes
+    }
+
+    pub(crate) fn report_outcomes(&mut self, effects: &mut Vec<TwapEffect>) {
+        if self.state.status != TwapStatus::Completed
+            || self.has_outstanding_work()
+            || self.outcomes_reported
+        {
+            return;
+        }
+        if let Some(plan) = &self.write_plan {
+            effects.push(TwapEffect::Outcome {
+                twap_id: self.id.clone(),
+                elements: plan.outcomes(),
+                error: self.terminal_error.clone().map(Box::new),
+            });
+            self.outcomes_reported = true;
+        }
+    }
+
+    fn stop_plan(&mut self, error: VenueError) {
+        self.terminal_error = Some(match &mut self.write_plan {
+            Some(plan) => plan.failure(error),
+            None => error,
+        });
+        self.terminate();
     }
 
     /// The earliest timer deadline, if any timer is armed.
@@ -112,6 +143,22 @@ impl TwapInstance {
 
     /// Materialize every wire quantity, carrying dust before checking any slice.
     pub(crate) fn prepare(&mut self, view: &dyn TwapMarketView) -> Result<(), VenueError> {
+        if self.prepared {
+            let released = self
+                .planned_writes
+                .len()
+                .saturating_sub(self.state.orders_sizes.len());
+            for write in &self.planned_writes[released..] {
+                let current = view.prepare_order(write.request.clone())?;
+                crate::plan::validate_write(&current)?;
+                if current.request != write.request {
+                    return Err(crate::plan::invalid(
+                        "TWAP prepared wire values no longer match native rules",
+                    ));
+                }
+            }
+            return Ok(());
+        }
         let mut sizes = self.state.orders_sizes.clone();
         let step = view
             .order_rules(&self.request(sizes.first().copied().unwrap_or(0.0), view))
@@ -136,13 +183,27 @@ impl TwapInstance {
         }
         let mut writes = Vec::with_capacity(sizes.len());
         for size in &sizes {
-            let write = view.prepare_order(self.request(*size, view))?;
-            crate::plan::validate_write(&write)?;
+            let mut write = view.prepare_order(self.request(*size, view))?;
+            if !self.options.use_chaser_orders {
+                write.request.client_order_id = view.client_order_id(&write.request);
+            }
             writes.push(write);
         }
-        let released = self.planned_writes.len().saturating_sub(writes.len());
-        self.planned_writes.truncate(released);
-        self.planned_writes.extend(writes);
+        self.write_plan = Some(WritePlan::validate(
+            writes
+                .iter()
+                .enumerate()
+                .map(|(index, write)| PlannedWrite {
+                    payload: write.clone(),
+                    elements: vec![Element {
+                        index,
+                        client_order_id: write.request.client_order_id.clone(),
+                    }],
+                })
+                .collect(),
+            crate::plan::validate_write,
+        )?);
+        self.planned_writes = writes;
         self.state.orders_sizes = sizes;
         self.prepared = true;
         Ok(())
@@ -197,19 +258,11 @@ impl TwapInstance {
         }
         if let Err(error) = self.prepare(view) {
             effects.push(TwapEffect::Log {
-                message: error.message,
+                message: error.message.clone(),
             });
-            self.terminate();
+            self.stop_plan(error);
             return;
         }
-        let planned_index = self
-            .planned_writes
-            .len()
-            .saturating_sub(self.state.orders_sizes.len());
-        let prepared_request = self
-            .planned_writes
-            .get(planned_index)
-            .map(|write| write.request.clone());
         let order_size =
             (!self.state.orders_sizes.is_empty()).then(|| self.state.orders_sizes.remove(0));
         let randomness = self.options.randomness_percentage;
@@ -235,8 +288,38 @@ impl TwapInstance {
             return;
         };
 
+        let Some((write_index, write)) = self.write_plan.as_mut().and_then(WritePlan::next_write)
+        else {
+            self.stop_plan(crate::plan::invalid(
+                "TWAP has no available validated write",
+            ));
+            return;
+        };
+        let request = write.payload.request.clone();
+
         if self.options.use_chaser_orders {
             let started = self.start_slice_chaser(order_size, env, view, effects);
+            let settled = match &mut self.write_plan {
+                Some(plan) if started => plan.settle(
+                    write_index,
+                    vec![ElementResult::Applied {
+                        effect: AppliedEffect::DeferredChild,
+                        target_order_id: None,
+                        position_key: None,
+                    }],
+                ),
+                Some(plan) => plan.fail(write_index, crate::plan::invalid("chaser refused")),
+                None => return,
+            };
+            if let Err(error) = settled {
+                self.stop_plan(VenueError::new(error.to_string()).outcome(Outcome::Unknown));
+                return;
+            }
+            if !started {
+                self.stop_plan(crate::plan::invalid("chaser refused"));
+                self.report_shortfall(effects);
+                return;
+            }
             self.finish_slice(
                 executed_before + u32::from(started),
                 next_order_at,
@@ -247,27 +330,17 @@ impl TwapInstance {
             return;
         }
 
-        let Some(mut request) = prepared_request else {
-            effects.push(TwapEffect::Log {
-                message: "TWAP has no validated write for its next slice".to_owned(),
-            });
-            self.terminate();
-            return;
-        };
         let priced = request.kind == OrderKind::Limit;
         let token = self.next_token;
         self.next_token += 1;
         self.pending.push(PendingSlice {
             token,
+            write_index,
             priced_limit: priced,
             executed_before,
             next_order_at,
             wait_ms,
         });
-        request.client_order_id = view.client_order_id(&request);
-        if let Some(write) = self.planned_writes.get_mut(planned_index) {
-            write.request.client_order_id = request.client_order_id.clone();
-        }
         // Persisted before the order goes out: a host that dies before the slice
         // is counted leaves a restore something to look up instead of re-placing.
         self.state.in_flight = Some(InFlightSlice {
@@ -301,12 +374,11 @@ impl TwapInstance {
     }
 
     /// The engine's answer to a slice [`TwapEffect::PlaceOrder`]: the order ids,
-    /// or the failure. The TWAP moves on either way, as in TS, but a slice proven
-    /// not placed is not counted as executed (TS counts it).
+    /// or the classified native failure. Any failure seals the remaining plan.
     pub fn placement_settled(
         &mut self,
         token: u64,
-        outcome: Result<Vec<String>, SliceFailure>,
+        outcome: Result<Vec<String>, VenueError>,
         env: &mut dyn TwapEnv,
         effects: &mut Vec<TwapEffect>,
     ) {
@@ -323,6 +395,29 @@ impl TwapInstance {
             self.state.in_flight = None;
         }
         let mut executed = pending.executed_before + 1;
+        let outcome = match outcome {
+            Ok(ids) if ids.is_empty() || ids.iter().any(String::is_empty) => {
+                Err(VenueError::new("order ids unknown, the order may be live")
+                    .outcome(Outcome::Unknown))
+            }
+            other => other,
+        };
+        let settlement = match &mut self.write_plan {
+            Some(plan) => match &outcome {
+                Ok(ids) => plan.settle(
+                    pending.write_index,
+                    vec![ElementResult::Placed {
+                        order_ids: ids.clone(),
+                    }],
+                ),
+                Err(error) => plan.fail(pending.write_index, error.clone()),
+            },
+            None => return,
+        };
+        if let Err(error) = settlement {
+            self.stop_plan(VenueError::new(error.to_string()).outcome(Outcome::Unknown));
+            return;
+        }
         match outcome {
             Ok(order_ids) => {
                 if pending.priced_limit && !order_ids.is_empty() {
@@ -330,7 +425,9 @@ impl TwapInstance {
                 }
             }
             Err(failure) => {
-                if failure.nothing_placed {
+                if matches!(failure.outcome, Some(Outcome::NotSent | Outcome::Rejected))
+                    && failure.partial.is_none()
+                {
                     executed = pending.executed_before;
                 }
                 effects.push(TwapEffect::Log {
@@ -340,6 +437,10 @@ impl TwapInstance {
                         failure.message
                     ),
                 });
+                self.state.orders_executed = executed;
+                self.stop_plan(failure);
+                self.report_shortfall(effects);
+                return;
             }
         }
         // terminate() may have run while the placement was in flight.

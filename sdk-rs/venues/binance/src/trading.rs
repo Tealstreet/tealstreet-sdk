@@ -235,7 +235,7 @@ pub struct TradingState {
     /// MIN_NOTIONAL by symbol. Market limits carry no value minimum.
     pub(crate) min_notional: HashMap<String, f64>,
     pub(crate) min_notional_market_exempt: HashMap<String, bool>,
-    pub(crate) market_amount: HashMap<String, safe_cex_engine::model::MarketAmountRules>,
+    pub(crate) market_amount: HashMap<String, safe_cex_engine::market_facts::MarketAmountRules>,
     jobs: HashMap<CommandId, Job>,
     /// While an amendment plans its replacement: the original row's hedge side.
     amended_position_side: Option<&'static str>,
