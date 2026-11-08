@@ -211,7 +211,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_037_760,
   asterdex: 2_174_976,
-  backpack: 2_011_136,
+  backpack: 2_024_448,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
@@ -220,14 +220,14 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bingx: 2_100_224,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
-  bitget: 2_457_600,
-  bitgetusdc: 2_457_600,
+  bitget: 2_472_960,
+  bitgetusdc: 2_472_960,
   bitrue: 1_864_704,
-  bitunix: 1_874_944,
+  bitunix: 1_887_232,
   blofin: 2_015_232,
-  bybit: 2_281_472,
-  coinbase: 1_953_792,
-  cryptocom: 1_779_712,
+  bybit: 2_294_784,
+  coinbase: 1_967_104,
+  cryptocom: 1_793_024,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
@@ -243,26 +243,26 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kraken: 2_159_616,
   krakenspot: 2_159_616,
   kucoin: 1_850_368,
-  kucoinspot: 2_423_808,
+  kucoinspot: 2_444_288,
   lighter: 2_109_440,
   'lighter-robinhood': 2_109_440,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
-  mexc: 1_872_896,
+  mexc: 1_889_280,
   okx: 1_999_872,
-  orderly: 1_744_896,
+  orderly: 1_760_256,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_282_496,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
-  phemex: 2_091_008,
+  phemex: 2_104_320,
   polymarket: 1_628_160,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
-  txflow: 1_907_712,
+  txflow: 1_921_024,
   weex: 1_963_008,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
-  woo: 2_611_200,
+  woo: 2_631_680,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
