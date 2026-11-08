@@ -1,26 +1,29 @@
-# Bybit legacy parity and outcome reporting
+# Bybit legacy parity and passive outcome reporting
 
-Legacy TypeScript owns the write behavior. Ordinary non-option orders have no
-new whole-command price, precision or minimum-notional gate. Existing capability,
-caller-ID and option preflight checks remain. The previous Rust lot normalization
-and transport classification stay in their existing owners.
+Legacy TypeScript owns write behavior. Ordinary non-option orders have no new
+whole-command price, precision or minimum-notional gate. Existing capability,
+caller-ID and option preflight checks remain, alongside pre-PR Rust lot formatting
+and engine-owned custody, signing and physical classification.
 
-Hyro awaits each order and stops when it fails. Its shared `WritePlan` is a
-reporting journal with an accepting callback; it records Placed,
-Applied, the classified failure and untouched NotSent rows. Typed envelopes retain
-native effect scopes without untyped JSON trees or invented order IDs. Read-only
-partial-stop confirmation requests consume no mutation index.
+Every ordinary and Hyro mutation has logical indices in the passive shared
+`WritePlan::new/record/attach` journal. It holds no payload, admission callback,
+next-write state or stop flag. The venue records pending rows as Unknown before
+transport, then records classified native results. Read-only cancellation proofs
+have no mutation index. Native batch fallback singles retain the original logical
+row indices and replace their earlier refused result with the actual fallback fact.
 
-Spot runs all lots of the current order before throwing its collected native
-refusal, then stops before the next caller order. Caught provider failures retain
-their separate continuation behavior. Placement there uses existing engine aggregate reporting, since a
-permanently stopping journal would change the latter behavior.
+After a definite refusal, Spot finishes the current caller order's lots, then
+stops before the next caller order. Caught provider refusals retain TS continuation.
+Linear/Inverse rows, chunks, fallback singles and special/option orders also
+continue after definite refusals according to their TS paths. Hyro serial writes,
+cancellation suffixes and single-setting commands stop where TS stops.
 
-Linear/Inverse batch placement retains the pre-adoption native batch-to-single
-fallback and continuation schedule. This path uses its existing engine aggregate
-reporting: the shared helper permanently stops after a failure, so enabling it
-here would change the legacy write sequence. No new helper API or venue-local
-replacement journal is introduced.
+Genuine Unknown halts every affected action, including suffixes and batch fallback.
+This is the recorded stop-after-UNKNOWN parity exception (Sean/daxx, 2026-11-08):
+TS continues in Spot payload catches and Linear/Inverse special/batch catches, but
+Rust preserves the duplicate-write fence. Errors retain placed and unknown rows
+and the canonical text "The outcome is unknown. Check Open Orders". The journal
+reports these decisions without making them.
 
 | Accepted effect | Correlation |
 | --- | --- |
@@ -28,30 +31,26 @@ replacement journal is introduced.
 | Cancel-all | Native category, symbol/coin and order-filter scope |
 | Amend, attached-leg clear | Existing native parent/target ID |
 | Trading-stop, partial-stop replacement | Native category, symbol and position index |
-| Leverage, margin mode, position mode | Native symbol/coin scope or account setting endpoint |
+| Leverage, margin mode, position mode | Native symbol/coin scope or setting endpoint |
 
-Partial TP/SL edits cancel then replace, as TS does. Replacement payloads use the
-native default Market execution and omit conditional Limit execution fields for
-both Full and Partial modes. A failed replacement does not automatically restore
-the old stop: TS has no such catch/restore branch. Protection warnings and native
-reconciliation remain. Existing declared batch fallbacks are retained. A refused
-cancel family stops the remaining family requests, matching TS cancellation
-failure semantics.
+Partial TP/SL edits cancel then replace. Replacement payloads use native default
+Market execution and omit conditional Limit fields for Full and Partial modes.
+TS does not automatically restore a failed replacement; its batch fallbacks remain.
+Protection warnings and native reconciliation stay in their existing owners.
 
-Known legacy issue: ordinary missing/zero prices, below-minimum notionals and
-other later native refusals may follow accepted rows. Batch rows/chunks may
-continue after earlier failures. This PR does not add an atomic-admission policy.
+Attaching changes only optional `elements`; the engine owns aggregate outcome,
+partial IDs and retry metadata. Unknown presentation adds the canonical shared
+wording in venue-local code. The existing unproven-HTTP evidence hook copies the
+journal when the engine seals before venue decoding. Reporting errors emit
+diagnostics without refusing or terminating native dispatch.
 
-The earlier [split-plan invariant](https://github.com/Tealstreet/tealstreet-sdk/blob/docs/split-plan-invariant/docs/plans/SPLIT_PLAN_INVARIANT.md)
-is superseded for this PR by the owner's legacy-parity scope.
+Known legacy issue: ordinary missing/zero prices and below-minimum notionals can
+follow accepted rows. Native batch errors can be followed by later writes. This
+PR adds no atomic-admission policy. The earlier [split-plan invariant](https://github.com/Tealstreet/tealstreet-sdk/blob/docs/split-plan-invariant/docs/plans/SPLIT_PLAN_INVARIANT.md)
+is superseded by the owner's legacy-parity and reporting-only decisions.
 
-The journal never rewrites a native payload. Failed journal construction, a
-missing journal entry or a refused journal settlement emits a reporting diagnostic
-and disables that optional journal; the TS dispatch path remains in control.
-These diagnostics do not refuse admission or terminate a native mutation plan.
-
-After-failure coverage follows the TS nesting: Linear/Inverse native rows,
-chunks, fallback singles and special/option orders continue; Hyro serial writes,
-later caller orders after a Spot native refusal, cancellation suffixes and single
-settings commands stop. Partial-stop cancel failures prevent replacement; failed
-replacements have no automatic put-back.
+Remaining shared-engine reporting gap: a definite fallback-single refusal followed
+by an accepted single and a later HTTP503 stops dispatch, but engine failure
+projection selects the earlier refusal, dropping the captured journal and canonical
+Unknown text. The transport pin retains this red case; venue code cannot repair
+an engine-owned HTTP seal without changing shared engine behavior.

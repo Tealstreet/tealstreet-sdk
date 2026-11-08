@@ -1,13 +1,9 @@
-//! Exact mutation payloads and effect targets for reporting legacy fail-stop paths.
+//! Logical mutation rows and effect targets for passive outcome reporting.
 use super::{Leg, fields, not_sent};
 use crate::trading::Call;
-use safe_cex_engine::VenueError;
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, PlannedWrite, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
+use safe_cex_engine::{Outcome, VenueError};
 use std::collections::VecDeque;
-
-pub(super) struct NativeWrite {
-    pub effects: Vec<EffectTarget>,
-}
 
 #[derive(Clone)]
 pub(super) struct EffectTarget {
@@ -91,49 +87,64 @@ struct MutationWire {
     order_id: Option<String>,
 }
 
-pub(super) fn settle_failure(
-    writes: &mut WritePlan<NativeWrite>,
-    index: usize,
-    error: VenueError,
-) -> Result<(), safe_cex_engine::write_plan::PlanError> {
-    writes.fail(index, error)
+pub(super) fn record_rows(
+    journal: &mut WritePlan,
+    indices: &[usize],
+    results: Vec<ElementResult>,
+) -> Result<(), String> {
+    if indices.len() != results.len() {
+        return Err("Bybit report row count differs from its native rows".into());
+    }
+    for (&index, result) in indices.iter().zip(results) {
+        journal
+            .record(index, result)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
-pub(super) fn build(legs: &VecDeque<Leg>) -> Result<Option<WritePlan<NativeWrite>>, VenueError> {
-    let mut writes = Vec::new();
-    let mut index = 0;
+pub(super) fn record_failure(
+    journal: &mut WritePlan,
+    indices: &[usize],
+    mut error: VenueError,
+) -> Result<(), String> {
+    // Row details must not recursively contain the complete reporting journal.
+    error.elements = None;
+    let result = if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
+        ElementResult::NotSent {
+            error: Some(Box::new(error)),
+        }
+    } else {
+        ElementResult::Unknown {
+            error: Box::new(error.outcome(Outcome::Unknown)),
+        }
+    };
+    record_rows(journal, indices, vec![result; indices.len()])
+}
+
+pub(super) fn build(legs: &mut VecDeque<Leg>) -> Result<Option<WritePlan>, VenueError> {
+    let mut elements = Vec::new();
     for leg in legs {
         if matches!(leg.planned.call, Call::PartialProof(_)) {
             continue;
         }
         let wire: MutationWire = serde_json::from_str(&leg.planned.body)
-            .map_err(|_| not_sent("Malformed Bybit planned mutation payload"))?;
-        let effects = effects(leg, &wire)?;
+            .map_err(|_| not_sent("Malformed Bybit reporting payload"))?;
+        leg.effects = effects(leg, &wire)?;
         let own = fields(&leg.planned.body);
         let links = match &leg.planned.call {
             Call::PlaceBatch { .. } => own.items.into_iter().map(|row| row.order_link_id).collect(),
             Call::PlaceOne | Call::PlaceLot { .. } => vec![own.order_link_id],
-            _ => vec![None; effects.len()],
+            _ => vec![None; leg.effects.len()],
         };
-        let elements = links
-            .into_iter()
-            .map(|client_order_id| {
-                let element = Element {
-                    index,
-                    client_order_id,
-                };
-                index += 1;
-                element
-            })
-            .collect();
-        writes.push(PlannedWrite {
-            payload: NativeWrite { effects },
-            elements,
-        });
+        for client_order_id in links {
+            let index = elements.len();
+            leg.elements.push(index);
+            elements.push(Element {
+                index,
+                client_order_id,
+            });
+        }
     }
-    if writes.is_empty() {
-        return Ok(None);
-    }
-    // Legacy adapter preflight owns admission; this journal only records outcomes.
-    WritePlan::validate(writes, |_| Ok(())).map(Some)
+    Ok((!elements.is_empty()).then(|| WritePlan::new(elements)))
 }

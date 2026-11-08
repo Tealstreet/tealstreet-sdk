@@ -552,6 +552,8 @@ fn partial_amount_only_replaces_shared_family_but_inverse_refuses() {
 
 #[test]
 fn after_failure_cancel_rejection_or_unknown_never_recreates_a_partial_stop() {
+    // TS cancel then default-Market replacement: reference/bybit/bybit.exchange.ts:3191-3225,2883-2891.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Partial TP/SL cancel-replace, Full conversion and protective put-back
     for profile in PROFILES {
         for outcome in ["top", "row", "transport", "unknown"] {
             let mut h = ready(profile);
@@ -1206,6 +1208,8 @@ fn a_partial_drag_that_stands_as_neither_kind_is_refused_before_its_cancel() {
 
 #[test]
 fn after_failure_refused_partial_replacement_reports_cancel_applied_without_rollback() {
+    // TS cancel then default-Market replacement: reference/bybit/bybit.exchange.ts:3191-3225,2883-2891.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Partial TP/SL cancel-replace, Full conversion and protective put-back
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -3037,6 +3041,8 @@ fn assert_applied_partial_failure(h: &Harness) {
 
 #[test]
 fn legacy_partial_replacement_preserves_raw_trigger_without_a_new_tick_gate() {
+    // TS cancel then default-Market replacement: reference/bybit/bybit.exchange.ts:3191-3225,2883-2891.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Partial TP/SL cancel-replace, Full conversion and protective put-back
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -3082,6 +3088,8 @@ fn seed_limit_partial(h: &mut Harness, profile: Profile, kind: &str) {
 
 #[test]
 fn legacy_limit_partial_replacement_uses_default_market_execution() {
+    // TS cancel then default-Market replacement: reference/bybit/bybit.exchange.ts:3191-3225,2883-2891.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Partial TP/SL cancel-replace, Full conversion and protective put-back
     for profile in PROFILES {
         for kind in ["StopLoss", "TakeProfit"] {
             for amount in [0.0, 8.0] {

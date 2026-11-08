@@ -15,6 +15,8 @@ const QUOTE: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"B
 
 #[test]
 fn after_failure_option_rejection_keeps_the_later_option() {
+    // TS catches special-order refusal: reference/bybit/bybit.exchange.ts:2969-2985.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | regular Linear/Inverse create-batch runtime continuation and fallback
     let mut h = ready(true);
     let mut first = order(OPTION, 0.1);
     first.client_order_id = Some("refused-option".into());
@@ -40,6 +42,26 @@ fn after_failure_option_rejection_keeps_the_later_option() {
     );
     assert!(!h.has_request("/v5/order/create"));
     assert!(h.result(170).is_some());
+    let elements = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 170,
+                error,
+            } => error.elements.as_ref(),
+            _ => None,
+        })
+        .expect("option outcomes after continuation");
+    use safe_cex_engine::write_plan::ElementResult;
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(
+        elements[0].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    assert!(
+        matches!(&elements[1].result, ElementResult::Placed { order_ids } if order_ids == &["accepted-option"])
+    );
 }
 
 #[test]
@@ -1503,4 +1525,54 @@ fn one_category_cannot_release_an_account_refresh_slot() {
         after, outstanding,
         "H7: completing linear alone must not permit another complete refresh batch while inverse and option remain out"
     );
+}
+
+#[test]
+fn parity_exception_unknown_option_halts_later_special_orders() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:2969-2985.
+    for status in [200, 503] {
+        let mut h = ready(true);
+        h.command(Command::PlaceOrders {
+            command: 179,
+            orders: vec![order(OPTION, 0.1); 3],
+        });
+        let first = h.take("/v5/order/create");
+        h.reply(
+            first.id,
+            200,
+            r#"{"retCode":0,"result":{"orderId":"known-prefix"}}"#,
+        );
+        let second = h.take("/v5/order/create");
+        h.reply(
+            second.id,
+            status,
+            r#"{"retCode":10016,"retMsg":"uncertain"}"#,
+        );
+        support::assert_unknown_pin(&mut h, 179, &["known-prefix"], 1, 3);
+    }
+}
+
+#[test]
+fn pin_option_capability_and_missing_price_refuse_before_any_io() {
+    // TS validates all callers before dispatch: reference/bybit/bybit.exchange.ts:2764-2786,2940-2946.
+    for fault in 0..4 {
+        let mut h = ready(true);
+        h.requests.clear();
+        let mut invalid = order(OPTION, 0.1);
+        match fault {
+            0 => invalid.price = None,
+            1 => invalid.price = Some(0.0),
+            2 => invalid.stop_loss = Some(500.0),
+            _ => invalid.kind = OrderType::Conditional,
+        }
+        h.command(Command::PlaceOrders {
+            command: 180,
+            orders: vec![order("BTCUSDT", 1.0), invalid],
+        });
+        assert!(matches!(h.result(180), Some(Err(_))));
+        assert!(
+            h.requests.is_empty(),
+            "preflight must precede reads and writes"
+        );
+    }
 }

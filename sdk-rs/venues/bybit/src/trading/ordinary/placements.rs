@@ -461,9 +461,9 @@ impl BybitLinear {
         cx: &mut Cx<'_, Pending>,
         id: CommandId,
         mut entry: Ordinary,
-        legs: VecDeque<Leg>,
+        mut legs: VecDeque<Leg>,
     ) {
-        let writes = match super::write_plan::build(&legs) {
+        let writes = match super::write_plan::build(&mut legs) {
             Ok(writes) => writes,
             Err(error) => {
                 cx.command_error(id, format!("Bybit outcome reporting unavailable: {error}"));
@@ -643,10 +643,8 @@ impl BybitLinear {
             return;
         };
         let key = call.key.clone();
-        if let Some(writes) = &mut run.writes
-            && let Some(index) = run.active.as_ref().and_then(|active| active.write_index)
-        {
-            let _ = super::write_plan::settle_failure(writes, index, error.clone());
+        if let (Some(writes), Some(active)) = (&mut run.writes, &run.active) {
+            let _ = super::write_plan::record_failure(writes, &active.leg.elements, error.clone());
         }
         if error.outcome == Some(Outcome::NotSent) {
             // Refused before release: this send never happened (legacy sign failure).
@@ -819,6 +817,8 @@ fn hyro_leg(lot: &hyro::Lot, index: usize) -> Leg {
         planned,
         intent,
         lot: Some(index),
+        elements: Vec::new(),
+        effects: Vec::new(),
     }
 }
 

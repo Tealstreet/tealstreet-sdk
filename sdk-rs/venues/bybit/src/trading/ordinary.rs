@@ -86,7 +86,7 @@ enum Stage {
 
 struct Run {
     plan: Plan,
-    writes: Option<WritePlan<write_plan::NativeWrite>>,
+    writes: Option<WritePlan>,
     partial: Option<Box<partial::Flow>>,
     /// Logical calls in native dispatch order.
     queue: VecDeque<Leg>,
@@ -110,6 +110,8 @@ struct Leg {
     intent: LegIntent,
     /// The Hyro intent lot this leg sends.
     lot: Option<usize>,
+    elements: Vec<usize>,
+    effects: Vec<write_plan::EffectTarget>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -127,15 +129,25 @@ struct Active {
     context: Context,
     leg: Leg,
     local: Option<LocalWrite>,
-    write_index: Option<usize>,
     results: Option<Vec<ElementResult>>,
-    effects: Vec<write_plan::EffectTarget>,
+}
+
+fn unknown_outcome(mut error: VenueError) -> VenueError {
+    if error.outcome == Some(Outcome::Unknown) {
+        let canonical = "The outcome is unknown. Check Open Orders";
+        if !error.message.contains(canonical) {
+            error.message = format!("{canonical}. {}", error.message);
+        }
+        error.presents = true;
+    }
+    error
 }
 
 impl Run {
     fn failure(&mut self, error: VenueError) -> VenueError {
+        let error = unknown_outcome(error);
         match &mut self.writes {
-            Some(writes) => writes.failure(error),
+            Some(writes) => writes.attach(error),
             None => error,
         }
     }
@@ -154,7 +166,10 @@ enum Decision {
     Unlisted(Vec<String>),
     Failed(VenueError),
     Resend(ResendGrant),
-    Replace(Vec<(String, Vec<safe_cex_engine::model::OrderIdentityReceipt>)>),
+    Replace(
+        Vec<(String, Vec<safe_cex_engine::model::OrderIdentityReceipt>)>,
+        VenueError,
+    ),
     /// The engine refused the fact; the plan cannot continue.
     Lost,
 }
@@ -508,22 +523,17 @@ impl BybitLinear {
                 planned,
                 intent,
                 lot: None,
+                elements: Vec::new(),
+                effects: Vec::new(),
             });
         }
-        let writes = if job.continue_on_error {
-            None
-        } else {
-            match write_plan::build(&legs) {
-                Ok(writes) => writes,
-                Err(error) => {
-                    if let Some(id) = trade_command_id(&entry.command) {
-                        cx.command_error(
-                            id,
-                            format!("Bybit outcome reporting unavailable: {error}"),
-                        );
-                    }
-                    None
+        let writes = match write_plan::build(&mut legs) {
+            Ok(writes) => writes,
+            Err(error) => {
+                if let Some(id) = trade_command_id(&entry.command) {
+                    cx.command_error(id, format!("Bybit outcome reporting unavailable: {error}"));
                 }
+                None
             }
         };
         let fallbacks: Vec<Vec<CallBound<'_>>> = legs
@@ -747,23 +757,13 @@ impl BybitLinear {
             let _ = cx.fail_plan(&run.plan, error);
             return;
         }
-        let mut effects = Vec::new();
-        let write_index =
-            if run.writes.is_some() && !matches!(leg.planned.call, Call::PartialProof(_)) {
-                match run.writes.as_mut().and_then(WritePlan::next_write) {
-                    Some((index, write)) => {
-                        effects.clone_from(&write.payload.effects);
-                        Some(index)
-                    }
-                    None => {
-                        run.writes = None;
-                        cx.command_error(id, "Bybit outcome reporting has no pending entry");
-                        None
-                    }
-                }
-            } else {
-                None
-            };
+        if let Some(journal) = &mut run.writes {
+            let pending =
+                VenueError::new("Write dispatched; awaiting outcome").outcome(Outcome::Unknown);
+            if let Err(error) = write_plan::record_failure(journal, &leg.elements, pending) {
+                cx.command_error(id, format!("Bybit pending outcome unavailable: {error}"));
+            }
+        }
         let method = if matches!(leg.planned.call, Call::PartialProof(_)) {
             Method::Get
         } else {
@@ -803,9 +803,7 @@ impl BybitLinear {
             context: context.clone(),
             leg,
             local,
-            write_index,
             results: None,
-            effects,
         });
         self.park(id, entry);
         if !self.send_ordinary(cx, id, context, method, path, body) {
@@ -821,8 +819,8 @@ impl BybitLinear {
             if let Some(mut failed) = failed
                 && let Stage::Plan(run) = &mut failed.stage
             {
-                if let (Some(writes), Some(index)) = (&mut run.writes, write_index) {
-                    let _ = write_plan::settle_failure(writes, index, error.clone());
+                if let (Some(writes), Some(active)) = (&mut run.writes, &run.active) {
+                    let _ = write_plan::record_failure(writes, &active.leg.elements, error.clone());
                 }
                 error = run.failure(error);
             }
@@ -1141,6 +1139,10 @@ impl BybitLinear {
         } else {
             self.leg_decision(cx, id, &mut active, response)
         };
+        let decision = match decision {
+            Decision::Failed(error) => Decision::Failed(unknown_outcome(error)),
+            other => other,
+        };
         if let (Some(call), Some(lot)) = (&entry.hyro, active.leg.lot) {
             self.hyro_leg_decided(&call.key, lot, &decision);
         }
@@ -1149,41 +1151,44 @@ impl BybitLinear {
         };
         let plan = run.plan.clone();
         if !matches!(decision, Decision::Resend(_))
-            && let (Some(writes), Some(index)) = (&mut run.writes, active.write_index)
+            && !active.leg.elements.is_empty()
+            && let Some(journal) = &mut run.writes
         {
-            let settled = if let Some(results) = active.results.take() {
-                writes.settle(index, results)
+            let recorded = if let Some(results) = active.results.take() {
+                write_plan::record_rows(journal, &active.leg.elements, results)
             } else {
                 match &decision {
-                    Decision::Next(_) | Decision::Unlisted(_) if !active.effects.is_empty() => {
-                        writes.settle(
-                            index,
+                    Decision::Next(_) | Decision::Unlisted(_) if !active.leg.effects.is_empty() => {
+                        write_plan::record_rows(
+                            journal,
+                            &active.leg.elements,
                             active
+                                .leg
                                 .effects
                                 .iter()
                                 .map(write_plan::EffectTarget::applied)
                                 .collect(),
                         )
                     }
-                    Decision::Next(ids) => writes.settle(
-                        index,
+                    Decision::Next(ids) => write_plan::record_rows(
+                        journal,
+                        &active.leg.elements,
                         vec![ElementResult::Placed {
                             order_ids: ids.clone(),
                         }],
                     ),
-                    Decision::Failed(error) => {
-                        write_plan::settle_failure(writes, index, error.clone())
+                    Decision::Failed(error) | Decision::Replace(_, error) => {
+                        write_plan::record_failure(journal, &active.leg.elements, error.clone())
                     }
-                    _ => write_plan::settle_failure(
-                        writes,
-                        index,
+                    _ => write_plan::record_failure(
+                        journal,
+                        &active.leg.elements,
                         internal("Bybit mutation outcome is unproven").outcome(Outcome::Unknown),
                     ),
                 }
             };
-            if let Err(error) = settled {
-                run.writes = None;
-                cx.command_error(id, format!("Bybit outcome settlement unavailable: {error}"));
+            if let Err(error) = recorded {
+                cx.command_error(id, format!("Bybit outcome recording unavailable: {error}"));
             }
         }
         match decision {
@@ -1193,6 +1198,8 @@ impl BybitLinear {
                     planned,
                     intent: LegIntent::Command,
                     lot: None,
+                    elements: Vec::new(),
+                    effects: Vec::new(),
                 });
                 if cx
                     .continue_serial_plan_after(
@@ -1296,7 +1303,10 @@ impl BybitLinear {
                     run.stop_after_spot_order = true;
                 }
                 let stop_serial_order = spot_order && !more_lots;
-                if run.continue_on_error && !stop_serial_order {
+                if run.continue_on_error
+                    && !stop_serial_order
+                    && error.outcome != Some(Outcome::Unknown)
+                {
                     run.error.get_or_insert(error);
                     if cx
                         .finish_plan_call(&plan, &active.slot, &active.context)
@@ -1348,7 +1358,7 @@ impl BybitLinear {
                 self.park(id, entry);
                 return;
             }
-            Decision::Replace(fallback) => {
+            Decision::Replace(fallback, _) => {
                 if cx
                     .replace_plan_call(&plan, &active.slot, &active.context)
                     .is_err()
@@ -1357,7 +1367,7 @@ impl BybitLinear {
                     return;
                 }
                 // Refused whole: nothing was placed, so each order may go alone.
-                for (body, receipts) in fallback.into_iter().rev() {
+                for (index, (body, receipts)) in fallback.into_iter().enumerate().rev() {
                     run.queue.push_front(Leg {
                         planned: Planned {
                             receipts,
@@ -1367,6 +1377,14 @@ impl BybitLinear {
                         },
                         intent: LegIntent::Command,
                         lot: None,
+                        elements: active
+                            .leg
+                            .elements
+                            .get(index)
+                            .copied()
+                            .into_iter()
+                            .collect(),
+                        effects: Vec::new(),
                     });
                 }
             }
@@ -1486,8 +1504,8 @@ impl BybitLinear {
         if matches!(active.leg.planned.call, Call::PartialProof(_)) {
             let _ = cx.inherit_plan_uncertainty(&run.plan);
         }
-        if let (Some(writes), Some(index)) = (&mut run.writes, active.write_index) {
-            let _ = write_plan::settle_failure(writes, index, error.clone());
+        if let Some(writes) = &mut run.writes {
+            let _ = write_plan::record_failure(writes, &active.leg.elements, error.clone());
         }
         if matches!(active.leg.planned.call, Call::PlaceLot { last: true })
             && run.stop_after_spot_order
@@ -1496,7 +1514,7 @@ impl BybitLinear {
             run.finish_failure(cx, error);
             return;
         }
-        if run.continue_on_error {
+        if run.continue_on_error && error.outcome != Some(Outcome::Unknown) {
             let Some(active) = run.active.take() else {
                 return;
             };
@@ -1799,11 +1817,6 @@ impl BybitLinear {
         if let (Verdict::RefusedResend(_), Some(server)) = (verdict, server) {
             Self::observe_clock(cx, server);
         }
-        if active.write_index.is_some()
-            && !matches!(verdict, Verdict::Satisfied(_) | Verdict::RefusedResend(_))
-        {
-            return Decision::Failed(error);
-        }
         match (verdict, &planned.call) {
             (Verdict::Satisfied(_), call) => {
                 self.satisfied_effects(cx, call);
@@ -1817,7 +1830,7 @@ impl BybitLinear {
                     id,
                     format!("Failed to place batch orders: {}", error.message),
                 );
-                Decision::Replace(fallback.clone())
+                Decision::Replace(fallback.clone(), error)
             }
             _ => Decision::Failed(error),
         }
@@ -1932,7 +1945,7 @@ impl BybitLinear {
                     {
                         return Ok(target.applied());
                     }
-                    let error = Box::new(fact.error().clone());
+                    let error = Box::new(unknown_outcome(fact.error().clone()));
                     Ok(if fact.verdict().is_refusal() {
                         ElementResult::NotSent { error: Some(error) }
                     } else {
@@ -1994,7 +2007,7 @@ impl BybitLinear {
                     );
                 };
                 let items = Self::batch_items(&rows);
-                match Self::native_row_results(cx, context, &BYBIT, &rows, &active.effects) {
+                match Self::native_row_results(cx, context, &BYBIT, &rows, &active.leg.effects) {
                     Ok(results) => active.results = Some(results),
                     Err(_) => return Decision::Lost,
                 }
@@ -2087,7 +2100,7 @@ impl BybitLinear {
                         &[],
                     );
                 };
-                match Self::native_row_results(cx, context, &BYBIT, &rows, &active.effects) {
+                match Self::native_row_results(cx, context, &BYBIT, &rows, &active.leg.effects) {
                     Ok(results) => active.results = Some(results),
                     Err(_) => return Decision::Lost,
                 }
@@ -2142,7 +2155,8 @@ impl BybitLinear {
                     );
                 };
                 let rows = [row];
-                match Self::native_row_results(cx, context, &PROTECTIVE, &rows, &active.effects) {
+                match Self::native_row_results(cx, context, &PROTECTIVE, &rows, &active.leg.effects)
+                {
                     Ok(results) => active.results = Some(results),
                     Err(_) => return Decision::Lost,
                 }
