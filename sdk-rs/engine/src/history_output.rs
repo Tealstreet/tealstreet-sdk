@@ -3,7 +3,10 @@ use crate::history::ReadCursorHistory;
 use crate::model::{Market, PositionSide};
 use crate::{ClosedPositionFormat, Cx, VenueError};
 use serde::Serialize;
-use serde_json::Value;
+
+#[path = "history_output_wire.rs"]
+mod wire;
+use wire::{Field, Row};
 
 pub struct ClosedPnlOutput {
     format: ClosedPositionFormat,
@@ -31,29 +34,10 @@ struct ClosedPnlEntry<'a> {
     leverage: f64,
 }
 
-fn text(value: &Value) -> String {
-    match value {
-        Value::Null => String::new(),
-        Value::String(value) => value.clone(),
-        Value::Number(value) => {
-            let n = value.as_f64().unwrap_or(0.);
-            if n == 0. {
-                "0".into()
-            } else if (1e-6..1e21).contains(&n.abs()) {
-                n.to_string()
-            } else {
-                format!("{n:e}")
-            }
-        }
-        Value::Bool(value) => value.to_string(),
-        Value::Array(values) => values.iter().map(text).collect::<Vec<_>>().join(","),
-        Value::Object(_) => "[object Object]".into(),
-    }
-}
-
-fn float(row: &Value, key: &str) -> f64 {
-    let value = text(&row[key]);
-    let value = value.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+fn float(value: &Field) -> f64 {
+    let value = value
+        .text
+        .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     for end in std::iter::once(value.len()).chain(value.char_indices().rev().map(|(end, _)| end)) {
         if let Ok(number) = value[..end].parse::<f64>() {
             return if number.is_finite() { number } else { 0. };
@@ -62,9 +46,10 @@ fn float(row: &Value, key: &str) -> f64 {
     0.
 }
 
-fn timestamp(row: &Value, key: &str) -> f64 {
-    let value = text(&row[key]);
-    let value = value.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+fn timestamp(value: &Field) -> f64 {
+    let value = value
+        .text
+        .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     let sign = usize::from(matches!(value.as_bytes().first(), Some(b'+' | b'-')));
     let end = sign + value[sign..].bytes().take_while(u8::is_ascii_digit).count();
     value[..end]
@@ -106,7 +91,12 @@ impl ClosedPnlOutput {
     pub fn encode(&self, rows: &[String]) -> Result<String, VenueError> {
         let mut entries = Vec::new();
         for row in rows {
-            let row: Value = serde_json::from_str(row)
+            let raw: &serde_json::value::RawValue = serde_json::from_str(row)
+                .map_err(|_| VenueError::new("invalid closed-position output"))?;
+            if !raw.get().starts_with('{') {
+                continue;
+            }
+            let row: Row = serde_json::from_str(raw.get())
                 .map_err(|_| VenueError::new("invalid closed-position output"))?;
             if let Some(entry) = self.entry(&row) {
                 entries.push(entry);
@@ -116,7 +106,7 @@ impl ClosedPnlOutput {
         serde_json::to_string(&entries).map_err(|_| VenueError::new("invalid closed-PnL output"))
     }
 
-    fn entry(&self, row: &Value) -> Option<ClosedPnlEntry<'_>> {
+    fn entry(&self, row: &Row) -> Option<ClosedPnlEntry<'_>> {
         let (
             symbol_key,
             time_key,
@@ -128,55 +118,53 @@ impl ClosedPnlOutput {
             leverage_key,
         ) = match self.format {
             ClosedPositionFormat::Bybit => (
-                "symbol",
-                "createdTime",
-                "updatedTime",
-                "closedSize",
-                "avgEntryPrice",
-                "avgExitPrice",
-                "closedPnl",
-                "leverage",
+                &row.symbol,
+                &row.created_time,
+                &row.updated_time,
+                &row.closed_size,
+                &row.avg_entry_price,
+                &row.avg_exit_price,
+                &row.closed_pnl,
+                &row.leverage,
             ),
             ClosedPositionFormat::Okx => (
-                "instId",
-                "cTime",
-                "uTime",
-                "closeTotalPos",
-                "openAvgPx",
-                "closeAvgPx",
-                "realizedPnl",
-                "lever",
+                &row.inst_id,
+                &row.c_time,
+                &row.u_time,
+                &row.close_total_pos,
+                &row.open_avg_px,
+                &row.close_avg_px,
+                &row.realized_pnl,
+                &row.lever,
             ),
             ClosedPositionFormat::Blofin => (
-                "instId",
-                "createTime",
-                "updateTime",
-                "closePositions",
-                "openAveragePrice",
-                "closeAveragePrice",
-                "realizedPnl",
-                "leverage",
+                &row.inst_id,
+                &row.create_time,
+                &row.update_time,
+                &row.close_positions,
+                &row.open_average_price,
+                &row.close_average_price,
+                &row.realized_pnl,
+                &row.leverage,
             ),
             ClosedPositionFormat::Bitunix => (
-                "symbol",
-                "ctime",
-                "mtime",
-                "qty",
-                "entryPrice",
-                "closePrice",
-                "realizedPNL",
-                "leverage",
+                &row.symbol,
+                &row.ctime,
+                &row.mtime,
+                &row.qty,
+                &row.entry_price,
+                &row.close_price,
+                &row.realized_pnl_bitunix,
+                &row.leverage,
             ),
             ClosedPositionFormat::Unsupported => return None,
         };
-        let symbol = if self.format == ClosedPositionFormat::Bybit
-            && (row[symbol_key] == false || row[symbol_key].as_f64() == Some(0.))
-        {
+        let symbol = if self.format == ClosedPositionFormat::Bybit && symbol_key.zero_or_false {
             String::new()
         } else {
-            text(&row[symbol_key])
+            symbol_key.text.clone()
         };
-        let time = timestamp(row, time_key);
+        let time = timestamp(time_key);
         if symbol.is_empty()
             || time == 0.
             || (self.format == ClosedPositionFormat::Bybit && time <= 0.)
@@ -191,8 +179,8 @@ impl ClosedPnlOutput {
         } else {
             self.markets.iter().find(|m| m.id == symbol)
         };
-        let price = float(row, exit_key);
-        let native = float(row, size_key);
+        let price = float(exit_key);
+        let native = float(size_key);
         let mut contracts = native;
         if self.format == ClosedPositionFormat::Bybit
             && (self.inverse || inverse_symbol(&symbol))
@@ -226,32 +214,30 @@ impl ClosedPnlOutput {
             if self.inverse || inverse_symbol(&symbol) {
                 native
             } else {
-                float(row, "cumExitValue")
+                float(&row.cum_exit_value)
             }
         } else {
             contracts * price
         };
         let side = match self.format {
-            ClosedPositionFormat::Bybit if row["side"] != "Sell" => PositionSide::Short,
-            ClosedPositionFormat::Okx if text(&row["direction"]).to_lowercase() == "short" => {
+            ClosedPositionFormat::Bybit if !row.side.sell_literal => PositionSide::Short,
+            ClosedPositionFormat::Okx if row.direction.text.to_lowercase() == "short" => {
                 PositionSide::Short
             }
-            ClosedPositionFormat::Blofin
-                if text(&row["positionSide"]).to_lowercase() == "short" =>
-            {
+            ClosedPositionFormat::Blofin if row.position_side.text.to_lowercase() == "short" => {
                 PositionSide::Short
             }
-            ClosedPositionFormat::Bitunix if text(&row["side"]).to_uppercase() == "SELL" => {
+            ClosedPositionFormat::Bitunix if row.side.text.to_uppercase() == "SELL" => {
                 PositionSide::Short
             }
             _ => PositionSide::Long,
         };
         let fees = match self.format {
-            ClosedPositionFormat::Bybit => float(row, "openFee") + float(row, "closeFee"),
-            ClosedPositionFormat::Okx | ClosedPositionFormat::Blofin => float(row, "fee").abs(),
-            _ => float(row, "fee"),
+            ClosedPositionFormat::Bybit => float(&row.open_fee) + float(&row.close_fee),
+            ClosedPositionFormat::Okx | ClosedPositionFormat::Blofin => float(&row.fee).abs(),
+            _ => float(&row.fee),
         };
-        let closed = timestamp(row, close_time_key);
+        let closed = timestamp(close_time_key);
         Some(ClosedPnlEntry {
             provenance: "venue",
             symbol: if matches!(
@@ -264,9 +250,9 @@ impl ClosedPnlOutput {
             },
             notional,
             contracts,
-            entry_price: float(row, entry_key),
+            entry_price: float(entry_key),
             exit_price: price,
-            unrealized_pnl: float(row, pnl_key),
+            unrealized_pnl: float(pnl_key),
             side,
             fees,
             time,
@@ -278,7 +264,7 @@ impl ClosedPnlOutput {
                 closed
             },
             account: &self.account,
-            leverage: float(row, leverage_key),
+            leverage: float(leverage_key),
         })
     }
 }

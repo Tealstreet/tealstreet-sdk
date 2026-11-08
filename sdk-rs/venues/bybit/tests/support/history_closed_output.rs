@@ -1,5 +1,4 @@
 //! Venue-reported closed positions: raw `/v5/position/closed-pnl` rows, paged as TS pages them.
-#[allow(dead_code)]
 #[path = "../support/mod.rs"]
 mod support;
 use safe_cex_venue_bybit::{Endpoints, Variant};

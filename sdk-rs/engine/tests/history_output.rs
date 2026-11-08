@@ -42,3 +42,60 @@ fn absent_market_keeps_the_venue_instrument_and_size() {
     assert_eq!(result[0]["notional"], 0.);
     assert_eq!(result[0]["fees"], 1.);
 }
+
+#[test]
+fn reported_field_decoding_keeps_native_coercion_and_literal_side_rules() {
+    let output = output::ClosedPnlOutput::new(
+        ClosedPositionFormat::Bybit,
+        "fixture".into(),
+        false,
+        None,
+        &[],
+    );
+    let rows = [
+        r#"{"symbol":["BTCUSDT"],"side":["Sell"],"closedSize":[["2lots"],null],"avgExitPrice":"3x","createdTime":[" 12ms"],"updatedTime":{},"openFee":"-.25fee","closeFee":true,"leverage":1e-7}"#.into(),
+        r#"{"symbol":"0","side":"Sell","closedSize":null,"createdTime":1,"closedPnl":{"unused":12}}"#.into(),
+        "null".into(),
+        "[]".into(),
+        "true".into(),
+    ];
+    let result: serde_json::Value = serde_json::from_str(&output.encode(&rows).unwrap()).unwrap();
+    assert_eq!(result.as_array().unwrap().len(), 2);
+    assert_eq!(result[0]["symbol"], "BTCUSDT");
+    assert_eq!(result[0]["side"], "short");
+    assert_eq!(result[0]["contracts"], 2.);
+    assert_eq!(result[0]["exitPrice"], 3.);
+    assert_eq!(result[0]["closedTime"], 12.);
+    assert_eq!(result[0]["fees"], -0.25);
+    assert_eq!(result[0]["leverage"], 1e-7);
+    assert_eq!(result[1]["symbol"], "0");
+    assert_eq!(result[1]["side"], "long");
+    assert_eq!(result[1]["unrealizedPnl"], 0.);
+}
+
+#[test]
+fn native_field_names_remain_distinct_across_projection_formats() {
+    let row = r#"{"symbol":"BTCUSDT","instId":"BTC-USDT-SWAP","createdTime":"1","cTime":"2","createTime":"3","ctime":"4","closedSize":"5","closeTotalPos":"6","closePositions":"7","qty":"8","realizedPnl":"9","realizedPNL":"10","leverage":"11","lever":"12"}"#;
+    for (format, symbol, time, size, pnl, leverage) in [
+        (ClosedPositionFormat::Bybit, "BTCUSDT", 1., 5., 0., 11.),
+        (ClosedPositionFormat::Okx, "BTC-USDT-SWAP", 2., 6., 9., 12.),
+        (
+            ClosedPositionFormat::Blofin,
+            "BTC-USDT-SWAP",
+            3.,
+            7.,
+            9.,
+            11.,
+        ),
+        (ClosedPositionFormat::Bitunix, "BTCUSDT", 4., 8., 10., 11.),
+    ] {
+        let output = output::ClosedPnlOutput::new(format, String::new(), false, None, &[]);
+        let result: serde_json::Value =
+            serde_json::from_str(&output.encode(&[row.into()]).unwrap()).unwrap();
+        assert_eq!(result[0]["symbol"], symbol);
+        assert_eq!(result[0]["time"], time);
+        assert_eq!(result[0]["contracts"], size);
+        assert_eq!(result[0]["unrealizedPnl"], pnl);
+        assert_eq!(result[0]["leverage"], leverage);
+    }
+}

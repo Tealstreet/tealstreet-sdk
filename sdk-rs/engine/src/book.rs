@@ -229,7 +229,7 @@ mod tests {
         assert_eq!(rebuilt.asks(), actual.asks());
         let full = |book: &Book| {
             let mut writer = FrameWriter::new(Vec::new(), 1.);
-            crate::book_output::write(&book, 7, &mut writer);
+            crate::book_output::write(book, 7, &mut writer);
             writer.finish()
         };
         assert_eq!(

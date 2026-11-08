@@ -1,6 +1,5 @@
 //! Venue-reported closed positions: raw `get_history_positions` rows, paged by
 //! `skip` and keyed by `positionId` exactly as TS `fetchBitunixHistoryPages`.
-#[allow(dead_code)]
 #[path = "../support/mod.rs"]
 mod support;
 use safe_cex_engine::{Action, Event, HttpRequest, Notice, Response, VenueError};

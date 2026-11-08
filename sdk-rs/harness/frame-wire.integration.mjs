@@ -118,7 +118,7 @@ test('Rust revised sections preserve native fields and identity through the SDK'
     const captures = Array.from({ length: table.count }, (_, i) => captureRustFill(table, i));
     assert.deepEqual(captures.map(({ id, executionId, fee }) => ({ id, executionId, fee })), [
       { id: 'tracked-order', executionId: '9007199254740997', fee: -0.25 },
-      { id: 'orphan-order', executionId: 'orphan-order', fee: undefined },
+      { id: 'orphan-order', executionId: undefined, fee: undefined },
     ]);
     assert.equal(store.fetchedLeverage.ORPHAN.buyLeverage, 11);
     assert.equal(store.marketsBySymbol.ORPHAN, undefined);

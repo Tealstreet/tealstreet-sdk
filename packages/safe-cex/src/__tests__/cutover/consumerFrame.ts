@@ -27,7 +27,7 @@ export function consumerFrame(
     if (index < 0) throw new Error(`Fixture market index missing for ${symbol}`);
     return index;
   };
-  const table = (kind: number, words: number[], columns: number[][], tail: number[] = []) => {
+  const table = (kind: number, words: number[], columns: number[][], tail: number[] = [], revision = 0) => {
     const size = align8(words.length * 4) + columns.reduce((n, col) => n + col.length * 8, 0);
     const bytes = new Uint8Array(align8(size + tail.length * 4));
     const view = new DataView(bytes.buffer);
@@ -39,7 +39,7 @@ export function consumerFrame(
         at += 8;
       }
     tail.forEach((word, i) => view.setUint32(at + i * 4, word, true));
-    sections.push({ kind, bytes });
+    sections.push({ kind, bytes, revision });
   };
   if (data.markets) {
     const rows = data.markets;
@@ -183,7 +183,17 @@ export function consumerFrame(
         ...rows.map(enums),
       ],
       columns.map((field) => rows.map((row) => row[field] ?? NaN))
-        .concat([rows.map((row) => row.extra?.remainingNative ?? NaN)]),
+        .concat([
+          rows.map((row) => row.extra?.remainingNative ?? NaN),
+          rows.map((row) => row.extra?.filledInPlacementUnits ?? NaN),
+          rows.map((row) => row.extra?.remainingNotional ?? NaN),
+          rows.map((row) => row.extra?.conditionalOrderPrice ?? NaN),
+        ]),
+      [
+        ...rows.map((row) => trigger.indexOf(row.tpTriggerType) | (trigger.indexOf(row.slTriggerType) << 8)),
+        ...rows.map((row) => ref(row.symbol)),
+      ],
+      1,
     );
   }
   if (data.positions) {
