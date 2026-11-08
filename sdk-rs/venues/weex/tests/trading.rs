@@ -389,6 +389,128 @@ fn regular_batches_are_five_sequential_and_correlated_by_echoed_id() {
             .all(|o| o.status == OrderStatus::Open)
     );
 }
+
+#[test]
+fn oversized_orders_send_one_ts_rounded_payload_and_surface_native_refusal() {
+    // TS weex.exchange.ts:1041,1112,926-943 sends one rounded quantity; :1006-1013 throws refusal.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses
+    for (amount, max, step, expected) in [
+        (26.0, 5.0, 1.0, "26"),
+        (11.0, 5.0, 1.0, "11"),
+        (12.0, 5.0, 1.0, "12"),
+        (10.0, 5.0, 1.0, "10"),
+        (7.0, 3.0, 0.5, "7"),
+        (1.0005, 0.3, 0.001, "1.001"),
+    ] {
+        let mut e = engine();
+        e.store_mut().update_markets(|market| {
+            market.precision.amount = step;
+            market.limits.amount.max = max;
+        });
+        let mut input = opts("");
+        input.amount = amount;
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![input],
+            },
+        );
+        let requests = writes(&actions);
+        assert_eq!(requests.len(), 1, "amount={amount}, max={max}: {actions:?}");
+        let request = &requests[0];
+        assert!(request.url.ends_with("/capi/v3/batchOrders"));
+        let payload = body(request);
+        let rows = payload["batchOrders"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["quantity"], expected);
+        let sum: f64 = rows
+            .iter()
+            .map(|row| row["quantity"].as_str().unwrap().parse::<f64>().unwrap())
+            .sum();
+        assert_eq!(sum, expected.parse::<f64>().unwrap());
+        let mut expected_payload = json!({
+            "symbol":"BTCUSDT", "side":"BUY", "positionSide":"LONG", "type":"LIMIT",
+            "timeInForce":"GTC", "quantity":expected, "price":"69000"
+        });
+        expected_payload["newClientOrderId"] = rows[0]["newClientOrderId"].clone();
+        assert_eq!(rows[0], expected_payload);
+        let actions = response(
+            &mut e,
+            request,
+            json!([{
+                "clientOrderId":rows[0]["newClientOrderId"], "success":false,
+                "errorCode":"42002", "errorMessage":"Quantity exceeds maximum size"
+            }]),
+        );
+        assert!(
+            done(&actions)
+                .unwrap_err()
+                .contains("Quantity exceeds maximum size")
+        );
+        assert!(
+            writes(&actions).is_empty(),
+            "no split or retry after native refusal"
+        );
+        assert_eq!(
+            failure(&actions).outcome,
+            Some(safe_cex_engine::Outcome::Rejected)
+        );
+        assert!(e.store().orders().is_empty());
+    }
+}
+
+#[test]
+fn oversized_unbatched_orders_keep_one_payload_per_ts_endpoint() {
+    // TS weex.exchange.ts:558-575,1041,1058,1086,1112 sends one payload for each kind.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses
+    for (kind, endpoint) in [
+        (OrderType::Market, "/capi/v3/order"),
+        (OrderType::Conditional, "/capi/v3/algoOrder"),
+        (OrderType::StopLoss, "/capi/v3/placeTpSlOrder"),
+        (OrderType::TakeProfit, "/capi/v3/placeTpSlOrder"),
+    ] {
+        let mut e = engine();
+        e.store_mut().update_markets(|market| {
+            market.precision.amount = 1.0;
+            market.limits.amount.max = 5.0;
+        });
+        let mut input = opts("");
+        input.kind = kind;
+        input.amount = 26.0;
+        input.reduce_only = Some(kind != OrderType::Conditional);
+        input.trigger_price = (kind == OrderType::Conditional).then_some(68000.0);
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![input],
+            },
+        );
+        let requests = writes(&actions);
+        assert_eq!(requests.len(), 1, "{kind:?}: {actions:?}");
+        let request = &requests[0];
+        assert!(request.url.ends_with(endpoint));
+        let payload = body(request);
+        assert_eq!(payload["quantity"], "26");
+        assert!(payload.get("batchOrders").is_none());
+        let client = payload
+            .get("newClientOrderId")
+            .unwrap_or(&payload["clientAlgoId"]);
+        let actions = response(
+            &mut e,
+            request,
+            json!({"clientOrderId":client, "success":false,
+                "errorCode":"42002", "errorMessage":"Quantity exceeds maximum size"}),
+        );
+        assert!(
+            done(&actions)
+                .unwrap_err()
+                .contains("Quantity exceeds maximum size")
+        );
+        assert!(writes(&actions).is_empty());
+    }
+}
 #[test]
 fn every_caller_id_is_preflighted_before_any_write() {
     let invalid = ["", "space is invalid", "unicode-💥", &"x".repeat(37)];

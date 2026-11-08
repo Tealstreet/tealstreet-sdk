@@ -493,7 +493,10 @@ impl WeexFutures {
             } else {
                 rounded(o.amount, m.precision.amount)?
             };
-            if m.limits.amount.max > 0.0 && amount > m.limits.amount.max {
+            if o.client_order_id.is_some()
+                && m.limits.amount.max > 0.0
+                && amount > m.limits.amount.max
+            {
                 return Err(
                     "WEEX order exceeds market maximum size; a caller ID cannot span orders".into(),
                 );
