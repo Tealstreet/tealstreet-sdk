@@ -47,12 +47,17 @@ setup. Native local callers retain their existing read-key selection and
 fallback. Direct hosted-provider setup refuses secondary signing with a typed
 `unsupported/notSent` reason. Failed signing is `NotSent`; a released ambiguous
 write keeps its existing `Unknown` result and is never resent automatically.
+Definite `NotSent` releases that attempt's client-ID/reduction reservation, so
+an explicit retry or cancel-all is not blocked by a placement that never left.
+An older `Unknown` placement sharing a refused attempt's ID stays fenced.
 
 ## Public type changes and NX
 
 - `ExchangeOptions` and saved account config accept optional
   `coinbaseJwtAlgorithm: 'es256' | 'edDsa'`. Hosted origins default to `es256`;
   local devices infer their actual algorithm through the existing Rust parser.
+  `accountToExchangeOptions` carries the saved selection for both Coinbase aliases;
+  an explicit options override still takes precedence.
 - `PayloadSignerRequest` adds the `coinbase-jws` scheme with explicit algorithm
   and base64url encoding. NX payload delegates must implement that scheme before
   using this optional mode.

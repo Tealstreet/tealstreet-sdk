@@ -2,9 +2,35 @@
 mod hosted_parity;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::model::*;
+use safe_cex_engine::signing::{
+    Algorithm, Capability, KeyRef, Provider, SignError, SignFuture, SignRequest, SignResult, Signer,
+};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_coinbase::{Coinbase, Options};
 use serde::Deserialize;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+struct DeferredSigner {
+    local: Provider,
+    deferred: Arc<AtomicBool>,
+}
+impl Signer for DeferredSigner {
+    fn immediate(&self) -> bool {
+        !self.deferred.load(Ordering::Relaxed)
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        (!self.deferred.load(Ordering::Relaxed)).then(|| self.local.sign_ready(request).unwrap())
+    }
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        Box::pin(std::future::pending())
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.local.can_sign(key, algorithm)
+    }
+}
 
 const SPOT: &str = r#"{"products":[{"product_id":"BTC-USD","product_type":"SPOT","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1"}]}"#;
 const INTX: &str = r#"{"products":[{"product_id":"BTC-PERP-INTX","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USDC","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"PERPETUAL","contract_root_unit":"BTC","contract_size":"1"}}]}"#;
@@ -38,6 +64,7 @@ struct Session {
     key_permission_failures: u32,
     deactivated: bool,
     warnings: Vec<String>,
+    signing: Vec<safe_cex_engine::RequestId>,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
@@ -52,7 +79,9 @@ impl Session {
         )
     }
     fn with_options(kind: &'static str, options: Options) -> Self {
-        let mut e = hosted_parity::engine(options);
+        Self::with_engine(kind, hosted_parity::engine(options))
+    }
+    fn with_engine(kind: &'static str, mut e: Engine<Coinbase>) -> Self {
         e.start(1000.0);
         Self {
             details: std::collections::HashMap::new(),
@@ -75,6 +104,7 @@ impl Session {
             key_permission_failures: 0,
             deactivated: false,
             warnings: vec![],
+            signing: vec![],
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -117,6 +147,7 @@ impl Session {
                     self.requests.push(r.clone());
                     requests.push(r)
                 }
+                Action::Sign { attempt, .. } => self.signing.push(attempt),
                 Action::SetTimer { timer, at_ms } => self.timers.push((at_ms, timer)),
                 Action::ClearTimer { timer } => self.timers.retain(|(_, t)| *t != timer),
                 Action::WsConnect { socket, url, .. } if url.contains("ws-user") => {
@@ -2017,6 +2048,163 @@ fn definite_http_rejection_releases_reservation_and_keeps_coinbase_message() {
         "Coinbase HTTP 400: limit price too far from market (INVALID_ARGUMENT)"
     );
     assert!(s.cancel_symbol(302).is_ok());
+}
+
+fn deferred_session(kind: &'static str, spot: bool) -> (Session, Arc<AtomicBool>) {
+    let mut e = hosted_parity::engine(Options {
+        key: ["organizations", "test", "apiKeys", "test"].join("/"),
+        secret: STANDARD.encode([7; 32]),
+        spot_only: spot,
+        ..Default::default()
+    });
+    let deferred = Arc::new(AtomicBool::new(false));
+    e.set_signer(Some(Arc::new(DeferredSigner {
+        local: e.signer().unwrap(),
+        deferred: deferred.clone(),
+    })))
+    .unwrap();
+    let mut s = Session::with_engine(kind, e).ready();
+    for request in s.collect() {
+        s.answer(request);
+    }
+    (s, deferred)
+}
+
+fn refuse_placement(
+    s: &mut Session,
+    deferred: &AtomicBool,
+    order: PlaceOrderOpts,
+    error: SignError,
+) {
+    deferred.store(true, Ordering::Relaxed);
+    s.command(Command::PlaceOrders {
+        command: 600,
+        orders: vec![order],
+    });
+    for _ in 0..100 {
+        for request in s.collect() {
+            assert_eq!(request.method, safe_cex_engine::Method::Get);
+            s.answer(request);
+        }
+        if let Some(attempt) = s.signing.pop() {
+            deferred.store(false, Ordering::Relaxed);
+            s.e.handle(
+                s.now,
+                Event::Signed {
+                    attempt,
+                    result: Err(error),
+                },
+            );
+            assert!(s.done(600).is_err());
+            assert_eq!(
+                s.failures[&600].outcome,
+                Some(safe_cex_engine::Outcome::NotSent)
+            );
+            assert!(
+                !s.requests
+                    .iter()
+                    .any(|r| r.method == safe_cex_engine::Method::Post)
+            );
+            return;
+        }
+        s.fire();
+    }
+    panic!("placement never reached deferred signing");
+}
+
+#[test]
+fn deferred_signing_failure_releases_client_id_for_retry() {
+    for error in [
+        SignError::Refused,
+        SignError::Unavailable,
+        SignError::TimedOut,
+        SignError::InvalidResult,
+    ] {
+        let (mut s, deferred) = deferred_session("DEFAULT", true);
+        let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
+        order.client_order_id = Some("refused-client".into());
+        refuse_placement(&mut s, &deferred, order.clone(), error);
+        let request = s.place(601, order);
+        assert_eq!(create_wire(&request).client_order_id, "refused-client");
+        s.reply(
+            request,
+            200,
+            r#"{"success":true,"success_response":{"order_id":"retry"}}"#,
+        );
+        assert!(s.done(601).is_ok());
+    }
+}
+
+#[test]
+fn deferred_signing_failure_does_not_block_cancel_all() {
+    let (mut s, deferred) = deferred_session("DEFAULT", true);
+    refuse_placement(
+        &mut s,
+        &deferred,
+        opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0),
+        SignError::Refused,
+    );
+    assert!(s.cancel_symbol(601).is_ok());
+}
+
+#[test]
+fn deferred_signing_failure_releases_reduce_only_capacity() {
+    let (mut s, deferred) = deferred_session("INTX", false);
+    let mut order = opts("BTC-PERP-INTX", OrderType::Market, OrderSide::Sell, 2.0);
+    order.reduce_only = Some(true);
+    refuse_placement(&mut s, &deferred, order.clone(), SignError::Refused);
+    let request = s.place(601, order);
+    assert_eq!(
+        create_wire(&request)
+            .order_configuration
+            .market_market_ioc
+            .unwrap()
+            .base_size,
+        "2"
+    );
+}
+
+#[test]
+fn unsent_duplicate_client_does_not_release_an_older_unknown_placement() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
+    order.client_order_id = Some("unknown-client".into());
+    let request = s.place(600, order.clone());
+    s.e.handle(
+        s.now,
+        Event::HttpFailed {
+            request: request.id,
+            error: "response lost",
+        },
+    );
+    assert!(s.done(600).is_err());
+    assert_eq!(
+        s.failures[&600].outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    s.advance(20_000.);
+    s.command(Command::PlaceOrders {
+        command: 601,
+        orders: vec![order],
+    });
+    assert!(s.done(601).is_err());
+    assert_eq!(
+        s.failures[&601].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert!(s.cancel_symbol(602).unwrap_err().contains("unresolved"));
+    s.advance(11_000.);
+    assert!(
+        s.cancel_symbol(603).is_ok(),
+        "a refused sibling must not restart Unknown reconciliation"
+    );
+    assert_eq!(
+        s.requests
+            .iter()
+            .filter(|r| r.method == safe_cex_engine::Method::Post)
+            .count(),
+        1
+    );
 }
 
 #[test]

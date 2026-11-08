@@ -67,5 +67,7 @@ frames sign at dispatch. Raw `Coinbase::new` remains the local compatibility API
 Hosted RemoteSigner sends canonical `coinbase-jws` bytes; PayloadSigner is REST
 only and cannot authenticate a private socket. Pre-dispatch signing refusal
 uses `trading_unsent`, preserving NotSent rather than transport-loss Unknown.
+Definite NotSent releases only the reservation acquired by that attempt; it
+must neither clear nor restart reconciliation for an older Unknown placement.
 The caller contract, algorithm selection and S2/S3 coordination boundary are in
 `docs/plans/callers/coinbase-hosted-signing.md` at the root.

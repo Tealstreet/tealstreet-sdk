@@ -147,7 +147,7 @@ impl Coinbase {
                 return;
             }
         };
-        if let Pending::Trading(pending) = &request.pending
+        if let Pending::Trading(pending) = &mut request.pending
             && let Err(error) = self.trading_before_dispatch(cx, pending)
         {
             self.fail_unsent(cx, request.pending, &error);

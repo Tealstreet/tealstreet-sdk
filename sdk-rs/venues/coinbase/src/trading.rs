@@ -15,6 +15,7 @@ const MAX_JOBS: usize = 100;
 pub struct Request {
     command: CommandId,
     step: Step,
+    placement_reserved: bool,
 }
 impl Request {
     pub(crate) fn signing_role(&self) -> safe_cex_engine::credential_selection::CredentialRole {
@@ -1206,7 +1207,7 @@ impl Coinbase {
     pub(crate) fn trading_before_dispatch(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        request: &Request,
+        request: &mut Request,
     ) -> Result<(), String> {
         self.reconcile_reductions(cx);
         match &request.step {
@@ -1288,6 +1289,7 @@ impl Coinbase {
                         reducer: order.reduce_only.then_some(*reducer),
                     },
                 );
+                request.placement_reserved = true;
             }
             Step::Cancel { ids } => {
                 for id in ids {
@@ -1369,7 +1371,11 @@ impl Coinbase {
             }
             return;
         }
-        let request = Request { command, step };
+        let request = Request {
+            command,
+            step,
+            placement_reserved: false,
+        };
         let (method, path, body) = match &request.step {
             Step::Place { payload, .. } => (Method::Post, ROOT.into(), Some(encode(payload))),
             Step::Edit { payload, .. } => {
@@ -1465,7 +1471,7 @@ impl Coinbase {
     }
 
     /// Refused at dispatch (signing or a dispatch-time check): Coinbase received nothing.
-    /// Reservation bookkeeping is kept as for a lost write; the key may belong to another request.
+    /// Only this attempt's reservation can be released; a duplicate key may name an older Unknown.
     pub(crate) fn trading_unsent(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1473,8 +1479,20 @@ impl Coinbase {
         error: &str,
     ) {
         self.private_after_write(cx);
-        self.placement_unresolved(cx, &request.step);
-        let error = format!("Coinbase write outcome requires reconciliation: {error}");
+        if request.placement_reserved
+            && let Step::Place { payload, .. } = &request.step
+        {
+            if self
+                .trading
+                .reductions
+                .get(&payload.client_order_id)
+                .is_some_and(|reservation| reservation.native_id.is_none())
+            {
+                self.trading.reductions.remove(&payload.client_order_id);
+            }
+            self.private_placement_finished(&payload.client_order_id);
+        }
+        let error = format!("Coinbase write was not sent: {error}");
         self.trading_finish_error(cx, request.command, not_sent(error));
     }
 
