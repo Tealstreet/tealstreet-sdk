@@ -156,25 +156,15 @@ fn keyed_missing_callbacks_keep_adoption_and_configuration_refusals() {
                         build(venue, options(value.clone()), None, Mode)
                     }
                     .expect_err("missing callback provider");
-                    let unadopted_payload = flag == "payloadSigner"
-                        && matches!(
-                            venue,
-                            "kraken" | "krakenspot" | "kodiakfi" | "mode" | "what" | "woofi"
-                        );
-                    let expected_kind = if unadopted_payload {
-                        ErrorKind::Unsupported
-                    } else {
-                        ErrorKind::InvalidInput
-                    };
-                    assert_eq!(error.kind, Some(expected_kind), "{venue}/{version}/{flag}");
-                    let expected_message = if unadopted_payload {
-                        format!(
-                            "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
-                        )
-                    } else {
-                        "Delegated signing requires a configured callback provider".to_owned()
-                    };
-                    assert_eq!(error.message, expected_message, "{venue}/{version}/{flag}");
+                    assert_eq!(
+                        error.kind,
+                        Some(ErrorKind::InvalidInput),
+                        "{venue}/{version}/{flag}"
+                    );
+                    assert_eq!(
+                        error.message, "Delegated signing requires a configured callback provider",
+                        "{venue}/{version}/{flag}"
+                    );
                     assert_eq!(
                         error.outcome,
                         Some(Outcome::NotSent),
@@ -263,7 +253,7 @@ fn explicit_client_context_constructs_public_engines_with_unused_callback_intent
 }
 
 #[test]
-fn unadopted_private_payload_admission_precedes_callback_configuration() {
+fn disabled_private_payload_checks_callback_configuration_before_admission() {
     use safe_cex_venues::{ConstructionContext, build_in_context, build_with_signer_in_context};
     for venue in [
         "kraken",
@@ -299,15 +289,157 @@ fn unadopted_private_payload_admission_precedes_callback_configuration() {
                         let error = result.expect_err("unadopted private custody");
                         assert_eq!(
                             error.kind,
-                            Some(ErrorKind::Unsupported),
+                            Some(if injected {
+                                ErrorKind::Unsupported
+                            } else {
+                                ErrorKind::InvalidInput
+                            }),
                             "{venue}/{context:?}"
                         );
                         assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}/{context:?}");
                         assert_eq!(
                             error.message,
-                            format!(
-                                "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
-                            )
+                            if injected {
+                                format!(
+                                    "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
+                                )
+                            } else {
+                                "Delegated signing requires a configured callback provider"
+                                    .to_owned()
+                            }
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn normalized_keyless_callbacks(venue: &str) {
+    for key in ["", "   ", "\u{0085}\u{2003}"] {
+        for (flag, intent) in [
+            ("remoteSigning", "remoteSigner"),
+            ("payloadSigner", "payloadSigner"),
+        ] {
+            for requested in [Value::Null, json!(false)] {
+                let mut value = json!({"key": key, "secret": "", "accountStartup": true,
+                    "publicMode": {"requested": requested}});
+                value[flag] = json!(true);
+                value["publicMode"][intent] = json!(true);
+                let entropy = Some(safe_cex_engine::test_support::seeded_entropy(17));
+                let public = build(venue, options(value), entropy, Mode)
+                    .expect("normalized keyless callbacks keep public mode");
+                assert!(!public, "{venue}/{flag}/{key:?}/{requested}");
+            }
+        }
+    }
+}
+
+#[test]
+// TS #3320 fd43a168: exchanges/rust/localSignerSetup.ts:63-96 normalizes before derivePublicMode.
+fn review2_normalized_keyless_mexc_callbacks_are_public() {
+    normalized_keyless_callbacks("mexc");
+}
+
+#[test]
+// TS #3320 fd43a168: exchanges/rust/localSignerSetup.ts:63-96 normalizes before derivePublicMode.
+fn review2_normalized_keyless_bitunix_callbacks_are_public() {
+    normalized_keyless_callbacks("bitunix");
+}
+
+#[test]
+// TS #3320 fd43a168: exchanges/rust/delegatedSignerSetup.ts:74-86 refuses these modes before callbacks.
+fn review2_grvt_kucoin_payload_refusal_precedes_provider_validation() {
+    use safe_cex_venues::{ConstructionContext, build_in_context, build_with_signer_in_context};
+    for venue in ["grvt", "kucoin", "kucoinspot"] {
+        for context in [ConstructionContext::Client, ConstructionContext::Hosted] {
+            for requested in [Value::Null, json!(false)] {
+                let value = json!({"key": "configured-key", "secret": "", "payloadSigner": true,
+                    "publicMode": {"requested": requested, "payloadSigner": true}});
+                for entry in ["raw", "injected-missing", "injected-ready"] {
+                    let result = match entry {
+                        "raw" => {
+                            build_in_context(context, venue, options(value.clone()), None, Mode)
+                        }
+                        "injected-missing" => build_with_signer_in_context(
+                            context,
+                            venue,
+                            options(value.clone()),
+                            None,
+                            None,
+                            Mode,
+                        ),
+                        _ => build_with_signer_in_context(
+                            context,
+                            venue,
+                            options(value.clone()),
+                            None,
+                            Some(Arc::new(NoIo)),
+                            Mode,
+                        ),
+                    };
+                    let error = result.expect_err("TS refuses unsupported payload mode first");
+                    assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}/{entry}");
+                    assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}/{entry}");
+                    assert!(
+                        error.message.contains("PayloadSigner"),
+                        "{venue}: {}",
+                        error.message
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+// TS #3320 fd43a168: exchanges/rust/betaVenues.ts:84-95 validates callbacks before disabled modes.
+fn review2_kraken_coinbase_provider_validation_precedes_payload_refusal() {
+    use safe_cex_venues::{ConstructionContext, build_in_context, build_with_signer_in_context};
+    for venue in ["kraken", "krakenspot", "coinbase", "coinbasespot"] {
+        for context in [ConstructionContext::Client, ConstructionContext::Hosted] {
+            for requested in [Value::Null, json!(false)] {
+                let value = json!({"key": "configured-key", "secret": "", "payloadSigner": true,
+                    "publicMode": {"requested": requested, "payloadSigner": true}});
+                for entry in ["raw", "injected-missing", "injected-ready"] {
+                    let ready = entry == "injected-ready";
+                    let result = match entry {
+                        "raw" => {
+                            build_in_context(context, venue, options(value.clone()), None, Mode)
+                        }
+                        "injected-missing" => build_with_signer_in_context(
+                            context,
+                            venue,
+                            options(value.clone()),
+                            None,
+                            None,
+                            Mode,
+                        ),
+                        _ => build_with_signer_in_context(
+                            context,
+                            venue,
+                            options(value.clone()),
+                            None,
+                            Some(Arc::new(NoIo)),
+                            Mode,
+                        ),
+                    };
+                    let error = result.expect_err("private disabled-family custody");
+                    assert_eq!(
+                        error.kind,
+                        Some(if ready {
+                            ErrorKind::Unsupported
+                        } else {
+                            ErrorKind::InvalidInput
+                        }),
+                        "{venue}/{entry}"
+                    );
+                    assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}/{entry}");
+                    if !ready {
+                        assert_eq!(
+                            error.message,
+                            "Delegated signing requires a configured callback provider",
+                            "{venue}/{entry}"
                         );
                     }
                 }

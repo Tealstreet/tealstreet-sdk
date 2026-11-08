@@ -497,7 +497,7 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             let error = construct(venue, &format!(r#"{{"key":"key","secret":"{local}","remoteSigning":true,"payloadSigner":true}}"#)).unwrap_err();
             assert_eq!(
                 error.kind,
-                Some(if matches!(venue, "polymarket" | "coinbase" | "txflow") {
+                Some(if venue == "polymarket" {
                     ErrorKind::Unsupported
                 } else {
                     ErrorKind::InvalidInput
@@ -507,10 +507,6 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
             let expected = if venue == "polymarket" {
                 "Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply".to_owned()
-            } else if matches!(venue, "coinbase" | "txflow") {
-                format!(
-                    "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
-                )
             } else {
                 "Delegated signing requires a configured callback provider".to_owned()
             };

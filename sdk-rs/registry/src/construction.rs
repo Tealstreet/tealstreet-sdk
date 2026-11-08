@@ -209,18 +209,29 @@ pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
         .signing
         .as_ref()
         .filter(|_| bridge(venue, options).dispatch_signing);
+    let primary_policy = signer_setup_policy(venue).primary.unwrap_or_default();
+    let credential_present = |value: &Option<String>, trim: Option<bool>| {
+        value.as_deref().is_some_and(|value| {
+            !(if trim == Some(true) {
+                value.trim()
+            } else {
+                value
+            })
+            .is_empty()
+        })
+    };
     let present = |value: &Option<String>| value.as_ref().is_some_and(|value| !value.is_empty());
     let matches = |conditions: Conditions, can_sign: bool| {
         conditions.iter().all(|group| {
             group.iter().any(|input| match input {
                 Input::Key => {
-                    present(&options.key)
+                    credential_present(&options.key, primary_policy.trim_credential)
                         || identities
                             .and_then(|s| s.primary.as_ref())
                             .is_some_and(|id| !id.credential.0.is_empty())
                 }
                 Input::Secret => {
-                    present(&options.secret)
+                    credential_present(&options.secret, primary_policy.trim_signing)
                         || identities
                             .and_then(|s| s.primary.as_ref())
                             .is_some_and(|id| id.signing_opt().is_some_and(|key| !key.0.is_empty()))
