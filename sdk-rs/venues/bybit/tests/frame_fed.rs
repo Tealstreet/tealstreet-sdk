@@ -66,7 +66,7 @@ fn frame_fed_market_close_splits_with_the_public_market_quantity_cap() {
         .iter()
         .map(|child| child["qty"].as_str().unwrap().parse().unwrap())
         .collect();
-    assert_eq!(quantities, vec![500.0, 500.0, 100.0]);
+    assert_eq!(quantities, vec![333.333, 333.333, 333.333, 100.0]);
     assert!(children.iter().all(|child| child["reduceOnly"] == true));
 }
 

@@ -2,8 +2,14 @@
 
 Legacy TypeScript owns write behavior. Ordinary non-option orders have no new
 whole-command price, precision or minimum-notional gate. Existing capability,
-caller-ID and option preflight checks remain, alongside pre-PR Rust lot formatting
+caller-ID and option preflight checks remain, alongside existing price formatting
 and engine-owned custody, signing and physical classification.
+
+Perpetual lot quantities follow `reference/bybit/bybit.exchange.ts:2718–2731`:
+emit `ceil(amount / max)` equal rounded lots, then the rounded remainder. This
+preserves TS rounding even when the emitted total differs from the requested
+amount: `26 / 5 / 1` emits `[4, 4, 4, 4, 4, 4, 1]`. Spot's separate allocation
+change is tracked in PR #3358; its allocation is unchanged in this branch.
 
 Every ordinary and Hyro mutation has logical indices in the passive shared
 `WritePlan::new/record/attach` journal. It holds no payload, admission callback,

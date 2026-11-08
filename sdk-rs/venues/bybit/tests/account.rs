@@ -1070,7 +1070,7 @@ fn ambiguous_batch_responses_never_resend_creates() {
 }
 
 #[test]
-fn a_split_preserves_quantity_and_only_the_first_lot_has_brackets() {
+fn a_split_uses_legacy_rounded_quantities_and_only_the_first_lot_has_brackets() {
     #[derive(serde::Deserialize)]
     struct Batch {
         request: Vec<Item>,
@@ -1097,14 +1097,14 @@ fn a_split_preserves_quantity_and_only_the_first_lot_has_brackets() {
             .iter()
             .map(|row| row.qty.as_str())
             .collect::<Vec<_>>(),
-        ["10", "10", "5"]
+        ["7", "7", "7", "5"]
     );
     let total: f64 = batch
         .request
         .iter()
         .map(|row| row.qty.parse::<f64>().unwrap())
         .sum();
-    assert_eq!(total, 25.0);
+    assert_eq!(total, 26.0);
     assert_eq!(batch.request[0].stop_loss.as_deref(), Some("85000"));
     assert!(batch.request[1..].iter().all(|row| row.stop_loss.is_none()));
 }

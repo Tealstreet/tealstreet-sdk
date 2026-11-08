@@ -31,7 +31,7 @@ fn page(symbols: &[&str], cursor: &str, label: &str) -> String {
 #[test]
 fn refreshed_market_quantity_caps_replace_both_native_split_bounds() {
     for (kind, quantities) in [
-        (OrderType::Market, vec![200.0, 200.0, 100.0]),
+        (OrderType::Market, vec![133.333, 133.333, 133.333, 100.0]),
         (OrderType::Limit, vec![500.0]),
     ] {
         let mut h = Harness::started(support::Options {

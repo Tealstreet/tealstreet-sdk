@@ -172,10 +172,112 @@ fn body(request: &HttpRequest) -> &str {
     request.body.as_deref().unwrap()
 }
 
+fn assert_allocation_quantities(
+    variant: Variant,
+    amount: f64,
+    max: f64,
+    step: f64,
+    expected: &[&str],
+) {
+    let mut h = ready(variant);
+    let mut markets = h.engine.store().markets().to_vec();
+    let market = markets.iter_mut().find(|m| m.symbol == "BTCUSDT").unwrap();
+    market.precision.amount = step;
+    market.limits.amount.max = max;
+    market.limits.amount.min = step;
+    h.engine.store_mut().set_markets(markets);
+    place(&mut h, 900, vec![order("BTCUSDT", amount)]);
+    if h.has_request("/v5/position/list") {
+        resolve_mode(&mut h, "BTCUSDT");
+    }
+    let mut quantities = Vec::new();
+    let mut ids = Vec::new();
+    while h.has_request("/v5/order/create") {
+        assert!(ids.len() < 30, "unexpected additional allocation writes");
+        let batch = h.has_request("/v5/order/create-batch");
+        let request = h.take(if batch {
+            "/v5/order/create-batch"
+        } else {
+            "/v5/order/create"
+        });
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let rows = if batch {
+            sent["request"].as_array().unwrap().clone()
+        } else {
+            vec![sent]
+        };
+        let mut results = Vec::new();
+        for row in &rows {
+            quantities.push(row["qty"].as_str().unwrap().to_owned());
+            let id = format!("lot-{}", ids.len());
+            results.push(serde_json::json!({"orderId": id}));
+            ids.push(id);
+        }
+        let response = if batch {
+            let statuses: Vec<_> = rows
+                .iter()
+                .map(|_| serde_json::json!({"code":0,"msg":"OK"}))
+                .collect();
+            serde_json::json!({"retCode":0,"result":{"list":results},"retExtInfo":{"list":statuses}})
+        } else {
+            serde_json::json!({"retCode":0,"result":results[0]})
+        };
+        h.reply(request.id, 200, &response.to_string());
+        h.advance(25.0);
+    }
+    assert_eq!(
+        quantities, expected,
+        "{variant:?}: amount={amount}, max={max}, step={step}"
+    );
+    assert_eq!(
+        h.result(900),
+        Some(&Ok(serde_json::to_string(&ids).unwrap()))
+    );
+    assert!(!h.unknown.contains(&900));
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn perp_lot_allocation_matches_legacy_ts_audit() {
+    // reference/bybit/bybit.exchange.ts:2718-2731, including rounded totals below the requested amount.
+    for (amount, max, step, expected) in [
+        (26.0, 5.0, 1.0, &["4", "4", "4", "4", "4", "4", "1"][..]),
+        (11.0, 5.0, 1.0, &["3", "3", "3", "1"][..]),
+        (12.0, 5.0, 1.0, &["3", "3", "3", "2"][..]),
+        (10.0, 5.0, 1.0, &["5", "5"][..]),
+        (7.0, 3.0, 0.5, &["2", "2", "2", "1"][..]),
+        (
+            1.0005,
+            0.3,
+            0.001,
+            &["0.225", "0.225", "0.225", "0.225", "0.101"][..],
+        ),
+    ] {
+        assert_allocation_quantities(Variant::Linear, amount, max, step, expected);
+    }
+}
+
+#[test]
+fn spot_lot_allocation_stays_separate_from_perp_fix() {
+    for (amount, max, step, expected) in [
+        (26.0, 5.0, 1.0, &["5", "5", "5", "5", "5", "1"][..]),
+        (11.0, 5.0, 1.0, &["5", "5", "1"][..]),
+        (12.0, 5.0, 1.0, &["5", "5", "2"][..]),
+        (10.0, 5.0, 1.0, &["5", "5"][..]),
+        (7.0, 3.0, 0.5, &["3", "3", "1"][..]),
+        (1.0005, 0.3, 0.001, &["0.3", "0.3", "0.3", "0.101"][..]),
+    ] {
+        assert_allocation_quantities(Variant::Spot, amount, max, step, expected);
+    }
+}
+
 #[test]
 fn managed_split_market_close_accepts_server_echoes_without_caller_ids() {
-    // Preserve two and three children under the 500-unit market cap.
-    for (amount, count) in [(900.0, 2), (1400.0, 3)] {
+    // Equal TS lots plus remainder under the 500-unit market cap.
+    for (amount, quantities) in [
+        (900.0, &["250", "250", "400"][..]),
+        (1400.0, &["333.333", "333.333", "333.333", "400"][..]),
+    ] {
         let mut h = ready(Variant::Demo);
         let mut opts = order("BTCUSDT", amount);
         opts.kind = OrderType::Market;
@@ -185,7 +287,14 @@ fn managed_split_market_close_accepts_server_echoes_without_caller_ids() {
         let request = h.take("/v5/order/create-batch");
         let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
         let children = sent["request"].as_array().unwrap();
-        assert_eq!(children.len(), count);
+        let count = quantities.len();
+        assert_eq!(
+            children
+                .iter()
+                .map(|child| child["qty"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            quantities
+        );
         assert!(
             children
                 .iter()
@@ -335,7 +444,7 @@ fn outcome(h: &Harness, command: u32) -> Option<safe_cex_engine::Outcome> {
 }
 
 #[test]
-fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
+fn inverse_create_keeps_native_integer_quantity_with_legacy_lot_rounding() {
     let mut h = ready(Variant::Inverse);
     place(&mut h, 1, vec![order("BTCUSD", 25.6)]);
     let mode = h.take("/v5/position/list");
@@ -347,8 +456,16 @@ fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
     );
     let request = h.take("/v5/order/create-batch");
     assert!(body(&request).contains("\"category\":\"inverse\""));
-    assert_eq!(body(&request).matches("\"qty\":\"10\"").count(), 2);
-    assert_eq!(body(&request).matches("\"qty\":\"6\"").count(), 1);
+    let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+    assert_eq!(
+        sent["request"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["qty"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["7", "7", "7", "6"]
+    );
 }
 
 #[test]
@@ -4922,8 +5039,16 @@ fn hyro_a_second_send_cannot_renew_the_earliest_send_retention_window() {
 #[test]
 fn market_quantity_cap_splits_each_reduce_only_child_but_keeps_the_limit_cap() {
     for (kind, reduce_only, expected) in [
-        (OrderType::Market, false, vec![500.0, 500.0, 100.0]),
-        (OrderType::Market, true, vec![500.0, 500.0, 100.0]),
+        (
+            OrderType::Market,
+            false,
+            vec![333.333, 333.333, 333.333, 100.0],
+        ),
+        (
+            OrderType::Market,
+            true,
+            vec![333.333, 333.333, 333.333, 100.0],
+        ),
         (OrderType::Limit, false, vec![1100.0]),
     ] {
         let mut h = ready(Variant::Demo);
@@ -5005,20 +5130,13 @@ fn market_quantity_cap_never_exceeds_limit_cap_and_missing_field_keeps_limit_cap
         let request = h.take("/v5/order/create-batch");
         let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
         assert_eq!(
-            payload["request"][0]["qty"]
-                .as_str()
+            payload["request"]
+                .as_array()
                 .unwrap()
-                .parse::<f64>()
-                .unwrap(),
-            expected
-        );
-        assert_eq!(
-            payload["request"][1]["qty"]
-                .as_str()
-                .unwrap()
-                .parse::<f64>()
-                .unwrap(),
-            1500.0 - expected
+                .iter()
+                .map(|row| row["qty"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["595", "595", "310"]
         );
     }
 }

@@ -65,11 +65,16 @@ fn check_lots(variant: Variant, single: bool) {
                     opts.take_profit = take_profit;
                     opts.stop_loss = stop_loss;
                     let lots = venue.format_lots(cx, &opts).unwrap();
-                    assert_eq!(lots.len(), 3);
+                    let quantities = if variant.is_spot() {
+                        &["2", "2", "1"][..]
+                    } else {
+                        &["1", "1", "1", "1"][..]
+                    };
+                    assert_eq!(lots.len(), quantities.len());
                     for (index, lot) in lots.into_iter().enumerate() {
                         let body = if single { lot.single } else { lot.item }.finish();
                         let sent: CreateLot = serde_json::from_str(&body).unwrap();
-                        assert_eq!(sent.qty, if index == 2 { "1" } else { "2" });
+                        assert_eq!(sent.qty, quantities[index]);
                         assert_eq!(
                             sent.category.as_deref(),
                             single.then_some(venue.category_for(symbol).as_str()),
