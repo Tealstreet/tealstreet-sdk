@@ -29,6 +29,12 @@ authorize zkLink orders. Secondary read keys are also `unsupported/notSent`,
 matching the venue's existing primary-only credential model. There is no local
 key fallback when a delegate fails or becomes unavailable.
 
+Public-only accounts, including keyless public accounts, ignore unused signing
+callbacks and credentials. Public mode is resolved before private custody
+validation, installs no signing provider or identities, and cannot authenticate
+private requests. An unused RemoteSigner or PayloadSigner cannot make a public
+account require a passphrase or fail private-mode validation.
+
 Native fixture signing compares local and device operations/signatures across
 REST reads, ordinary/protective orders, cancellation, cancel-all, leverage,
 cancel/proof/replacement amendments, signature-rejection re-signing and private

@@ -59,8 +59,13 @@ nonce, timestamp, expiry, transport outcome, retry grant or execution fence.
 The table adds enabled remoteSigning with base64 signature encoding, the ApeX
 protected headers and passphrase header. payloadSupported stays false because
 generic PayloadSigner cannot execute zkLink contract work. Private PayloadSigner
-and all configured secondary signing credentials refuse with typed
+and all configured secondary signing credentials on private accounts refuse with typed
 unsupported/notSent errors. RemoteSigner takes precedence and never falls back.
+
+Public mode is resolved before private signer validation. Public-only and
+keyless public accounts ignore unused callbacks, passphrases and setup metadata,
+install no provider or identities, and cannot sign. Captured public mode remains
+public even if later construction input supplies a key or requests private mode.
 
 Public type changes are the additive `apexomni-batch` RemoteSigner/host input
 format and the Apex HMAC/zkLink capability declaration. Hosts/devices must run

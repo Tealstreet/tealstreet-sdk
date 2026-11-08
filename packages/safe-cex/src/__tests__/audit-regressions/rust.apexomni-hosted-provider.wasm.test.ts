@@ -159,3 +159,30 @@ it('actual keyless WASM origins refuse unavailable, throwing and malformed deleg
     for (const material of ['fixture-material', 'fixture-pass', seed]) expect(JSON.stringify(output)).not.toContain(material);
   }
 });
+
+it.each([true, false])('public Apex WASM accounts ignore unused signing configuration (explicit=%s)', async (explicit) => {
+  for (const key of explicit ? ['', 'saved-public-key'] : ['']) {
+    const remoteSigner = { sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn() };
+    const payloadSigner = vi.fn();
+    for (const callbacks of [{ remoteSigner }, { payloadSigner }, { remoteSigner, payloadSigner }]) {
+      const { exchange, io } = fixture({
+        key, secret: '', passphrase: undefined, omniKeySeed: undefined,
+        ...(explicit ? { publicDataOnly: true } : {}), ...callbacks,
+      });
+      expect(exchange.isPublicDataOnly).toBe(true);
+      const http = await exchange.signHttpRequest({ id: 'public', type: 'http', exchangeName: 'apexomni',
+        config: { method: 'GET', url: '/v3/klines', baseURL: 'https://omni.apex.exchange/api', headers: {} } });
+      expect(http.error).toBeUndefined();
+      expect(Object.keys(http.config!.headers).some((header) => /^APEX-/i.test(header))).toBe(false);
+      const auth = await exchange.signWsAuth({ id: 'public-auth', type: 'ws-auth', exchangeName: 'apexomni',
+        wsAuth: { outputFormat: 'apexomni-batch', toSign: JSON.stringify({ contracts: [], payload: [{ bytes: bytes(`${now}GET/ws/accounts`) }] }) } });
+      expect(auth.error).toBeTruthy();
+      expect(auth.wsAuthSignature).toBeUndefined();
+      expect(io).not.toHaveBeenCalled();
+    }
+    expect(remoteSigner.sign).not.toHaveBeenCalled();
+    expect(remoteSigner.isAvailable).not.toHaveBeenCalled();
+    expect(remoteSigner.onAvailabilityChange).not.toHaveBeenCalled();
+    expect(payloadSigner).not.toHaveBeenCalled();
+  }
+});

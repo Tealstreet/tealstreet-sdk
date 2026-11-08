@@ -144,8 +144,8 @@ The same field policy declares primary required-for-private passphrases and
 required secondary passphrases with primary fallback for OKX and Bitget aliases
 and WEEX.
 Missing/JSON-null secondary passphrases inherit an opaque primary reference;
-explicit empty never inherits. Public mode bypasses only the primary requirement,
-while secondary validation stays active. Shared publicMode intent takes precedence
+explicit empty never inherits. Local signer setup in public mode bypasses only
+the primary requirement, while secondary validation stays active. Shared publicMode intent takes precedence
 over legacy publicDataOnly, including null/omitted requested. This declaration does
 not enable signing for an unmigrated family.
 Normalization and required-material validation occur before opaque identities are installed, and SDK cached
@@ -213,6 +213,11 @@ Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
+Delegated setup resolves public mode before private callback, credential or
+metadata validation. Explicit public-only and keyless public accounts ignore
+unused signer configuration, install no provider or identities and advertise no
+signing algorithms. Captured public mode cannot be changed by later construction
+input; private callback validation and custody requirements remain strict.
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.
 RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary
