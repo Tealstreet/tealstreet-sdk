@@ -1,0 +1,32 @@
+# Polymarket signing
+
+The connector uses CLOB V2 on Polygon (chain 137): EIP-712 wallet signatures
+for L1 credential derivation and orders, and URL-safe base64 HMAC-SHA256 over
+`seconds + method + path + exact body` for L2 REST authentication. Query strings
+are excluded from the L2 preimage. Deposit wallets (signature type 3) use the
+ERC-7739 nested order signature; proxy and Safe accounts retain types 1 and 2.
+
+Hosted `RemoteSigner` and delegated `PayloadSigner` remain explicitly disabled
+in `construction-rules.json`. The private user WebSocket authenticates with
+`{apiKey, secret, passphrase}`: it requires the actual L2 API secret, not a
+signature. A signature-only callback cannot construct this subscription while
+keeping secret material on the device. Wallet signing and L2 HMAC also use
+different key types; enabling just one would not provide private-account
+parity. SDK and native construction refuse these modes with `unsupported` /
+`notSent` before credentials are decoded, callbacks run or transport starts.
+
+The existing local connector supports its wallet/proxy/Safe/deposit-wallet
+account types. Those account forms do not substitute for the user-channel
+credential. The beta venue admission list is unchanged. Supporting hosted
+accounts requires a separately designed credential/session transport (or a
+venue-supported signature-based user stream), not exporting the API secret in
+a signer payload or result.
+
+Protocol references:
+- [Authentication](https://docs.polymarket.com/getting-started/api)
+- [User stream](https://docs.polymarket.com/trading/realtime-order-updates)
+- [CLOB client V2](https://github.com/Polymarket/clob-client-v2)
+
+The local signing module retains independent official-client golden vectors
+for L1, L2 and all four order signature types. No remote signing vector or WS
+signature is claimed for a mode that cannot authenticate this protocol.
