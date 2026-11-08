@@ -27,6 +27,10 @@ old login with a message. This includes queued exit/quit commands. In-flight
 scripts cannot make further adapter calls after their starting session ends. A new login reconnects the listener with that user's identity;
 browser approval is specific to that user.
 
+Changing login stops the old user's in-process chasers and removes them from
+chase listings before disconnecting exchanges. Late chase results are discarded;
+they do not appear in the next user's chase watch or one-shot command result.
+
 Each legacy config can identify the owner of its own accounts. Shared legacy
 files (hooks, browser approvals, vars, scripts and recordings) have one claim
 for their physical source directory across config profiles, brands and path

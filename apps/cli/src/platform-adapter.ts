@@ -35,6 +35,8 @@ import {
   setContextualProxyTokenProvider,
 } from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
+import type { Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
+import { chaserOrderManagerInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderManager';
 import { assertBetaVenue } from '@tealstreet/safe-cex/src/exchanges/rust/betaVenues';
 import {
   defaultProxyRegion,
@@ -297,6 +299,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     async stopExchange(exchange: ExchangeLike): Promise<void> {
+      chaserOrderManagerInstance.cleanupExchange(exchange as Exchange);
       if (exchange.dispose) {
         exchange.dispose();
       }

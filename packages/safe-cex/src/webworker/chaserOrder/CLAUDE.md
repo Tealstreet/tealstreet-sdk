@@ -26,6 +26,10 @@ synchronously, cancellation is started for known IDs, and a bridged warning
 tells the user the chase was interrupted. Do not defer this cleanup to a future
 store update.
 
+The standalone CLI stop adapter calls this cleanup before disposing its exchange.
+Each chase keeps its original exchange as an immutable session generation;
+late placement, lookup and completion continuations drop results once it is disposed.
+
 ## Hot-path: order updates are immediate; ticker-only checks are rate-limited
 
 `ChaserOrderManager.processInstance` registers an `onUpdate`
