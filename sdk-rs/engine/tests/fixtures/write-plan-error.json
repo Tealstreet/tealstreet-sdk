@@ -1,0 +1,11 @@
+{
+  "message": "stopped",
+  "outcome": "unknown",
+  "partial": { "orderIds": ["native-0"] },
+  "elements": [
+    { "index": 0, "clientOrderId": "first", "status": "placed", "orderIds": ["native-0"] },
+    { "index": 1, "clientOrderId": "second", "status": "notSent", "error": { "message": "rejected", "outcome": "rejected", "venueCode": "-1013" } },
+    { "index": 2, "clientOrderId": "third", "status": "unknown", "error": { "message": "lost acknowledgement", "outcome": "unknown" } },
+    { "index": 3, "status": "notSent" }
+  ]
+}

@@ -238,6 +238,66 @@ export const builderAuthorizationOf = (value) => {
   return undefined;
 };
 
+/** Validate and clone a complete logical outcome array at host/worker boundaries. */
+export function writePlanElementsOf(value) {
+  return parseWritePlanElements(value, new WeakSet(), 0);
+}
+
+function writePlanErrorOf(value, active, depth) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof value.message !== 'string' || active.has(value) || depth > 32) return undefined;
+  active.add(value);
+  try {
+    const error = { message: value.message };
+    if (ERROR_KINDS.has(value.kind)) error.kind = value.kind;
+    if (ERROR_OUTCOMES.has(value.outcome)) error.outcome = value.outcome;
+    for (const key of ['venueCode', 'venueMessage'])
+      if (typeof value[key] === 'string') error[key] = value[key];
+    if (typeof value.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value.causeCode)) error.causeCode = value.causeCode;
+    const historyDecode = historyDecodeOf(value.historyDecode);
+    if (historyDecode) error.historyDecode = historyDecode;
+    const builder = builderAuthorizationOf(value.builderAuthorization);
+    if (builder) error.builderAuthorization = builder;
+    if (Number.isFinite(value.retryAfterMs) && value.retryAfterMs >= 0) error.retryAfterMs = value.retryAfterMs;
+    if (ERROR_PROTECTIONS.has(value.protection)) error.protection = value.protection;
+    if (value.partial && Array.isArray(value.partial.orderIds)
+      && value.partial.orderIds.every((id) => typeof id === 'string')) {
+      error.partial = { orderIds: [...value.partial.orderIds] };
+      for (const key of ['total', 'failedIndex'])
+        if (count(value.partial[key]) !== undefined) error.partial[key] = value.partial[key];
+    }
+    if (value.elements !== undefined) {
+      const elements = parseWritePlanElements(value.elements, active, depth + 1);
+      if (!elements) return undefined;
+      error.elements = elements;
+    }
+    return error;
+  } finally { active.delete(value); }
+}
+
+function parseWritePlanElements(value, active, depth) {
+  if (!Array.isArray(value) || active.has(value) || depth > 32) return undefined;
+  active.add(value);
+  try {
+    const elements = [];
+    for (const row of value) {
+      if (!row || typeof row !== 'object' || Array.isArray(row) || count(row.index) === undefined
+        || (row.clientOrderId !== undefined && typeof row.clientOrderId !== 'string')) return undefined;
+      const element = { index: row.index };
+      if (row.clientOrderId !== undefined) element.clientOrderId = row.clientOrderId;
+      if (row.status === 'placed') {
+        if (!Array.isArray(row.orderIds) || !row.orderIds.every((id) => typeof id === 'string')) return undefined;
+        elements.push({ ...element, status: 'placed', orderIds: [...row.orderIds] });
+      } else if (row.status === 'notSent' || row.status === 'unknown') {
+        const error = row.error === undefined ? undefined : writePlanErrorOf(row.error, active, depth + 1);
+        if ((row.error !== undefined && !error) || (row.status === 'unknown' && !error)) return undefined;
+        elements.push({ ...element, status: row.status, ...(error ? { error } : {}) });
+      } else return undefined;
+    }
+    return elements;
+  } finally { active.delete(value); }
+}
+
 /** A classified venue failure (`engine/src/error.rs`). `message` is the text
  * hosts have always shown; `name` stays `Error` so displayed text is unchanged. */
 export class ExchangeError extends Error {
@@ -256,6 +316,8 @@ export class ExchangeError extends Error {
     if (venueMessage) this.venueMessage = venueMessage;
     if (Number.isFinite(detail.retryAfterMs) && detail.retryAfterMs >= 0) this.retryAfterMs = detail.retryAfterMs;
     if (ERROR_PROTECTIONS.has(detail.protection)) this.protection = detail.protection;
+    const elements = writePlanElementsOf(detail.elements);
+    if (elements) this.elements = elements;
     const ids = detail.partial?.orderIds;
     if (Array.isArray(ids) && ids.length && ids.every((id) => typeof id === 'string')) {
       this.partialOrderIds = [...ids];
