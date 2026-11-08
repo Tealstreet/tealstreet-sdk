@@ -84,6 +84,145 @@ fn refused_before_transport(engine: &mut Driver) -> Result {
     Ok(())
 }
 
+const PRICE_CAPPED_MARKETS: &str = r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","filters":{"price":{"minPrice":"0.01","maxPrice":"1000","tickSize":"0.01"},"quantity":{"minQuantity":"0.01","maxQuantity":"1000","stepSize":"0.01"}}}]"#;
+
+#[test]
+fn native_max_price_in_later_write_refuses_entire_plan() -> Result {
+    for price in [1000.01, 1000.006] {
+        let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, "[]");
+        let mut last = limit(1.);
+        last["price"] = json!(price);
+        submit(&mut engine, vec![limit(1.), limit(1.), last])?;
+        refused_before_transport(&mut engine)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn native_max_price_replacement_refuses_before_cancel() -> Result {
+    let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, &format!("[{ORDER}]"));
+    engine.handle(
+        2000.,
+        Event::Command(Command::AmendOrder {
+            command: 901,
+            id: "123".into(),
+            price: Some(1000.01),
+            amount: None,
+        }),
+    );
+    refused_before_transport(&mut engine)
+}
+
+#[test]
+fn native_max_price_checks_protective_prices_before_entry() -> Result {
+    for kind in ["limit", "market"] {
+        for field in ["takeProfit", "stopLoss"] {
+            let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, "[]");
+            let mut order = limit(1.);
+            order["type"] = json!(kind);
+            order[field] = json!(1000.01);
+            submit(&mut engine, vec![order])?;
+            refused_before_transport(&mut engine)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn native_max_price_uses_rounded_wire_value_with_inclusive_bound() -> Result {
+    for price in [1000., 1000.004] {
+        let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, "[]");
+        let mut order = limit(1.);
+        order["price"] = json!(price);
+        submit(&mut engine, vec![order])?;
+        let packet = requests(&mut engine)
+            .pop()
+            .ok_or("missing valid boundary write")?;
+        let row: Value = serde_json::from_str(packet.body.as_deref().ok_or("missing body")?)?;
+        assert_eq!(row["price"], "1000.00");
+        reply(&mut engine, &packet, 200, r#"{"id":"boundary"}"#);
+        assert!(actions(&mut engine).iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 901, .. })
+        )));
+        assert!(requests(&mut engine).is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn protective_rejection_never_reads_proof_or_puts_back_original_stop() -> Result {
+    let stop = ORDER
+        .replace("\"orderType\":\"Limit\"", "\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\",\"reduceOnly\":true")
+        .replace("\"side\":\"Bid\"", "\"side\":\"Ask\"");
+    let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, &format!("[{stop}]"));
+    engine.store_mut().update_ticker(SYMBOL, |ticker| {
+        ticker.last = 140.;
+        ticker.mark = 140.;
+        ticker.index = 140.;
+    });
+    engine.handle(
+        2000.,
+        Event::Command(Command::AmendOrder {
+            command: 901,
+            id: "123".into(),
+            price: Some(125.),
+            amount: None,
+        }),
+    );
+    let mut transport = ScriptedTransport {
+        responses: [
+            (
+                200,
+                r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#.into(),
+            ),
+            (400, r#"{"code":"INVALID_ORDER","message":"bad"}"#.into()),
+            (200, "[]".into()),
+        ]
+        .into(),
+        ..Default::default()
+    };
+    transport.poll(&mut engine);
+    assert_eq!(transport.requests[0].method, Method::Delete);
+    transport.poll(&mut engine);
+    let replacement = transport
+        .requests
+        .get(1)
+        .ok_or("missing replacement")?
+        .clone();
+    assert_eq!(replacement.method, Method::Post);
+    let row: Value = serde_json::from_str(replacement.body.as_deref().ok_or("missing body")?)?;
+    assert_eq!(row["triggerPrice"], "125.00");
+    assert_eq!(row["triggerQuantity"], "5.00");
+    let out = transport.poll(&mut engine);
+    let error = failed(&out)?;
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    let elements = error
+        .elements
+        .as_ref()
+        .ok_or("missing protective outcomes")?;
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(&elements[0].result, ElementResult::Applied {
+        effect: AppliedEffect::Cancel, target_order_id: Some(id), ..
+    } if id == "123"));
+    assert!(
+        matches!(&elements[1].result, ElementResult::Unknown { error }
+        if error.venue_code.as_deref() == Some("INVALID_ORDER"))
+    );
+    transport.poll(&mut engine);
+    assert_eq!(transport.requests.len(), 2);
+    assert_eq!(transport.responses, [(200, "[]".into())]);
+    reply(&mut engine, &replacement, 200, "[]");
+    let late = transport.poll(&mut engine);
+    assert!(!late.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 901, .. })
+            | Action::Notice(Notice::CommandFailed { command: 901, .. })
+    )));
+    assert_eq!(transport.requests.len(), 2);
+    Ok(())
+}
+
 #[test]
 fn rounded_second_pair_row_above_max_zero_writes() -> Result {
     for orders in [
