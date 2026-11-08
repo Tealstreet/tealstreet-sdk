@@ -124,6 +124,7 @@ enum Ack {
     Many { orders: Vec<SingleAck> },
 }
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AckClaims {
     #[serde(rename = "orderId")]
     order_id: Option<serde::de::IgnoredAny>,
@@ -131,13 +132,16 @@ struct AckClaims {
     orders: Option<Vec<serde::de::IgnoredAny>>,
 }
 fn has_effect_claim(data: &serde_json::value::RawValue) -> bool {
-    if let Ok(claims) = serde_json::from_str::<AckClaims>(data.get()) {
-        return claims.order_id.is_some()
-            || claims.order.is_some()
-            || claims.orders.is_some_and(|rows| !rows.is_empty());
+    if let Ok(rows) = serde_json::from_str::<Vec<serde::de::IgnoredAny>>(data.get()) {
+        return !rows.is_empty();
     }
-    !serde_json::from_str::<Vec<serde::de::IgnoredAny>>(data.get())
-        .is_ok_and(|rows| rows.is_empty())
+    // Unrecognized fields may contain execution evidence without a native ID.
+    // Only demonstrably empty data preserves a definite refusal.
+    serde_json::from_str::<AckClaims>(data.get()).map_or(true, |claims| {
+        claims.order_id.is_some()
+            || claims.order.is_some()
+            || claims.orders.is_some_and(|rows| !rows.is_empty())
+    })
 }
 fn proven_ids(call: &Call, native: &str, ack: &Ack) -> Option<Vec<String>> {
     let same = |a: &SingleAck| a.order_id.valid() && a.symbol == native;

@@ -128,7 +128,9 @@ payload is Unknown, and untouched suffixes stay NotSent. The partial metadata
 retains the failed payload index and total prepared payload count.
 Error codes are decoded independently of success-order data. Empty error data
 (`null`, `{}`, `[]` or an empty `orders` array) does not erase a known refusal;
-data claiming an order effect still makes a contradictory refusal Unknown.
+nonempty arrays or unrecognized object fields remain Unknown. This includes
+execution quantities and order status even when the native order ID is absent
+or null; a contradictory error header cannot erase that execution evidence.
 
 KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. Transport-loss
 and HTTP 503 cases sealed before Spot decoding retain their Unknown outcome,

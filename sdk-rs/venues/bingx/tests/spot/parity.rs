@@ -516,48 +516,88 @@ fn spot_followup_effect_claims_and_empty_success_stay_unknown() {
         json!({"code":0,"data":{}}),
         json!({"code":0,"data":{"orders":[]}}),
     ] {
-        let (mut e, _) = seed(true);
-        let actions = submit_batch(
-            &mut e,
-            vec![
-                batch_order(0.002, 41000., "prefix"),
-                batch_order(0.003, 41000., "middle"),
-                batch_order(0.004, 41000., "suffix"),
-            ],
-        );
-        let (_, actions) = ack(&mut e, &actions, "1001");
-        let middle = writes(&actions);
-        reply(&mut e, &middle[0], 200, &body.to_string());
-        let actions = collect(&mut e);
-        assert!(writes(&actions).is_empty());
-        unknown_outcome_and_journal(&actions, &["1001"]);
-        let error = failure(&actions);
-        let elements = error.elements.as_ref().expect("indexed Spot outcomes");
-        assert_eq!(elements.len(), 3);
-        for (index, client) in ["prefix", "middle", "suffix"].iter().enumerate() {
-            assert_eq!(elements[index].element.index, index);
-            assert_eq!(
-                elements[index].element.client_order_id.as_deref(),
-                Some(*client)
-            );
+        assert_indexed_spot_unknown(body);
+    }
+}
+
+#[test]
+fn spot_followup_incomplete_execution_evidence_stays_unknown() {
+    for data in [
+        json!({"symbol":"BTC-USDT","side":"BUY","type":"LIMIT",
+            "status":"FILLED","executedQty":"0.003","origQty":"0.003"}),
+        json!({"executedQty":"0.003","cummulativeQuoteQty":"123"}),
+        json!({"status":"FILLED"}),
+        json!({"status":"PARTIALLY_FILLED","executedQty":0.001}),
+        json!({"executedQty":0.003}),
+        json!({"cummulativeQuoteQty":123}),
+        json!({"orders":[],"executedQty":"0.003"}),
+    ] {
+        for null_id in [false, true] {
+            let mut data = data.clone();
+            if null_id {
+                data["orderId"] = Value::Null;
+            }
+            assert_indexed_spot_unknown(json!({"code":100440,"data":data}));
         }
-        assert!(matches!(&elements[0].result,
+    }
+}
+
+#[test]
+fn spot_followup_nonempty_unrecognized_data_stays_unknown() {
+    for data in [
+        json!({"unrecognizedExecutionField":"execution evidence"}),
+        json!([null, null, []]),
+        json!({"orderId":null,"orders":[],"fills":[{"quantity":"0.003"}]}),
+    ] {
+        assert_indexed_spot_unknown(json!({"code":100440,"data":data}));
+    }
+}
+
+fn assert_indexed_spot_unknown(body: Value) {
+    let (mut e, _) = seed(true);
+    let actions = submit_batch(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "prefix"),
+            batch_order(0.003, 41000., "middle"),
+            batch_order(0.004, 41000., "suffix"),
+        ],
+    );
+    let (_, actions) = ack(&mut e, &actions, "1001");
+    let middle = writes(&actions);
+    reply(&mut e, &middle[0], 200, &body.to_string());
+    let actions = collect(&mut e);
+    assert!(
+        writes(&actions).is_empty(),
+        "Unknown must halt before suffix: {body}"
+    );
+    unknown_outcome_and_journal(&actions, &["1001"]);
+    let error = failure(&actions);
+    let elements = error.elements.as_ref().expect("indexed Spot outcomes");
+    assert_eq!(elements.len(), 3);
+    for (index, client) in ["prefix", "middle", "suffix"].iter().enumerate() {
+        assert_eq!(elements[index].element.index, index);
+        assert_eq!(
+            elements[index].element.client_order_id.as_deref(),
+            Some(*client)
+        );
+    }
+    assert!(matches!(&elements[0].result,
             safe_cex_engine::write_plan::ElementResult::Placed { order_ids }
                 if order_ids == &["1001"]));
-        assert!(matches!(&elements[1].result,
+    assert!(matches!(&elements[1].result,
             safe_cex_engine::write_plan::ElementResult::Unknown { error }
                 if error.outcome == Some(Outcome::Unknown)
                     && error.message == ENGINE_UNKNOWN_TEXT));
-        assert!(matches!(
-            &elements[2].result,
-            safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
-        ));
-        let partial = error.partial.as_ref().unwrap();
-        assert_eq!(partial.failed_index, Some(1));
-        assert_eq!(partial.total, Some(3));
-        unknown_telemetry(&actions, "place");
-        late_unknown_ack_is_inert(&mut e, &middle[0]);
-    }
+    assert!(matches!(
+        &elements[2].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+    ));
+    let partial = error.partial.as_ref().unwrap();
+    assert_eq!(partial.failed_index, Some(1));
+    assert_eq!(partial.total, Some(3));
+    unknown_telemetry(&actions, "place");
+    late_unknown_ack_is_inert(&mut e, &middle[0]);
 }
 
 #[test]
