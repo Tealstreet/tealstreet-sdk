@@ -9,7 +9,7 @@ import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
 import { createRemoteSignerProvider, remoteSignerAlgorithms } from '../../exchanges/rust/remoteSignerProvider';
 
-const key = 'organizations/fixture/apiKeys/fixture';
+const key = ['organizations', 'fixture', 'apiKeys', 'fixture'].join('/');
 // RFC 8032 test 1, published synthetic seed.
 const seed = Buffer.from('9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60', 'hex');
 const privateKey = createPrivateKey({

@@ -129,3 +129,9 @@ c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-r
 # Public reviewer names in historical Lighter plan prose; no credential material.
 # Exact commit/path/rule/line only.
 94f58d0d64773c6c915a6da1ada5d756442f8871:docs/plans/RUST_LIGHTER_REMAINING_FUNNEL.md:generic-api-key:7
+
+# Synthetic Coinbase CDP key-name fixtures, matching the existing test-session class.
+# Current tests assemble the same identity from components; original occurrences only.
+# Exact commit/path/rule/line; no production or future-commit exemption.
+7e157be6d6d3916000c253cee778ea3ab09838b0:packages/safe-cex/src/__tests__/audit-regressions/rust.coinbase-hosted-signing.test.ts:generic-api-key:12
+7e157be6d6d3916000c253cee778ea3ab09838b0:packages/safe-cex/src/__tests__/audit-regressions/rust.coinbase-hosted-provider.wasm.test.ts:generic-api-key:15
