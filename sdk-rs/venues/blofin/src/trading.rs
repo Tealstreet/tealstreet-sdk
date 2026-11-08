@@ -504,6 +504,14 @@ fn positive(value: f64, label: &str) -> Result<(), String> {
     }
 }
 impl Job {
+    fn has_unknown(&self) -> bool {
+        self.writes.as_ref().is_some_and(|writes| {
+            writes
+                .outcomes()
+                .iter()
+                .any(|row| matches!(row.result, ElementResult::Unknown { .. }))
+        })
+    }
     fn settle_applied(&mut self, request: &Request) -> Result<(), VenueError> {
         let write = request.effect_write.as_ref().ok_or_else(|| {
             unknown("BloFin accepted effect has no report description").kind(ErrorKind::Internal)
@@ -546,7 +554,7 @@ impl Job {
         self.pending_write = None;
     }
 
-    fn failure(&mut self, error: VenueError) -> VenueError {
+    fn failure(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) -> VenueError {
         if let Some((index, count)) = self.pending_write.take() {
             let result = if definite_refusal(&error) {
                 ElementResult::NotSent {
@@ -554,14 +562,34 @@ impl Job {
                 }
             } else {
                 ElementResult::Unknown {
-                    error: Box::new(error.clone().outcome(Outcome::Unknown)),
+                    error: Box::new(unknown_guidance(error.clone().outcome(Outcome::Unknown))),
                 }
             };
             self.settle_write(Some(index), vec![result; count]);
         }
-        self.writes
+        let mut error = self
+            .writes
             .as_ref()
-            .map_or(error.clone(), |writes| writes.attach(error))
+            .map_or(error.clone(), |writes| writes.attach(error));
+        let uncertain = error.outcome == Some(Outcome::Unknown)
+            || error.elements.as_ref().is_some_and(|rows| {
+                rows.iter()
+                    .any(|row| matches!(row.result, ElementResult::Unknown { .. }))
+            });
+        if uncertain {
+            error = unknown_guidance(error.outcome(Outcome::Unknown));
+            error.presents = true;
+            cx.event(
+                Level::Warn,
+                code::CHILD_LEG_FAILED,
+                &error.message,
+                vec![
+                    ("command", self.command.into()),
+                    ("outcome", safe_cex_engine::Value::StaticStr("unknown")),
+                ],
+            );
+        }
+        error
     }
 
     fn new(command: CommandId, intent: Intent) -> Self {
@@ -2334,7 +2362,7 @@ impl Blofin {
         error: VenueError,
     ) {
         let unknown = !definite_refusal(&error);
-        let error = active.job.failure(error);
+        let error = active.job.failure(cx, error);
         self.cleanup_job(cx, &active.job);
         match &active.plan {
             None => {
@@ -2392,6 +2420,16 @@ impl Blofin {
         mut active: Active,
         current: Option<(&Slot, &Context)>,
     ) {
+        // A final Unknown needs the venue's indexed failure terminal; done_plan
+        // would otherwise seal directly without its logical outcome rows.
+        if active.job.has_unknown() {
+            return self.end(
+                cx,
+                active,
+                current,
+                unknown("BloFin job ended without its call"),
+            );
+        }
         self.cleanup_job(cx, &active.job);
         let plan = active.plan.as_ref().expect("a job with calls has a Plan");
         if let Some((slot, context)) = current {
@@ -2404,7 +2442,7 @@ impl Blofin {
         } else {
             let error = active
                 .job
-                .failure(VenueError::new("BloFin job ended without its call"));
+                .failure(cx, VenueError::new("BloFin job ended without its call"));
             let failed = cx.fail_plan(plan, error);
             debug_assert!(failed.is_ok(), "Plan terminal stranded");
         }
@@ -2750,7 +2788,7 @@ impl Blofin {
             Ok(reply) => reply,
             Err(error) => {
                 let message = error.to_string();
-                let _ = cx.http_write_unproven(context, message.clone());
+                let _ = cx.http_write_unproven(context, unknown(message.clone()).message);
                 return Err(unknown(message));
             }
         };
@@ -2787,7 +2825,7 @@ impl Blofin {
                             &message,
                         ));
                     }
-                    let _ = cx.http_write_unproven(context, message.clone());
+                    let _ = cx.http_write_unproven(context, unknown(message.clone()).message);
                     return Err(unknown(message));
                 }
                 let mut maybe_live = false;
@@ -2930,6 +2968,9 @@ impl Blofin {
                 }
                 if rows.iter().any(|row| row.code == "429") {
                     error = Some(UNKNOWN_RATE.to_owned());
+                }
+                if unproven || maybe_live {
+                    error = Some(unknown(error.clone().unwrap_or_else(|| message.clone())).message);
                 }
                 if unproven {
                     let message = error.clone().unwrap_or_else(|| message.clone());
@@ -3098,6 +3139,12 @@ impl Blofin {
                 }
                 if rows.iter().any(|row| row.code == "429") {
                     error = Some(UNKNOWN_RATE.to_owned());
+                }
+                if results
+                    .iter()
+                    .any(|result| matches!(result, ElementResult::Unknown { .. }))
+                {
+                    error = Some(unknown(error.clone().unwrap_or_default()).message);
                 }
                 job.settle_write(request.write_index, results);
                 if unproven {
@@ -3390,9 +3437,17 @@ fn http_failure(status: u16, body: &str) -> VenueError {
     VenueError::new(format!("BloFin HTTP {status}: {body}"))
 }
 
+// PARITY-EXCEPTION wording follows the engine without changing its fence.
+fn unknown_guidance(mut error: VenueError) -> VenueError {
+    if error.outcome == Some(Outcome::Unknown) {
+        error.message = "The outcome is unknown. Check Open Orders".into();
+    }
+    error
+}
+
 /// The write may have executed; reconcile before resending.
 fn unknown(message: impl Into<String>) -> VenueError {
-    VenueError::new(message).outcome(Outcome::Unknown)
+    unknown_guidance(VenueError::new(message).outcome(Outcome::Unknown))
 }
 
 /// Refused before any request was sent.
@@ -3431,7 +3486,7 @@ fn failed_element(
 ) -> ElementResult {
     let error = cx
         .classify_write(context, &CODES, Some(&native), message.to_owned())
-        .map(|fact| fact.error().clone())
+        .map(|fact| unknown_guidance(fact.error().clone()))
         .unwrap_or_else(|_| unknown(message));
     if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
         ElementResult::NotSent {

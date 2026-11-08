@@ -106,13 +106,24 @@ fn http_setting_failures_distinguish_transport_status_from_vendor_evidence() {
                 expected.map(|(_, message)| message),
                 "{error:?}"
             );
-            assert!(
-                error
-                    .message
-                    .contains(&format!("BloFin {kind} setting rejected")),
-                "{error:?}"
-            );
-            assert!(error.message.contains("HTTP 400"), "{error:?}");
+            if expected.is_some() {
+                assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+                assert!(
+                    error
+                        .message
+                        .contains(&format!("BloFin {kind} setting rejected")),
+                    "{error:?}"
+                );
+                assert!(error.message.contains("HTTP 400"), "{error:?}");
+            } else {
+                assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+                assert!(matches!(
+                    &error.elements.as_ref().unwrap()[0].result,
+                    safe_cex_engine::write_plan::ElementResult::Unknown { error }
+                        if error.message == "The outcome is unknown. Check Open Orders"
+                ));
+            }
             assert!(!h.pending.iter().any(|r| r.method == Method::Post));
         }
     }

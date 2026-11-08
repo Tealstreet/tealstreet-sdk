@@ -1113,7 +1113,9 @@ fn a_text_only_gone_row_is_classified_by_its_code_and_stops() {
     let error = failure(&h, 7);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error.message.contains("cancellation rejected"),
+        error
+            .message
+            .contains("The outcome is unknown. Check Open Orders"),
         "{}",
         error.message
     );

@@ -5,6 +5,8 @@ use safe_cex_engine::{Action, Command, Event, Method, Outcome};
 use serde_json::{Value, json};
 use support::*;
 
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
 const TS: &str = "packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts";
 
 fn setup(maximum: u32) -> Harness {
@@ -352,28 +354,324 @@ fn normal_and_protective_cancel_chunks_continue_after_ignored_row_refusals() {
     }
 }
 
-#[test]
-#[ignore = "NEEDS-ENGINE-CONTINUE: serial plans stop on Unknown; request_context.rs:2468"]
-fn code_only_unknown_row_needs_engine_continuation() {
-    // TS:2232-2257 continues even after an internal-error row with no message.
-    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: blofin | trading.rs:890 grouped-batch-chunking
-    let mut h = setup(1);
-    place(&mut h, json!([normal(21)]));
-    let request = h.take("batch-orders");
-    let rows: Vec<_> = (0..20).map(|i| {
-        json!({"orderId":if i==19 {"0".into()} else {(100+i).to_string()},"code":if i==19 {"103013"} else {"0"}})
-    }).collect();
-    h.respond(request, &json!({"code":"0","data":rows}).to_string());
+fn assert_unknown_halt(h: &mut Harness, expected_writes: &[&str], index: usize, placed: &[String]) {
+    use safe_cex_engine::write_plan::ElementResult;
+    assert_eq!(writes(h), expected_writes);
+    assert_eq!(h.failures.len(), 1);
+    let error = &h.failures[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .map_or(&[][..], |p| p.order_ids.as_slice()),
+        placed
+    );
+    let rows = error
+        .elements
+        .as_ref()
+        .expect("journal survives terminal projection");
+    let ElementResult::Unknown { error: unknown } = &rows[index].result else {
+        panic!("unknown physical write is not reported: {:?}", rows[index]);
+    };
+    if !placed.is_empty() {
+        for (row, id) in rows[..index].iter().zip(placed) {
+            assert!(matches!(&row.result, ElementResult::Placed { order_ids }
+                if order_ids.as_slice() == std::slice::from_ref(id)));
+        }
+    }
     assert!(
-        h.failures.is_empty(),
-        "TS would continue; engine refused: {:?}",
-        h.failures
+        rows[index + 1..]
+            .iter()
+            .all(|row| matches!(row.result, ElementResult::NotSent { error: None }))
+    );
+    let guidance = ENGINE_UNKNOWN_TEXT;
+    let message_ok = error.message.contains(guidance)
+        && !error.message.to_ascii_lowercase().contains("reject")
+        && !error.message.to_ascii_lowercase().contains("refused")
+        && unknown.message.contains(guidance);
+    let telemetry = h.actions.iter().filter(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+        if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
+            && event.message.contains(guidance)
+            && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    )).count();
+    assert!(
+        message_ok && telemetry == 1,
+        "standard message={message_ok}, telemetry={telemetry}, error={error:?}"
+    );
+    let mut timers: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms > h.now && *at_ms <= h.now + 1000.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .collect();
+    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+    for (timer, at) in timers {
+        h.handle(at, Event::TimerFired { timer });
+        h.collect();
+    }
+    assert_eq!(
+        writes(h),
+        expected_writes,
+        "no delayed continuation or retry"
+    );
+    assert_eq!(h.failures.len(), 1, "one terminal only");
+}
+
+fn unknown_normal_batch(h: &mut Harness, code: &str, message: Option<Value>) {
+    let request = h.take("batch-orders");
+    let mut rows: Vec<_> = (0..20).map(|i| {
+        json!({"orderId":if i==19 {"0".into()} else {(100+i).to_string()},"code":if i==19 {code} else {"0"}})
+    }).collect();
+    if let Some(message) = message {
+        rows[19]["msg"] = message;
+    }
+    h.respond(request, &json!({"code":"0","data":rows}).to_string());
+}
+
+#[test]
+fn native_lots_stop_after_an_unknown_row() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:2232-2257.
+    for (code, message) in [
+        ("103013", None),
+        ("103013", Some(Value::Null)),
+        ("103013", Some(json!("success"))),
+        ("429", None),
+        ("999999", None),
+    ] {
+        let mut h = setup(1);
+        place(&mut h, json!([normal(21)]));
+        unknown_normal_batch(&mut h, code, message);
+        assert_unknown_halt(
+            &mut h,
+            &["batch-orders"],
+            19,
+            &(100..119).map(|id| id.to_string()).collect::<Vec<_>>(),
+        );
+    }
+}
+
+#[test]
+fn grouped_batches_stop_after_an_unknown_row() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:2240-2257.
+    let mut h = setup(5);
+    place(&mut h, json!(vec![normal(1); 21]));
+    unknown_normal_batch(&mut h, "103013", None);
+    assert_unknown_halt(
+        &mut h,
+        &["batch-orders"],
+        19,
+        &(100..119).map(|id| id.to_string()).collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn protective_children_stop_after_an_unknown_row() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:2295-2315.
+    let mut h = setup(5);
+    let child =
+        json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":1,"price":55000});
+    place(&mut h, json!([child, child, child]));
+    h.reply(
+        "order-tpsl",
+        r#"{"code":"0","data":{"tpslId":"100","code":"0"}}"#,
     );
     pause(&mut h, 350);
-    assert_eq!(
-        writes(&h),
-        ["batch-orders", "batch-orders"],
-        "engine failure: {:?}",
-        h.failures
+    h.reply(
+        "order-tpsl",
+        r#"{"code":"0","data":{"code":"103013","msg":"Internal error"}}"#,
     );
+    assert_unknown_halt(&mut h, &["order-tpsl", "order-tpsl"], 1, &["100".into()]);
+}
+
+fn unknown_cancel_chunk(protective: bool) {
+    let mut h = setup(5);
+    let count = if protective { 11 } else { 21 };
+    let rows: Vec<_> = (100..100+count).map(|id| if protective {
+        json!({"instId":"BTC-USDT","tpslId":id.to_string(),"side":"sell","size":"-1","marginMode":"cross","positionSide":"net","slTriggerPrice":"55000","slOrderPrice":"-1","state":"live"})
+    } else {
+        json!({"instId":"BTC-USDT","orderCategory":"normal","orderId":id.to_string(),"orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"1","filledSize":"0","price":"60000","state":"live"})
+    }).collect();
+    h.ws(
+        &json!({"arg":{"channel":if protective {"orders-algo"} else {"orders"}},"data":rows})
+            .to_string(),
+    );
+    let ids = (100..100 + count)
+        .map(|id| {
+            if protective {
+                format!("{id}__stop_loss")
+            } else {
+                id.to_string()
+            }
+        })
+        .collect();
+    h.handle(
+        1.0,
+        Event::Command(Command::CancelOrders { command: 7, ids }),
+    );
+    h.collect();
+    let endpoint = if protective {
+        "cancel-tpsl"
+    } else {
+        "cancel-batch-orders"
+    };
+    let request = h.take(endpoint);
+    let payload: Vec<Value> = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let key = if protective { "tpslId" } else { "orderId" };
+    let rows: Vec<_> = payload
+        .iter()
+        .enumerate()
+        .map(|(i, row)| json!({key:row[key],"code":if i+1==payload.len() {"103013"} else {"0"}}))
+        .collect();
+    h.respond(request, &json!({"code":"0","data":rows}).to_string());
+    let elements = h.failures[0].elements.as_ref().unwrap();
+    assert!(elements[..payload.len() - 1].iter().all(|row| matches!(
+        row.result,
+        safe_cex_engine::write_plan::ElementResult::Applied { .. }
+    )));
+    assert_unknown_halt(&mut h, &[endpoint], payload.len() - 1, &[]);
+}
+
+#[test]
+fn normal_cancel_chunks_stop_after_an_unknown_row() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:2436-2466.
+    unknown_cancel_chunk(false);
+}
+
+#[test]
+fn protective_cancel_chunks_stop_after_an_unknown_row() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:2478-2510.
+    unknown_cancel_chunk(true);
+}
+
+#[test]
+fn normal_cancel_replacement_stops_after_an_unknown_cancel() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:1355-1361,2445-2464.
+    let mut h = setup(5);
+    seed_normal(&mut h);
+    amend(&mut h, "12", None, Some(3.0));
+    h.reply(
+        "cancel-batch-orders",
+        r#"{"code":"0","data":[{"orderId":"12","code":"103013"}]}"#,
+    );
+    assert_unknown_halt(&mut h, &["cancel-batch-orders"], 0, &[]);
+}
+
+#[test]
+fn protective_cancel_replacement_stops_after_an_unknown_cancel() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:1355-1361,2445-2464.
+    let mut h = Harness::new();
+    h.open_private();
+    h.modes();
+    h.reply("account/positions", r#"{"code":"0","data":[]}"#);
+    h.reply(
+        "balances",
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
+    );
+    h.reply("orders-pending", r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"12","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","filledSize":"4","price":"60000","slTriggerPrice":"55000","state":"partially_filled"}]}"#);
+    for path in [
+        "orders-pending",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        h.reply(path, r#"{"code":"0","data":[]}"#);
+    }
+    h.requests.clear();
+    h.e.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 60000.0;
+        ticker.last = 60000.0;
+        ticker.index = 60000.0;
+    });
+    amend(&mut h, "12__stop_loss", Some(54000.0), None);
+    assert!(h.failures.is_empty(), "fixture admission: {:?}", h.failures);
+    h.reply(
+        "cancel-batch-orders",
+        r#"{"code":"0","data":[{"orderId":"12","code":"103013"}]}"#,
+    );
+    assert_unknown_halt(&mut h, &["cancel-batch-orders"], 0, &[]);
+}
+
+#[test]
+fn sibling_compensation_stops_after_an_unknown_cancel() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:1410-1436,2488-2510.
+    let mut h = setup(5);
+    seed_siblings(&mut h);
+    h.handle(
+        1.0,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["91__take_profit".into()],
+        }),
+    );
+    h.collect();
+    h.reply(
+        "amend-tpsl",
+        r#"{"code":"102014","msg":"refused","data":null}"#,
+    );
+    h.reply(
+        "cancel-tpsl",
+        r#"{"code":"0","data":[{"tpslId":"91","code":"103013"}]}"#,
+    );
+    assert_unknown_halt(&mut h, &["amend-tpsl", "cancel-tpsl"], 1, &[]);
+}
+
+#[test]
+fn opening_trigger_children_stop_after_a_code_less_unproven_ack() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:1558-1559,2038-2050.
+    let mut h = setup(5);
+    let child = json!({"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":61000});
+    place(&mut h, json!([child, child, child]));
+    h.reply(
+        "order-algo",
+        r#"{"code":"0","data":{"algoId":"100","code":"0"}}"#,
+    );
+    pause(&mut h, 350);
+    h.reply(
+        "order-algo",
+        r#"{"code":"0","data":{"algoId":"101","msg":"unproven"}}"#,
+    );
+    assert_unknown_halt(&mut h, &["order-algo", "order-algo"], 1, &["100".into()]);
+}
+
+#[test]
+fn native_metadata_path_stops_before_protection_after_unknown() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:2140-2141,2232-2257,1561-1564.
+    let mut instruments: Value = serde_json::from_str(INSTRUMENT).unwrap();
+    instruments["data"][0]["lotSize"] = json!("-1");
+    let mut h = Harness::with_instruments(&instruments.to_string());
+    h.open_private();
+    h.seed();
+    h.requests.clear();
+    place(
+        &mut h,
+        json!([normal(1), {"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0,"price":55000}]),
+    );
+    h.reply("batch-orders", r#"{"code":"0","data":[{"code":"103013"}]}"#);
+    assert_unknown_halt(&mut h, &["batch-orders"], 0, &[]);
+}
+
+#[test]
+fn normalized_nested_reference_replacement_reports_final_unknown() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts:1296-1297,2038-2050.
+    let mut h = setup(5);
+    seed_trigger(&mut h, "unknown");
+    amend(&mut h, "500", Some(62000.0), None);
+    h.reply(
+        "cancel-algo",
+        r#"{"code":"0","data":{"algoId":"500","code":"0"}}"#,
+    );
+    pause(&mut h, 350);
+    let request = h.take("order-algo");
+    let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["attachAlgoOrders"][0]["slTriggerPriceType"], "last");
+    h.respond(
+        request,
+        r#"{"code":"0","data":{"algoId":"101","msg":"unproven"}}"#,
+    );
+    assert_unknown_halt(&mut h, &["cancel-algo", "order-algo"], 1, &[]);
 }

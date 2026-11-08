@@ -43,7 +43,12 @@ cancels continue after definite row refusals under envelope `0`. Trigger row
 failures and failing envelopes stop. `WritePlan::record` only reports outcomes;
 it neither validates payloads nor grants or refuses dispatch.
 
-Known boundary: the shared serial engine still prevents continuation after an
-Unknown native outcome, even where TS ignores that row. The ignored red probe
-`code_only_unknown_row_needs_engine_continuation` records this unresolved parity
-gap; changing the engine policy requires the lead's decision.
+PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08; Sam to verify,
+doc #3355). The shared engine halts further writes for the action after a genuine
+Unknown, even where TS ignores that row. No automatic retry or continuation is
+allowed. Definite refusals retain the TS dispatch rules above.
+Active recording tests in `tests/after_failure.rs` pin each affected path,
+including native lots, grouped batches, protective children, cancellation,
+replacement and sibling compensation. Failures retain placed IDs and indexed
+Unknown/notSent outcomes, show "The outcome is unknown. Check Open Orders",
+and emit an Unknown telemetry event. The engine fence remains unchanged.
