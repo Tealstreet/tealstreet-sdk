@@ -143,25 +143,51 @@ export const stringifyWsDiagnosticPayload = (data: unknown): string => {
 
 const normalizeSecretKey = (key: string): string => key.replace(/[^a-z0-9_]/gi, '').toLowerCase();
 
-const isAuthOperationObject = (value: Record<string, unknown>): boolean =>
+const isAuthOperationObject = (value: object): boolean =>
   Object.keys(value).some((key) => normalizeSecretKey(key).includes('challenge')) ||
-  ['op', 'method', 'type', 'event', 'action'].some((key) => {
-    const field = value[key];
-    return typeof field === 'string' && AUTH_OPERATION_RE.test(field);
-  });
+  Object.entries(value).some(([key, field]) =>
+    ['op', 'method', 'type', 'event', 'action'].includes(key)
+      && typeof field === 'string' && AUTH_OPERATION_RE.test(field));
 
-const redactJsonValue = (value: unknown, depth = 0, redactStrings = false, strict = false): unknown => {
+// Diagnostics retain only protocol and trading fields, never free-form error
+// text, echoes, arbitrary field names or positional response strings.
+const DIAGNOSTIC_FIELDS = new Set([
+  'op', 'method', 'type', 'event', 'action', 'e', 'topic', 'channel', 'feed',
+  'args', 'params', 'data', 'result', 'o', 'i', 'id', 'code', 'success',
+  'symbol', 'orderId', 'orderLinkId', 'clientOrderId', 'orderStatus', 'side', 'orderType',
+  'price', 'qty', 'size', 'amount', 'lastPrice', 'bidPrice', 'askPrice', 'timestamp', 'ts',
+]);
+
+const diagnosticJsonValue = (value: unknown, depth = 0, field = ''): unknown => {
   if (depth > MAX_JSON_REDACTION_DEPTH) return REDACTED;
   if (typeof value === 'string') {
-    if (redactStrings || (strict && /(?:https?|wss?):\/\/|%3a%2f%2f|[\[{]/i.test(value))) return REDACTED;
-    return strict ? value.replace(HEX_SECRET_RE, REDACTED) : value;
+    if (!field || /(?:https?|wss?):\/\/|%3a%2f%2f|[\[{]/i.test(value)) return REDACTED;
+    return value.replace(HEX_SECRET_RE, REDACTED);
   }
-  if (Array.isArray(value)) return value.map((item) => redactJsonValue(item, depth + 1, redactStrings, strict));
+  if (Array.isArray(value)) return value.map((child) => diagnosticJsonValue(child, depth + 1));
+  if (!value || typeof value !== 'object') return value;
+  if (isAuthOperationObject(value) || Object.entries(value).some(([key, child]) =>
+    /^(?:error|echo|message|msg|ret_msg|retMsg)$/i.test(key)
+      || (['op', 'method', 'type', 'event', 'action'].includes(key)
+        && typeof child === 'string' && /error|echo/i.test(child)))) return REDACTED;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (DIAGNOSTIC_FIELDS.has(key)) result[key] = diagnosticJsonValue(child, depth + 1, key);
+    else result.redacted = REDACTED;
+  }
+  return result;
+};
+
+const redactJsonValue = (value: unknown, depth = 0, redactStrings = false): unknown => {
+  if (depth > MAX_JSON_REDACTION_DEPTH) return REDACTED;
+  if (typeof value === 'string') {
+    return redactStrings ? REDACTED : value;
+  }
+  if (Array.isArray(value)) return value.map((item) => redactJsonValue(item, depth + 1, redactStrings));
   if (!value || typeof value !== 'object') return value;
 
-  if (strict && isAuthOperationObject(value as Record<string, unknown>)) return REDACTED;
   const result: Record<string, unknown> = {};
-  const authScope = redactStrings || isAuthOperationObject(value as Record<string, unknown>);
+  const authScope = redactStrings || isAuthOperationObject(value);
   for (const [key, child] of Object.entries(value)) {
     const normalizedKey = normalizeSecretKey(key);
     result[key] = isSecretKey(key)
@@ -170,7 +196,6 @@ const redactJsonValue = (value: unknown, depth = 0, redactStrings = false, stric
           child,
           depth + 1,
           authScope && (normalizedKey === 'args' || normalizedKey === 'params'),
-          strict,
         );
   }
   return result;
@@ -206,7 +231,7 @@ export const sanitizeWsDiagnosticFrame = (message: string): string => {
   try {
     const parsed: unknown = JSON.parse(message);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '[redacted opaque frame]';
-    return redactWsDiagnosticPayload(JSON.stringify(redactJsonValue(parsed, 0, false, true)));
+    return redactWsDiagnosticPayload(JSON.stringify(diagnosticJsonValue(parsed)));
   } catch {
     return '[redacted malformed frame]';
   }

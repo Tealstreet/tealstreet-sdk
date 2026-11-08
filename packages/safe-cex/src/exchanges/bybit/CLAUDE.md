@@ -1297,10 +1297,10 @@ Configure the web build before enabling the connector:
 | `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_KEY` / `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_SECRET` | Existing branded-demo defaults, bundled publicly; only a disposable shared demo account belongs here  |
 | `HYROTRADER_ENABLED`                                                                       | App feature flag controlling connector/demo access; runtime overrides may differ from source defaults |
 
-Until Hyro's production origin is live, ordinary `hyrotrader` accounts use the
-simulator origin when `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL` is unset. This is
-still not a Bybit fallback, and only the `/hyrotrader-demo` account reads the
-simulator API key/secret envs.
+Rust defaults omitted `extra.hyrotraderMode` to production. Production selects
+only the requested production network and refuses missing endpoints with
+`invalidInput` / `notSent` before I/O. Only explicit `demo` selects simulator;
+only the `/hyrotrader-demo` account reads the simulator API key/secret envs.
 
 Normal connected accounts supply their own credentials through exchange options,
 not environment variables. During v1 they may use the simulator origin with

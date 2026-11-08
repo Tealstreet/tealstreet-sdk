@@ -1523,7 +1523,7 @@ export class RustEngineExchange extends BaseExchange {
     const options = this.engineOptions;
     if (this.setupError) throw this.setupError;
     if (deriveEndpointSetupPolicy(this.name) === 'hyrotrader') {
-      const simulator = options.extra?.hyrotraderMode === 'demo' || !HYROTRADER_PROD_URL.livenet;
+      const simulator = options.extra?.hyrotraderMode === 'demo';
       const network = options.testnet ? 'testnet' : 'livenet';
       const rest = simulator ? HYROTRADER_SIMULATOR_URL : HYROTRADER_PROD_URL;
       const sockets = simulator ? HYROTRADER_SIMULATOR_WS_URL : HYROTRADER_PROD_WS_URL;

@@ -1,5 +1,5 @@
 import type { SignRequest, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { expect, it, vi } from 'vitest';
 
@@ -15,6 +15,77 @@ const unusedSigners = () => ({
     sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn(),
   },
   payloadSigner: vi.fn(),
+});
+
+class CapturedEngine implements WasmEngineLike {
+  readonly options: unknown;
+  constructor(_venue: string, json: string) { this.options = JSON.parse(json); }
+  capabilities = () => '{}';
+  start = () => '[]';
+  command = () => '[]';
+  takeFrame = () => undefined;
+  snapshotFrame = () => new Uint8Array();
+  wsOpen = () => '[]';
+  wsMessage = () => undefined;
+  wsClose = () => '[]';
+  wsRouteExhausted = () => '[]';
+  httpStart = () => '[]';
+  httpChunk = () => '[]';
+  httpEnd = () => '[]';
+  httpFailed = () => '[]';
+  timer = () => '[]';
+}
+
+const bybitHyroVenues: readonly ExchangeName[] = ['bybit', 'hyrotrader'];
+
+it.each(bybitHyroVenues)('%s explicit and keyless public modes install no delegated authority', (name) => {
+  const { remoteSigner, payloadSigner } = unusedSigners();
+  for (const callbacks of [{ remoteSigner }, { payloadSigner }]) {
+    for (const mode of [{ key: 'unused-key', publicDataOnly: true }, { key: '' }, { key: '', publicDataOnly: false }]) {
+      const options: ExchangeOptions = { secret: '', ...mode, ...callbacks };
+      const setup = new DelegatedSignerSetup(name, options);
+      try {
+        const engine = setup.construct(CapturedEngine, name, JSON.stringify(options));
+        if (!(engine instanceof CapturedEngine)) throw new Error('Expected the capture engine');
+        expect(engine.options).toMatchObject({ signing: {}, remoteSigning: false, payloadSigner: false, publicDataOnly: true });
+        expect(setup.signerAlgorithms).toEqual([]);
+        expect(setup.primaryComplete).toBe(false);
+        const exchange = new RustEngineExchange(name, options, new DefaultStore());
+        try {
+          expect(exchange.isPublicDataOnly).toBe(true);
+          expect(exchange.privateWebsocket).toBeUndefined();
+        } finally { exchange.dispose(); }
+      } finally { setup.dispose(); }
+    }
+  }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(remoteSigner.isAvailable).not.toHaveBeenCalled();
+  expect(remoteSigner.onAvailabilityChange).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+it.each(bybitHyroVenues)('%s keyed private RemoteSigner retains its primary authority', (name) => {
+  const { remoteSigner } = unusedSigners();
+  const options: ExchangeOptions = { key: 'fixture-key', secret: '', remoteSigner };
+  const setup = new DelegatedSignerSetup(name, options);
+  try {
+    const engine = setup.construct(CapturedEngine, name, JSON.stringify(options));
+    if (!(engine instanceof CapturedEngine)) throw new Error('Expected the capture engine');
+    expect(engine.options).toMatchObject({ remoteSigning: true, signing: { primary: {
+      credential: expect.any(String), signing: expect.any(String),
+    } } });
+    expect(setup.primaryComplete).toBe(true);
+    const exchange = new RustEngineExchange(name, options, new DefaultStore());
+    try { expect(exchange.isPublicDataOnly).toBe(false); } finally { exchange.dispose(); }
+  } finally { setup.dispose(); }
+});
+
+it('retains private Bybit PayloadSigner support and Hyro PayloadSigner refusal', () => {
+  const options: ExchangeOptions = { key: 'fixture-key', secret: '', payloadSigner: vi.fn() };
+  const exchange = new RustEngineExchange('bybit', options, new DefaultStore());
+  try { expect(exchange.isPublicDataOnly).toBe(false); } finally { exchange.dispose(); }
+  expect(() => new RustEngineExchange('hyrotrader', options, new DefaultStore()))
+    .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
 });
 
 it.each(['kucoin', 'kucoinspot'] as const)('%s constructs explicitly public-only accounts with an unused PayloadSigner', (name) => {

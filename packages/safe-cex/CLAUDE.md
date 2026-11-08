@@ -211,8 +211,8 @@ Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
-Explicit `publicDataOnly: true` in delegated setup preserves raw mode-intent
-flags but ignores signing callbacks, credentials and setup metadata. It installs
+Explicit or keyless-derived public mode in delegated setup preserves raw
+mode-intent flags but ignores signing callbacks, credentials and setup metadata. It installs
 no provider or identity, advertises no algorithms, and cannot sign. Private-mode
 callback validation, primary/secondary selection and mode refusals remain strict.
 
@@ -1782,8 +1782,9 @@ realm; worker hosts use the existing `__workerConfig.wsDiagnosticsEnabled` flag.
 `ExchangeWorker` forwards `{ op: 'ws-diagnostic', data: [event] }`; consuming web
 controllers must handle that op and re-emit it before rendering Requests Log rows.
 
-Diagnostics run after socket I/O, redact complete auth frames and sensitive
-fields, and never include connection URLs/headers or binary contents.
+Diagnostics run after socket I/O and allow only protocol/trading fields.
+Auth/error frames, free-form messages, echoes and unknown fields are withheld;
+connection URLs/headers and binary contents are never included.
 Challenge fields withhold the containing object even when its operation is
 `subscribe`; incoming challenge replies are also withheld. Opaque,
 malformed, oversized and excessive-depth content is withheld. Heartbeats are

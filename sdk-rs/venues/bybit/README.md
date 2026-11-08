@@ -25,10 +25,11 @@ come from the user's account, never a production build-time credential variable.
 The shared demo account's disposable credentials belong only to its separate
 web-owned configuration.
 
-`extra.hyrotraderMode: 'demo'` selects the simulator map. The production mode
-selects configured production origins, retaining the existing simulator fallback
-when the production REST livenet URL is absent. The registry resolves that map
-and testnet/livenet choice before construction. Neither mode falls back to Bybit
+`extra.hyrotraderMode: 'demo'` selects the simulator map. Explicit `production`
+selects only production origins on the requested network; a missing selected
+endpoint refuses with typed `invalidInput` / `notSent` before I/O. Configured
+production testnet does not require livenet URLs. Omitted mode defaults to
+production; only `demo` selects simulator. Neither mode falls back to Bybit
 live, testnet or demo hosts. Native callers can instead supply `Options.endpoints`
 with `Variant::Hyrotrader` through the normal signing-provider setup.
 
@@ -72,7 +73,8 @@ The SDK emits opt-in `ws-diagnostic` events for Hyro and every Rust venue:
 `{ venue, channel, direction, message }`, with sanitized text for public/private/
 business sockets. Enable `setWsDiagnosticsEnabled(true)` in the exchange's realm
 or send the existing `__workerConfig.wsDiagnosticsEnabled` worker setting. The
-default is off. Auth frames and sensitive fields are redacted; connection URLs,
+default is off. Only protocol/trading fields are allowed; auth/error frames,
+free-form messages, echoes and unknown fields are withheld. Connection URLs,
 headers and binary contents are omitted. `WsDiagnosticEvent` is exported from
 the SDK, and the worker posts `{ op: 'ws-diagnostic', data: [event] }`.
 

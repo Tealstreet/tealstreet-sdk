@@ -151,11 +151,12 @@ export const withRequestsLog = (
         } catch {
           return;
         }
+        const frameSampler = sampler;
         offPath(() => {
           if (!enabled() || (typeof data === 'string' && data.length <= OBSERVED_CHARS && isHeartbeatFrame(data)))
             return;
           const message = typeof data === 'string' ? sanitizeWsDiagnosticFrame(data) : `binary ${data} bytes`;
-          sampler!.emit(
+          frameSampler.emit(
             (entry) => {
               onWsDiagnostic?.({ venue: label, channel, direction, message: entry });
               if (channel !== 'public') emit(direction === 'send' ? 'grafana-pws-sub' : 'grafana-pws', entry);

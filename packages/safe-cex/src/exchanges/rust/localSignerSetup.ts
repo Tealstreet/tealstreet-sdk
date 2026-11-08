@@ -1,7 +1,8 @@
 import type { LocalIdentityMetadata, LocalSignerMetadata, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { CredentialPresence, IdentitySetupPolicy, SignerSetupPolicy } from './construction';
+import { derivePublicMode, deriveSignerSetupPolicy } from './construction';
 
 type LocalIdentity = LocalIdentityMetadata & {
   key?: string;
@@ -55,6 +56,23 @@ export const effectiveIdentityMetadata = (
   if (policy?.trimCredential !== undefined) effective = { ...effective, trimCredential: policy.trimCredential };
   if (policy?.trimSigning !== undefined) effective = { ...effective, trimSigning: policy.trimSigning };
   return effective;
+};
+
+/** Resolve public intent before delegated callbacks or private setup validation. */
+export const resolveEffectivePublicDataOnly = (name: ExchangeName, options: ExchangeOptions): boolean => {
+  if (options.publicDataOnly === true) return true;
+  const rawKey: unknown = options.key;
+  if (rawKey !== undefined && typeof rawKey !== 'string') return false;
+  let primary: LocalIdentityMetadata | undefined;
+  try {
+    primary = effectiveIdentityMetadata(parseLocalSignerMetadata(options.localSigner).primary, deriveSignerSetupPolicy(name).primary);
+  } catch {
+    if (options.key !== undefined && options.key !== '') return false;
+  }
+  const key = credentialPresent(options.key, primary?.trimCredential === true);
+  const callback = options.remoteSigner !== undefined || options.payloadSigner !== undefined;
+  const secret = credentialPresent(options.secret, primary?.trimSigning === true) || (key && callback);
+  return derivePublicMode(name, options, undefined, { key, secret }).publicDataOnly;
 };
 
 /** One required-field/fallback policy for trusted local and callback setup.

@@ -142,6 +142,42 @@ const authMaterials = {
   token: 'fixture-socket-token',
 };
 
+const diagnosticMarkers = ['fixture-challenge-marker', 'fixture-signature-marker'].flatMap((marker) => [
+  marker,
+  Buffer.from(marker).toString('hex'),
+  Buffer.from(marker).toString('base64'),
+]);
+
+it.each(diagnosticMarkers)('withholds auth-error and echo material in every diagnostic sink: %s', async (marker) => {
+  setWsDiagnosticsEnabled(true);
+  const { transport, sockets, diagnostics, events } = harness(undefined, 'kraken');
+  const received: string[] = [];
+  const socket = transport.connect('wss://fixture.invalid/', {
+    channel: 'private', onOpen() {}, onMessage: (message) => received.push(message), onClose() {},
+  });
+  const frames = [
+    { event: 'error', message: `signed_challenge=${marker}` },
+    { event: 'error', message: `original_challenge=${marker}` },
+    { event: 'error', message: marker, code: 401 },
+    { event: 'subscribe', echo: marker },
+    { event: 'subscribe', data: { message: marker, echo: marker, unexpected: marker } },
+    { event: 'subscribe', data: [marker] },
+    { event: 'subscribe', [marker]: marker },
+  ].map((frame) => JSON.stringify(frame));
+  for (const frame of frames) {
+    socket.send(frame);
+    sockets[0].handlers.onMessage(frame);
+  }
+  await tick();
+  expect(received).toEqual(frames);
+  expect(sockets[0].sent).toEqual(frames);
+  expect(diagnostics).toHaveLength(frames.length * 2);
+  expect(events).toHaveLength(frames.length * 2);
+  for (const emitted of [...diagnostics.map(({ message }) => message), ...events.map(([, message]) => message)]) {
+    for (const material of diagnosticMarkers) expect(emitted).not.toContain(material);
+  }
+});
+
 const subscriptionAuthCases: Array<{ venue: string; frame: unknown }> = [
   { venue: 'kraken-challenge', frame: { event: 'challenge', message: authMaterials.challenge } },
   { venue: 'kraken-signature-field', frame: { event: 'subscribe', signed_challenge: authMaterials.signature } },
