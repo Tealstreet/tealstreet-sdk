@@ -1304,7 +1304,7 @@ fn a_trigger_veto_takes_its_direction_from_planning_not_last_price() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_keep_classification_and_unknown_guidance() {
     use safe_cex_engine::{ErrorKind, Outcome, Response};
     let market = r#"[{"symbol":"SOL_USDC_PERP","type":"market","side":"buy","amount":1}]"#;
     for (status, body, kind, outcome) in [
@@ -1359,6 +1359,10 @@ fn write_failures_are_classified_without_changing_their_text() {
             (kind, outcome),
             "{status} {body}: {}",
             error.message
+        );
+        assert_eq!(
+            error.message,
+            "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
         );
     }
 }
@@ -1450,10 +1454,21 @@ fn snapshot_pair_ack_fence(accepted: bool, stored: bool) {
     if accepted {
         assert_eq!(done(&mut e).unwrap(), r#"["new-bid","new-ask"]"#);
     } else {
-        assert!(
-            done(&mut e)
-                .unwrap_err()
-                .contains("batch response identity")
+        let out = actions(&mut e);
+        let Some(error) = out.iter().find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 701,
+                error,
+            }) => Some(error),
+            _ => None,
+        }) else {
+            panic!("missing uncertain batch failure");
+        };
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+        assert_eq!(
+            error.message,
+            "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
         );
     }
     assert_eq!(e.store().order("123").is_some(), stored);

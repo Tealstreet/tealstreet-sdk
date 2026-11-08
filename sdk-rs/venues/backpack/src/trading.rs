@@ -1637,6 +1637,7 @@ impl Backpack {
             self.managed_trade_failed(cx, request, error, false);
             return;
         }
+        let error = error.with_unknown_guidance();
         if let Step::Cancel { id, .. } = &request.step
             && self.finish_trade_cancel(request.command, id)
             && let Some(previous) = request.previous
@@ -1939,6 +1940,10 @@ impl Backpack {
         {
             return self.guarded_failed(cx, request, error, data);
         }
+        // The owner selects its recorded transport error before this fallback.
+        if error.outcome == Some(Outcome::Unknown) {
+            let _ = cx.present_plan_failure(&managed.plan, &error.message);
+        }
         // An optional leg may still be resting after an uncertain reply. Preserve
         // that uncertainty and prior IDs instead of advancing the serial plan.
         if optional {
@@ -2114,6 +2119,7 @@ pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
             .outcome(Outcome::Rejected),
         _ => error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected),
     }
+    .with_unknown_guidance()
 }
 
 /// Refused before any request was sent.
@@ -2261,14 +2267,29 @@ fn pair_fact(
             message: "Backpack unexpected batch response row",
         }));
     }
-    cx.http_write_batch(
+    let result = cx.http_write_batch(
         &managed.context,
         &BACKPACK,
         orders.len(),
         &items,
         "Backpack invalid batch response identity",
         None,
-    )
+    )?;
+    match &result {
+        WriteResult::Accepted { .. } => {}
+        WriteResult::Rejected(error)
+        | WriteResult::KnownPartial(error)
+        | WriteResult::PartialUnknown(error)
+        | WriteResult::Failed(error) => {
+            if error.outcome == Some(Outcome::Unknown) {
+                let _ = cx.present_plan_failure(
+                    &managed.plan,
+                    error.clone().with_unknown_guidance().message,
+                );
+            }
+        }
+    }
+    Ok(result)
 }
 
 impl Request {
