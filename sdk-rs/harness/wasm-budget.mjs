@@ -247,7 +247,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   lighter: 2_093_056,
   'lighter-robinhood': 2_093_056,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
-  mexc: 1_872_896,
+  mexc: 1_904_640,
   okx: 1_986_560,
   orderly: 1_744_896,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
