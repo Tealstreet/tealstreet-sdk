@@ -147,14 +147,17 @@ it.each(['remote', 'payload', 'payload-headers', 'remote-trimmed'] as const)('ac
   expect(await server.placeOrder({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy,
     amount: 60, price: 60_000 })).toEqual(['fixture-order']);
   expect(requests.filter((r) => r.method === 'POST' && r.url.endsWith('/order/submit'))).toHaveLength(1);
-  for (const r of requests.filter((r) => r.headers.Signature)) {
+  const privateRequests = requests.filter((r) => new URL(r.url).pathname.startsWith('/api/v1/private/'));
+  expect(privateRequests.length).toBeGreaterThan(0);
+  for (const r of privateRequests) {
+    const headers = Object.fromEntries(Object.entries(r.headers).map(([key, value]) => [key.toLowerCase(), value]));
     const url = new URL(r.url);
-    expect(r.headers.Signature).toBe(mac(`replay-key${stamp}${r.method === 'GET' ? url.search.slice(1) : r.body ?? ''}`));
-    expect(r.headers.ApiKey).toBe('replay-key');
+    expect(headers.signature).toBe(mac(`replay-key${stamp}${r.method === 'GET' ? url.search.slice(1) : r.body ?? ''}`));
+    expect(headers.apikey).toBe('replay-key');
     if (mode === 'payload-headers') expect(r.headers['X-Trace']).toBe('fixture-trace');
     expect(r.headers['Content-Type']).toBe('application/json');
     expect(r.headers['Recv-Window']).toBe('20000');
-    expect(r.headers['Request-Time']).toBe(String(stamp));
+    expect(headers['request-time']).toBe(String(stamp));
   }
   if (!mode.startsWith('payload')) {
     await vi.waitFor(() => expect(logins).toHaveLength(1));

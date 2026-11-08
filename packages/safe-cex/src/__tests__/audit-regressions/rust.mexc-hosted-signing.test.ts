@@ -87,3 +87,32 @@ it('retains permitted callback headers while native authentication headers take 
   expect(result.config?.headers['X-Trace']).toBe('fixture-trace');
   expect(result.config?.headers.ApiKey).toBe('replay-key');
 });
+
+it.each(['  { "note": "é/+%" } \n', '\t[ { "symbol": "BTC_USDT" } ]\r\n'])(
+  'authenticates the transmitted Axios JSON bytes: %j', async (body) => {
+    const { host, hostedSigning } = owned();
+    const input = request(vectors[2]);
+    input.config!.data = body;
+    const result = await signHostedHttp('mexc', { key: '', secret: '' }, true, host, input);
+    expect(result.config!.data).toBe(body);
+    expect(result.config!.headers.Signature).toBe(mac(`replay-key${stamp}${result.config!.data}`));
+    expect(hostedSigning).toHaveBeenLastCalledWith({ kind: 'http', payload: `replay-key${stamp}${result.config!.data}`, stampMs: stamp, revision: '1' });
+  },
+);
+
+it('retains permitted signer headers while native MEXC auth and content headers take precedence', async () => {
+  const { host, hostedSigning } = owned();
+  hostedSigning.mockImplementation(async (input) => input.kind === 'credential' ? { credential: 'replay-key' }
+    : { credential: 'replay-key', signature: mac(input.payload!), headers: [
+      ['X-Trace', 'first'], ['x-trace', 'retained'], ['apikey', 'shadow'], ['signature', 'shadow'],
+      ['request-time', 'shadow'], ['recv-window', 'shadow'], ['content-type', 'text/plain'],
+    ] });
+  const result = await signHostedHttp('mexc', { key: '', secret: '' }, true, host, request(vectors[2]));
+  const headers = Object.fromEntries(Object.entries(result.config!.headers).map(([key, value]) => [key.toLowerCase(), value]));
+  expect(headers['x-trace']).toBe('retained');
+  expect(headers.apikey).toBe('replay-key');
+  expect(headers.signature).toBe(vectors[2].signature);
+  expect(headers['request-time']).toBe(String(stamp));
+  expect(headers['recv-window']).toBe('20000');
+  expect(headers['content-type']).toBe('application/json');
+});
