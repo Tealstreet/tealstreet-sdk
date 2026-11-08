@@ -216,8 +216,6 @@ pub mod code {
     pub const ORDER_REJECTED: &str = "order.rejected";
     /// One leg of a multi-order command (bracket, close, replace) failed.
     pub const CHILD_LEG_FAILED: &str = "child_leg.failed";
-    /// A journaled write action stopped with unresolved execution evidence.
-    pub const WRITE_UNKNOWN: &str = "write.unknown";
     /// Existing orders were cancelled or replaced as part of a command.
     pub const ORDERS_REPLACED: &str = "orders.replaced";
     /// A history walk stopped before covering its whole range.

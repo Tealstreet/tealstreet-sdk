@@ -56,13 +56,6 @@ pub enum ElementResult {
     },
 }
 
-impl ElementResult {
-    /// Classify failure evidence for reporting without controlling dispatch.
-    pub fn failed(error: VenueError) -> Self {
-        result_for_failure(error)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ElementOutcome {
@@ -321,39 +314,5 @@ impl<T> WritePlan<T> {
         }
         error.elements = Some(Box::new(ElementOutcomes(self.outcomes())));
         error
-    }
-}
-
-#[cfg(test)]
-mod reporting_tests {
-    use super::*;
-
-    #[test]
-    fn failure_reporting_preserves_refusal_and_unattributed_effect_uncertainty() {
-        for outcome in [Outcome::NotSent, Outcome::Rejected, Outcome::Unknown] {
-            let error = VenueError::new("native failure").outcome(outcome);
-            let row = ElementResult::failed(error.clone());
-            match row {
-                ElementResult::NotSent {
-                    error: Some(detail),
-                } => {
-                    assert_ne!(outcome, Outcome::Unknown);
-                    assert_eq!(*detail, error);
-                }
-                ElementResult::Unknown { error: detail } => {
-                    assert_eq!(outcome, Outcome::Unknown);
-                    assert_eq!(*detail, error);
-                }
-                _ => panic!("failure became a success"),
-            }
-        }
-        let error = VenueError::new("unattributed accepted row")
-            .outcome(Outcome::Rejected)
-            .partial_ids(&["native-0".into()]);
-        assert!(
-            matches!(ElementResult::failed(error), ElementResult::Unknown { error }
-            if error.outcome == Some(Outcome::Unknown)
-                && error.partial.as_ref().unwrap().order_ids == ["native-0"])
-        );
     }
 }
