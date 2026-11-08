@@ -6,10 +6,23 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { createExchange } from '../../index';
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { snapshotDelegatedSigningOptions } from '../../exchanges/rust/delegatedSigningSnapshot';
 import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
 
 beforeEach(() => { vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined); });
+
+it('omits absent signer keys from snapshots and retained local-account options', () => {
+  for (const options of [{ key: 'fixture-key', secret: 'fixture-secret' },
+    { key: 'fixture-key', secret: 'fixture-secret', remoteSigner: undefined, payloadSigner: undefined }]) {
+    const snapshot = snapshotDelegatedSigningOptions('binance', options);
+    for (const field of ['remoteSigner', 'payloadSigner']) expect(Object.hasOwn(snapshot, field)).toBe(false);
+    const exchange = new RustEngineExchange('binance', options, new DefaultStore());
+    try {
+      for (const field of ['remoteSigner', 'payloadSigner']) expect(Object.hasOwn(exchange.options, field)).toBe(false);
+    } finally { exchange.dispose(); }
+  }
+});
 
 const marker = 'SYNTHETIC_PRIVATE_OUTER_CALLBACK_MARKER';
 const fields: Array<'remoteSigner' | 'payloadSigner'> = ['remoteSigner', 'payloadSigner'];

@@ -11,6 +11,9 @@ type Snapshot = Readonly<{
 }>;
 const snapshotKey = Symbol('delegatedSigningSnapshot');
 const snapshots = new WeakMap<object, Snapshot>();
+const callbackValues = (remoteSigner: RemoteSigner | undefined, payloadSigner: PayloadSigner | undefined): Readonly<Callbacks> =>
+  Object.freeze({ ...(remoteSigner === undefined ? {} : { remoteSigner }),
+    ...(payloadSigner === undefined ? {} : { payloadSigner }) });
 const invalid = (): never => {
   const message = 'Invalid delegated signer setup';
   throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
@@ -45,7 +48,7 @@ const captureCallbacks = ({ remoteSigner, payloadSigner }: Callbacks): Readonly<
       return Reflect.apply(call, payloadSigner, [this, request]);
     });
   }
-  return Object.freeze({ remoteSigner: remote, payloadSigner: payload });
+  return callbackValues(remote, payload);
 };
 
 /** One guarded projection owns outer fields and methods across asynchronous loading.
@@ -59,7 +62,7 @@ export function snapshotDelegatedSigningOptions(name: ExchangeName, options: Par
     Reflect.has(options, 'remoteSigner');
     Reflect.has(options, 'payloadSigner');
     const { remoteSigner, payloadSigner, ...rest } = options;
-    const values = { ...rest, remoteSigner, payloadSigner };
+    const values = { ...rest, ...callbackValues(remoteSigner, payloadSigner) };
     const inspect = !resolveEffectivePublicDataOnly(name, values)
       || (values.publicDataOnly !== true && hasPrimaryKey(name, values));
     const reusable = previous?.venue === name && previous.inspected === inspect
@@ -67,7 +70,7 @@ export function snapshotDelegatedSigningOptions(name: ExchangeName, options: Par
     const callbacks = reusable ? previous.callbacks : inspect ? captureCallbacks(values) : undefined;
     const snapshot = reusable ? previous : Object.freeze({ venue: name, inspected: inspect,
       wellFormed: !inspect || callbacks !== undefined,
-      values: callbacks ?? Object.freeze({ remoteSigner, payloadSigner }), callbacks });
+      values: callbacks ?? callbackValues(remoteSigner, payloadSigner), callbacks });
     const token = Object.freeze({});
     snapshots.set(token, snapshot);
     return Object.freeze({ ...rest, ...snapshot.values, [snapshotKey]: token });

@@ -38,6 +38,21 @@ const expectInvalid = (invoke: () => unknown) => {
 };
 
 describe('trusted delegated signer setup capsule', () => {
+  it('invokes the captured remote callback once and never invokes it while unavailable', async () => {
+    let available = true;
+    const sign = vi.fn<RemoteSigner['sign']>(async ({ id }) => ({ id, wsAuthSignature: hex }));
+    const source: RemoteSigner = { sign, isAvailable: () => available, onAvailabilityChange: () => () => {} };
+    const setup = new DelegatedSignerSetup('binance', options({ remoteSigner: source }));
+    try {
+      const { config } = construct(setup);
+      await expect(setup.signer(request(config.signing), callContext())).resolves.toHaveProperty('values');
+      expect(sign).toHaveBeenCalledTimes(1);
+      available = false;
+      await expect(setup.signer(request(config.signing), callContext())).rejects.toThrow('unavailable');
+      expect(sign).toHaveBeenCalledTimes(1);
+    } finally { setup.dispose(); }
+  });
+
   it('captures remote method getters once and preserves their original receiver', async () => {
     const reads = { sign: 0, isAvailable: 0, onAvailabilityChange: 0, accountName: 0 };
     const original = remote();
