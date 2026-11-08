@@ -6065,7 +6065,7 @@ fn after_failure_special_tpsl_keeps_the_regular_order_batch() {
 fn parity_exception_unknown_spot_halts_lots_and_later_caller_orders() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybitspot.exchange.ts:844-856.
     for split in [false, true] {
-        for status in [200, 503] {
+        for status in [Some(200), Some(503), None] {
             let mut h = if split {
                 spot_split_plan_market("0.001", "1")
             } else {
@@ -6084,11 +6084,18 @@ fn parity_exception_unknown_spot_halts_lots_and_later_caller_orders() {
                 r#"{"retCode":0,"result":{"orderId":"known-prefix"}}"#,
             );
             let second = h.take("/v5/order/create");
-            h.reply(
-                second.id,
-                status,
-                r#"{"retCode":10016,"retMsg":"uncertain"}"#,
-            );
+            if let Some(status) = status {
+                h.reply(
+                    second.id,
+                    status,
+                    r#"{"retCode":10016,"retMsg":"uncertain"}"#,
+                );
+            } else {
+                h.event(Event::HttpFailed {
+                    request: second.id,
+                    error: "reply lost",
+                });
+            }
             support::assert_unknown_pin(
                 &mut h,
                 175,
@@ -6134,7 +6141,7 @@ fn parity_exception_unknown_batch_halts_chunks_and_single_fallback() {
 #[test]
 fn parity_exception_unknown_fallback_halts_remaining_singles() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:3026-3042.
-    for status in [200, 503] {
+    for status in [Some(200), Some(503), None] {
         let mut h = ready(Variant::Demo);
         place(&mut h, 177, vec![order("BTCUSDT", 1.0); 4]);
         resolve_mode(&mut h, "BTCUSDT");
@@ -6153,28 +6160,50 @@ fn parity_exception_unknown_fallback_halts_remaining_singles() {
             r#"{"retCode":0,"result":{"orderId":"known-prefix"}}"#,
         );
         let second = h.take("/v5/order/create");
-        h.reply(
-            second.id,
-            status,
-            r#"{"retCode":10016,"retMsg":"uncertain"}"#,
-        );
-        support::assert_unknown_pin(&mut h, 177, &["known-prefix"], 2, 4);
+        if let Some(status) = status {
+            h.reply(
+                second.id,
+                status,
+                r#"{"retCode":10016,"retMsg":"uncertain"}"#,
+            );
+        } else {
+            h.event(Event::HttpFailed {
+                request: second.id,
+                error: "reply lost",
+            });
+        }
+        // Engine-owned HTTP seals retain their own canonical text after a refusal.
+        let text = if status == Some(503) {
+            support::ENGINE_UNKNOWN_AFTER_REFUSAL_TEXT
+        } else {
+            support::ENGINE_UNKNOWN_TEXT
+        };
+        support::assert_unknown_pin_with_text(&mut h, 177, &["known-prefix"], 2, 4, text);
     }
 }
 
 #[test]
 fn parity_exception_unknown_special_halts_regular_batch() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:2969-2985.
-    let mut h = ready(Variant::Demo);
-    h.message("/v5/private", r#"{"topic":"position","data":[{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"1","avgPrice":"100","markPrice":"100","positionValue":"100","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}]}"#);
-    let mut stop = order("BTCUSDT", 0.0);
-    stop.kind = OrderType::StopLoss;
-    stop.side = OrderSide::Sell;
-    stop.price = Some(90.0);
-    place(&mut h, 178, vec![stop, order("BTCUSDT", 1.0)]);
-    let request = h.take("/v5/position/trading-stop");
-    h.reply(request.id, 200, r#"{"retCode":10016,"retMsg":"uncertain"}"#);
-    support::assert_unknown_pin(&mut h, 178, &[], 0, 2);
+    for lost in [false, true] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", r#"{"topic":"position","data":[{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"1","avgPrice":"100","markPrice":"100","positionValue":"100","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}]}"#);
+        let mut stop = order("BTCUSDT", 0.0);
+        stop.kind = OrderType::StopLoss;
+        stop.side = OrderSide::Sell;
+        stop.price = Some(90.0);
+        place(&mut h, 178, vec![stop, order("BTCUSDT", 1.0)]);
+        let request = h.take("/v5/position/trading-stop");
+        if lost {
+            h.event(Event::HttpFailed {
+                request: request.id,
+                error: "reply lost",
+            });
+        } else {
+            h.reply(request.id, 200, r#"{"retCode":10016,"retMsg":"uncertain"}"#);
+        }
+        support::assert_unknown_pin(&mut h, 178, &[], 0, 2);
+    }
 }
 
 #[test]
@@ -6244,4 +6273,18 @@ fn pin_linear_and_inverse_price_rows_are_sent_in_the_native_batch() {
             );
         }
     }
+}
+
+#[test]
+fn parity_exception_lost_native_batch_halts_chunks_without_fallback() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:3015-3042.
+    let mut h = ready(Variant::Demo);
+    place(&mut h, 184, vec![order("BTCUSDT", 1.0); 12]);
+    resolve_mode(&mut h, "BTCUSDT");
+    let batch = h.take("/v5/order/create-batch");
+    h.event(Event::HttpFailed {
+        request: batch.id,
+        error: "reply lost",
+    });
+    support::assert_unknown_pin(&mut h, 184, &[], 0, 12);
 }

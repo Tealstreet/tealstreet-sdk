@@ -1496,6 +1496,13 @@ impl BybitLinear {
             self.park(request.command, entry);
             return;
         };
+        let error = if run.continue_on_error
+            && !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
+        {
+            unknown_outcome(error.outcome(Outcome::Unknown))
+        } else {
+            error
+        };
         if error.outcome == Some(Outcome::NotSent)
             && matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
         {
@@ -1509,6 +1516,7 @@ impl BybitLinear {
         }
         if matches!(active.leg.planned.call, Call::PlaceLot { last: true })
             && run.stop_after_spot_order
+            && error.outcome != Some(Outcome::Unknown)
         {
             let error = run.error.take().unwrap_or(error);
             run.finish_failure(cx, error);

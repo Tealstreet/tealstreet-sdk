@@ -670,7 +670,9 @@ fn a_transport_failure_on_a_batch_is_not_resent() {
         request: batch,
         error: "connection reset",
     });
-    assert!(matches!(h.result(9), Some(Err(message)) if message == "connection reset"));
+    assert!(matches!(h.result(9), Some(Err(message))
+        if message.contains(support::ENGINE_UNKNOWN_TEXT) && message.contains("connection reset")));
+    assert!(h.unknown.contains(&9));
     // The venue may have the orders: reconcile once, never resend.
     h.reconcile_once(EMPTY_LIST);
 }

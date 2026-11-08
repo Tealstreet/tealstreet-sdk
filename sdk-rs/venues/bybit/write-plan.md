@@ -49,8 +49,8 @@ follow accepted rows. Native batch errors can be followed by later writes. This
 PR adds no atomic-admission policy. The earlier [split-plan invariant](https://github.com/Tealstreet/tealstreet-sdk/blob/docs/split-plan-invariant/docs/plans/SPLIT_PLAN_INVARIANT.md)
 is superseded by the owner's legacy-parity and reporting-only decisions.
 
-Remaining shared-engine reporting gap: a definite fallback-single refusal followed
-by an accepted single and a later HTTP503 stops dispatch, but engine failure
-projection selects the earlier refusal, dropping the captured journal and canonical
-Unknown text. The transport pin retains this red case; venue code cannot repair
-an engine-owned HTTP seal without changing shared engine behavior.
+The engine retains its own canonical text when it seals an HTTP Unknown after
+a prior refusal. Venue-authored Unknowns use "The outcome is unknown. Check Open
+Orders". Transport pins assert the text produced by the sealing layer, the full
+journal, placed-prefix IDs and suppressed suffix. P11's failure-projection fix
+preserves later captured row facts when an earlier refusal supplies native details.

@@ -1530,7 +1530,7 @@ fn one_category_cannot_release_an_account_refresh_slot() {
 #[test]
 fn parity_exception_unknown_option_halts_later_special_orders() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:2969-2985.
-    for status in [200, 503] {
+    for status in [Some(200), Some(503), None] {
         let mut h = ready(true);
         h.command(Command::PlaceOrders {
             command: 179,
@@ -1543,11 +1543,18 @@ fn parity_exception_unknown_option_halts_later_special_orders() {
             r#"{"retCode":0,"result":{"orderId":"known-prefix"}}"#,
         );
         let second = h.take("/v5/order/create");
-        h.reply(
-            second.id,
-            status,
-            r#"{"retCode":10016,"retMsg":"uncertain"}"#,
-        );
+        if let Some(status) = status {
+            h.reply(
+                second.id,
+                status,
+                r#"{"retCode":10016,"retMsg":"uncertain"}"#,
+            );
+        } else {
+            h.event(Event::HttpFailed {
+                request: second.id,
+                error: "reply lost",
+            });
+        }
         support::assert_unknown_pin(&mut h, 179, &["known-prefix"], 1, 3);
     }
 }
