@@ -261,8 +261,8 @@ fn combined_leg_cancel_unlisted_code_retains_uncertainty_guidance() {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum WriteFailure {
-    Response(u16, &'static str),
+enum WriteFailure<'a> {
+    Response(u16, &'a str),
     HttpFailed,
     Timeout,
 }
@@ -378,9 +378,61 @@ fn dispatched_timeout_covers_every_write_path() {
     assert_dispatched_ambiguity([WriteFailure::Timeout]);
 }
 
-fn assert_dispatched_ambiguity(failures: impl IntoIterator<Item = WriteFailure>) {
-    for failure in failures {
-        for operation in [
+#[test]
+fn uncertain_batch_envelopes_override_placement_rows_before_put_back() {
+    assert_uncertain_batch_envelopes(&[
+        "create",
+        "protective-create",
+        "algo-create",
+        "amend-replacement",
+        "protective-replacement",
+        "protective-put-back",
+    ]);
+}
+
+#[test]
+fn uncertain_batch_envelopes_override_cancellation_rows_before_replacement() {
+    assert_uncertain_batch_envelopes(&[
+        "cancel",
+        "protective-cancel",
+        "algo-cancel",
+        "combined-cancel",
+        "amend",
+    ]);
+}
+
+fn assert_uncertain_batch_envelopes(operations: &[&str]) {
+    for envelope in ["103013", "999999", "", "429"] {
+        for row_code in ["102014", "0", "1000", "102068", "103013", "999999", ""] {
+            for status in [200, 400] {
+                for single in [false, true] {
+                    let row = serde_json::json!({
+                        "orderId": "12", "tpslId": "91", "algoId": "78", "code": row_code,
+                        "msg": if row_code == "0" { "success" } else { "row reply" },
+                    });
+                    let data = if single {
+                        row
+                    } else {
+                        serde_json::json!([row])
+                    };
+                    let response = serde_json::json!({
+                        "code": envelope, "msg": "uncertain envelope", "data": data,
+                    })
+                    .to_string();
+                    assert_dispatched_ambiguity_for(
+                        [WriteFailure::Response(status, &response)],
+                        operations,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn assert_dispatched_ambiguity<'a>(failures: impl IntoIterator<Item = WriteFailure<'a>>) {
+    assert_dispatched_ambiguity_for(
+        failures,
+        &[
             "create",
             "protective-create",
             "algo-create",
@@ -399,7 +451,17 @@ fn assert_dispatched_ambiguity(failures: impl IntoIterator<Item = WriteFailure>)
             "leverage",
             "margin-mode",
             "position-mode",
-        ] {
+            "combined-cancel",
+        ],
+    );
+}
+
+fn assert_dispatched_ambiguity_for<'a>(
+    failures: impl IntoIterator<Item = WriteFailure<'a>>,
+    operations: &[&str],
+) {
+    for failure in failures {
+        for &operation in operations {
             let mut h = Harness::new();
             h.open_private();
             if matches!(
@@ -484,16 +546,20 @@ fn assert_dispatched_ambiguity(failures: impl IntoIterator<Item = WriteFailure>)
                     },
                 ),
                 "cancel" | "protective-cancel" | "algo-cancel" | "combined-tp-cancel"
-                | "combined-sl-cancel" => (
+                | "combined-sl-cancel" | "combined-cancel" => (
                     Command::CancelOrders {
                         command: 7,
-                        ids: vec![match operation {
-                            "cancel" => "12".into(),
-                            "algo-cancel" => "78".into(),
-                            "combined-tp-cancel" => "91__take_profit".into(),
-                            "combined-sl-cancel" => "91__stop_loss".into(),
-                            _ => protective.clone(),
-                        }],
+                        ids: if operation == "combined-cancel" {
+                            vec!["91__take_profit".into(), "91__stop_loss".into()]
+                        } else {
+                            vec![match operation {
+                                "cancel" => "12".into(),
+                                "algo-cancel" => "78".into(),
+                                "combined-tp-cancel" => "91__take_profit".into(),
+                                "combined-sl-cancel" => "91__stop_loss".into(),
+                                _ => protective.clone(),
+                            }]
+                        },
                     },
                     match operation {
                         "cancel" => "cancel-batch-orders",

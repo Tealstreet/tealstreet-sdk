@@ -2690,6 +2690,24 @@ impl Blofin {
             }
         };
         let rows = reply.data.map(ResultRows::rows).unwrap_or_default();
+        // Success and aggregate envelopes delegate to rows. An uncertain error
+        // envelope makes the entire batch unproven before any row or Store effect.
+        if matches!(
+            request.step.effect,
+            Effect::Place { .. } | Effect::Cancel(_)
+        ) && !matches!(&*reply.code, "0" | "1" | "2")
+            && matches!(
+                CODES.verdict(&native(&reply.code, &reply.msg), request.step.intent()),
+                Verdict::Unknown(_)
+            )
+        {
+            return Err(record_failed(
+                cx,
+                context,
+                Some(native(&reply.code, &reply.msg)),
+                UNKNOWN_WRITE,
+            ));
+        }
         match &request.step.effect {
             Effect::Place {
                 family,

@@ -54,3 +54,9 @@ TP/SL leg removal. The original diagnostic remains in the message or native
 diagnostic fields. Definite refusals keep their wording; an unknown response
 never permits another POST. The trading table covers these failures for every
 write path, including replacement and put-back dispatches.
+
+Placement and cancellation batches classify envelope uncertainty before trusting
+any row. Internal, blank, unlisted and rate-limit error envelopes make every row
+Unknown, even a matching refusal, acceptance or already-gone row. They apply no
+row acknowledgement to the Store and cannot authorize put-back or replacement.
+Success code `0` and aggregate status codes `1`/`2` retain their row semantics.
