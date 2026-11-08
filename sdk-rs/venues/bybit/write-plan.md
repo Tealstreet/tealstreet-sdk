@@ -8,6 +8,11 @@ formatting, conservation checks, option price/IV rules and live release vetoes
 still apply. Fixed-price non-reduce-only creates honor minimum notional; market
 and BBO execution prices retain their existing semantics.
 
+Typed mutation and create-batch envelopes decode the frozen bodies. Full-mode
+position protection permits only Market execution; a Limit replacement refuses
+the complete plan before canceling existing protection. Partial-mode Limit
+replacements retain their execution type and native limit price.
+
 Each physical call has one journal index, with consecutive logical elements for
 native create/cancel batch rows. Read-only partial-stop proofs consume no mutation
 index. Dispatch marks the index pending before signing/admission. A local veto

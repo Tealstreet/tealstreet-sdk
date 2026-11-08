@@ -650,7 +650,7 @@ impl BybitLinear {
             // Refused before release: this send never happened (legacy sign failure).
             self.hyro_leg_unsent(&key, Some(lot));
             if run.writes.is_some() {
-                run.fail(cx, error);
+                run.finish_failure(cx, error);
                 return;
             }
             self.park(request.command, entry);

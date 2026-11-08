@@ -137,7 +137,7 @@ impl Run {
         }
     }
 
-    fn fail(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+    fn finish_failure(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
         let error = self.failure(error);
         let _ = cx.fail_plan(&self.plan, error);
     }
@@ -640,7 +640,7 @@ impl BybitLinear {
                 } else {
                     internal("Bybit trading plan lost its schedule")
                 };
-                run.fail(cx, error);
+                run.finish_failure(cx, error);
                 return;
             }
         };
@@ -684,7 +684,7 @@ impl BybitLinear {
                     }
                     Ok(false) => {}
                     Err(_) => {
-                        run.fail(cx, internal("Bybit trading plan was incomplete"));
+                        run.finish_failure(cx, internal("Bybit trading plan was incomplete"));
                     }
                 }
                 return;
@@ -695,7 +695,7 @@ impl BybitLinear {
         }
         let (Ok([slot]), Some(mut leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front())
         else {
-            run.fail(cx, internal("Bybit trading plan is not serial"));
+            run.finish_failure(cx, internal("Bybit trading plan is not serial"));
             return;
         };
         let context = match leg.intent {
@@ -706,7 +706,7 @@ impl BybitLinear {
             LegIntent::Command => cx.plan_leg_context(&run.plan, &slot),
         };
         let Ok(context) = context else {
-            run.fail(cx, internal("Bybit trading plan refused its next leg"));
+            run.finish_failure(cx, internal("Bybit trading plan refused its next leg"));
             return;
         };
         // A later Hyro leg waits for reconciled private state (legacy text).
@@ -1202,7 +1202,7 @@ impl BybitLinear {
                     cx.finish_plan_call(&plan, &active.slot, &active.context)
                 };
                 if continued.is_err() {
-                    run.fail(cx, internal("Bybit trading plan lost its call"));
+                    run.finish_failure(cx, internal("Bybit trading plan lost its call"));
                     return;
                 }
             }
@@ -1285,7 +1285,7 @@ impl BybitLinear {
                 return;
             }
             Decision::Lost => {
-                run.fail(cx, internal("Bybit write fact was refused"));
+                run.finish_failure(cx, internal("Bybit write fact was refused"));
                 return;
             }
         }
@@ -1403,7 +1403,7 @@ impl BybitLinear {
         if let (Some(writes), Some(index)) = (&mut run.writes, active.write_index) {
             let _ = writes.fail(index, error.clone());
         }
-        run.fail(cx, error);
+        run.finish_failure(cx, error);
     }
 
     pub(crate) fn partial_stop_release_veto(
