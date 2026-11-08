@@ -1,5 +1,6 @@
 use super::{NativeOrder, Step};
 use safe_cex_engine::{ErrorKind, Outcome, VenueError, model::Market, num};
+use std::collections::HashMap;
 
 fn refused(message: &str) -> VenueError {
     VenueError::new(message)
@@ -24,7 +25,11 @@ fn grid(text: &str, step: f64) -> Result<f64, VenueError> {
     Ok(value)
 }
 
-pub(super) fn validate_order(order: &NativeOrder, markets: &[Market]) -> Result<(), VenueError> {
+pub(super) fn validate_order(
+    order: &NativeOrder,
+    markets: &[Market],
+    max_prices: &HashMap<String, f64>,
+) -> Result<(), VenueError> {
     let market = markets
         .iter()
         .find(|market| market.id == order.symbol)
@@ -63,21 +68,30 @@ pub(super) fn validate_order(order: &NativeOrder, markets: &[Market]) -> Result<
         {
             return Err(refused("Backpack wire order price is below market minimum"));
         }
+        if max_prices
+            .get(&order.symbol)
+            .is_some_and(|max| !max.is_finite() || price > *max)
+        {
+            return Err(refused("Backpack wire order price exceeds market maximum"));
+        }
     }
     Ok(())
 }
 
 // Capturing only the immutable catalogue keeps this directly usable as
 // WritePlan::validate's Fn(&Step) -> Result<(), VenueError> predicate.
-pub(super) fn validate_write(markets: &[Market]) -> impl Fn(&Step) -> Result<(), VenueError> + '_ {
+pub(super) fn validate_write<'a>(
+    markets: &'a [Market],
+    max_prices: &'a HashMap<String, f64>,
+) -> impl Fn(&Step) -> Result<(), VenueError> + 'a {
     move |step| match step {
-        Step::Place { order, .. } => validate_order(order, markets),
+        Step::Place { order, .. } => validate_order(order, markets, max_prices),
         Step::Pair(rows) => {
             if rows.is_empty() || rows.len() > 2 {
                 return Err(refused("Backpack paired write needs one or two rows"));
             }
             rows.iter()
-                .try_for_each(|order| validate_order(order, markets))
+                .try_for_each(|order| validate_order(order, markets, max_prices))
         }
         _ => Ok(()),
     }
@@ -132,7 +146,8 @@ mod tests {
     #[test]
     fn wire_quantities_validate_bounds_grid_and_finiteness() {
         let markets = [market()];
-        let validate = validate_write(&markets);
+        let max_prices = HashMap::new();
+        let validate = validate_write(&markets, &max_prices);
         for quantity in ["1.0", "0.1", "0.15", "0", "NaN", "inf"] {
             let error = validate(&Step::Place {
                 order: Box::new(order(quantity, "140.0")),
@@ -150,7 +165,8 @@ mod tests {
     #[test]
     fn wire_prices_validate_limit_and_every_protective_field() {
         let markets = [market()];
-        let validate = validate_write(&markets);
+        let max_prices = HashMap::new();
+        let validate = validate_write(&markets, &max_prices);
         for field in 0..4 {
             for price in ["1.0", "1.15", "0", "NaN", "inf"] {
                 let mut row = order("0.9", "140.0");
@@ -174,11 +190,42 @@ mod tests {
     #[test]
     fn pair_count_and_last_wire_row_are_validated() {
         let markets = [market()];
-        let validate = validate_write(&markets);
+        let max_prices = HashMap::new();
+        let validate = validate_write(&markets, &max_prices);
         let valid = order("0.9", "140.0");
         assert!(validate(&Step::Pair(vec![])).is_err());
         assert!(validate(&Step::Pair(vec![valid.clone(); 3])).is_err());
         assert!(validate(&Step::Pair(vec![valid.clone(), order("1.0", "140.0")])).is_err());
         assert!(validate(&Step::Pair(vec![valid.clone(), valid])).is_ok());
+    }
+
+    #[test]
+    fn native_maximum_applies_to_every_wire_price_field() {
+        let markets = [market()];
+        let max_prices = HashMap::from([("SOL_USDC_PERP".into(), 150.)]);
+        let validate = validate_write(&markets, &max_prices);
+        for field in 0..4 {
+            let mut row = order("0.9", "140.0");
+            match field {
+                0 => row.price = Some("150.1".into()),
+                1 => row.trigger_price = Some("150.1".into()),
+                2 => row.take_profit_trigger_price = Some("150.1".into()),
+                _ => row.stop_loss_trigger_price = Some("150.1".into()),
+            }
+            assert!(
+                validate(&Step::Place {
+                    order: Box::new(row),
+                    optional: false,
+                })
+                .is_err()
+            );
+        }
+        assert!(
+            validate(&Step::Place {
+                order: Box::new(order("0.9", "150.0")),
+                optional: false,
+            })
+            .is_ok()
+        );
     }
 }

@@ -300,6 +300,7 @@ pub struct Filters {
 #[serde(rename_all = "camelCase")]
 pub struct PriceFilter {
     pub min_price: Option<Number>,
+    pub max_price: Option<Number>,
     pub tick_size: Option<Number>,
 }
 #[derive(Default, Deserialize)]

@@ -133,7 +133,11 @@ pub enum Step {
     },
     Leverage(f64),
 }
-fn write_plan(steps: &[Step], markets: &[Market]) -> Result<WritePlan<Step>, VenueError> {
+fn write_plan(
+    steps: &[Step],
+    markets: &[Market],
+    max_prices: &HashMap<String, f64>,
+) -> Result<WritePlan<Step>, VenueError> {
     let mut index = 0;
     let writes = steps
         .iter()
@@ -167,7 +171,7 @@ fn write_plan(steps: &[Step], markets: &[Market]) -> Result<WritePlan<Step>, Ven
             }
         })
         .collect();
-    WritePlan::validate(writes, validation::validate_write(markets))
+    WritePlan::validate(writes, validation::validate_write(markets, max_prices))
 }
 
 pub struct Request {
@@ -802,7 +806,8 @@ impl Backpack {
                     _ => None,
                 });
                 let preflight = preflight.as_ref().unwrap();
-                let mut write_plan = match write_plan(&steps, cx.store.markets()) {
+                let mut write_plan = match write_plan(&steps, cx.store.markets(), &self.max_prices)
+                {
                     Ok(plan) => plan,
                     Err(error) => {
                         let _ = cx.fail_preflight(preflight, error);

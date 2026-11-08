@@ -23,7 +23,10 @@ orders, including after a gap.
 Preflight checks every prepared row at its serialized quantity and price before
 the first write, including pairs, TP/SL children and amend replacements. A rounded
 quantity outside native bounds refuses the entire intent as InvalidInput/NotSent
-with zero transport requests.
+with zero transport requests. Native `filters.price.maxPrice` caps are retained
+with their accepted catalogue rows and checked against every serialized execution
+and protective price. The maximum is inclusive; rounding happens before this
+check. An over-cap amendment refuses before cancellation.
 
 Trading dispatch uses the engine's immutable `WritePlan`, including each pair
 row and separate TP/SL child. Runtime failures return indexed `elements`: proven

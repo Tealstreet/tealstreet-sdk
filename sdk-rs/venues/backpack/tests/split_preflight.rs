@@ -89,7 +89,7 @@ const PRICE_CAPPED_MARKETS: &str = r#"[{"symbol":"SOL_USDC_PERP","marketType":"P
 #[test]
 fn native_max_price_in_later_write_refuses_entire_plan() -> Result {
     for price in [1000.01, 1000.006] {
-        let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, "[]");
+        let (mut engine, _, _) = ready_catalogue(PRICE_CAPPED_MARKETS, "[]");
         let mut last = limit(1.);
         last["price"] = json!(price);
         submit(&mut engine, vec![limit(1.), limit(1.), last])?;
@@ -100,7 +100,7 @@ fn native_max_price_in_later_write_refuses_entire_plan() -> Result {
 
 #[test]
 fn native_max_price_replacement_refuses_before_cancel() -> Result {
-    let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, &format!("[{ORDER}]"));
+    let (mut engine, _, _) = ready_catalogue(PRICE_CAPPED_MARKETS, &format!("[{ORDER}]"));
     engine.handle(
         2000.,
         Event::Command(Command::AmendOrder {
@@ -117,7 +117,7 @@ fn native_max_price_replacement_refuses_before_cancel() -> Result {
 fn native_max_price_checks_protective_prices_before_entry() -> Result {
     for kind in ["limit", "market"] {
         for field in ["takeProfit", "stopLoss"] {
-            let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, "[]");
+            let (mut engine, _, _) = ready_catalogue(PRICE_CAPPED_MARKETS, "[]");
             let mut order = limit(1.);
             order["type"] = json!(kind);
             order[field] = json!(1000.01);
@@ -131,7 +131,7 @@ fn native_max_price_checks_protective_prices_before_entry() -> Result {
 #[test]
 fn native_max_price_uses_rounded_wire_value_with_inclusive_bound() -> Result {
     for price in [1000., 1000.004] {
-        let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, "[]");
+        let (mut engine, _, _) = ready_catalogue(PRICE_CAPPED_MARKETS, "[]");
         let mut order = limit(1.);
         order["price"] = json!(price);
         submit(&mut engine, vec![order])?;
@@ -151,11 +151,60 @@ fn native_max_price_uses_rounded_wire_value_with_inclusive_bound() -> Result {
 }
 
 #[test]
+fn catalogue_refresh_keeps_native_caps_aligned_with_accepted_market_rows() -> Result {
+    let mut catalogue: Vec<Value> = serde_json::from_str(PRICE_CAPPED_MARKETS)?;
+    catalogue.push(json!({"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0"}));
+    let partial = serde_json::to_string(&catalogue)?;
+    let btc = json!({"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001","priceIncrement":"0.1"});
+    for (max, allowed) in [
+        (None, false),
+        (Some("900"), false),
+        (Some("2000"), true),
+        (Some("absent"), true),
+        (Some("bad"), false),
+    ] {
+        let (mut engine, _, timers) = ready_catalogue(&partial, "[]");
+        let timer = timers
+            .into_iter()
+            .find_map(|(timer, at)| jittered(at - 1000., 1000.).then_some(timer))
+            .ok_or("missing partial catalogue retry")?;
+        engine.handle(2000., Event::TimerFired { timer });
+        let packet = requests(&mut engine)
+            .into_iter()
+            .find(|request| request.url.ends_with("/markets"))
+            .ok_or("missing catalogue refresh")?;
+        let mut rows = vec![btc.clone()];
+        if let Some(max) = max {
+            let mut sol = catalogue[0].clone();
+            if max == "absent" {
+                sol["filters"]["price"] = json!({"minPrice":"0.01","tickSize":"0.01"});
+            } else {
+                sol["filters"]["price"]["maxPrice"] = json!(max);
+            }
+            rows.push(sol);
+        }
+        reply(&mut engine, &packet, 200, &serde_json::to_string(&rows)?);
+        assert!(engine.store().market(SYMBOL).is_some());
+        let mut order = limit(1.);
+        order["price"] = json!(1000.01);
+        submit(&mut engine, vec![order])?;
+        if allowed {
+            let writes = requests(&mut engine);
+            assert_eq!(writes.len(), 1, "{max:?}");
+            assert_eq!(writes[0].method, Method::Post);
+        } else {
+            refused_before_transport(&mut engine)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn protective_rejection_never_reads_proof_or_puts_back_original_stop() -> Result {
     let stop = ORDER
         .replace("\"orderType\":\"Limit\"", "\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\",\"reduceOnly\":true")
         .replace("\"side\":\"Bid\"", "\"side\":\"Ask\"");
-    let (mut engine, _) = ready_catalogue(PRICE_CAPPED_MARKETS, &format!("[{stop}]"));
+    let (mut engine, _, _) = ready_catalogue(PRICE_CAPPED_MARKETS, &format!("[{stop}]"));
     engine.store_mut().update_ticker(SYMBOL, |ticker| {
         ticker.last = 140.;
         ticker.mark = 140.;
