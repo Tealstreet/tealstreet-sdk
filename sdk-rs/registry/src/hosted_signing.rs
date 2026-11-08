@@ -9,11 +9,20 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "backpack")]
 mod backpack;
 
+#[cfg(feature = "kraken")]
+mod kraken;
+
 #[cfg(feature = "kucoin")]
 mod kucoin;
 
 #[derive(Clone, Copy, Deserialize)]
 pub enum OutputFormat {
+    #[cfg(feature = "kraken")]
+    #[serde(rename = "kraken-sha512")]
+    KrakenSha512,
+    #[cfg(feature = "kraken")]
+    #[serde(rename = "kraken-challenge")]
+    KrakenChallenge,
     #[cfg(feature = "backpack")]
     #[serde(rename = "backpack-ed25519")]
     BackpackEd25519,
@@ -152,6 +161,10 @@ impl<'de> Deserialize<'de> for Input {
 /// Formatting metadata remains bound to its one capture token.
 #[derive(Clone, Copy)]
 pub enum OutputKind {
+    #[cfg(feature = "kraken")]
+    Kraken {
+        batch: bool,
+    },
     #[cfg(feature = "backpack")]
     Backpack {
         ws: bool,
@@ -307,6 +320,7 @@ fn family(venue: &str) -> bool {
         || (cfg!(feature = "blofin") && venue == "blofin")
         || (cfg!(feature = "backpack") && venue == "backpack")
         || (cfg!(feature = "kucoin") && venue == "kucoin")
+        || (cfg!(feature = "kraken") && venue == "kraken")
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "woo") && venue == "woo")
@@ -318,6 +332,52 @@ pub fn prepare(
     identities: &Identities,
     input: Input,
 ) -> Result<(SignRequest, OutputKind), SignError> {
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => {
+                return kraken::prepare(
+                    identities,
+                    &payload,
+                    SignReceipt {
+                        stamp_ms: Some(stamp_ms),
+                        ..Default::default()
+                    },
+                    false,
+                );
+            }
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::KrakenSha512,
+            } => return kraken::prepare(identities, &to_sign, SignReceipt::default(), true),
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::KrakenChallenge,
+            } => {
+                #[derive(Serialize)]
+                struct Challenge<'a> {
+                    payload: &'a str,
+                }
+                let descriptor = serde_json::to_string(&Challenge { payload: &to_sign })
+                    .map_err(|_| SignError::InvalidRequest)?;
+                return kraken::prepare(identities, &descriptor, SignReceipt::default(), false);
+            }
+            Input::WsAuth { .. } => return Err(SignError::Unsupported),
+            Input::Credential {} => {}
+        }
+    }
+    #[cfg(feature = "kraken")]
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::KrakenSha512 | OutputFormat::KrakenChallenge,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
     #[cfg(feature = "backpack")]
     if venue == "backpack" {
         match input {
@@ -467,6 +527,10 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    #[cfg(feature = "kraken")]
+    if let OutputKind::Kraken { batch } = kind {
+        return kraken::finish(batch, result);
+    }
     #[cfg(feature = "backpack")]
     if let OutputKind::Backpack { ws } = kind {
         return backpack::finish(ws, result);
@@ -515,6 +579,12 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         return Err(SignError::InvalidResult);
     }
     let signature = match kind {
+        #[cfg(feature = "kraken")]
+        OutputKind::Kraken { .. } => unreachable!(),
+        #[cfg(feature = "kraken")]
+        OutputKind::WsAuth(OutputFormat::KrakenSha512 | OutputFormat::KrakenChallenge) => {
+            return Err(SignError::Unsupported);
+        }
         #[cfg(feature = "backpack")]
         OutputKind::Backpack { .. } => unreachable!(),
         #[cfg(feature = "backpack")]

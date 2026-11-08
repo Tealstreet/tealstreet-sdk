@@ -1678,21 +1678,46 @@ pub fn build_with_signer<T: Visit>(
             )
         }
         #[cfg(feature = "kraken")]
-        "kraken" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Kraken::new(KrakenOptions {
-                    read_credentials: options.read_credentials.take(),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                }),
+        "kraken" => {
+            let identities = options.signing.take().unwrap_or_default();
+            for identity in [&identities.primary, &identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                identity.validate().map_err(invalid)?;
+                if identity.stable_id.is_none() && !options.public_data_only {
+                    return Err(invalid(
+                        "Kraken Futures requires caller-assigned stable signing identities",
+                    ));
+                }
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Kraken credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut engine = Engine::new(
+                Kraken::with_signing(
+                    KrakenOptions {
+                        testnet: options.testnet,
+                        public_data_only: options.public_data_only,
+                        ..Default::default()
+                    },
+                    identities.clone(),
+                ),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "kraken")]
         "krakenspot" => finish(
             visitor,

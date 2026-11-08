@@ -63,7 +63,7 @@ impl Kraken {
         if self.public.feed.is_none() && cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.feed = Some(cx.register_socket_feed(policy(false, true))?);
         }
-        if self.account.feed.is_none() && self.signer.is_some() && !self.options.public_data_only {
+        if self.account.feed.is_none() && self.can_sign() && !self.options.public_data_only {
             self.account.feed = Some(cx.register_socket_feed_with_native_timing(
                 policy(true, true),
                 NativeTiming {

@@ -52,7 +52,7 @@ impl Selected {
         &self.selection
     }
     pub fn credential(&self) -> Credential {
-        self.selection.credential(self.identity.credential.clone())
+        self.selection.authority(&self.identity)
     }
     pub fn futures_http(
         self,
@@ -390,6 +390,124 @@ fn hash_work(
             },
         ],
         context: Context::default(),
+    }
+}
+/// Canonical Futures preimage for REST or a WS challenge, using owned refs only.
+pub fn canonical_work(
+    identity: &Identity,
+    payload: Vec<u8>,
+    receipt: SignReceipt,
+) -> Result<SignRequest, SignError> {
+    identity.validate().map_err(|_| SignError::InvalidRequest)?;
+    receipt.validate()?;
+    if payload.is_empty() {
+        return Err(SignError::InvalidRequest);
+    }
+    Ok(hash_work(
+        &identity.credential,
+        identity.signing_ref()?,
+        payload,
+        None,
+        receipt,
+    ))
+}
+
+/// Each frame remains owned by its physical socket through engine dispatch.
+pub struct WsAuth {
+    identity: Identity,
+    socket: safe_cex_engine::SocketId,
+    challenge: Option<(String, &'static str)>,
+    prepared: bool,
+}
+impl WsAuth {
+    pub fn challenge(identity: Identity, socket: safe_cex_engine::SocketId) -> Self {
+        Self {
+            identity,
+            socket,
+            challenge: None,
+            prepared: false,
+        }
+    }
+    pub fn subscribe(
+        identity: Identity,
+        socket: safe_cex_engine::SocketId,
+        challenge: String,
+        feed: &'static str,
+    ) -> Self {
+        Self {
+            identity,
+            socket,
+            challenge: Some((challenge, feed)),
+            prepared: false,
+        }
+    }
+    fn matches(&self, action: &Action) -> bool {
+        matches!(action, Action::WsSend { socket, text } if *socket == self.socket && text.is_empty())
+    }
+}
+impl SignStep for WsAuth {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        _: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        self.prepared = false;
+        if !self.matches(action) {
+            return Err(SignError::InvalidRequest);
+        }
+        self.identity
+            .validate()
+            .map_err(|_| SignError::InvalidRequest)?;
+        let work = if let Some((challenge, _)) = &self.challenge {
+            canonical_work(
+                &self.identity,
+                challenge.as_bytes().to_vec(),
+                SignReceipt::default(),
+            )?
+        } else {
+            SignRequest {
+                receipt: SignReceipt::default(),
+                context: Context::default(),
+                operations: vec![Operation::Present {
+                    key: self.identity.credential.clone(),
+                }],
+            }
+        };
+        self.prepared = true;
+        Ok(work)
+    }
+    fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        use sha2::Digest;
+        if !self.matches(action)
+            || !std::mem::take(&mut self.prepared)
+            || result.receipt != SignReceipt::default()
+            || !result.headers.is_empty()
+            || result.values.len() != if self.challenge.is_some() { 3 } else { 1 }
+        {
+            return Err(SignError::InvalidResult);
+        }
+        let key = std::str::from_utf8(&result.values[0]).map_err(|_| SignError::InvalidResult)?;
+        if key.is_empty() || key.contains(['\r', '\n', '\0']) {
+            return Err(SignError::InvalidResult);
+        }
+        let text = if let Some((challenge, feed)) = &self.challenge {
+            if result.values[1] != sha2::Sha256::digest(challenge.as_bytes())[..]
+                || result.values[2].len() != 64
+            {
+                return Err(SignError::InvalidResult);
+            }
+            serde_json::json!({"event":"subscribe","feed":feed,"api_key":key,"original_challenge":challenge,"signed_challenge":STANDARD.encode(&result.values[2])}).to_string()
+        } else {
+            serde_json::json!({"event":"challenge","api_key":key}).to_string()
+        };
+        let Action::WsSend { text: out, .. } = action else {
+            return Err(SignError::InvalidResult);
+        };
+        *out = text;
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
     }
 }
 /// Pure atomic work only; the socket owner binds challenge and physical epoch.

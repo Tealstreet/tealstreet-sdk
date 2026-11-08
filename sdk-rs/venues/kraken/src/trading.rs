@@ -18,6 +18,7 @@ pub struct Trading {
 }
 struct Job {
     command: CommandId,
+    root: Option<safe_cex_engine::request_context::Context>,
     steps: VecDeque<Step>,
     ids: Vec<String>,
     canceled_ids: Vec<String>,
@@ -45,6 +46,11 @@ enum Step {
         symbol: String,
     },
 }
+impl Step {
+    fn is_read(&self) -> bool {
+        matches!(self, Self::Leverage { .. })
+    }
+}
 #[derive(Clone)]
 struct Prepared {
     form: String,
@@ -53,6 +59,7 @@ struct Prepared {
 pub struct Request {
     step: Step,
     settings_revision: u64,
+    pub(super) context: Option<safe_cex_engine::request_context::Context>,
 }
 #[derive(Deserialize, Default)]
 struct Reply {
@@ -120,6 +127,30 @@ struct Cancel<'a> {
 }
 
 impl Kraken {
+    pub(super) fn active_trading_command(&self) -> Option<CommandId> {
+        self.trading.active.as_ref().map(|job| job.command)
+    }
+    pub(super) fn trading_root(&self) -> Option<&safe_cex_engine::request_context::Context> {
+        self.trading
+            .active
+            .as_ref()
+            .and_then(|job| job.root.as_ref())
+    }
+    pub(super) fn discard_provider_trade(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+    ) {
+        if self
+            .trading_root()
+            .is_some_and(|root| root.owner() == owner)
+        {
+            self.trading.active = None;
+            self.trading.waiting = false;
+        }
+        self.trading
+            .queue
+            .retain(|job| job.root.as_ref().is_none_or(|root| root.owner() != owner));
+    }
     pub(crate) fn trading_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
         let (id, result) = match command {
             Command::PlaceOrders { command, orders } => (*command, self.prepare_orders(cx, orders)),
@@ -196,7 +227,7 @@ impl Kraken {
                 Err(not_sent(error)),
             ),
             Ok(steps) => {
-                if self.signer.is_none() || self.options.public_data_only {
+                if !self.can_sign() || self.options.public_data_only {
                     crate::public_context::local(
                         cx,
                         if matches!(command, Command::FetchLeverage { .. }) {
@@ -208,8 +239,33 @@ impl Kraken {
                             .kind(ErrorKind::AuthInvalid)),
                     );
                 } else {
+                    let root = if let Some(ids) = &self.identities {
+                        use safe_cex_engine::credential_selection::CredentialRole;
+                        let read = matches!(command, Command::FetchLeverage { .. });
+                        let slots = sign::setup::futures_slots(ids);
+                        let Ok((selection, identity)) = slots.select(if read {
+                            CredentialRole::Read { scope: None }
+                        } else {
+                            CredentialRole::Mutation
+                        }) else {
+                            return true;
+                        };
+                        let mut policy = crate::public_context::policy(if read {
+                            Operation::Read
+                        } else {
+                            Operation::Mutation
+                        });
+                        policy.credential = Some(selection.authority(identity));
+                        let Ok(root) = cx.admit_http_command(policy) else {
+                            return true;
+                        };
+                        Some(root)
+                    } else {
+                        None
+                    };
                     self.trading.queue.push_back(Job {
                         command: id,
+                        root,
                         steps,
                         ids: Vec::new(),
                         canceled_ids: Vec::new(),
@@ -538,7 +594,12 @@ impl Kraken {
             };
             let Some(mut step) = job.steps.pop_front() else {
                 let job = self.trading.active.take().unwrap();
-                cx.done(job.command, serde_json::to_string(&job.ids).unwrap());
+                let result = serde_json::to_string(&job.ids).unwrap();
+                if let Some(root) = &job.root {
+                    let _ = cx.done_context(root, result);
+                } else {
+                    cx.done(job.command, serde_json::to_string(&job.ids).unwrap());
+                }
                 continue;
             };
             let command = job.command;
@@ -645,6 +706,7 @@ impl Kraken {
                 Pending::Trade(Request {
                     step,
                     settings_revision: self.account_settings_revision(),
+                    context: None,
                 }),
             ) {
                 self.trading_finish(cx, Err(not_sent(error)));
@@ -659,8 +721,14 @@ impl Kraken {
         request: Request,
         response: Response<'_>,
     ) {
+        let context = request.context.clone();
+        let before = self
+            .trading
+            .active
+            .as_ref()
+            .map_or(0, |job| job.ids.len() + job.canceled_ids.len());
         let ok = (200..300).contains(&response.status);
-        let leverage_read = matches!(request.step, Step::Leverage { .. });
+        let leverage_read = request.step.is_read();
         let intent = match &request.step {
             Step::Place(_) => Intent::Place,
             Step::Cancel(_) | Step::CancelSymbol(_) => Intent::Cancel,
@@ -676,6 +744,23 @@ impl Kraken {
                 classified_failure(&response, intent, None, message)
             }
         });
+        let native_code = reply
+            .as_ref()
+            .ok()
+            .and_then(|r| {
+                r.error
+                    .as_ref()
+                    .filter(|code| !code.is_empty())
+                    .or(r.status.as_ref())
+                    .or_else(|| {
+                        r.send
+                            .as_ref()
+                            .or(r.edit.as_ref())
+                            .or(r.cancel.as_ref())
+                            .map(|status| &status.status)
+                    })
+            })
+            .cloned();
         let result = reply.and_then(|r| {
             if !ok
                 || r.result != "success"
@@ -702,6 +787,53 @@ impl Kraken {
             }
             self.trading_apply(cx, request.step, request.settings_revision, r)
         });
+        if let Some(context) = context.as_ref().filter(|_| !leverage_read) {
+            let ids = self
+                .trading
+                .active
+                .as_ref()
+                .map(|job| {
+                    job.ids
+                        .iter()
+                        .chain(&job.canceled_ids)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let fact = match &result {
+                Ok(_) => safe_cex_engine::classify::WriteFact::Accepted { order_ids: ids },
+                Err(error) => {
+                    let code = native_code
+                        .as_deref()
+                        .map(|code| code.split(':').next().unwrap_or(code).trim());
+                    let native = code.map(|code| Native {
+                        code: NativeCode::Text(code),
+                        message: code,
+                    });
+                    let Ok(fact) =
+                        cx.classify_write(context, &ERROR_CODES, native.as_ref(), &error.message)
+                    else {
+                        self.trading_finish(
+                            cx,
+                            Err(unproven("Kraken write evidence is unavailable")),
+                        );
+                        return;
+                    };
+                    safe_cex_engine::classify::WriteFact::Failed {
+                        fact: if error.outcome == Some(Outcome::Rejected) {
+                            fact
+                        } else {
+                            fact.unproven()
+                        },
+                        known_effects: ids.len() > before,
+                    }
+                }
+            };
+            if let Err(reason) = cx.http_write_fact(context, fact, None) {
+                self.trading_finish(cx, Err(reason.venue_error().outcome(Outcome::Unknown)));
+                return;
+            }
+        }
         match result {
             Ok(Some(result)) => self.trading_finish(cx, Ok(result)),
             Ok(None) => {
@@ -946,7 +1078,13 @@ impl Kraken {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
             match result {
-                Ok(result) => cx.done(job.command, result),
+                Ok(result) => {
+                    if let Some(root) = &job.root {
+                        let _ = cx.done_context(root, result);
+                    } else {
+                        cx.done(job.command, result);
+                    }
+                }
                 Err(mut error) => {
                     let ids: Vec<_> = job
                         .canceled_ids
@@ -960,7 +1098,11 @@ impl Kraken {
                     if error.outcome == Some(Outcome::Rejected) {
                         cx.placement_resolved(job.command);
                     }
-                    cx.fail(job.command, error);
+                    if let Some(root) = &job.root {
+                        let _ = cx.fail_context(root, error);
+                    } else {
+                        cx.fail(job.command, error);
+                    }
                 }
             }
         }
@@ -975,12 +1117,21 @@ impl Kraken {
             "Kraken request failed; write outcome may be uncertain: {error}"
         ))
         .kind(ErrorKind::Network);
-        let error = if matches!(request.step, Step::Leverage { .. }) {
+        let error = if request.step.is_read() {
             error
         } else {
             error.outcome(Outcome::Unknown)
         };
         self.trading_finish(cx, Err(error));
+        self.trading_pump(cx);
+    }
+    pub(crate) fn trading_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        _request: Request,
+        error: VenueError,
+    ) {
+        self.trading_finish(cx, Err(error.outcome(Outcome::NotSent)));
         self.trading_pump(cx);
     }
 }
