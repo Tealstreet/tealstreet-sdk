@@ -37,3 +37,8 @@ restore; this exception follows the lead's explicit HOLD/no-removal instruction.
 Evidence: `packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts`
 lines 742–867 (per-intent checks and splitting), 955–997 (placement and batch
 continuation), and 1000–1081 (cancel-replace and cancellation fan-out).
+
+Stop-after-Unknown is a recorded TS parity exception (Sean/daxx, 2026-11-08).
+An uncertain row ends the action with its placed/applied prefix, Unknown row
+and unsent suffix in the journal, standard Check Open Orders guidance and a
+`write.unknown` event. Definite refusals keep the TS continuation behavior.

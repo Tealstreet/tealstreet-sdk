@@ -3962,6 +3962,19 @@ impl crate::engine::CoreCx<'_> {
         let notice = match result {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
+                let error = if error.elements.is_some() {
+                    error.with_unknown_write_text()
+                } else {
+                    error
+                };
+                if error.outcome == Some(crate::Outcome::Unknown) && error.elements.is_some() {
+                    self.event(
+                        Level::Warn,
+                        log_code::WRITE_UNKNOWN,
+                        error.message.clone(),
+                        vec![("command", command.into()), ("outcome", "unknown".into())],
+                    );
+                }
                 let error = error.with_ip_whitelist_hint();
                 if credential_evidence {
                     count_auth_failure(self.io.core, Some(&error));

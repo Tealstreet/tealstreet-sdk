@@ -977,7 +977,12 @@ impl AsterDex {
             return;
         };
         let _ = match job.error.take() {
-            Some(mut error) if !job.continue_on_error || job.sweep_failed || job.successes == 0 => {
+            Some(mut error)
+                if !job.continue_on_error
+                    || job.sweep_failed
+                    || job.successes == 0
+                    || error.outcome == Some(Outcome::Unknown) =>
+            {
                 // A later rejection after a step took effect cannot mean nothing happened.
                 if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
                     error.outcome = None;
@@ -1208,8 +1213,8 @@ impl AsterDex {
             };
             return;
         }
-        // A status-only refusal takes its kind and outcome from the table's status rows.
-        let mut status_error = None;
+        // Keep the engine's classified kind and outcome in the logical journal.
+        let mut classified_error = None;
         let protective = was_place
             && self
                 .trading
@@ -1266,9 +1271,7 @@ impl AsterDex {
                     };
                     match cx.classify_write(leg, table, native, told) {
                         Ok(fact) => {
-                            if native.is_none() {
-                                status_error = Some(fact.error().clone());
-                            }
+                            classified_error = Some(fact.error().clone());
                             cx.http_write_fact(
                                 leg,
                                 WriteFact::Failed {
@@ -1357,9 +1360,9 @@ impl AsterDex {
                 Err((code, message)) => {
                     cx.command_error(command, message.clone());
                     let mut error = transport_error
-                        .or(status_error)
+                        .or(classified_error)
                         .unwrap_or_else(|| failure(*code, message.clone()));
-                    if unproven {
+                    if unproven || transport && error.outcome != Some(Outcome::NotSent) {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     let guarded = was_place && job.gone_text(true).is_some();

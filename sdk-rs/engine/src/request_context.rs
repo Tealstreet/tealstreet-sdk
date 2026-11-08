@@ -2108,7 +2108,20 @@ impl CommandWrites {
         if self.sealed {
             return Err(Error::State);
         }
-        let elements = fallback.elements.take();
+        let elements = fallback.elements.take().or_else(|| {
+            self.attempts
+                .iter()
+                .rev()
+                .find_map(|attempt| match &attempt.result {
+                    Some(
+                        WriteResult::Rejected(error)
+                        | WriteResult::KnownPartial(error)
+                        | WriteResult::PartialUnknown(error)
+                        | WriteResult::Failed(error),
+                    ) => error.elements.clone(),
+                    _ => None,
+                })
+        });
         let presented = (fallback.protection.is_some() || fallback.presents)
             .then(|| (fallback.message.clone(), fallback.protection));
         let mut projected_budget = self.evidence;
@@ -2288,8 +2301,10 @@ impl CommandWrites {
         if let Some((message, protection)) = presented {
             error.message = message;
             error.protection = protection;
+            error.presents = true;
         } else if let Some(message) = &self.presentation {
             error.message = message.clone();
+            error.presents = true;
         } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
             error.message = UNKNOWN_AFTER_REFUSAL.into();
             if overflow {

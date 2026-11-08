@@ -192,7 +192,34 @@ pub enum Protection {
     Unprotected,
 }
 
+/// Shared guidance for writes whose execution cannot be established.
+pub const UNKNOWN_OUTCOME_TEXT: &str = "outcome is unknown. Check Open Orders, then try again";
+
 impl VenueError {
+    /// Uncertainty is never a rejection or an automatic resend instruction.
+    pub fn unknown_write() -> Self {
+        Self::new(format!("The write {UNKNOWN_OUTCOME_TEXT}")).outcome(Outcome::Unknown)
+    }
+
+    /// Keep explicit protective context while replacing stale refusal wording.
+    pub(crate) fn with_unknown_write_text(mut self) -> Self {
+        if self.outcome != Some(Outcome::Unknown) {
+            return self;
+        }
+        self.message = match self.message.split_once("outcome is unknown") {
+            Some((context, _)) if self.presents => format!("{context}{UNKNOWN_OUTCOME_TEXT}"),
+            _ => Self::unknown_write().message,
+        };
+        if let Some(elements) = &mut self.elements {
+            for row in &mut elements.0 {
+                if let crate::write_plan::ElementResult::Unknown { error } = &mut row.result {
+                    error.message = Self::unknown_write().message;
+                }
+            }
+        }
+        self
+    }
+
     pub fn new(message: impl Into<String>) -> Self {
         Self::from_message(message.into())
     }
@@ -507,6 +534,53 @@ pub fn stop_gone_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_write_guidance_preserves_facts_and_non_unknown_messages() {
+        use crate::write_plan::{Element, ElementOutcome, ElementOutcomes, ElementResult};
+        let mut error = VenueError::new("earlier refusal")
+            .kind(ErrorKind::Rejected)
+            .venue_code("-2010")
+            .venue_message("insufficient margin")
+            .partial_ids(&["accepted-1".into()])
+            .outcome(Outcome::Unknown);
+        error.elements = Some(Box::new(ElementOutcomes(vec![ElementOutcome {
+            element: Element {
+                index: 0,
+                client_order_id: None,
+            },
+            result: ElementResult::Unknown {
+                error: Box::new(VenueError::new("uncertain decoder").outcome(Outcome::Unknown)),
+            },
+        }])));
+        let updated = error.clone().with_unknown_write_text();
+        assert_eq!(updated.message, VenueError::unknown_write().message);
+        assert_eq!(updated.venue_code, error.venue_code);
+        assert_eq!(updated.venue_message, error.venue_message);
+        assert_eq!(updated.kind, error.kind);
+        assert_eq!(updated.partial, error.partial);
+        assert!(
+            matches!(&updated.elements.as_ref().unwrap()[0].result, ElementResult::Unknown { error }
+            if error.message == VenueError::unknown_write().message)
+        );
+        for outcome in [Outcome::NotSent, Outcome::Rejected] {
+            let error = VenueError::new("specific refusal").outcome(outcome);
+            assert_eq!(error.clone().with_unknown_write_text(), error);
+        }
+    }
+
+    #[test]
+    fn unknown_write_guidance_keeps_explicit_protective_context() {
+        let mut error =
+            VenueError::new("Your BTC stop's put-back's outcome is unknown. Check Open Orders")
+                .outcome(Outcome::Unknown);
+        error.presents = true;
+        let error = error.with_unknown_write_text();
+        assert_eq!(
+            error.message,
+            "Your BTC stop's put-back's outcome is unknown. Check Open Orders, then try again"
+        );
+    }
 
     /// Venue refusals naming the key's IP whitelist, as the venues word them.
     const NAMED: [&str; 9] = [

@@ -1,7 +1,13 @@
 use super::*;
 use safe_cex_engine::{ErrorKind, Outcome};
 
-fn configured(minimum: f64, maximum: f64, step: f64, notional: f64, algos: u32) -> Harness {
+pub(super) fn configured(
+    minimum: f64,
+    maximum: f64,
+    step: f64,
+    notional: f64,
+    algos: u32,
+) -> Harness {
     let info = json!({"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":1,"quantityPrecision":3,"filters":[
         {"filterType":"PRICE_FILTER","tickSize":"0.1"},
         {"filterType":"LOT_SIZE","stepSize":step.to_string(),"minQty":minimum.to_string(),"maxQty":maximum.to_string()},
@@ -15,6 +21,7 @@ fn configured(minimum: f64, maximum: f64, step: f64, notional: f64, algos: u32) 
     h.sent_requests = 0;
     h.sent_writes = 0;
     h.writes.clear();
+    h.events.clear();
     h.engine.store_mut().set_tickers(vec![Ticker {
         symbol: "BTCUSDT".into(),
         last: 1.0,
@@ -24,11 +31,11 @@ fn configured(minimum: f64, maximum: f64, step: f64, notional: f64, algos: u32) 
     h
 }
 
-fn ordinary(amount: f64, price: f64) -> serde_json::Value {
+pub(super) fn ordinary(amount: f64, price: f64) -> serde_json::Value {
     json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":amount,"price":price})
 }
 
-fn batch(h: &mut Harness, orders: Vec<serde_json::Value>) {
+pub(super) fn batch(h: &mut Harness, orders: Vec<serde_json::Value>) {
     h.command(Command::PlaceOrders {
         command: 1,
         orders: orders
@@ -38,7 +45,7 @@ fn batch(h: &mut Harness, orders: Vec<serde_json::Value>) {
     });
 }
 
-fn write_sequence(h: &Harness) -> Vec<String> {
+pub(super) fn write_sequence(h: &Harness) -> Vec<String> {
     h.writes
         .iter()
         .map(|(method, url)| {

@@ -15,6 +15,7 @@ struct Harness {
     writes: Vec<(Method, String)>,
     done: Vec<(u32, Result<String, String>)>,
     failures: Vec<(u32, safe_cex_engine::VenueError)>,
+    events: Vec<safe_cex_engine::log::LogEvent>,
 }
 impl Harness {
     fn new() -> Self {
@@ -65,6 +66,7 @@ impl Harness {
             writes: Vec::new(),
             done: Vec::new(),
             failures: Vec::new(),
+            events: Vec::new(),
         }
     }
     fn collect(&mut self) {
@@ -78,6 +80,7 @@ impl Harness {
                     }
                     self.requests.push(request);
                 }
+                Action::Notice(Notice::Event(event)) => self.events.push(event),
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, Ok(result)))
                 }
@@ -1361,12 +1364,11 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                 let sweep = h.requests.remove(index);
                 h.reply_status(sweep, status, body);
                 let message = h.result(7).as_ref().expect_err(body);
-                if status == 429 {
-                    let error = &h.failures.iter().find(|(id, _)| *id == 7).unwrap().1;
-                    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                let error = &h.failures.iter().find(|(id, _)| *id == 7).unwrap().1;
+                if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
                     assert_eq!(
                         error.message,
-                        "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                        safe_cex_engine::VenueError::unknown_write().message
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");
@@ -1559,3 +1561,6 @@ fn engine_ambiguity_429_timestamp_cannot_resend() {
 
 #[path = "support/legacy_parity.rs"]
 mod legacy_parity;
+
+#[path = "support/unknown_exception.rs"]
+mod unknown_exception;

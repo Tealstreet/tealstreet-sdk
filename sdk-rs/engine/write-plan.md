@@ -42,3 +42,10 @@ write. `UnprovenEvidence::write_plan_outcomes` accepts such a snapshot and appli
 the same engine-owned HTTP classification to pending Unknown rows. Neither API
 validates payloads or changes continuation. AsterDEX uses these reporting APIs;
 its existing venue/engine dispatch rules remain authoritative.
+
+For a journaled command whose final engine outcome is Unknown, terminal
+publication uses the shared `VenueError::unknown_write` guidance. Explicit
+protective context is retained, stale refusal text is replaced, and Unknown
+rows receive the same guidance. One `write.unknown` warning event carries the
+command ID and final outcome. This presentation/reporting step grants no retry
+or continuation and does not alter the engine's physical classification.
