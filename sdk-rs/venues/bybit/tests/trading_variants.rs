@@ -5984,48 +5984,47 @@ fn after_failure_native_batch_row_refusal_keeps_the_later_chunk() {
 }
 
 #[test]
-fn after_failure_batch_fallback_continues_past_a_refused_single() {
-    // TS catches each fallback refusal: reference/bybit/bybit.exchange.ts:3015-3042.
+fn pinfix_10001_batch_fallback_continues_past_a_refused_single() {
+    // Preserve master's 10001 trigger; TS catches each fallback refusal: reference/bybit/bybit.exchange.ts:3015-3042.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | regular Linear/Inverse create-batch runtime continuation and fallback
-    for code in [10001, 110007] {
-        let mut h = ready(Variant::Demo);
-        place(
-            &mut h,
-            163,
-            vec![order("BTCUSDT", 1.0), order("BTCUSDT", 1.0)],
-        );
-        resolve_mode(&mut h, "BTCUSDT");
-        let batch = h.take("/v5/order/create-batch");
-        h.reply(
-            batch.id,
-            200,
-            &serde_json::json!({"retCode":code,"retMsg":"batch refused"}).to_string(),
-        );
-        let first = h.take("/v5/order/create");
-        h.reply(
-            first.id,
-            200,
-            r#"{"retCode":110007,"retMsg":"first refused"}"#,
-        );
-        let second = h.take("/v5/order/create");
-        h.reply(
-            second.id,
-            200,
-            r#"{"retCode":0,"result":{"orderId":"fallback-last"}}"#,
-        );
-        assert!(!h.has_request("/v5/order/create"));
-        assert!(matches!(h.result(163), Some(Err(_))));
-        let elements = applied_failure(&h, 163).elements.as_ref().unwrap();
-        assert_eq!(elements.len(), 2);
-        use safe_cex_engine::write_plan::ElementResult;
-        assert!(matches!(
-            elements[0].result,
-            ElementResult::NotSent { error: Some(_) }
-        ));
-        assert!(
-            matches!(&elements[1].result, ElementResult::Placed { order_ids } if order_ids == &["fallback-last"])
-        );
-    }
+    let code = 10001;
+    let mut h = ready(Variant::Demo);
+    place(
+        &mut h,
+        163,
+        vec![order("BTCUSDT", 1.0), order("BTCUSDT", 1.0)],
+    );
+    resolve_mode(&mut h, "BTCUSDT");
+    let batch = h.take("/v5/order/create-batch");
+    h.reply(
+        batch.id,
+        200,
+        &serde_json::json!({"retCode":code,"retMsg":"batch refused"}).to_string(),
+    );
+    let first = h.take("/v5/order/create");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"first refused"}"#,
+    );
+    let second = h.take("/v5/order/create");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"fallback-last"}}"#,
+    );
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(matches!(h.result(163), Some(Err(_))));
+    let elements = applied_failure(&h, 163).elements.as_ref().unwrap();
+    assert_eq!(elements.len(), 2);
+    use safe_cex_engine::write_plan::ElementResult;
+    assert!(matches!(
+        elements[0].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    assert!(
+        matches!(&elements[1].result, ElementResult::Placed { order_ids } if order_ids == &["fallback-last"])
+    );
 }
 
 #[test]
@@ -6287,4 +6286,34 @@ fn parity_exception_lost_native_batch_halts_chunks_without_fallback() {
         error: "reply lost",
     });
     support::assert_unknown_pin(&mut h, 184, &[], 0, 12);
+}
+
+#[test]
+fn pinfix_nontrigger_batch_refusal_never_falls_back_to_singles() {
+    // TS fallback context: reference/bybit/bybit.exchange.ts:3015-3042.
+    // The lead's preservation rule retains master's stricter 10001-only trigger.
+    for code in [110007, 10003] {
+        let mut h = ready(Variant::Demo);
+        place(&mut h, 185, vec![order("BTCUSDT", 1.0); 2]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let batch = h.take("/v5/order/create-batch");
+        h.reply(
+            batch.id,
+            200,
+            &serde_json::json!({"retCode":code,"retMsg":"definite batch refusal"}).to_string(),
+        );
+        h.advance(1_201.0);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "nontrigger {code} released fallback"
+        );
+        assert!(!h.has_request("/v5/order/create-batch"));
+        let error = applied_failure(&h, 185);
+        assert_eq!(error.venue_code.as_deref(), Some(code.to_string().as_str()));
+        let elements = error.elements.as_ref().unwrap();
+        assert_eq!(elements.len(), 2);
+        assert!(elements.iter().all(|row| matches!(&row.result,
+            safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) }
+                if error.venue_code.as_deref() == Some(code.to_string().as_str()))));
+    }
 }

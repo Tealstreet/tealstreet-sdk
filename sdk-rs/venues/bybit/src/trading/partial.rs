@@ -55,6 +55,10 @@ struct NativeStop {
     #[serde(default)]
     tpsl_mode: Option<String>,
     #[serde(default)]
+    parent_order_link_id: Option<String>,
+    #[serde(default)]
+    order_link_id: Option<String>,
+    #[serde(default)]
     created_time: Option<String>,
 }
 
@@ -106,13 +110,74 @@ fn matches_original(row: &NativeStop, guard: &PartialStopGuard) -> bool {
             })
 }
 
-/// Native cancellation confirmation and bounded observations before replacement.
+/// Missing native lineage or an incomplete peer census never authorizes put-back.
+fn standalone_provenance(
+    target: &NativeStop,
+    peers: &[NativeStop],
+    complete: bool,
+    guard: &PartialStopGuard,
+    now: f64,
+) -> bool {
+    let Some(link) = target
+        .order_link_id
+        .as_deref()
+        .filter(|link| !link.is_empty())
+    else {
+        return false;
+    };
+    let Some(created) = target
+        .created_time
+        .as_deref()
+        .filter(|time| time.parse::<u64>().is_ok_and(|n| n > 0))
+    else {
+        return false;
+    };
+    let created_time = created.parse::<u64>().unwrap();
+    let created_ms = created_time as f64;
+    if !created_ms.is_finite() || created_ms > now || now - created_ms > 86_400_000.0 {
+        return false;
+    }
+    complete
+        && matches_original(target, guard)
+        && guard.original.parent_id.is_none()
+        && target.parent_order_link_id.as_deref() == Some("")
+        && target.tpsl_mode.as_deref() == Some("Partial")
+        && target.stop_order_type.as_deref()
+            == Some(if guard.original.kind == OrderType::StopLoss {
+                "StopLoss"
+            } else {
+                "TakeProfit"
+            })
+        && peers.iter().all(|peer| {
+            peer.order_id == target.order_id
+                || (peer.order_link_id.is_some()
+                    && peer.parent_order_link_id.is_some()
+                    && peer
+                        .created_time
+                        .as_ref()
+                        .is_some_and(|time| time.parse::<u64>().is_ok_and(|n| n > 0))
+                    && peer.order_link_id.as_deref() != Some(link)
+                    && peer.parent_order_link_id.as_deref() != Some(link)
+                    && !(peer.side == target.side
+                        && (peer.created_time.as_deref() == Some(created)
+                            || (peer.tpsl_mode.as_deref() == Some("Partial")
+                                && peer.created_time.as_deref().is_some_and(|time| {
+                                    time.parse::<u64>().is_ok_and(|time| {
+                                        time.abs_diff(created_time) <= CREATION_WINDOW_MS
+                                    })
+                                })))))
+        })
+}
+
 pub(super) struct Flow {
     guard: PartialStopGuard,
     terminal: Option<NativeStop>,
+    peers: Vec<NativeStop>,
+    complete: bool,
     history_done: bool,
     observed_at: f64,
     target_reads: u8,
+    history_window: Option<(u64, u64)>,
 }
 
 pub(super) enum Observation {
@@ -141,11 +206,17 @@ impl Flow {
         planned
             .body
             .push_str(&format!("&startTime={start}&endTime={end}"));
+        self.history_window = Some((start, end));
         Some(planned)
     }
 
     pub(super) fn skip_history(&mut self) {
         self.history_done = true;
+        self.complete = false;
+    }
+
+    pub(super) fn history_done(&self) -> bool {
+        self.history_done
     }
 
     pub(super) fn proof(&self, axis: Axis) -> Planned {
@@ -158,9 +229,12 @@ impl Flow {
         Self {
             guard,
             terminal: None,
+            peers: Vec::new(),
+            complete: true,
             history_done: false,
             observed_at: 0.0,
             target_reads: 0,
+            history_window: None,
         }
     }
 
@@ -220,19 +294,59 @@ impl Flow {
             }) {
                 return Err(failed());
             }
+            self.complete &= page.next_page_cursor.is_empty();
+            if axis == Axis::History {
+                self.complete &= self.history_window.is_some_and(|(start, end)| {
+                    page.list.iter().all(|row| {
+                        row.created_time
+                            .as_deref()
+                            .and_then(|time| time.parse::<u64>().ok())
+                            .is_some_and(|time| start <= time && time <= end)
+                    })
+                });
+            }
+            self.peers.extend(page.list);
             self.history_done |= axis == Axis::History;
         }
         Ok(Observation::Complete)
     }
 
-    pub(super) fn validate(&self, store: &Store, now: f64) -> Result<(), VenueError> {
-        if self.terminal.is_none() || !self.history_done {
-            return Err(VenueError::new("Protection cannot be re-placed without native cancellation confirmation; check Open Orders").outcome(Outcome::NotSent));
+    pub(super) fn restorable(&self) -> bool {
+        self.history_done
+            && self.terminal.as_ref().is_some_and(|target| {
+                standalone_provenance(
+                    target,
+                    &self.peers,
+                    self.complete,
+                    &self.guard,
+                    self.observed_at,
+                )
+            })
+    }
+
+    pub(super) fn validate(
+        &self,
+        store: &Store,
+        now: f64,
+        restoring: bool,
+    ) -> Result<(), VenueError> {
+        if self.terminal.is_none() || !self.history_done || (restoring && !self.restorable()) {
+            return Err(VenueError::new("Protection cannot be re-placed without native cancellation and lineage proof; check Open Orders").outcome(Outcome::NotSent));
         }
-        let validation = self
-            .guard
-            .validate_order(store, true)
-            .and_then(|()| self.guard.validate(store, now));
+        let validation = self.guard.validate_order(store, true).and_then(|()| {
+            if restoring {
+                let mut guard = self.guard.clone();
+                guard.kind = guard.original.kind;
+                guard.price = guard.original.price;
+                guard.reference = guard
+                    .original
+                    .trigger_type
+                    .expect("native proof required reference");
+                guard.validate(store, now)
+            } else {
+                self.guard.validate(store, now)
+            }
+        });
         validation.map_err(|mut error| {
             error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
             error.presents = true;

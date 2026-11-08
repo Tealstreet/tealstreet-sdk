@@ -56,6 +56,17 @@ enum Call {
             safe_cex_engine::model::OrderSide,
             safe_cex_engine::model::OrderType,
         ),
+        /// That stop's id and own trading-stop body: sent once if this write is refused.
+        restore: Option<(String, String)>,
+    },
+    /// Puts back the stop a refused replacement left the position without.
+    RestorePartialStop {
+        stop: (
+            String,
+            safe_cex_engine::model::OrderSide,
+            safe_cex_engine::model::OrderType,
+        ),
+        refusal: String,
     },
     Amend,
     /// Clears an attached TP/SL, a field of its parent, by amending the field to 0.
@@ -223,6 +234,7 @@ pub struct TradingState {
     /// Settles cancel-alls whose order read has landed.
     unlisted_timer: Option<safe_cex_engine::TimerId>,
     pub(crate) hyro: crate::hyro::State,
+    gone_before_cancel: std::collections::HashSet<String>,
 }
 
 fn side_text(side: OrderSide) -> &'static str {
@@ -1150,6 +1162,7 @@ impl BybitLinear {
         price: f64,
         trigger: Option<StopTriggerType>,
         amount: f64,
+        limit: Option<f64>,
     ) -> (String, &'static str) {
         let partial = amount != 0.0;
         let (level, by, size, reference) = if kind == OrderType::StopLoss {
@@ -1178,6 +1191,22 @@ impl BybitLinear {
             .str(level, &number(price))
             .str(by, reference)
             .opt_str(size, partial.then(|| number(amount)).as_deref())
+            .opt_str(
+                if kind == OrderType::StopLoss {
+                    "slOrderType"
+                } else {
+                    "tpOrderType"
+                },
+                limit.map(|_| "Limit"),
+            )
+            .opt_str(
+                if kind == OrderType::StopLoss {
+                    "slLimitPrice"
+                } else {
+                    "tpLimitPrice"
+                },
+                limit.map(number).as_deref(),
+            )
             .finish();
         (body, reference)
     }
@@ -1258,7 +1287,8 @@ impl BybitLinear {
                     order.symbol
                 ));
             }
-            let (body, reference) = self.trading_stop_body(cx, order, kind, price, trigger, amount);
+            let (body, reference) =
+                self.trading_stop_body(cx, order, kind, price, trigger, amount, None);
             let by = match reference {
                 "LastPrice" => StopTriggerType::LastPrice,
                 "IndexPrice" => StopTriggerType::IndexPrice,
@@ -1279,6 +1309,16 @@ impl BybitLinear {
                 .and_then(|()| guard.validate_original(cx.store, cx.now))
                 .and_then(|()| guard.validate(cx.store, cx.now))
                 .map_err(|error| error.message)?;
+            // The stop as it stands, to put back exactly if its replacement is refused.
+            let (restore, _) = self.trading_stop_body(
+                cx,
+                order,
+                order.kind,
+                order.price,
+                order.trigger_type,
+                order.amount,
+                limit,
+            );
             let mut job = self.plan_cancel(std::slice::from_ref(order));
             for planned in job.steps.iter_mut().flat_map(|step| &mut step.requests) {
                 planned.call = Call::CancelPartialStop {
@@ -1309,6 +1349,7 @@ impl BybitLinear {
                     body,
                     call: Call::PartialStop {
                         stop: (order.symbol.clone(), order.side, order.kind),
+                        restore: Some((order.id.clone(), restore)),
                     },
                 }],
             });

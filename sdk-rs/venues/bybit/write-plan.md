@@ -9,8 +9,10 @@ Every ordinary and Hyro mutation has logical indices in the passive shared
 `WritePlan::new/record/attach` journal. It holds no payload, admission callback,
 next-write state or stop flag. The venue records pending rows as Unknown before
 transport, then records classified native results. Read-only cancellation proofs
-have no mutation index. Native batch fallback singles retain the original logical
-row indices and replace their earlier refused result with the actual fallback fact.
+have no mutation index. Native batch fallback is restricted to master's code 10001
+trigger. Its singles
+retain the original logical row indices and replace the earlier batch refusal
+with the actual fallback fact. Other native refusal codes do not select singles.
 
 After a definite refusal, Spot finishes the current caller order's lots, then
 stops before the next caller order. Caught provider refusals retain TS continuation.
@@ -35,8 +37,17 @@ reports these decisions without making them.
 
 Partial TP/SL edits cancel then replace. Replacement payloads use native default
 Market execution and omit conditional Limit fields for Full and Partial modes.
-TS does not automatically restore a failed replacement; its batch fallbacks remain.
-Protection warnings and native reconciliation stay in their existing owners.
+The lead's explicit master-preservation rule retains the guarded put-back after
+a definitive replacement refusal. Native standalone lineage, complete peer census,
+positive cancellation proof and current protection validation authorize one attempt;
+Unknown or an already-gone cancel never does. Put-back preserves the original
+native size, trigger source and conditional execution fields. Its passive report
+appends an Applied TradingStop or failure row without erasing the refused replacement.
+
+The legacy TS cancel/replace context is `bybit.exchange.ts:3221–3224`, and its batch
+catch is at `:3015–3042`. Those TS paths lack this put-back and catch more batch
+errors; the reviewed master-preservation rule explicitly governs these two details.
+Protection warnings and native reconciliation retain their master behavior.
 
 Attaching changes only optional `elements`; the engine owns aggregate outcome,
 partial IDs and retry metadata. Unknown presentation adds the canonical shared

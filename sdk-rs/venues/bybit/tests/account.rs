@@ -1365,15 +1365,10 @@ fn normal_business_rejections_remain_actionable_after_a_signature_retry() {
         200,
         r#"{"retCode":110007,"retMsg":"Available balance is insufficient","result":{}}"#,
     );
-    let fallback = h.take("/v5/order/create");
-    h.reply(
-        fallback.id,
-        200,
-        r#"{"retCode":110007,"retMsg":"Available balance is insufficient","result":{}}"#,
-    );
     let error = h.result(9002).unwrap().as_ref().unwrap_err();
     assert!(error.contains("Available balance is insufficient"));
     assert!(!h.has_request("/v5/order/create-batch"));
+    assert!(!h.has_request("/v5/order/create"));
     assert_private_notices_are_safe(&h);
 }
 

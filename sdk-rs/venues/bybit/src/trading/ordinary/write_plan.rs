@@ -54,7 +54,9 @@ fn effects(leg: &Leg, wire: &MutationWire) -> Result<Vec<EffectTarget>, VenueErr
         Call::CancelPartialStop { id, .. } => vec![target(AppliedEffect::Cancel, id.clone())],
         Call::CancelAll { .. } => vec![scoped(AppliedEffect::Cancel)?],
         Call::Amend | Call::ClearAttachedLeg { .. } => return amend(),
-        Call::TradingStop | Call::PartialStop { .. } => vec![scoped(AppliedEffect::TradingStop)?],
+        Call::TradingStop | Call::PartialStop { .. } | Call::RestorePartialStop { .. } => {
+            vec![scoped(AppliedEffect::TradingStop)?]
+        }
         Call::Leverage { .. } | Call::MarginMode { .. } | Call::PositionMode { .. } => {
             vec![scoped(AppliedEffect::Settings)?]
         }
@@ -147,4 +149,22 @@ pub(super) fn build(legs: &mut VecDeque<Leg>) -> Result<Option<WritePlan>, Venue
         }
     }
     Ok((!elements.is_empty()).then(|| WritePlan::new(elements)))
+}
+
+pub(super) fn append_restore(journal: &mut WritePlan) -> Result<usize, String> {
+    let previous = journal.outcomes();
+    let index = previous.len();
+    let mut elements: Vec<_> = previous.iter().map(|row| row.element.clone()).collect();
+    elements.push(Element {
+        index,
+        client_order_id: None,
+    });
+    let mut extended = WritePlan::new(elements);
+    for row in previous {
+        extended
+            .record(row.element.index, row.result)
+            .map_err(|error| error.to_string())?;
+    }
+    *journal = extended;
+    Ok(index)
 }
