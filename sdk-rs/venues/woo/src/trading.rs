@@ -66,6 +66,7 @@ struct Job {
     errors: Vec<VenueError>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    split_report: Option<crate::split_report::SplitReport>,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -971,6 +972,7 @@ impl Woo {
                     touches: HashMap::new(),
                     errors: Vec::new(),
                     effective: false,
+                    split_report: None,
                 });
                 self.trade_pump(cx);
             }
@@ -1023,7 +1025,30 @@ impl Woo {
                     let touches =
                         std::mem::take(&mut self.trading.active.as_mut().unwrap().touches);
                     match self.build_places(cx, orders, &touches) {
-                        Ok(steps) => self.trading.active.as_mut().unwrap().steps.extend(steps),
+                        Ok(steps) => {
+                            let elements = steps
+                                .iter()
+                                .filter_map(|step| match step {
+                                    Step::Write { accepted, .. } => Some(match accepted {
+                                        Accepted::Regular(receipt) => {
+                                            receipt.as_ref().map(|r| r.identity.clone())
+                                        }
+                                        _ => None,
+                                    }),
+                                    _ => None,
+                                })
+                                .enumerate()
+                                .map(|(index, client_order_id)| {
+                                    safe_cex_engine::write_plan::Element {
+                                        index,
+                                        client_order_id,
+                                    }
+                                })
+                                .collect();
+                            let job = self.trading.active.as_mut().unwrap();
+                            job.split_report = crate::split_report::SplitReport::new(elements);
+                            job.steps.extend(steps);
+                        }
                         Err(error) => {
                             self.trade_abort(cx, not_sent(error));
                         }
@@ -1080,6 +1105,12 @@ impl Woo {
                     {
                         cx.command_progress(command, vec![receipt.clone()]);
                     }
+                    if let Some(report) =
+                        self.trading.active.as_mut().unwrap().split_report.as_mut()
+                    {
+                        report.request_id = None;
+                        report.status = None;
+                    }
                     let result = self.signed(
                         cx,
                         method,
@@ -1091,9 +1122,17 @@ impl Woo {
                             step: outbound.clone(),
                         }),
                     );
-                    if let Err(error) = result {
-                        self.trade_write_failed(cx, &outbound, not_sent(error));
-                        continue;
+                    let request = match result {
+                        Ok(request) => request,
+                        Err(error) => {
+                            self.trade_write_failed(cx, &outbound, not_sent(error));
+                            continue;
+                        }
+                    };
+                    if let Some(report) =
+                        self.trading.active.as_mut().unwrap().split_report.as_mut()
+                    {
+                        report.request_id = Some(request);
                     }
                     self.trading.next_write =
                         cx.now + if method == Method::Put { 200.0 } else { 100.0 };
@@ -1149,7 +1188,21 @@ impl Woo {
         }
     }
     fn trade_abort(&mut self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
-        if let Some(job) = self.trading.active.take() {
+        if let Some(mut job) = self.trading.active.take() {
+            if let Some(report) = job.split_report.as_mut() {
+                if error.outcome == Some(Outcome::Unknown)
+                    && !error
+                        .message
+                        .contains(safe_cex_engine::UNKNOWN_OUTCOME_TEXT)
+                {
+                    error.message = format!(
+                        "{}; {}",
+                        error.message,
+                        safe_cex_engine::UNKNOWN_OUTCOME_TEXT
+                    );
+                }
+                report.failed(&error);
+            }
             if !job.ids.is_empty() {
                 error.message = format!(
                     "{}; accepted native IDs: {}",
@@ -1162,6 +1215,14 @@ impl Woo {
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             {
                 error.outcome = None;
+            }
+            if let Some(report) = job.split_report.as_ref() {
+                if error.outcome == Some(Outcome::Unknown) {
+                    cx.command_error(job.command, error.message.clone());
+                    let event = report.unknown_event(job.command, &job.ids);
+                    cx.event(event.level, event.code, event.message, event.fields);
+                }
+                error = report.attach(error);
             }
             cx.fail(job.command, error);
         }
@@ -1274,6 +1335,12 @@ impl Woo {
             return;
         }
         self.trading.waiting = false;
+        let accepted_ids = self.trading.active.as_ref().unwrap().ids.len();
+        if let Step::Write { .. } = request.step
+            && let Some(report) = self.trading.active.as_mut().unwrap().split_report.as_mut()
+        {
+            report.status = Some(response.status);
+        }
         if let Step::Touch { ref symbol, side } = request.step {
             #[derive(Deserialize)]
             struct Touch {
@@ -1529,6 +1596,9 @@ impl Woo {
                     && let Some(job) = self.trading.active.as_mut()
                 {
                     job.effective = true;
+                    if let Some(report) = job.split_report.as_mut() {
+                        report.placed(&job.ids[accepted_ids..]);
+                    }
                 }
             }
             Err(error) => {

@@ -15,3 +15,9 @@ Ordinary orders and sized stops round the requested amount to the market step
 before splitting into balanced native lots, matching the TS reference. An amount
 of `1.0005` at step `0.001` becomes `1.001`; a native maximum of `0.3` produces
 `[0.251, 0.25, 0.25, 0.25]`.
+
+Multi-write placements keep an indexed reporting journal for every planned lot.
+An uncertain lot retains accepted native IDs, marks the untouched suffix as
+unsent, and reports `The outcome is unknown. Check Open Orders` in the failure
+and one command diagnostic, together with one `order.outcome_unknown` event.
+The command stops after that lot without retrying or sending the suffix.
