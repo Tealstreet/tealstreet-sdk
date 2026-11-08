@@ -20,10 +20,11 @@ write response is not retried. Post-only and time-in-force flags survive
 reconciliation, amend and trigger repair. Attached protective stops remain market
 orders, including after a gap.
 
-Preflight checks every prepared row at its serialized quantity and price before
-the first write, including pairs, TP/SL children and amend replacements. A rounded
-quantity outside native bounds refuses the entire intent as InvalidInput/NotSent
-with zero transport requests.
+Placement preserves legacy TypeScript rounding without an extra rounded-wire
+bounds check (`reference/backpack/backpack.exchange.ts:746-779,872-878,918-925`).
+Pairs, TP/SL children, amend replacements and prepared put-backs keep those
+formatted quantities. A venue can therefore refuse a rounded quantity after
+earlier writes have landed. The existing Unknown fence and protective guards remain.
 
 Account leverage is global. Position mode is fixed hedged, and margin mode is
 fixed cross; requests for another mode return an error. Private reconciliation

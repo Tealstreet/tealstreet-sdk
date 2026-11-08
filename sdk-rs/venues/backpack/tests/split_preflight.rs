@@ -181,7 +181,12 @@ fn rounded_replacement_follows_legacy_cancel_then_place() -> Result {
     assert_eq!(packets.len(), 1, "legacy cancellation must be released");
     let cancel = packets.first().ok_or("missing cancellation")?;
     assert_eq!(cancel.method, Method::Delete);
-    reply(&mut engine, cancel, 200, ORDER);
+    reply(
+        &mut engine,
+        cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
     assert_placement_sequence(&mut engine, &[vec!["1.0"]])
 }
 

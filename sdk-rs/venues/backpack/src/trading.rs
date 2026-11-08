@@ -1,7 +1,5 @@
 //! Each command is a preflighted sequence of writes. A lost write response is
 //! terminal for that job: it is never replayed.
-mod validation;
-
 use crate::account::Next;
 use crate::sign::Params;
 use crate::{Backpack, Pending, REST};
@@ -664,7 +662,6 @@ impl Backpack {
         };
         guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
         let restore = self.native(cx, original)?;
-        validation::validate_order(&restore, cx.store.markets()).map_err(|error| error.message)?;
         Ok(Some(Box::new(StopProtect {
             guard,
             restore: Box::new(restore),
@@ -855,13 +852,6 @@ impl Backpack {
                     _ => None,
                 });
                 let preflight = preflight.as_ref().unwrap();
-                if let Err(error) = steps
-                    .iter()
-                    .try_for_each(validation::validate_write(cx.store.markets()))
-                {
-                    let _ = cx.fail_preflight(preflight, error);
-                    return;
-                }
                 if steps.is_empty() {
                     let _ = cx.done_empty_plan(preflight, "[]".into());
                     return;
