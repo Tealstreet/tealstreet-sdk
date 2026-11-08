@@ -226,7 +226,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitunix: 1_904_640,
   blofin: 2_049_024,
   bybit: 2_320_384,
-  coinbase: 1_953_792,
+  coinbase: 1_972_224,
   cryptocom: 1_803_264,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
@@ -254,7 +254,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   paradex: 2_300_928,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
-  phemex: 2_091_008,
+  phemex: 2_111_488,
   polymarket: 1_652_736,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   txflow: 1_934_336,

@@ -1245,3 +1245,17 @@ test('#3306 (run 42481130823 at merge 680966203b3) retains measured wasm headroo
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+test('#3306 repair (run 42484190726 at merge ac99b43383f) retains Coinbase and Phemex headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['coinbase', 1_961_227, 1_972_224],
+    ['phemex', 2_100_869, 2_111_488],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
