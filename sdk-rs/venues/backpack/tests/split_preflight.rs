@@ -1,6 +1,7 @@
 mod support;
 
-use safe_cex_engine::{Action, Command, ErrorKind, Event, HttpRequest, Method, Notice, Outcome};
+use safe_cex_engine::{Action, Command, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, VenueError};
+use safe_cex_engine::write_plan::ElementResult;
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, VecDeque};
 use support::managed::*;
@@ -266,5 +267,128 @@ fn valid_bracket_places_each_leg_once() -> Result {
         serde_json::from_str::<Vec<String>>(result)?,
         ["entry", "tp", "sl"]
     );
+    Ok(())
+}
+
+fn serial_orders() -> Vec<Value> {
+    (1..=3).map(|client| json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":0.4,"price":140,"clientOrderId":client.to_string()})).collect()
+}
+
+fn failed(out: &[Action]) -> Result<&VenueError> {
+    out.iter().find_map(|action| match action {
+        Action::Notice(Notice::CommandFailed { command: 901, error }) => Some(error),
+        _ => None,
+    }).ok_or_else(|| "missing terminal failure".into())
+}
+
+fn prefix_failure(error: &VenueError, local: bool) -> Result {
+    let elements = error.elements.as_ref().ok_or("missing complete element outcomes")?;
+    assert_eq!(elements.len(), 3);
+    for (index, element) in elements.iter().enumerate() {
+        assert_eq!(element.element.index, index);
+    }
+    assert!(matches!(&elements[0].result, ElementResult::Placed { order_ids } if order_ids == &["prefix"]));
+    if local {
+        assert!(matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::NotSent)));
+    } else {
+        assert!(matches!(&elements[1].result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown)));
+    }
+    assert!(matches!(&elements[2].result, ElementResult::NotSent { error: None }));
+    Ok(())
+}
+
+#[test]
+fn runtime_native_failure_retains_prefix_and_stops_suffix() -> Result {
+    for bracket in [false, true] {
+        let mut engine = constrained(0.1, 1.);
+        let orders = if bracket {
+            vec![json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":0.4,"price":140,"takeProfit":150,"stopLoss":130})]
+        } else { serial_orders() };
+        submit(&mut engine, orders)?;
+        let mut transport = ScriptedTransport {
+            responses: [(200, json!({"id":"prefix"}).to_string()), (400, json!({"code":"ORDER_REJECTED","message":"scripted refusal"}).to_string())].into(),
+            ..Default::default()
+        };
+        transport.poll(&mut engine);
+        transport.poll(&mut engine);
+        let out = transport.poll(&mut engine);
+        let error = failed(&out)?;
+        prefix_failure(error, false)?;
+        let elements = error.elements.as_ref().ok_or("missing elements")?;
+        assert!(matches!(&elements[1].result, ElementResult::Unknown { error } if error.venue_code.as_deref() == Some("ORDER_REJECTED") && error.venue_message.as_deref() == Some("scripted refusal")));
+        transport.poll(&mut engine);
+        assert_eq!(transport.requests.len(), 2);
+        assert!(transport.requests.iter().all(|request| request.method == Method::Post));
+    }
+    Ok(())
+}
+
+#[test]
+fn lost_or_unproven_reply_retains_prefix_and_stops_suffix() -> Result {
+    for status in [None, Some(503)] {
+        let mut engine = constrained(0.1, 1.);
+        submit(&mut engine, serial_orders())?;
+        let mut transport = ScriptedTransport {
+            responses: [(200, json!({"id":"prefix"}).to_string())].into(),
+            ..Default::default()
+        };
+        transport.poll(&mut engine);
+        transport.poll(&mut engine);
+        let request = transport.requests.last().ok_or("missing second write")?;
+        match status {
+            Some(status) => reply(&mut engine, request, status, "service unavailable"),
+            None => engine.handle(2000., Event::HttpFailed { request: request.id, error: "lost reply" }),
+        }
+        let out = transport.poll(&mut engine);
+        prefix_failure(failed(&out)?, false)?;
+        transport.poll(&mut engine);
+        assert_eq!(transport.requests.len(), 2);
+        assert!(transport.requests.iter().all(|request| request.method == Method::Post));
+    }
+    Ok(())
+}
+
+#[test]
+fn local_preparation_veto_marks_pending_not_sent_after_prefix() -> Result {
+    use safe_cex_engine::request_context::{Error, HttpAction};
+    let mut engine = constrained(0.1, 1.);
+    submit(&mut engine, serial_orders())?;
+    let first = requests(&mut engine).pop().ok_or("missing prefix")?;
+    reply(&mut engine, &first, 200, r#"{"id":"prefix"}"#);
+    let token = engine.drain_actions().find_map(|action| match action {
+        Action::ManagedHttp(action) => match *action {
+            HttpAction::Prepare { preparation, .. } => Some(preparation),
+            _ => None,
+        },
+        _ => None,
+    }).ok_or("missing pending preparation")?;
+    engine.http_preparation_failed(2000., token, Error::Invalid, VenueError::new("provider refused"));
+    let out = actions(&mut engine);
+    prefix_failure(failed(&out)?, true)?;
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    assert!(!actions(&mut engine).iter().any(|action| matches!(action, Action::Http(_))));
+    Ok(())
+}
+
+#[test]
+fn mixed_pair_keeps_correlated_row_evidence_and_never_dispatches_next_pair() -> Result {
+    let mut engine = constrained(0.1, 1.);
+    submit(&mut engine, vec![limit(0.4), limit(0.5), limit(0.6), limit(0.7)])?;
+    let packet = requests(&mut engine).pop().ok_or("missing first pair")?;
+    let rows: Vec<Value> = serde_json::from_str(packet.body.as_deref().ok_or("missing pair body")?)?;
+    let body: Vec<_> = rows.iter().enumerate().map(|(index, row)| json!({
+        "operation": if index == 0 { "Ok" } else { "Error" },
+        "id": if index == 0 { "prefix" } else { "" },
+        "clientId":row["clientId"], "symbol":SYMBOL, "side":"Bid", "orderType":"Limit"
+    })).collect();
+    reply(&mut engine, &packet, 200, &serde_json::to_string(&body)?);
+    let out = actions(&mut engine);
+    let elements = failed(&out)?.elements.as_ref().ok_or("missing pair element outcomes")?;
+    assert_eq!(elements.len(), 4);
+    assert!(matches!(&elements[0].result, ElementResult::Placed { order_ids } if order_ids == &["prefix"]));
+    assert!(matches!(&elements[1].result, ElementResult::Unknown { .. }));
+    assert!(elements[2..].iter().all(|element| matches!(element.result, ElementResult::NotSent { error: None })));
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    assert!(requests(&mut engine).is_empty());
     Ok(())
 }
