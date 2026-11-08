@@ -5,7 +5,8 @@ credential) + Sign(Ed25519, primary signing ref) graph. It is a device codec,
 not a venue admission declaration: `hosted_signing::admitted` and the
 construction remote-signing policies remain false for Orderly and all four
 aliases. The ordinary Orderly feature does not enable `hosted-signing`.
-Native provider and trusted registry injection are available as described below.
+The native provider is tested independently; private registry injection remains
+closed pending the managed write migration described below.
 Do not enable hosted accounts based only on the format's existence.
 
 A descriptor is a closed JSON object:
@@ -64,16 +65,17 @@ contain exactly the matching public credential and a canonical, padded URL-safe
 base64 signature of 64 bytes; partial, foreign, duplicate or extra fields refuse
 atomically. Cancellation, link disposal and timeout withdraw the pending request.
 
-Trusted native callers may use `build_with_signer` with validated public key and
-applicationId metadata, primary refs and an Ed25519-capable provider, without a
-seed. This does not enable `remote_account`, `remoteSigning` or PayloadSigner.
-The ordinary local constructor still consumes base58 raw/prefixed key setup.
-The registry removes the seed before constructing the venue; reads, writes and
-WS auth all use its installed provider at dispatch. Explicit public construction
-strips the provider and refs before validating unused private material.
+Private `build_with_signer` injection refuses `Unsupported` and `NotSent` before
+engine construction or device work, including when the provider owns valid
+primary refs. Enabling it requires the deferred managed Preflight/Plan write
+path; the exact shrinking legacy request inventory cannot admit new transport
+sites. This also keeps `remote_account`, `remoteSigning` and PayloadSigner closed.
+The ordinary local constructor retains base58 raw/prefixed key setup and its
+existing native write lifecycle. Explicit public construction strips provider
+and refs before validating unused private material.
 
-Tests join the real native registry, dispatch recipes, SignerLink and device
-codec for each alias using synthetic custody. Frozen browser signatures remain
-the independent byte oracle. A refused dispatch is NotSent, and a dispatched
-write with a lost response is Unknown with no replay. Hosted admission and the
-SDK callback/runtime activation remain reserved for the later slices.
+Tests join SignerLink and the device codec independently for each alias using
+synthetic custody, and verify private registry refusal with zero device work.
+Frozen browser signatures remain the independent byte oracle. Local write
+outcome and no-replay controls remain in the venue tests. Hosted admission,
+private injection and SDK callback/runtime activation remain for later work.

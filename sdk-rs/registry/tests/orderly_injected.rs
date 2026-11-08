@@ -5,7 +5,7 @@ use safe_cex_engine::signing::{
     Algorithm, Capability, Identities, Identity, KeyRef, Provider, SignError, SignFuture,
     SignRequest, SignResult, Signer,
 };
-use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, Outcome, Response, Venue};
+use safe_cex_engine::{Action, Engine, ErrorKind, Event, Outcome, Response, Venue};
 use safe_cex_venues::{EngineOptions, Visit, build_with_signer};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -16,7 +16,6 @@ const ALIASES: [&str; 4] = ["kodiakfi", "mode", "what", "woofi"];
 struct Probe {
     local: LocalSigner,
     seen: Arc<Mutex<Vec<SignRequest>>>,
-    refuse: Arc<Mutex<Option<SignError>>>,
 }
 impl Signer for Probe {
     fn immediate(&self) -> bool {
@@ -31,9 +30,6 @@ impl Signer for Probe {
                 .lock()
                 .map_err(|_| SignError::Unavailable)?
                 .push(request.clone());
-            if let Some(error) = *self.refuse.lock().map_err(|_| SignError::Unavailable)? {
-                return Err(error);
-            }
             self.local.sign_now(request)
         })();
         Some(result)
@@ -51,7 +47,6 @@ struct Setup {
     ids: Identities,
     key: String,
     seen: Arc<Mutex<Vec<SignRequest>>>,
-    refuse: Arc<Mutex<Option<SignError>>>,
 }
 fn setup() -> TestResult<Setup> {
     let fixture: Value = serde_json::from_str(include_str!(
@@ -76,17 +71,14 @@ fn setup() -> TestResult<Setup> {
         secondary: None,
     };
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let refuse = Arc::new(Mutex::new(None));
     Ok(Setup {
         provider: Arc::new(Probe {
             local,
             seen: seen.clone(),
-            refuse: refuse.clone(),
         }),
         ids,
         key,
         seen,
-        refuse,
     })
 }
 fn options(setup: &Setup) -> TestResult<EngineOptions> {
@@ -109,136 +101,51 @@ fn body(url: &str) -> &'static str {
         r#"{"success":true,"data":{"rows":[],"meta":{"total":0}}}"#
     }
 }
-struct Exercise {
-    setup: Setup,
-    error: Option<SignError>,
+fn assert_closed<T>(result: Result<T, safe_cex_engine::VenueError>) -> TestResult {
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => return Err("closed private admission constructed an engine".into()),
+    };
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Orderly injected private signing admission is closed"
+    );
+    Ok(())
 }
-impl Visit for Exercise {
-    type Output = TestResult;
-    fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> TestResult {
-        assert!(engine.identities() == &self.setup.ids);
-        let installed = engine.signer().ok_or("missing installed provider")?;
-        assert!(Arc::ptr_eq(&installed, &self.setup.provider));
-        engine.start(NOW);
-        let mut private = None;
-        let mut reads = 0;
-        for _ in 0..12 {
-            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
-            if actions.is_empty() {
-                break;
-            }
-            for action in actions {
-                match action {
-                    Action::Http(http) => {
-                        if http
-                            .headers
-                            .iter()
-                            .any(|(key, _)| *key == "orderly-signature")
-                        {
-                            reads += 1;
-                        }
-                        engine.handle(
-                            NOW,
-                            Event::HttpResponse {
-                                request: http.id,
-                                response: Response {
-                                    status: 200,
-                                    headers: "",
-                                    body: body(&http.url),
-                                },
-                            },
-                        );
-                    }
-                    Action::WsConnect { socket, url, .. } if url.contains("private") => {
-                        private = Some(socket)
-                    }
-                    _ => {}
+
+#[test]
+fn orderly_private_injection_refuses_before_engine_or_signing() -> TestResult {
+    for venue in ALIASES {
+        for (captured, legacy_public) in [(false, false), (true, false), (true, true)] {
+            for (remote, payload) in [(false, false), (true, false), (false, true), (true, true)] {
+                for (refs, provider) in [(true, false), (false, true), (true, true)] {
+                    let setup = setup()?;
+                    let mut options = if captured {
+                        captured_private_options(&setup)?
+                    } else {
+                        options(&setup)?
+                    };
+                    options.public_data_only = legacy_public;
+                    options.remote_signing = remote;
+                    options.payload_signer = payload;
+                    options.signing = refs.then(|| setup.ids.clone());
+                    assert_closed(build_with_signer(
+                        venue,
+                        options,
+                        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+                        provider.then(|| setup.provider.clone()),
+                        Accept,
+                    ))?;
+                    assert!(setup.seen.lock().map_err(|_| "poisoned record")?.is_empty());
                 }
             }
-        }
-        assert!(reads >= 4);
-        let socket = private.ok_or("missing private socket")?;
-        *self.setup.refuse.lock().map_err(|_| "poisoned refusal")? = self.error;
-        engine.handle(NOW, Event::WsOpened { socket });
-        let auth = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
-        assert_eq!(auth.iter().any(|action| matches!(action, Action::WsSend { text, .. } if text.contains("orderly_key"))), self.error.is_none());
-        engine.handle(
-            NOW,
-            Event::WsMessage {
-                socket,
-                text: r#"{"event":"auth","success":true}"#,
-            },
-        );
-        safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
-        engine.handle(NOW, Event::Command(Command::PlaceOrders { command:71, orders:vec![serde_json::from_value(json!({"symbol":"BTCUSDC","type":"limit","side":"buy","amount":0.01,"price":50000}))?] }));
-        let out = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
-        let writes: Vec<_> = out
-            .iter()
-            .filter_map(|action| match action {
-                Action::Http(http) if http.method != safe_cex_engine::Method::Get => Some(http),
-                _ => None,
-            })
-            .collect();
-        if self.error.is_some() {
-            assert!(writes.is_empty(), "refused write reached transport");
-            assert!(out.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandFailed { command:71, error }) if error.outcome == Some(Outcome::NotSent))));
-        } else {
-            assert_eq!(writes.len(), 1);
-            assert!(
-                writes[0]
-                    .headers
-                    .iter()
-                    .any(|(name, _)| *name == "orderly-signature")
-            );
-            let seen = self.setup.seen.lock().map_err(|_| "poisoned record")?;
-            assert!(seen.iter().any(|work| work.context.method == "POST"));
-            assert!(seen.iter().any(|work| work.context.method == "WS"));
-            assert!(
-                seen.iter()
-                    .all(|work| work.operations.len() == 2 && work.receipt.stamp_ms == Some(NOW))
-            );
-            drop(seen);
-            engine.handle(
-                NOW,
-                Event::HttpFailed {
-                    request: writes[0].id,
-                    error: "synthetic lost response",
-                },
-            );
-            let after = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
-            assert!(after.iter().all(|action| !matches!(action, Action::Http(http) if http.method != safe_cex_engine::Method::Get)));
-            assert!(after.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandFailed { command:71, error }) if error.outcome == Some(Outcome::Unknown))));
-        }
-        Ok(())
-    }
-}
-#[test]
-fn orderly_alias_injected_signer_is_used_for_reads_writes_and_ws() -> TestResult {
-    for venue in ALIASES {
-        for error in [
-            None,
-            Some(SignError::Refused),
-            Some(SignError::TimedOut),
-            Some(SignError::Unavailable),
-        ] {
-            let setup = setup()?;
-            assert_eq!(
-                setup
-                    .provider
-                    .can_sign(&KeyRef("owned-signing".into()), Algorithm::Ed25519),
-                Capability::Supported
-            );
-            build_with_signer(
-                venue,
-                options(&setup)?,
-                Some(safe_cex_engine::test_support::seeded_entropy(17)),
-                Some(setup.provider.clone()),
-                Exercise { setup, error },
-            )??;
         }
     }
     Ok(())
 }
+
 struct Public;
 impl Visit for Public {
     type Output = TestResult;
@@ -284,11 +191,12 @@ fn orderly_public_installs_no_refs_and_has_no_device_link() -> TestResult {
 struct Accept;
 impl Visit for Accept {
     type Output = ();
-    fn visit<V: Venue + 'static>(self, _: Engine<V>) {}
+    fn visit<V: Venue + 'static>(self, _: Engine<V>) {
+        panic!("closed private admission visited an engine");
+    }
 }
 #[test]
-fn orderly_injection_requires_complete_owned_metadata_and_keeps_hosted_admission_closed()
--> TestResult {
+fn orderly_private_injection_stays_closed_even_for_invalid_metadata() -> TestResult {
     for venue in ALIASES {
         for failure in [
             "key",
@@ -344,10 +252,7 @@ fn orderly_injection_requires_complete_owned_metadata_and_keeps_hosted_admission
                 "payload" => options.payload_signer = true,
                 _ => return Err("unknown refusal case".into()),
             }
-            assert!(
-                build_with_signer(venue, options, None, provider, Accept).is_err(),
-                "accepted invalid {failure}"
-            );
+            assert_closed(build_with_signer(venue, options, None, provider, Accept))?;
             assert!(setup.seen.lock().map_err(|_| "poisoned record")?.is_empty());
         }
     }
@@ -447,7 +352,7 @@ fn refuses_captured_private_payload_signer(venue: &str) -> TestResult {
     Ok(())
 }
 
-fn injected_startup_matches_local(venue: &str) -> TestResult {
+fn private_injection_refuses_and_local_startup_completes(venue: &str) -> TestResult {
     let setup = setup()?;
     let local_options: EngineOptions = serde_json::from_value(json!({
         "key": setup.key,
@@ -466,14 +371,14 @@ fn injected_startup_matches_local(venue: &str) -> TestResult {
     for legacy_public in [false, true] {
         let mut options = captured_private_options(&setup)?;
         options.public_data_only = legacy_public;
-        let injected = build_with_signer(
+        assert_closed(build_with_signer(
             venue,
             options,
             Some(safe_cex_engine::test_support::seeded_entropy(17)),
             Some(setup.provider.clone()),
-            Startup,
-        )?;
-        assert_eq!(injected, local);
+            Accept,
+        ))?;
+        assert!(setup.seen.lock().map_err(|_| "poisoned record")?.is_empty());
     }
     Ok(())
 }
@@ -520,18 +425,18 @@ fn woofi_captured_private_payload_signer_refuses() -> TestResult {
     refuses_captured_private_payload_signer("woofi")
 }
 #[test]
-fn kodiakfi_injected_private_startup_matches_local() -> TestResult {
-    injected_startup_matches_local("kodiakfi")
+fn kodiakfi_private_injection_refuses_and_local_startup_completes() -> TestResult {
+    private_injection_refuses_and_local_startup_completes("kodiakfi")
 }
 #[test]
-fn mode_injected_private_startup_matches_local() -> TestResult {
-    injected_startup_matches_local("mode")
+fn mode_private_injection_refuses_and_local_startup_completes() -> TestResult {
+    private_injection_refuses_and_local_startup_completes("mode")
 }
 #[test]
-fn what_injected_private_startup_matches_local() -> TestResult {
-    injected_startup_matches_local("what")
+fn what_private_injection_refuses_and_local_startup_completes() -> TestResult {
+    private_injection_refuses_and_local_startup_completes("what")
 }
 #[test]
-fn woofi_injected_private_startup_matches_local() -> TestResult {
-    injected_startup_matches_local("woofi")
+fn woofi_private_injection_refuses_and_local_startup_completes() -> TestResult {
+    private_injection_refuses_and_local_startup_completes("woofi")
 }

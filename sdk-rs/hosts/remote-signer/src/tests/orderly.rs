@@ -353,231 +353,39 @@ async fn orderly_timeout_cancellation_disposal_and_unavailable_withdraw_device_w
     Ok(())
 }
 
-async fn native_actions<V: safe_cex_engine::Venue>(
-    engine: &mut safe_cex_engine::Engine<V>,
-) -> TestResult<Vec<safe_cex_engine::Action>> {
-    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
-    use safe_cex_engine::{Action, Event};
-    let mut out = Vec::new();
-    for _ in 0..128 {
-        engine.prepare_dispatch(STAMP);
-        let actions: Vec<_> = engine.drain_actions().collect();
-        if actions.is_empty() {
-            return Ok(out);
-        }
-        for action in actions {
-            match action {
-                Action::Sign { attempt, work, .. } => {
-                    assert!(engine.signing_pending(attempt));
-                    let result = engine
-                        .signer()
-                        .ok_or("missing native provider")?
-                        .sign(work)
-                        .await;
-                    engine.handle(STAMP, Event::Signed { attempt, result });
-                }
-                Action::ManagedHttp(action) => match *action {
-                    HttpAction::Prepare {
-                        preparation,
-                        request,
-                        ..
-                    } => engine.http_prepared(
-                        STAMP,
-                        preparation,
-                        Prepared {
-                            id: request.id.0,
-                            expires_at: None,
-                        },
-                    ),
-                    HttpAction::Bind {
-                        permit, request, ..
-                    } => {
-                        assert!(matches!(
-                            engine.claim_http(STAMP, permit),
-                            Ok(Claim::Released(_))
-                        ));
-                        out.push(Action::Http(request));
-                    }
-                    HttpAction::Cancel { .. } => {}
-                    HttpAction::BindGroup { .. } => {
-                        return Err("unexpected grouped Orderly read".into());
-                    }
-                },
-                action => out.push(action),
-            }
-        }
-    }
-    Err("native fixture did not quiesce".into())
-}
-struct Native {
-    refuse: Arc<std::sync::atomic::AtomicBool>,
-    fail: bool,
-}
-impl safe_cex_venues::Visit for Native {
-    type Output = std::pin::Pin<Box<dyn std::future::Future<Output = TestResult>>>;
-    fn visit<V: safe_cex_engine::Venue + 'static>(
-        self,
-        mut engine: safe_cex_engine::Engine<V>,
-    ) -> Self::Output {
-        Box::pin(async move {
-            use safe_cex_engine::{Action, Command, Event, Method, Notice, Outcome, Response};
-            engine.start(STAMP);
-            let mut private = None;
-            let mut reads = 0;
-            for _ in 0..12 {
-                let actions = native_actions(&mut engine).await?;
-                if actions.is_empty() {
-                    break;
-                }
-                for action in actions {
-                    match action {
-                        Action::Http(http) => {
-                            if http
-                                .headers
-                                .iter()
-                                .any(|(key, _)| *key == "orderly-signature")
-                            {
-                                reads += 1;
-                            }
-                            let body = if http.url.ends_with("/v1/client/info") {
-                                r#"{"success":true,"data":{"max_leverage":20}}"#
-                            } else if http.url.ends_with("/v1/public/info") {
-                                r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":20,"base_imr":0.01}]}}"#
-                            } else if http.url.ends_with("/v1/public/futures") {
-                                r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","24h_open":50000,"24h_close":51000,"mark_price":51000}]}}"#
-                            } else if http.url.ends_with("/v1/positions") {
-                                r#"{"success":true,"data":{"rows":[],"total_collateral_value":10000,"free_collateral":7000}}"#
-                            } else {
-                                r#"{"success":true,"data":{"rows":[],"meta":{"total":0}}}"#
-                            };
-                            engine.handle(
-                                STAMP,
-                                Event::HttpResponse {
-                                    request: http.id,
-                                    response: Response {
-                                        status: 200,
-                                        headers: "",
-                                        body,
-                                    },
-                                },
-                            );
-                        }
-                        Action::WsConnect { socket, url, .. } if url.contains("private") => {
-                            private = Some(socket)
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            assert!(reads >= 4);
-            self.refuse
-                .store(self.fail, std::sync::atomic::Ordering::SeqCst);
-            let socket = private.ok_or("missing private socket")?;
-            engine.handle(STAMP, Event::WsOpened { socket });
-            let auth = native_actions(&mut engine).await?;
-            assert_eq!(auth.iter().any(|action| matches!(action, Action::WsSend { text, .. } if text.contains("orderly_key"))), !self.fail);
-            engine.handle(
-                STAMP,
-                Event::WsMessage {
-                    socket,
-                    text: r#"{"event":"auth","success":true}"#,
-                },
-            );
-            native_actions(&mut engine).await?;
-            engine.handle(STAMP, Event::Command(Command::PlaceOrders { command:71, orders:vec![serde_json::from_value(json!({"symbol":"BTCUSDC","type":"limit","side":"buy","amount":0.01,"price":50000}))?] }));
-            let actions = native_actions(&mut engine).await?;
-            let writes: Vec<_> = actions
-                .iter()
-                .filter_map(|action| match action {
-                    Action::Http(http) if http.method != Method::Get => Some(http),
-                    _ => None,
-                })
-                .collect();
-            if self.fail {
-                assert!(writes.is_empty());
-                assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command:71, error }) if error.outcome == Some(Outcome::NotSent))));
-            } else {
-                assert_eq!(writes.len(), 1);
-                assert!(
-                    writes[0]
-                        .headers
-                        .iter()
-                        .any(|(name, _)| *name == "orderly-signature")
-                );
-                engine.handle(
-                    STAMP,
-                    Event::HttpFailed {
-                        request: writes[0].id,
-                        error: "synthetic lost response",
-                    },
-                );
-                let after = native_actions(&mut engine).await?;
-                assert!(after.iter().all(
-                    |action| !matches!(action, Action::Http(http) if http.method != Method::Get)
-                ));
-                assert!(after.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command:71, error }) if error.outcome == Some(Outcome::Unknown))));
-            }
-            Ok(())
-        })
+struct NeverConstruct;
+impl safe_cex_venues::Visit for NeverConstruct {
+    type Output = ();
+    fn visit<V: safe_cex_engine::Venue + 'static>(self, _: safe_cex_engine::Engine<V>) {
+        panic!("closed private admission visited an engine");
     }
 }
+
 #[tokio::test]
-async fn orderly_native_registry_provider_device_release_and_unknown_write_never_replay()
--> TestResult {
+async fn orderly_native_registry_refuses_private_injection_before_device_work() -> TestResult {
     for venue in ALIASES {
-        for fail in [false, true] {
-            let refuse = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let control = refuse.clone();
-            let (link, seen) = device(Box::new(move |request| {
-                if control.load(std::sync::atomic::Ordering::SeqCst) {
-                    return json!({"error":"synthetic refusal"});
-                }
-                match codec_answer(venue, request) {
-                    Ok(answer) => answer,
-                    Err(_) => json!({"error":"synthetic routing refusal"}),
-                }
-            }));
-            let remote = Arc::new(provider(venue, link)?);
-            let mut options: safe_cex_venues::EngineOptions = serde_json::from_value(
-                json!({"key":golden()?["publicKey"],"applicationId":"account-1"}),
-            )?;
-            options.signing = Some(ids());
-            safe_cex_venues::build_with_signer(
-                venue,
-                options,
-                Some(safe_cex_engine::test_support::seeded_entropy(17)),
-                Some(remote),
-                Native { refuse, fail },
-            )?
-            .await?;
-            let sent = seen.lock().map_err(|_| "poisoned record")?;
-            assert!(
-                sent.iter()
-                    .all(|row| row["exchangeName"] == venue && row["accountName"] == "main")
-            );
-            let descriptors: Vec<Value> = sent
-                .iter()
-                .map(|row| {
-                    serde_json::from_str(text(&row["wsAuth"]["toSign"])?).map_err(Into::into)
-                })
-                .collect::<TestResult<_>>()?;
-            assert_eq!(
-                descriptors
-                    .iter()
-                    .filter(|row| row["kind"] == "wsAuth")
-                    .count(),
-                1
-            );
-            assert_eq!(
-                descriptors
-                    .iter()
-                    .filter(|row| row["payload"]
-                        .as_str()
-                        .is_some_and(|payload| payload.contains("POST/v1/order")))
-                    .count(),
-                1
-            );
-        }
+        let (link, seen) = device(Box::new(move |request| {
+            match codec_answer(venue, request) {
+                Ok(answer) => answer,
+                Err(_) => json!({"error":"synthetic routing refusal"}),
+            }
+        }));
+        let remote = Arc::new(provider(venue, link)?);
+        let mut options: safe_cex_venues::EngineOptions = serde_json::from_value(
+            json!({"key":golden()?["publicKey"],"applicationId":"account-1", "publicMode":{"requested":false}}),
+        )?;
+        options.signing = Some(ids());
+        let error = safe_cex_venues::build_with_signer(
+            venue,
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(17)),
+            Some(remote),
+            NeverConstruct,
+        )
+        .expect_err("private injection admission must stay closed");
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert!(seen.lock().map_err(|_| "poisoned record")?.is_empty());
     }
     Ok(())
 }

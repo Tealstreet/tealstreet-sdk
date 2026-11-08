@@ -3,8 +3,6 @@
 //! through a [`Visit`]or; each venue's construction rules live here.
 #[cfg(feature = "mexc")]
 mod mexc_setup;
-#[cfg(feature = "orderly")]
-mod orderly_setup;
 #[cfg(not(any(
     feature = "grvt",
     feature = "paradex",
@@ -331,12 +329,10 @@ fn orderly_rules(options: &EngineOptions) -> Result<(), VenueError> {
     {
         return Err(invalid("Orderly private applicationId is required"));
     }
-    if options.signing.is_none()
-        && !safe_cex_venue_orderly::signing_keys_valid(
-            options.key.as_deref().unwrap_or_default(),
-            options.secret.as_deref().unwrap_or_default(),
-        )
-    {
+    if !safe_cex_venue_orderly::signing_keys_valid(
+        options.key.as_deref().unwrap_or_default(),
+        options.secret.as_deref().unwrap_or_default(),
+    ) {
         return Err(invalid(
             "Orderly requires base58-encoded 32-byte key and secret",
         ));
@@ -1421,20 +1417,19 @@ pub fn build_with_signer<T: Visit>(
     }
     let orderly = cfg!(feature = "orderly")
         && matches!(venue, "orderly" | "kodiakfi" | "mode" | "what" | "woofi");
-    let orderly_injected = orderly && (options.signing.is_some() || signer.is_some());
     if orderly && construction::signer_setup_public_data_only(&options) {
         options.public_data_only = true;
         options.signing = None;
         signer = None;
-    } else if orderly_injected {
-        options.public_data_only = false;
     }
-    // Explicit provider injection is trusted native setup, not hosted admission.
-    if orderly_injected && options.remote_signing && !options.public_data_only {
-        return Err(invalid("Orderly remote signing admission is closed"));
+    if orderly && (options.signing.is_some() || signer.is_some()) {
+        return Err(
+            VenueError::new("Orderly injected private signing admission is closed")
+                .kind(ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
     }
     if (options.signing.is_some() || signer.is_some())
-        && !orderly
         && !construction::bridge(venue, &options).dispatch_signing
     {
         return Err(invalid(
@@ -1450,20 +1445,13 @@ pub fn build_with_signer<T: Visit>(
         }
     }
     if let Some(mode) = construction::resolve(venue, &options) {
-        if !(orderly_injected && !options.public_data_only) {
-            if let Some(error) = mode.explicit_private_error {
-                return Err(invalid(error));
-            }
-            options.public_data_only = mode.public_data_only;
+        if let Some(error) = mode.explicit_private_error {
+            return Err(invalid(error));
         }
-        options.account_startup = !options.public_data_only;
+        options.public_data_only = mode.public_data_only;
+        options.account_startup = !mode.public_data_only;
     }
-    if orderly_injected {
-        // A seedless provider's private intent must not resolve as keyless public.
-        payload_signing_rules_in_mode(venue, &options, signer.is_some(), options.public_data_only)?;
-    } else {
-        payload_signing_rules(venue, &options, signer.is_some())?;
-    }
+    payload_signing_rules(venue, &options, signer.is_some())?;
     #[cfg(feature = "bybit")]
     if venue == "hyrotrader"
         && let Some(config) = options.hyrotrader.take()
@@ -1805,13 +1793,7 @@ pub fn build_with_signer<T: Visit>(
         #[cfg(feature = "orderly")]
         "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => {
             orderly_rules(&options)?;
-            let (provider, identities) = if options.signing.is_some() || signer.is_some() {
-                orderly_setup::injected(&mut options, signer)?
-            } else {
-                orderly_signer(&options)?
-            };
-            // The venue keeps metadata and refs; only its provider owns a seed.
-            safe_cex_crypto::secrets::erase(&mut options.secret);
+            let (provider, identities) = orderly_signer(&options)?;
             let mut engine = Engine::new(
                 Orderly::new(OrderlyOptions {
                     broker: match venue {

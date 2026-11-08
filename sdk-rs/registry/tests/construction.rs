@@ -772,7 +772,6 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             "hyperliquidspot",
             "Hyperliquid requires its primary signing provider",
         ),
-        ("orderly", "Orderly remote signing admission is closed"),
     ] {
         assert_eq!(
             rejected(
@@ -782,6 +781,16 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             expected
         );
     }
+    let error = construct(
+        "orderly",
+        r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}},"remoteSigning":true,"publicMode":{"requested":false}}"#,
+    ).expect_err("Orderly private injection stays closed");
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Orderly injected private signing admission is closed"
+    );
 }
 
 #[test]

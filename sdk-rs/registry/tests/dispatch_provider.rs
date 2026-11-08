@@ -462,10 +462,10 @@ fn mexc_provider_injection_requires_its_installed_provider() {
     }
 }
 
-// Trusted native injection does not admit hosted Orderly accounts.
+// Private Orderly injection stays closed until its managed write migration.
 #[cfg(feature = "orderly")]
 #[test]
-fn orderly_hosted_admission_stays_closed_after_trusted_provider_injection() {
+fn orderly_private_provider_injection_stays_closed() {
     struct NeverConstruct;
     impl safe_cex_venues::Visit for NeverConstruct {
         type Output = ();
@@ -480,7 +480,6 @@ fn orderly_hosted_admission_stays_closed_after_trusted_provider_injection() {
     for venue in ["orderly"] {
         for (refs, supplied_provider) in [(true, false), (false, true), (true, true)] {
             let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
-            options.remote_signing = true;
             options.signing = refs.then(|| identities.clone());
             let error = safe_cex_venues::build_with_signer(
                 venue,
@@ -490,12 +489,12 @@ fn orderly_hosted_admission_stays_closed_after_trusted_provider_injection() {
                 NeverConstruct,
             )
             .expect_err("trusted injection must not enable hosted admission");
-            assert_eq!(error.message, "Orderly remote signing admission is closed");
-            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
-            assert!(
-                error.outcome.is_none(),
-                "construction has no command outcome"
+            assert_eq!(
+                error.message,
+                "Orderly injected private signing admission is closed"
             );
+            assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
         }
     }
 }
