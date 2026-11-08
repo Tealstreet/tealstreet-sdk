@@ -33,3 +33,24 @@ requests: BingX's unbounded maximum remains usable, a restored [3, 1] plan with
 minimum 2 releases the prefix, and rejected/unknown second children still
 allow a distinct third child. Existing controls cover all-valid schedules and
 chaser timeout/failure market fallbacks.
+
+## After-failure parity
+
+| Path | After a failed element | Legacy evidence at the pinned TS commit |
+| --- | --- | --- |
+| Fresh scheduled children | TS-continues | `twap/TwapInstance.ts:255-280` logs and schedules the next child. |
+| Native quantity/price/notional delegation | TS-continues | `twap/TwapInstance.ts:117-139,167,255-280` delegates the write, catches its refusal, then continues. |
+| Restore and resume | TS-continues | `handlers/TwapHandler.ts:95-99` and `twap/TwapInstance.ts:330-345,255-280` reuse the same timer/start path. |
+| Runtime rejected or unknown child | TS-continues | `twap/TwapInstance.ts:255-280` catches either failure without vetoing the suffix. |
+| Chaser handoff and market remainder | TS-continues | `twap/TwapInstance.ts:142-165,181-194,213-220,255-280` retains compensation and the next child after failure. |
+
+`NEEDS-WRITEPLAN-CONTINUE` applies to these five paths. The available helper's
+`settle` seals the plan after a refused/unknown row and `next_write` then returns
+none. TWAP preserves legacy dispatch without that gate; this PR does not change
+the helper or add a replacement journal. Explicit user termination still stops
+the schedule, as TS checks at lines 267–269.
+
+`tests/after_failure.rs` covers each row, with separate restored/resumed cases,
+unknown results, a refused chaser handoff and rejected/unknown compensating
+market remainders. Its test executor advances epoch time with Tokio's paused
+clock, so both cancellation settlement and subsequent child timers are checked.
