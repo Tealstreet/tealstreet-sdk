@@ -1350,10 +1350,9 @@ impl Blofin {
         }
         Ok(out)
     }
-    /// A stop, take-profit or trigger edit BloFin cannot make in place: its
-    /// cancel is re-checked at the final send, and the original (with its
-    /// attached legs, or the entry carrying it) is placed again if the
-    /// replacement is refused outright.
+    /// A stop, take-profit or trigger edit BloFin cannot make in place.
+    /// Re-check its cancel at final send; a refused replacement stops the plan
+    /// without restoring the original order or its attached legs.
     fn guard_replacement(
         &self,
         cx: &Cx<'_, Pending>,
