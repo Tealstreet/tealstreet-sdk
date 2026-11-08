@@ -44,6 +44,14 @@ type NativePingSocket = WebSocket & {
   off(event: 'pong', listener: () => void): void;
 };
 
+function hasNativePing(socket: WebSocket): socket is NativePingSocket {
+  return (
+    'ping' in socket && typeof socket.ping === 'function' &&
+    'on' in socket && typeof socket.on === 'function' &&
+    'off' in socket && typeof socket.off === 'function'
+  );
+}
+
 // Import ws for Node.js/Bun: Bun's native WebSocket lacks ALPNProtocols, which
 // the tunnel needs to force HTTP/1.1. Same pattern as HOWWebSocket.
 let NodeWebSocket: (new (url: string, protocols?: string | string[], options?: unknown) => WebSocket) | undefined;
@@ -321,9 +329,8 @@ export class RelayWebSocket extends EventTarget {
   }
 
   private startKeepalive() {
-    const socket = this.inner as Partial<NativePingSocket>;
-    if (typeof socket.ping !== 'function' || typeof socket.on !== 'function' || typeof socket.off !== 'function')
-      return;
+    const socket = this.inner;
+    if (!hasNativePing(socket)) return;
     const ping = socket.ping.bind(socket);
     this.lastReceivedAt = Date.now();
     socket.on('pong', this.onNativePong);
@@ -342,6 +349,6 @@ export class RelayWebSocket extends EventTarget {
   private stopKeepalive() {
     clearInterval(this.keepaliveTimer);
     this.keepaliveTimer = undefined;
-    (this.inner as Partial<NativePingSocket>).off?.('pong', this.onNativePong);
+    if (hasNativePing(this.inner)) this.inner.off('pong', this.onNativePong);
   }
 }

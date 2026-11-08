@@ -1,18 +1,109 @@
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeOptions, Order } from '../../types';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
+import { decodeWorkerOrderIds, encodeWorkerOrderIds, replacementClientOrderIdOf, withReplacementClientOrderId } from '../../exchanges/clientOrderId';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
+import { OrderSide, OrderStatus, OrderType } from '../../types';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const accounts: BaseExchange[] = [];
+const amendmentOrder: Order = {
+  id: 'original', symbol: 'BTCUSDT', status: OrderStatus.Open, type: OrderType.Limit,
+  side: OrderSide.Buy, price: 100, amount: 1, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+};
+
+it.each([{ ids: [] }, { ids: ['accepted', 'accepted', ''] }])('keeps replacement IDs and client attribution through clone boundaries ($ids)', ({ ids }) => {
+  const envelope = encodeWorkerOrderIds(withReplacementClientOrderId([...ids], 'replacement-client'));
+  for (const copy of [structuredClone(envelope), JSON.parse(JSON.stringify(envelope))]) {
+    const decoded = decodeWorkerOrderIds(copy);
+    expect([...decoded]).toEqual(ids);
+    expect(replacementClientOrderIdOf(decoded)).toBe('replacement-client');
+    expect(decoded).not.toBe(copy.orderIds);
+  }
+  expect(envelope).toEqual({ orderIds: ids, clientOrderId: 'replacement-client' });
+});
+
+it.each([
+  { result: undefined }, { result: null }, { result: {} }, { result: [] },
+  { result: { orderIds: null } }, { result: { orderIds: 'accepted' } },
+  { result: { orderIds: [null, 123] } }, { result: { orderIds: Array(1) } },
+])('keeps a malformed amendment reply uncertain ($result)', ({ result }) => {
+  expect(() => decodeWorkerOrderIds(result)).toThrow(/reconcile/i);
+  try { decodeWorkerOrderIds(result); } catch (error) {
+    expect(error).toMatchObject({ kind: 'internal', outcome: 'unknown', command: 'updateOrder' });
+  }
+});
+
+it.each([{ orderIds: ['accepted'] }, { orderIds: [], clientOrderId: '' }])('preserves amendment replies without client attribution (%j)', (result) => {
+  const decoded = decodeWorkerOrderIds(result);
+  expect(decoded).toEqual(result.orderIds);
+  expect(replacementClientOrderIdOf(decoded)).toBeUndefined();
+});
+
+it.each([
+  { orderIds: ['accepted', 123, 'other'], clientOrderId: 'replacement-client' },
+  { orderIds: ['accepted', 'other'], clientOrderId: 123 },
+])('retains known partial IDs when an amendment reply is malformed (%j)', (result) => {
+  try {
+    decodeWorkerOrderIds(result);
+    throw new Error('Expected malformed amendment reply to fail');
+  } catch (error) {
+    expect(error).toMatchObject({ outcome: 'unknown', partialOrderIds: ['accepted', 'other'] });
+    if (typeof result.clientOrderId === 'string') expect(error).toHaveProperty('clientOrderId', result.clientOrderId);
+    else expect(error).not.toHaveProperty('clientOrderId');
+  }
+});
+
+it('rejects a malformed worker amendment success without replaying the write', async () => {
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  const bridge = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', {
+      requestId, success: true, result: { orderIds: ['accepted', 123], clientOrderId: 'replacement-client' },
+    });
+  });
+  exchange.on('callMethod', bridge);
+  await expect(exchange.updateOrder({ order: amendmentOrder, update: { price: 105 } })).rejects.toMatchObject({
+    command: 'updateOrder', kind: 'internal', outcome: 'unknown',
+    partialOrderIds: ['accepted'], clientOrderId: 'replacement-client',
+  });
+  expect(bridge).toHaveBeenCalledOnce();
+});
+
+it('preserves a valid worker amendment replacement ID after structured cloning', async () => {
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  const bridge = vi.fn(({ requestId }: { requestId: string }) => {
+    const result = structuredClone(encodeWorkerOrderIds(withReplacementClientOrderId([], 'replacement-client')));
+    exchange.emitter.emit('callMethod:done', { requestId, success: true, result });
+  });
+  exchange.on('callMethod', bridge);
+  const result = await exchange.updateOrder({ order: amendmentOrder, update: { price: 105 } });
+  expect([...result]).toEqual([]);
+  expect(replacementClientOrderIdOf(result)).toBe('replacement-client');
+  expect(bridge).toHaveBeenCalledOnce();
+});
+
+it.each(['unknown', 'rejected', 'notSent'])('preserves an amendment rejection outcome and partial IDs (%s)', async (outcome) => {
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+  const bridge = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', {
+      requestId, success: false,
+      result: { message: 'Original worker failure', outcome, partialOrderIds: ['accepted'], clientOrderId: 'replacement-client' },
+    });
+  });
+  exchange.on('callMethod', bridge);
+  await expect(exchange.updateOrder({ order: amendmentOrder, update: { price: 105 } })).rejects.toMatchObject({
+    message: 'Original worker failure', outcome, partialOrderIds: ['accepted'], clientOrderId: 'replacement-client',
+  });
+  expect(bridge).toHaveBeenCalledOnce();
+});
 const account = (rust = true, options: Partial<ExchangeOptions> = { publicDataOnly: true }): BaseExchange => {
   const config = { key: '', secret: '', ...options };
   const exchange = rust
