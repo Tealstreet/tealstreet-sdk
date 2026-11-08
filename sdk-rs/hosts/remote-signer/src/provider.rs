@@ -860,6 +860,19 @@ pub struct RemoteProvider {
     pub(crate) inner: Arc<Inner>,
 }
 
+/// Public accounts retain neither identities nor a device link.
+pub(crate) struct PublicProvider;
+
+impl Signer for PublicProvider {
+    fn sign(&self, _request: SignRequest) -> SignFuture {
+        Box::pin(async { Err(SignError::Refused) })
+    }
+
+    fn can_sign(&self, _key: &KeyRef, _algorithm: Algorithm) -> Capability {
+        Capability::Unsupported
+    }
+}
+
 impl Signer for RemoteProvider {
     fn sign(&self, request: SignRequest) -> SignFuture {
         Box::pin(self.inner.clone().sign(request))

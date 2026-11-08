@@ -101,7 +101,15 @@ fn kucoin_setup_installs_device_passphrase_identity_without_header() {
                 "{venue}: missing device passphrase identity"
             );
             assert!(!account.options_json.contains("fixture-passphrase"));
-            assert!(account.inner.primary.passphrase_value.is_none());
+            assert!(
+                account
+                    .inner
+                    .as_ref()
+                    .unwrap()
+                    .primary
+                    .passphrase_value
+                    .is_none()
+            );
             let ids: Identities = serde_json::from_value(options["signing"].clone()).unwrap();
             assert_eq!(graph(venue, &ids).operations.len(), 3);
         }
@@ -339,6 +347,149 @@ async fn kucoin_rejects_malformed_or_wrong_account_device_batches_atomically() {
             assert_eq!(error, SignError::Refused);
             assert!(!format!("{error:?}").contains("fixture-"));
             assert_eq!(seen.lock().unwrap().len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn kucoin_explicit_public_accounts_publish_no_signing_authority() {
+    for venue in ["kucoin", "kucoinspot"] {
+        for mode in [
+            json!({ "publicDataOnly": true }),
+            json!({ "publicDataOnly": false, "publicMode": { "requested": true } }),
+        ] {
+            let (link, seen) = kucoin_device(venue);
+            let mut input = mode;
+            input["key"] = "fixture-key".into();
+            input["passphrase"] = "fixture-passphrase".into();
+            input["signing"] = serde_json::to_value(broker_identities()).unwrap();
+            input["extra"] = json!({ "kucoinBroker": {
+                "partner": "partner", "brokerName": "broker-name", "brokerKey": "fixture-broker"
+            } });
+            let (account, options) = account(link, venue, input);
+            assert_eq!(options["signing"], json!({}), "{venue}");
+            assert!(account.inner.is_none());
+            assert_eq!(options["remoteSigning"], false);
+            assert_eq!(options["payloadSigner"], false);
+            assert_eq!(options["publicDataOnly"], true);
+            assert_eq!(options["publicMode"]["remoteSigner"], false);
+            assert!(options.pointer("/extra/kucoinBroker/brokerKey").is_none());
+            for material in [
+                "fixture-key",
+                "fixture-passphrase",
+                "fixture-broker",
+                "delegated/",
+            ] {
+                assert!(!account.options_json.contains(material));
+            }
+            assert!(seen.lock().unwrap().is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn kucoin_keyless_accounts_resolve_public_before_custody_validation() {
+    for venue in ["kucoin", "kucoinspot"] {
+        for input in [
+            json!({}),
+            json!({ "key": null }),
+            json!({ "key": "" }),
+            json!({ "publicDataOnly": true }),
+            json!({ "publicMode": { "requested": true } }),
+            json!({ "publicMode": { "requested": false, "remoteSigner": true } }),
+            json!({ "publicDataOnly": true, "secret": "unused-secret", "secondary_key": "unused-key", "localSigner": "unused-metadata" }),
+            json!({ "publicDataOnly": true, "key": "bad\nkey", "passphrase": "unused-passphrase" }),
+        ] {
+            let (link, seen) = kucoin_device(venue);
+            let (account, options) = account(link, venue, input);
+            assert_eq!(options["signing"], json!({}), "{venue}");
+            assert!(account.inner.is_none());
+            assert_eq!(options["publicDataOnly"], true);
+            assert_eq!(options["remoteSigning"], false);
+            assert!(!account.options_json.contains("unused-"));
+            assert!(!account.options_json.contains("delegated/"));
+            assert!(seen.lock().unwrap().is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn kucoin_public_provider_cannot_complete_native_batches_or_present_credentials() {
+    for venue in ["kucoin", "kucoinspot"] {
+        for input in [
+            json!({ "key": "fixture-key", "publicDataOnly": true }),
+            json!({ "key": "fixture-key", "publicMode": { "requested": true } }),
+            json!({ "publicDataOnly": true }),
+            json!({}),
+        ] {
+            let (link, seen) = kucoin_device(venue);
+            let (public, options) = account(link, venue, input);
+            let installed: Identities = serde_json::from_value(options["signing"].clone()).unwrap();
+            let ids = if installed.primary.is_some() {
+                installed
+            } else {
+                identities()
+            };
+            let work = graph(venue, &ids);
+            let control = local(&ids).sign_now(&work).unwrap();
+            work.validate_result(&control).unwrap();
+            assert_eq!(
+                public.provider.sign(work).await.map(|_| ()),
+                Err(SignError::Refused)
+            );
+            let id = ids.primary.as_ref().unwrap();
+            for key in [
+                &id.credential,
+                id.signing_ref().unwrap(),
+                id.passphrase.as_ref().unwrap(),
+            ] {
+                assert_eq!(
+                    public.provider.can_sign(key, Algorithm::HmacSha256),
+                    Capability::Unsupported
+                );
+                assert_eq!(
+                    public
+                        .provider
+                        .sign(request(
+                            vec![Operation::Present { key: key.clone() }],
+                            Default::default()
+                        ))
+                        .await
+                        .map(|_| ()),
+                    Err(SignError::Refused)
+                );
+            }
+            assert_eq!(
+                public.provider.owned_public_address_capability(),
+                Capability::Unsupported
+            );
+            assert!(seen.lock().unwrap().is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn kucoin_captured_private_or_default_intent_overrides_legacy_public_flag() {
+    for venue in ["kucoin", "kucoinspot"] {
+        for mode in [
+            json!({ "requested": false }),
+            json!({ "requested": null }),
+            json!({}),
+        ] {
+            let (link, _) = kucoin_device(venue);
+            let (account, options) = account(
+                link,
+                venue,
+                json!({ "key": "fixture-key", "publicDataOnly": true, "publicMode": mode }),
+            );
+            assert_eq!(options["publicDataOnly"], false);
+            let ids: Identities = serde_json::from_value(options["signing"].clone()).unwrap();
+            let work = graph(venue, &ids);
+            let control = local(&ids).sign_now(&work).unwrap();
+            let result = account.provider.sign(work.clone()).await.unwrap();
+            work.validate_result(&result).unwrap();
+            assert_eq!(result.values, control.values);
+            assert_eq!(result.receipt, control.receipt);
         }
     }
 }

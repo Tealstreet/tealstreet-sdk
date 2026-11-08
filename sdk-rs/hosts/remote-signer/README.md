@@ -4,8 +4,15 @@
 existing device `sign-req` / `sign-res` channel. Credentials and private signer
 setup are removed from engine options before construction.
 
-KuCoin Futures and Spot use the existing `kucoin-batch` device format. Setup
-always installs a passphrase reference; its value stays with the device and is
+Public mode is resolved before custody validation or reference installation.
+Explicit public requests, including captured `publicMode.requested`, return
+empty signing identities and an inert provider without a device link. KuCoin
+Futures/Spot accounts without a public key also resolve to this public capsule.
+Captured intent takes precedence over the legacy `publicDataOnly` flag. Unused
+credential/setup fields are stripped, and all signing capabilities refuse.
+
+Private KuCoin Futures and Spot use the existing `kucoin-batch` device format.
+Private setup installs a passphrase reference; its value stays with the device and is
 neither required nor retained by this host. Complete public `extra.kucoinBroker`
 partner/name metadata also installs an optional broker reference. A supplied
 `brokerKey` is stripped from engine options; the device resolves its own key.
