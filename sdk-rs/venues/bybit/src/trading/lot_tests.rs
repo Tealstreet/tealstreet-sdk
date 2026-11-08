@@ -65,21 +65,28 @@ fn check_lots(variant: Variant, single: bool) {
                     opts.take_profit = take_profit;
                     opts.stop_loss = stop_loss;
                     let lots = venue.format_lots(cx, &opts).unwrap();
-                    let quantities = if variant.is_spot() {
+                    let quantities = if variant.is_inverse() {
+                        // KNOWN-ISSUE: legacy TS under-allocates (sum 2 of requested 5); kept for parity per Sam; decision pending
+                        &["2"][..]
+                    } else if variant.is_spot() {
                         &["2", "2", "1"][..]
                     } else {
+                        // KNOWN-ISSUE: legacy TS under-allocates (sum 4 of requested 5); kept for parity per Sam; decision pending
                         &["1", "1", "1", "1"][..]
                     };
                     assert_eq!(lots.len(), quantities.len());
+                    let mut total = 0.;
                     for (index, lot) in lots.into_iter().enumerate() {
                         let body = if single { lot.single } else { lot.item }.finish();
                         let sent: CreateLot = serde_json::from_str(&body).unwrap();
                         assert_eq!(sent.qty, quantities[index]);
+                        total += sent.qty.parse::<f64>().unwrap();
                         assert_eq!(
                             sent.category.as_deref(),
                             single.then_some(venue.category_for(symbol).as_str()),
                         );
-                        let protected = variant.is_spot() || index == 0;
+                        let protected =
+                            variant.is_spot() || index == 0 || index == quantities.len() - 1;
                         assert_eq!(
                             sent.take_profit,
                             take_profit.filter(|_| protected).map(number),
@@ -99,6 +106,16 @@ fn check_lots(variant: Variant, single: bool) {
                             (variant.is_spot() && stop_loss.is_some()).then_some("Market")
                         );
                     }
+                    assert_eq!(
+                        total,
+                        if variant.is_inverse() {
+                            2.
+                        } else if variant.is_spot() {
+                            5.
+                        } else {
+                            4.
+                        }
+                    );
                 },
             );
             seeded_engine(probe).start(1000.);
@@ -117,7 +134,7 @@ fn split_spot_limit_keeps_protection_in_every_batch_body() {
 }
 
 #[test]
-fn split_derivative_limits_keep_protection_on_the_first_lot_only() {
+fn split_derivative_limits_keep_ts_first_and_remainder_protection() {
     for variant in [
         Variant::Linear,
         Variant::Inverse,

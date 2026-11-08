@@ -172,12 +172,120 @@ fn body(request: &HttpRequest) -> &str {
     request.body.as_deref().unwrap()
 }
 
+#[test]
+fn second_review_perp_remainder_keeps_ts_protection() {
+    // reference/bybit/bybit.exchange.ts:2723-2731 restores the original request on the remainder.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+    for (amount, expected, sum) in [
+        (26., &["4", "4", "4", "4", "4", "4", "1"][..], 25.),
+        (10., &["5", "5"][..], 10.),
+    ] {
+        let mut h = ready(Variant::Linear);
+        let mut markets = h.engine.store().markets().to_vec();
+        let market = markets.iter_mut().find(|m| m.symbol == "BTCUSDT").unwrap();
+        market.precision.amount = 1.;
+        market.limits.amount.max = 5.;
+        market.limits.amount.min = 1.;
+        h.engine.store_mut().set_markets(markets);
+        let mut opts = order("BTCUSDT", amount);
+        opts.stop_loss = Some(90.);
+        opts.take_profit = Some(110.);
+        place(&mut h, 901, vec![opts]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let rows = sent["request"].as_array().unwrap();
+        let quantities: Vec<_> = rows
+            .iter()
+            .map(|row| row["qty"].as_str().unwrap())
+            .collect();
+        assert_eq!(quantities, expected);
+        assert_eq!(
+            quantities
+                .iter()
+                .map(|q| q.parse::<f64>().unwrap())
+                .sum::<f64>(),
+            sum
+        );
+        for (index, row) in rows.iter().enumerate() {
+            let protected = index == 0 || (amount == 26. && index == rows.len() - 1);
+            for (key, value) in [
+                ("stopLoss", "90"),
+                ("takeProfit", "110"),
+                ("slTriggerBy", "MarkPrice"),
+                ("tpTriggerBy", "LastPrice"),
+            ] {
+                assert_eq!(
+                    row.get(key).and_then(|v| v.as_str()),
+                    protected.then_some(value),
+                    "amount={amount}, row={index}, key={key}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn second_review_native_unknown_emits_telemetry_and_journal() {
+    for code in [10016, 110007] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, 902, vec![order("BTCUSDT", 1.); 3]);
+        let prefix = h.take("/v5/order/create");
+        h.reply(
+            prefix.id,
+            200,
+            r#"{"retCode":0,"result":{"orderId":"known-prefix"}}"#,
+        );
+        let uncertain = h.take("/v5/order/create");
+        h.reply(
+            uncertain.id,
+            200,
+            &serde_json::json!({"retCode":code,"retMsg":"native result"}).to_string(),
+        );
+        if code == 10016 {
+            support::assert_unknown_pin(&mut h, 902, &["known-prefix"], 1, 3);
+            let events: Vec<_> = h
+                .notices
+                .iter()
+                .filter_map(|notice| match notice {
+                    safe_cex_engine::Notice::Event(event)
+                        if event.code == "order.outcome_unknown" =>
+                    {
+                        Some(event)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                events.len(),
+                1,
+                "HTTP-200 native Unknown must emit telemetry"
+            );
+            assert_eq!(events[0].level, safe_cex_engine::log::Level::Warn);
+            assert!(events[0].message.contains(support::ENGINE_UNKNOWN_TEXT));
+            assert!(events[0].fields.iter().any(|(key, value)| *key == "command"
+                && *value == safe_cex_engine::log::Value::Num(902.)));
+            let error = applied_failure(&h, 902);
+            let safe_cex_engine::write_plan::ElementResult::Unknown { error } =
+                &error.elements.as_ref().unwrap()[1].result
+            else {
+                panic!("native Unknown journal row")
+            };
+            assert!(error.message.contains(support::ENGINE_UNKNOWN_TEXT));
+        } else {
+            assert!(!h.notices.iter().any(|notice| matches!(notice, safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown")));
+            assert!(!h.unknown.contains(&902));
+        }
+    }
+}
+
 fn assert_allocation_quantities(
     variant: Variant,
     amount: f64,
     max: f64,
     step: f64,
     expected: &[&str],
+    expected_sum: f64,
 ) {
     let mut h = ready(variant);
     let mut markets = h.engine.store().markets().to_vec();
@@ -229,6 +337,8 @@ fn assert_allocation_quantities(
         quantities, expected,
         "{variant:?}: amount={amount}, max={max}, step={step}"
     );
+    let total: f64 = quantities.iter().map(|q| q.parse::<f64>().unwrap()).sum();
+    assert_eq!(safe_cex_engine::num::adjust(total, step), expected_sum);
     assert_eq!(
         h.result(900),
         Some(&Ok(serde_json::to_string(&ids).unwrap()))
@@ -240,34 +350,50 @@ fn assert_allocation_quantities(
 #[test]
 fn perp_lot_allocation_matches_legacy_ts_audit() {
     // reference/bybit/bybit.exchange.ts:2718-2731, including rounded totals below the requested amount.
-    for (amount, max, step, expected) in [
-        (26.0, 5.0, 1.0, &["4", "4", "4", "4", "4", "4", "1"][..]),
-        (11.0, 5.0, 1.0, &["3", "3", "3", "1"][..]),
-        (12.0, 5.0, 1.0, &["3", "3", "3", "2"][..]),
-        (10.0, 5.0, 1.0, &["5", "5"][..]),
-        (7.0, 3.0, 0.5, &["2", "2", "2", "1"][..]),
+    for (amount, max, step, expected, expected_sum) in [
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+        (
+            26.0,
+            5.0,
+            1.0,
+            &["4", "4", "4", "4", "4", "4", "1"][..],
+            25.,
+        ),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+        (11.0, 5.0, 1.0, &["3", "3", "3", "1"][..], 10.),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+        (12.0, 5.0, 1.0, &["3", "3", "3", "2"][..], 11.),
+        (10.0, 5.0, 1.0, &["5", "5"][..], 10.),
+        (7.0, 3.0, 0.5, &["2", "2", "2", "1"][..], 7.),
         (
             1.0005,
             0.3,
             0.001,
             &["0.225", "0.225", "0.225", "0.225", "0.101"][..],
+            1.001,
         ),
     ] {
-        assert_allocation_quantities(Variant::Linear, amount, max, step, expected);
+        assert_allocation_quantities(Variant::Linear, amount, max, step, expected, expected_sum);
     }
 }
 
 #[test]
 fn spot_lot_allocation_stays_separate_from_perp_fix() {
-    for (amount, max, step, expected) in [
-        (26.0, 5.0, 1.0, &["5", "5", "5", "5", "5", "1"][..]),
-        (11.0, 5.0, 1.0, &["5", "5", "1"][..]),
-        (12.0, 5.0, 1.0, &["5", "5", "2"][..]),
-        (10.0, 5.0, 1.0, &["5", "5"][..]),
-        (7.0, 3.0, 0.5, &["3", "3", "1"][..]),
-        (1.0005, 0.3, 0.001, &["0.3", "0.3", "0.3", "0.101"][..]),
+    for (amount, max, step, expected, expected_sum) in [
+        (26.0, 5.0, 1.0, &["5", "5", "5", "5", "5", "1"][..], 26.),
+        (11.0, 5.0, 1.0, &["5", "5", "1"][..], 11.),
+        (12.0, 5.0, 1.0, &["5", "5", "2"][..], 12.),
+        (10.0, 5.0, 1.0, &["5", "5"][..], 10.),
+        (7.0, 3.0, 0.5, &["3", "3", "1"][..], 7.),
+        (
+            1.0005,
+            0.3,
+            0.001,
+            &["0.3", "0.3", "0.3", "0.101"][..],
+            1.001,
+        ),
     ] {
-        assert_allocation_quantities(Variant::Spot, amount, max, step, expected);
+        assert_allocation_quantities(Variant::Spot, amount, max, step, expected, expected_sum);
     }
 }
 
@@ -444,7 +570,9 @@ fn outcome(h: &Harness, command: u32) -> Option<safe_cex_engine::Outcome> {
 }
 
 #[test]
-fn inverse_create_keeps_native_integer_quantity_with_legacy_lot_rounding() {
+fn second_review_inverse_clamps_to_ts_maximum() {
+    // reference/bybit/bybitinverse.exchange.ts:1523-1541 clamps before :1614-1636 allocates.
+    // KNOWN-ISSUE: legacy TS sends 10 of requested 25.6; kept for parity per Sam; decision pending
     let mut h = ready(Variant::Inverse);
     place(&mut h, 1, vec![order("BTCUSD", 25.6)]);
     let mode = h.take("/v5/position/list");
@@ -464,8 +592,15 @@ fn inverse_create_keeps_native_integer_quantity_with_legacy_lot_rounding() {
             .iter()
             .map(|row| row["qty"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["7", "7", "7", "6"]
+        ["10"]
     );
+    let total: f64 = sent["request"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["qty"].as_str().unwrap().parse::<f64>().unwrap())
+        .sum();
+    assert_eq!(total, 10.);
 }
 
 #[test]

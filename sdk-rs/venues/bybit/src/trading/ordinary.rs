@@ -1154,7 +1154,21 @@ impl BybitLinear {
             self.leg_decision(cx, id, &mut active, response)
         };
         let decision = match decision {
-            Decision::Failed(error) => Decision::Failed(unknown_outcome(error)),
+            Decision::Failed(error) => {
+                let error = unknown_outcome(error);
+                if response.status == 200
+                    && error.outcome == Some(Outcome::Unknown)
+                    && !matches!(active.leg.planned.call, Call::PartialProof(_))
+                {
+                    cx.event(
+                        safe_cex_engine::log::Level::Warn,
+                        "order.outcome_unknown",
+                        error.message.clone(),
+                        vec![("command", id.into()), ("outcome", "unknown".into())],
+                    );
+                }
+                Decision::Failed(error)
+            }
             other => other,
         };
         // The logical replacement has settled (a resend is the same write, still

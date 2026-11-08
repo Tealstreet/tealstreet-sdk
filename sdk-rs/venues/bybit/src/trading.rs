@@ -750,7 +750,7 @@ impl BybitLinear {
     }
 
     /// Split oversized entries into create bodies. Each spot lot owns its TP/SL;
-    /// derivatives keep position-wide protection on the first lot only.
+    /// derivatives keep protection on the first lot and the TS remainder.
     /// Refuse invalid lot plans before any entry in the batch can be dispatched.
     pub(crate) fn format_lots(
         &self,
@@ -776,7 +776,20 @@ impl BybitLinear {
         let p_amount = market.precision.amount;
         let adjust_price = |p: f64| num::adjust(p, p_price);
         let amount = if self.category_for(&opts.symbol) == Category::Inverse {
-            opts.amount.round()
+            // reference/bybit/bybitinverse.exchange.ts:1523-1541 clamps before allocation.
+            let mut amount = opts.amount.round();
+            let minimum = if market.limits.amount.min != 0.0 {
+                market.limits.amount.min
+            } else {
+                1.0
+            };
+            if amount < minimum {
+                amount = minimum;
+            }
+            if market.limits.amount.max != 0.0 && amount > market.limits.amount.max {
+                amount = market.limits.amount.max;
+            }
+            amount
         } else {
             num::adjust(opts.amount, p_amount)
         };
@@ -865,6 +878,7 @@ impl BybitLinear {
             return Err("Order prices must be finite and positive".into());
         }
         let mut sizes = Vec::new();
+        let mut remainder_index = None;
         if amount / max > 1000.0 {
             return Err("Order exceeds the safe split bound".into());
         }
@@ -894,6 +908,7 @@ impl BybitLinear {
             let lot_size = num::adjust((amount - rest) / lots as f64, p_amount);
             sizes.resize(lots, lot_size);
             if rest != 0.0 {
+                remainder_index = Some(sizes.len());
                 sizes.push(rest);
             }
         }
@@ -983,8 +998,8 @@ impl BybitLinear {
                     })
                     .collect(),
                 category: self.category_for(&opts.symbol),
-                item: lot(qty, index == 0, false),
-                single: lot(qty, index == 0, true),
+                item: lot(qty, index == 0 || remainder_index == Some(index), false),
+                single: lot(qty, index == 0 || remainder_index == Some(index), true),
             })
             .collect())
     }

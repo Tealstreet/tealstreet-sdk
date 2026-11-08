@@ -1070,7 +1070,7 @@ fn ambiguous_batch_responses_never_resend_creates() {
 }
 
 #[test]
-fn a_split_uses_legacy_rounded_quantities_and_only_the_first_lot_has_brackets() {
+fn a_split_uses_legacy_rounded_quantities_and_ts_first_and_remainder_brackets() {
     #[derive(serde::Deserialize)]
     struct Batch {
         request: Vec<Item>,
@@ -1106,7 +1106,12 @@ fn a_split_uses_legacy_rounded_quantities_and_only_the_first_lot_has_brackets() 
         .sum();
     assert_eq!(total, 26.0);
     assert_eq!(batch.request[0].stop_loss.as_deref(), Some("85000"));
-    assert!(batch.request[1..].iter().all(|row| row.stop_loss.is_none()));
+    assert_eq!(batch.request[3].stop_loss.as_deref(), Some("85000"));
+    assert!(
+        batch.request[1..3]
+            .iter()
+            .all(|row| row.stop_loss.is_none())
+    );
 }
 
 #[test]

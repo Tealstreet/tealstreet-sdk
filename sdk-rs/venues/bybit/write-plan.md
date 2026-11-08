@@ -10,6 +10,10 @@ emit `ceil(amount / max)` equal rounded lots, then the rounded remainder. This
 preserves TS rounding even when the emitted total differs from the requested
 amount: `26 / 5 / 1` emits `[4, 4, 4, 4, 4, 4, 1]`. Spot's separate allocation
 change is tracked in PR #3358; its allocation is unchanged in this branch.
+The first equal lot and the remainder carry the original TP/SL fields; middle
+equal lots omit them, including the last lot when there is no remainder.
+Inverse follows `bybitinverse.exchange.ts:1523–1541`: round and clamp the amount
+to the native minimum/maximum before allocation. Thus `25.6 / 10` emits `[10]`.
 
 Every ordinary and Hyro mutation has logical indices in the passive shared
 `WritePlan::new/record/attach` journal. It holds no payload, admission callback,
@@ -60,6 +64,9 @@ partial IDs and retry metadata. Unknown presentation adds the canonical shared
 wording in venue-local code. The existing unproven-HTTP evidence hook copies the
 journal when the engine seals before venue decoding. Reporting errors emit
 diagnostics without refusing or terminating native dispatch.
+An HTTP-200 mutation decoded by the venue as Unknown also emits the warning
+event `order.outcome_unknown`, correlated by command ID. Its message and the
+journal's Unknown row use "The outcome is unknown. Check Open Orders".
 
 Known legacy issue: ordinary missing/zero prices and below-minimum notionals can
 follow accepted rows. Native batch errors can be followed by later writes. This
