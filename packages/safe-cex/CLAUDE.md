@@ -629,6 +629,8 @@ approval fields; the old class export stays available without prototype repair.
 account labels and newest-close ordering are native output policy. The four TS
 closed-PnL mappers live only under test references. `fetchClosedPositions`
 remains the raw journal contract; it is never a fallback for reported PnL.
+The capability-installed method forwards whole to the worker when bridged,
+including after capability adoption; it never commands a mirror-local engine.
 The Bitunix/Blofin income helpers and Bybit inverse helpers also live only in
 `__tests__/reference`; their remaining callers are replay oracles and tests.
 The production venue-file inventory removes them with the runtime imports.

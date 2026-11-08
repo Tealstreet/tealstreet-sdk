@@ -3607,6 +3607,11 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Reported rows only, newest close first; failures propagate so refreshes keep their last result. */
   private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.routesToWorker) {
+      await this.untilWorkerBridge();
+      const { callMethodInWorker }: BaseExchange = this;
+      return callMethodInWorker.bind(this)('fetchClosedPnl', opts);
+    }
     if (this.isPublicDataOnly) return [];
     const ready = this.capabilitiesFor('fetchClosedPnl');
     const capabilities = ready instanceof Promise ? await ready : ready;
