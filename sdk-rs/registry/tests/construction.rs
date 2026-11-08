@@ -535,7 +535,9 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
             let policy = safe_cex_venues::remote_signing_policy(venue);
-            let expected = if policy.enabled && !policy.payload_supported {
+            let expected = if venue == "polymarket" {
+                "Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply".into()
+            } else if policy.enabled && !policy.payload_supported {
                 format!("Rust {venue} has no REST-only PayloadSigner lifecycle")
             } else if policy.enabled {
                 format!(
