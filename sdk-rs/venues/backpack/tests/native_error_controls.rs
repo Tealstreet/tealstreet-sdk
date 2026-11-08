@@ -77,7 +77,7 @@ fn start_bracket(engine: &mut Driver) -> Result {
     Ok(())
 }
 
-fn unknown_child_stops(body: &str, expected_code: Option<&str>) -> Result {
+fn unknown_child_stops(body: &str, expected_code: Option<&str>, expected_message: &str) -> Result {
     let (mut engine, _) = ready();
     let mut transport = RecordingTransport::new(body);
     start_bracket(&mut engine)?;
@@ -118,9 +118,7 @@ fn unknown_child_stops(body: &str, expected_code: Option<&str>) -> Result {
         .ok_or("missing child failure warning")?;
     assert_eq!(warning.message, error.message);
     assert_eq!(error.venue_code.as_deref(), expected_code);
-    if expected_code.is_some() {
-        assert_eq!(error.venue_message.as_deref(), Some("synthetic detail"));
-    }
+    assert_eq!(error.venue_message.as_deref(), Some(expected_message));
     assert_eq!(
         error
             .partial
@@ -155,12 +153,17 @@ fn http200_code_envelope_keeps_unknown_and_stops_children() -> Result {
     unknown_child_stops(
         r#"{"code":"NATIVE_UNAVAILABLE","message":"synthetic detail"}"#,
         Some("NATIVE_UNAVAILABLE"),
+        "synthetic detail",
     )
 }
 
 #[test]
 fn http200_error_envelope_keeps_unknown_and_stops_children() -> Result {
-    unknown_child_stops(r#"{"error":"synthetic unavailable"}"#, None)
+    unknown_child_stops(
+        r#"{"error":"synthetic unavailable"}"#,
+        None,
+        "synthetic unavailable",
+    )
 }
 
 #[test]

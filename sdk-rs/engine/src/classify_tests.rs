@@ -71,6 +71,34 @@ fn int(code: i64) -> Native<'static> {
     }
 }
 
+#[test]
+fn unknown_guidance_preserves_classification_evidence_and_real_refusal_wording() {
+    for code in [123456, -2011] {
+        let response = response(200);
+        let native = int(code);
+        let original = fact(
+            &TABLE,
+            Intent::Place,
+            Released::Response(&response),
+            Some(&native),
+            "Order rejected",
+        )
+        .for_attempt(crate::RequestId(17))
+        .with_order_ids(&["observed-id".into()]);
+        let guided = original.clone().with_unknown_guidance();
+        assert_eq!(guided.verdict, original.verdict);
+        assert_eq!(guided.attempt, original.attempt);
+        let mut expected = original.error;
+        if expected.outcome == Some(Outcome::Unknown) {
+            expected.message = "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders".into();
+        } else {
+            assert_eq!(expected.outcome, Some(Outcome::Rejected));
+            assert_eq!(guided.error.message, "Order rejected");
+        }
+        assert_eq!(guided.error, expected);
+    }
+}
+
 fn classify(status: u16, native: Option<&Native<'_>>, intent: Intent) -> Verdict {
     verdict(
         &TABLE,

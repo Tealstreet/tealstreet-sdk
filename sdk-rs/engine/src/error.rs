@@ -218,6 +218,19 @@ impl VenueError {
         self
     }
 
+    /// Reuse the engine's unproven-response wording without changing native evidence.
+    pub fn with_unknown_guidance(mut self) -> Self {
+        if self.outcome == Some(Outcome::Unknown)
+            && let Some(standard) = crate::request_context::ResponseProof::Unproven(
+                self.kind.unwrap_or(ErrorKind::Internal),
+            )
+            .error()
+        {
+            self.message = standard.message;
+        }
+        self
+    }
+
     pub fn venue_code(mut self, code: impl Into<String>) -> Self {
         self.venue_code = Some(code.into());
         self

@@ -1575,8 +1575,11 @@ impl Backpack {
                             .get(&request.command)
                             .is_some_and(|job| job.protect.is_some() && job.ids.is_empty());
                     let fact = if unproven {
-                        cx.http_write_unproven(&managed.context, &e)
-                            .map(|()| VenueError::new(e).outcome(Outcome::Unknown))
+                        let error = VenueError::new(e)
+                            .outcome(Outcome::Unknown)
+                            .with_unknown_guidance();
+                        cx.http_write_unproven(&managed.context, &error.message)
+                            .map(|()| error)
                     } else {
                         let table = if amend_refusal {
                             &AMEND_REFUSAL
@@ -1903,7 +1906,8 @@ impl Backpack {
                 error.outcome(Outcome::Unknown)
             } else {
                 error
-            };
+            }
+            .with_unknown_guidance();
         let managed = request.managed.as_ref().expect("foreground delivery");
         let optional = matches!(
             request.step,
@@ -2155,10 +2159,16 @@ fn native_failure(
         code: Option<&'a serde_json::value::RawValue>,
         #[serde(borrow)]
         message: Option<&'a str>,
+        #[serde(borrow)]
+        error: Option<&'a serde_json::value::RawValue>,
     }
     let failure = serde_json::from_str::<Failure<'_>>(body).ok();
     let raw = failure.as_ref().and_then(|failure| failure.code);
     let text = raw.and_then(|raw| serde_json::from_str::<String>(raw.get()).ok());
+    let error_text = failure
+        .as_ref()
+        .and_then(|failure| failure.error)
+        .and_then(|raw| serde_json::from_str::<String>(raw.get()).ok());
     let code = raw
         .and_then(|raw| safe_cex_engine::classify::decode_int(raw.get()))
         .map(NativeCode::Int)
@@ -2169,9 +2179,12 @@ fn native_failure(
         message: failure
             .as_ref()
             .and_then(|failure| failure.message)
+            .or(error_text.as_deref())
             .unwrap_or(""),
     };
-    let fact = cx.classify_write(context, table, Some(&native), message)?;
+    let fact = cx
+        .classify_write(context, table, Some(&native), message)?
+        .with_unknown_guidance();
     let error = fact.error().clone();
     cx.http_write_fact(
         context,
