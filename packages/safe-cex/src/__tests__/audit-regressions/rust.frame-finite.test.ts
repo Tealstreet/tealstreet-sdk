@@ -1,5 +1,7 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
 
+import assert from 'node:assert/strict';
+
 import { expect, it } from 'vitest';
 
 import { FrameApplier } from '../../store/frameApplier';
@@ -164,7 +166,9 @@ it.each([NaN, Infinity, -Infinity, 0, -0, -1])(
   'preserves unknown liquidation through packed frames and serialization (%s)',
   (liquidationPrice) => {
     const packed = inverseUnitsFrame({ positions: true, inverse: false, positionLiquidationPrice: liquidationPrice });
-    expect(packed.positions()!.liquidationPrice[0]).toBeNull();
+    const positions = packed.positions();
+    assert.ok(positions, 'Packed frame must contain a positions section');
+    expect(positions.liquidationPrice[0]).toBeNull();
     const store = new DefaultStore();
     new FrameApplier(store).apply(packed);
     expect(store.positions[0].liquidationPrice).toBeNull();

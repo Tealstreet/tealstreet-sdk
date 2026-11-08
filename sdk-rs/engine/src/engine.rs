@@ -1913,6 +1913,7 @@ impl OrdersRefresh {
 }
 
 struct IoCore {
+    write_failure_text: Option<fn(&VenueError) -> String>,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2215,6 +2216,7 @@ impl Default for IoCore {
     #[inline]
     fn default() -> Self {
         Self {
+            write_failure_text: None,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,
@@ -3888,7 +3890,19 @@ impl crate::engine::CoreCx<'_> {
             request_context_registry::Seal::Failure(error, rejections) => {
                 write_sealed = true;
                 for message in rejections {
+                    let message = match self.io.core.write_failure_text {
+                        Some(present) => {
+                            let mut warning = error.clone();
+                            warning.message = message;
+                            present(&warning)
+                        }
+                        None => message,
+                    };
                     self.command_error(command, message);
+                }
+                let mut error = error;
+                if let Some(present) = self.io.core.write_failure_text {
+                    error.message = present(&error);
                 }
                 Err(error)
             }
@@ -4243,6 +4257,16 @@ pub trait Venue {
         Self: Sized,
     {
         true
+    }
+
+    /// Render a journal-classified write failure and its warnings at publication.
+    /// The callback sees the final outcome and can change only text; reads and
+    /// successful writes do not call it. No I/O or completion authority is lent.
+    fn write_failure_text() -> Option<fn(&VenueError) -> String>
+    where
+        Self: Sized,
+    {
+        None
     }
 
     /// The venue's one FIFO release domain, if any. Its group must be registered
@@ -4912,7 +4936,7 @@ fn new_core(
 impl<V: Venue> Engine<V> {
     pub fn new(venue: V, entropy: Option<crate::entropy::Entropy>) -> Result<Self, VenueError> {
         let http_release = V::http_release();
-        let (store, core) = new_core(
+        let (store, mut core) = new_core(
             entropy,
             CoreSpec {
                 quantity_units: venue.capabilities().quantity_units,
@@ -4935,6 +4959,7 @@ impl<V: Venue> Engine<V> {
                 socket_capabilities: V::socket_capabilities(),
             },
         )?;
+        core.write_failure_text = V::write_failure_text();
         Ok(Self {
             venue,
             http_release,
@@ -8440,6 +8465,77 @@ mod streaming_tests {
             Action::Notice(Notice::CommandFailed { command: 7, error: result }),
         ] if background == "background error" && message == "command error" && result.legacy_text() == *message));
         assert_eq!(before, engine.snapshot_frame(0.));
+    }
+
+    #[test]
+    fn write_failure_presentation_uses_final_classification_for_terminal_and_warnings() {
+        use crate::request_context::{CommandWrites, WriteResult};
+        let mut engine = frame_engine();
+        engine.io.core.write_failure_text =
+            Some(|error| format!("{:?}: {}", error.outcome.unwrap(), error.message));
+        let mut writes = CommandWrites::new(2).unwrap();
+        writes.register(RequestId(1), 1).unwrap();
+        writes.released(RequestId(1)).unwrap();
+        writes
+            .result(
+                RequestId(1),
+                WriteResult::Rejected(
+                    VenueError::new("known first refusal")
+                        .kind(ErrorKind::Rejected)
+                        .venue_code("native-refusal")
+                        .venue_message("native diagnostic"),
+                ),
+            )
+            .unwrap();
+        writes.register(RequestId(2), 2).unwrap();
+        writes.released(RequestId(2)).unwrap();
+        writes
+            .result(
+                RequestId(2),
+                WriteResult::Failed(
+                    VenueError::new("later response lost").kind(ErrorKind::Network),
+                ),
+            )
+            .unwrap();
+        let expected = writes.fail(VenueError::new("callback fallback")).unwrap();
+        assert_eq!(expected.outcome, Some(crate::Outcome::Unknown));
+        let reports = writes.reports().map(str::to_owned).collect();
+        Cx {
+            now: 1.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .core()
+        .finish_sealed_command(
+            7,
+            None,
+            request_context_registry::Seal::Failure(expected.clone(), reports),
+        )
+        .unwrap();
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(matches!(actions.as_slice(), [
+            Action::Notice(Notice::CommandError { command: 7, message }),
+            Action::Notice(Notice::CommandFailed { command: 7, error }),
+        ] if message == "Unknown: known first refusal" && {
+            let mut presented = expected.clone();
+            presented.message = format!("Unknown: {}", expected.message);
+            *error == presented
+        }));
+        Cx {
+            now: 2.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .core()
+        .finish_sealed_command(
+            8,
+            None,
+            request_context_registry::Seal::Legacy(Some(VenueError::new("read response lost"))),
+        )
+        .unwrap();
+        assert!(matches!(engine.drain_actions().next(), Some(Action::Notice(
+            Notice::CommandFailed { command: 8, error }
+        )) if error.message == "read response lost" && error.outcome.is_none()));
     }
 
     #[test]

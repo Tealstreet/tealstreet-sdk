@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { inverseUnitsFrame } from '@tealstreet/safe-cex/src/__tests__/fixtures/scxfFrame';
+import { BaseExchange } from '@tealstreet/safe-cex/src/exchanges/base';
 import { FrameApplier } from '@tealstreet/safe-cex/src/store/frameApplier';
 import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
-import { OrderSide, OrderType } from '@tealstreet/safe-cex/src/types';
-import type { Ticker } from '@tealstreet/safe-cex/src/generated/Ticker';
-import type { ChaserOrderInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderInstance';
+import { OrderSide, OrderType, type Ticker } from '@tealstreet/safe-cex/src/types';
+import { ChaserOrderInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderInstance';
 import type { CLIPlatformAdapter, ExchangeLike } from '../../types';
 import { ChartCommand, formatOrderLine } from './ChartCommand';
 import { formatChaserStatus } from './ChaseCommand';
@@ -13,6 +13,27 @@ import { formatMultiAccountOrdersTable, formatOrdersTable } from './MonitorComma
 import { OrdersCommand } from './OrdersCommand';
 
 const strip = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, '');
+const adapterFixture = (print: CLIPlatformAdapter['print']): CLIPlatformAdapter => ({
+  listAccounts: () => [],
+  getAccount: () => undefined,
+  addAccount: vi.fn(),
+  updateAccount: () => false,
+  removeAccount: () => false,
+  setDefaultAccount: () => false,
+  getDefaultSymbol: () => undefined,
+  setDefaultSymbol: vi.fn(),
+  getActiveAccounts: () => [],
+  createExchange: async () => {
+    throw new Error('Display fixture does not create exchanges');
+  },
+  startExchange: vi.fn(async () => {}),
+  stopExchange: vi.fn(async () => {}),
+  print,
+  printError: vi.fn(),
+  printSuccess: vi.fn(),
+  printWarning: vi.fn(),
+  printInfo: vi.fn(),
+});
 const sizeCells = (table: string) =>
   strip(table)
     .split('\n')
@@ -35,10 +56,19 @@ describe.each([
       units: profile.units,
       contractSize: profile.contractSize,
       native: true,
-      orders: [{ id: 'partial', amount: 7, filled: 2, remaining: profile.remaining, native: profile.native, remainingNotional: 500 }],
+      orders: [
+        {
+          id: 'partial',
+          amount: 7,
+          filled: 2,
+          remaining: profile.remaining,
+          native: profile.native,
+          remainingNotional: 500,
+        },
+      ],
     });
     const orders = frame.orders();
-    if (!orders) throw new Error('Inverse fixture is missing its orders table');
+    if (orders === undefined) throw new Error('Inverse display fixture requires an orders frame');
     orders.price[0] = 50_000;
     const store = new DefaultStore();
     new FrameApplier(store).apply(frame);
@@ -62,7 +92,7 @@ describe.each([
       symbol: 'BTCUSD',
       accountName: undefined,
       exchange,
-      adapter: { print } as unknown as CLIPlatformAdapter,
+      adapter: adapterFixture(print),
     });
     expect(sizeCells(print.mock.calls.flat(2).join('\n'))[0][3]).toBe('0.01');
   });
@@ -82,8 +112,19 @@ describe.each([
   it('converts the decoded remainder in rendered charts', async () => {
     const exchange = fixture();
     const ticker: Ticker = {
-      id: 'BTCUSD', symbol: 'BTCUSD', last: 50_000, bid: 0, ask: 0, mark: 0, index: 0,
-      percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
+      id: 'BTCUSD',
+      symbol: 'BTCUSD',
+      bid: 50_000,
+      ask: 50_000,
+      last: 50_000,
+      mark: 50_000,
+      index: 50_000,
+      percentage: 0,
+      openInterest: 0,
+      fundingRate: 0,
+      fundingTime: 0,
+      volume: 0,
+      quoteVolume: 0,
     };
     exchange.store.update({ tickers: [ticker] });
     exchange.fetchOHLCV = vi
@@ -98,7 +139,7 @@ describe.each([
       symbol: 'BTCUSD',
       accountName: undefined,
       exchange,
-      adapter: { print } as unknown as CLIPlatformAdapter,
+      adapter: adapterFixture(print),
     });
     expect(result.success).toBe(true);
     expect(print.mock.calls.flat(2).join('\n')).toContain('Limit 0.01');
@@ -106,13 +147,13 @@ describe.each([
 
   it('converts the decoded remainder in the current chase order row', () => {
     const exchange = fixture();
-    const instance = {
-      options: { symbol: 'BTCUSD', side: OrderSide.Buy, size: 7 },
-      state: { attempts: 1, stopReason: '' },
-      remainingSize: 5,
-      currentOrderIds: ['partial'],
-      isStopped: false,
-    } as unknown as ChaserOrderInstance;
+    const instance = new ChaserOrderInstance(
+      new BaseExchange('binanceinverse', { key: '', secret: '' }, exchange.store),
+      { symbol: 'BTCUSD', side: OrderSide.Buy, size: 7, maxAttempts: 10, delay: 0 },
+    );
+    instance.incrementAttempts();
+    instance.addFillAmount('partial', 2);
+    instance.currentOrderIds = ['partial'];
     const output = strip(formatChaserStatus(instance, exchange));
     expect(
       output

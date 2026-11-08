@@ -167,7 +167,7 @@ describe('SwarmCommand — argument parsing', () => {
     const ex = makeExchange();
     const r = await cmd.execute(ctx(['swarm', 'buy', '$100', 'into', '5', 'frizzle'], ex));
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/unexpected token/);
+    expect(r.error).toMatch(/unknown argument/i);
   });
 });
 

@@ -924,16 +924,13 @@ describe('BuyCommand', () => {
       expect(order.timeInForce).toBe(OrderTimeInForce.GoodTillCancel);
     });
 
-    it('`po` on a market order is silently ignored (no timeInForce flip)', async () => {
+    it('refuses post-only on a market order before writing', async () => {
       const exchange = createMockExchange();
       const ctx = createMockContext(['buy', '$100', 'po'], exchange, 'BTCUSDT');
       const r = await command.execute(ctx);
-      expect(r.success).toBe(true);
-      const order = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(order.type).toBe(OrderType.Market);
-      // Market orders default to GoodTillCancel; the `po` keyword
-      // doesn't flip it.
-      expect(order.timeInForce).toBe(OrderTimeInForce.GoodTillCancel);
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(/po requires a limit order/);
+      expect(exchange.placeOrder).not.toHaveBeenCalled();
     });
 
     it('`po` combines with `reduce`', async () => {

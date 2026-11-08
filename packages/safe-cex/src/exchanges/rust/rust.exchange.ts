@@ -1,3 +1,4 @@
+import type { WorkerMethodArguments } from '../../webworker/workerMethodArguments';
 import type {
   AccountAuthResult,
   AlgoStopAllResult,
@@ -49,7 +50,7 @@ import type {
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
 import type { CallableMethodsInWorker, EngineSnapshot, ExchangeCapabilities, WorkerForwardedMethod } from '../base';
 import type { BaseWebSocket } from '../base.ws';
-import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
+import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { ChaseEnd } from './algoControlWatch';
 import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
@@ -1897,27 +1898,38 @@ export class RustEngineExchange extends BaseExchange {
     // Native account reads start an engine, so a mirror asks the worker's instead.
     // Journals are not forwarded: a mirror folds them itself from forwarded raw reads,
     // so the hosted server, which has no TS mappers, only serves those reads.
-    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS, ...RUST_FORWARDED_METHODS, 'fetchClosedPnl'];
-    const members = this as unknown as Record<string, unknown>;
-    for (const method of methods) {
+    type Method =
+      | (typeof WORKER_FORWARDED_METHODS)[number]
+      | (typeof NATIVE_ACCOUNT_READS)[number]
+      | (typeof RUST_FORWARDED_METHODS)[number]
+      | 'fetchClosedPnl';
+    const methods: Method[] = [
+      ...WORKER_FORWARDED_METHODS,
+      ...NATIVE_ACCOUNT_READS,
+      ...RUST_FORWARDED_METHODS,
+      'fetchClosedPnl',
+    ];
+    type Args = Pick<WorkerMethodArguments, Method>;
+    const install = <M extends Method>(
+      method: M,
+      members: { [K in Method]: (...args: Args[K]) => Promise<unknown> },
+    ) => {
       // A capability-defined method this venue lacks stays absent, never a forwarder.
-      if (inert.has(method) || typeof members[method] !== 'function') continue;
-      const local = members[method] as (...args: unknown[]) => Promise<unknown>;
+      if (inert.has(method) || typeof members[method] !== 'function') return;
+      const local = members[method];
       // An engine-owning instance calls straight through, keeping its own synchronous refusals.
-      const route = (...args: unknown[]) => {
+      const route = (...args: Args[M]): Promise<unknown> => {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
         if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
-          return this.fetchPageCandles(args[0] as OHLCVOptions);
+          return Reflect.apply(this.fetchPageCandles, this, args);
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
         const viaWorker = () =>
           this.callWorker(method, ...args).then(
             (result) =>
               // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-              method === 'updateOrder'
-                ? decodeWorkerOrderIds(result as WorkerOrderIds)
-                : rowsFromAccountFrame(method, result, args[0]),
+              method === 'updateOrder' ? decodeWorkerOrderIds(result) : rowsFromAccountFrame(method, result, args[0]),
             (error: unknown) => {
               // Never passed through `command` here, and the hosted server marks no failure as
               // reported. A LOCAL worker's report arrives marked, so this says nothing twice.
@@ -1934,10 +1946,12 @@ export class RustEngineExchange extends BaseExchange {
           },
         );
       };
-      members[method] = FRAME_FED_WRITES.has(method)
-        ? (...args: unknown[]) => this.trackWrite(() => route(...args))
+      const forwarded = FRAME_FED_WRITES.has(method)
+        ? (...args: Args[M]) => this.trackWrite(() => route(...args))
         : route;
-    }
+      Object.assign(members, { [method]: forwarded });
+    };
+    for (const method of methods) install(method, this);
   }
 
   private writesInFlight = 0;

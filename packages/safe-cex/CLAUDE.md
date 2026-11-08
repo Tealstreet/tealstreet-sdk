@@ -1,6 +1,9 @@
 # CLAUDE.md - safe-cex Package
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
+Polymarket explicitly refuses hosted/delegated signing before construction:
+its private user WebSocket needs the L2 API secret, not a signature. See
+`sdk-rs/venues/polymarket/README.md`; callback payloads must never export it.
 SDK factories and workers have no TypeScript venue fallback; OUT names refuse
 with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
 and test-only replay/reference implementations remain independent dependencies.
@@ -8,10 +11,10 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
+Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
-KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
+KuCoin futures and Spot (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md` and `docs/plans/callers/kucoinspot-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override. Refused `remoteSigner` accounts are told to
 turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
@@ -83,7 +86,9 @@ read-identity presence; managed routing uses explicit credential intent before
 credentials are materialised, while legacy requests retain header-based routing.
 KuCoin Futures/Spot also install their passphrase and optional configured broker
 key only in this capsule. One receipt binds Present plus the request, passphrase,
-and optional broker MACs; Hosted admission remains disabled for both names.
+and optional broker MACs. Both names admit RemoteSigner through device-owned
+`kucoin-batch` custody, including the secondary read slot; PayloadSigner remains
+refused because a request MAC cannot supply the separate passphrase/broker MACs.
 Lighter's trusted native/JSON mapping uses a typed API-index principal when a
 private Schnorr signing ref exists and the original key is not Nonblank.
 Original SetupFacts stay unchanged; the principal is never presentable. Validated
@@ -198,14 +203,29 @@ serialized bodies are preserved. WOO has no signing nonce or wire recvWindow.
 PayloadSigner remains refused because its legacy private lifecycle has no such
 mode; RemoteSigner cannot fall back to it or to local material. Before-dispatch
 signing failures are `notSent`; dispatched ambiguous writes remain `Unknown`.
-WOO RemoteSigner setup refuses any configured secondary credentials with
+Private WOO RemoteSigner setup refuses any configured secondary credentials with
 `unsupported` / `notSent` before native construction or callbacks: its HMAC wire
 cannot select the device's read-key slot. Remove the secondary credentials to
 use Hosted with the primary key, or use read keys in local browser mode.
+Crypto.com admits RemoteSigner and canonical HMAC PayloadSigner. Every signed
+REST envelope and `public/auth` uses provider custody; the hosted wire carries
+only `method + id + api_key + canonical params + nonce`. PayloadSigner keeps
+private REST reconciliation and writes but opens no private user socket.
+Crypto.com HTTP callback metadata follows its declared header policy in native
+dispatch and hosted capture; the HMAC remains in JSON `sig`. WS auth refuses
+callback result headers.
+Crypto.com Hosted secondary credentials refuse with `unsupported` / `notSent`;
+all native private POSTs retain primary selection. Subaccounts use their own
+API key/secret, with no separate wallet or cosigning protocol.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
+Explicit `publicDataOnly: true` in delegated setup preserves raw mode-intent
+flags but ignores signing callbacks, credentials and setup metadata. It installs
+no provider or identity, advertises no algorithms, and cannot sign. Private-mode
+callback validation, primary/secondary selection and mode refusals remain strict.
+
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.
 RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary
