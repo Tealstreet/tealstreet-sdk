@@ -36,9 +36,11 @@ PayloadSigner supports V1 canonical HMAC payloads with REST-only lifecycle.
 The native account loads and polls balances, positions and orders, including
 fresh position commands, without registering a private feed or creating,
 renewing or reconnecting a listen-key session. WS signing stays refused.
-V3 PayloadSigner is `unsupported` / `notSent`: its HMAC-only callback cannot
+Private V3 PayloadSigner is `unsupported` / `notSent`: its HMAC-only callback cannot
 derive account-bound wallet signatures or prove the wallet address. It requires
-RemoteSigner wallet custody instead. Generic HTTP signing captures remain V1
+RemoteSigner wallet custody instead. Public-only construction accepts unused
+PayloadSigner and RemoteSigner configuration for both API versions.
+Generic HTTP signing captures remain V1
 only; V3 native REST requests use the structured wallet protocol above. Aster
 has no independent WS login signature: signed listen-key creation/keepalive
 authenticates the private socket. A generic WS HMAC login remains refused.

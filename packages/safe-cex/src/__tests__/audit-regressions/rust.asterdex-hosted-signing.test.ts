@@ -7,6 +7,8 @@ import { mapAsterDEXSignerSetup } from '../../exchanges/rust/asterdexSignerSetup
 import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
 import { createRemoteSignerProvider, remoteSignerAlgorithms } from '../../exchanges/rust/remoteSignerProvider';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { DefaultStore } from '../../store/store.base';
 
 const primary = { credential: 'origin/credential', signing: 'origin/signing', publicCredential: 'fixture-key' };
 const remote = (sign = vi.fn()) => ({ sign, isAvailable: () => true, onAvailabilityChange: () => () => {} });
@@ -36,10 +38,30 @@ it('V1 remote batches bind the selected device slot and public credential', asyn
   expect(JSON.stringify(sign.mock.calls)).not.toContain('origin/');
 });
 
-it('refuses V3 PayloadSigner with a typed reason before invoking it', () => {
+it.each<{ version: 'v1' | 'v3' }>([{ version: 'v1' }, { version: 'v3' }])(
+  'public-only $version construction ignores unused delegated signers', ({ version }) => {
+    for (const key of ['', 'fixture-key']) {
+      const payloadSigner = vi.fn();
+      const remoteSigner = remote();
+      for (const callbacks of [{ payloadSigner }, { remoteSigner }, { remoteSigner, payloadSigner }]) {
+        const exchange = new RustEngineExchange('asterdex', { key, secret: '', publicDataOnly: true,
+          extra: { asterdexApiVersion: version }, ...callbacks }, new DefaultStore());
+        try {
+          expect(exchange.isPublicDataOnly).toBe(true);
+          expect(payloadSigner).not.toHaveBeenCalled();
+          expect(remoteSigner.sign).not.toHaveBeenCalled();
+        } finally { exchange.dispose(); }
+      }
+    }
+  },
+);
+
+it.each([undefined, false])('refuses private V3 PayloadSigner with publicDataOnly=%s before invoking it', (publicDataOnly) => {
   const payloadSigner = vi.fn();
-  expect(() => new DelegatedSignerSetup('asterdex', { key: 'fixture-key', secret: '', extra: { asterdexApiVersion: 'v3' }, payloadSigner }))
-    .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('V3') }));
+  const options = { key: 'fixture-key', secret: '', publicDataOnly, payloadSigner };
+  expect(() => new RustEngineExchange('asterdex', { ...options, extra: { asterdexApiVersion: 'v3' } }, new DefaultStore()))
+    .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
+      message: 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only' }));
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 

@@ -208,9 +208,13 @@ it('actual SDK V1 PayloadSigner loads and polls REST without private session wor
   assertNoSession();
   expect(payloadSigner).toHaveBeenCalled();
   const calls = payloadSigner.mock.calls.length;
-  for (const [outputFormat, toSign] of [['hex', 'fixture'], ['asterdex-hmac', JSON.stringify({ slot: 'primary', payload: 'fixture' })]]) {
+  const wsAuthRequests: Array<NonNullable<RemoteSignerRequest['wsAuth']>> = [
+    { outputFormat: 'hex', toSign: 'fixture' },
+    { outputFormat: 'asterdex-hmac', toSign: JSON.stringify({ slot: 'primary', payload: 'fixture' }) },
+  ];
+  for (const wsAuth of wsAuthRequests) {
     const refused = await exchange.signWsAuth({ id: 'rest-only', type: 'ws-auth', exchangeName: 'asterdex',
-      wsAuth: { toSign, outputFormat } });
+      wsAuth });
     expect(refused.wsAuthSignature).toBeUndefined();
     expect(refused.error).toBeDefined();
   }
