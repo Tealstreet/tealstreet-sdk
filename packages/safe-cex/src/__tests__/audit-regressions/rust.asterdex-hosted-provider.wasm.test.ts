@@ -17,7 +17,7 @@ let stamp = 1_748_310_859_508;
 const live: RustEngineExchange[] = [];
 const primary = { credential: 'origin/key', signing: 'origin/sign', publicCredential: 'fixture-key' };
 vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
-afterEach(() => { live.splice(0).forEach((exchange) => exchange.dispose()); setWasmEngineLoader(loadNodeEngine); setRustEngineTransport(); });
+afterEach(() => { live.splice(0).forEach((exchange) => exchange.dispose()); vi.useRealTimers(); setWasmEngineLoader(loadNodeEngine); setRustEngineTransport(); });
 function device(options: Partial<ExchangeOptions>) {
   setWasmEngineLoader(loadNodeEngine);
   const io = vi.fn(() => { throw new Error('No network in hosted fixture'); });
@@ -144,4 +144,77 @@ it.each(['v1', 'v3'] as const)('actual %s native startup uses keyless hosted RES
     expect(JSON.stringify(browser.sign.mock.calls)).not.toContain(wallet ? vector.privateKey : 'fixture-material');
     expect(browser.io).not.toHaveBeenCalled();
   } finally { host.dispose(); }
+});
+
+it('actual SDK V1 PayloadSigner loads and polls REST without private session work or WS signing', async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  vi.setSystemTime(1_748_310_859_508);
+  setWasmEngineLoader(loadNodeEngine);
+  const packets: Array<{ method: string; url: string }> = [];
+  const sockets: string[] = [];
+  const payloadSigner = vi.fn(({ payload }: { payload: string }) => ({
+    signature: createHmac('sha256', 'fixture-material').update(payload).digest('hex'),
+  }));
+  setRustEngineTransport(() => ({
+    now: () => Date.now(), prepareHttp: prepareRecordedHttp,
+    request: async ({ method, url }) => {
+      packets.push({ method, url });
+      const parsed = new URL(url);
+      const path = parsed.pathname;
+      if (parsed.searchParams.has('signature')) {
+        const signature = parsed.searchParams.get('signature');
+        parsed.searchParams.delete('signature');
+        expect(signature).toBe(createHmac('sha256', 'fixture-material').update(parsed.searchParams.toString()).digest('hex'));
+      }
+      const data = path.endsWith('/time') ? JSON.stringify({ serverTime: Date.now() })
+        : path.endsWith('/exchangeInfo') ? '{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"LOT_SIZE","minQty":"0.001","maxQty":"1000"}]}]}'
+        : path.endsWith('/account') ? '{"totalWalletBalance":"1000","availableBalance":"800","totalInitialMargin":"100","totalOpenOrderInitialMargin":"20","totalUnrealizedProfit":"5"}'
+        : path.endsWith('/positionSide/dual') ? '{"dualSidePosition":false}'
+        : path.endsWith('/listenKey') ? '{"listenKey":"fixture-session"}' : '[]';
+      return { status: 200, headers: '', body: new TextEncoder().encode(data) };
+    },
+    connect: (url, handlers) => {
+      sockets.push(url);
+      queueMicrotask(() => handlers.onOpen());
+      return { send: () => {}, close: () => {} };
+    },
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  }));
+  const store = new DefaultStore();
+  const exchange = new RustEngineExchange('asterdex', {
+    key: 'fixture-key', secret: '', payloadSigner, extra: { asterdexApiVersion: 'v1' },
+  } as ExchangeOptions, store);
+  live.push(exchange);
+  const logs: string[] = [];
+  exchange.emitter.on('log', (message: string) => logs.push(message));
+  let started = false;
+  const startup = exchange.start().then(() => { started = true; });
+  await vi.waitFor(() => expect(started).toBe(true));
+  await startup;
+  await vi.waitFor(() => expect(store.loaded).toMatchObject({ balance: true, positions: true, orders: true }));
+  const assertNoSession = () => {
+    expect(packets.filter(({ url }) => url.includes('/listenKey'))).toEqual([]);
+    expect(sockets.filter((url) => new URL(url).pathname.startsWith('/ws/'))).toEqual([]);
+  };
+  assertNoSession();
+  const count = (suffix: string) => packets.filter(({ url }) => new URL(url).pathname.endsWith(suffix)).length;
+  const before = ['/account', '/positionRisk', '/openOrders'].map(count);
+  await vi.advanceTimersByTimeAsync(31 * 60_000);
+  for (const [i, suffix] of ['/account', '/positionRisk', '/openOrders'].entries()) {
+    expect(count(suffix)).toBeGreaterThan(before[i]);
+  }
+  await expect(exchange.readPositions()).resolves.toEqual({ skipped: [], open: [] });
+  assertNoSession();
+  expect(payloadSigner).toHaveBeenCalled();
+  const calls = payloadSigner.mock.calls.length;
+  for (const [outputFormat, toSign] of [['hex', 'fixture'], ['asterdex-hmac', JSON.stringify({ slot: 'primary', payload: 'fixture' })]]) {
+    const refused = await exchange.signWsAuth({ id: 'rest-only', type: 'ws-auth', exchangeName: 'asterdex',
+      wsAuth: { toSign, outputFormat } });
+    expect(refused.wsAuthSignature).toBeUndefined();
+    expect(refused.error).toBeDefined();
+  }
+  expect(payloadSigner).toHaveBeenCalledTimes(calls);
+  expect(JSON.stringify(payloadSigner.mock.calls)).not.toContain('fixture-material');
+  expect(JSON.stringify(logs)).not.toContain('fixture-material');
 });
