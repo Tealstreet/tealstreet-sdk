@@ -339,7 +339,9 @@ fn rounded_caller_amount_cannot_split_and_rejects_whole_batch() {
 }
 
 #[test]
-fn split_brackets_protect_each_accepted_lot_before_another_entry() {
+fn split_brackets_batch_all_entries_and_stop_after_the_first_child_failure() {
+    // TS okx.exchange.ts:1751-1763,2319-2339: entry prefix survives a first child refusal.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:669 per-lot TP/SL child validation
     let mut e = trading_engine();
     let out = place(
         &mut e,
@@ -347,29 +349,46 @@ fn split_brackets_protect_each_accepted_lot_before_another_entry() {
             r#"{"symbol":"BTCUSDT","type":"market","side":"buy","amount":2001,"stopLoss":36000,"takeProfit":42000}"#,
         )],
     );
-    let a = http(&out);
-    assert_eq!(body(a).matches("\"sz\"").count(), 1);
-    assert!(body(a).contains("\"sz\":\"1000\""));
-    let out = ack(&mut e, a, false);
-    let stop = http(&out);
-    assert!(body(stop).contains("slTriggerPx"));
-    assert!(body(stop).contains("\"sz\":\"1000\""));
-    let out = ack(&mut e, stop, true);
-    assert!(body(http(&out)).contains("tpTriggerPx"));
-    let out = ack(&mut e, http(&out), true);
-    let second = http(&out);
-    assert!(matches!(second, Action::Http(r) if r.url.ends_with("/batch-orders")));
+    let entry = http(&out);
+    let payload: serde_json::Value = serde_json::from_str(body(entry)).expect("entry batch");
+    assert_eq!(
+        payload
+            .as_array()
+            .expect("batch")
+            .iter()
+            .map(|row| &row["sz"])
+            .collect::<Vec<_>>(),
+        vec![
+            &serde_json::json!("1000"),
+            &serde_json::json!("1000"),
+            &serde_json::json!("1")
+        ]
+    );
     reply(
         &mut e,
-        second,
-        r#"{"code":"1","msg":"All operations failed","data":[{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
-        7.0,
+        entry,
+        r#"{"code":"0","data":[{"ordId":"1","sCode":"0"},{"ordId":"2","sCode":"0"},{"ordId":"3","sCode":"0"}]}"#,
+        6.,
     );
-    let out = prepared(&mut e, 7.0);
+    let out = prepared(&mut e, 6.);
+    let stop = http(&out);
+    assert!(body(stop).contains("slTriggerPx"));
+    assert!(body(stop).contains("\"sz\":\"2001\""));
+    reply(
+        &mut e,
+        stop,
+        r#"{"code":"1","data":[{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
+        7.,
+    );
+    let out = prepared(&mut e, 7.);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    let results = terminals(&out, 1);
+    let [Err(error)] = results.as_slice() else {
+        panic!("failed terminal")
+    };
+    assert_eq!(
+        error.partial.as_ref().expect("entry prefix").order_ids,
+        ["1", "2", "3"]
     );
 }
 
@@ -677,6 +696,8 @@ fn code_51400_is_not_success_for_a_placement_or_amendment() {
 
 #[test]
 fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
+    // TS okx.exchange.ts:1625-1629,2355-2363 continues code-0 row errors into the algo group.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | native cancellation runtime row refusal
     use safe_cex_engine::model::*;
     let mut e = trading_engine();
     let mut ids = Vec::new();

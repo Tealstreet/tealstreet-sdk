@@ -199,6 +199,8 @@ fn native_split_bound_applies_per_input_not_to_whole_command() {
 }
 
 fn complete_max_bracketed_inputs(input_count: u32) {
+    // TS okx.exchange.ts:1751-1763,2291-2295: entry chunks precede original-amount algos.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:669 per-lot TP/SL child validation
     let mut engine = trading_engine();
     small_lots(&mut engine);
     let orders = (0..input_count)
@@ -210,43 +212,44 @@ fn complete_max_bracketed_inputs(input_count: u32) {
         })
         .collect();
     place(&mut engine, orders);
-    let count = input_count * 30_000;
+    let entry_batches = input_count * 500;
+    let calls = entry_batches + input_count * 2;
     let mut output = prepared(&mut engine, 5.);
-    for step in 0..count {
+    let mut next_id = 0;
+    for call in 0..calls {
         let write = output
             .iter()
-            .position(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
-            .expect("next native protective write");
+            .position(|a| {
+                matches!(a,
+                    Action::Http(r) if r.method == safe_cex_engine::Method::Post
+                )
+            })
+            .expect("next native write");
         let Action::Http(request) = &output[write] else {
             unreachable!()
         };
-        assert!(
-            request
-                .headers
-                .iter()
-                .any(|(name, value)| *name == "OK-ACCESS-KEY" && value == "test-key")
-        );
         let body: serde_json::Value =
-            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-        let identity = match step % 3 {
-            0 => {
-                assert!(request.url.ends_with("/batch-orders"));
-                assert_eq!(body.as_array().unwrap().len(), 1);
-                assert_eq!(body[0]["sz"], "1");
-                body[0]["clOrdId"].as_str().unwrap()
+            serde_json::from_str(request.body.as_deref().expect("payload")).expect("JSON");
+        let identities: Vec<_> = if call < entry_batches {
+            assert!(request.url.ends_with("/batch-orders"));
+            let rows = body.as_array().expect("entry batch");
+            assert_eq!(rows.len(), 20);
+            rows.iter()
+                .map(|row| {
+                    assert_eq!(row["sz"], "1");
+                    row["clOrdId"].as_str().expect("client identity")
+                })
+                .collect()
+        } else {
+            assert!(request.url.ends_with("/order-algo"));
+            assert_eq!(body["sz"], "10000");
+            assert_eq!(body["reduceOnly"], true);
+            if call - entry_batches < input_count {
+                assert_eq!(body["slTriggerPx"], "36000");
+            } else {
+                assert_eq!(body["tpTriggerPx"], "42000");
             }
-            index => {
-                assert!(request.url.ends_with("/order-algo"));
-                assert_eq!(body["sz"], "1");
-                assert_eq!(body["reduceOnly"], true);
-                let price = if index == 1 {
-                    "slTriggerPx"
-                } else {
-                    "tpTriggerPx"
-                };
-                assert_eq!(body[price], if index == 1 { "36000" } else { "42000" });
-                body["algoClOrdId"].as_str().unwrap()
-            }
+            vec![body["algoClOrdId"].as_str().expect("client identity")]
         };
         let receipts: Vec<_> = output[..write]
             .iter()
@@ -259,20 +262,37 @@ fn complete_max_bracketed_inputs(input_count: u32) {
             })
             .flatten()
             .collect();
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(receipts[0].symbol, "BTCUSDT");
-        assert_eq!(receipts[0].identity, identity);
-        let field = if step % 3 == 0 { "ordId" } else { "algoId" };
-        let response =
-            format!(r#"{{"code":"0","data":[{{"{field}":"{step}","sCode":"0","sMsg":""}}]}}"#);
-        let now = 6. + f64::from(step);
-        reply(&mut engine, &output[write], &response, now);
+        assert_eq!(receipts.len(), identities.len());
+        for (receipt, identity) in receipts.iter().zip(&identities) {
+            assert_eq!(receipt.symbol, "BTCUSDT");
+            assert_eq!(receipt.identity, *identity);
+        }
+        let replies: Vec<_> = identities
+            .iter()
+            .map(|_| {
+                let field = if call < entry_batches {
+                    "ordId"
+                } else {
+                    "algoId"
+                };
+                let row = serde_json::json!({field:next_id.to_string(),"sCode":"0"});
+                next_id += 1;
+                row
+            })
+            .collect();
+        let now = 6. + f64::from(call);
+        reply(
+            &mut engine,
+            &output[write],
+            &serde_json::json!({"code":"0","data":replies}).to_string(),
+            now,
+        );
         output = prepared(&mut engine, now);
         assert!(!output.iter().any(|a| matches!(
             a,
             Action::Notice(Notice::CommandFailed { command: OWNER, .. })
         )));
-        if step + 1 != count {
+        if call + 1 != calls {
             assert!(!output.iter().any(|a| matches!(
                 a,
                 Action::Notice(Notice::CommandDone { command: OWNER, .. })
@@ -290,19 +310,22 @@ fn complete_max_bracketed_inputs(input_count: u32) {
         })
         .collect();
     assert_eq!(results.len(), 1);
-    let ids: Vec<String> = serde_json::from_str(results[0]).unwrap();
-    assert_eq!(ids.len(), count as usize);
-    assert!(ids.iter().enumerate().all(|(i, id)| *id == i.to_string()));
+    let ids: Vec<String> = serde_json::from_str(results[0]).expect("result IDs");
+    assert_eq!(
+        ids,
+        (0..next_id).map(|id| id.to_string()).collect::<Vec<_>>()
+    );
+    assert_eq!(next_id, input_count * 10_002);
     assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
 }
 
 #[test]
-fn native_max_bracketed_input_completes_all_thirty_thousand_steps() {
+fn max_bracketed_input_batches_all_entry_lots_before_full_amount_children() {
     complete_max_bracketed_inputs(1);
 }
 
 #[test]
-fn native_two_max_bracketed_inputs_complete_all_sixty_thousand_steps() {
+fn two_max_bracketed_inputs_batch_entries_before_grouped_stops_and_tps() {
     complete_max_bracketed_inputs(2);
 }
 
@@ -354,6 +377,8 @@ fn native_maximum_plain_split_returns_all_ten_thousand_accepted_ids() {
 
 #[test]
 fn legacy_cancel_envelope_selects_continue_or_stop() {
+    // TS okx.exchange.ts:2355-2363,2375-2383 continues row errors; okx.api.ts:77-82 throws nonzero envelopes.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | native cancellation runtime row refusal
     for code in ["0", "1", "2"] {
         for row_code in ["51000", "51400"] {
             for algo in [false, true] {
@@ -401,14 +426,89 @@ fn legacy_cancel_envelope_selects_continue_or_stop() {
                     &serde_json::json!({"code":code,"msg":"refused","data":replies}).to_string(),
                     6.,
                 );
-                let mut output = prepared(&mut engine, 6.);
-                output.extend(prepared(&mut engine, 7.));
+                let mut sequence = vec![request.clone()];
+                let mut pending = prepared(&mut engine, 6.);
+                let mut output = pending.clone();
+                let mut now = 7.;
+                loop {
+                    let next: Vec<_> = pending
+                        .iter()
+                        .filter_map(|action| match action {
+                            Action::Http(request)
+                                if request.method != safe_cex_engine::Method::Get =>
+                            {
+                                Some(request.clone())
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    if next.is_empty() {
+                        break;
+                    }
+                    assert_eq!(code, "0", "TS throws before later cancellation I/O");
+                    let [request] = next.as_slice() else {
+                        panic!("serial cancel")
+                    };
+                    sequence.push(request.clone());
+                    let payload: Vec<serde_json::Value> =
+                        serde_json::from_str(request.body.as_deref().expect("cancel payload"))
+                            .expect("cancel rows");
+                    let acks: Vec<_> = payload
+                        .into_iter()
+                        .map(|mut row| {
+                            row["sCode"] = serde_json::json!("0");
+                            row
+                        })
+                        .collect();
+                    reply(
+                        &mut engine,
+                        &Action::Http(request.clone()),
+                        &serde_json::json!({"code":"0","data":acks}).to_string(),
+                        now,
+                    );
+                    pending = prepared(&mut engine, now);
+                    output.extend(pending.iter().cloned());
+                    now += 1.;
+                    assert!(sequence.len() <= 3);
+                }
+                let field = if algo { "algoId" } else { "ordId" };
+                let expected_path = if algo {
+                    "/cancel-algos"
+                } else {
+                    "/cancel-batch-orders"
+                };
+                let mut sent_ids = Vec::new();
+                let mut batch_sizes = Vec::new();
+                for request in sequence {
+                    assert!(request.url.ends_with(expected_path));
+                    let rows: Vec<serde_json::Value> =
+                        serde_json::from_str(request.body.as_deref().expect("cancel payload"))
+                            .expect("cancel rows");
+                    batch_sizes.push(rows.len());
+                    sent_ids.extend(
+                        rows.iter()
+                            .map(|row| row[field].as_str().expect("target").to_owned()),
+                    );
+                }
+                let expected_sizes = match (code, algo) {
+                    ("0", false) => vec![20, 1],
+                    ("0", true) => vec![10, 10, 1],
+                    (_, false) => vec![20],
+                    (_, true) => vec![10],
+                };
+                assert_eq!(batch_sizes, expected_sizes);
+                let sent_count = if code == "0" {
+                    21
+                } else if algo {
+                    10
+                } else {
+                    20
+                };
                 assert_eq!(
-                    output.iter().any(|action| matches!(action,
-                        Action::Http(request) if request.method != safe_cex_engine::Method::Get
-                    )),
-                    code == "0",
-                    "legacy TS continues only code-0 envelopes, row {row_code}, algo={algo}"
+                    sent_ids,
+                    (1..=sent_count)
+                        .map(|id| id.to_string())
+                        .collect::<Vec<_>>()
                 );
                 assert_eq!(
                     output
@@ -421,12 +521,17 @@ fn legacy_cancel_envelope_selects_continue_or_stop() {
                             )
                         ))
                         .count(),
-                    usize::from(code != "0")
+                    1
                 );
                 if code != "0" {
                     assert!(output.iter().any(|action| matches!(
                         action,
                         Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+                    )));
+                } else {
+                    assert!(output.iter().any(|action| matches!(
+                        action,
+                        Action::Notice(Notice::CommandDone { command: OWNER, .. })
                     )));
                 }
             }
@@ -1152,6 +1257,8 @@ fn failures(output: &[Action]) -> Vec<&safe_cex_engine::VenueError> {
 
 #[test]
 fn a_signature_rejected_write_is_re_signed_and_resent_once() {
+    // TS okx.api.ts:66-75; utils/signatureRejection.ts:19-40.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | signature refusal retry
     let mut engine = trading_engine();
     place(&mut engine, vec![order(1)]);
     let first = prepared(&mut engine, 5.);
@@ -1166,6 +1273,8 @@ fn a_signature_rejected_write_is_re_signed_and_resent_once() {
     };
     assert_ne!(a.id, b.id, "a fresh physical attempt");
     assert_eq!(a.body, b.body, "the same native write");
+    assert_eq!(a.url, b.url);
+    assert!(a.url.ends_with("/batch-orders"));
     reply(
         &mut engine,
         post(&second),
@@ -1173,6 +1282,9 @@ fn a_signature_rejected_write_is_re_signed_and_resent_once() {
         7.,
     );
     let output = prepared(&mut engine, 7.);
+    assert!(!output.iter().any(|action| matches!(action,
+        Action::Http(request) if request.method != safe_cex_engine::Method::Get
+    )));
     assert!(output.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone { command: OWNER, result }) if result.contains("777")
@@ -1181,6 +1293,8 @@ fn a_signature_rejected_write_is_re_signed_and_resent_once() {
 
 #[test]
 fn a_second_signature_rejection_fails_without_a_third_send() {
+    // TS utils/signatureRejection.ts:19-40 bounds the resend.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | signature refusal retry
     let mut engine = trading_engine();
     place(&mut engine, vec![order(1)]);
     let first = prepared(&mut engine, 5.);

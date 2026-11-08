@@ -462,6 +462,8 @@ fn replacement(e: &mut Engine<Okx>, ack_at: f64) -> Action {
 
 #[test]
 fn released_cancel_late_ack_still_places_and_does_not_recheck_the_expired_quote() {
+    // TS okx.exchange.ts:1561-1562 awaits cancellation before the replacement placement.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | protective cancel/re-place
     let mut e = native_engine(TRAILING, "move_order_stop");
     let replace = replacement(&mut e, 10000.);
     reply(
@@ -631,6 +633,8 @@ fn unproven_trailing_and_dust_refuse_before_any_cancel() {
 
 #[test]
 fn dependent_cancel_refusal_never_replaces_or_restores() {
+    // TS okx.exchange.ts:1561-1562; okx.api.ts:77-82: thrown cancel prevents re-place.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | protective cancel/re-place
     let mut e = native_engine(TRAILING, "move_order_stop");
     amend(&mut e, "91_tsl", Some(39940.), Some(5.));
     let cancel = post(&prepared(&mut e, 5.), "/cancel-algos");

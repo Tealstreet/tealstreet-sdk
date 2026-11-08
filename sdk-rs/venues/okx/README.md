@@ -9,7 +9,7 @@ which writes are sent, retried, continued or compensated.
 | --- | --- | --- |
 | Positive split tail below native minSz | `okx.exchange.ts:2266-2284` emits every positive remainder without a minimum-lot check. | Preserve the tail; no new minimum gate. |
 | Row after the 20-row batch boundary | `okx.exchange.ts:2290-2315` sends batches serially. A later native refusal can follow an accepted batch. | Preserve native batch dispatch and report known outcomes. |
-| Separate TP/SL children | `okx.exchange.ts:1758-1763,2181-2200,2318-2343` formats protection without native min/cap checks. | Remove the added child minimum/cap gate. |
+| Separate TP/SL children | `okx.exchange.ts:1758-1763,2181-2200,2318-2343` sends entry batches before full-input children, without native min/cap checks. | Match entry batching, child amounts and stable algo priority; remove the added child gate. |
 | Ordinary amount/max/precision | `okx.exchange.ts:1751-1755,2226-2242` formats all ordinary rows and refuses nonfinite/nonpositive values before writes. | Retain matching preflight checks. |
 | Opening conditional trigger/amount | `okx.exchange.ts:1759-1763,2162-2172` formats all algos and refuses a missing trigger or invalid amount before writes. | Retain matching preflight checks. |
 
@@ -37,5 +37,9 @@ After failure, normal and algo placement series stop, as TS's serial placement
 helpers throw. Cancellation row errors inside a code-0 envelope continue; every
 nonzero envelope stops, matching `okx.api.ts:77-82`. Regular and algo cancellation
 tests cover both paths without imposing WritePlan's dispatch policy.
+
+Sequence pins require all entry batches before SL/trailing/TP algos. Children
+retain the original input amount, so a child refusal leaves the accepted entry
+prefix and stops later algos. Per-lot entry/SL/TP interleaving is not TS parity.
 
 This PR remains stacked on #3348; re-merge master after that dependency lands.

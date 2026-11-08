@@ -182,23 +182,26 @@ fn valid_split_and_chunk_controls_place_each_element_once() {
     }
 }
 #[test]
-fn valid_brackets_keep_per_lot_entry_stop_take_profit_order() {
+fn ts_pin_split_brackets_batch_entries_before_full_amount_children() {
+    // TS okx.exchange.ts:1751-1763; exchanges/base.ts:1453-1476 derives original-amount children.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:669 per-lot TP/SL child validation
     let mut row = limit(15.);
     row["stopLoss"] = json!(36000);
     row["takeProfit"] = json!(42000);
     let (seen, requests) = finish(&mut ready(instrument()), vec![row]);
-    assert_eq!(requests, 9);
-    assert_eq!(seen.len(), 9);
-    for lot in seen.chunks(3) {
-        assert!(lot[0].0.ends_with("/batch-orders"));
-        assert_eq!(lot[0].1["sz"], "5");
-        assert_eq!(lot[1].1["slTriggerPx"], "36000");
-        assert_eq!(lot[2].1["tpTriggerPx"], "42000");
-        for (_, leg) in &lot[1..] {
-            assert_eq!(leg["sz"], "5");
-            assert_eq!(leg["reduceOnly"], true);
-            assert_eq!(leg["side"], "sell");
-        }
+    assert_eq!(requests, 3, "TS sends one entry batch, one SL, then one TP");
+    assert_eq!(seen.len(), 5);
+    for (path, row) in &seen[..3] {
+        assert!(path.ends_with("/batch-orders"));
+        assert_eq!(row["sz"], "5");
+    }
+    assert_eq!(seen[3].1["slTriggerPx"], "36000");
+    assert_eq!(seen[4].1["tpTriggerPx"], "42000");
+    for (path, leg) in &seen[3..] {
+        assert!(path.ends_with("/order-algo"));
+        assert_eq!(leg["sz"], "15");
+        assert_eq!(leg["reduceOnly"], true);
+        assert_eq!(leg["side"], "sell");
     }
 }
 #[test]
@@ -216,7 +219,62 @@ fn full_position_algo_zero_control() {
 }
 
 #[test]
+fn ts_pin_mixed_algos_follow_entries_with_stable_stop_trailing_tp_priority() {
+    // TS okx.exchange.ts:1758-1763,2395-2400 sorts supplied and derived algos together, stably.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:669 per-lot TP/SL child validation
+    let mut bracket = limit(11.);
+    bracket["stopLoss"] = json!(36000);
+    bracket["takeProfit"] = json!(42000);
+    let (seen, requests) = finish(
+        &mut ready(instrument()),
+        vec![
+            json!({"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":5,"price":38000,"triggerPrice":37000}),
+            bracket,
+            json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":4,"price":35000}),
+            json!({"symbol":"BTCUSDT","type":"take_profit_market","side":"sell","amount":4,"price":43000}),
+            json!({"symbol":"BTCUSDT","type":"trailing_stop_market","side":"sell","amount":8,"price":36000}),
+        ],
+    );
+    assert_eq!(requests, 7);
+    assert_eq!(seen.len(), 9);
+    assert!(
+        seen[..3]
+            .iter()
+            .all(|(path, _)| path.ends_with("/batch-orders"))
+    );
+    let signature: Vec<_> = seen[3..]
+        .iter()
+        .map(|(path, row)| {
+            assert!(path.ends_with("/order-algo"));
+            let (kind, price) = if let Some(price) = row.get("slTriggerPx") {
+                ("SL", price.as_str().expect("price"))
+            } else if let Some(price) = row.get("tpTriggerPx") {
+                ("TP", price.as_str().expect("price"))
+            } else if row["ordType"] == "move_order_stop" {
+                ("trailing", "")
+            } else {
+                ("conditional", row["triggerPx"].as_str().expect("trigger"))
+            };
+            (kind, row["sz"].as_str().expect("size"), price)
+        })
+        .collect();
+    assert_eq!(
+        signature,
+        vec![
+            ("SL", "4", "35000"),
+            ("SL", "11", "36000"),
+            ("trailing", "8", ""),
+            ("TP", "4", "43000"),
+            ("TP", "11", "42000"),
+            ("conditional", "5", "37000"),
+        ]
+    );
+}
+
+#[test]
 fn legacy_standalone_algos_do_not_add_a_native_cap_gate() {
+    // TS okx.exchange.ts:2133-2211,2318-2343: pin released native writes, without a new gate.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | standalone algo native cap and positive SL/TP minimum
     for kind in [
         "stop_market",
         "take_profit_market",
@@ -235,6 +293,7 @@ fn legacy_standalone_algos_do_not_add_a_native_cap_gate() {
         );
         assert_eq!(requests, 1);
         assert_eq!(seen.len(), 1);
+        assert!(seen[0].0.ends_with("/order-algo"));
         assert_eq!(seen[0].1["sz"], amount.to_string());
     }
 }
@@ -256,6 +315,8 @@ fn valid_wire_rounding_and_reduce_only_caller_identity_are_preserved() {
 }
 
 fn runtime_failure(status: u16, code: &str, expected: Outcome) {
+    // TS okx.exchange.ts:1763,2319-2339: all entry lots precede the first child refusal.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:669 per-lot TP/SL child validation
     let mut engine = ready(instrument());
     let mut row = limit(15.);
     row["stopLoss"] = json!(36000);
@@ -266,10 +327,19 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
         panic!("first entry only")
     };
     assert!(entry.url.ends_with("/batch-orders"));
+    let body: Value =
+        serde_json::from_str(entry.body.as_deref().expect("entry body")).expect("JSON");
+    assert_eq!(body.as_array().expect("batch").len(), 3);
+    assert!(
+        body.as_array()
+            .expect("batch")
+            .iter()
+            .all(|row| row["sz"] == "5")
+    );
     reply(
         &mut engine,
         &Action::Http(entry.clone()),
-        r#"{"code":"0","msg":"","data":[{"ordId":"1000","sCode":"0","sMsg":""}]}"#,
+        r#"{"code":"0","data":[{"ordId":"1000","sCode":"0"},{"ordId":"1001","sCode":"0"},{"ordId":"1002","sCode":"0"}]}"#,
         6.,
     );
     let second = transport.record(&prepared(&mut engine, 6.));
@@ -277,6 +347,10 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
         panic!("one protective write")
     };
     assert!(stop.url.ends_with("/order-algo"));
+    let stop_body: Value =
+        serde_json::from_str(stop.body.as_deref().expect("SL body")).expect("JSON");
+    assert_eq!(stop_body["sz"], "15");
+    assert_eq!(stop_body["slTriggerPx"], "36000");
     let body = json!({"code":"1","msg":"scripted failure","data":[{
         "algoId":"","sCode":code,"sMsg":"scripted failure"
     }]})
@@ -316,13 +390,13 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
     };
     assert!(matches!(error.outcome, None | Some(Outcome::Unknown)));
     let elements = error.elements.as_ref().expect("complete shared journal");
-    assert_eq!(elements.len(), 9);
+    assert_eq!(elements.len(), 5);
     assert_eq!(
         elements
             .iter()
             .map(|row| row.element.index)
             .collect::<Vec<_>>(),
-        (0..9).collect::<Vec<_>>()
+        (0..5).collect::<Vec<_>>()
     );
     assert!(
         elements
@@ -330,13 +404,15 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
             .all(|row| row.element.client_order_id.is_some())
     );
     use safe_cex_engine::write_plan::ElementResult;
-    assert_eq!(
-        elements[0].result,
-        ElementResult::Placed {
-            order_ids: vec!["1000".into()]
-        }
-    );
-    match (&elements[1].result, expected) {
+    for (index, element) in elements.iter().take(3).enumerate() {
+        assert_eq!(
+            element.result,
+            ElementResult::Placed {
+                order_ids: vec![format!("{}", 1000 + index)]
+            }
+        );
+    }
+    match (&elements[3].result, expected) {
         (ElementResult::NotSent { error: Some(error) }, Outcome::Rejected) => {
             assert_eq!(error.outcome, Some(Outcome::Rejected));
             assert_eq!(error.venue_code.as_deref(), Some(code));
@@ -349,12 +425,12 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
     assert!(
         elements
             .iter()
-            .skip(2)
+            .skip(4)
             .all(|row| row.result == ElementResult::NotSent { error: None })
     );
     assert_eq!(
         error.partial.as_ref().expect("accepted prefix").order_ids,
-        ["1000"]
+        ["1000", "1001", "1002"]
     );
 }
 
@@ -365,6 +441,8 @@ fn runtime_rejection_reports_prefix_failed_element_and_unsent_suffix() {
 
 #[test]
 fn legacy_native_placement_failure_stops_every_remaining_batch_and_algo() {
+    // TS okx.exchange.ts:1763,2291-2311,2319-2339: pin released native writes, without a new gate.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:723 later-row/20-row batch boundary
     let mut bracket = limit(15.);
     bracket["stopLoss"] = json!(36000);
     bracket["takeProfit"] = json!(42000);
@@ -524,11 +602,30 @@ fn ambiguous_native_batch_row_keeps_other_proven_rows() {
 
 #[test]
 fn ts_zero_adjusted_last_ordinary_row_refuses_before_any_write() {
-    not_sent(&mut ready(instrument()), vec![limit(5.), limit(0.)]);
+    // TS okx.exchange.ts:1751-1755,2238-2242: formatter refusal precedes every native write.
+    for amount in [0., 0.1] {
+        not_sent(&mut ready(instrument()), vec![limit(5.), limit(amount)]);
+    }
+}
+
+#[test]
+fn ts_conditional_invalid_amount_or_trigger_refuses_before_any_io() {
+    // TS okx.exchange.ts:1759-1763,2162-2172 checks all conditional amounts/triggers before POST.
+    for (amount, trigger) in [(0., 37000.), (-1., 37000.), (5., 0.), (5., -1.)] {
+        not_sent(
+            &mut ready(instrument()),
+            vec![
+                limit(5.),
+                json!({"symbol":"BTCUSDT","type":"conditional","side":"buy",
+                "amount":amount,"price":38000,"triggerPrice":trigger}),
+            ],
+        );
+    }
 }
 
 #[test]
 fn ts_missing_conditional_trigger_refuses_before_any_write() {
+    // TS okx.exchange.ts:1759-1763,2162-2172: formatter refusal precedes every native write.
     not_sent(
         &mut ready(instrument()),
         vec![
@@ -540,6 +637,7 @@ fn ts_missing_conditional_trigger_refuses_before_any_write() {
 
 #[test]
 fn ts_invalid_ordinary_market_rules_refuse_before_any_write() {
+    // TS okx.exchange.ts:1751,2226-2235: formatter refusal precedes every native write.
     let mut engine = ready(instrument());
     engine
         .store_mut()
@@ -563,6 +661,8 @@ fn first_native_rows(engine: &mut Engine<Okx>, rows: Vec<Value>) -> Value {
 
 #[test]
 fn legacy_split_tail_below_native_minimum_is_not_newly_refused() {
+    // TS okx.exchange.ts:2266-2284,2290-2295: pin released native writes, without a new gate.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:645 split-tail/native-minQty
     let body = first_native_rows(&mut ready(instrument()), vec![limit(11.)]);
     assert_eq!(
         body.as_array()
@@ -576,6 +676,8 @@ fn legacy_split_tail_below_native_minimum_is_not_newly_refused() {
 
 #[test]
 fn legacy_later_native_batch_row_is_not_prevalidated_against_minimum() {
+    // TS okx.exchange.ts:2290-2315: pin released native writes, without a new gate.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:723 later-row/20-row batch boundary
     let mut engine = ready(instrument());
     let mut rows = vec![limit(5.); 20];
     rows.push(limit(1.));
@@ -606,13 +708,33 @@ fn legacy_later_native_batch_row_is_not_prevalidated_against_minimum() {
 
 #[test]
 fn legacy_protective_child_native_bounds_are_not_a_new_gate() {
+    // TS okx.exchange.ts:1758-1763,2181-2200: pin released native writes, without a new gate.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:669 per-lot TP/SL child validation
     let mut product = instrument();
     product["maxStopSz"] = json!("3");
     let mut row = limit(10.);
     row["stopLoss"] = json!(36000);
     row["takeProfit"] = json!(42000);
     let (seen, requests) = finish(&mut ready(product), vec![row]);
-    assert!(requests > 0);
-    assert!(seen.iter().any(|(_, row)| row["sz"] == "1"));
-    assert!(seen.iter().any(|(_, row)| row["slTriggerPx"] == "36000"));
+    assert_eq!(requests, 3);
+    assert_eq!(seen.len(), 6);
+    assert!(
+        seen[..4]
+            .iter()
+            .all(|(path, _)| path.ends_with("/batch-orders"))
+    );
+    assert_eq!(
+        seen[..4]
+            .iter()
+            .map(|(_, row)| row["sz"].as_str().expect("size"))
+            .collect::<Vec<_>>(),
+        vec!["3", "3", "3", "1"]
+    );
+    assert!(
+        seen[4..]
+            .iter()
+            .all(|(path, row)| path.ends_with("/order-algo") && row["sz"] == "10")
+    );
+    assert_eq!(seen[4].1["slTriggerPx"], "36000");
+    assert_eq!(seen[5].1["tpTriggerPx"], "42000");
 }

@@ -687,8 +687,8 @@ impl Okx {
             }
         }
         let mut regular = Vec::new();
-        let mut brackets = Vec::new();
         let mut algos = Vec::new();
+        let mut derived = Vec::new();
         for o in orders {
             if is_algo(o.kind) {
                 algos.push(o);
@@ -722,40 +722,7 @@ impl Okx {
                 let size = remaining.min(max);
                 let payload = self.order_payload(cx, &o, size)?;
                 count += 1;
-                if bracket {
-                    // Protect each accepted lot before another entry can fail.
-                    brackets.push(placement_step(
-                        "/api/v5/trade/batch-orders",
-                        &[payload],
-                        1,
-                        true,
-                    )?);
-                    for (kind, price) in [
-                        (OrderType::StopLoss, o.stop_loss),
-                        (OrderType::TakeProfit, o.take_profit),
-                    ] {
-                        if let Some(price) = price.filter(|v| *v != 0.0) {
-                            let mut leg = o.clone();
-                            leg.kind = kind;
-                            leg.side = o.side.opposite();
-                            leg.amount = size;
-                            leg.price = Some(price);
-                            leg.client_order_id = None;
-                            leg.stop_loss = None;
-                            leg.take_profit = None;
-                            leg.reduce_only = Some(true);
-                            let payload = self.order_payload(cx, &leg, size)?;
-                            brackets.push(placement_step(
-                                "/api/v5/trade/order-algo",
-                                &payload,
-                                1,
-                                true,
-                            )?);
-                        }
-                    }
-                } else {
-                    regular.push(payload);
-                }
+                regular.push(payload);
                 remaining = num::adjust(remaining - size, m.precision.amount);
             }
             if o.client_order_id.is_some() && count != 1 {
@@ -763,7 +730,27 @@ impl Okx {
                     "Caller client order ID requires exactly one plain native order".into(),
                 );
             }
+            if bracket {
+                // Legacy TS derives full-input protection after formatting all entry lots.
+                for (kind, price) in [
+                    (OrderType::StopLoss, o.stop_loss),
+                    (OrderType::TakeProfit, o.take_profit),
+                ] {
+                    if let Some(price) = price.filter(|v| *v != 0.0) {
+                        let mut leg = o.clone();
+                        leg.kind = kind;
+                        leg.side = o.side.opposite();
+                        leg.price = Some(price);
+                        leg.client_order_id = None;
+                        leg.stop_loss = None;
+                        leg.take_profit = None;
+                        leg.reduce_only = Some(true);
+                        derived.push(leg);
+                    }
+                }
+            }
         }
+        algos.extend(derived);
         algos.sort_by_key(|o| match o.kind {
             OrderType::StopLoss => 0,
             OrderType::TrailingStopLoss => 1,
@@ -784,7 +771,6 @@ impl Okx {
                 true,
             )?);
         }
-        steps.extend(brackets);
         for payload in algos {
             steps.push(placement_step(
                 "/api/v5/trade/order-algo",
