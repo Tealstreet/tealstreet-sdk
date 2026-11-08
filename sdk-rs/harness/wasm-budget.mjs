@@ -225,7 +225,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_864_704,
   bitunix: 1_874_944,
   blofin: 2_015_232,
-  bybit: 2_281_472,
+  bybit: 2_310_144,
   coinbase: 1_953_792,
   cryptocom: 1_779_712,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
