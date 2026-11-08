@@ -1600,7 +1600,7 @@ fn an_amend_below_the_venue_minimum_value_is_refused_before_any_cancel() {
         command: 1,
         id: "1".into(),
         price: Some(1.0),
-        amount: None,
+        amount: Some(0.001),
     });
     let error = h.done[0].1.clone().unwrap_err();
     assert!(error.contains("the order is unchanged"), "{error}");

@@ -271,6 +271,23 @@ fn split_preflight_invalid_amend_plan_never_modifies_or_cancels() {
 }
 
 #[test]
+fn split_preflight_floors_off_step_caps_and_never_loses_a_finite_maximum() {
+    for uta in [false, true] {
+        let mut h = harness(uta, 0.1, 0.95, 0.1, 0.0);
+        place(&mut h, vec![order(1.8)]);
+        let rows = settle(&mut h, uta);
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter()
+                .all(|row| row[if uta { "qty" } else { "size" }] == "0.9")
+        );
+        let mut h = harness(uta, 0.0, 1e300, 1e292, 0.0);
+        place(&mut h, vec![order(1e306)]);
+        refused(&h);
+    }
+}
+
+#[test]
 fn split_preflight_existing_valid_batches_place_every_element_once() {
     for uta in [false, true] {
         let mut h = harness(uta, 2.0, 3.0, 1.0, 5.0);

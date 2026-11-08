@@ -21,6 +21,9 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+mod validation;
+use validation::{NativeRules, QuantityMode, split_sizes, validate_write, wire_price};
+
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
 /// Native wait for Classic/UTA account detection (scoped engine condition wait).
@@ -333,6 +336,8 @@ struct CancelId {
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Payload {
+    #[serde(skip)]
+    native_rules: Option<NativeRules>,
     /// Local diagnostic custody only; never part of signed native bytes.
     #[serde(skip)]
     close_diagnostic: Option<crate::telemetry::CloseRequest>,
@@ -784,7 +789,7 @@ impl BitgetFutures {
                 job.positions_checked = true;
             }
             if let Err(error) = self.plan_job(cx, job) {
-                return Step::Fail(not_sent(error));
+                return Step::Fail(not_sent(error).kind(ErrorKind::InvalidInput));
             }
             self.warn_stop_downgrade(cx, job);
             job.planned = true;
@@ -1655,6 +1660,14 @@ impl BitgetFutures {
             }
             _ => return Err("unsupported Bitget trading command".into()),
         }
+        for call in job
+            .calls
+            .iter()
+            .chain(job.fallback.iter().flatten())
+            .chain(job.rollback.iter())
+        {
+            validate_write(call).map_err(|error| error.message)?;
+        }
         Ok(())
     }
 
@@ -1809,38 +1822,20 @@ impl BitgetFutures {
         for o in orders.iter().filter(|o| !is_algo(o.kind)) {
             let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
             let total = num::adjust(o.amount, m.precision.amount);
-            // TS drops an order that rounds below one lot. Explicit caller ids
-            // were rejected in preflight because dropping cannot honor them.
-            if total <= 0.0 {
-                continue;
-            }
-            let cap = self
-                .order_caps
-                .get(&o.symbol)
-                .map_or(m.limits.amount.max, |caps| {
-                    caps.for_order(m.limits.amount.max, o.kind == OrderType::Market)
-                });
-            let max = if cap > 0.0 && cap.is_finite() {
-                floor_lot(cap, m.precision.amount)
-            } else if cap == f64::INFINITY {
-                total
-            } else {
-                return Err("Bitget market has no valid maximum order quantity".into());
-            };
-            if max <= 0.0 {
-                return Err("Bitget maximum size is smaller than one lot".into());
-            }
-            let mut left = total;
-            let count = (total / max).ceil() as usize;
-            if o.client_order_id.is_some() && count > 1 {
+            let rules = self.native_row_rules(cx, o)?;
+            let price = o
+                .price
+                .filter(|_| rules.limit)
+                .map(|price| wire_price(price, rules.tick))
+                .transpose()
+                .map_err(|error| error.message)?;
+            let minimum = rules.minimum(price).map_err(|error| error.message)?;
+            let sizes = split_sizes(total, minimum, rules.max, rules.step)
+                .map_err(|error| error.message)?;
+            if o.client_order_id.is_some() && sizes.len() > 1 {
                 return Err("Bitget caller clientOrderId would split across native orders".into());
             }
-            if count > 10_000 {
-                return Err("Bitget order exceeds the split bound".into());
-            }
-            while left > 0.0 {
-                let size = left.min(max);
-                left = num::adjust(left - size, m.precision.amount);
+            for size in sizes {
                 let payload = self.normal_payload(cx, o, size)?;
                 if self.account.uta {
                     calls.push(Planned {
@@ -1898,6 +1893,40 @@ impl BitgetFutures {
         Ok(calls)
     }
 
+    fn native_row_rules(
+        &self,
+        cx: &Cx<'_, Pending>,
+        o: &PlaceOrderOpts,
+    ) -> Result<NativeRules, String> {
+        let market = cx.store.market(&o.symbol).ok_or("unknown market")?;
+        let cap = self
+            .order_caps
+            .get(&o.symbol)
+            .map_or(market.limits.amount.max, |caps| {
+                caps.for_order(
+                    market.limits.amount.max,
+                    o.kind == OrderType::Market || is_algo(o.kind),
+                )
+            });
+        Ok(NativeRules {
+            min: market.limits.amount.min,
+            max: cap,
+            step: market.precision.amount,
+            tick: market.precision.price,
+            min_value: self
+                .trading
+                .min_order_value
+                .get(&o.symbol)
+                .copied()
+                .unwrap_or(0.0),
+            market_price: cx.store.ticker(&o.symbol).map(|ticker| ticker.last),
+            inverse: self.inverse(),
+            reduce_only: o.reduce_only == Some(true) || is_algo(o.kind),
+            limit: o.kind == OrderType::Limit,
+            quantity: QuantityMode::Required,
+        })
+    }
+
     fn normal_payload(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1908,6 +1937,7 @@ impl BitgetFutures {
         let reduce = o.reduce_only.unwrap_or(false);
         let hedge = cx.store.hedged();
         let mut p = Payload {
+            native_rules: Some(self.native_row_rules(cx, o)?),
             client_oid: Some(o.client_order_id.clone().map_or_else(|| mint(cx), Ok)?),
             price: o
                 .price
@@ -1998,6 +2028,11 @@ impl BitgetFutures {
         let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
         let (plan, size) = self.plan_size(cx, o)?;
         let mut p = self.classic(cx, &o.symbol)?;
+        let mut rules = self.native_row_rules(cx, o)?;
+        if size == 0.0 && o.kind != OrderType::TrailingStopLoss {
+            rules.quantity = QuantityMode::FullPosition;
+        }
+        p.native_rules = Some(rules);
         p.client_oid = Some(mint(cx)?);
         p.reduce_only = (!cx.store.hedged()).then_some("YES");
         p.trigger_price = o.price.map(|v| number(v, m.precision.price));
@@ -2104,6 +2139,7 @@ impl BitgetFutures {
             return Ok(diagnostic_payload(
                 o,
                 Payload {
+                    native_rules: Some(self.native_row_rules(cx, o)?),
                     category: Some(self.product().to_uppercase()),
                     symbol: Some(o.symbol.clone()),
                     kind: Some("trailing_stop"),
@@ -2155,6 +2191,13 @@ impl BitgetFutures {
                 .map_or(0.0, |p| num::adjust(p.contracts, m.precision.amount));
         }
         let mut p = Payload {
+            native_rules: Some({
+                let mut rules = self.native_row_rules(cx, o)?;
+                if size == 0.0 {
+                    rules.quantity = QuantityMode::FullPosition;
+                }
+                rules
+            }),
             category: Some(self.product().to_uppercase()),
             symbol: Some(o.symbol.clone()),
             kind: Some("tpsl"),
@@ -2445,6 +2488,13 @@ impl BitgetFutures {
                         new_size: amount.map(|_| num::format(next_amount)),
                         new_trigger_price: price.map(|_| num::format(next_price)),
                         new_callback_ratio: Some(num::format(ratio)),
+                        native_rules: Some({
+                            let mut rules = self.native_row_rules(cx, &opts)?;
+                            if amount.is_none() {
+                                rules.quantity = QuantityMode::Unchanged;
+                            }
+                            rules
+                        }),
                         ..Payload::default()
                     },
                 ),
@@ -2454,6 +2504,13 @@ impl BitgetFutures {
         }
         if standalone && !self.account.uta {
             let mut p = self.classic(cx, &order.symbol)?;
+            let mut rules = self.native_row_rules(cx, &place_opts(&order))?;
+            rules.quantity = if order.amount == 0.0 {
+                QuantityMode::FullPosition
+            } else {
+                QuantityMode::Required
+            };
+            p.native_rules = Some(rules);
             p.order_id = Some(native_id(&order));
             p.trigger_price = Some(num::format(next_price));
             p.trigger_type = Some(trigger(order.trigger_type));
@@ -2500,6 +2557,9 @@ impl BitgetFutures {
             && attached.is_some_and(|parent| parent.filled == 0.0)
         {
             let mut payload = self.classic(cx, &order.symbol)?;
+            let mut rules = self.native_row_rules(cx, &place_opts(&order))?;
+            rules.quantity = QuantityMode::Unchanged;
+            payload.native_rules = Some(rules);
             payload.order_id = Some(native_id(&order));
             payload.new_client_oid = Some(mint(cx)?);
             payload.new_preset_stop_loss_price = attached
@@ -2548,6 +2608,7 @@ impl BitgetFutures {
                 );
             }
             let mut payload = Payload {
+                native_rules: Some(self.native_row_rules(cx, &place_opts(&order))?),
                 order_id: Some(native_id(&order)),
                 qty: Some(num::format(next_amount)),
                 ..Payload::default()
@@ -2650,9 +2711,17 @@ impl BitgetFutures {
                     "full"
                 });
                 original.qty = (order.amount > 0.0).then(|| num::format(order.amount));
+                if order.amount == 0.0
+                    && let Some(rules) = original.native_rules.as_mut()
+                {
+                    rules.quantity = QuantityMode::FullPosition;
+                }
                 if order.amount == 0.0 && amount.is_none_or(|amount| amount == 0.0) {
                     next.tpsl_mode = Some("full");
                     next.qty = None;
+                    if let Some(rules) = next.native_rules.as_mut() {
+                        rules.quantity = QuantityMode::FullPosition;
+                    }
                 }
             }
             if order.kind != OrderType::TrailingStopLoss {
@@ -2713,18 +2782,22 @@ impl BitgetFutures {
                 quote: None,
             });
         }
+        let single_replacement = replacement.len() == 1;
         let mut fallback: VecDeque<_> = self.cancel_calls(cx, &linked, false)?.into();
         fallback.extend(replacement);
         if !standalone
             && order.kind == OrderType::Limit
             && attached.is_some_and(|_| linked.len() == 1)
             && !self.account.uta
+            && single_replacement
+            && next_amount <= self.native_row_rules(cx, &opts)?.max
         {
             if next_amount <= 0.0 {
                 return Err("Bitget amended size must be positive".into());
             }
             let client = mint(cx)?;
             let payload = Payload {
+                native_rules: Some(self.native_row_rules(cx, &opts)?),
                 symbol: Some(order.symbol.clone()),
                 product_type: Some(self.product().into()),
                 order_id: Some(order.id.clone()),
