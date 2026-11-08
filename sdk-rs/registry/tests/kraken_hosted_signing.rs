@@ -21,6 +21,130 @@ fn custody() -> (safe_cex_crypto::signer::LocalSigner, Identities) {
     )
 }
 
+struct PublicStartup;
+impl safe_cex_venues::Visit for PublicStartup {
+    type Output = ();
+    fn visit<V: safe_cex_engine::Venue + 'static>(self, mut engine: safe_cex_engine::Engine<V>) {
+        use safe_cex_engine::{Action, Event, Response};
+        engine.start(support::NOW);
+        let mut instruments = false;
+        let mut tickers = false;
+        for _ in 0..5 {
+            for action in safe_cex_engine::test_support::prepared_actions(&mut engine, support::NOW)
+            {
+                if let Action::Http(request) = action {
+                    assert!(!request.headers.iter().any(|(name, _)| {
+                        name.eq_ignore_ascii_case("APIKey") || name.eq_ignore_ascii_case("Authent")
+                    }));
+                    let body = if request.url.ends_with("/instruments") {
+                        instruments = true;
+                        support::META
+                    } else {
+                        assert!(request.url.ends_with("/tickers"), "{}", request.url);
+                        tickers = true;
+                        support::TICKERS
+                    };
+                    engine.handle(
+                        support::NOW,
+                        Event::HttpResponse {
+                            request: request.id,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+            }
+        }
+        assert!(instruments, "public startup must fetch instruments");
+        assert!(tickers, "public startup must fetch tickers");
+    }
+}
+
+fn public_startup_with_saved_key(key: &str) {
+    let options = serde_json::from_value(serde_json::json!({
+        "publicDataOnly": true, "accountStartup": true, "key": key, "secret": ""
+    }))
+    .unwrap();
+    safe_cex_venues::build(
+        "kraken",
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(5)),
+        PublicStartup,
+    )
+    .expect("unused saved credentials must not block public startup");
+}
+
+#[test]
+fn public_startup_with_saved_blank_credentials_reaches_http() {
+    public_startup_with_saved_key("");
+}
+
+#[test]
+fn public_startup_with_saved_key_only_credentials_reaches_http() {
+    public_startup_with_saved_key("fixture-key");
+}
+
+fn injected_primary_options(public_data_only: bool) -> safe_cex_venues::EngineOptions {
+    serde_json::from_value(serde_json::json!({
+        "publicDataOnly": public_data_only,
+        "signing": Identities {
+            primary: Some(Identity::new(
+                KeyRef("fixture-public-ref".into()),
+                Some(KeyRef("fixture-signing-ref".into())),
+            )),
+            secondary: None,
+        },
+    }))
+    .unwrap()
+}
+
+#[test]
+fn public_startup_ignores_unused_primary_refs_without_provider() {
+    safe_cex_venues::build_with_signer(
+        "kraken",
+        injected_primary_options(true),
+        Some(safe_cex_engine::test_support::seeded_entropy(5)),
+        None,
+        PublicStartup,
+    )
+    .expect("public startup must not require an unused primary provider");
+}
+
+#[test]
+fn private_startup_still_requires_primary_provider() {
+    let error = safe_cex_venues::build_with_signer(
+        "kraken",
+        injected_primary_options(false),
+        Some(safe_cex_engine::test_support::seeded_entropy(5)),
+        None,
+        PublicStartup,
+    )
+    .expect_err("private startup must require its primary provider");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert_eq!(error.message, "Engine signing provider is required");
+}
+
+#[test]
+fn private_startup_still_refuses_incomplete_saved_credentials() {
+    for key in ["", "fixture-key"] {
+        let options = serde_json::from_value(serde_json::json!({
+            "publicDataOnly": false, "key": key, "secret": ""
+        }))
+        .unwrap();
+        let error = safe_cex_venues::build(
+            "kraken",
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(5)),
+            PublicStartup,
+        )
+        .expect_err("private startup must validate incomplete saved credentials");
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    }
+}
+
 #[test]
 fn device_resolves_sha256_then_sha512_with_its_owned_material() {
     let (signer, ids) = custody();

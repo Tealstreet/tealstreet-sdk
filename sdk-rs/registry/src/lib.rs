@@ -1679,7 +1679,10 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "kraken")]
         "kraken" => {
-            let identities = options.signing.take().unwrap_or_default();
+            let mut identities = options.signing.take().unwrap_or_default();
+            if options.public_data_only {
+                identities.primary = None;
+            }
             for identity in [&identities.primary, &identities.secondary]
                 .into_iter()
                 .flatten()

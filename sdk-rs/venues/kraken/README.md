@@ -9,6 +9,10 @@ signing failures before transport remain NotSent, and ambiguous writes stay
 Unknown. The public `Kraken::new` local compatibility constructor is retained;
 registry construction uses `Kraken::with_signing` with opaque refs only.
 
+Native public-only startup discards unused primary identities before validation,
+so saved blank or key-only primary fields do not block unauthenticated market
+data. Private primary and secondary read credentials retain their validation.
+
 REST signs the exact encoded form, optional frozen decimal nonce and path (without the
 `/derivatives` prefix) with SHA256 followed by HMAC-SHA512. WS signs SHA256 of
 the challenge with the same MAC. See Kraken's [REST authentication](https://support.kraken.com/ca/articles/360022635592-generate-authentication-strings-rest-api-derivatives)

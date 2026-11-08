@@ -977,6 +977,20 @@ mod input_parse_tests {
             ));
         }
         for (format, input) in [
+            #[cfg(feature = "kraken")]
+            (
+                "kraken-sha512",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"kraken-sha512"}"#,
+            ),
+            #[cfg(feature = "kraken")]
+            ("kraken-sha512", r#"["wsAuth","x","kraken-sha512"]"#),
+            #[cfg(feature = "kraken")]
+            (
+                "kraken-challenge",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"kraken-challenge"}"#,
+            ),
+            #[cfg(feature = "kraken")]
+            ("kraken-challenge", r#"["wsAuth","x","kraken-challenge"]"#),
             #[cfg(feature = "backpack")]
             (
                 "backpack-ed25519",
@@ -1015,6 +1029,10 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    #[cfg(feature = "kraken")]
+                    OutputFormat::KrakenSha512 => "kraken-sha512",
+                    #[cfg(feature = "kraken")]
+                    OutputFormat::KrakenChallenge => "kraken-challenge",
                     #[cfg(feature = "backpack")]
                     OutputFormat::BackpackEd25519 => "backpack-ed25519",
                     OutputFormat::KucoinBatch => "kucoin-batch",
