@@ -10,6 +10,8 @@ use support::Options;
 struct Harness {
     engine: Engine<AsterDex>,
     requests: Vec<HttpRequest>,
+    sent_requests: usize,
+    sent_writes: usize,
     done: Vec<(u32, Result<String, String>)>,
     failures: Vec<(u32, safe_cex_engine::VenueError)>,
 }
@@ -57,6 +59,8 @@ impl Harness {
         Self {
             engine,
             requests: Vec::new(),
+            sent_requests: 0,
+            sent_writes: 0,
             done: Vec::new(),
             failures: Vec::new(),
         }
@@ -64,7 +68,11 @@ impl Harness {
     fn collect(&mut self) {
         for action in support::drain(&mut self.engine, 1700000000000.0).into_iter() {
             match action {
-                Action::Http(request) => self.requests.push(request),
+                Action::Http(request) => {
+                    self.sent_requests += 1;
+                    self.sent_writes += usize::from(request.method != Method::Get);
+                    self.requests.push(request);
+                }
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, Ok(result)))
                 }
@@ -241,15 +249,21 @@ fn bracket_splits_regular_first_then_sequential_conditional_children() {
         assert!(request.url.contains("type=LIMIT"));
         h.reply(request, &format!(r#"{{"orderId":{}}}"#, index + 1));
     }
-    let sl = h.take(Method::Post);
-    assert!(sl.url.contains("side=SELL&type=STOP_MARKET&quantity=5.001&reduceOnly=true&stopPrice=9000.1&workingType=MARK_PRICE"),"{}",sl.url);
-    h.reply(sl, r#"{"orderId":4}"#);
-    let tp = h.take(Method::Post);
-    assert!(tp.url.contains("type=TAKE_PROFIT_MARKET&quantity=5.001&reduceOnly=true&stopPrice=9500.1&workingType=CONTRACT_PRICE"),"{}",tp.url);
-    h.reply(tp, r#"{"orderId":5}"#);
+    let mut id = 4;
+    for (kind, trigger, working) in [
+        ("STOP_MARKET", "9000.1", "MARK_PRICE"),
+        ("TAKE_PROFIT_MARKET", "9500.1", "CONTRACT_PRICE"),
+    ] {
+        for amount in ["2", "2", "1.001"] {
+            let child = h.take(Method::Post);
+            assert!(child.url.contains(&format!("side=SELL&type={kind}&quantity={amount}&reduceOnly=true&stopPrice={trigger}&workingType={working}")), "{}", child.url);
+            h.reply(child, &format!(r#"{{"orderId":{id}}}"#));
+            id += 1;
+        }
+    }
     assert_eq!(
         h.result(1).as_ref().unwrap(),
-        "[\"1\",\"2\",\"3\",\"4\",\"5\"]"
+        "[\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"]"
     );
 }
 #[test]
@@ -352,9 +366,9 @@ fn a_refused_order_fails_the_command_and_names_the_placed_one() {
         ],
     });
     let first = h.take(Method::Post);
-    h.reply(first, r#"{"code":-2010,"msg":"insufficient margin"}"#);
+    h.reply(first, r#"{"orderId":22542179}"#);
     let second = h.take(Method::Post);
-    h.reply(second, r#"{"orderId":22542179}"#);
+    h.reply(second, r#"{"code":-2010,"msg":"insufficient margin"}"#);
     assert!(h.result(1).is_err());
     let error = &h.failures.last().unwrap().1;
     assert_eq!(error.partial.as_ref().unwrap().order_ids, ["22542179"]);
@@ -592,7 +606,7 @@ fn malformed_ack_is_not_success_and_ambiguous_write_is_never_retried() {
 }
 
 #[test]
-fn a_locally_invalid_order_still_sends_the_valid_one_and_names_it() {
+fn a_locally_invalid_order_refuses_the_whole_batch() {
     let mut h = Harness::new();
     let mut invalid = limit();
     invalid["symbol"] = json!("UNKNOWN");
@@ -603,11 +617,11 @@ fn a_locally_invalid_order_still_sends_the_valid_one_and_names_it() {
             serde_json::from_value(limit()).unwrap(),
         ],
     });
-    let valid = h.take(Method::Post);
-    h.reply(valid, r#"{"orderId":22542179}"#);
+    assert!(h.requests.is_empty());
     assert!(h.result(1).is_err());
     let error = &h.failures.last().unwrap().1;
-    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["22542179"]);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert!(error.partial.is_none());
 }
 
 #[test]
@@ -1402,6 +1416,11 @@ fn market_orders_split_at_the_market_lot_maximum_and_limits_at_the_lot_maximum()
                 Harness::new()
             };
             h.load(BTC_INFO);
+            h.engine.store_mut().set_tickers(vec![Ticker {
+                symbol: "BTCUSDT".into(),
+                mark: 70000.0,
+                ..Ticker::default()
+            }]);
             h.place(json!({"symbol":"BTCUSDT","type":"market","side":"sell","amount":250.0,"reduceOnly":reduce_only}));
             assert_eq!(
                 quantities(&mut h),
@@ -1427,6 +1446,11 @@ fn a_market_split_keeps_every_chunk_on_the_market_lot_step_and_minimum() {
     );
     let mut h = Harness::new();
     h.load(&info);
+    h.engine.store_mut().set_tickers(vec![Ticker {
+        symbol: "BTCUSDT".into(),
+        mark: 70000.0,
+        ..Ticker::default()
+    }]);
     h.place(json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":240.024}));
     assert_eq!(quantities(&mut h), ["120", "119.97", "0.05"]);
     h.place(
@@ -1547,3 +1571,6 @@ fn engine_ambiguity_429_timestamp_cannot_resend() {
         );
     }
 }
+
+#[path = "support/split_preflight.rs"]
+mod split_preflight;
