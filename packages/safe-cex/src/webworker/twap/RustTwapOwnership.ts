@@ -100,11 +100,15 @@ export class RustTwapOwnership {
         refused = true;
         continue;
       }
+      if (ownerSession !== undefined && ownerId === undefined) {
+        this.cancelForOwnerChange(id, symbol, 'persisted ownerId is missing');
+        continue;
+      }
       const row: PendingRow = {
         options: options!,
         state: state!,
         ownerSession,
-        ...(ownerId !== undefined ? { ownerId } : ownerSession ? { ownerId: ownerSession.ownerId } : {}),
+        ...(ownerId !== undefined ? { ownerId } : {}),
       };
       if (!this.ownerCurrent(row)) {
         this.cancelForOwnerChange(id, symbol);
@@ -201,10 +205,13 @@ export class RustTwapOwnership {
     );
   }
 
-  private cancelForOwnerChange(id: string, symbol: string) {
+  private cancelForOwnerChange(id: string, symbol: string, reason?: string) {
     this.pending.delete(id);
     this.release(id);
-    this.exchange.emitter.emit('warning', `TWAP ${symbol} restore cancelled-for-owner-change`);
+    this.exchange.emitter.emit(
+      'warning',
+      `TWAP ${symbol} restore cancelled-for-owner-change${reason ? `: ${reason}` : ''}`,
+    );
     this.publish();
   }
 

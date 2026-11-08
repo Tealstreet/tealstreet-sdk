@@ -7,6 +7,7 @@ import type { TwapState } from '../twap/TwapState';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { handlerArgs, rustAlgoExchange } from '../../__tests__/fixtures/rustAlgoExchange';
+import nativeOwnerState from '../../__tests__/fixtures/twap-owner-state.json';
 import { OrderSide } from '../../types';
 import { TwapInstance } from '../twap/TwapInstance';
 import { setTwapLockManager } from '../twap/twapLock';
@@ -268,4 +269,63 @@ it('fails closed for an owned row when the host supplies no owner check', async 
   expect(h.slices).toEqual([]);
   expect(h.exchange.algoOp).not.toHaveBeenCalled();
   expect(h.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT restore cancelled-for-owner-change');
+});
+
+it.each(['A', 'B'])('refuses an untagged row under owner %s without inventing ownership', async (ownerId) => {
+  const h = harness();
+  h.setOwner({ ownerId, generation: 2 });
+  const { ownerId: _oldOwner, ...untagged } = restored(false);
+  handler.handle({ op: 'twap:state', data: [untagged] } as StoreWorkerPayload);
+  h.lockGrant.resolve();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(h.slices).toEqual([]);
+  expect(h.adopted).toEqual([]);
+  expect(h.exchange.emitter.emit).toHaveBeenCalledWith(
+    'warning',
+    'TWAP BTCUSDT restore cancelled-for-owner-change: persisted ownerId is missing',
+  );
+});
+
+it('keeps an A native persistence snapshot tagged through receive before B tries to restore it', async () => {
+  const a = harness();
+  // Rust's restored_owner_round_trip_matches_the_worker_fixture pins this exact serialize_state output.
+  a.exchange.listeners.get('twap:stateUpdate')?.(structuredClone(nativeOwnerState));
+  expect(a.postMessage).toHaveBeenLastCalledWith({ op: 'twap:stateUpdate', data: nativeOwnerState });
+  handler.dispose();
+  a.lockGrant.resolve();
+  const b = harness();
+  b.setOwner({ ownerId: 'B', generation: 2 });
+  const rows = Object.entries(nativeOwnerState).map(([id, row]) => ({ id, ...row }));
+  handler.handle({ op: 'twap:state', data: rows } as StoreWorkerPayload);
+  b.lockGrant.resolve();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(b.slices).toEqual([]);
+  expect(b.adopted).toEqual([]);
+  expect(b.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT restore cancelled-for-owner-change');
+});
+
+it('restores the native tagged A snapshot for the same owner with unchanged slices', async () => {
+  const h = harness();
+  const rows = Object.entries(structuredClone(nativeOwnerState)).map(([id, row]) => ({ id, ...row }));
+  handler.handle({ op: 'twap:state', data: rows } as StoreWorkerPayload);
+  h.lockGrant.resolve();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(h.slices).toEqual([
+    { amount: 0.15, at: 1700000000000 },
+    { amount: 0.15, at: 1700000000300 },
+  ]);
+  expect(h.exchange.emitter.emit).not.toHaveBeenCalled();
+});
+
+it('keeps untagged restores only in a legacy single-user context without a provider', async () => {
+  const h = harness('missing', false);
+  const { ownerId: _owner, ...untagged } = restored(false);
+  handler.handle({ op: 'twap:state', data: [untagged] } as StoreWorkerPayload);
+  h.lockGrant.resolve();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(h.slices).toEqual([
+    { amount: 0.15, at: 1700000000000 },
+    { amount: 0.15, at: 1700000000300 },
+  ]);
+  expect(h.adopted[0]).not.toHaveProperty('ownerId');
 });
