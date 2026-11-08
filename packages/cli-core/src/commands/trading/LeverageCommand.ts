@@ -3,6 +3,7 @@ import { CommandCategory, type CommandContext, type CommandResult } from '../Com
 
 /**
  * `leverage` / `lev`            — show current leverage for the active symbol.
+ * `lev <symbol>`               — show leverage for a loaded symbol.
  * `leverage <n>` / `lev <n>`    — set leverage for the active symbol.
  *
  * Showing leverage is read from the open position if any. Most exchanges
@@ -16,7 +17,7 @@ export class LeverageCommand extends TradingBaseCommand {
   readonly description = 'Show or set leverage for the active symbol';
   readonly category = CommandCategory.Trading;
   readonly aliases = ['lev'];
-  readonly examples = ['leverage', 'lev', 'lev 5', 'leverage 10 ETHUSDT'];
+  readonly examples = ['leverage', 'lev', 'lev BTCUSDT', 'lev 5', 'leverage 10 ETHUSDT'];
   readonly requiresConnection = true;
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
@@ -28,6 +29,14 @@ export class LeverageCommand extends TradingBaseCommand {
     const args = this.getRawArgs(ctx);
     if (args.some(arg => arg === 'isolated' || arg === 'cross')) {
       return this.error('lev does not set margin mode; use lev <n> [SYMBOL]. Nothing was changed.');
+    }
+    const readSymbol = args[1] && args[1] !== 'show'
+      ? this.validateSymbols(exchange, [args[1]])[0]
+      : undefined;
+    if (readSymbol) {
+      const invalid = this.refuseUnknownArgs(ctx, [1]);
+      if (invalid) return invalid;
+      return this.printLeverage(ctx, readSymbol, exchange);
     }
     if (args[1] && !/\d/.test(args[1]) && args[1] !== 'show') {
       return this.error(this.unknownOrderArgument(args[1]));

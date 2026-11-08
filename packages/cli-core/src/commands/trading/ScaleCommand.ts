@@ -21,6 +21,7 @@ interface ParsedScaleCommand {
   allowTaker: boolean;
   reduceOnly: boolean;
   symbol?: string;
+  unexpectedArgument?: string;
 }
 
 /**
@@ -83,13 +84,7 @@ export class ScaleCommand extends TradingBaseCommand {
     }
 
     const symbol = tokens.shift();
-    if (symbol && (SUPPORTED_MODIFIERS.includes(symbol) || RESERVED_MODIFIERS.includes(symbol))) {
-      return `${this.unknownOrderArgument(symbol!)} modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
-    }
-    if (tokens.length > 0) {
-      return `${this.unknownOrderArgument(symbol!)} modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
-    }
-    return { allowTaker, reduceOnly, ...(symbol ? { symbol } : {}) };
+    return { allowTaker, reduceOnly, symbol, unexpectedArgument: tokens[0] };
   }
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
@@ -123,6 +118,10 @@ export class ScaleCommand extends TradingBaseCommand {
         );
       }
       targetSymbol = resolvedSymbol;
+    }
+
+    if (parsedCommand.unexpectedArgument) {
+      return this.error(this.unknownOrderArgument(parsedCommand.unexpectedArgument));
     }
 
     const { allowTaker, reduceOnly } = parsedCommand;

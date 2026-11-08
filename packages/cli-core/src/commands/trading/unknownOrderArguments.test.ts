@@ -459,3 +459,58 @@ it('keeps leverage show in its read-operation slot with a loaded SHOW alias', as
   expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-log', { message: expect.stringContaining('BTCUSDT: 1x') });
   expect(write).not.toHaveBeenCalled();
 });
+
+describe('leverage symbol reads and scale leftover diagnostics', () => {
+  it.each([
+    ['lev BTCUSDT', 'BTCUSDT', 1],
+    ['lev BTC', 'BTCUSDT', 1],
+    ['leverage btc', 'BTCUSDT', 1],
+    ['lev SOLUSDT', 'SOLUSDT', 7],
+    ['lev show SOLUSDT', 'SOLUSDT', 7],
+    ['lev show BTCUSDT', 'BTCUSDT', 1],
+    ['lev 1000PEPEUSDT', '1000PEPEUSDT', 3],
+  ])('reads the resolved loaded symbol without writes: %s', async (command, symbol, leverage) => {
+    const { run, write, exchange } = fixture(true);
+    const store = exchange.store!;
+    store.markets!.push({ ...store.markets![0], symbol: '1000PEPEUSDT', base: '1000PEPE' });
+    store.tickers!.push({ ...store.tickers![0], symbol: '1000PEPEUSDT' });
+    store.positions!.push(
+      { ...store.positions![0], symbol: 'SOLUSDT', leverage: 7 },
+      { ...store.positions![0], symbol: '1000PEPEUSDT', leverage: 3 },
+    );
+    expect((await run(command)).success).toBe(true);
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-log', { message: `${symbol}: ${leverage}x` });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it.each(['lev BTCUSDT extra', 'lev BTCUSDT SOLUSDT', 'lev surprise', 'lev BTCUSDT 50'])(
+    'refuses unknown or extra read operands: %s',
+    async (command) => {
+      const { run, write } = fixture(true);
+      const result = await run(command);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/unknown argument/i);
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['BTCUSDT extra', 'taker BTCUSDT extra', 'BTCUSDT extra another'])(
+    'names the unconsumed scale token after a valid symbol: %s',
+    async (tail) => {
+      const { run, write } = fixture(true);
+      const result = await run(`scale buy $500 into 5 from 75700 to 75800 ${tail}`);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Unknown argument "extra"');
+      expect(result.error).not.toContain('Unknown argument "BTCUSDT"');
+      expect(result.error).not.toContain('modifier');
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a scale with a loaded symbol valid', async () => {
+    const { run, write } = fixture(true);
+    expect((await run('scale buy $500 into 5 from 75700 to 75800 BTCUSDT')).success).toBe(true);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write.mock.calls[0][0]).toHaveLength(5);
+  });
+});

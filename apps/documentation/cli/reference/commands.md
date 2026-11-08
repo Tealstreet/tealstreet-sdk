@@ -380,6 +380,7 @@ Source: `NukeCommand.ts`.
 | Form                  | Result                            |
 | --------------------- | --------------------------------- |
 | `leverage`            | Read (only if a position is open) |
+| `lev BTCUSDT` / `lev show BTCUSDT` | Read a named loaded symbol |
 | `lev 5`               | Set 5x on focused symbol          |
 | `leverage 10 ETHUSDT` | Set 10x on named symbol           |
 

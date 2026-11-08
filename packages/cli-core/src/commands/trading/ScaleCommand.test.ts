@@ -142,10 +142,6 @@ describe('ScaleCommand — modifier honesty', () => {
       ['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'exponential', 'BTCUSDT'],
       'exponential',
     ],
-    [
-      ['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'bogus', 'BTCUSDT'],
-      'bogus',
-    ],
   ])('rejects an unimplemented modifier with the supported list (%s)', async (args, modifier) => {
     const ex = makeExchange();
     const r = await cmd.execute(ctx(args, ex));
@@ -153,6 +149,20 @@ describe('ScaleCommand — modifier honesty', () => {
     expect(r.error).toContain(`modifier '${modifier}' is not implemented; supported: reduce, taker`);
     expect(ex.placeOrders).not.toHaveBeenCalled();
   });
+
+  it.each([['bogus'], ['bogus', 'BTCUSDT']])(
+    'rejects an unknown symbol before any later token: %s',
+    async (...tail) => {
+      const ex = makeExchange();
+      const r = await cmd.execute(
+        ctx(['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', ...tail], ex),
+      );
+      expect(r.success).toBe(false);
+      expect(r.error).toContain('Unknown argument "bogus"');
+      expect(r.error).not.toContain('modifier');
+      expect(ex.placeOrders).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects `cubic` even when a CUBIC market resolves as a symbol (reserved keyword)', async () => {
     const ex = makeExchange();
