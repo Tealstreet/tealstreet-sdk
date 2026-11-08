@@ -291,6 +291,13 @@ fn runtime_failure_suffix(
         );
     } else {
         assert_eq!(error["outcome"], "unknown", "{error}");
+        assert!(
+            error["message"]
+                .as_str()
+                .expect("terminal message")
+                .contains(support::ENGINE_UNKNOWN_TEXT),
+            "{error}"
+        );
     }
     assert_eq!(error["partial"]["orderIds"], json!(["91"]));
     let elements = error["elements"]
@@ -302,6 +309,15 @@ fn runtime_failure_suffix(
     assert_eq!(elements[0]["orderIds"], json!(["91"]));
     for element in &elements[1..=second_rows] {
         assert_eq!(element["status"], expected);
+        if expected == "unknown" {
+            assert!(
+                element["error"]["message"]
+                    .as_str()
+                    .expect("element message")
+                    .contains(support::ENGINE_UNKNOWN_TEXT),
+                "{element}"
+            );
+        }
         assert_eq!(
             element["error"]["outcome"],
             if expected == "notSent" {

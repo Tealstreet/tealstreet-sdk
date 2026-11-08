@@ -128,6 +128,9 @@ impl Journal {
             .enumerate()
             .map(|(index, mut row)| {
                 row.element.index = index;
+                if let ElementResult::Unknown { error } = &mut row.result {
+                    error.message = ENGINE_UNKNOWN_TEXT.into();
+                }
                 row
             })
             .collect()
@@ -136,6 +139,7 @@ impl Journal {
     pub(super) fn failure(&self, mut error: VenueError) -> VenueError {
         if !self.writes.is_empty() {
             error.elements = Some(Box::new(ElementOutcomes(self.outcomes())));
+            error.message = terminal_failure_text(&error);
         }
         error
     }

@@ -20,6 +20,24 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
+// Canonical engine wording copied under the lead's venue-local literal rule.
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
+    if error.elements.as_ref().is_some_and(|rows| {
+        rows.iter().any(|row| {
+            matches!(
+                row.result,
+                safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+            )
+        })
+    }) {
+        ENGINE_UNKNOWN_TEXT.into()
+    } else {
+        error.message.clone()
+    }
+}
+
 #[derive(Default)]
 pub struct Trading {
     queue: VecDeque<Job>,

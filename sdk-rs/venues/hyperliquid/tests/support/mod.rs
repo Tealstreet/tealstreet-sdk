@@ -444,6 +444,8 @@ pub fn answer_order_status(e: &mut Engine<Hyperliquid>, r: &HttpRequest) {
     reply(e, r, 200, &reply_body);
 }
 
+pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
 pub fn assert_unknown_publication(
     error: &serde_json::Value,
     events: &[safe_cex_engine::log::LogEvent],
@@ -457,7 +459,7 @@ pub fn assert_unknown_publication(
         1,
         "Unknown telemetry must be emitted: {events:?}"
     );
-    let standard = "outcome is unknown. Check Open Orders, then try again";
+    let standard = ENGINE_UNKNOWN_TEXT;
     assert_eq!(error["outcome"], "unknown");
     assert!(
         error["message"]

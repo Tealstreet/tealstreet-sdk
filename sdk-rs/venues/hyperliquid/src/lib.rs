@@ -1366,6 +1366,9 @@ impl Venue for Hyperliquid {
     ) -> Result<(), VenueError> {
         self.protective_release_veto(store, pending, release)
     }
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::terminal_failure_text)
+    }
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         &[trading::PACING]
     }

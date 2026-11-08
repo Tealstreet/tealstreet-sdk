@@ -92,11 +92,7 @@ fn dispatched_ambiguity_covers_ordinary_and_protective_writes() {
                 let error = errors[0];
                 assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
                 assert_eq!(error.protection, None);
-                assert!(
-                    error.message.to_lowercase().contains("unknown"),
-                    "{error:?}"
-                );
-                assert!(error.message.contains("Check Open Orders"), "{error:?}");
+                assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
                 assert!(!error.message.contains("refused"), "{error:?}");
                 assert!(!error.message.contains("no stop"), "{error:?}");
                 assert!(
@@ -999,11 +995,25 @@ fn unlisted_settings_error_fences_the_next_queued_command() {
         r#"{"status":"err","response":"Cannot switch margin mode with open orders"}"#,
     );
     let actions = fire_timers(&mut e);
-    assert!(
-        actions
-            .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error }) if error.legacy_text() == "Cannot switch margin mode with open orders"))
+    let error = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
+            _ => None,
+        })
+        .expect("uncertain settings failure");
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("Cannot switch margin mode with open orders")
     );
+    let events = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) => Some(event.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_unknown_publication(&serde_json::to_value(error).expect("error"), &events, 1);
     assert!(
         !actions
             .iter()
