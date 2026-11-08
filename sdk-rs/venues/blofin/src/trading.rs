@@ -2614,7 +2614,13 @@ impl Blofin {
             active.job.amend_fallback.clear();
             return self.drive(cx, active, At::Data(&request.slot, &request.context));
         }
-        if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
+        let mut reconcile = false;
+        if let Err(error) =
+            self.write_answer(cx, &mut active.job, &request, &response, &mut reconcile)
+        {
+            if reconcile {
+                self.reconcile_orders(cx);
+            }
             if request.step.is_place() {
                 cx.store.invalidate_order_snapshots();
             }
@@ -2655,13 +2661,15 @@ impl Blofin {
         self.drive(cx, active, At::Data(&request.slot, &request.context))
     }
     /// Decodes one write answer, records its journal fact exactly once and
-    /// applies native Store effects. `Err` ends the job.
+    /// applies native Store effects. `Err` ends the job; any requested account
+    /// reconciliation is dispatched by the response handler after classification.
     fn write_answer(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         job: &mut Job,
         request: &Request,
         response: &Response<'_>,
+        reconcile: &mut bool,
     ) -> Result<(), VenueError> {
         let context = &request.context;
         let parsed = serde_json::from_str::<Reply<'_>>(response.body);
@@ -2675,12 +2683,13 @@ impl Blofin {
                 )
             });
             let native = detail.map(|(code, message)| native(code, message));
-            let error = if let Effect::Setting = &request.step.effect {
+            let mut error = if let Effect::Setting = &request.step.effect {
                 setting_failure(request.step.path, response.status, detail)
             } else {
                 http_failure(response.status, response.body)
             };
-            return Err(record_failed(cx, context, native, &error.message));
+            self.record_failed(cx, context, native, &mut error);
+            return Err(error);
         }
         let reply = match parsed {
             Ok(reply) => reply,
@@ -2701,12 +2710,14 @@ impl Blofin {
                 Verdict::Unknown(_)
             )
         {
-            return Err(record_failed(
+            let mut error = unknown(UNKNOWN_WRITE);
+            self.record_failed(
                 cx,
                 context,
                 Some(native(&reply.code, &reply.msg)),
-                UNKNOWN_WRITE,
-            ));
+                &mut error,
+            );
+            return Err(error);
         }
         match &request.step.effect {
             Effect::Place {
@@ -2723,12 +2734,14 @@ impl Blofin {
                 };
                 if rows.len() != *count {
                     if reply.code != "0" && rows.is_empty() {
-                        return Err(record_failed(
+                        let mut error = VenueError::new(message);
+                        self.record_failed(
                             cx,
                             context,
                             Some(native(&reply.code, &reply.msg)),
-                            &message,
-                        ));
+                            &mut error,
+                        );
+                        return Err(error);
                     }
                     let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
                     return Err(unknown(UNKNOWN_WRITE));
@@ -2768,7 +2781,7 @@ impl Blofin {
                 }
                 let accepted: Vec<String> = items
                     .iter()
-                    .filter_map(|item| match item {
+                    .filter_map(|item: &BatchItem<'_>| match item {
                         BatchItem::Accepted(id) => Some((*id).to_owned()),
                         BatchItem::Native(_) => None,
                     })
@@ -2815,12 +2828,14 @@ impl Blofin {
             Effect::Cancel(targets) => {
                 if reply.code != "0" && rows.is_empty() {
                     let message = format!("BloFin cancellation rejected: {}", reply.msg);
-                    return Err(record_failed(
+                    let mut error = VenueError::new(message);
+                    self.record_failed(
                         cx,
                         context,
                         Some(native(&reply.code, &reply.msg)),
-                        &message,
-                    ));
+                        &mut error,
+                    );
+                    return Err(error);
                 }
                 let mut matched: Vec<Option<&ResultRow<'_>>> = vec![None; targets.len()];
                 let mut unproven = rows.len() != targets.len();
@@ -2947,14 +2962,10 @@ impl Blofin {
                     let (code, message) =
                         failed_detail(&reply.code, &reply.msg, &rows, request.step.intent())
                             .expect("failed setting answer");
-                    let error =
+                    let mut error =
                         setting_failure(request.step.path, response.status, Some((code, message)));
-                    return Err(record_failed(
-                        cx,
-                        context,
-                        Some(native(code, message)),
-                        &error.message,
-                    ));
+                    self.record_failed(cx, context, Some(native(code, message)), &mut error);
+                    return Err(error);
                 }
                 let accepted = WriteFact::Accepted { order_ids: vec![] };
                 let _ = cx.http_write_fact(context, accepted, None);
@@ -2981,7 +2992,8 @@ impl Blofin {
                     failed_detail(&reply.code, &reply.msg, &rows, request.step.intent())
                         .expect("failed TP/SL answer");
                 let message = format!("BloFin TP/SL amend {code}: {msg}");
-                let error = record_failed(cx, context, Some(native(code, msg)), &message);
+                let mut error = VenueError::new(message);
+                self.record_failed(cx, context, Some(native(code, msg)), &mut error);
                 // Only a definite refusal falls back; one that may have landed must not stack a cancel.
                 if !definite_refusal(&error) {
                     return Err(error);
@@ -3018,9 +3030,10 @@ impl Blofin {
                 } else {
                     format!("Your {symbol} is unchanged: BloFin refused the edit ({code}: {msg})")
                 };
-                let mut error = record_failed(cx, context, Some(native(code, msg)), &message);
+                let mut error = VenueError::new(message.clone());
+                self.record_failed(cx, context, Some(native(code, msg)), &mut error);
                 if gone {
-                    self.reconcile_orders(cx);
+                    *reconcile = true;
                     error.message = format!("{}; {message}", error.message);
                     error.presents = true;
                 }
@@ -3204,39 +3217,42 @@ fn native<'a>(code: &'a str, message: &'a str) -> Native<'a> {
     }
 }
 
-/// Records one whole failed answer for the delivered write.
-fn record_failed(
-    cx: &mut Cx<'_, Pending>,
-    context: &Context,
-    native: Option<Native<'_>>,
-    message: &str,
-) -> VenueError {
-    // Classify the delivered attempt before choosing its presentation or fallback.
-    // Unknown guidance must be in the journal, not only in the later terminal.
-    let classified = cx
-        .classify_write(context, &CODES, native.as_ref(), UNKNOWN_WRITE.to_owned())
-        .and_then(|fact| {
-            if matches!(fact.verdict(), Verdict::Unknown(_)) {
-                Ok(fact)
-            } else {
-                cx.classify_write(context, &CODES, native.as_ref(), message.to_owned())
-            }
-        });
-    match classified {
-        Ok(fact) => {
-            let error = fact.error().clone();
-            let failed = WriteFact::Failed {
-                fact,
-                known_effects: false,
+impl Blofin {
+    /// Records one whole failed answer for the delivered write.
+    fn record_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        context: &Context,
+        native: Option<Native<'_>>,
+        error: &mut VenueError,
+    ) {
+        // Keep Cx calls in this synchronous helper, outside closures and nested
+        // expressions, so the managed request's provenance remains inspectable.
+        // Classify the delivered attempt before choosing its presentation or fallback.
+        // Unknown guidance must be in the journal, not only in the later terminal.
+        let classified =
+            match cx.classify_write(context, &CODES, native.as_ref(), UNKNOWN_WRITE.to_owned()) {
+                Ok(fact) if !matches!(fact.verdict(), Verdict::Unknown(_)) => {
+                    cx.classify_write(context, &CODES, native.as_ref(), error.message.clone())
+                }
+                other => other,
             };
-            let _ = cx.http_write_fact(context, failed, None);
-            error
-        }
-        // A released write never ends factless.
-        Err(_) => {
-            let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
-            unknown(UNKNOWN_WRITE)
-        }
+        *error = match classified {
+            Ok(fact) => {
+                let error = fact.error().clone();
+                let failed = WriteFact::Failed {
+                    fact,
+                    known_effects: false,
+                };
+                let _ = cx.http_write_fact(context, failed, None);
+                error
+            }
+            // A released write never ends factless.
+            Err(_) => {
+                let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
+                unknown(UNKNOWN_WRITE)
+            }
+        };
     }
 }
 
