@@ -467,33 +467,101 @@ fn unsupported_shared_commands_complete_with_error_without_io() {
 }
 
 #[test]
-fn split_orders_are_sequential_exact_and_unique() {
+fn split_orders_are_sequential_legacy_sized_and_unique() {
+    assert_legacy_equal_lots(
+        2.123,
+        1.,
+        0.001,
+        &["0.667", "0.667", "0.667", "0.123"],
+        2.124,
+    );
+}
+
+fn assert_legacy_equal_lots(amount: f64, max: f64, step: f64, expected: &[&str], sum: f64) {
+    // packages/safe-cex/src/__tests__/reference/phemex/phemex.exchange.ts:1372-1384.
     let mut e = engine();
-    let mut o = opts("");
-    o.amount = 2.123;
-    let a = command(
+    let mut markets = e.store().markets().to_vec();
+    let market = markets.iter_mut().find(|m| m.symbol == "BTCUSDT").unwrap();
+    market.precision.amount = step;
+    market.limits.amount.min = step;
+    market.limits.amount.max = max;
+    e.store_mut().set_markets(markets);
+    let mut order = opts("");
+    order.amount = amount;
+    let mut actions = command(
         &mut e,
         Command::PlaceOrders {
-            command: 1,
-            orders: vec![o],
+            command: 92,
+            orders: vec![order],
         },
     );
-    let mut r = writes(&a).pop().unwrap();
-    let mut ids = Vec::new();
-    for (i, qty) in ["1", "1", "0.123"].iter().enumerate() {
-        assert_eq!(p(&r, "orderQtyRq").as_deref(), Some(*qty));
-        let id = p(&r, "clOrdID").unwrap();
-        assert!(id.starts_with("Tealstreet_"));
-        assert!(!ids.contains(&id));
-        ids.push(id);
-        let a = respond(&mut e, &r, ack(&r, &format!("real-{i}")));
-        if i < 2 {
-            assert_eq!(writes(&a).len(), 1);
-            r = writes(&a).pop().unwrap();
-        } else {
-            assert_eq!(done(&a).unwrap(), "[\"real-0\",\"real-1\",\"real-2\"]");
-        }
+    let mut quantities = Vec::new();
+    let mut client_ids = Vec::new();
+    let mut native_ids = Vec::new();
+    for index in 0..expected.len() {
+        let sent = writes(&actions);
+        assert_eq!(sent.len(), 1, "only the next lot may be dispatched");
+        let request = &sent[0];
+        assert!(request.url.contains("/g-orders/create?"));
+        quantities.push(p(request, "orderQtyRq").unwrap());
+        let client_id = p(request, "clOrdID").unwrap();
+        assert!(client_id.starts_with("Tealstreet_"));
+        assert!(!client_ids.contains(&client_id));
+        client_ids.push(client_id);
+        let native_id = format!("native-{index}");
+        actions = respond(&mut e, request, ack(request, &native_id));
+        native_ids.push(native_id);
     }
+    assert_eq!(quantities, expected);
+    let total: f64 = quantities.iter().map(|q| q.parse::<f64>().unwrap()).sum();
+    assert_eq!(safe_cex_engine::num::adjust(total, step), sum);
+    assert!(
+        writes(&actions).is_empty(),
+        "no extra lot after the TS sequence"
+    );
+    assert_eq!(
+        done(&actions).unwrap(),
+        serde_json::to_string(&native_ids).unwrap()
+    );
+}
+
+#[test]
+fn legacy_equal_lots_26_step_1() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+    assert_legacy_equal_lots(26., 5., 1., &["4", "4", "4", "4", "4", "4", "1"], 25.);
+}
+
+#[test]
+fn legacy_equal_lots_11_step_1() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+    assert_legacy_equal_lots(11., 5., 1., &["3", "3", "3", "1"], 10.);
+}
+
+#[test]
+fn legacy_equal_lots_12_step_1() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+    assert_legacy_equal_lots(12., 5., 1., &["3", "3", "3", "2"], 11.);
+}
+
+#[test]
+fn legacy_equal_lots_10_exact_multiple() {
+    assert_legacy_equal_lots(10., 5., 1., &["5", "5"], 10.);
+}
+
+#[test]
+fn legacy_equal_lots_7_half_step() {
+    assert_legacy_equal_lots(7., 3., 0.5, &["2", "2", "2", "1"], 7.);
+}
+
+#[test]
+fn legacy_equal_lots_normalize_to_thousandth_step() {
+    assert_legacy_equal_lots(
+        1.0005,
+        0.3,
+        0.001,
+        &["0.225", "0.225", "0.225", "0.225", "0.101"],
+        1.001,
+    );
 }
 
 #[test]
