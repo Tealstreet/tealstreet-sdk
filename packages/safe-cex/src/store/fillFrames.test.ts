@@ -17,6 +17,11 @@ import { DefaultStore } from './store.base';
 
 let native: { frame: number[]; events: OrderFillEvent[] };
 const frame = () => new Frame(Uint8Array.from(native.frame).buffer);
+const fillRows = (decoded: Frame) => {
+  const rows = decoded.fills();
+  if (rows === undefined) throw new Error('Native fixture must contain fill rows');
+  return rows;
+};
 
 beforeAll(() => {
   const manifest = fileURLToPath(new URL('../../../../sdk-rs/Cargo.toml', import.meta.url));
@@ -67,7 +72,7 @@ describe('native Fill output through the real packed decoder', () => {
 
   it('rejects a missing native event id instead of synthesizing identity in TypeScript', () => {
     const decoded = frame();
-    const table = decoded.fills()!;
+    const table = fillRows(decoded);
     const numericEnd = table.rows.byteOffset + table.count * 16;
     const ids = new Uint32Array(decoded.buffer, numericEnd + table.count * 4, table.count);
     ids[0] = 0xffffffff;
@@ -76,13 +81,15 @@ describe('native Fill output through the real packed decoder', () => {
 
   it('rejects invalid side codes instead of casting an incomplete event', () => {
     const decoded = frame();
-    decoded.fills()!.side[0] = 7;
+    fillRows(decoded).side[0] = 7;
     expect(() => readFillFrame(decoded)).toThrow('Invalid Fill side');
   });
 
   it('rejects malformed infinite financial columns instead of treating them as absent', () => {
     const decoded = frame();
-    decoded.fills()!.fee![0] = Infinity;
+    const fee = fillRows(decoded).fee;
+    if (fee === undefined) throw new Error('Native fixture must contain the fee column');
+    fee[0] = Infinity;
     expect(() => readFillFrame(decoded)).toThrow('Invalid Fill financial column');
   });
 });

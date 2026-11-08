@@ -503,7 +503,8 @@ describe('Rust frame recovery callers', () => {
     expect(store.positions[0].contracts).toBe(0.5);
     expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes, false);
     expect(bytes.byteLength).toBe(0);
-    expect(new Frame(forwarded!).balance()?.total).toBe(42);
+    if (forwarded === undefined) throw new Error('Expected the transferred frame');
+    expect(new Frame(forwarded).balance()?.total).toBe(42);
     expect(snapshot).not.toHaveBeenCalled();
     expect(exchange.isDisposed).toBe(false);
     exchange.dispose();
@@ -709,7 +710,9 @@ describe('Rust frame recovery callers', () => {
       vi.fn(() => frame),
     );
     const snapshot = await worker.fetchEngineSnapshot();
-    expect(new Frame(snapshot.frame).settings()!.count).toBe(0);
+    const settings = new Frame(snapshot.frame).settings();
+    if (settings === undefined) throw new Error('Expected the SETTINGS snapshot');
+    expect(settings.count).toBe(0);
     expect(snapshot.fetchedLeverage).toEqual({ BTCUSDT: rails });
     expect(snapshot.fetchedLeverage).not.toBe(workerStore.fetchedLeverage);
     expect(snapshot.fetchedLeverage.BTCUSDT).not.toBe(workerStore.fetchedLeverage.BTCUSDT);
@@ -746,7 +749,9 @@ describe('Rust frame recovery callers', () => {
     expect(flush).toHaveBeenCalledTimes(1);
     expect(snapshot).toHaveBeenCalledTimes(1);
     expect(flush.mock.invocationCallOrder[0]).toBeLessThan(snapshot.mock.invocationCallOrder[0]);
-    expect(new Frame(result.frame).settings()!.buyLeverage![0]).toBe(12);
+    const buyLeverage = new Frame(result.frame).settings()?.buyLeverage;
+    if (buyLeverage === undefined) throw new Error('Expected the buy leverage column');
+    expect(buyLeverage[0]).toBe(12);
     expect(result.fetchedLeverage.BTCUSDT.buyLeverage).toBe(12);
     expect(result.fetchedLeverage.BTCUSDT.sellLeverage).toBe(12);
     expect(result.fetchedLeverage.DELISTED).toBeUndefined();
@@ -789,7 +794,9 @@ describe('Rust frame recovery callers', () => {
     expect(snapshot).toHaveBeenCalledTimes(1);
     expect(store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(12);
     expect(main.store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(12);
-    expect(postMessage.mock.calls.at(-1)![0]).toMatchObject({
+    const lastMessage = postMessage.mock.calls.at(-1);
+    if (lastMessage === undefined) throw new Error('Expected the worker snapshot message');
+    expect(lastMessage[0]).toMatchObject({
       op: 'store',
       data: { fetchedLeverage: { BTCUSDT: { buyLeverage: 12, sellLeverage: 12 } } },
     });

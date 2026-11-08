@@ -48,35 +48,84 @@ fill.orderId = 'order'; fill.realizedPnl = 0; fill.fee = 0;
 const execution: Execution = { timestamp:1, symbol:'BTC', price:0, qty:0, side:OrderSide.Sell, positionSide:PositionSide.Long };
 const both: Execution = { ...execution, positionSide:'both' };
 const trade: PublicTrade = { id:'trade', timestamp:1000, symbol:'BTC', price:0, qty:0, side:OrderSide.Buy };
-// @ts-expect-error Event fields inherited from Order remain readonly.
-fill.amount = 1;
-// @ts-expect-error Execution remains readonly.
-execution.commission = 0;
-// @ts-expect-error PublicTrade remains readonly.
-trade.quoteQty = 0;
-// @ts-expect-error Bare strings cannot replace OrderSide.
-const stringSide: Fill['side'] = 'buy';
-// @ts-expect-error Bare strings cannot replace PositionSide.
-const stringLeg: Execution['positionSide'] = 'long';
-// @ts-expect-error Explicit null is not an absent fee.
-const nullFill: Fill = { ...fill, fee:null };
-// @ts-expect-error A missing position leg is distinct from null.
-const nullLeg: Execution = { ...execution, positionSide:null };
-// @ts-expect-error An unreported quote quantity is distinct from null.
-const nullQuote: PublicTrade = { ...trade, quoteQty:null };
-// @ts-expect-error A live event is not a historical execution.
-const confused: Execution = fill;
-// @ts-expect-error PublicTrade requires timestamp.
-const missingTrade: PublicTrade = { id:'t', symbol:'BTC', price:1, qty:1, side:OrderSide.Buy };
 `;
+  // Deliberate negative compiler proofs; assert diagnostics rather than suppress them.
+  const negativeCases = [
+    {
+      reason: 'Event fields inherited from Order remain readonly.',
+      statement: 'fill.amount = 1;',
+      code: 2540,
+    },
+    {
+      reason: 'Execution remains readonly.',
+      statement: 'execution.commission = 0;',
+      code: 2540,
+    },
+    {
+      reason: 'PublicTrade remains readonly.',
+      statement: 'trade.quoteQty = 0;',
+      code: 2540,
+    },
+    {
+      reason: 'Bare strings cannot replace OrderSide.',
+      statement: "const stringSide: Fill['side'] = 'buy';",
+      code: 2322,
+    },
+    {
+      reason: 'Bare strings cannot replace PositionSide.',
+      statement: "const stringLeg: Execution['positionSide'] = 'long';",
+      code: 2322,
+    },
+    {
+      reason: 'Explicit null is not an absent fee.',
+      statement: 'const nullFill: Fill = { ...fill, fee:null };',
+      code: 2322,
+    },
+    {
+      reason: 'A missing position leg is distinct from null.',
+      statement: 'const nullLeg: Execution = { ...execution, positionSide:null };',
+      code: 2322,
+    },
+    {
+      reason: 'An unreported quote quantity is distinct from null.',
+      statement: 'const nullQuote: PublicTrade = { ...trade, quoteQty:null };',
+      code: 2322,
+    },
+    {
+      reason: 'A live event is not a historical execution.',
+      statement: 'const confused: Execution = fill;',
+      code: 2739,
+    },
+    {
+      reason: 'PublicTrade requires timestamp.',
+      statement: "const missingTrade: PublicTrade = { id:'t', symbol:'BTC', price:1, qty:1, side:OrderSide.Buy };",
+      code: 2741,
+    },
+  ];
+  let checkedSource = source;
+  const spans = negativeCases.map(({ reason, statement, code }) => {
+    const start = checkedSource.length;
+    checkedSource += statement + '\n';
+    return { reason, code, start, end: checkedSource.length };
+  });
   const configFile = path.join(root, 'packages/safe-cex/tsconfig.json');
   const config = ts.readConfigFile(configFile, ts.sys.readFile);
   const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, path.dirname(configFile));
   const host = ts.createCompilerHost(parsed.options);
   const original = host.getSourceFile.bind(host);
-  host.getSourceFile = (file, version, ...args) => file === fixture
-    ? ts.createSourceFile(file, source, version, true) : original(file, version, ...args);
-  const program = ts.createProgram([fixture], { ...parsed.options, incremental:false }, host);
-  assert.deepEqual(ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')), []);
+  host.getSourceFile = (file, version, ...args) =>
+    file === fixture ? ts.createSourceFile(file, checkedSource, version, true) : original(file, version, ...args);
+  const program = ts.createProgram([fixture], { ...parsed.options, incremental: false }, host);
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  for (const span of spans) {
+    const matched = diagnostics.filter(
+      (d) => d.file?.fileName === fixture && d.start !== undefined && d.start >= span.start && d.start < span.end,
+    );
+    assert.deepEqual(
+      matched.map((d) => d.code),
+      [span.code],
+      span.reason,
+    );
+  }
+  assert.equal(diagnostics.length, spans.length, 'positive fixtures and imported consumers must have no diagnostics');
 });
-
