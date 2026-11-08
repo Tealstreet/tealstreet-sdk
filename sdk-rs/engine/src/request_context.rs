@@ -2119,6 +2119,10 @@ impl CommandWrites {
             return Err(Error::State);
         }
         let elements = fallback.elements.take();
+        let plan_counts = elements
+            .as_ref()
+            .and(fallback.partial.as_ref())
+            .map(|partial| (partial.total, partial.failed_index));
         let presented = (fallback.protection.is_some() || fallback.presents)
             .then(|| (fallback.message.clone(), fallback.protection));
         let mut projected_budget = self.evidence;
@@ -2303,6 +2307,19 @@ impl CommandWrites {
             } else {
                 error = error.partial_ids(&ids);
             }
+        }
+        // Logical counts travel with the complete venue journal, independently
+        // of native-error selection and the engine's accepted identity prefix.
+        if let Some((total, failed_index)) = plan_counts {
+            let partial = error.partial.get_or_insert_with(|| {
+                Box::new(crate::Partial {
+                    order_ids: Vec::new(),
+                    total: None,
+                    failed_index: None,
+                })
+            });
+            partial.total = total;
+            partial.failed_index = failed_index;
         }
         if overflow {
             evidence::mark_id_overflow(&mut error);

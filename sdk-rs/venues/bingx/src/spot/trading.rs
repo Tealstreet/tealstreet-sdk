@@ -7,6 +7,7 @@ use safe_cex_engine::{
         Plan, PreflightPolicy, PreflightPurpose,
         plan::{CallAuth, SerialCall, SerialPolicy, Slot},
     },
+    write_plan::{AppliedEffect, Element, ElementResult, WritePlan},
 };
 const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 const ORDER: &str = "/openApi/spot/v1/trade/order";
@@ -80,6 +81,7 @@ enum Call {
 }
 pub struct Request {
     pub(super) command: CommandId,
+    index: usize,
     plan: Plan,
     slot: Slot,
     context: Context,
@@ -88,9 +90,22 @@ pub struct Request {
 pub(super) struct Run {
     pub(super) plan: Plan,
     next: Option<Slot>,
-    steps: VecDeque<Step>,
+    steps: VecDeque<(usize, Step)>,
     ids: Vec<String>,
     error: Option<VenueError>,
+    journal: WritePlan,
+    total: usize,
+}
+impl Run {
+    fn attach(&self, error: VenueError, index: usize) -> VenueError {
+        let mut error = self.journal.attach(error);
+        error.partial = Some(Box::new(safe_cex_engine::Partial {
+            order_ids: self.ids.clone(),
+            total: Some(self.total),
+            failed_index: Some(index),
+        }));
+        error
+    }
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -440,14 +455,27 @@ impl BingxSpot {
             },
         ) {
             Ok((plan, slot)) => {
+                let total = steps.len();
+                let journal = WritePlan::new(
+                    steps
+                        .iter()
+                        .enumerate()
+                        .map(|(index, step)| Element {
+                            index,
+                            client_order_id: step.receipt.as_ref().map(|r| r.identity.clone()),
+                        })
+                        .collect(),
+                );
                 self.jobs.insert(
                     command,
                     Run {
                         plan,
                         next: Some(slot),
-                        steps,
+                        steps: steps.into_iter().enumerate().collect(),
                         ids: vec![],
                         error: None,
+                        journal,
+                        total,
                     },
                 );
                 self.advance(cx, command);
@@ -461,10 +489,11 @@ impl BingxSpot {
         let Some(run) = self.jobs.get_mut(&command) else {
             return;
         };
-        let Some(step) = run.steps.pop_front() else {
+        let Some((index, step)) = run.steps.pop_front() else {
             let plan = run.plan.clone();
             if let Some(mut error) = run.error.take() {
                 error.presents = true;
+                error = run.journal.attach(error);
                 let _ = cx.fail_plan(&plan, error);
                 return;
             }
@@ -476,7 +505,7 @@ impl BingxSpot {
             return;
         };
         let Some(slot) = run.next.take() else {
-            run.steps.push_front(step);
+            run.steps.push_front((index, step));
             return;
         };
         let plan = run.plan.clone();
@@ -492,6 +521,12 @@ impl BingxSpot {
                 return;
             }
         };
+        let _ = run.journal.record(
+            index,
+            ElementResult::Unknown {
+                error: Box::new(VenueError::new(UNKNOWN_TEXT).outcome(Outcome::Unknown)),
+            },
+        );
         let _ = cx.present_plan_failure(&plan, UNKNOWN_TEXT);
         if let Some(r) = &step.receipt {
             cx.command_progress(command, vec![r.clone()]);
@@ -509,6 +544,7 @@ impl BingxSpot {
         let (url, _, body) = recipe.unsigned();
         let request = Request {
             command,
+            index,
             plan,
             slot,
             context: context.clone(),
@@ -554,6 +590,19 @@ impl BingxSpot {
             );
         }
         error.presents = true;
+        if let Some(run) = self.jobs.get_mut(&r.command) {
+            let result = if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
+                ElementResult::NotSent {
+                    error: Some(Box::new(error.clone())),
+                }
+            } else {
+                ElementResult::Unknown {
+                    error: Box::new(error.clone()),
+                }
+            };
+            let _ = run.journal.record(r.index, result);
+            error = run.attach(error, r.index);
+        }
         let _ = cx.fail_plan(&r.plan, error);
     }
     fn finish_step(&mut self, cx: &mut Cx<'_, Pending>, r: &Request) -> bool {
@@ -614,6 +663,20 @@ impl BingxSpot {
                 }
             }
             if let Some(run) = self.jobs.get_mut(&r.command) {
+                let result = match &r.step.kind {
+                    Call::Place { .. } => ElementResult::Placed {
+                        order_ids: ids.clone(),
+                    },
+                    kind => ElementResult::Applied {
+                        effect: AppliedEffect::Cancel,
+                        target_order_id: match kind {
+                            Call::Cancel { id } => Some(id.clone()),
+                            _ => None,
+                        },
+                        position_key: None,
+                    },
+                };
+                let _ = run.journal.record(r.index, result);
                 run.ids.extend(ids);
             }
             self.balance_revision = self.balance_revision.saturating_add(1);
@@ -660,6 +723,12 @@ impl BingxSpot {
             }
             if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
                 if let Some(run) = self.jobs.get_mut(&r.command) {
+                    let _ = run.journal.record(
+                        r.index,
+                        ElementResult::NotSent {
+                            error: Some(Box::new(error.clone())),
+                        },
+                    );
                     run.error.get_or_insert(error);
                 }
                 self.finish_step(cx, &r);

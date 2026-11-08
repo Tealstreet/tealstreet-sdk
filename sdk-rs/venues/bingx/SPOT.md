@@ -116,12 +116,16 @@ cancellation still sends. Native engine write journals retain accepted IDs and
 refusals, delivered in the structured CommandFailed event. A genuine Unknown
 halts the action under the recorded stop-after-UNKNOWN parity exception, with
 "The outcome is unknown. Check Open Orders". No engine fence is bypassed and
-there is no per-venue outcome store or dependency on the draft WritePlan API.
+the venue's reporting-only WritePlan never controls dispatch or retries.
 Venue-authored Unknown terminals also emit one `order.outcome_unknown` diagnostic
 with command correlation, operation and outcome. It carries the same canonical
 text, without response bodies, signing material or raw native messages. The
 diagnostic is separate from the engine journal's terminal projection; late
 callbacks emit neither a second diagnostic nor another completion.
+Their indexed journal covers every prepared native payload: accepted placements
+retain native IDs, accepted cancellations record applied effects, the uncertain
+payload is Unknown, and untouched suffixes stay NotSent. The partial metadata
+retains the failed payload index and total prepared payload count.
 Error codes are decoded independently of success-order data. Empty error data
 (`null`, `{}`, `[]` or an empty `orders` array) does not erase a known refusal;
 data claiming an order effect still makes a contradictory refusal Unknown.
