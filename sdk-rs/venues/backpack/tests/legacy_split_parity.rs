@@ -76,6 +76,74 @@ fn failure(out: &[Action]) -> Result<&VenueError> {
         .ok_or_else(|| "missing reporting-only terminal".into())
 }
 
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025,1072-1079,1207-1229.
+fn unknown_stop(path: &str) -> Result {
+    for status in [Some(400), Some(200), Some(503), None] {
+        if path == "pair" && status != Some(200) { continue; }
+        let rows = ["123", "456", "789"].map(|id| ORDER.replace("\"123\"", &format!("\"{id}\"")));
+        let (mut engine, _) = ready_orders(&format!("[{}]", rows.join(",")));
+        engine.store_mut().update_markets(|market| market.limits.amount.max = 1000.);
+        let mut transport = vec![];
+        let bracket = json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130});
+        let (unknown, count, accepted) = match path {
+            "cancel" => {
+                engine.handle(2000., Event::Command(Command::CancelOrders { command:901, ids:vec!["123".into(),"456".into(),"789".into()] }));
+                (1, 3, vec![])
+            }
+            "pair" => { place(&mut engine, [140.,141.,142.,143.].into_iter().map(limit).collect())?; (1,4,vec!["prefix".to_owned()]) }
+            "tp" | "sl" | "entry" => {
+                place(&mut engine, vec![bracket,limit(142.)])?;
+                let index = if path == "entry" {0} else if path == "tp" {1} else {2};
+                (index,4,(0..index).map(|i| format!("prefix-{i}")).collect())
+            }
+            _ => {
+                let orders = (1..=3).map(|id| { let mut row=limit(if path=="cap" && id==2 {1000.01} else {140.}); row["clientOrderId"]=json!(id.to_string()); row }).collect();
+                place(&mut engine, orders)?;
+                (1,3,vec!["prefix-0".to_owned()])
+            }
+        };
+        if path != "pair" {
+            for i in 0..unknown {
+                let request = packet(&mut engine, &mut transport)?;
+                reply(&mut engine, &request, 200, &json!({"id":if path=="cancel" {"123".to_owned()} else {format!("prefix-{i}")}}).to_string());
+            }
+        }
+        let request = packet(&mut engine, &mut transport)?;
+        if path == "pair" {
+            let mut ack: Vec<Value> = serde_json::from_str(&pair_ack(&request)?)?;
+            ack[0]["id"]=json!("prefix"); ack[1]["operation"]=json!("Error"); ack[1]["id"]=json!("");
+            reply(&mut engine, &request, 200, &serde_json::to_string(&ack)?);
+        } else if let Some(status)=status {
+            reply(&mut engine, &request, status, r#"{"code":"UNCLASSIFIED","message":"uncertain"}"#);
+        } else {
+            engine.handle(2000., Event::HttpFailed { request:request.id, error:"lost reply" });
+        }
+        let out = actions(&mut engine);
+        assert!(!out.iter().any(|action| matches!(action,Action::Http(_))), "Unknown must halt {path}");
+        let error = failure(&out)?;
+        assert_eq!(error.outcome,Some(safe_cex_engine::Outcome::Unknown));
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT),"{}",error.message);
+        let elements = error.elements.as_ref().ok_or("missing journal")?;
+        assert_eq!(elements.len(),count);
+        assert!(matches!(&elements[unknown].result,ElementResult::Unknown { error } if error.message.contains(ENGINE_UNKNOWN_TEXT)));
+        assert!(elements[unknown+1..].iter().all(|element|matches!(element.result,ElementResult::NotSent{error:None})));
+        let ids = error.partial.as_ref().map_or(&[][..],|partial|partial.order_ids.as_slice());
+        assert_eq!(ids,accepted);
+        if path=="cancel" { assert!(matches!(elements[0].result,ElementResult::Applied{effect:AppliedEffect::Cancel,..})); }
+        assert!(out.iter().any(|action| matches!(action,Action::Notice(Notice::Event(event)) if event.code=="backpack.write.unknown" && event.message.contains(ENGINE_UNKNOWN_TEXT))));
+        reply(&mut engine,&request,200,r#"{"id":"late"}"#);
+        assert!(!actions(&mut engine).iter().any(|action|matches!(action,Action::Http(_) | Action::Notice(Notice::CommandDone { command:901,.. } | Notice::CommandFailed { command:901,.. }))));
+        assert_eq!(transport.len(),if path=="pair" {1} else {unknown+1});
+    }
+    Ok(())
+}
+
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1223-1229.
+#[test]
+fn over_cap_unknown_halts_later_row() -> Result { unknown_stop("cap") }
+
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:728-779,1207-1229.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | sdk-rs/venues/backpack/src/trading.rs:522 pair-batching-and-serial-rows
 #[test]
@@ -203,224 +271,29 @@ fn legacy_trigger_and_attached_prices_are_sent_past_catalogue_cap() -> Result {
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1223-1229.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime row/pair failure suffix
 #[test]
-fn legacy_serial_failure_continues_with_complete_reporting() -> Result {
-    for status in [Some(400), Some(200), Some(503), None] {
-        let (mut engine, _) = ready();
-        let mut transport = vec![];
-        place(
-            &mut engine,
-            (1..=3)
-                .map(|client| {
-                    let mut row = limit(140.);
-                    row["clientOrderId"] = json!(client.to_string());
-                    row
-                })
-                .collect(),
-        )?;
-        let prefix = packet(&mut engine, &mut transport)?;
-        reply(&mut engine, &prefix, 200, r#"{"id":"prefix"}"#);
-        let middle = packet(&mut engine, &mut transport)?;
-        if let Some(status) = status {
-            reply(
-                &mut engine,
-                &middle,
-                status,
-                r#"{"code":"ORDER_REJECTED","message":"scripted failure"}"#,
-            );
-        } else {
-            engine.handle(
-                2000.,
-                Event::HttpFailed {
-                    request: middle.id,
-                    error: "lost reply",
-                },
-            );
-        }
-        let suffix = packet(&mut engine, &mut transport)?;
-        assert_ne!(suffix.id, middle.id);
-        reply(&mut engine, &suffix, 200, r#"{"id":"suffix"}"#);
-        let out = actions(&mut engine);
-        let error = failure(&out)?;
-        let elements = error.elements.as_ref().ok_or("missing elements")?;
-        assert_eq!(elements.len(), 3);
-        assert!(
-            matches!(&elements[0].result,ElementResult::Placed {order_ids} if order_ids==&["prefix"])
-        );
-        assert!(matches!(&elements[1].result, ElementResult::Unknown { .. }));
-        assert!(
-            matches!(&elements[2].result,ElementResult::Placed {order_ids} if order_ids==&["suffix"])
-        );
-        assert_eq!(
-            error
-                .partial
-                .as_ref()
-                .ok_or("missing accepted IDs")?
-                .order_ids,
-            ["prefix", "suffix"]
-        );
-        sequence(
-            &transport,
-            &[
-                (Method::Post, "/api/v1/order"),
-                (Method::Post, "/api/v1/order"),
-                (Method::Post, "/api/v1/order"),
-            ],
-        );
-        assert!(requests(&mut engine).is_empty());
-    }
-    Ok(())
+fn legacy_serial_failure_halts_unknown_with_complete_reporting() -> Result {
+    unknown_stop("serial")
 }
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime TP/SL child failure suffix
 #[test]
-fn legacy_tp_failure_continues_to_sl() -> Result {
-    let (mut engine, _) = ready();
-    let mut transport = vec![];
-    place(
-        &mut engine,
-        vec![
-            json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}),
-        ],
-    )?;
-    let entry = packet(&mut engine, &mut transport)?;
-    reply(&mut engine, &entry, 200, r#"{"id":"entry"}"#);
-    let tp = packet(&mut engine, &mut transport)?;
-    reply(
-        &mut engine,
-        &tp,
-        400,
-        r#"{"code":"INVALID_ORDER","message":"bad TP"}"#,
-    );
-    let sl = packet(&mut engine, &mut transport)?;
-    let row: Value = serde_json::from_str(sl.body.as_deref().ok_or("missing SL")?)?;
-    assert_eq!(row["triggerPrice"], "130.00");
-    reply(&mut engine, &sl, 200, r#"{"id":"sl"}"#);
-    let out = actions(&mut engine);
-    let elements = failure(&out)?
-        .elements
-        .as_ref()
-        .ok_or("missing bracket outcomes")?;
-    assert_eq!(elements.len(), 3);
-    assert!(matches!(&elements[1].result, ElementResult::Unknown { .. }));
-    assert!(matches!(&elements[2].result,ElementResult::Placed {order_ids} if order_ids==&["sl"]));
-    sequence(
-        &transport,
-        &[
-            (Method::Post, "/api/v1/order"),
-            (Method::Post, "/api/v1/order"),
-            (Method::Post, "/api/v1/order"),
-        ],
-    );
-    assert!(requests(&mut engine).is_empty());
-    Ok(())
+fn legacy_tp_failure_halts_before_sl() -> Result {
+    unknown_stop("tp")
 }
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1010-1028,1223-1229.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime TP/SL child failure suffix
 #[test]
-fn legacy_sl_failure_continues_to_later_entry() -> Result {
-    let (mut engine, _) = ready();
-    let mut transport = vec![];
-    place(
-        &mut engine,
-        vec![
-            json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}),
-            limit(142.),
-        ],
-    )?;
-    for id in ["entry", "tp"] {
-        let request = packet(&mut engine, &mut transport)?;
-        reply(&mut engine, &request, 200, &json!({"id":id}).to_string());
-    }
-    let sl = packet(&mut engine, &mut transport)?;
-    let row: Value = serde_json::from_str(sl.body.as_deref().ok_or("missing SL")?)?;
-    assert_eq!(row["triggerPrice"], "130.00");
-    reply(
-        &mut engine,
-        &sl,
-        400,
-        r#"{"code":"INVALID_ORDER","message":"bad SL"}"#,
-    );
-    let suffix = packet(&mut engine, &mut transport)?;
-    let row: Value = serde_json::from_str(suffix.body.as_deref().ok_or("missing suffix")?)?;
-    assert_eq!(row["price"], "142.00");
-    assert!(row.get("triggerPrice").is_none());
-    reply(&mut engine, &suffix, 200, r#"{"id":"suffix"}"#);
-    let out = actions(&mut engine);
-    let error = failure(&out)?;
-    let elements = error.elements.as_ref().ok_or("missing journal")?;
-    assert_eq!(elements.len(), 4);
-    assert!(matches!(&elements[2].result, ElementResult::Unknown { .. }));
-    assert_eq!(
-        error.partial.as_ref().ok_or("missing IDs")?.order_ids,
-        ["entry", "tp", "suffix"]
-    );
-    sequence(
-        &transport,
-        &[
-            (Method::Post, "/api/v1/order"),
-            (Method::Post, "/api/v1/order"),
-            (Method::Post, "/api/v1/order"),
-            (Method::Post, "/api/v1/order"),
-        ],
-    );
-    assert!(requests(&mut engine).is_empty());
-    Ok(())
+fn legacy_sl_failure_halts_before_later_entry() -> Result {
+    unknown_stop("sl")
 }
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1072-1079.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | CancelOrders accepted-ID-less effect and failed-row continuation
 #[test]
-fn legacy_cancel_failure_continues_without_inventing_ids() -> Result {
-    let rows = ["123", "456", "789"].map(|id| ORDER.replace("\"123\"", &format!("\"{id}\"")));
-    let (mut engine, _) = ready_orders(&format!("[{}]", rows.join(",")));
-    let mut transport = vec![];
-    engine.handle(
-        2000.,
-        Event::Command(Command::CancelOrders {
-            command: 901,
-            ids: vec!["123".into(), "456".into(), "789".into()],
-        }),
-    );
-    let first = packet(&mut engine, &mut transport)?;
-    reply(&mut engine, &first, 200, r#"{"id":"123"}"#);
-    let middle = packet(&mut engine, &mut transport)?;
-    reply(
-        &mut engine,
-        &middle,
-        400,
-        r#"{"code":"UNKNOWN","message":"bad cancel"}"#,
-    );
-    let last = packet(&mut engine, &mut transport)?;
-    assert_eq!(last.method, Method::Delete);
-    reply(&mut engine, &last, 200, r#"{"id":"789"}"#);
-    let out = actions(&mut engine);
-    let error = failure(&out)?;
-    let elements = error.elements.as_ref().ok_or("missing cancel outcomes")?;
-    assert_eq!(elements.len(), 3);
-    for (index, id) in [(0, "123"), (2, "789")] {
-        assert!(matches!(&elements[index].result,ElementResult::Applied {
-            effect:AppliedEffect::Cancel,target_order_id:Some(target),..
-        } if target==id));
-    }
-    assert!(matches!(&elements[1].result, ElementResult::Unknown { .. }));
-    assert!(
-        error
-            .partial
-            .as_ref()
-            .is_none_or(|partial| partial.order_ids.is_empty())
-    );
-    sequence(
-        &transport,
-        &[
-            (Method::Delete, "/api/v1/order"),
-            (Method::Delete, "/api/v1/order"),
-            (Method::Delete, "/api/v1/order"),
-        ],
-    );
-    assert!(requests(&mut engine).is_empty());
-    Ok(())
+fn legacy_cancel_failure_halts_without_inventing_ids() -> Result {
+    unknown_stop("cancel")
 }
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1104-1135.
@@ -551,108 +424,13 @@ fn legacy_bracket_sends_each_rounded_quantity_without_a_wire_bound_gate() -> Res
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:984,1047-1049,1223-1229.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime TP/SL child failure suffix
 #[test]
-fn legacy_failed_entry_skips_its_children_but_continues_other_orders() -> Result {
-    let (mut engine, _) = ready();
-    let mut transport = vec![];
-    place(
-        &mut engine,
-        vec![
-            json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}),
-            limit(142.),
-        ],
-    )?;
-    let entry = packet(&mut engine, &mut transport)?;
-    reply(
-        &mut engine,
-        &entry,
-        400,
-        r#"{"code":"INVALID_ORDER","message":"bad entry"}"#,
-    );
-    let suffix = packet(&mut engine, &mut transport)?;
-    let row: Value = serde_json::from_str(suffix.body.as_deref().ok_or("missing later order")?)?;
-    assert_eq!(row["price"], "142.00");
-    assert!(row.get("triggerPrice").is_none());
-    reply(&mut engine, &suffix, 200, r#"{"id":"suffix"}"#);
-    let out = actions(&mut engine);
-    let elements = failure(&out)?.elements.as_ref().ok_or("missing outcomes")?;
-    assert_eq!(elements.len(), 4);
-    assert!(matches!(&elements[0].result, ElementResult::Unknown { .. }));
-    assert!(
-        elements[1..3]
-            .iter()
-            .all(|element| matches!(element.result, ElementResult::NotSent { error: None }))
-    );
-    assert!(
-        matches!(&elements[3].result, ElementResult::Placed {order_ids} if order_ids==&["suffix"])
-    );
-    sequence(
-        &transport,
-        &[
-            (Method::Post, "/api/v1/order"),
-            (Method::Post, "/api/v1/order"),
-        ],
-    );
-    assert!(requests(&mut engine).is_empty());
-    Ok(())
+fn legacy_failed_entry_halts_children_and_other_orders() -> Result {
+    unknown_stop("entry")
 }
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1213-1219.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime row/pair failure suffix
 #[test]
-fn legacy_mixed_pair_failure_still_releases_the_next_pair() -> Result {
-    let (mut engine, _) = ready();
-    let mut transport = vec![];
-    engine
-        .store_mut()
-        .update_markets(|market| market.limits.amount.max = 1000.);
-    place(
-        &mut engine,
-        [140., 141., 142., 143.].into_iter().map(limit).collect(),
-    )?;
-    let first = packet(&mut engine, &mut transport)?;
-    let rows: Vec<Value> =
-        serde_json::from_str(first.body.as_deref().ok_or("missing first pair")?)?;
-    let ack:Vec<_> = rows.iter().enumerate().map(|(index,row)| json!({
-        "operation":if index == 0 {"Ok"} else {"Error"},
-        "id":if index == 0 {"prefix"} else {""},
-        "clientId":row["clientId"],"symbol":row["symbol"],"side":row["side"],"orderType":row["orderType"]
-    })).collect();
-    reply(&mut engine, &first, 200, &serde_json::to_string(&ack)?);
-    let second = packet(&mut engine, &mut transport)?;
-    assert!(second.url.ends_with("/orders"));
-    assert_ne!(second.id, first.id);
-    reply(&mut engine, &second, 200, &pair_ack(&second)?);
-    let out = actions(&mut engine);
-    let error = failure(&out)?;
-    let elements = error
-        .elements
-        .as_ref()
-        .ok_or("missing correlated outcomes")?;
-    assert_eq!(elements.len(), 4);
-    assert!(
-        matches!(&elements[0].result, ElementResult::Placed {order_ids} if order_ids==&["prefix"])
-    );
-    assert!(matches!(&elements[1].result, ElementResult::Unknown { .. }));
-    for (index, id) in [(2, "pair-0"), (3, "pair-1")] {
-        assert!(
-            matches!(&elements[index].result, ElementResult::Placed {order_ids} if order_ids==&[id])
-        );
-    }
-    assert_eq!(
-        error
-            .partial
-            .as_ref()
-            .ok_or("missing accepted IDs")?
-            .order_ids,
-        ["prefix", "pair-0", "pair-1"]
-    );
-    sequence(
-        &transport,
-        &[
-            (Method::Post, "/api/v1/orders"),
-            (Method::Post, "/api/v1/orders"),
-        ],
-    );
-    assert!(requests(&mut engine).is_empty());
-    Ok(())
+fn legacy_mixed_pair_failure_halts_the_next_pair() -> Result {
+    unknown_stop("pair")
 }

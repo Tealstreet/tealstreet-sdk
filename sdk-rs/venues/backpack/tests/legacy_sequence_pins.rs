@@ -4,6 +4,8 @@ use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice};
 use serde_json::{Value, json};
 use support::managed::*;
 
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Default)]
@@ -190,10 +192,10 @@ fn leverage_success_sends_one_account_wide_write() -> Result {
     )])
 }
 
-// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:543-588, serial cancel/place, catch and continue.
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:543-588.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | background missing-trigger-source compensating cancel/re-place
 #[test]
-fn repair_failure_continues_serially_to_next_candidate() -> Result {
+fn repair_unknown_halts_before_next_candidate() -> Result {
     for fail_cancel in [true, false] {
         let (mut engine, socket) = ready();
         engine.handle(1000., Event::WsOpened { socket });
@@ -239,28 +241,17 @@ fn repair_failure_continues_serially_to_next_candidate() -> Result {
                 r#"{"code":"INVALID_ORDER","message":"bad replacement"}"#,
             );
         }
-        let second_cancel = transport.next(&mut engine)?;
-        expected.push((
-            Method::Delete,
-            "/api/v1/order",
-            json!({"symbol":SYMBOL,"orderId":"456"}),
-        ));
-        reply(
-            &mut engine,
-            &second_cancel,
-            200,
-            r#"{"id":"456","status":"Cancelled","executedQuantity":"0"}"#,
-        );
-        let second_place = transport.next(&mut engine)?;
-        expected.push((Method::Post, "/api/v1/order", json!({"symbol":SYMBOL,"side":"Bid","orderType":"Market","triggerPrice":"130.00","triggerQuantity":"5.00","triggerBy":"MarkPrice"})));
-        reply(
-            &mut engine,
-            &second_place,
-            200,
-            r#"{"id":"repaired","symbol":"SOL_USDC_PERP","status":"New"}"#,
-        );
+        let out = transport.poll(&mut engine);
+        assert_eq!(transport.writes.len(), expected.len(), "Unknown halts this repair action");
+        let event = out.iter().find_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "backpack.repair.unknown" => Some(event),
+            _ => None,
+        }).ok_or("missing settled repair journal telemetry")?;
+        assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+        assert!(event.fields.iter().any(|(key,value)| *key == "targetOrderId" && value.as_str() == Some("123")));
         transport.poll(&mut engine);
         transport.assert_sequence(&expected)?;
     }
     Ok(())
 }
+
