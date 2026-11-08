@@ -25,6 +25,15 @@ the first write, including pairs, TP/SL children and amend replacements. A round
 quantity outside native bounds refuses the entire intent as InvalidInput/NotSent
 with zero transport requests.
 
+Placement dispatch uses the engine's immutable `WritePlan`, including each pair
+row and separate TP/SL child. Runtime failures return indexed `elements`: proven
+placements retain native IDs, ambiguous writes remain unknown, and untouched
+children are not sent. A failed child stops the remaining plan without replay or
+rollback. Engine-owned unproven responses retain the same journal.
+
+Cancel, cancel-replace and leverage effects await the shared `Applied` result;
+their existing managed paths do not manufacture placement IDs for these effects.
+
 Account leverage is global. Position mode is fixed hedged, and margin mode is
 fixed cross; requests for another mode return an error. Private reconciliation
 runs every ten seconds. Failed reads preserve prior state; stream revisions

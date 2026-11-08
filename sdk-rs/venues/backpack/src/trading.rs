@@ -18,6 +18,7 @@ use safe_cex_engine::request_context::{
         CallBound, MutationTerminalBound, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound,
     },
 };
+use safe_cex_engine::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, CommandWait, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -156,8 +157,40 @@ impl Step {
         matches!(self, Step::Place { .. } | Step::OpenOrders { .. })
     }
 }
+
+fn placement_plan(steps: &[Step], markets: &[Market]) -> Result<WritePlan<Step>, VenueError> {
+    let mut index = 0;
+    let writes = steps
+        .iter()
+        .map(|step| {
+            let orders: &[NativeOrder] = match step {
+                Step::Place { order, .. } => std::slice::from_ref(order.as_ref()),
+                Step::Pair(orders) => orders,
+                _ => &[],
+            };
+            let elements = orders
+                .iter()
+                .map(|order| {
+                    let element = Element {
+                        index,
+                        client_order_id: order.client_id.map(|id| id.to_string()),
+                    };
+                    index += 1;
+                    element
+                })
+                .collect();
+            PlannedWrite {
+                payload: step.clone(),
+                elements,
+            }
+        })
+        .collect();
+    WritePlan::validate(writes, validation::validate_write(markets))
+}
+
 pub struct Request {
     managed: Option<ManagedWrite>,
+    write: Option<usize>,
     command: u64,
     step: Step,
     previous: Option<OrderStatus>,
@@ -174,6 +207,7 @@ pub struct Repair {
 }
 struct Job {
     managed: Option<Plan>,
+    write_plan: Option<WritePlan<Step>>,
     waiting: bool,
     cancel_latches: Vec<String>,
     steps: VecDeque<Step>,
@@ -664,6 +698,7 @@ impl Backpack {
     }
 
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let placement = matches!(&command, Command::PlaceOrders { .. });
         let managed = matches!(
             &command,
             Command::PlaceOrders { .. }
@@ -846,13 +881,24 @@ impl Backpack {
                     _ => None,
                 });
                 let preflight = preflight.as_ref().unwrap();
-                if let Err(error) = steps
-                    .iter()
-                    .try_for_each(validation::validate_write(cx.store.markets()))
-                {
-                    let _ = cx.fail_preflight(preflight, error);
-                    return;
-                }
+                let mut write_plan = if placement {
+                    match placement_plan(&steps, cx.store.markets()) {
+                        Ok(plan) => Some(plan),
+                        Err(error) => {
+                            let _ = cx.fail_preflight(preflight, error);
+                            return;
+                        }
+                    }
+                } else {
+                    if let Err(error) = steps
+                        .iter()
+                        .try_for_each(validation::validate_write(cx.store.markets()))
+                    {
+                        let _ = cx.fail_preflight(preflight, error);
+                        return;
+                    }
+                    None
+                };
                 if steps.is_empty() {
                     let _ = cx.done_empty_plan(preflight, "[]".into());
                     return;
@@ -867,7 +913,11 @@ impl Backpack {
                 let plan = match admitted {
                     Ok(plan) => plan,
                     Err(error) => {
-                        let _ = cx.fail_preflight(preflight, error.venue_error());
+                        let mut error = error.venue_error();
+                        if let Some(writes) = &mut write_plan {
+                            error = writes.failure(error);
+                        }
+                        let _ = cx.fail_preflight(preflight, error);
                         return;
                     }
                 };
@@ -875,9 +925,14 @@ impl Backpack {
                     u64::from(id),
                     Job {
                         managed: Some(plan),
+                        steps: if write_plan.is_some() {
+                            VecDeque::new()
+                        } else {
+                            steps.into()
+                        },
+                        write_plan,
                         waiting: false,
                         cancel_latches: vec![],
-                        steps: steps.into(),
                         ids: vec![],
                         collect_ids,
                         amendment,
@@ -984,9 +1039,15 @@ impl Backpack {
         if job.waiting {
             return;
         }
-        if job.steps.is_empty()
-            && let Some(plan) = &job.managed
-        {
+        let complete = job.write_plan.as_ref().map_or_else(
+            || job.steps.is_empty(),
+            |plan| {
+                plan.outcomes()
+                    .iter()
+                    .all(|element| matches!(element.result, ElementResult::Placed { .. }))
+            },
+        );
+        if complete && let Some(plan) = &job.managed {
             let result = if job.collect_ids {
                 serde_json::to_string(&job.ids).unwrap()
             } else {
@@ -1003,13 +1064,17 @@ impl Backpack {
             else {
                 return;
             };
-            let intent = match job.steps.front() {
-                Some(Step::Place { .. } | Step::Pair(..)) => Some(Intent::Place),
-                Some(Step::Cancel { .. }) if job.amendment.is_some() => Some(Intent::Amend),
-                Some(Step::Cancel { .. } | Step::CancelAll { .. }) => Some(Intent::Cancel),
-                Some(Step::Leverage(..)) => Some(Intent::Setting),
-                Some(Step::OpenOrders { .. }) => None,
-                None => return,
+            let intent = if job.write_plan.is_some() {
+                Some(Intent::Place)
+            } else {
+                match job.steps.front() {
+                    Some(Step::Place { .. } | Step::Pair(..)) => Some(Intent::Place),
+                    Some(Step::Cancel { .. }) if job.amendment.is_some() => Some(Intent::Amend),
+                    Some(Step::Cancel { .. } | Step::CancelAll { .. }) => Some(Intent::Cancel),
+                    Some(Step::Leverage(..)) => Some(Intent::Setting),
+                    Some(Step::OpenOrders { .. }) => None,
+                    None => return,
+                }
             };
             let context = match intent {
                 Some(intent) => cx.plan_leg_context_with_intent(plan, &slot, intent),
@@ -1018,7 +1083,11 @@ impl Backpack {
             let context = match context {
                 Ok(context) => context,
                 Err(error) => {
-                    let _ = cx.fail_plan(plan, error.venue_error());
+                    let mut error = error.venue_error();
+                    if let Some(writes) = &mut job.write_plan {
+                        error = writes.failure(error);
+                    }
+                    let _ = cx.fail_plan(plan, error);
                     return;
                 }
             };
@@ -1031,7 +1100,13 @@ impl Backpack {
         } else {
             None
         };
-        let Some(step) = job.steps.pop_front() else {
+        let next = match &mut job.write_plan {
+            Some(plan) => plan
+                .next_write()
+                .map(|(index, write)| (Some(index), write.payload.clone())),
+            None => job.steps.pop_front().map(|step| (None, step)),
+        };
+        let Some((write, step)) = next else {
             self.trading.jobs.remove(&command);
             return;
         };
@@ -1061,6 +1136,7 @@ impl Backpack {
                 let body = serde_json::to_string(rows).unwrap();
                 let delivery = Request {
                     managed: Some(managed),
+                    write,
                     command,
                     step,
                     previous,
@@ -1126,6 +1202,7 @@ impl Backpack {
                 let params: Params = [("symbol".into(), symbol.clone())].into();
                 let delivery = Request {
                     managed: Some(managed),
+                    write,
                     command,
                     step,
                     previous,
@@ -1149,6 +1226,7 @@ impl Backpack {
         if let Some(managed) = managed {
             let delivery = Request {
                 managed: Some(managed),
+                write,
                 command,
                 step,
                 previous,
@@ -1190,7 +1268,12 @@ impl Backpack {
             Box::new(recipe),
             Pending::Trade(delivery),
         ) {
-            self.trade_failed(cx, delivery, error.venue_error());
+            let error = if delivery.write.is_some() {
+                error.venue_error().outcome(Outcome::NotSent)
+            } else {
+                error.venue_error()
+            };
+            self.trade_failed(cx, delivery, error);
         }
     }
     fn send_managed_trade(
@@ -1232,7 +1315,12 @@ impl Backpack {
             Box::new(recipe),
             Pending::Trade(delivery),
         ) {
-            self.trade_failed(cx, delivery, error.venue_error());
+            let error = if delivery.write.is_some() {
+                error.venue_error().outcome(Outcome::NotSent)
+            } else {
+                error.venue_error()
+            };
+            self.trade_failed(cx, delivery, error);
         }
     }
     pub(crate) fn trade_response(
@@ -1261,18 +1349,27 @@ impl Backpack {
                 && !refused_in_body(response.body)
             {
                 match pair_fact(cx, managed, orders, response.body) {
-                    Ok(WriteResult::Accepted { .. }) => recorded = true,
-                    Ok(_) => {
-                        self.managed_trade_failed(
-                            cx,
-                            request,
-                            VenueError::new("Backpack invalid batch response identity"),
-                            true,
-                        );
-                        return;
+                    Ok((result, elements)) => {
+                        if let Err(reason) = self.settle_write(&request, elements) {
+                            let error = self.plan_failure(&request, VenueError::new(reason), false);
+                            let _ = cx.fail_plan(&managed.plan, error);
+                            return;
+                        }
+                        match result {
+                            WriteResult::Accepted { .. } => recorded = true,
+                            WriteResult::Rejected(error)
+                            | WriteResult::KnownPartial(error)
+                            | WriteResult::PartialUnknown(error)
+                            | WriteResult::Failed(error) => {
+                                let error = self.plan_failure(&request, error, false);
+                                let _ = cx.fail_plan(&managed.plan, error);
+                                return;
+                            }
+                        }
                     }
                     Err(error) => {
-                        let _ = cx.fail_plan(&managed.plan, error.venue_error());
+                        let error = self.plan_failure(&request, error.venue_error(), true);
+                        let _ = cx.fail_plan(&managed.plan, error);
                         return;
                     }
                 }
@@ -1303,6 +1400,12 @@ impl Backpack {
                     }
                     accept_trade(cx, &request, vec![row.id.into()])?;
                     recorded = request.managed.is_some();
+                    self.settle_write(
+                        &request,
+                        vec![ElementResult::Placed {
+                            order_ids: vec![row.id.into()],
+                        }],
+                    )?;
                     cx.store.invalidate_order_snapshots();
                     if let Some(job) = self.trading.jobs.get_mut(&request.command) {
                         job.ids.push(row.id.into());
@@ -1351,7 +1454,9 @@ impl Backpack {
                     cx.store.invalidate_order_snapshots();
                     if let Some(job) = self.trading.jobs.get_mut(&request.command) {
                         for o in orders {
-                            job.ids.push(ids.remove(&o.client_id.unwrap()).unwrap());
+                            let client = o.client_id.ok_or("Backpack missing planned client ID")?;
+                            job.ids
+                                .push(ids.remove(&client).ok_or("Backpack missing batch ID")?);
                         }
                     }
                 }
@@ -1531,7 +1636,8 @@ impl Backpack {
                     if let Err(error) =
                         cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context)
                     {
-                        let _ = cx.fail_plan(&managed.plan, error.venue_error());
+                        let error = self.plan_failure(&request, error.venue_error(), false);
+                        let _ = cx.fail_plan(&managed.plan, error);
                         return;
                     }
                     self.run_trade(cx, request.command);
@@ -1557,7 +1663,7 @@ impl Backpack {
                             }
                             _ => None,
                         };
-                        let error = VenueError::new(e);
+                        let error = self.plan_failure(&request, VenueError::new(e), false);
                         let _ = match &gone {
                             Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
                             None => cx.fail_plan(&managed.plan, error),
@@ -1576,6 +1682,7 @@ impl Backpack {
                             .is_some_and(|job| job.protect.is_some() && job.ids.is_empty());
                     let fact = if unproven {
                         cx.http_write_unproven(&managed.context, &e)
+                            .map(|()| VenueError::new(e.clone()).outcome(Outcome::Unknown))
                     } else {
                         let table = if amend_refusal {
                             &AMEND_REFUSAL
@@ -1584,24 +1691,23 @@ impl Backpack {
                         };
                         native_failure(cx, &managed.context, table, response.body, &e)
                     };
-                    if let Err(error) = fact {
-                        // A trigger amend's write that cannot be journaled is unknown.
-                        if request.step.places()
-                            && self
-                                .trading
-                                .jobs
-                                .get(&request.command)
-                                .is_some_and(|job| job.protect.is_some())
-                        {
-                            return self.guarded_failed(cx, request, error.venue_error(), true);
+                    let error = match fact {
+                        Ok(error) => error,
+                        Err(error) => {
+                            // A trigger amend's write that cannot be journaled is unknown.
+                            if request.step.places()
+                                && self
+                                    .trading
+                                    .jobs
+                                    .get(&request.command)
+                                    .is_some_and(|job| job.protect.is_some())
+                            {
+                                return self.guarded_failed(cx, request, error.venue_error(), true);
+                            }
+                            let error = self.plan_failure(&request, error.venue_error(), true);
+                            let _ = cx.fail_plan(&managed.plan, error);
+                            return;
                         }
-                        let _ = cx.fail_plan(&managed.plan, error.venue_error());
-                        return;
-                    }
-                    let error = if unproven {
-                        VenueError::new(e).outcome(Outcome::Unknown)
-                    } else {
-                        VenueError::new(e)
                     };
                     if let Step::Place { order, .. } = &request.step
                         && amend_refusal
@@ -1889,6 +1995,63 @@ impl Backpack {
         }
     }
 
+    fn settle_write(
+        &mut self,
+        request: &Request,
+        results: Vec<ElementResult>,
+    ) -> Result<(), String> {
+        let Some(index) = request.write else {
+            return Ok(());
+        };
+        let plan = self
+            .trading
+            .jobs
+            .get_mut(&request.command)
+            .and_then(|job| job.write_plan.as_mut())
+            .ok_or("Backpack write plan unavailable")?;
+        plan.settle(index, results)
+            .map_err(|error| error.to_string())
+    }
+
+    fn plan_failure(
+        &mut self,
+        request: &Request,
+        mut error: VenueError,
+        pending: bool,
+    ) -> VenueError {
+        if let Some(index) = request.write
+            && let Some(plan) = self
+                .trading
+                .jobs
+                .get_mut(&request.command)
+                .and_then(|job| job.write_plan.as_mut())
+        {
+            if pending && let Err(reason) = plan.fail(index, error.clone()) {
+                error.message = format!("{}; {reason}", error.message);
+                error.outcome = Some(Outcome::Unknown);
+            }
+            error = plan.failure(error);
+        }
+        error
+    }
+
+    pub(crate) fn trade_unproven_evidence(
+        &self,
+        request: &Request,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        request.unproven_evidence(response, evidence);
+        if let Some(plan) = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .and_then(|job| job.write_plan.as_ref())
+        {
+            evidence.write_plan(plan);
+        }
+    }
+
     fn managed_trade_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1901,6 +2064,14 @@ impl Backpack {
             request.step,
             Step::Place { optional: true, .. } | Step::Cancel { optional: true, .. }
         );
+        if request.write.is_some() {
+            if optional {
+                cx.notice(Level::Error, code::CHILD_LEG_FAILED, &error.message);
+            }
+            let error = self.plan_failure(&request, error, true);
+            let _ = cx.fail_plan(&managed.plan, error);
+            return;
+        }
         if let Step::Cancel { id, .. } = &request.step {
             let last = self.finish_trade_cancel(request.command, id);
             if last
@@ -2136,7 +2307,7 @@ fn native_failure(
     table: &CodeTable,
     body: &str,
     message: &str,
-) -> Result<(), safe_cex_engine::request_context::Error> {
+) -> Result<VenueError, safe_cex_engine::request_context::Error> {
     #[derive(Deserialize)]
     struct Failure<'a> {
         #[serde(borrow)]
@@ -2159,8 +2330,17 @@ fn native_failure(
             .and_then(|failure| failure.message)
             .unwrap_or(""),
     };
-    cx.http_write_failure(context, table, Some(&native), message, None)
-        .map(|_| ())
+    let fact = cx.classify_write(context, table, Some(&native), message)?;
+    let error = fact.error().clone();
+    cx.http_write_fact(
+        context,
+        WriteFact::Failed {
+            fact,
+            known_effects: false,
+        },
+        None,
+    )?;
+    Ok(error)
 }
 
 #[derive(Deserialize)]
@@ -2201,23 +2381,38 @@ fn pair_fact(
     managed: &ManagedWrite,
     orders: &[NativeOrder],
     body: &str,
-) -> Result<WriteResult, safe_cex_engine::request_context::Error> {
+) -> Result<(WriteResult, Vec<ElementResult>), safe_cex_engine::request_context::Error> {
     let (rows, count) = pair_rows(body);
     let mut items = vec![];
+    let mut results = vec![];
     for expected in orders {
-        let Some(row) = correlated_pair_row(expected, &rows) else {
-            continue;
-        };
-        if row.operation == "Ok"
+        let row = correlated_pair_row(expected, &rows);
+        if let Some(row) = row
+            && row.operation == "Ok"
             && !row.id.trim().is_empty()
             && rows.iter().filter(|other| other.id == row.id).count() == 1
         {
             items.push(BatchItem::Accepted(&row.id));
+            results.push(ElementResult::Placed {
+                order_ids: vec![row.id.clone()],
+            });
         } else {
-            items.push(BatchItem::Native(Native {
+            let native = Native {
                 code: NativeCode::None,
                 message: "Backpack invalid batch response identity",
-            }));
+            };
+            let fact =
+                cx.classify_write(&managed.context, &BACKPACK, Some(&native), native.message)?;
+            let error = Box::new(fact.error().clone());
+            results.push(match error.outcome {
+                Some(Outcome::Rejected | Outcome::NotSent) => {
+                    ElementResult::NotSent { error: Some(error) }
+                }
+                _ => ElementResult::Unknown { error },
+            });
+            if row.is_some() {
+                items.push(BatchItem::Native(native));
+            }
         }
     }
     if count > orders.len() && items.len() == orders.len() {
@@ -2227,14 +2422,15 @@ fn pair_fact(
             message: "Backpack unexpected batch response row",
         }));
     }
-    cx.http_write_batch(
+    let result = cx.http_write_batch(
         &managed.context,
         &BACKPACK,
         orders.len(),
         &items,
         "Backpack invalid batch response identity",
         None,
-    )
+    )?;
+    Ok((result, results))
 }
 
 impl Request {

@@ -182,33 +182,44 @@ fn duplicate_client_ids_and_bracket_client_id_fail_closed() {
     }
 }
 #[test]
-fn limit_bracket_waits_for_entry_and_keeps_a_successful_leg_if_other_leg_fails() {
+fn limit_bracket_waits_for_entry_and_stops_when_a_child_outcome_is_unknown()
+-> Result<(), Box<dyn std::error::Error>> {
     let (mut e, _) = ready();
     place(
         &mut e,
         1,
         r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}]"#,
     );
-    let r = requests(&mut e).pop().unwrap();
-    assert!(!r.body.as_deref().unwrap().contains("TriggerPrice"));
-    reply(&mut e, &r, 200, r#"{"id":"entry"}"#);
-    let tp = requests(&mut e).pop().unwrap();
-    let body = tp.body.as_deref().unwrap();
+    let entry = requests(&mut e).pop().ok_or("entry missing")?;
+    assert!(
+        !entry
+            .body
+            .as_deref()
+            .ok_or("entry body missing")?
+            .contains("TriggerPrice")
+    );
+    reply(&mut e, &entry, 200, r#"{"id":"entry"}"#);
+    let tp = requests(&mut e).pop().ok_or("first child missing")?;
+    let body = tp.body.as_deref().ok_or("first child body missing")?;
     assert!(body.contains("\"side\":\"Ask\""));
     assert!(body.contains("\"triggerPrice\":\"150.00\""));
     assert!(body.contains("\"triggerBy\":\"MarkPrice\""));
     reply(&mut e, &tp, 400, r#"{"message":"rejected"}"#);
-    let sl = requests(&mut e).pop().unwrap();
-    assert!(
-        sl.body
-            .as_deref()
-            .unwrap()
-            .contains("\"triggerPrice\":\"130.00\"")
+    let out = actions(&mut e);
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    let error = failure(&out);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .ok_or("prior accepted ID missing")?
+            .order_ids,
+        ["entry"]
     );
-    reply(&mut e, &sl, 200, r#"{"id":"stop"}"#);
-    let error = done(&mut e).unwrap_err();
-    assert!(error.contains(r#""partialOrderIds":["entry","stop"]"#));
+    Ok(())
 }
+
 #[test]
 fn market_attached_brackets_and_standalone_trigger_payloads() {
     let (mut e, _) = ready();
@@ -940,7 +951,8 @@ fn amend_does_not_replace_after_an_ambiguous_cancel_ack() {
 }
 
 #[test]
-fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+fn an_unclassified_limit_replacement_failure_warns_its_outcome_is_unknown()
+-> Result<(), Box<dyn std::error::Error>> {
     let (mut e, _) = ready_orders(&format!("[{ORDER}]"));
     e.drain_actions().for_each(drop);
     e.handle(
@@ -952,7 +964,7 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
             amount: None,
         }),
     );
-    let cancel = requests(&mut e).pop().unwrap();
+    let cancel = requests(&mut e).pop().ok_or("cancel missing")?;
     reply(
         &mut e,
         &cancel,
@@ -965,25 +977,34 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
             Action::Http(r) if r.method == Method::Post => Some(r),
             _ => None,
         })
-        .expect("the replacement");
+        .ok_or("replacement missing")?;
     reply(
         &mut e,
         &place,
         400,
         r#"{"code":"INVALID_ORDER","message":"bad"}"#,
     );
-    let error = actions(&mut e)
+    let out = actions(&mut e);
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    let error = out
         .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
             _ => None,
         })
-        .expect("a failure");
+        .ok_or("failure missing")?;
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.venue_code.as_deref(), Some("INVALID_ORDER"));
+    assert_eq!(error.venue_message.as_deref(), Some("bad"));
     assert!(
-        error.message.contains("Your SOL_USDC_PERP order is gone"),
+        error
+            .message
+            .contains("Your SOL_USDC_PERP order may be gone")
+            && error.message.contains("Check Open Orders"),
         "{}",
         error.message
     );
+    Ok(())
 }
 
 /// Prices observed now, as a trigger edit's final check needs.

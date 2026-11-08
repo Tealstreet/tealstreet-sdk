@@ -1153,7 +1153,7 @@ impl Venue for Backpack {
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
         if let Pending::Trade(request) = pending {
-            request.unproven_evidence(response, evidence);
+            self.trade_unproven_evidence(request, response, evidence);
         }
     }
     fn on_http_failed(
