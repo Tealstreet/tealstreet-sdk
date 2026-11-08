@@ -223,7 +223,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitget: 2_457_600,
   bitgetusdc: 2_457_600,
   bitrue: 1_864_704,
-  bitunix: 1_878_016,
+  bitunix: 1_874_944,
   blofin: 2_015_232,
   bybit: 2_281_472,
   coinbase: 1_953_792,
@@ -248,7 +248,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   'lighter-robinhood': 2_109_440,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   mexc: 1_872_896,
-  okx: 2_014_208,
+  okx: 1_999_872,
   orderly: 1_744_896,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_282_496,
