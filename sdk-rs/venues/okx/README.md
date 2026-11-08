@@ -30,9 +30,12 @@ and ordered outcome. A runtime refusal stops the unissued suffix; an ambiguous
 reply or lost response stays unknown. Mixed batches retain their proven row
 successes. Terminal partial-ID errors include the shared element journal,
 including when the engine seals an HTTP server failure before venue decoding.
-Journaled placements do not resend on a signature refusal, and a refused trailing
+Journaled writes do not resend on a signature refusal, and a refused trailing
 replacement reports lost protection without automatically restoring the old stop.
 
-This adoption is stacked on engine PR #3348. Accepted cancels, native amendments
-and settings currently remain under the existing engine lifecycle while its
-shared `Applied` result is pending; they are not mislabeled as placed orders.
+This adoption is stacked on engine PR #3348. Accepted cancels and native
+amendments use `Applied` with their existing native target ID. Settings use the
+instrument/margin key or the account position-mode key. These effects continue
+dispatch without inventing new order IDs; a later failure reports an applied
+prefix and preserves the untouched suffix. Native lifecycle custody stays with
+the engine.

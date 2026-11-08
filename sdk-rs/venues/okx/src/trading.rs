@@ -2404,7 +2404,17 @@ fn native_results(
         return if let Some(index) = unproven {
             Ok(vec![failures.remove(index)])
         } else if let Some(result) = failures.into_iter().next() {
-            Ok(vec![result])
+            if acks.iter().any(|ack| matches!(ack.s_code, "" | "0")) {
+                let error = match result {
+                    ElementResult::NotSent { error: Some(error) } => error,
+                    _ => return Ok(vec![result]),
+                };
+                Ok(vec![ElementResult::Unknown {
+                    error: Box::new((*error).outcome(Outcome::Unknown)),
+                }])
+            } else {
+                Ok(vec![result])
+            }
         } else {
             Ok(vec![applied.result(0)?])
         };
@@ -2965,6 +2975,67 @@ mod write_validation_tests {
         payload.sz = Some("5".into());
         payload.px = Some("38000".into());
         payload
+    }
+
+    #[test]
+    fn applied_effects_keep_existing_targets_out_of_created_order_ids() {
+        for (path, body, expected) in [
+            (
+                "/api/v5/trade/cancel-batch-orders",
+                r#"[{"ordId":"91"}]"#,
+                ElementResult::Applied {
+                    effect: AppliedEffect::Cancel,
+                    target_order_id: Some("91".into()),
+                    position_key: None,
+                },
+            ),
+            (
+                "/api/v5/trade/amend-algos",
+                r#"{"algoId":"92","newSz":"5"}"#,
+                ElementResult::Applied {
+                    effect: AppliedEffect::Amend,
+                    target_order_id: Some("92".into()),
+                    position_key: None,
+                },
+            ),
+            (
+                "/api/v5/account/set-leverage",
+                r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","lever":"5"}"#,
+                ElementResult::Applied {
+                    effect: AppliedEffect::Settings,
+                    target_order_id: None,
+                    position_key: Some("BTC-USDT-SWAP:cross".into()),
+                },
+            ),
+            (
+                "/api/v5/account/set-position-mode",
+                r#"{"posMode":"net_mode"}"#,
+                ElementResult::Applied {
+                    effect: AppliedEffect::Settings,
+                    target_order_id: None,
+                    position_key: Some("account:positionMode".into()),
+                },
+            ),
+        ] {
+            let body: serde_json::Value = serde_json::from_str(body).expect("native fixture");
+            let step = step(path, &body, 1, false).expect("native step");
+            let applied = step.applied.clone().expect("known existing target");
+            let mut job = job(vec![step], Finish::Empty);
+            job.validate_writes().expect("valid write plan");
+            let writes = job.writes.as_mut().expect("shared journal");
+            let (index, _) = writes.next_write().expect("native dispatch");
+            writes
+                .settle(index, vec![applied.result(0).expect("native acceptance")])
+                .expect("settled");
+            assert_eq!(writes.outcomes()[0].result, expected);
+            let failure =
+                writes.failure(VenueError::new("later failure").outcome(Outcome::Rejected));
+            assert_eq!(failure.outcome, Some(Outcome::Unknown));
+            assert!(
+                failure.partial.is_none(),
+                "applied targets are not created order IDs"
+            );
+        }
     }
 
     #[test]
