@@ -217,7 +217,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
   // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
   binance: 2_236_416,
-  bingx: 2_085_888,
+  // #3316 at 0ce06dd04ad: CI run 42449269046, job 128635008984 measured 2,087,229 B.
+  // Standing CI + 10 KiB rounded up; fixture-only Spot remains refused.
+  bingx: 2_098_176,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   bitget: 2_457_600,
