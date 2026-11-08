@@ -2162,6 +2162,22 @@ impl CommandWrites {
             ) => Some(error.clone()),
             _ => None,
         };
+        // Later failed attempts can carry a complete journal even when an
+        // earlier refusal still supplies the native error text.
+        let elements = elements.or_else(|| {
+            self.attempts
+                .iter()
+                .rev()
+                .find_map(|attempt| match &attempt.result {
+                    Some(
+                        WriteResult::Rejected(error)
+                        | WriteResult::KnownPartial(error)
+                        | WriteResult::PartialUnknown(error)
+                        | WriteResult::Failed(error),
+                    ) => error.elements.clone(),
+                    _ => None,
+                })
+        });
         // Choose the terminal physical attempt of the earliest logical leg,
         // preferring legs that reached the venue. Callback order is irrelevant.
         let select = |sent_only: bool| {
@@ -2579,3 +2595,7 @@ mod evidence_tests;
 #[cfg(test)]
 #[path = "request_context_replacement_tests.rs"]
 mod replacement_tests;
+
+#[cfg(test)]
+#[path = "request_context_write_plan_tests.rs"]
+mod write_plan_tests;
