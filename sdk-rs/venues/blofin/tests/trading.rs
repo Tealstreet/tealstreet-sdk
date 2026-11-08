@@ -1116,6 +1116,7 @@ fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
     let mut h = Harness {
         e,
         pending: vec![],
+        requests: vec![],
         actions: vec![],
         failures: vec![],
         private: SocketId(0),

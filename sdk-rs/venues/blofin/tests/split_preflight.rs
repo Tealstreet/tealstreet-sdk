@@ -16,6 +16,7 @@ fn harness(minimum: f64, maximum: f64, step: f64) -> Harness {
     h.open_private();
     h.seed();
     assert_eq!(h.pending.len(), 0);
+    h.requests.clear();
     h
 }
 
@@ -35,6 +36,11 @@ fn place(h: &mut Harness, orders: Value) {
 }
 
 fn not_sent(h: &Harness) {
+    assert_eq!(
+        h.requests.len(),
+        0,
+        "recording scripted transport saw a request"
+    );
     assert_eq!(
         h.pending.len(),
         0,
@@ -126,6 +132,7 @@ fn off_step_maximum_rebalances_without_oversize() {
     );
     assert!(h.failures.is_empty());
     assert_eq!(h.pending.len(), 0);
+    assert_eq!(h.requests.len(), 1);
 }
 
 #[test]
@@ -193,6 +200,11 @@ fn valid_replacement_cancels_once_and_places_each_lot_once() {
     assert!(rows.iter().all(|row| row["size"] == "4"));
     assert!(h.failures.is_empty());
     assert_eq!(h.pending.len(), 0);
+    assert_eq!(
+        h.requests.len(),
+        3,
+        "one cancel, one verify read, one placement"
+    );
 }
 
 #[test]
@@ -206,6 +218,7 @@ fn native_order_type_maximum_controls_every_lot() {
     for kind in ["limit", "market"] {
         let mut h = Harness::with_instruments(&instruments.to_string());
         h.seed();
+        h.requests.clear();
         let mut intent = order(5.0);
         intent["type"] = json!(kind);
         place(&mut h, json!([intent]));
@@ -222,6 +235,7 @@ fn native_order_type_maximum_controls_every_lot() {
     for execution in [json!(60000), Value::Null] {
         let mut h = Harness::with_instruments(&instruments.to_string());
         h.seed();
+        h.requests.clear();
         let intent = json!({"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":5,"price":execution,"triggerPrice":61000});
         place(&mut h, json!([intent]));
         if execution.is_null() {
@@ -290,6 +304,7 @@ fn exact_minimum_balanced_control() {
     }
     assert!(h.failures.is_empty());
     assert_eq!(h.pending.len(), 0);
+    assert_eq!(h.requests.len(), 1);
     assert!(
         h.actions
             .iter()
@@ -326,4 +341,5 @@ fn valid_grouped_chunks_preserve_each_caller_id_exactly_once() {
     );
     assert!(h.failures.is_empty());
     assert_eq!(h.pending.len(), 0);
+    assert_eq!(h.requests.len(), 2);
 }

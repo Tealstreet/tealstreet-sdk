@@ -1,6 +1,8 @@
 //! Trading command jobs: each command owns a Preflight root and one streamed
 //! serial Plan. A lost write response is never retried.
 use super::*;
+mod preflight;
+use preflight::{PlacementWrite, validate_placement_write};
 use safe_cex_engine::classify::{
     BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
     WriteFact, decode_int,
@@ -951,62 +953,35 @@ impl Blofin {
         }
         Ok(result)
     }
+    fn validate_placement_batch(
+        &self,
+        cx: &Cx<'_, Pending>,
+        family: u8,
+        payloads: &[Placement],
+    ) -> Result<(), String> {
+        let first = payloads.first().ok_or("Empty BloFin placement write")?;
+        let market = cx
+            .store
+            .market_by_id(&first.inst_id)
+            .ok_or("Unknown BloFin placement market")?;
+        let rules = self
+            .size_rules
+            .get(&market.id)
+            .ok_or("Missing BloFin native size rules")?;
+        validate_placement_write(&PlacementWrite {
+            payloads,
+            family,
+            rules,
+            market,
+        })
+        .map_err(|error| error.message)
+    }
     fn add_placements(
         &self,
         cx: &Cx<'_, Pending>,
         job: &mut Job,
         rows: Vec<(u8, Placement, Order)>,
     ) -> Result<(), String> {
-        for (family, payload, order) in &rows {
-            let market = cx
-                .store
-                .market(&order.symbol)
-                .ok_or("Unknown BloFin placement market")?;
-            let rules = self
-                .size_rules
-                .get(&market.id)
-                .ok_or("Missing BloFin native size rules")?;
-            let size = payload.size.parse::<f64>().map_err(|e| e.to_string())?;
-            if *family != 1 || size != -1.0 {
-                rules.validate(size, rules.maximum(payload), market.precision.amount)?;
-            }
-            let price = |text: &str, market_execution: bool| -> Result<(), String> {
-                let value = text.parse::<f64>().map_err(|e| e.to_string())?;
-                if market_execution && value == -1.0 {
-                    return Ok(());
-                }
-                positive(value, "wire price")?;
-                if num::adjust(value, market.precision.price) != value {
-                    return Err("BloFin wire price violates tickSize".into());
-                }
-                Ok(())
-            };
-            for value in [&payload.price, &payload.trigger_price]
-                .into_iter()
-                .flatten()
-            {
-                price(value, false)?;
-            }
-            if let Some(value) = &payload.order_price {
-                price(value, true)?;
-            }
-            for protection in
-                std::iter::once(&payload.protection).chain(&payload.attach_algo_orders)
-            {
-                for value in [&protection.tp_trigger_price, &protection.sl_trigger_price]
-                    .into_iter()
-                    .flatten()
-                {
-                    price(value, false)?;
-                }
-                for value in [&protection.tp_order_price, &protection.sl_order_price]
-                    .into_iter()
-                    .flatten()
-                {
-                    price(value, true)?;
-                }
-            }
-        }
         if !rows.is_empty() {
             job.replacement_targets = job
                 .steps
@@ -1059,6 +1034,7 @@ impl Blofin {
                 .take_while(|p| p.inst_id == first.inst_id && p.margin_mode == first.margin_mode)
                 .count();
             let batch = &normal[start..start + count];
+            self.validate_placement_batch(cx, 0, batch)?;
             let receipts = normal_receipts[start..start + count].to_vec();
             let orders = normal_orders[start..start + count].to_vec();
             start += count;
@@ -1076,6 +1052,7 @@ impl Blofin {
             });
         }
         for (family, payload, receipt, order) in special {
+            self.validate_placement_batch(cx, family, std::slice::from_ref(&payload))?;
             job.steps.push_back(Step {
                 receipts: vec![receipt],
                 orders: vec![order],
