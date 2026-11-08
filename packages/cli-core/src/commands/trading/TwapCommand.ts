@@ -84,11 +84,22 @@ export class TwapCommand extends TradingBaseCommand {
   async execute(ctx: CommandContext): Promise<CommandResult> {
     const sideIndex = ctx.args._[1]?.toLowerCase() === 'chase' ? 2 : 1;
     if (['buy', 'sell'].includes(ctx.args._[sideIndex]?.toLowerCase())) {
+      this.assertUnambiguousOrderModifiers(
+        ctx,
+        sideIndex + 1,
+        ['into', 'over', 'reduce', 'chaser', 'timeout', 'fail'],
+        { into: 1, over: 1, timeout: 2, fail: 1 },
+      );
       ctx = this.resolveLeadingSymbolSlot(ctx, sideIndex + 1);
     }
     const args = this.getRawArgs(ctx);
     const duplicate = this.refuseDuplicateModifiers(ctx, [
-      ['timeout'], ['fail'], ['into', 'slices'], ['over', 'duration'], ['reduce'], ['chaser'],
+      ['timeout'],
+      ['fail'],
+      ['into', 'slices'],
+      ['over', 'duration'],
+      ['reduce'],
+      ['chaser'],
     ]);
     if (duplicate) return duplicate;
     const assignment = this.refuseOrderAssignments(ctx);
@@ -392,9 +403,8 @@ export class TwapCommand extends TradingBaseCommand {
     }
 
     const sizeArg = args[leadingSymbol ? 3 : 2];
-    const symbol = leadingSymbols[0] ?? (symbolIndex > 0
-      ? this.validateSymbols(exchange, [args[symbolIndex]])[0]
-      : ctx.symbol);
+    const symbol =
+      leadingSymbols[0] ?? (symbolIndex > 0 ? this.validateSymbols(exchange, [args[symbolIndex]])[0] : ctx.symbol);
 
     if (!sizeArg || !this.looksLikeSize(sizeArg)) {
       return this.error('Size must be in USD format (e.g., $100). Usage: twap buy $100 duration=1h');
