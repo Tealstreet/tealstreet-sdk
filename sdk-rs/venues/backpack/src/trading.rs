@@ -1,7 +1,5 @@
-//! Each command is a preflighted sequence of writes. A lost write response is
-//! terminal for that job: it is never replayed.
-mod validation;
-
+//! Foreground writes retain legacy TS sequencing; WritePlan observes outcomes.
+//! An uncertain physical write is never resent.
 use crate::account::Next;
 use crate::sign::Params;
 use crate::{Backpack, Pending, REST};
@@ -133,11 +131,7 @@ pub enum Step {
     },
     Leverage(f64),
 }
-fn write_plan(
-    steps: &[Step],
-    markets: &[Market],
-    max_prices: &HashMap<String, f64>,
-) -> Result<WritePlan<Step>, VenueError> {
+fn write_plan(steps: &[Step]) -> Result<WritePlan<Step>, VenueError> {
     let mut index = 0;
     let writes = steps
         .iter()
@@ -171,7 +165,7 @@ fn write_plan(
             }
         })
         .collect();
-    WritePlan::validate(writes, validation::validate_write(markets, max_prices))
+    WritePlan::validate(writes, |_| Ok(()))
 }
 
 pub struct Request {
@@ -194,79 +188,18 @@ pub struct Repair {
 struct Job {
     managed: Option<Plan>,
     write_plan: WritePlan<Step>,
+    continue_rows: bool,
+    skip_children: bool,
+    failure: Option<VenueError>,
     waiting: bool,
     cancel_latches: Vec<String>,
     ids: Vec<String>,
     collect_ids: bool,
-    amendment: Option<(String, f64)>,
+    amendment: bool,
     /// The amended order's side and kind: what its lost replacement costs.
     amended: Option<(OrderSide, OrderType)>,
-    /// A trigger edit's final pre-cancel safety check.
-    protect: Option<Box<StopGuard>>,
 }
 
-/// The last check before an amended trigger order's cancel: a refusal leaves
-/// it untouched.
-struct StopGuard {
-    order: Order,
-    trigger: f64,
-    reference: StopTriggerType,
-    /// The side of the reference the trigger stays on, from planning.
-    below: bool,
-    /// A reduce-only stop needs a position on the side it closes.
-    closes: Option<PositionSide>,
-}
-impl StopGuard {
-    /// A refusal is typed NotSent and leaves the order untouched.
-    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
-        use safe_cex_engine::protective_amend::{fresh_reference, refused};
-        let unchanged = || format!("Your {} order was not changed", self.order.symbol);
-        // Its own cancel marks the row Canceling just before the claim.
-        let same = store.order(&self.order.id).is_some_and(|order| {
-            order == &self.order
-                || order.status == OrderStatus::Canceling
-                    && Order {
-                        status: self.order.status,
-                        ..order.clone()
-                    } == self.order
-        });
-        if !same {
-            return Err(refused(Some(format!(
-                "{}: it changed or filled before cancellation",
-                unchanged()
-            ))));
-        }
-        if let Some(side) = self.closes
-            && !store
-                .positions()
-                .iter()
-                .any(|p| p.symbol == self.order.symbol && p.side == side && p.contracts > 0.0)
-        {
-            return Err(refused(Some(format!(
-                "{}: no position for it to protect",
-                unchanged()
-            ))));
-        }
-        let label = match self.reference {
-            StopTriggerType::MarkPrice => "mark",
-            StopTriggerType::IndexPrice => "index",
-            StopTriggerType::LastPrice => "last",
-        };
-        let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
-            return Err(refused(Some(format!(
-                "{}: the {label} price reference is stale",
-                unchanged()
-            ))));
-        };
-        if (self.below && self.trigger >= price) || (!self.below && self.trigger <= price) {
-            return Err(refused(Some(format!(
-                "{}: the new trigger has already crossed the {label} price",
-                unchanged()
-            ))));
-        }
-        Ok(())
-    }
-}
 #[derive(Default)]
 pub struct Trading {
     jobs: HashMap<u64, Job>,
@@ -564,66 +497,11 @@ impl Backpack {
         let _ = cx.fail_context(&context, not_sent(message).kind(ErrorKind::Unsupported));
     }
 
-    /// Validate a trigger edit now and again at its final pre-cancel claim.
-    fn stop_guard(
-        &self,
-        cx: &Cx<'_, Pending>,
-        old: &Order,
-        edited: &PlaceOrderOpts,
-    ) -> Result<Option<Box<StopGuard>>, String> {
-        let triggered_limit = old
-            .extra
-            .as_ref()
-            .is_some_and(|e| e.conditional_order_price.is_some());
-        if !matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit) && !triggered_limit {
-            return Ok(None);
-        }
-        let market = cx
-            .store
-            .market(&old.symbol)
-            .ok_or_else(|| format!("Market not found: {}", old.symbol))?;
-        let trigger = num::adjust(
-            edited
-                .trigger_price
-                .or(edited.price)
-                .ok_or("Backpack amendment has no trigger")?,
-            market.precision.price,
-        );
-        // The source the replacement is sent with (`trigger`'s default).
-        let reference = old.trigger_type.unwrap_or(StopTriggerType::MarkPrice);
-        // Direction comes from planning, never a later last-price reclassification:
-        // a stop's side and kind, or the side a triggered limit was planned on.
-        let below = match old.kind {
-            OrderType::StopLoss => old.side == OrderSide::Sell,
-            OrderType::TakeProfit => old.side == OrderSide::Buy,
-            _ => safe_cex_engine::protective_amend::fresh_reference(
-                cx.store,
-                &old.symbol,
-                reference,
-                cx.now,
-            )
-            .is_some_and(|price| old.price < price),
-        };
-        let guard = StopGuard {
-            order: old.clone(),
-            trigger,
-            reference,
-            below,
-            // Backpack marks every trigger row reduce-only, so only a stop or
-            // take profit is known to close a position.
-            closes: (old.reduce_only && old.kind != OrderType::Limit).then(|| {
-                if old.side == OrderSide::Sell {
-                    PositionSide::Long
-                } else {
-                    PositionSide::Short
-                }
-            }),
-        };
-        guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
-        Ok(Some(Box::new(guard)))
-    }
-
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let continue_rows = matches!(
+            &command,
+            Command::PlaceOrders { .. } | Command::CancelOrders { .. }
+        );
         let managed = matches!(
             &command,
             Command::PlaceOrders { .. }
@@ -664,7 +542,6 @@ impl Backpack {
         } else {
             None
         };
-        let mut protect = None;
         let (id, plan) = match command {
             Command::PlaceOrders { command, orders } => {
                 (command, self.prepare_place(cx, orders).map(|s| (s, true)))
@@ -709,32 +586,21 @@ impl Backpack {
                     if matches!(old.status, OrderStatus::Closed | OrderStatus::Canceled) {
                         return Err("Backpack cannot amend a terminal order".into());
                     }
-                    if amount.unwrap_or(old.amount) <= old.filled {
-                        return Err(
-                            "Backpack amended total must exceed the already filled quantity".into(),
-                        );
+                    if amount.unwrap_or(old.amount) <= 0. {
+                        return Err("Backpack amended total must be positive".into());
                     }
                     let edited = |price: Option<f64>, amount: Option<f64>| PlaceOrderOpts {
                         symbol: old.symbol.clone(),
                         kind: old.kind,
                         side: old.side,
-                        amount: (amount.unwrap_or(old.amount) - old.filled).max(0.0),
-                        price: Some(
-                            old.extra
-                                .as_ref()
-                                .and_then(|e| e.conditional_order_price)
-                                .unwrap_or(price.unwrap_or(old.price)),
-                        ),
-                        trigger_price: old
-                            .extra
-                            .as_ref()
-                            .and_then(|e| e.conditional_order_price)
-                            .map(|_| price.unwrap_or(old.price)),
+                        amount: amount.unwrap_or(old.amount),
+                        price: Some(price.unwrap_or(old.price)),
+                        trigger_price: None,
                         stop_loss: None,
                         take_profit: None,
                         reduce_only: Some(old.reduce_only),
                         time_in_force: old.time_in_force,
-                        trigger_type: old.trigger_type,
+                        trigger_type: None,
                         tp_trigger_type: None,
                         sl_trigger_type: None,
                         client_order_id: None,
@@ -747,7 +613,6 @@ impl Backpack {
                     };
                     let o = edited(price, amount);
                     let mut steps = self.placement_steps(cx, &o)?;
-                    protect = self.stop_guard(cx, &old, &o)?;
                     steps.insert(
                         0,
                         Step::Cancel {
@@ -789,16 +654,7 @@ impl Backpack {
         }
         match plan {
             Ok((steps, collect_ids)) => {
-                let amendment = if collect_ids {
-                    steps.first().and_then(|step| match step {
-                        Step::Cancel { id, .. } => {
-                            cx.store.order(id).map(|o| (id.clone(), o.filled))
-                        }
-                        _ => None,
-                    })
-                } else {
-                    None
-                };
+                let amendment = collect_ids && matches!(steps.first(), Some(Step::Cancel { .. }));
                 let amended = steps.first().and_then(|step| match step {
                     Step::Cancel { id, .. } if collect_ids => {
                         cx.store.order(id).map(|o| (o.side, o.kind))
@@ -806,8 +662,7 @@ impl Backpack {
                     _ => None,
                 });
                 let preflight = preflight.as_ref().unwrap();
-                let mut write_plan = match write_plan(&steps, cx.store.markets(), &self.max_prices)
-                {
+                let mut write_plan = match write_plan(&steps) {
                     Ok(plan) => plan,
                     Err(error) => {
                         let _ = cx.fail_preflight(preflight, error);
@@ -818,7 +673,7 @@ impl Backpack {
                     let _ = cx.done_empty_plan(preflight, "[]".into());
                     return;
                 }
-                let admitted = self.admit_trade(cx, preflight, &steps);
+                let admitted = self.admit_trade(cx, preflight, &steps, continue_rows);
                 let plan = match admitted {
                     Ok(plan) => plan,
                     Err(error) => {
@@ -833,13 +688,15 @@ impl Backpack {
                     Job {
                         managed: Some(plan),
                         write_plan,
+                        continue_rows,
+                        skip_children: false,
+                        failure: None,
                         waiting: false,
                         cancel_latches: vec![],
                         ids: vec![],
                         collect_ids,
                         amendment,
                         amended,
-                        protect,
                     },
                 );
                 self.run_trade(cx, u64::from(id));
@@ -857,6 +714,7 @@ impl Backpack {
         cx: &mut Cx<'_, Pending>,
         preflight: &Preflight,
         steps: &[Step],
+        independent_calls: bool,
     ) -> Result<Plan, safe_cex_engine::request_context::Error> {
         let calls: Vec<_> = steps
             .iter()
@@ -878,7 +736,7 @@ impl Backpack {
             preflight,
             &bounds,
             PlanPolicy {
-                independent_calls: false,
+                independent_calls,
                 operation: Operation::Mutation,
                 credential: self.options.identity.as_ref().map(|identity| Credential {
                     slot: safe_cex_engine::CredentialSlot::Primary,
@@ -914,13 +772,13 @@ impl Backpack {
         if job.waiting {
             return;
         }
-        let complete = job.write_plan.outcomes().iter().all(|element| {
-            matches!(
-                element.result,
-                ElementResult::Placed { .. } | ElementResult::Applied { .. }
-            )
-        });
+        let complete = job.write_plan.is_complete();
         if complete && let Some(plan) = &job.managed {
+            if let Some(error) = job.failure.take() {
+                let error = job.write_plan.failure(error);
+                let _ = cx.fail_plan(plan, error);
+                return;
+            }
             let result = if job.collect_ids {
                 serde_json::to_string(&job.ids).unwrap()
             } else {
@@ -938,13 +796,29 @@ impl Backpack {
             return;
         };
         let writes = &mut job.write_plan;
-        let Some((write, planned)) = writes.next_write() else {
+        let Some((write, planned)) = writes.observe_next_write() else {
             return;
         };
         let step = planned.payload.clone();
+        if job.skip_children && matches!(step, Step::Place { optional: true, .. }) {
+            if let Err(reason) = writes.settle(write, vec![ElementResult::NotSent { error: None }])
+            {
+                let error = writes.failure(VenueError::new(reason.to_string()));
+                let _ = cx.fail_plan(plan, error);
+                return;
+            }
+            if let Err(reason) = cx.retire_unissued_plan_call(plan, &slot) {
+                let error = writes.failure(reason.venue_error());
+                let _ = cx.fail_plan(plan, error);
+                return;
+            }
+            self.run_trade(cx, command);
+            return;
+        }
+        job.skip_children = false;
         let intent = match &step {
             Step::Place { .. } | Step::Pair(..) => Intent::Place,
-            Step::Cancel { .. } if job.amendment.is_some() => Intent::Amend,
+            Step::Cancel { .. } if job.amendment => Intent::Amend,
             Step::Cancel { .. } | Step::CancelAll { .. } => Intent::Cancel,
             Step::Leverage(..) => Intent::Setting,
         };
@@ -1152,6 +1026,15 @@ impl Backpack {
                             | WriteResult::KnownPartial(error)
                             | WriteResult::PartialUnknown(error)
                             | WriteResult::Failed(error) => {
+                                if self.continue_reported_failure(
+                                    cx,
+                                    &request,
+                                    error.clone(),
+                                    false,
+                                    true,
+                                ) {
+                                    return;
+                                }
                                 let error = self.plan_failure(&request, error, false);
                                 let _ = cx.fail_plan(&managed.plan, error);
                                 return;
@@ -1252,46 +1135,7 @@ impl Backpack {
                     }
                 }
                 Step::Cancel { id, .. } => {
-                    let mut changed = None;
-                    if let Some((_, baseline)) = self
-                        .trading
-                        .jobs
-                        .get(&request.command)
-                        .and_then(|job| job.amendment.as_ref())
-                    {
-                        #[derive(Deserialize)]
-                        #[serde(rename_all = "camelCase")]
-                        struct Canceled<'a> {
-                            id: &'a str,
-                            status: &'a str,
-                            executed_quantity: crate::wire::Number,
-                        }
-                        let proof: Canceled<'_> = serde_json::from_str(response.body).map_err(
-                            |_| "Backpack amend requires a complete cancel acknowledgement",
-                        )?;
-                        if proof.id != id
-                            || !matches!(proof.status, "Cancelled" | "Filled")
-                            || !proof.executed_quantity.0.is_finite()
-                            || proof.executed_quantity.0 < *baseline
-                        {
-                            return Err(
-                                "Backpack amend cancel acknowledgement is not definitive".into()
-                            );
-                        }
-                        let filled = proof
-                            .executed_quantity
-                            .0
-                            .max(cx.store.order(id).map_or(*baseline, |o| o.filled));
-                        if filled > *baseline || proof.status == "Filled" {
-                            changed = Some(if proof.status == "Filled" {
-                                "Backpack order filled before its cancel landed; replacement not sent"
-                            } else {
-                                "Backpack fills changed during cancellation; frozen replacement not sent"
-                            });
-                        }
-                    } else {
-                        validate_ack(response.body)?;
-                    }
+                    validate_ack(response.body)?;
                     accept_trade(cx, &request, vec![])?;
                     recorded = request.managed.is_some();
                     self.settle_write(
@@ -1315,10 +1159,6 @@ impl Backpack {
                             o.status = OrderStatus::Canceled;
                         }
                     });
-                    if let Some(message) = changed {
-                        self.veto_remaining(&request, not_sent(message))?;
-                        return Err(message.into());
-                    }
                 }
                 Step::CancelAll { .. } => {
                     if request.managed.is_some() {
@@ -1398,7 +1238,7 @@ impl Backpack {
                                     .trading
                                     .jobs
                                     .get(&request.command)
-                                    .is_some_and(|job| job.amendment.is_some()) =>
+                                    .is_some_and(|job| job.amendment) =>
                             {
                                 cx.store
                                     .order(id)
@@ -1473,54 +1313,6 @@ impl Backpack {
         cx.notice(Level::Warn, code::ORDER_REJECTED, &error.message);
     }
 
-    /// The final-claim re-check of a trigger amend's cancel.
-    pub(crate) fn trade_release_veto(
-        &self,
-        store: &safe_cex_engine::Store,
-        pending: &Pending,
-        release: &safe_cex_engine::request_context::HttpRelease,
-    ) -> Result<(), VenueError> {
-        let Pending::Trade(request) = pending else {
-            return Ok(());
-        };
-        let Some(job) = self.trading.jobs.get(&request.command) else {
-            return Ok(());
-        };
-        if matches!(
-            request.step,
-            Step::Cancel {
-                optional: false,
-                ..
-            }
-        ) && let Some(protect) = &job.protect
-        {
-            protect.validate(store, release.time.raw_ms)?;
-        }
-        if let Some((id, baseline)) = &job.amendment
-            && store
-                .order(id)
-                .is_some_and(|order| order.filled > *baseline)
-        {
-            return Err(not_sent(
-                "Backpack fills changed; frozen amendment not sent",
-            ));
-        }
-        Ok(())
-    }
-
-    fn veto_remaining(&mut self, request: &Request, error: VenueError) -> Result<(), String> {
-        let plan = self
-            .trading
-            .jobs
-            .get_mut(&request.command)
-            .map(|job| &mut job.write_plan)
-            .ok_or("Backpack write plan unavailable")?;
-        if let Some((index, _)) = plan.next_write() {
-            plan.fail(index, error).map_err(|error| error.to_string())?;
-        }
-        Ok(())
-    }
-
     fn settle_write(
         &mut self,
         request: &Request,
@@ -1581,7 +1373,7 @@ impl Backpack {
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: VenueError,
-        _data: bool,
+        data: bool,
     ) {
         let managed = request.managed.as_ref().expect("foreground delivery");
         let optional = matches!(
@@ -1625,11 +1417,63 @@ impl Backpack {
         if optional {
             cx.notice(Level::Error, code::CHILD_LEG_FAILED, &error.message);
         }
+        if self.continue_reported_failure(cx, &request, error.clone(), true, data) {
+            return;
+        }
         let error = self.plan_failure(&request, error, true);
         let _ = match &gone {
             Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
             None => cx.fail_plan(&managed.plan, error),
         };
+    }
+
+    fn continue_reported_failure(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        error: VenueError,
+        pending: bool,
+        data: bool,
+    ) -> bool {
+        let Some(job) = self
+            .trading
+            .jobs
+            .get_mut(&request.command)
+            .filter(|job| job.continue_rows)
+        else {
+            return false;
+        };
+        let Some(managed) = &request.managed else {
+            return false;
+        };
+        job.waiting = false;
+        if pending && let Err(reason) = job.write_plan.fail(request.write, error.clone()) {
+            let error = job.write_plan.failure(VenueError::new(reason.to_string()));
+            let _ = cx.fail_plan(&managed.plan, error);
+            return true;
+        }
+        job.skip_children = matches!(
+            request.step,
+            Step::Place {
+                optional: false,
+                ..
+            }
+        );
+        if job.failure.is_none() {
+            job.failure = Some(error);
+        }
+        let finished = if data {
+            cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context)
+        } else {
+            cx.finish_plan_failed_call(&managed.plan, &managed.slot, &managed.context)
+        };
+        if let Err(reason) = finished {
+            let error = job.write_plan.failure(reason.venue_error());
+            let _ = cx.fail_plan(&managed.plan, error);
+            return true;
+        }
+        self.run_trade(cx, request.command);
+        true
     }
 
     pub(crate) fn trade_retired(&mut self, owner: &HttpOwnerRetirement) {

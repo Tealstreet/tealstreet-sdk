@@ -111,7 +111,7 @@ fn pair(missing: bool) {
 }
 
 #[test]
-fn p0_write_optional_child_failure_keeps_prefix_and_fails_once()
+fn p0_write_optional_child_failure_preserves_legacy_continuation_and_reports_once()
 -> Result<(), Box<dyn std::error::Error>> {
     let (mut e, _) = ready();
     e.handle(2000.0, Event::Command(Command::PlaceOrders {
@@ -131,12 +131,25 @@ fn p0_write_optional_child_failure_keeps_prefix_and_fails_once()
     assert!(after_failure.iter().any(|action| matches!(action,
         Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
     )));
+    let sl = after_failure
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .ok_or("legacy SL missing")?;
     assert!(
-        !after_failure
-            .iter()
-            .any(|action| matches!(action, Action::Http(_)))
+        sl.body
+            .as_deref()
+            .ok_or("SL body missing")?
+            .contains("\"triggerPrice\":\"130.00\"")
     );
-    let out = after_failure;
+    assert!(!after_failure.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandFailed { command: 713, .. })
+    )));
+    reply(&mut e, sl, 200, r#"{"id":"sl"}"#);
+    let out = actions(&mut e);
     let failures: Vec<_> = out
         .iter()
         .filter_map(|action| match action {
@@ -154,7 +167,7 @@ fn p0_write_optional_child_failure_keeps_prefix_and_fails_once()
             .as_ref()
             .ok_or("prior accepted ID missing")?
             .order_ids,
-        ["entry"]
+        ["entry", "sl"]
     );
     assert!(!out.iter().any(|action| matches!(
         action,

@@ -264,18 +264,30 @@ fn legacy_cancel_failure_continues_without_inventing_ids() -> Result {
 
 #[test]
 fn legacy_amend_preserves_requested_total_after_cancel_fills() -> Result {
-    for (amount, expected) in [(None,"5.00"),(Some(4.),"4.00"),(Some(1.),"1.00")] {
-        let old=ORDER.replace("\"executedQuantity\":\"0\"","\"executedQuantity\":\"2\"");
-        let (mut engine,_)=ready_orders(&format!("[{old}]"));
-        engine.handle(2000.,Event::Command(Command::AmendOrder {
-            command:901,id:"123".into(),price:Some(142.),amount,
-        }));
-        let cancel=packet(&mut engine)?;
-        assert_eq!(cancel.method,Method::Delete);
-        reply(&mut engine,&cancel,200,r#"{"id":"123","status":"Cancelled","executedQuantity":"3"}"#);
-        let replacement=packet(&mut engine)?;
-        let row:Value=serde_json::from_str(replacement.body.as_deref().ok_or("missing replacement")?)?;
-        assert_eq!(row["quantity"],expected);
+    for (amount, expected) in [(None, "5.00"), (Some(4.), "4.00"), (Some(1.), "1.00")] {
+        let old = ORDER.replace("\"executedQuantity\":\"0\"", "\"executedQuantity\":\"2\"");
+        let (mut engine, _) = ready_orders(&format!("[{old}]"));
+        engine.handle(
+            2000.,
+            Event::Command(Command::AmendOrder {
+                command: 901,
+                id: "123".into(),
+                price: Some(142.),
+                amount,
+            }),
+        );
+        let cancel = packet(&mut engine)?;
+        assert_eq!(cancel.method, Method::Delete);
+        reply(
+            &mut engine,
+            &cancel,
+            200,
+            r#"{"id":"123","status":"Cancelled","executedQuantity":"3"}"#,
+        );
+        let replacement = packet(&mut engine)?;
+        let row: Value =
+            serde_json::from_str(replacement.body.as_deref().ok_or("missing replacement")?)?;
+        assert_eq!(row["quantity"], expected);
     }
     Ok(())
 }
@@ -284,11 +296,141 @@ fn legacy_amend_preserves_requested_total_after_cancel_fills() -> Result {
 fn legacy_stop_amend_does_not_add_a_position_or_reference_gate() -> Result {
     let stop=ORDER.replace("\"orderType\":\"Limit\"","\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\",\"reduceOnly\":true")
         .replace("\"side\":\"Bid\"","\"side\":\"Ask\"");
-    let (mut engine,_)=ready_orders(&format!("[{stop}]"));
+    let (mut engine, _) = ready_orders(&format!("[{stop}]"));
     engine.store_mut().set_positions(vec![]);
-    engine.handle(2000.,Event::Command(Command::AmendOrder {
-        command:901,id:"123".into(),price:Some(125.),amount:None,
-    }));
-    assert_eq!(packet(&mut engine)?.method,Method::Delete);
+    engine.handle(
+        2000.,
+        Event::Command(Command::AmendOrder {
+            command: 901,
+            id: "123".into(),
+            price: Some(125.),
+            amount: None,
+        }),
+    );
+    assert_eq!(packet(&mut engine)?.method, Method::Delete);
+    Ok(())
+}
+
+#[test]
+fn legacy_bracket_sends_each_rounded_quantity_without_a_wire_bound_gate() -> Result {
+    let (mut engine, _) = ready();
+    engine.store_mut().update_markets(|market| {
+        market.precision.amount = 0.1;
+        market.limits.amount.max = 0.95;
+    });
+    place(
+        &mut engine,
+        vec![
+            json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":0.95,"price":140,"takeProfit":150,"stopLoss":130}),
+        ],
+    )?;
+    for (index, id) in ["entry", "tp", "sl"].into_iter().enumerate() {
+        let request = packet(&mut engine)?;
+        let row: Value =
+            serde_json::from_str(request.body.as_deref().ok_or("missing bracket body")?)?;
+        assert_eq!(
+            row[if index == 0 {
+                "quantity"
+            } else {
+                "triggerQuantity"
+            }],
+            "1.0"
+        );
+        reply(&mut engine, &request, 200, &json!({"id":id}).to_string());
+    }
+    assert!(actions(&mut engine).iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 901, .. })
+    )));
+    assert!(requests(&mut engine).is_empty());
+    Ok(())
+}
+
+#[test]
+fn legacy_failed_entry_skips_its_children_but_continues_other_orders() -> Result {
+    let (mut engine, _) = ready();
+    place(
+        &mut engine,
+        vec![
+            json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}),
+            limit(142.),
+        ],
+    )?;
+    let entry = packet(&mut engine)?;
+    reply(
+        &mut engine,
+        &entry,
+        400,
+        r#"{"code":"INVALID_ORDER","message":"bad entry"}"#,
+    );
+    let suffix = packet(&mut engine)?;
+    let row: Value = serde_json::from_str(suffix.body.as_deref().ok_or("missing later order")?)?;
+    assert_eq!(row["price"], "142.00");
+    assert!(row.get("triggerPrice").is_none());
+    reply(&mut engine, &suffix, 200, r#"{"id":"suffix"}"#);
+    let out = actions(&mut engine);
+    let elements = failure(&out)?.elements.as_ref().ok_or("missing outcomes")?;
+    assert_eq!(elements.len(), 4);
+    assert!(matches!(&elements[0].result, ElementResult::Unknown { .. }));
+    assert!(
+        elements[1..3]
+            .iter()
+            .all(|element| matches!(element.result, ElementResult::NotSent { error: None }))
+    );
+    assert!(
+        matches!(&elements[3].result, ElementResult::Placed {order_ids} if order_ids==&["suffix"])
+    );
+    assert!(requests(&mut engine).is_empty());
+    Ok(())
+}
+
+#[test]
+fn legacy_mixed_pair_failure_still_releases_the_next_pair() -> Result {
+    let (mut engine, _) = ready();
+    engine
+        .store_mut()
+        .update_markets(|market| market.limits.amount.max = 1000.);
+    place(
+        &mut engine,
+        [140., 141., 142., 143.].into_iter().map(limit).collect(),
+    )?;
+    let first = packet(&mut engine)?;
+    let rows: Vec<Value> =
+        serde_json::from_str(first.body.as_deref().ok_or("missing first pair")?)?;
+    let ack:Vec<_> = rows.iter().enumerate().map(|(index,row)| json!({
+        "operation":if index == 0 {"Ok"} else {"Error"},
+        "id":if index == 0 {"prefix"} else {""},
+        "clientId":row["clientId"],"symbol":row["symbol"],"side":row["side"],"orderType":row["orderType"]
+    })).collect();
+    reply(&mut engine, &first, 200, &serde_json::to_string(&ack)?);
+    let second = packet(&mut engine)?;
+    assert!(second.url.ends_with("/orders"));
+    assert_ne!(second.id, first.id);
+    reply(&mut engine, &second, 200, &pair_ack(&second)?);
+    let out = actions(&mut engine);
+    let error = failure(&out)?;
+    let elements = error
+        .elements
+        .as_ref()
+        .ok_or("missing correlated outcomes")?;
+    assert_eq!(elements.len(), 4);
+    assert!(
+        matches!(&elements[0].result, ElementResult::Placed {order_ids} if order_ids==&["prefix"])
+    );
+    assert!(matches!(&elements[1].result, ElementResult::Unknown { .. }));
+    for (index, id) in [(2, "pair-0"), (3, "pair-1")] {
+        assert!(
+            matches!(&elements[index].result, ElementResult::Placed {order_ids} if order_ids==&[id])
+        );
+    }
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .ok_or("missing accepted IDs")?
+            .order_ids,
+        ["prefix", "pair-0", "pair-1"]
+    );
+    assert!(requests(&mut engine).is_empty());
     Ok(())
 }

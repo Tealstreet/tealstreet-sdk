@@ -107,7 +107,8 @@ fn required_amend_preparation_refusal_restores_only_unchanged_cancel_state() {
 }
 
 #[test]
-fn hosted_unproven_child_stops_the_plan_and_keeps_native_metadata_and_prior_ids() {
+fn hosted_unproven_child_continues_legacy_sl_and_keeps_native_metadata_and_ids()
+-> Result<(), Box<dyn std::error::Error>> {
     // ready() installs the local/device parity provider for every dispatched write.
     for status in [408, 429, 500, 503] {
         let (mut e, _) = ready();
@@ -125,13 +126,32 @@ fn hosted_unproven_child_stops_the_plan_and_keeps_native_metadata_and_prior_ids(
             r#"{"code":"NATIVE_UNAVAILABLE","message":"native detail"}"#,
         );
         let out = actions(&mut e);
+        assert!(!out.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandFailed { command: 722, .. })
+        )));
+        let sl = out
+            .iter()
+            .find_map(|action| match action {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("legacy SL missing")?;
+        assert!(
+            sl.body
+                .as_deref()
+                .ok_or("SL body missing")?
+                .contains("\"triggerPrice\":\"130.00\"")
+        );
+        reply(&mut e, sl, 200, r#"{"id":"accepted-sl"}"#);
+        let out = actions(&mut e);
         let error = failure(&out, 722);
         assert_eq!(error.outcome, Some(Outcome::Unknown));
         assert_eq!(error.venue_code.as_deref(), Some("NATIVE_UNAVAILABLE"));
         assert_eq!(error.venue_message.as_deref(), Some("native detail"));
         assert_eq!(
             error.partial.as_ref().unwrap().order_ids,
-            ["accepted-entry"]
+            ["accepted-entry", "accepted-sl"]
         );
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
         reply(&mut e, &child, 200, r#"{"id":"late-child"}"#);
@@ -144,6 +164,7 @@ fn hosted_unproven_child_stops_the_plan_and_keeps_native_metadata_and_prior_ids(
                 )
         )));
     }
+    Ok(())
 }
 
 struct Remote;

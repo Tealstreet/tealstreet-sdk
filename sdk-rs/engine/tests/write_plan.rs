@@ -100,6 +100,44 @@ fn ambiguous_second_element_stays_unknown_and_is_never_resent() {
 }
 
 #[test]
+fn reporting_observer_keeps_legacy_continuation_separate_from_dispatch_policy()
+-> Result<(), Box<dyn std::error::Error>> {
+    for outcome in [Outcome::Rejected, Outcome::Unknown] {
+        let mut plan = WritePlan::validate(writes(&[1, 2, 3]), validate)?;
+        let mut observed = vec![];
+        while let Some((index, write)) = plan.observe_next_write() {
+            observed.push(write.payload);
+            assert!(
+                plan.observe_next_write().is_none(),
+                "pending cannot be observed twice"
+            );
+            if index == 1 {
+                plan.fail(
+                    index,
+                    VenueError::new("legacy caught failure").outcome(outcome),
+                )?;
+                assert!(plan.next_write().is_none(), "dispatch policy still stops");
+            } else {
+                plan.settle(index, vec![placed(index)])?;
+            }
+        }
+        assert_eq!(observed, [1, 2, 3]);
+        assert!(plan.is_complete());
+        assert!(plan.next_write().is_none());
+        let error = plan.failure(VenueError::new("reported after legacy loop completed"));
+        let elements = error.elements.as_ref().ok_or("missing journal")?;
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements[0].result, placed(0));
+        assert_eq!(elements[2].result, placed(2));
+        assert_eq!(
+            error.partial.as_ref().ok_or("missing IDs")?.order_ids,
+            ["native-0", "native-2"]
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn all_valid_control_releases_each_write_exactly_once() {
     let mut plan = WritePlan::validate(writes(&[1, 2, 3]), validate).unwrap();
     let mut requests = Vec::new();

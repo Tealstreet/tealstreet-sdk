@@ -187,7 +187,16 @@ impl<T> WritePlan<T> {
     /// Hand the next immutable payload to the venue's existing transport owner.
     /// Call only at physical dispatch. Pending writes cannot be released again.
     pub fn next_write(&mut self) -> Option<(usize, &PlannedWrite<T>)> {
-        if self.stopped || self.pending.is_some() {
+        if self.stopped {
+            return None;
+        }
+        self.observe_next_write()
+    }
+
+    /// Record dispatch chosen by a legacy venue driver, including continuation
+    /// after a sibling failed. This observer does not choose write behavior.
+    pub fn observe_next_write(&mut self) -> Option<(usize, &PlannedWrite<T>)> {
+        if self.pending.is_some() {
             return None;
         }
         let index = self.next;
@@ -202,8 +211,13 @@ impl<T> WritePlan<T> {
         Some((index, write))
     }
 
+    pub fn is_complete(&self) -> bool {
+        self.next == self.writes.len() && self.pending.is_none()
+    }
+
     /// Record explicit per-row facts, including mixed native batch responses.
-    /// Any refused or unknown row permanently stops the unissued suffix.
+    /// A refused or unknown row stops next_write; reporting observers leave
+    /// continuation decisions to their existing venue driver.
     pub fn settle(&mut self, write: usize, results: Vec<ElementResult>) -> Result<(), PlanError> {
         let pending = self.pending.ok_or(PlanError::NoPendingWrite)?;
         if pending != write {

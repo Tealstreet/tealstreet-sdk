@@ -20,25 +20,25 @@ write response is not retried. Post-only and time-in-force flags survive
 reconciliation, amend and trigger repair. Attached protective stops remain market
 orders, including after a gap.
 
-Preflight checks every prepared row at its serialized quantity and price before
-the first write, including pairs, TP/SL children and amend replacements. A rounded
-quantity outside native bounds refuses the entire intent as InvalidInput/NotSent
-with zero transport requests. Native `filters.price.maxPrice` caps are retained
-with their accepted catalogue rows and checked against every serialized execution
-and protective price. The maximum is inclusive; rounding happens before this
-check. An over-cap amendment refuses before cancellation.
+Split dispatch follows the legacy TypeScript adapter in
+`packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts`.
+Legacy rows round without rechecking wire quantity bounds or native maximum
+prices. Independent rows, pairs, cancel batches and protective children continue
+after a sibling fails. A failed entry skips its own protective children.
+These inherited partial-placement cases remain known issues for Sam.
 
-Trading dispatch uses the engine's immutable `WritePlan`, including each pair
-row and separate TP/SL child. Runtime failures return indexed `elements`: proven
-placements retain native IDs, ambiguous writes remain unknown, and untouched
-children are not sent. A failed child stops the remaining plan without replay or
-rollback. Engine-owned unproven responses retain the same journal.
+The engine's `WritePlan` observes dispatch and reports indexed outcomes without
+adding a validation gate or choosing continuation. Proven placements retain
+native IDs, ambiguous writes remain unknown, and skipped children are not sent.
+The command's terminal error retains the journal and accepted IDs after the
+legacy loop finishes. A failed write is never resent.
 
 Accepted cancel and leverage effects use `Applied`, with existing cancel targets
-kept separate from newly created IDs. Cancel-replace freezes its replacement
-before cancellation: new fills veto that replacement instead of rewriting its
-payload. A failed replacement never starts a proof read or automatic put-back;
-the error retains the applied cancellation and the replacement's own outcome.
+kept separate from newly created IDs. Legacy cancel-replace uses the requested
+total and edited price after cancellation, without a fill or reference veto.
+Its failed replacement is reported without a proof read or automatic put-back,
+matching TS `updateOrder`. Background missing-trigger-source repair continues
+its separate legacy cancel/re-place behavior.
 
 Account leverage is global. Position mode is fixed hedged, and margin mode is
 fixed cross; requests for another mode return an error. Private reconciliation

@@ -182,7 +182,7 @@ fn duplicate_client_ids_and_bracket_client_id_fail_closed() {
     }
 }
 #[test]
-fn limit_bracket_waits_for_entry_and_stops_when_a_child_outcome_is_unknown()
+fn legacy_limit_bracket_waits_for_entry_and_continues_after_a_child_failure()
 -> Result<(), Box<dyn std::error::Error>> {
     let (mut e, _) = ready();
     place(
@@ -205,6 +205,11 @@ fn limit_bracket_waits_for_entry_and_stops_when_a_child_outcome_is_unknown()
     assert!(body.contains("\"triggerPrice\":\"150.00\""));
     assert!(body.contains("\"triggerBy\":\"MarkPrice\""));
     reply(&mut e, &tp, 400, r#"{"message":"rejected"}"#);
+    let sl = requests(&mut e).pop().ok_or("legacy SL missing")?;
+    let body = sl.body.as_deref().ok_or("SL body missing")?;
+    assert!(body.contains("\"triggerPrice\":\"130.00\""));
+    assert!(body.contains("\"reduceOnly\":true"));
+    reply(&mut e, &sl, 200, r#"{"id":"sl"}"#);
     let out = actions(&mut e);
     assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
     let error = failure(&out);
@@ -215,7 +220,7 @@ fn limit_bracket_waits_for_entry_and_stops_when_a_child_outcome_is_unknown()
             .as_ref()
             .ok_or("prior accepted ID missing")?
             .order_ids,
-        ["entry"]
+        ["entry", "sl"]
     );
     Ok(())
 }
@@ -602,7 +607,7 @@ fn documented_empty_leverage_reply_applies_the_leverage() {
 }
 
 #[test]
-fn amend_trigger_limit_preserves_execution_price_and_trigger_source() {
+fn legacy_trigger_limit_amend_uses_the_edited_price_as_a_plain_limit() {
     let (mut e, socket) = ready();
     e.handle(1000.0, Event::WsOpened { socket });
     safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
@@ -633,9 +638,9 @@ fn amend_trigger_limit_preserves_execution_price_and_trigger_source() {
     );
     let replace = requests(&mut e).pop().unwrap();
     let body = replace.body.as_deref().unwrap();
-    assert!(body.contains("\"price\":\"145.00\""), "{body}");
-    assert!(body.contains("\"triggerPrice\":\"151.00\""), "{body}");
-    assert!(body.contains("\"triggerBy\":\"LastPrice\""), "{body}");
+    assert!(body.contains("\"price\":\"151.00\""), "{body}");
+    assert!(!body.contains("triggerPrice"), "{body}");
+    assert!(!body.contains("triggerBy"), "{body}");
 }
 
 #[test]
@@ -852,34 +857,28 @@ fn reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements()
 }
 
 #[test]
-fn amend_preserves_frozen_unfilled_total_and_vetoes_changed_fills() {
-    for (initial, later, requested, expected) in [
-        ("2", "2", None, Some("3.00")),
-        ("2", "3", None, None),
-        ("2", "3", Some(4.0), None),
-        ("2", "5", None, None),
+fn legacy_amend_keeps_the_requested_total_when_stream_fills_change()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (later, requested, expected) in [
+        ("2", None, "5.00"),
+        ("3", None, "5.00"),
+        ("3", Some(4.), "4.00"),
+        ("5", None, "5.00"),
     ] {
-        let (mut e, socket) = ready_orders(&format!(
-            "[{}]",
-            ORDER.replace(
-                "\"executedQuantity\":\"0\"",
-                &format!("\"executedQuantity\":\"{initial}\"")
-            )
-        ));
-        e.handle(1000.0, Event::WsOpened { socket });
-        safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
-        e.drain_actions().for_each(drop);
+        let old = ORDER.replace(r#""executedQuantity":"0""#, r#""executedQuantity":"2""#);
+        let (mut e, socket) = ready_orders(&format!("[{old}]"));
+        e.handle(1000., Event::WsOpened { socket });
+        actions(&mut e);
         e.handle(
-            2000.0,
+            2000.,
             Event::Command(Command::AmendOrder {
                 command: 1,
                 id: "123".into(),
-                price: Some(142.0),
+                price: Some(142.),
                 amount: requested,
             }),
         );
-        let cancel = requests(&mut e).pop().unwrap();
-        // A stream update can beat the definitive HTTP cancellation reply.
+        let cancel = requests(&mut e).pop().ok_or("cancel missing")?;
         ws(
             &mut e,
             socket,
@@ -888,81 +887,50 @@ fn amend_preserves_frozen_unfilled_total_and_vetoes_changed_fills() {
                 r#"{{"e":"orderFill","i":"123","E":3000000,"X":"PartiallyFilled","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"{later}","l":"1","L":"140","t":999,"f":"GTC"}}"#
             ),
         );
-        requests(&mut e);
+        actions(&mut e);
         reply(
             &mut e,
             &cancel,
             200,
             &format!(r#"{{"id":"123","status":"Cancelled","executedQuantity":"{later}"}}"#),
         );
-        let out = actions(&mut e);
-        let writes: Vec<_> = out
-            .iter()
-            .filter_map(|a| match a {
-                Action::Http(r) if r.method == Method::Post => Some(r),
-                _ => None,
-            })
-            .collect();
-        if let Some(expected) = expected {
-            assert_eq!(writes.len(), 1);
-            let value: serde_json::Value =
-                serde_json::from_str(writes[0].body.as_deref().unwrap()).unwrap();
-            assert_eq!(value["quantity"], expected);
-        } else {
-            assert!(
-                writes.is_empty(),
-                "changed fills must not release the frozen replacement"
-            );
-            let error = failure(&out);
-            assert!(error.message.contains("fills changed"));
-            assert!(
-                error
-                    .elements
-                    .as_ref()
-                    .is_some_and(|elements| elements.len() == 2
-                        && matches!(
-                            elements[0].result,
-                            safe_cex_engine::write_plan::ElementResult::Applied { .. }
-                        )
-                        && matches!(
-                            elements[1].result,
-                            safe_cex_engine::write_plan::ElementResult::NotSent { .. }
-                        ))
-            );
-        }
+        let replacement = requests(&mut e).pop().ok_or("legacy replacement missing")?;
+        let row: serde_json::Value =
+            serde_json::from_str(replacement.body.as_deref().ok_or("missing body")?)?;
+        assert_eq!(row["quantity"], expected);
+        assert_eq!(row["price"], "142.00");
     }
+    Ok(())
 }
 
 #[test]
-fn amend_does_not_replace_after_an_ambiguous_cancel_ack() {
+fn legacy_amend_continues_after_successful_cancel_http_response()
+-> Result<(), Box<dyn std::error::Error>> {
     for ack in [
         "{}",
         r#"{"id":"other","status":"Cancelled","executedQuantity":"0"}"#,
         r#"{"id":"123","status":"New","executedQuantity":"0"}"#,
     ] {
         let (mut e, _) = ready_orders(&format!("[{ORDER}]"));
-        e.drain_actions().for_each(drop);
         e.handle(
-            2000.0,
+            2000.,
             Event::Command(Command::AmendOrder {
                 command: 1,
                 id: "123".into(),
-                price: Some(142.0),
+                price: Some(142.),
                 amount: None,
             }),
         );
-        let cancel = requests(&mut e).pop().unwrap();
+        let cancel = requests(&mut e).pop().ok_or("cancel missing")?;
         reply(&mut e, &cancel, 200, ack);
-        let out: Vec<_> = e.drain_actions().collect();
-        assert!(
-            !out.iter()
-                .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
-        );
-        assert!(
-            out.iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
-        );
+        let replacement = requests(&mut e).pop().ok_or("replacement missing")?;
+        assert_eq!(replacement.method, Method::Post);
+        let row: serde_json::Value =
+            serde_json::from_str(replacement.body.as_deref().ok_or("missing body")?)?;
+        assert_eq!(row["quantity"], "5.00");
+        assert_eq!(row["price"], "142.00");
     }
+    Ok(())
 }
 
 #[test]
@@ -1209,73 +1177,59 @@ fn an_unknown_replacement_is_never_read_or_put_back() {
 }
 
 #[test]
-fn a_stop_that_filled_before_its_cancel_landed_reports_the_fill() {
+fn legacy_stop_amend_keeps_its_quantity_after_a_filled_cancel_reply()
+-> Result<(), Box<dyn std::error::Error>> {
     let mut e = resting_stop();
-    amend_stop(&mut e, 125.0);
-    let cancel = requests(&mut e).pop().unwrap();
+    amend_stop(&mut e, 125.);
+    let cancel = requests(&mut e).pop().ok_or("cancel missing")?;
     reply(
         &mut e,
         &cancel,
         200,
         r#"{"id":"123","status":"Filled","executedQuantity":"5"}"#,
     );
-    let out = actions(&mut e);
-    let error = failure(&out);
-    assert!(
-        error.message.contains("filled before its cancel landed"),
-        "{}",
-        error.message
-    );
-    assert_eq!(
-        error.protection, None,
-        "the fill is reported, not Unprotected"
-    );
-    assert!(posts(&out).is_empty());
+    let replacement = requests(&mut e).pop().ok_or("legacy replacement missing")?;
+    let row: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().ok_or("missing body")?)?;
+    assert_eq!(row["triggerQuantity"], "5.00");
+    assert_eq!(row["triggerPrice"], "125.00");
+    Ok(())
 }
 
 #[test]
-fn a_stale_crossed_changed_or_flat_stop_at_the_final_claim_cancels_nothing() {
-    use safe_cex_engine::Outcome;
-    for (case, why) in [
-        ("stale", "mark price reference is stale"),
-        ("crossed", "already crossed the mark price"),
-        ("changed", "changed or filled before cancellation"),
-        ("flat", "no position for it to protect"),
-    ] {
+fn legacy_stop_amend_has_no_extra_final_reference_or_position_gate()
+-> Result<(), Box<dyn std::error::Error>> {
+    for case in ["stale", "crossed", "changed", "flat"] {
         let mut e = resting_stop();
-        amend_stop(&mut e, 125.0);
-        // Between planning and the cancel's final claim.
+        amend_stop(&mut e, 125.);
         let at = match case {
-            "stale" => 2000.0 + 6000.0,
+            "stale" => 8000.,
             "crossed" => {
-                e.store_mut().update_ticker(SYMBOL, |t| t.mark = 124.0);
-                2000.0
+                e.store_mut().update_ticker(SYMBOL, |t| t.mark = 124.);
+                2000.
             }
             "changed" => {
-                e.store_mut().update_order("123", |o| o.filled = 1.0);
-                2000.0
+                e.store_mut().update_order("123", |o| o.filled = 1.);
+                2000.
             }
             _ => {
                 e.store_mut().set_positions(vec![]);
-                2000.0
+                2000.
             }
         };
         let out = safe_cex_engine::test_support::prepared_actions(&mut e, at);
-        assert!(posts(&out).is_empty(), "{case}: no cancel");
-        let error = failure(&out);
-        assert!(
-            error.message.contains("was not changed") && error.message.contains(why),
-            "{case}: {}",
-            error.message
-        );
-        assert_eq!(error.outcome, Some(Outcome::NotSent), "{case}");
-        assert_eq!(error.protection, None, "{case}");
-        assert_ne!(
-            e.store().order("123").unwrap().status,
-            OrderStatus::Canceling,
-            "{case}: the stop is left as it was"
-        );
+        let writes = posts(&out);
+        assert_eq!(writes.len(), 1, "{case}");
+        assert_eq!(writes[0].method, Method::Delete, "{case}");
+        let row: serde_json::Value =
+            serde_json::from_str(writes[0].body.as_deref().ok_or("missing cancel")?)?;
+        assert_eq!(row["orderId"], "123", "{case}");
+        assert!(!out.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandFailed { command: 1, .. })
+        )));
     }
+    Ok(())
 }
 
 #[test]
@@ -1539,11 +1493,10 @@ fn repair_never_retires_an_admitted_replacement_in_flight() -> Result<(), Box<dy
 
 /// New fills veto the immutable replacement before signing or transport.
 #[test]
-fn a_stop_that_filled_during_its_cancel_never_places_a_stale_quantity()
+fn legacy_stop_amend_preserves_its_requested_quantity_after_cancel_fills()
 -> Result<(), Box<dyn std::error::Error>> {
-    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
     let mut e = resting_stop();
-    amend_stop(&mut e, 125.0);
+    amend_stop(&mut e, 125.);
     let cancel = requests(&mut e).pop().ok_or("cancel missing")?;
     reply(
         &mut e,
@@ -1551,25 +1504,11 @@ fn a_stop_that_filled_during_its_cancel_never_places_a_stale_quantity()
         200,
         r#"{"id":"123","status":"Cancelled","executedQuantity":"1"}"#,
     );
-    let out = actions(&mut e);
-    let error = failure(&out);
-    assert!(error.message.contains("fills changed"));
-    let elements = error
-        .elements
-        .as_ref()
-        .ok_or("missing changed-fill outcomes")?;
-    assert_eq!(elements.len(), 2);
-    assert!(matches!(
-        elements[0].result,
-        ElementResult::Applied {
-            effect: AppliedEffect::Cancel,
-            ..
-        }
-    ));
-    assert!(
-        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::NotSent))
-    );
-    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    let replacement = requests(&mut e).pop().ok_or("legacy replacement missing")?;
+    let row: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().ok_or("missing body")?)?;
+    assert_eq!(row["triggerQuantity"], "5.00");
+    assert_eq!(row["triggerPrice"], "125.00");
     Ok(())
 }
 

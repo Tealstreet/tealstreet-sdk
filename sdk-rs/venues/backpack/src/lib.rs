@@ -62,7 +62,6 @@ pub enum Pending {
     Markets {
         context: Context,
         rows: Vec<Market>,
-        max_prices: HashMap<String, Option<f64>>,
         skipped: Vec<String>,
     },
     Daily {
@@ -154,8 +153,6 @@ pub struct Backpack {
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), u32>,
     seed: Seed,
-    // The shared market model represents only the minimum price.
-    max_prices: HashMap<String, f64>,
     /// Perp markets whose catalogue row was skipped, and whether that was reported yet.
     skipped_markets: HashMap<String, bool>,
     unlisted_logged: std::collections::HashSet<String>,
@@ -222,7 +219,6 @@ impl Backpack {
                 Pending::Markets {
                     context: context.clone(),
                     rows: vec![],
-                    max_prices: HashMap::new(),
                     skipped: vec![],
                 },
             ),
@@ -311,7 +307,6 @@ impl Backpack {
             Pending::Markets {
                 context,
                 rows,
-                max_prices,
                 skipped,
             } => {
                 if rows.is_empty() {
@@ -320,15 +315,6 @@ impl Backpack {
                     return;
                 }
                 let refresh = cx.store.loaded().markets;
-                // Commit native caps with their accepted rows; omitted refresh rows
-                // retain the same cap as the market preserved by keep_listed.
-                for (symbol, max) in max_prices {
-                    if let Some(max) = max {
-                        self.max_prices.insert(symbol, max);
-                    } else {
-                        self.max_prices.remove(&symbol);
-                    }
-                }
                 let rows = if refresh {
                     keep_listed(cx.store.markets(), rows)
                 } else {
@@ -446,7 +432,6 @@ impl Backpack {
             books: HashMap::new(),
             candles: HashMap::new(),
             seed: Seed::default(),
-            max_prices: HashMap::new(),
             skipped_markets: Default::default(),
             unlisted_logged: Default::default(),
             reread_stalls: 0,
@@ -810,15 +795,6 @@ impl Venue for Backpack {
     fn guard_order_mutations(&self) -> bool {
         true
     }
-    fn http_release_veto(
-        &self,
-        store: &safe_cex_engine::Store,
-        pending: &Pending,
-        release: &safe_cex_engine::request_context::HttpRelease,
-    ) -> Result<(), safe_cex_engine::VenueError> {
-        self.trade_release_veto(store, pending, release)
-    }
-
     type Pending = Pending;
     fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
         use safe_cex_engine::startup::Sections as S;
@@ -938,12 +914,7 @@ impl Venue for Backpack {
                 self.account_item(cx, request, item);
                 return;
             }
-            Pending::Markets {
-                rows,
-                max_prices,
-                skipped,
-                ..
-            } => {
+            Pending::Markets { rows, skipped, .. } => {
                 let r = serde_json::from_str::<MarketRow<'_>>(item).map(|r| {
                     if r.visible == Some(false)
                         || r.market_type != "PERP"
@@ -1002,10 +973,6 @@ impl Venue for Backpack {
                     };
                     let tradable = market.precision.is_tradable();
                     if tradable {
-                        max_prices.insert(
-                            market.id.clone(),
-                            r.filters.price.max_price.map(|max| max.0),
-                        );
                         rows.push(market);
                     }
                     tradable
