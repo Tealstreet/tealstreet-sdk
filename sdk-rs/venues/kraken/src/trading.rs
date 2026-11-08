@@ -945,7 +945,8 @@ impl Kraken {
                 Err(mut error) => {
                     let ids: Vec<_> = job
                         .canceled_ids
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .chain(job.ids.iter().cloned())
                         .collect();
                     error = error.partial_ids(&ids);
@@ -963,7 +964,25 @@ impl Kraken {
                     if error.outcome == Some(Outcome::Rejected) {
                         cx.placement_resolved(job.command);
                     }
-                    cx.fail(job.command, error);
+                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    fail_job(cx, &job, error);
+                    if unknown {
+                        // Admission preceded this uncertainty; never pump those
+                        // placements or edits. Cancels, settings and reads remain.
+                        self.trading.queue.retain(|queued| {
+                            if !queued.steps.iter().any(|step| {
+                                matches!(step, Step::Place(_) | Step::Edit { .. })
+                            }) {
+                                return true;
+                            }
+                            fail_job(
+                                cx,
+                                queued,
+                                not_sent("Kraken Futures queued write was not sent: earlier write outcome is uncertain. Check Open Orders before retrying"),
+                            );
+                            false
+                        });
+                    }
                 }
             }
         }
@@ -986,6 +1005,10 @@ impl Kraken {
         self.trading_finish(cx, Err(error));
         self.trading_pump(cx);
     }
+}
+
+fn fail_job(cx: &mut Cx<'_, Pending>, job: &Job, error: VenueError) {
+    cx.fail(job.command, error);
 }
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
