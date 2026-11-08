@@ -17,3 +17,7 @@ command and lists actual placed IDs and unknown indices as comma-separated field
 Recording tests in `after_failure_parity.rs`, `write_plan_preflight.rs` and
 `spot.rs` cite the TS continuation sites and pin this exception, accepted prefixes,
 standard wording, journal rows, telemetry and absence of later writes.
+
+Engine-sealed HTTP503 Unknown retains halt, prefix IDs, journal and canonical
+message assertions. Telemetry for that path awaits a later engine hook; its
+telemetry assertion alone is deferred. Other Unknown pins require telemetry.
