@@ -114,6 +114,176 @@ async fn settle() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn same_name_different_owner_cannot_restore_a_pending_slice() {
+    LocalSet::new()
+        .run_until(async {
+            for tagged in [false, true] {
+                let port_a = Rc::new(Port::default());
+                let scope_a = Scope::new();
+                let cx_a = AlgoCx::new(port_a.clone(), scope_a.clone());
+                let factory_a = TwapFactory::with_owner(
+                    "a",
+                    safe_cex_algo_twap::TwapOwner {
+                        owner_id: "A".into(),
+                        generation: 7,
+                    },
+                    cx_a.clone(),
+                    Rc::new(Chasers::default()),
+                );
+                factory_a
+                    .handle("twap:start", &twap_options(json!({"duration": 0.5})), &cx_a)
+                    .unwrap();
+                settle().await;
+                assert_eq!(placed_amounts(&port_a), vec![0.5]);
+                let mut rows: Vec<Value> = port_a
+                    .emits
+                    .borrow()
+                    .iter()
+                    .rev()
+                    .find(|(op, data)| {
+                        op == "twap:stateUpdate" && !data.as_object().unwrap().is_empty()
+                    })
+                    .unwrap()
+                    .1
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(id, row)| {
+                        let mut row = row.clone();
+                        row["id"] = json!(id);
+                        row
+                    })
+                    .collect();
+                if tagged {
+                    rows[0]["ownerId"] = json!("A");
+                    rows[0]["ownerGeneration"] = json!(7);
+                } else {
+                    rows[0].as_object_mut().unwrap().remove("ownerId");
+                    rows[0].as_object_mut().unwrap().remove("ownerGeneration");
+                }
+                scope_a.dispose();
+                let port_b = Rc::new(Port::default());
+                let cx_b = AlgoCx::new(port_b.clone(), Scope::new());
+                let factory_b = TwapFactory::with_owner(
+                    "a",
+                    safe_cex_algo_twap::TwapOwner {
+                        owner_id: "B".into(),
+                        generation: 7,
+                    },
+                    cx_b.clone(),
+                    Rc::new(Chasers::default()),
+                );
+                factory_b
+                    .handle("twap:state", &json!(rows).to_string(), &cx_b)
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(15_001)).await;
+                settle().await;
+                assert!(
+                    placed_amounts(&port_b).is_empty(),
+                    "tagged={tagged}: stale A slice reached same-name B"
+                );
+                assert!(
+                    factory_b.active_twaps("a").is_empty(),
+                    "mismatched rows must be dropped"
+                );
+                assert_eq!(
+                    placed_amounts(&port_a),
+                    vec![0.5],
+                    "disposed A must stay stopped"
+                );
+                cx_b.scope.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn restore_checks_generation_and_requires_a_trusted_current_owner() {
+    LocalSet::new()
+        .run_until(async {
+            for generation in [Some(7), Some(8), None] {
+                let source = Rc::new(Port::default());
+                let source_scope = Scope::new();
+                let source_cx = AlgoCx::new(source.clone(), source_scope.clone());
+                let a = TwapFactory::with_owner(
+                    "a",
+                    safe_cex_algo_twap::TwapOwner {
+                        owner_id: "A".into(),
+                        generation: 7,
+                    },
+                    source_cx.clone(),
+                    Rc::new(Chasers::default()),
+                );
+                a.handle(
+                    "twap:start",
+                    &twap_options(
+                        json!({"duration": 0.5, "ownerId": "forged", "ownerGeneration": 999}),
+                    ),
+                    &source_cx,
+                )
+                .unwrap();
+                settle().await;
+                assert_eq!(placed_amounts(&source), vec![0.5]);
+                let rows: Vec<Value> = source
+                    .emits
+                    .borrow()
+                    .iter()
+                    .rev()
+                    .find(|(op, data)| {
+                        op == "twap:stateUpdate" && !data.as_object().unwrap().is_empty()
+                    })
+                    .unwrap()
+                    .1
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(id, row)| {
+                        assert_eq!(row["ownerId"], "A");
+                        assert_eq!(row["ownerGeneration"], 7);
+                        let mut row = row.clone();
+                        row["id"] = json!(id);
+                        row
+                    })
+                    .collect();
+                source_scope.dispose();
+                let target = Rc::new(Port::default());
+                let target_cx = AlgoCx::new(target.clone(), Scope::new());
+                let b = match generation {
+                    Some(generation) => TwapFactory::with_owner(
+                        "a",
+                        safe_cex_algo_twap::TwapOwner {
+                            owner_id: "A".into(),
+                            generation,
+                        },
+                        target_cx.clone(),
+                        Rc::new(Chasers::default()),
+                    ),
+                    None => TwapFactory::new("a", target_cx.clone(), Rc::new(Chasers::default())),
+                };
+                b.handle("twap:state", &json!(rows).to_string(), &target_cx)
+                    .unwrap();
+                assert_eq!(
+                    b.active_twaps("a").len(),
+                    usize::from(generation == Some(7))
+                );
+                tokio::time::sleep(Duration::from_millis(15_001)).await;
+                settle().await;
+                assert_eq!(
+                    placed_amounts(&target),
+                    if generation == Some(7) {
+                        vec![0.5]
+                    } else {
+                        vec![]
+                    }
+                );
+                assert_eq!(placed_amounts(&source), vec![0.5]);
+                target_cx.scope.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn runs_slices_on_the_interval_and_reports_state() {
     LocalSet::new()
         .run_until(async {

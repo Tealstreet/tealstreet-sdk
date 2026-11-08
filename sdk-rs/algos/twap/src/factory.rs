@@ -15,7 +15,7 @@ use tokio::sync::Notify;
 
 use crate::{
     ChaserProgress, ChaserRequest, OrderKind, OrderSide, SliceFailure, TickerQuote, TwapBook,
-    TwapEffect, TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest,
+    TwapEffect, TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest, TwapOwner,
 };
 
 /// The account's chaser runtime, as TWAP slices use it.
@@ -62,12 +62,30 @@ struct Inner {
 }
 
 impl TwapFactory {
-    /// `account_name` is the account's `accountName`; TWAPs naming another are refused.
+    /// New TWAPs only; persisted restores require [`Self::with_owner`].
     pub fn new(account_name: &str, account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
+        Self::from_book(TwapBook::new(account_name), account_cx, chasers)
+    }
+
+    /// The host supplies its authenticated owner/session, independently of restore data.
+    pub fn with_owner(
+        account_name: &str,
+        owner: TwapOwner,
+        account_cx: AlgoCx,
+        chasers: Rc<dyn TwapChasers>,
+    ) -> Self {
+        Self::from_book(
+            TwapBook::with_owner(account_name, owner),
+            account_cx,
+            chasers,
+        )
+    }
+
+    fn from_book(book: TwapBook, account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
         Self {
             inner: Rc::new(Inner {
                 cx: account_cx,
-                book: RefCell::new(TwapBook::new(account_name)),
+                book: RefCell::new(book),
                 chasers,
                 env: RefCell::new(CxEnv::seeded()),
                 rescheduled: Notify::new(),
