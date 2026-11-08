@@ -23,6 +23,24 @@ function make(name: ExchangeName, rows: unknown, options: Record<string, unknown
 }
 
 describe('Rust reported closed-PnL output is authoritative', () => {
+  it('forwards closed-PnL to the worker after capability adoption without a local command', async () => {
+    const { exchange, command } = make('bybit', fixtures.bybit, { workerMirror: true }, { closedPositions: true });
+    const calls: { method: string; args: unknown[] }[] = [];
+    exchange.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      exchange.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: fixtures.bybit });
+    });
+    const opts = { symbol: 'BTCUSD' };
+    await exchange.fetchClosedPositions(opts);
+    expect(calls).toEqual([{ method: 'fetchClosedPositions', args: [opts] }]);
+    expect(command).not.toHaveBeenCalled();
+    calls.length = 0;
+
+    expect(await exchange.fetchClosedPnl(opts)).toEqual(fixtures.bybit);
+    expect({ worker: calls.length, local: command.mock.calls.length }).toEqual({ worker: 1, local: 0 });
+    expect(calls).toEqual([{ method: 'fetchClosedPnl', args: [opts] }]);
+  });
+
   it.each<ExchangeName>(['bybit', 'okx', 'blofin', 'bitunix'])('%s forwards the reported command with account and bounds', async name => {
     const { exchange, command } = make(name, fixtures.bybit);
     expect(await exchange.fetchClosedPnl({symbol: 'BTCUSD', from: 1, to: 2, accountName: 'fixture-account'})).toBe(fixtures.bybit);
