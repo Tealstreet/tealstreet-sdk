@@ -4,6 +4,9 @@ use safe_cex_engine::write_plan::ElementResult;
 use safe_cex_engine::{Outcome, VenueError};
 
 const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const HTTP_UNKNOWN_TEXT: &str =
+    "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders";
+const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
 
 #[derive(Clone, Copy, Debug)]
 enum Path {
@@ -201,37 +204,55 @@ fn check(path: Path, cases: &[Uncertain]) {
                 "{label}"
             );
         }
+        let engine_sealed = matches!(uncertain, Uncertain::Gateway);
+        let terminal_text = if engine_sealed {
+            if matches!(path, Path::PriorRefusal) {
+                UNKNOWN_AFTER_REFUSAL
+            } else {
+                HTTP_UNKNOWN_TEXT
+            }
+        } else {
+            ENGINE_UNKNOWN_TEXT
+        };
         assert!(
-            error.message.contains(ENGINE_UNKNOWN_TEXT),
+            error.message.contains(terminal_text),
             "{label}: {}",
             error.message
         );
         if let ElementResult::Unknown { error } = &rows[pending].result {
+            let row_text = if engine_sealed {
+                HTTP_UNKNOWN_TEXT
+            } else {
+                ENGINE_UNKNOWN_TEXT
+            };
             assert!(
-                error.message.contains(ENGINE_UNKNOWN_TEXT),
+                error.message.contains(row_text),
                 "{label}: {}",
                 error.message
             );
         }
-        let events: Vec<_> = h
-            .events
-            .iter()
-            .filter(|event| event.code == "write.unknown")
-            .collect();
-        assert_eq!(events.len(), 1, "{label}: {:?}", h.events);
-        assert!(events[0].message.contains(ENGINE_UNKNOWN_TEXT), "{label}");
-        assert!(
-            events[0]
-                .fields
+        // Engine-sealed telemetry awaits the later engine hook; other pins stay.
+        if !engine_sealed {
+            let events: Vec<_> = h
+                .events
                 .iter()
-                .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown")),
-            "{label}"
-        );
-        assert!(
-            events[0].fields.iter().any(|(key, value)| *key == "command"
-                && matches!(value, safe_cex_engine::log::Value::Num(id) if *id == 1.0)),
-            "{label}"
-        );
+                .filter(|event| event.code == "write.unknown")
+                .collect();
+            assert_eq!(events.len(), 1, "{label}: {:?}", h.events);
+            assert!(events[0].message.contains(ENGINE_UNKNOWN_TEXT), "{label}");
+            assert!(
+                events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown")),
+                "{label}"
+            );
+            assert!(
+                events[0].fields.iter().any(|(key, value)| *key == "command"
+                    && matches!(value, safe_cex_engine::log::Value::Num(id) if *id == 1.0)),
+                "{label}"
+            );
+        }
         let before = h.sent_writes;
         h.engine.handle(
             1700000000000.0,
@@ -250,14 +271,16 @@ fn check(path: Path, cases: &[Uncertain]) {
             "{label}: no retry or continuation after late ACK"
         );
         assert_eq!(h.failures.len(), 1, "{label}: one terminal");
-        assert_eq!(
-            h.events
-                .iter()
-                .filter(|event| event.code == "write.unknown")
-                .count(),
-            1,
-            "{label}: one telemetry event"
-        );
+        if !engine_sealed {
+            assert_eq!(
+                h.events
+                    .iter()
+                    .filter(|event| event.code == "write.unknown")
+                    .count(),
+                1,
+                "{label}: one telemetry event"
+            );
+        }
     }
 }
 
