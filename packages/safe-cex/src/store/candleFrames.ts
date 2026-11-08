@@ -7,15 +7,16 @@ export type FrameCandle = { symbol: string; interval: string; candle: Candle };
 export function readCandleFrame(frame: Frame, symbols: readonly string[]): FrameCandle[] {
   const rows = frame.candles();
   const candles: FrameCandle[] = [];
-  for (let i = 0; i < (rows?.count ?? 0); i++) {
-    const symbol = symbols[rows!.market[i]];
+  if (!rows) return candles;
+  for (let i = 0; i < rows.count; i++) {
+    const symbol = symbols[rows.market[i]];
     if (!symbol) throw new Error('Candle identity requires a market snapshot');
     const at = i * 6;
-    const values = rows!.rows.subarray(at, at + 6);
+    const values = rows.rows.subarray(at, at + 6);
     if (!values.every(Number.isFinite)) throw new Error('Invalid candle values');
     candles.push({
       symbol,
-      interval: rows!.interval(i),
+      interval: rows.interval(i),
       candle: {
         timestamp: values[0],
         open: values[1],

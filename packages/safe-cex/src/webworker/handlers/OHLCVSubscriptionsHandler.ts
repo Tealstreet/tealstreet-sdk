@@ -1,17 +1,18 @@
+
 import throttle from 'lodash/throttle';
 
-import { Candle } from '../../types';
+import { Candle, OHLCVOptions } from '../../types';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
 interface SymbolIntervalSub {
   unsub: () => void;
-  throttleFn: any;
+  throttleFn?: ReturnType<typeof throttle<(candle: Candle) => void>>;
   // subIds.size IS the refcount — see OrderBookSubscriptionsHandler for why a
   // separate counter desyncs on a duplicate subId and strands the subscription.
   subIds: Set<string>;
   lastCandleTimestamp: number;
-  payloadDataBySubId: Map<string, any>;
+  payloadDataBySubId: Map<string, OHLCVOptions & { subId: string }>;
 }
 
 export class OHLCVSubscriptionsHandler extends BaseHandler {

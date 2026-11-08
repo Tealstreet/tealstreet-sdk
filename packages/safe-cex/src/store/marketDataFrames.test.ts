@@ -1,3 +1,4 @@
+import type { Candle } from '../generated/Candle';
 import type { OrderBook } from '../generated/OrderBook';
 
 import { execFileSync } from 'node:child_process';
@@ -157,11 +158,12 @@ describe('Rust market data frames', () => {
     const index = candle.timestamp / 1000 / intervalSeconds;
     const chunk = Math.floor(index / chunkSize);
     const offset = index % chunkSize;
-    const sparse = new Array(chunkSize);
+    const sparse = new Array<Candle | undefined>(chunkSize);
     sparse[offset] = candle;
     sparse[offset + 1] = { ...candle, timestamp: candle.timestamp + 60_000, lastSide: OrderSide.Sell };
     await backend.persistChunks('zero', new Map([[chunk, sparse]]));
-    const loaded = (await backend.loadChunks('zero', [chunk], { chunkSize, intervalSeconds })).get(chunk)!;
+    const loaded = (await backend.loadChunks('zero', [chunk], { chunkSize, intervalSeconds })).get(chunk);
+    if (!loaded) throw new Error('Expected the persisted candle chunk');
     expect(loaded[offset]).toEqual(candle);
     expect(loaded[offset]).not.toHaveProperty('lastSide');
     expect(loaded[offset + 1]?.lastSide).toBe(OrderSide.Sell);

@@ -75,7 +75,7 @@ export class BookFrames {
     const identities = new Map(symbols.map((symbol, i) => [symbol, ids[i]]));
     const states = new Map(this.states);
     for (const [symbol, state] of states) if (identities.get(symbol) !== state.id) states.delete(symbol);
-    const changed = new Set<string>();
+    const changed = new Map<string, BookState>();
     const identity = (market: number) => {
       const symbol = symbols[market];
       const id = ids[market];
@@ -86,18 +86,20 @@ export class BookFrames {
       const { symbol, id } = identity(book.market);
       validateSnapshot(book.bids, true);
       validateSnapshot(book.asks, false);
-      states.set(symbol, { id, bids: book.bids.slice(), asks: book.asks.slice() });
-      changed.add(symbol);
+      const state = { id, bids: book.bids.slice(), asks: book.asks.slice() };
+      states.set(symbol, state);
+      changed.set(symbol, state);
     }
     for (const book of deltas) {
       const { symbol, id } = identity(book.market);
       const previous = states.get(symbol);
       if (!previous || previous.id !== id) throw new Error(`Order book snapshot required for ${symbol}`);
       const state = { id, bids: levelMap(previous.bids), asks: levelMap(previous.asks) };
-      for (const [levels, rows] of [
+      const updates: Array<[Map<number, number>, Float64Array]> = [
         [state.bids, book.bids],
         [state.asks, book.asks],
-      ] as const) {
+      ];
+      for (const [levels, rows] of updates) {
         for (let i = 0; i < rows.length; i += 2) {
           const price = rows[i];
           const amount = rows[i + 1];
@@ -107,10 +109,9 @@ export class BookFrames {
         }
       }
       states.set(symbol, state);
-      changed.add(symbol);
+      changed.set(symbol, state);
     }
-    const books = [...changed].map((symbol) => {
-      const state = states.get(symbol)!;
+    const books = [...changed].map(([symbol, state]) => {
       return { symbol, orderbook: { bids: side(state.bids, true), asks: side(state.asks, false) } };
     });
     this.states = states;
