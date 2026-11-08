@@ -1755,7 +1755,7 @@ impl Okx {
                     ack.algo_id
                 };
                 if id.is_empty() {
-                    return self.unproven(cx, request, "OKX placement response missing order ID");
+                    continue;
                 }
                 if !self.account.order_final(id)
                     && let Some(market) = cx.store.market_by_id(&identity.inst_id)
@@ -1773,7 +1773,17 @@ impl Okx {
                 job.ids.push(id.into());
             }
         }
-        if acks.iter().any(|ack| ack.s_code == "50004") {
+        let missing_id = step.collect_ids
+            && matches!(envelope.code, "0" | "2")
+            && acks.iter().any(|ack| {
+                matches!(ack.s_code, "" | "0") && ack.ord_id.is_empty() && ack.algo_id.is_empty()
+            });
+        if missing_id || acks.iter().any(|ack| ack.s_code == "50004") {
+            let message = if missing_id {
+                "OKX placement response missing order ID"
+            } else {
+                "OKX 50004: write execution status is unknown"
+            };
             // Preserve proven siblings in this same unproven batch. Recording
             // only an empty Unknown fact loses them in the engine projection.
             // Keep the existing Internal/Unknown classification and halt.
@@ -1792,7 +1802,6 @@ impl Okx {
                     .map(str::to_owned)
                     .collect();
                 if !ids.is_empty() {
-                    let message = "OKX 50004: write execution status is unknown";
                     let fact =
                         safe_cex_engine::classify::unproven_reply(message).with_order_ids(&ids);
                     let _ = cx.http_write_fact(
@@ -1807,7 +1816,7 @@ impl Okx {
                     return self.end(cx, request.command, Some(&request), error, true);
                 }
             }
-            return self.unproven(cx, request, "OKX 50004: write execution status is unknown");
+            return self.unproven(cx, request, message);
         }
         // Placement success needs its new native ID. Cancel identities are
         // matched against the requested rows below, including native refusals.
