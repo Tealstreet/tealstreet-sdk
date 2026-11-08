@@ -1,11 +1,32 @@
 mod support;
 
-use safe_cex_engine::{Action, Command, ErrorKind, Event, Method, Notice, Outcome};
+use safe_cex_engine::{Action, Command, ErrorKind, Event, HttpRequest, Method, Notice, Outcome};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use support::managed::*;
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+#[derive(Default)]
+struct ScriptedTransport {
+    requests: Vec<HttpRequest>,
+    responses: VecDeque<(u16, String)>,
+}
+
+impl ScriptedTransport {
+    fn poll(&mut self, engine: &mut Driver) -> Vec<Action> {
+        let out = actions(engine);
+        for action in &out {
+            if let Action::Http(request) = action {
+                self.requests.push(request.clone());
+                if let Some((status, body)) = self.responses.pop_front() {
+                    reply(engine, request, status, &body);
+                }
+            }
+        }
+        out
+    }
+}
 
 fn constrained(min: f64, max: f64) -> Driver {
     let (mut engine, _) = ready();
@@ -33,11 +54,10 @@ fn submit(engine: &mut Driver, orders: Vec<Value>) -> Result {
 }
 
 fn refused_before_transport(engine: &mut Driver) -> Result {
-    let out = actions(engine);
+    let mut transport = ScriptedTransport::default();
+    let out = transport.poll(engine);
     assert_eq!(
-        out.iter()
-            .filter(|action| matches!(action, Action::Http(_)))
-            .count(),
+        transport.requests.len(),
         0,
         "the entire intent must be validated before the first transport request"
     );
@@ -56,7 +76,8 @@ fn refused_before_transport(engine: &mut Driver) -> Result {
     assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     assert!(error.partial.is_none());
-    assert!(requests(engine).is_empty());
+    transport.poll(engine);
+    assert!(transport.requests.is_empty());
     Ok(())
 }
 
@@ -191,9 +212,22 @@ fn valid_bracket_places_each_leg_once() -> Result {
             json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":0.85,"price":140,"takeProfit":150,"stopLoss":130,"timeInForce":"PostOnly"}),
         ],
     )?;
-    let mut sends = 0;
+    let mut transport = ScriptedTransport {
+        responses: ["entry", "tp", "sl"]
+            .into_iter()
+            .map(|id| (200, json!({"id":id}).to_string()))
+            .collect(),
+        ..Default::default()
+    };
     for (index, id) in ["entry", "tp", "sl"].into_iter().enumerate() {
-        let packets = requests(&mut engine);
+        let packets: Vec<_> = transport
+            .poll(&mut engine)
+            .into_iter()
+            .filter_map(|action| match action {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .collect();
         assert_eq!(packets.len(), 1);
         let packet = packets.first().ok_or("missing bracket write")?;
         assert_eq!(packet.method, Method::Post);
@@ -212,11 +246,11 @@ fn valid_bracket_places_each_leg_once() -> Result {
             assert_eq!(row["side"], "Ask");
             assert_eq!(row["reduceOnly"], true);
         }
-        sends += 1;
-        reply(&mut engine, packet, 200, &json!({"id":id}).to_string());
+        assert_eq!(transport.requests.len(), index + 1, "{id}");
     }
-    assert_eq!(sends, 3);
-    let out = actions(&mut engine);
+    let out = transport.poll(&mut engine);
+    assert_eq!(transport.requests.len(), 3);
+    assert!(transport.responses.is_empty());
     assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
     let result = out
         .iter()
