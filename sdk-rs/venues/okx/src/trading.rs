@@ -12,7 +12,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, PlannedWrite, WritePlan};
+use safe_cex_engine::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -21,12 +21,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const BROKER: &str = "e847386590ce4dBC";
 
-/// Each write has its own 20 s bound and stops at its first failure.
+/// Every write is one call with its own 20 s bound; only a 50113 signature
+/// refusal, which executed nothing, is re-signed and sent once more.
 const SERIAL: SerialCall = SerialCall {
     auth: safe_cex_engine::request_context::plan::CallAuth::Preflight,
     operation: Operation::Mutation,
     timeout_ms: 20_000,
-    attempts: 1,
+    attempts: 2,
     pacing: None,
 };
 
@@ -155,8 +156,6 @@ struct Step {
     body: String,
     expected: usize,
     collect_ids: bool,
-    native: Option<NativeWrite>,
-    applied: Option<AppliedWrite>,
     write_index: Option<usize>,
 }
 #[derive(Default)]
@@ -180,7 +179,7 @@ struct Job {
     preflight: Option<Preflight>,
     plan: Option<Plan>,
     steps: VecDeque<Step>,
-    writes: Option<WritePlan<NativeWrite>>,
+    writes: Option<WritePlan<ReportedWrite>>,
     pending_write: Option<usize>,
     ids: Vec<String>,
     finish: Finish,
@@ -281,11 +280,14 @@ impl TrailingOrder {
 enum TrailingPhase {
     Cancel,
     Replace,
+    Restore,
 }
 struct TrailingAmend {
     original: ObservedAlgo,
     replacement: TrailingOrder,
     phase: TrailingPhase,
+    restore: Option<Step>,
+    refusal: Option<VenueError>,
     quote: Option<(f64, f64)>,
 }
 enum Finish {
@@ -296,11 +298,51 @@ enum Finish {
     Mode(bool),
 }
 
+struct ReportedWrite {
+    path: &'static str,
+    body: String,
+}
+impl Job {
+    fn track_writes(&mut self) -> Result<(), VenueError> {
+        if !matches!(self.finish, Finish::Ids) || self.trailing.is_some() || self.lookup.is_some() {
+            return Ok(());
+        }
+        let mut writes = Vec::new();
+        let mut index = 0;
+        for step in &mut self.steps {
+            if !step.collect_ids || step.receipts.is_empty() {
+                return Ok(());
+            }
+            step.write_index = Some(writes.len());
+            let elements = step
+                .receipts
+                .iter()
+                .map(|receipt| {
+                    let element = Element {
+                        index,
+                        client_order_id: Some(receipt.identity.clone()),
+                    };
+                    index += 1;
+                    element
+                })
+                .collect();
+            writes.push(PlannedWrite {
+                payload: ReportedWrite {
+                    path: step.path,
+                    body: step.body.clone(),
+                },
+                elements,
+            });
+        }
+        // Legacy formatters decide validity; this callback adds no trading rules.
+        self.writes = Some(WritePlan::validate(writes, |_| Ok(()))?);
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct OrderPayload {
-    #[serde(skip)]
-    rules: OrderWireRules,
     #[serde(skip)]
     symbol: String,
     inst_id: String,
@@ -346,119 +388,6 @@ struct OrderPayload {
     callback_ratio: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     callback_spread: Option<String>,
-}
-
-struct NativeWrite {
-    path: &'static str,
-    body: String,
-    payload: NativePayload,
-}
-enum NativePayload {
-    Orders(Vec<OrderPayload>),
-    Trailing {
-        order: Box<TrailingOrder>,
-        rules: OrderWireRules,
-    },
-    Applied(AppliedWrite),
-}
-#[derive(Clone, PartialEq)]
-struct AppliedWrite {
-    effect: AppliedEffect,
-    targets: Vec<AppliedTarget>,
-}
-#[derive(Clone, PartialEq)]
-struct AppliedTarget {
-    order_id: Option<String>,
-    position_key: Option<String>,
-}
-impl AppliedWrite {
-    fn result(&self, index: usize) -> Result<ElementResult, VenueError> {
-        let target = self.targets.get(index).ok_or_else(|| {
-            VenueError::new("OKX accepted effect has no planned target")
-                .kind(ErrorKind::Internal)
-                .outcome(Outcome::Unknown)
-        })?;
-        Ok(ElementResult::Applied {
-            effect: self.effect,
-            target_order_id: target.order_id.clone(),
-            position_key: target.position_key.clone(),
-        })
-    }
-}
-impl NativeWrite {
-    fn client_ids(&self) -> Vec<Option<String>> {
-        match &self.payload {
-            NativePayload::Orders(orders) => orders
-                .iter()
-                .map(|order| {
-                    order
-                        .cl_ord_id
-                        .clone()
-                        .or_else(|| order.algo_cl_ord_id.clone())
-                })
-                .collect(),
-            NativePayload::Trailing { order, .. } => vec![Some(order.algo_cl_ord_id.clone())],
-            NativePayload::Applied(write) => vec![None; write.targets.len()],
-        }
-    }
-}
-impl Job {
-    fn settle_write(
-        &mut self,
-        cx: &Cx<'_, Pending>,
-        context: &Context,
-        acks: &[Ack<'_>],
-    ) -> Result<(), VenueError> {
-        let Some(index) = self.pending_write else {
-            return Ok(());
-        };
-        let step = self.steps.front().ok_or_else(|| {
-            VenueError::new("OKX pending write has no native step")
-                .kind(ErrorKind::Internal)
-                .outcome(Outcome::Unknown)
-        })?;
-        let results = native_results(cx, context, step, acks)?;
-        let writes = self.writes.as_mut().ok_or_else(|| {
-            VenueError::new("OKX pending write has no journal")
-                .kind(ErrorKind::Internal)
-                .outcome(Outcome::Unknown)
-        })?;
-        writes.settle(index, results).map_err(|error| {
-            VenueError::new(error.to_string())
-                .kind(ErrorKind::Internal)
-                .outcome(Outcome::Unknown)
-        })?;
-        self.pending_write = None;
-        Ok(())
-    }
-
-    fn validate_writes(&mut self) -> Result<(), VenueError> {
-        let mut writes = Vec::new();
-        let mut element_index = 0;
-        for step in &mut self.steps {
-            let Some(payload) = step.native.take() else {
-                continue;
-            };
-            step.write_index = Some(writes.len());
-            let elements = payload
-                .client_ids()
-                .into_iter()
-                .map(|client_order_id| {
-                    let index = element_index;
-                    element_index += 1;
-                    Element {
-                        index,
-                        client_order_id,
-                    }
-                })
-                .collect();
-            writes.push(PlannedWrite { payload, elements });
-        }
-        if !writes.is_empty() {
-            self.writes = Some(WritePlan::validate(writes, validate_native_write)?);
-        }
-        Ok(())
-    }
 }
 
 #[derive(Serialize)]
@@ -651,9 +580,12 @@ impl Okx {
         }) else {
             return;
         };
-        if let Err(error) = job.validate_writes() {
-            let _ = cx.fail_preflight(&preflight, error);
-            return;
+        if job.track_writes().is_err() {
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                safe_cex_engine::log::code::REQUEST_FAILED,
+                "OKX write outcome reporting is unavailable",
+            );
         }
         if job.steps.is_empty() {
             let _ = match self.finish_effects(cx, &mut job) {
@@ -762,10 +694,7 @@ impl Okx {
                 algos.push(o);
                 continue;
             }
-            let m = cx
-                .store
-                .market(&o.symbol)
-                .ok_or_else(|| format!("Market {} not found on OKX", o.symbol))?;
+            let m = cx.store.market(&o.symbol).expect("preflight market");
             if !m.limits.amount.max.is_finite()
                 || m.limits.amount.max <= 0.0
                 || m.precision.amount <= 0.0
@@ -773,6 +702,9 @@ impl Okx {
                 return Err("invalid market size limits".into());
             }
             let amount = adjusted(o.amount, m.precision.amount, false)?;
+            if !amount.is_finite() {
+                return Err("Order amount must be finite after adjustment".into());
+            }
             let max = lot_floor(m.limits.amount.max, m.precision.amount)?;
             if o.client_order_id.is_some() && amount > max {
                 return Err(
@@ -880,6 +812,9 @@ impl Okx {
             m.precision.amount,
             algo && o.kind != OrderType::Conditional,
         )?;
+        if o.kind == OrderType::Conditional && !size.is_finite() {
+            return Err("Conditional amount must be finite after adjustment".into());
+        }
         let protective = matches!(
             o.kind,
             OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
@@ -910,7 +845,7 @@ impl Okx {
                 _ => "conditional",
             },
             pos_side,
-            ..empty_payload(self.order_wire_rules(m, o.kind)?)
+            ..empty_payload()
         };
         let generated = || generated_order_id(cx);
         if algo {
@@ -991,26 +926,6 @@ impl Okx {
             _ => {}
         }
         Ok(p)
-    }
-
-    fn order_wire_rules(&self, market: &Market, kind: OrderType) -> Result<OrderWireRules, String> {
-        let limits = &self
-            .products
-            .get(&market.id)
-            .ok_or("Native OKX order limits are unavailable")?
-            .order_limits;
-        Ok(OrderWireRules {
-            min: limits.min,
-            max: match kind {
-                OrderType::Limit => limits.limit,
-                OrderType::Market => limits.market,
-                OrderType::Conditional => limits.trigger,
-                _ => limits.stop,
-            },
-            step: market.precision.amount,
-            tick: market.precision.price,
-            kind,
-        })
     }
 
     fn plan_cancel(&self, cx: &Cx<'_, Pending>, ids: Vec<String>) -> Result<Job, String> {
@@ -1301,15 +1216,19 @@ impl Okx {
                 }
             }
             replacement.algo_cl_ord_id = generated_order_id(cx)?;
-            let rules = self.order_wire_rules(m, OrderType::TrailingStopLoss)?;
+            let mut restored = native.clone();
+            restored.algo_cl_ord_id = generated_order_id(cx)?;
+            let restore = trailing_step(&o.symbol, &restored)?;
             let mut result = self.plan_cancel(cx, vec![id.into()])?;
             result
                 .steps
-                .push_back(trailing_step(&o.symbol, &replacement, rules)?);
+                .push_back(trailing_step(&o.symbol, &replacement)?);
             result.trailing = Some(TrailingAmend {
                 original,
                 replacement,
                 phase: TrailingPhase::Cancel,
+                restore: Some(restore),
+                refusal: None,
                 quote: None,
             });
             result.replacing_stop = Some((o.symbol.clone(), o.side, o.kind));
@@ -1450,25 +1369,24 @@ impl Okx {
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
-        let Some(step) = job.steps.front() else {
-            return;
-        };
-        if let Some(expected) = step.write_index {
-            let next = job.writes.as_mut().and_then(WritePlan::next_write);
-            match next {
-                Some((index, write))
-                    if index == expected
-                        && write.payload.path == step.path
-                        && write.payload.body == step.body =>
-                {
-                    job.pending_write = Some(index);
-                }
-                _ => {
-                    let error = VenueError::new("OKX validated write schedule is unavailable")
-                        .kind(ErrorKind::Internal)
-                        .outcome(Outcome::NotSent);
-                    return self.end(cx, command, None, error, false);
-                }
+        let step = job.steps.front().expect("issued step");
+        if job.pending_write.is_none()
+            && let (Some(expected), Some(writes)) = (step.write_index, &mut job.writes)
+        {
+            let matched = writes.next_write().is_some_and(|(index, write)| {
+                index == expected
+                    && write.payload.path == step.path
+                    && write.payload.body == step.body
+            });
+            if matched {
+                job.pending_write = Some(expected);
+            } else {
+                job.writes = None;
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    safe_cex_engine::log::code::REQUEST_FAILED,
+                    "OKX write outcome reporting is unavailable",
+                );
             }
         }
         let read = step.query.is_some();
@@ -1708,9 +1626,6 @@ impl Okx {
                 );
             }
         };
-        if let Err(error) = next.validate_writes() {
-            return self.end(cx, request.command, Some(&request), error, false);
-        }
         let previous = self
             .trading
             .jobs
@@ -1809,15 +1724,27 @@ impl Okx {
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
             return;
         };
-        if job
-            .steps
-            .front()
-            .is_some_and(|step| step.collect_ids && acks.len() == step.expected)
-            && let Err(error) = job.settle_write(cx, &request.context, &acks)
-        {
-            return self.end(cx, request.command, Some(&request), error, true);
-        }
         let step = job.steps.front().expect("inflight step");
+        if let (Some(writes), Some(index)) = (&mut job.writes, job.pending_write)
+            && acks.len() == step.expected
+        {
+            let recorded = placement_results(cx, &request.context, &acks).and_then(|results| {
+                writes
+                    .settle(index, results)
+                    .map_err(|error| VenueError::new(error.to_string()))
+            });
+            if recorded.is_ok() {
+                job.pending_write = None;
+            } else {
+                job.writes = None;
+                job.pending_write = None;
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    safe_cex_engine::log::code::REQUEST_FAILED,
+                    "OKX write outcome reporting is unavailable",
+                );
+            }
+        }
         if step.collect_ids && matches!(envelope.code, "0" | "2") {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -1890,15 +1817,7 @@ impl Okx {
         if step.expected > 0 && acks.len() != step.expected {
             return self.unproven(cx, request, "OKX write response row count mismatch");
         }
-        let requested: Vec<Requested> = if step.path == "/api/v5/trade/amend-order"
-            || step.path == "/api/v5/trade/amend-algos"
-        {
-            serde_json::from_str(&step.body)
-                .map(|row| vec![row])
-                .unwrap_or_default()
-        } else {
-            serde_json::from_str(&step.body).unwrap_or_default()
-        };
+        let requested: Vec<Requested> = serde_json::from_str(&step.body).unwrap_or_default();
         if matches!(
             step.path,
             "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
@@ -1912,19 +1831,6 @@ impl Okx {
             }))
         {
             return self.unproven(cx, request, "OKX cancel row identity missing or mismatched");
-        }
-        if step
-            .applied
-            .as_ref()
-            .is_some_and(|write| write.effect == AppliedEffect::Amend)
-            && acks.iter().enumerate().any(|(index, ack)| {
-                requested.get(index).is_none_or(|target| {
-                    (!ack.ord_id.is_empty() && ack.ord_id != target.ord_id)
-                        || (!ack.algo_id.is_empty() && ack.algo_id != target.algo_id)
-                })
-            })
-        {
-            return self.unproven(cx, request, "OKX amend row identity mismatched its target");
         }
         if step.collect_ids
             && acks.len() == step.expected
@@ -1958,9 +1864,6 @@ impl Okx {
         if expected == 0 && envelope.code != "0" {
             let message = format!("OKX {}: {}", envelope.code, envelope.msg);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
-        }
-        if let Err(error) = job.settle_write(cx, &request.context, &acks) {
-            return self.end(cx, request.command, Some(&request), error, true);
         }
         // Record the call's fact before any continuation or terminal.
         let recorded = if expected > 0 {
@@ -2045,7 +1948,7 @@ impl Okx {
             return;
         }
         if !errors.is_empty() {
-            if !continue_cancel_errors || job.writes.is_some() {
+            if !continue_cancel_errors {
                 let error = refused(rejection(
                     errors.join_with("; "),
                     first_code,
@@ -2069,7 +1972,22 @@ impl Okx {
         }
         job.effective = true;
         if job.steps.is_empty() {
-            self.finish(cx, request);
+            let restored = job
+                .trailing
+                .as_mut()
+                .filter(|a| a.phase == TrailingPhase::Restore)
+                .and_then(|a| a.refusal.take());
+            if let Some(mut refusal) = restored {
+                refusal.message = format!(
+                    "{}; the original OKX trailing stop was restored",
+                    refusal.message
+                );
+                refusal.protection = Some(safe_cex_engine::error::Protection::Restored);
+                refusal.presents = true;
+                self.end(cx, request.command, Some(&request), refusal, false);
+            } else {
+                self.finish(cx, request);
+            }
         } else {
             match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
                 Ok(slot) => self.issue(cx, request.command, slot),
@@ -2112,7 +2030,25 @@ impl Okx {
             message.clone(),
             None,
         );
-        let verdict = failure.map(|(verdict, _)| verdict);
+        let (verdict, grant) = match failure {
+            Ok((verdict, grant)) => (Ok(verdict), grant),
+            Err(error) => (Err(error), None),
+        };
+        // One re-signed resend of a 50113 refusal; the journal refuses a second.
+        if let Some(grant) = grant {
+            let plan = self
+                .trading
+                .jobs
+                .get(&request.command)
+                .and_then(|job| job.plan.clone());
+            if let Some(plan) = plan
+                && let Ok(context) =
+                    cx.plan_resend_context(&plan, &request.slot, &request.context, grant)
+            {
+                self.release(cx, request.command, request.slot, context);
+                return;
+            }
+        }
         let error = rejection(message, code, status);
         if matches!(verdict, Ok(Verdict::Refused(_) | Verdict::RefusedResend(_))) {
             self.end(cx, request.command, Some(&request), error, false);
@@ -2166,6 +2102,35 @@ impl Okx {
         mut error: VenueError,
         uncertain: bool,
     ) {
+        if !uncertain
+            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            && let Some(request) = current
+        {
+            let restore = self.trading.jobs.get_mut(&command).and_then(|job| {
+                let trailing = job.trailing.as_mut()?;
+                if trailing.phase != TrailingPhase::Replace {
+                    return None;
+                }
+                let restore = trailing.restore.take()?;
+                trailing.phase = TrailingPhase::Restore;
+                trailing.refusal = Some(error.clone());
+                job.steps.clear();
+                job.steps.push_back(restore);
+                Some(job.plan.clone().expect("admitted trailing Plan"))
+            });
+            if let Some(plan) = restore {
+                match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
+                    Ok(slot) => {
+                        self.issue(cx, command, slot);
+                        return;
+                    }
+                    Err(reason) => {
+                        error.message =
+                            format!("{}; restore admission failed: {reason}", error.message)
+                    }
+                }
+            }
+        }
         let Some(mut job) = self.trading.jobs.remove(&command) else {
             return;
         };
@@ -2176,9 +2141,12 @@ impl Okx {
                 error.clone()
             };
             if writes.fail(index, classified).is_err() {
-                error = VenueError::new("OKX write journal could not settle its pending write")
-                    .kind(ErrorKind::Internal)
-                    .outcome(Outcome::Unknown);
+                job.writes = None;
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    safe_cex_engine::log::code::REQUEST_FAILED,
+                    "OKX write outcome reporting is unavailable",
+                );
             }
         }
         if !uncertain
@@ -2221,10 +2189,9 @@ impl Okx {
                 safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
             });
         let stop_gone = note.is_some();
-        // Preserve native identities even when a malformed reply prevents row attribution.
-        error = error.partial_ids(&job.ids);
-        if let Some(writes) = &mut job.writes {
-            error = writes.failure(error);
+        // A sibling rests: the caller must be told even though this call failed.
+        if !job.ids.is_empty() {
+            error = error.partial_ids(&job.ids);
         }
         for (id, status) in job.optimistic {
             if !uncertain
@@ -2241,6 +2208,9 @@ impl Okx {
                     },
                 );
             }
+        }
+        if let Some(writes) = &mut job.writes {
+            error = writes.failure(error);
         }
         let _ = match (&job.plan, &job.preflight) {
             (Some(plan), _) => {
@@ -2320,129 +2290,6 @@ fn rejection(message: String, code: Option<&str>, status: u16) -> VenueError {
     error
 }
 
-#[derive(serde::Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
-struct AppliedRequest {
-    ord_id: String,
-    algo_id: String,
-    inst_id: String,
-    mgn_mode: String,
-    pos_mode: String,
-}
-fn applied_write(path: &str, body: &str) -> Result<Option<AppliedWrite>, String> {
-    let effect = match path {
-        "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos" => AppliedEffect::Cancel,
-        "/api/v5/trade/amend-order" | "/api/v5/trade/amend-algos" => AppliedEffect::Amend,
-        "/api/v5/account/set-leverage" | "/api/v5/account/set-position-mode" => {
-            AppliedEffect::Settings
-        }
-        _ => return Ok(None),
-    };
-    let rows: Vec<AppliedRequest> = if effect == AppliedEffect::Cancel {
-        serde_json::from_str(body)
-    } else {
-        serde_json::from_str(body).map(|row| vec![row])
-    }
-    .map_err(|error| error.to_string())?;
-    if rows.is_empty() {
-        return Err("OKX mutation must name its target".into());
-    }
-    let targets = rows
-        .into_iter()
-        .map(|row| {
-            if effect == AppliedEffect::Settings {
-                let position_key = if path == "/api/v5/account/set-position-mode" {
-                    if !matches!(row.pos_mode.as_str(), "net_mode" | "long_short_mode") {
-                        return Err("OKX position mode is missing its account setting".into());
-                    }
-                    "account:positionMode".to_owned()
-                } else {
-                    if row.inst_id.is_empty() || row.mgn_mode.is_empty() {
-                        return Err("OKX leverage is missing its position scope".into());
-                    }
-                    format!("{}:{}", row.inst_id, row.mgn_mode)
-                };
-                Ok(AppliedTarget {
-                    order_id: None,
-                    position_key: Some(position_key),
-                })
-            } else {
-                let order_id = match (row.ord_id.is_empty(), row.algo_id.is_empty()) {
-                    (false, true) => row.ord_id,
-                    (true, false) => row.algo_id,
-                    _ => {
-                        return Err("OKX mutation must name exactly one native order target".into());
-                    }
-                };
-                Ok(AppliedTarget {
-                    order_id: Some(order_id),
-                    position_key: None,
-                })
-            }
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok(Some(AppliedWrite { effect, targets }))
-}
-
-fn native_results(
-    cx: &Cx<'_, Pending>,
-    context: &Context,
-    step: &Step,
-    acks: &[Ack<'_>],
-) -> Result<Vec<ElementResult>, VenueError> {
-    let Some(applied) = &step.applied else {
-        return placement_results(cx, context, acks);
-    };
-    if applied.effect == AppliedEffect::Settings {
-        let mut failures = Vec::new();
-        for ack in acks.iter().filter(|ack| !matches!(ack.s_code, "" | "0")) {
-            failures.push(native_refusal(cx, context, ack)?);
-        }
-        let unproven = failures
-            .iter()
-            .position(|result| matches!(result, ElementResult::Unknown { .. }));
-        return if let Some(index) = unproven {
-            Ok(vec![failures.remove(index)])
-        } else if let Some(result) = failures.into_iter().next() {
-            if acks.iter().any(|ack| matches!(ack.s_code, "" | "0")) {
-                let error = match result {
-                    ElementResult::NotSent { error: Some(error) } => error,
-                    _ => return Ok(vec![result]),
-                };
-                Ok(vec![ElementResult::Unknown {
-                    error: Box::new((*error).outcome(Outcome::Unknown)),
-                }])
-            } else {
-                Ok(vec![result])
-            }
-        } else {
-            Ok(vec![applied.result(0)?])
-        };
-    }
-    acks.iter()
-        .enumerate()
-        .map(|(index, ack)| {
-            if matches!(ack.s_code, "" | "0") {
-                applied.result(index)
-            } else {
-                let fact = cx
-                    .classify_write(
-                        context,
-                        &CODES,
-                        Some(&native(ack.s_code, ack.s_msg)),
-                        ack.s_msg,
-                    )
-                    .map_err(|error| error.venue_error())?;
-                if matches!(fact.verdict(), Verdict::Satisfied(_)) {
-                    applied.result(index)
-                } else {
-                    native_refusal(cx, context, ack)
-                }
-            }
-        })
-        .collect()
-}
-
 fn native_refusal(
     cx: &Cx<'_, Pending>,
     context: &Context,
@@ -2508,9 +2355,8 @@ fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
 
-fn empty_payload(rules: OrderWireRules) -> OrderPayload {
+fn empty_payload() -> OrderPayload {
     OrderPayload {
-        rules,
         symbol: String::new(),
         inst_id: String::new(),
         td_mode: "cross",
@@ -2544,22 +2390,13 @@ fn step<T: Serialize + ?Sized>(
     expected: usize,
     collect_ids: bool,
 ) -> Result<Step, String> {
-    let body = serde_json::to_string(body).map_err(|e| e.to_string())?;
-    let applied = applied_write(path, &body)?;
-    let native = applied.as_ref().map(|write| NativeWrite {
-        path,
-        body: body.clone(),
-        payload: NativePayload::Applied(write.clone()),
-    });
     Ok(Step {
         query: None,
         receipts: Vec::new(),
         path,
-        body,
+        body: serde_json::to_string(body).map_err(|e| e.to_string())?,
         expected,
         collect_ids,
-        native,
-        applied,
         write_index: None,
     })
 }
@@ -2618,20 +2455,8 @@ fn generated_order_id(cx: &Cx<'_, Pending>) -> Result<String, String> {
     safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
         .map(|id| format!("{BROKER}{id}").chars().take(32).collect::<String>())
 }
-fn trailing_step(
-    symbol: &str,
-    payload: &TrailingOrder,
-    rules: OrderWireRules,
-) -> Result<Step, String> {
+fn trailing_step(symbol: &str, payload: &TrailingOrder) -> Result<Step, String> {
     let mut write = step("/api/v5/trade/order-algo", payload, 1, true)?;
-    write.native = Some(NativeWrite {
-        path: write.path,
-        body: write.body.clone(),
-        payload: NativePayload::Trailing {
-            order: Box::new(payload.clone()),
-            rules,
-        },
-    });
     if !payload.algo_cl_ord_id.is_empty() {
         write.receipts.push(OrderIdentityReceipt {
             symbol: symbol.into(),
@@ -2714,26 +2539,11 @@ fn adjusted(value: f64, precision: f64, allow_zero: bool) -> Result<f64, String>
         return Err("order amount/price must be finite".into());
     }
     let result = num::adjust(value, precision);
-    if !result.is_finite() || result < 0.0 || (result == 0.0 && (!allow_zero || value > 0.0)) {
+    if result < 0.0 || (result == 0.0 && (!allow_zero || value > 0.0)) {
         Err("Order amount or price is too small".into())
     } else {
         Ok(result)
     }
-}
-
-fn wire_multiple(text: &str, step: f64) -> Result<f64, String> {
-    let value: f64 = text.parse().map_err(|_| "Invalid OKX wire amount/price")?;
-    let aligned = num::adjust(value, step);
-    if !value.is_finite()
-        || value <= 0.
-        || !step.is_finite()
-        || step <= 0.
-        || !aligned.is_finite()
-        || (value - aligned).abs() > step * 1e-8
-    {
-        return Err("OKX wire amount/price must be a positive native step multiple".into());
-    }
-    Ok(value)
 }
 
 // Integer decimal units avoid floor(0.3 / 0.1) losing an entire lot.
@@ -2753,34 +2563,20 @@ fn lot_floor(max: f64, step: f64) -> Result<f64, String> {
     Ok(num::adjust((max_units / step_units) as f64 * step, step))
 }
 
-fn placement_step<T: Serialize + ?Sized + PlacementBody>(
+fn placement_step<T: Serialize + ?Sized + PlacementIdentities>(
     path: &'static str,
     body: &T,
     expected: usize,
     collect_ids: bool,
 ) -> Result<Step, String> {
-    validate_write(&PlacementWrite {
-        path,
-        orders: body.orders(),
-    })
-    .map_err(|error| error.message)?;
     let mut write = step(path, body, expected, collect_ids)?;
     write.receipts = body.identities();
-    write.native = Some(NativeWrite {
-        path,
-        body: write.body.clone(),
-        payload: NativePayload::Orders(body.orders().into_iter().cloned().collect()),
-    });
     Ok(write)
 }
-trait PlacementBody {
+trait PlacementIdentities {
     fn identities(&self) -> Vec<OrderIdentityReceipt>;
-    fn orders(&self) -> Vec<&OrderPayload>;
 }
-impl PlacementBody for OrderPayload {
-    fn orders(&self) -> Vec<&OrderPayload> {
-        vec![self]
-    }
+impl PlacementIdentities for OrderPayload {
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
         self.cl_ord_id
             .iter()
@@ -2793,331 +2589,16 @@ impl PlacementBody for OrderPayload {
             .collect()
     }
 }
-impl<const N: usize> PlacementBody for [OrderPayload; N] {
-    fn orders(&self) -> Vec<&OrderPayload> {
-        self.as_slice().orders()
-    }
+impl<const N: usize> PlacementIdentities for [OrderPayload; N] {
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
         self.as_slice().identities()
     }
 }
-impl PlacementBody for [OrderPayload] {
-    fn orders(&self) -> Vec<&OrderPayload> {
-        self.iter().collect()
-    }
+impl PlacementIdentities for [OrderPayload] {
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
-        self.iter().flat_map(PlacementBody::identities).collect()
-    }
-}
-
-#[derive(Clone, Copy)]
-struct OrderWireRules {
-    min: f64,
-    max: f64,
-    step: f64,
-    tick: f64,
-    kind: OrderType,
-}
-struct PlacementWrite<'a> {
-    path: &'static str,
-    orders: Vec<&'a OrderPayload>,
-}
-
-// Pure gate over final wire fields and captured rules; no transport or venue state.
-fn validate_write(write: &PlacementWrite<'_>) -> Result<(), VenueError> {
-    let reject = |message| not_sent(message).kind(ErrorKind::InvalidInput);
-    let count_limit = match write.path {
-        "/api/v5/trade/batch-orders" => 20,
-        "/api/v5/trade/order-algo" => 1,
-        _ => return Err(reject("Unknown OKX placement route".into())),
-    };
-    if write.orders.is_empty() || write.orders.len() > count_limit {
-        return Err(reject(
-            "OKX placement exceeds the native batch count".into(),
-        ));
-    }
-    for payload in &write.orders {
-        if (write.path == "/api/v5/trade/batch-orders")
-            != matches!(payload.rules.kind, OrderType::Limit | OrderType::Market)
-        {
-            return Err(reject(
-                "OKX order kind does not match its placement route".into(),
-            ));
-        }
-        validate_order_payload(payload).map_err(reject)?;
-    }
-    Ok(())
-}
-
-fn validate_native_write(write: &NativeWrite) -> Result<(), VenueError> {
-    let reject = |message| not_sent(message).kind(ErrorKind::InvalidInput);
-    let body = match &write.payload {
-        NativePayload::Applied(planned) => {
-            if applied_write(write.path, &write.body)
-                .map_err(reject)?
-                .as_ref()
-                != Some(planned)
-            {
-                return Err(reject(
-                    "OKX applied targets differ from its native payload".into(),
-                ));
-            }
-            return Ok(());
-        }
-        NativePayload::Orders(orders) => {
-            validate_write(&PlacementWrite {
-                path: write.path,
-                orders: orders.iter().collect(),
-            })?;
-            if write.path == "/api/v5/trade/batch-orders" {
-                serde_json::to_string(orders)
-            } else {
-                let Some(order) = orders.first() else {
-                    return Err(reject("OKX placement has no native row".into()));
-                };
-                serde_json::to_string(order)
-            }
-        }
-        NativePayload::Trailing { order, rules } => {
-            if write.path != "/api/v5/trade/order-algo" || !order.valid() {
-                return Err(reject("Invalid OKX trailing replacement payload".into()));
-            }
-            let size = wire_multiple(&order.sz, rules.step).map_err(reject)?;
-            if !rules.min.is_finite()
-                || rules.min <= 0.
-                || !rules.max.is_finite()
-                || rules.max < rules.min
-                || size < rules.min
-                || size > rules.max
-            {
-                return Err(reject("OKX trailing size is outside native limits".into()));
-            }
-            for price in [&order.active_px, &order.callback_spread] {
-                if !price.is_empty() {
-                    wire_multiple(price, rules.tick).map_err(reject)?;
-                }
-            }
-            serde_json::to_string(order)
-        }
-    }
-    .map_err(|error| reject(error.to_string()))?;
-    if body != write.body {
-        return Err(reject(
-            "OKX placement bytes differ from the validated native payload".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_order_payload(payload: &OrderPayload) -> Result<(), String> {
-    let rules = payload.rules;
-    let required_price = match rules.kind {
-        OrderType::Limit => payload.px.as_deref(),
-        OrderType::Conditional => payload.trigger_px.as_deref(),
-        OrderType::StopLoss => payload.sl_trigger_px.as_deref(),
-        OrderType::TakeProfit => payload.tp_trigger_px.as_deref(),
-        OrderType::TrailingStopLoss => payload.callback_spread.as_deref(),
-        OrderType::Market => None,
-    };
-    if (rules.kind != OrderType::Market && required_price.is_none())
-        || (rules.kind == OrderType::Conditional && payload.order_px.is_none())
-    {
-        return Err("OKX native order is missing its execution or trigger price".into());
-    }
-    if let Some(size) = &payload.sz {
-        let size = wire_multiple(size, rules.step)?;
-        if !rules.min.is_finite()
-            || rules.min <= 0.
-            || !rules.max.is_finite()
-            || rules.max < rules.min
-            || size < rules.min
-            || size > rules.max
-        {
-            return Err("OKX native order size is outside minSz or its order-type maximum".into());
-        }
-    } else if payload.close_fraction != Some("1")
-        || !matches!(rules.kind, OrderType::StopLoss | OrderType::TakeProfit)
-    {
-        return Err("OKX native order requires a size".into());
-    }
-    for price in [
-        payload.px.as_deref(),
-        payload.trigger_px.as_deref(),
-        payload.sl_trigger_px.as_deref(),
-        payload.tp_trigger_px.as_deref(),
-        payload.callback_spread.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        wire_multiple(price, rules.tick)?;
-    }
-    if let Some(price) = &payload.order_px
-        && price != "-1"
-    {
-        wire_multiple(price, rules.tick)?;
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod write_validation_tests {
-    use super::*;
-
-    fn payload() -> OrderPayload {
-        let mut payload = empty_payload(OrderWireRules {
-            min: 4.,
-            max: 5.,
-            step: 1.,
-            tick: 0.1,
-            kind: OrderType::Limit,
-        });
-        payload.sz = Some("5".into());
-        payload.px = Some("38000".into());
-        payload
-    }
-
-    #[test]
-    fn applied_effects_keep_existing_targets_out_of_created_order_ids() {
-        for (path, body, expected) in [
-            (
-                "/api/v5/trade/cancel-batch-orders",
-                r#"[{"ordId":"91"}]"#,
-                ElementResult::Applied {
-                    effect: AppliedEffect::Cancel,
-                    target_order_id: Some("91".into()),
-                    position_key: None,
-                },
-            ),
-            (
-                "/api/v5/trade/amend-algos",
-                r#"{"algoId":"92","newSz":"5"}"#,
-                ElementResult::Applied {
-                    effect: AppliedEffect::Amend,
-                    target_order_id: Some("92".into()),
-                    position_key: None,
-                },
-            ),
-            (
-                "/api/v5/account/set-leverage",
-                r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","lever":"5"}"#,
-                ElementResult::Applied {
-                    effect: AppliedEffect::Settings,
-                    target_order_id: None,
-                    position_key: Some("BTC-USDT-SWAP:cross".into()),
-                },
-            ),
-            (
-                "/api/v5/account/set-position-mode",
-                r#"{"posMode":"net_mode"}"#,
-                ElementResult::Applied {
-                    effect: AppliedEffect::Settings,
-                    target_order_id: None,
-                    position_key: Some("account:positionMode".into()),
-                },
-            ),
-        ] {
-            let body: serde_json::Value = serde_json::from_str(body).expect("native fixture");
-            let step = step(path, &body, 1, false).expect("native step");
-            let applied = step.applied.clone().expect("known existing target");
-            let mut job = job(vec![step], Finish::Empty);
-            job.validate_writes().expect("valid write plan");
-            let writes = job.writes.as_mut().expect("shared journal");
-            let (index, _) = writes.next_write().expect("native dispatch");
-            writes
-                .settle(index, vec![applied.result(0).expect("native acceptance")])
-                .expect("settled");
-            assert_eq!(writes.outcomes()[0].result, expected);
-            let failure =
-                writes.failure(VenueError::new("later failure").outcome(Outcome::Rejected));
-            assert_eq!(failure.outcome, Some(Outcome::Unknown));
-            assert!(
-                failure.partial.is_none(),
-                "applied targets are not created order IDs"
-            );
-        }
-    }
-
-    #[test]
-    fn pure_write_gate_checks_every_row_and_native_batch_count() {
-        for (path, counts) in [
-            (
-                "/api/v5/trade/batch-orders",
-                [(0, false), (1, true), (20, true), (21, false)],
-            ),
-            (
-                "/api/v5/trade/order-algo",
-                [(0, false), (1, true), (2, false), (20, false)],
-            ),
-        ] {
-            for (count, valid) in counts {
-                let payloads: Vec<_> = (0..count)
-                    .map(|_| {
-                        let mut payload = payload();
-                        if path.ends_with("/order-algo") {
-                            payload.rules.kind = OrderType::StopLoss;
-                            payload.ord_type = "conditional";
-                            payload.sl_trigger_px = Some("36000".into());
-                            payload.sl_ord_px = Some("-1");
-                            payload.px = None;
-                            payload.reduce_only = Some(true);
-                        }
-                        payload
-                    })
-                    .collect();
-                let write = PlacementWrite {
-                    path,
-                    orders: payloads.iter().collect(),
-                };
-                let result = validate_write(&write);
-                assert_eq!(result.is_ok(), valid);
-                if let Err(error) = result {
-                    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
-                    assert_eq!(error.outcome, Some(Outcome::NotSent));
-                }
-            }
-        }
-        let mut payloads: Vec<_> = (0..20).map(|_| payload()).collect();
-        let Some(last) = payloads.last_mut() else {
-            panic!("nonempty fixture")
-        };
-        last.sz = Some("1".into());
-        let error = validate_write(&PlacementWrite {
-            path: "/api/v5/trade/batch-orders",
-            orders: payloads.iter().collect(),
-        })
-        .expect_err("last invalid row must refuse the full write");
-        assert_eq!(error.outcome, Some(Outcome::NotSent));
-    }
-
-    #[test]
-    fn pure_write_gate_checks_final_price_ticks_and_rejects_invalid_rule_bounds() {
-        for (price, min, max) in [
-            ("38000.04", 4., 5.),
-            ("0", 4., 5.),
-            ("38000", f64::NAN, 5.),
-            ("38000", 4., f64::INFINITY),
-        ] {
-            let mut payload = payload();
-            payload.px = Some(price.into());
-            payload.rules.min = min;
-            payload.rules.max = max;
-            let error = validate_write(&PlacementWrite {
-                path: "/api/v5/trade/batch-orders",
-                orders: vec![&payload],
-            })
-            .expect_err("wire values and native bounds must be valid");
-            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
-            assert_eq!(error.outcome, Some(Outcome::NotSent));
-        }
-        let mut payload = payload();
-        payload.px = None;
-        let error = validate_write(&PlacementWrite {
-            path: "/api/v5/trade/batch-orders",
-            orders: vec![&payload],
-        })
-        .expect_err("missing limit price must refuse");
-        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        self.iter()
+            .flat_map(PlacementIdentities::identities)
+            .collect()
     }
 }
 

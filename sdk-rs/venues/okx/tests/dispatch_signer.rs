@@ -138,11 +138,6 @@ fn first_write_provider_refusal_is_not_sent_and_completes_once() {
         .collect();
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].outcome, Some(Outcome::NotSent));
-    let elements = failures[0].elements.as_ref().expect("shared journal");
-    assert_eq!(elements.len(), 1);
-    assert!(matches!(&elements[0].result,
-        safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) }
-            if error.outcome == Some(Outcome::NotSent)));
     engine.handle(
         7.,
         Event::Signed {
@@ -190,14 +185,6 @@ fn later_bracket_sign_failure_preserves_the_accepted_entry_effect() {
         failure.outcome, None,
         "existing partial-effect contract, never wholly NotSent"
     );
-    let elements = failure.elements.as_ref().expect("complete shared journal");
-    assert_eq!(elements.len(), 2);
-    assert!(matches!(&elements[0].result,
-        safe_cex_engine::write_plan::ElementResult::Placed { order_ids }
-            if order_ids == &["accepted-entry"]));
-    assert!(matches!(&elements[1].result,
-        safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) }
-            if error.outcome == Some(Outcome::NotSent)));
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
 

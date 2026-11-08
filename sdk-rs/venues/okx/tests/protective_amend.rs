@@ -287,70 +287,83 @@ fn native_trigger_protection_uses_trigger_fields_instead_of_conditional_fields()
     assert!(b.get("newSlTriggerPx").is_none());
 }
 
-fn failed_replacement(out: &[Action]) -> &safe_cex_engine::VenueError {
-    assert!(
-        out.iter()
-            .all(|a| !matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)),
-        "no resend, cancel, suffix or automatic restoration"
-    );
-    let error = out
-        .iter()
-        .find_map(|a| match a {
-            Action::Notice(Notice::CommandFailed { command: 20, error }) => Some(error),
-            _ => None,
-        })
-        .expect("replacement failure is terminal");
-    let elements = error.elements.as_ref().expect("shared element journal");
-    assert_eq!(
-        elements.len(),
-        2,
-        "cancel and replacement must both be journaled"
-    );
-    assert_eq!(
-        elements[0].result,
-        safe_cex_engine::write_plan::ElementResult::Applied {
-            effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
-            target_order_id: Some("91".into()),
-            position_key: None,
-        }
-    );
-    assert!(
-        matches!(&elements[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
-    );
-    assert_eq!(
-        error.protection,
-        Some(safe_cex_engine::error::Protection::Unprotected)
-    );
-    error
-}
-
 #[test]
-fn trailing_replacement_refusal_reports_failure_without_restoring() {
+fn trailing_replacement_refusal_restores_exact_native_parameters_once() {
     let mut e = native_engine(TRAILING, "move_order_stop");
-    let replace = replacement(&mut e, 6.);
-    let payload = body(&replace);
-    assert_eq!(payload["sz"], "5");
-    assert_ne!(payload["algoClOrdId"], "OldTrail91");
+    assert!(e.store().order("91_tsl").is_some());
+    amend(&mut e, "91_tsl", Some(39940.), Some(5.));
+    let out = prepared(&mut e, 5.);
+    let cancel = post(&out, "/cancel-algos");
     reply(
         &mut e,
-        &replace,
+        &cancel,
+        &envelope(r#"{"algoId":"91","sCode":"0"}"#),
+        6.,
+    );
+    let replacement = post(&prepared(&mut e, 6.), "/order-algo");
+    reply(
+        &mut e,
+        &replacement,
         r#"{"code":"1","data":[{"sCode":"51280","sMsg":"replacement refused"}]}"#,
         7.,
     );
-    let out = prepared(&mut e, 7.);
+    let restore_out = prepared(&mut e, 7.);
+    let restore = post(&restore_out, "/order-algo");
+    let b = body(&restore);
+    assert_eq!(b["sz"], "4");
+    assert_eq!(b["callbackSpread"], "50");
+    assert_eq!(b["activePx"], "41000");
+    let restored_client_id = b["algoClOrdId"].as_str().unwrap();
+    assert_ne!(restored_client_id, "OldTrail91");
+    assert_ne!(b["algoClOrdId"], body(&replacement)["algoClOrdId"]);
+    assert_eq!(restored_client_id.len(), 32);
     assert!(
-        failed_replacement(&out)
-            .legacy_text()
-            .contains("unprotected")
+        restored_client_id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric())
     );
+    let mut exact = b.clone();
+    exact.as_object_mut().unwrap().remove("algoClOrdId");
     assert_eq!(
-        e.store().order("91_tsl").expect("old stop").status,
-        OrderStatus::Canceled
+        exact,
+        serde_json::json!({
+            "instId":"BTC-USDT-SWAP", "tdMode":"cross", "side":"sell",
+            "posSide":"net", "ordType":"move_order_stop", "sz":"4",
+            "reduceOnly":true, "activePx":"41000", "callbackSpread":"50"
+        }),
+        "every original placement parameter except client identity is exact"
     );
     assert!(
-        prepared(&mut e, 8.)
-            .iter()
-            .all(|a| !matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+        restore_out.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandProgress { command: 20, receipts })
+            if receipts.iter().any(|r| r.identity == restored_client_id)
+        )),
+        "fresh restore identity is published before dispatch"
+    );
+    assert_eq!(b["posSide"], "net");
+    reply(
+        &mut e,
+        &restore,
+        &envelope(r#"{"algoId":"92","sCode":"0"}"#),
+        8.,
+    );
+    let out = prepared(&mut e, 8.);
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.protection == Some(safe_cex_engine::error::Protection::Restored))));
+    let restored = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => error.partial.as_ref(),
+            _ => None,
+        })
+        .expect("restored native order identity accompanies the failed edit");
+    assert_eq!(
+        restored.order_ids,
+        ["91", "92"],
+        "canceled and newly restored native identities are both recorded"
+    );
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
 }
 
@@ -465,59 +478,64 @@ fn released_cancel_late_ack_still_places_and_does_not_recheck_the_expired_quote(
 }
 
 #[test]
-fn duplicate_replacement_refusal_cannot_trigger_restoration_or_second_terminal() {
+fn refused_restore_is_typed_unprotected_and_never_attempted_twice() {
     let mut e = native_engine(TRAILING, "move_order_stop");
     let replace = replacement(&mut e, 6.);
     let refusal = r#"{"code":"1","data":[{"sCode":"51280","sMsg":"trigger refused"}]}"#;
     reply(&mut e, &replace, refusal, 7.);
-    let out = prepared(&mut e, 7.);
-    failed_replacement(&out);
-    reply(&mut e, &replace, refusal, 8.);
-    assert!(prepared(&mut e, 8.).iter().all(
-        |a| !matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)
-            && !matches!(a, Action::Notice(Notice::CommandFailed { command: 20, .. }))
-    ));
-}
-
-#[test]
-fn unknown_replacement_never_sends_another_stop_or_claims_protection() {
-    let mut e = native_engine(TRAILING, "move_order_stop");
-    let replace = replacement(&mut e, 6.);
-    reply(
-        &mut e,
-        &replace,
-        r#"{"code":"50004","msg":"unknown outcome"}"#,
-        7.,
+    let restore = post(&prepared(&mut e, 7.), "/order-algo");
+    reply(&mut e, &restore, refusal, 8.);
+    let out = prepared(&mut e, 8.);
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.protection == Some(safe_cex_engine::error::Protection::Unprotected) && error.legacy_text().contains("unprotected"))));
+    assert_eq!(
+        e.store().order("91_tsl").unwrap().status,
+        OrderStatus::Canceled
     );
-    let out = prepared(&mut e, 7.);
     assert!(
-        out.iter()
-            .all(|a| !matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
-    let error = out
-        .iter()
-        .find_map(|a| match a {
-            Action::Notice(Notice::CommandFailed { command: 20, error }) => Some(error),
-            _ => None,
-        })
-        .expect("unknown replacement terminal");
-    assert!(error.protection.is_none());
-    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    let elements = error.elements.as_ref().expect("shared journal");
-    assert_eq!(elements.len(), 2);
-    assert!(matches!(&elements[0].result,
-        safe_cex_engine::write_plan::ElementResult::Applied {
-            effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
-            target_order_id: Some(target), ..
-        } if target == "91"));
-    assert!(matches!(
-        elements[1].result,
-        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
-    ));
+    reply(&mut e, &restore, refusal, 9.);
+    assert!(
+        !prepared(&mut e, 9.)
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+    );
 }
 
 #[test]
-fn amount_only_trailing_edit_preserves_ratio_and_activation_without_restoring() {
+fn unknown_replacement_or_restore_never_sends_another_stop_or_claims_protection() {
+    for during_restore in [false, true] {
+        let mut e = native_engine(TRAILING, "move_order_stop");
+        let replace = replacement(&mut e, 6.);
+        let uncertain = if during_restore {
+            reply(
+                &mut e,
+                &replace,
+                r#"{"code":"1","data":[{"sCode":"51280","sMsg":"trigger refused"}]}"#,
+                7.,
+            );
+            post(&prepared(&mut e, 7.), "/order-algo")
+        } else {
+            replace
+        };
+        reply(
+            &mut e,
+            &uncertain,
+            r#"{"code":"50004","msg":"unknown outcome"}"#,
+            8.,
+        );
+        let out = prepared(&mut e, 8.);
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.protection.is_none() && error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+        );
+    }
+}
+
+#[test]
+fn amount_only_trailing_edit_preserves_ratio_and_activation_and_restores_original_size() {
     let row = TRAILING.replace(
         "\"callbackSpread\":\"50\",\"callbackRatio\":\"\"",
         "\"callbackSpread\":\"\",\"callbackRatio\":\"0.005\"",
@@ -542,12 +560,14 @@ fn amount_only_trailing_edit_preserves_ratio_and_activation_without_restoring() 
         r#"{"code":"1","data":[{"sCode":"51280","sMsg":"trigger refused"}]}"#,
         7.,
     );
-    let out = prepared(&mut e, 7.);
-    failed_replacement(&out);
+    let restore = body(&post(&prepared(&mut e, 7.), "/order-algo"));
+    assert_eq!(restore["callbackRatio"], "0.005");
+    assert_eq!(restore["activePx"], "41000");
+    assert_eq!(restore["sz"], "4");
 }
 
 #[test]
-fn refused_ratio_price_edit_does_not_restore_the_original_stop() {
+fn refused_ratio_price_edit_restores_the_original_callback_ratio_exactly() {
     let row = TRAILING.replace(
         "\"callbackSpread\":\"50\",\"callbackRatio\":\"\"",
         "\"callbackSpread\":\"\",\"callbackRatio\":\"0.005\"",
@@ -574,8 +594,17 @@ fn refused_ratio_price_edit_does_not_restore_the_original_stop() {
         r#"{"code":"1","data":[{"sCode":"51280","sMsg":"replacement refused"}]}"#,
         7.,
     );
-    let out = prepared(&mut e, 7.);
-    failed_replacement(&out);
+    let mut restore = body(&post(&prepared(&mut e, 7.), "/order-algo"));
+    restore.as_object_mut().unwrap().remove("algoClOrdId");
+    assert_eq!(
+        restore,
+        serde_json::json!({
+            "instId":"BTC-USDT-SWAP", "tdMode":"cross", "side":"sell",
+            "posSide":"net", "ordType":"move_order_stop", "sz":"4",
+            "reduceOnly":true, "activePx":"41000", "callbackRatio":"0.005"
+        }),
+        "the restore puts back the original ratio, never the edited one"
+    );
 }
 
 #[test]
@@ -619,7 +648,7 @@ fn dependent_cancel_refusal_never_replaces_or_restores() {
 }
 
 #[test]
-fn concurrent_edit_cancel_and_cancel_all_cannot_overlap_replacement_custody() {
+fn concurrent_edit_cancel_and_cancel_all_cannot_overlap_restore_custody() {
     for second in [
         Command::AmendOrder {
             command: 21,
@@ -654,8 +683,14 @@ fn concurrent_edit_cancel_and_cancel_all_cannot_overlap_replacement_custody() {
             r#"{"code":"1","data":[{"sCode":"51280","sMsg":"trigger refused"}]}"#,
             7.,
         );
-        let out = prepared(&mut e, 7.);
-        failed_replacement(&out);
+        let restore = post(&prepared(&mut e, 7.), "/order-algo");
+        reply(
+            &mut e,
+            &restore,
+            &envelope(r#"{"algoId":"92","sCode":"0"}"#),
+            8.,
+        );
+        let _ = prepared(&mut e, 8.);
         e.store_mut()
             .upsert_order(stored("92_tsl", OrderType::TrailingStopLoss));
         e.handle(
@@ -707,7 +742,7 @@ fn source_read(e: &mut Engine<Okx>) -> Action {
 }
 
 #[test]
-fn frame_fed_writer_reads_native_trailing_parameters_and_never_rolls_back() {
+fn frame_fed_writer_reads_native_trailing_parameters_before_cancel_and_can_restore() {
     let mut row = stored("91_tsl", OrderType::TrailingStopLoss);
     row.amount = 0.;
     row.remaining = 0.;
@@ -729,8 +764,12 @@ fn frame_fed_writer_reads_native_trailing_parameters_and_never_rolls_back() {
         r#"{"code":"1","data":[{"sCode":"51280","sMsg":"replacement refused"}]}"#,
         8.,
     );
-    let out = prepared(&mut e, 8.);
-    failed_replacement(&out);
+    let restore = body(&post(&prepared(&mut e, 8.), "/order-algo"));
+    assert_eq!(restore["sz"], "4");
+    assert_eq!(restore["callbackSpread"], "50");
+    assert_eq!(restore["activePx"], "41000");
+    assert_ne!(restore["algoClOrdId"], "OldTrail91");
+    assert_ne!(restore["algoClOrdId"], body(&replace)["algoClOrdId"]);
 }
 
 #[test]

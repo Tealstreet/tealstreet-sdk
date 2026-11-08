@@ -254,12 +254,7 @@ fn ack(
     let Action::Http(request) = a else {
         panic!("HTTP action")
     };
-    let response = if request.url.contains("/amend-") {
-        let mut row: serde_json::Value = serde_json::from_str(body(a)).expect("amend payload");
-        row["sCode"] = "0".into();
-        row["sMsg"] = "".into();
-        serde_json::json!({ "code": "0", "data": [row] }).to_string()
-    } else if request.url.contains("/cancel-") {
+    let response = if request.url.contains("/cancel-") {
         let mut rows: Vec<serde_json::Value> = serde_json::from_str(body(a)).unwrap();
         for row in &mut rows {
             row["sCode"] = "0".into();
@@ -681,7 +676,7 @@ fn code_51400_is_not_success_for_a_placement_or_amendment() {
 }
 
 #[test]
-fn standalone_cancel_rejection_reports_applied_prefix_and_stops_remaining_batches() {
+fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
     use safe_cex_engine::model::*;
     let mut e = trading_engine();
     let mut ids = Vec::new();
@@ -708,45 +703,19 @@ fn standalone_cancel_rejection_reports_applied_prefix_and_stops_remaining_batche
     );
     reply(&mut e, http(&out), &mixed, 6.0);
     let out = prepared(&mut e, 6.0);
+    assert!(out.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandError { command:2, message }) if message.contains("51000"))
+    ));
+    let a = http(&out);
+    assert!(matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders")));
+    assert!(body(a).contains("\"ordId\":\"20\""));
+    let out = ack(&mut e, a, false);
+    let a = http(&out);
+    assert!(matches!(a, Action::Http(r) if r.url.ends_with("/cancel-algos")));
+    let out = ack(&mut e, a, true);
     assert!(
         out.iter()
-            .all(|a| !matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
-    );
-    let error = out
-        .iter()
-        .find_map(|a| match a {
-            Action::Notice(Notice::CommandFailed { command: 2, error }) => Some(error),
-            _ => None,
-        })
-        .expect("partial cancel terminal");
-    let elements = error.elements.as_ref().expect("complete shared journal");
-    assert_eq!(elements.len(), 22);
-    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
-    for (i, element) in elements.iter().enumerate() {
-        assert_eq!(element.element.index, i);
-        if i < 19 {
-            assert_eq!(
-                element.result,
-                ElementResult::Applied {
-                    effect: AppliedEffect::Cancel,
-                    target_order_id: Some(i.to_string()),
-                    position_key: None,
-                }
-            );
-        } else if i == 19 {
-            assert!(
-                matches!(&element.result, ElementResult::NotSent { error: Some(error) }
-                if error.outcome == Some(safe_cex_engine::Outcome::Rejected)
-                    && error.venue_code.as_deref() == Some("51000"))
-            );
-        } else {
-            assert_eq!(element.result, ElementResult::NotSent { error: None });
-        }
-    }
-    assert!(
-        prepared(&mut e, 7.)
-            .iter()
-            .all(|a| !matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
     );
 }
 
@@ -2901,37 +2870,4 @@ fn foreign_cancel_row_echoes_are_unknown_for_every_code() {
             );
         }
     }
-}
-
-#[test]
-fn native_amend_ack_without_a_new_id_uses_the_existing_target() {
-    let mut e = trading_engine();
-    e.store_mut()
-        .upsert_order(stored("91", safe_cex_engine::model::OrderType::Limit));
-    e.handle(
-        5.,
-        Event::Command(Command::AmendOrder {
-            command: 2,
-            id: "91".into(),
-            price: Some(39000.),
-            amount: None,
-        }),
-    );
-    let out = prepared(&mut e, 5.);
-    reply(
-        &mut e,
-        http(&out),
-        r#"{"code":"0","data":[{"sCode":"0"}]}"#,
-        6.,
-    );
-    let out = prepared(&mut e, 6.);
-    let results = terminals(&out, 2);
-    let [Ok(result)] = results.as_slice() else {
-        panic!("accepted native edit")
-    };
-    assert_eq!(result, r#"["91"]"#);
-    assert!(
-        out.iter()
-            .all(|a| !matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
-    );
 }

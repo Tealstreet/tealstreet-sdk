@@ -105,51 +105,6 @@ fn not_sent(engine: &mut Engine<Okx>, rows: Vec<Value>) {
     assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
 }
-#[test]
-fn split_tail_below_min_sz_zero_writes() {
-    not_sent(&mut ready(instrument()), vec![limit(11.)]);
-}
-#[test]
-fn bracketed_split_tail_below_min_sz_zero_writes() {
-    let mut row = limit(11.);
-    row["stopLoss"] = json!(36000);
-    row["takeProfit"] = json!(42000);
-    not_sent(&mut ready(instrument()), vec![row]);
-}
-#[test]
-fn invalid_last_row_in_second_batch_zero_writes() {
-    let mut rows = vec![limit(5.); 20];
-    rows.push(limit(1.));
-    not_sent(&mut ready(instrument()), rows);
-}
-#[test]
-fn oversized_standalone_algo_zero_writes() {
-    for kind in [
-        "stop_market",
-        "take_profit_market",
-        "trailing_stop_market",
-        "conditional",
-    ] {
-        let row = json!({"symbol":"BTCUSDT","type":kind,"side":"sell","amount":6,
-            "price":36000,"triggerPrice":37000});
-        not_sent(&mut ready(instrument()), vec![limit(5.), row]);
-    }
-}
-#[test]
-fn native_minimum_is_in_contracts_even_when_public_minimum_is_scaled() {
-    let mut product = instrument();
-    product["ctVal"] = json!("0.01");
-    not_sent(&mut ready(product), vec![limit(5.), limit(1.)]);
-}
-#[test]
-fn protective_cap_cannot_leave_subminimum_parent_lots() {
-    let mut product = instrument();
-    product["maxStopSz"] = json!("3");
-    let mut row = limit(5.);
-    row["stopLoss"] = json!(36000);
-    row["takeProfit"] = json!(42000);
-    not_sent(&mut ready(product), vec![row]);
-}
 fn finish(engine: &mut Engine<Okx>, rows: Vec<Value>) -> (Vec<(String, Value)>, usize) {
     let mut actions = submit(engine, rows);
     let mut seen = vec![];
@@ -261,26 +216,7 @@ fn full_position_algo_zero_control() {
 }
 
 #[test]
-fn rounded_wire_quantity_is_checked_against_both_native_bounds() {
-    let mut below = instrument();
-    below["minSz"] = json!("4.04");
-    below["lotSz"] = json!("0.1");
-    not_sent(&mut ready(below), vec![limit(5.), limit(4.04)]);
-
-    let mut above = instrument();
-    above["maxStopSz"] = json!("5.45");
-    above["lotSz"] = json!("0.1");
-    not_sent(
-        &mut ready(above),
-        vec![
-            limit(5.),
-            json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":5.45,"price":36000}),
-        ],
-    );
-}
-
-#[test]
-fn standalone_algos_keep_their_order_type_cap_above_the_public_cap() {
+fn legacy_standalone_algos_do_not_add_a_native_cap_gate() {
     for kind in [
         "stop_market",
         "take_profit_market",
@@ -301,19 +237,6 @@ fn standalone_algos_keep_their_order_type_cap_above_the_public_cap() {
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].1["sz"], amount.to_string());
     }
-}
-
-#[test]
-fn missing_specific_cap_keeps_the_conservative_native_bound() {
-    let mut product = instrument();
-    product["maxStopSz"] = json!("");
-    not_sent(
-        &mut ready(product),
-        vec![
-            limit(5.),
-            json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":6,"price":36000}),
-        ],
-    );
 }
 
 #[test]
@@ -545,4 +468,99 @@ fn native_batch_rejection_keeps_successful_rows_and_only_stops_unsent_writes() {
 #[test]
 fn ambiguous_native_batch_row_keeps_other_proven_rows() {
     mixed_batch_failure("50004", false);
+}
+
+#[test]
+fn ts_zero_adjusted_last_ordinary_row_refuses_before_any_write() {
+    not_sent(&mut ready(instrument()), vec![limit(5.), limit(0.)]);
+}
+
+#[test]
+fn ts_missing_conditional_trigger_refuses_before_any_write() {
+    not_sent(
+        &mut ready(instrument()),
+        vec![
+            limit(5.),
+            json!({"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":5,"price":38000}),
+        ],
+    );
+}
+
+#[test]
+fn ts_invalid_ordinary_market_rules_refuse_before_any_write() {
+    let mut engine = ready(instrument());
+    engine
+        .store_mut()
+        .update_markets(|market| market.limits.amount.max = f64::INFINITY);
+    not_sent(&mut engine, vec![limit(5.)]);
+}
+
+fn first_native_rows(engine: &mut Engine<Okx>, rows: Vec<Value>) -> Value {
+    let output = submit(engine, rows);
+    let mut transport = ScriptedTransport::default();
+    let requests = transport.record(&output);
+    let [request] = requests.as_slice() else {
+        panic!("one native request")
+    };
+    assert!(
+        terminals(&output, 17).is_empty(),
+        "legacy valid formatter input reaches transport"
+    );
+    serde_json::from_str(request.body.as_deref().expect("native body")).expect("native JSON")
+}
+
+#[test]
+fn legacy_split_tail_below_native_minimum_is_not_newly_refused() {
+    let body = first_native_rows(&mut ready(instrument()), vec![limit(11.)]);
+    assert_eq!(
+        body.as_array()
+            .expect("native batch")
+            .iter()
+            .map(|row| &row["sz"])
+            .collect::<Vec<_>>(),
+        vec![&json!("5"), &json!("5"), &json!("1")]
+    );
+}
+
+#[test]
+fn legacy_later_native_batch_row_is_not_prevalidated_against_minimum() {
+    let mut engine = ready(instrument());
+    let mut rows = vec![limit(5.); 20];
+    rows.push(limit(1.));
+    let output = submit(&mut engine, rows);
+    let mut transport = ScriptedTransport::default();
+    let first = transport.record(&output);
+    let [request] = first.as_slice() else {
+        panic!("first batch")
+    };
+    let acks: Vec<_> = (0..20)
+        .map(|i| json!({"ordId":format!("native{i}"),"sCode":"0"}))
+        .collect();
+    reply(
+        &mut engine,
+        &Action::Http(request.clone()),
+        &json!({"code":"0","data":acks}).to_string(),
+        6.,
+    );
+    let output = prepared(&mut engine, 6.);
+    let second = transport.record(&output);
+    let [request] = second.as_slice() else {
+        panic!("later native batch")
+    };
+    let body: Value = serde_json::from_str(request.body.as_deref().expect("body")).expect("JSON");
+    assert_eq!(body[0]["sz"], "1");
+    assert_eq!(transport.write_count(), 2);
+}
+
+#[test]
+fn legacy_protective_child_native_bounds_are_not_a_new_gate() {
+    let mut product = instrument();
+    product["maxStopSz"] = json!("3");
+    let mut row = limit(10.);
+    row["stopLoss"] = json!(36000);
+    row["takeProfit"] = json!(42000);
+    let (seen, requests) = finish(&mut ready(product), vec![row]);
+    assert!(requests > 0);
+    assert!(seen.iter().any(|(_, row)| row["sz"] == "1"));
+    assert!(seen.iter().any(|(_, row)| row["slTriggerPx"] == "36000"));
 }

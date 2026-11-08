@@ -1,41 +1,36 @@
-# OKX write planning
+# OKX legacy execution parity
 
-Placement builds and validates every final ordinary, trigger, trailing and TP/SL
-payload before admitting the first write. This includes every split lot, every
-row across the 20-order batch boundary and every per-lot protective child. A
-known-invalid element refuses the whole command as `InvalidInput`/`NotSent`
-without a transport request; it never leaves a valid prefix to execute.
+The retained TypeScript adapter is the authority for trading rules. This change
+adds outcome reporting without introducing whole-plan minimum, native cap or
+wire-grid validation. Existing formatters and native execution owners decide
+which writes are sent, retried, continued or compensated.
 
-The pure `validate_write` gate takes each planned write and its captured native
-rules, returns a typed error, and checks both row values and native batch count.
+| Path | Legacy TS behavior | Rust scope |
+| --- | --- | --- |
+| Positive split tail below native minSz | `okx.exchange.ts:2266-2284` emits every positive remainder without a minimum-lot check. | Preserve the tail; no new minimum gate. |
+| Row after the 20-row batch boundary | `okx.exchange.ts:2290-2315` sends batches serially. A later native refusal can follow an accepted batch. | Preserve native batch dispatch and report known outcomes. |
+| Separate TP/SL children | `okx.exchange.ts:1758-1763,2181-2200,2318-2343` formats protection without native min/cap checks. | Remove the added child minimum/cap gate. |
+| Ordinary amount/max/precision | `okx.exchange.ts:1751-1755,2226-2242` formats all ordinary rows and refuses nonfinite/nonpositive values before writes. | Retain matching preflight checks. |
+| Opening conditional trigger/amount | `okx.exchange.ts:1759-1763,2162-2172` formats all algos and refuses a missing trigger or invalid amount before writes. | Retain matching preflight checks. |
 
-The validator checks the serialized quantity and prices against native lot/tick
-precision, `minSz` and the applicable limit, market, stop or trigger size cap.
-Native sizes stay in contracts, separate from the public market minimum scaled
-by contract value. Missing per-type caps retain the existing conservative
-instrument cap. These SWAP/FUTURES instruments declare a minimum contract size,
-not a separate minimum-notional filter. The field definitions are in the
-[OKX instruments API](https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments).
+Source paths above are under
+`packages/safe-cex/src/__tests__/reference/okx/`; the same methods were checked
+in the pre-move adapter at `4a3af89e6^`. The shared child derivation is
+`packages/safe-cex/src/exchanges/base.ts:1446-1478`.
 
-Rounding, caller IDs, reduce-only flags and valid batch/protection ordering are
-preserved. The planner refuses an invalid split tail rather than resizing lots.
-Explicit zero-size SL/TP still uses `closeFraction=1`; positive sizes cannot use
-that exemption, and trailing stops still require an explicit size. Ambiguous
-released writes retain the existing no-resend and reconciliation behavior.
+Known legacy issue: positive subminimum tails, later native rows and protective
+children can partially execute before native rejection. This PR records that
+behavior; it does not impose a new order-planning policy.
 
-Placement dispatch uses `safe_cex_engine::write_plan`: the complete set of owned
-native payloads and rule snapshots passes the pure gate before the first write.
-Each native batch row and separately sent protective child retains its client ID
-and ordered outcome. A runtime refusal stops the unissued suffix; an ambiguous
-reply or lost response stays unknown. Mixed batches retain their proven row
-successes. Terminal partial-ID errors include the shared element journal,
-including when the engine seals an HTTP server failure before venue decoding.
-Journaled writes do not resend on a signature refusal, and a refused trailing
-replacement reports lost protection without automatically restoring the old stop.
+`safe_cex_engine::write_plan` supplies optional indexed placement error facts.
+Its callback adds no native validity rules, and reporting failures cannot block
+execution. A proven signature rejection retains its existing authorized resend
+while the same logical row awaits its final outcome. Ambiguous released writes
+stay unknown under the existing engine lifecycle. Cancel and compensating flows
+keep their existing scheduling and native evidence; the optional placement
+journal is omitted for those flows rather than changing their behavior to fit
+its fail-stop dispatcher. Removed pre-existing put-back and resend code is
+restored. The legacy TS snapshot proves protective cancel/re-place, not a
+separate original-stop put-back algorithm.
 
-This adoption is stacked on engine PR #3348. Accepted cancels and native
-amendments use `Applied` with their existing native target ID. Settings use the
-instrument/margin key or the account position-mode key. These effects continue
-dispatch without inventing new order IDs; a later failure reports an applied
-prefix and preserves the untouched suffix. Native lifecycle custody stays with
-the engine.
+This PR remains stacked on #3348; re-merge master after that dependency lands.
