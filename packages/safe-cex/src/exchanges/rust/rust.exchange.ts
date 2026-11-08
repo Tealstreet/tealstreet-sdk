@@ -49,7 +49,7 @@ import type {
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
 import type { CallableMethodsInWorker, EngineSnapshot, ExchangeCapabilities, WorkerForwardedMethod } from '../base';
 import type { BaseWebSocket } from '../base.ws';
-import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
+import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { ChaseEnd } from './algoControlWatch';
 import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
@@ -1921,7 +1921,7 @@ export class RustEngineExchange extends BaseExchange {
             (result) =>
               // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
               method === 'updateOrder'
-                ? decodeWorkerOrderIds(result as WorkerOrderIds)
+                ? decodeWorkerOrderIds(result)
                 : rowsFromAccountFrame(method, result, args[0]),
             (error: unknown) => {
               // Never passed through `command` here, and the hosted server marks no failure as
