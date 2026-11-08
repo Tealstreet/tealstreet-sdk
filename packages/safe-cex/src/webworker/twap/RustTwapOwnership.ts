@@ -9,7 +9,7 @@ import { captureTwapOwner } from './TwapOwner';
 import { twapRestoreRefusal } from './twapRestoreRefusal';
 import { TwapStatus } from './TwapStatus';
 
-type Row = { options: TwapOptions; state: TwapState; ownerId?: string };
+type Row = { options: TwapOptions; state: TwapState; ownerId?: string; ownerGeneration?: number };
 type PendingRow = Row & { ownerSession: TwapOwner | null | undefined };
 type PersistedTwap = Row & { id: string };
 
@@ -91,7 +91,7 @@ export class RustTwapOwnership {
     }
     let refused = false;
     for (const value of data as Partial<PersistedTwap>[]) {
-      const { id, options, state, ownerId } = value ?? {};
+      const { id, options, state, ownerId, ownerGeneration } = value ?? {};
       if (!id || id in this.rows || this.pending.has(id) || this.locks.has(id)) continue;
       const symbol = options?.activeMarket?.symbol ?? id;
       const refusal = twapRestoreRefusal(options, state, Date.now());
@@ -109,6 +109,7 @@ export class RustTwapOwnership {
         state: state!,
         ownerSession,
         ...(ownerId !== undefined ? { ownerId } : {}),
+        ...(ownerGeneration !== undefined ? { ownerGeneration } : {}),
       };
       if (!this.ownerCurrent(row)) {
         this.cancelForOwnerChange(id, symbol);

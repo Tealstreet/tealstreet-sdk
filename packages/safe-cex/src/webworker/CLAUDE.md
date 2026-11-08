@@ -429,16 +429,21 @@ Multi-user worker hosts supply `TwapWorkerContext.getTwapOwner()` before creatin
 `ExchangeWorker`: `{ ownerId, generation }`, or `null` after revocation/logout.
 The generation must change for every owner/session transition, including A→B→A;
 it is a non-secret session counter, not an access token. Restore captures a copy
-before the engine-readiness queue, retains `ownerId` in pending/forwarded rows,
+before the engine-readiness queue, retains the original persisted `ownerId` and
+`ownerGeneration` in pending, published and forwarded rows,
 and rechecks identity and generation after the lock and in-flight lookup awaits,
 immediately before handing the row to the algos. Stale restores release their
 lock, are removed from persisted state and emit a `cancelled-for-owner-change` warning.
 Owned rows without a host owner check fail closed. A host with that API must
 also reject untagged rows: the current login never proves an old row's owner.
-Native `PersistedTwap` and `TwapBook::serialize_state` preserve an explicit
-top-level `ownerId`; they never infer it from the account or current session.
-Untagged single-user rows without the API keep their existing behavior. Session snapshots remain private
-to the pending restore and are never persisted or forwarded to the engine.
+Native `PersistedTwap` and `TwapBook::serialize_state` preserve both explicit
+top-level tags. Native restore requires a trusted bound owner matching both;
+missing, foreign or stale evidence stays rejected. The wrapper never fills in a
+missing generation from the current session or replaces an old generation.
+Without the host API, the wrapper still forwards untagged single-user rows
+unchanged; native ownership checks remain authoritative. Captured session
+snapshots remain private to the pending restore and are never persisted or
+forwarded to the engine.
 
 `twap/RustTwapOwnership.ts`, owned by `TwapHandler`, keeps these rules for the
 Rust TWAPs: it takes each running TWAP's Web Lock, holds a restored row until it

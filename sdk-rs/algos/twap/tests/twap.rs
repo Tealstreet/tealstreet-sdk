@@ -982,6 +982,80 @@ fn restore_drops_foreign_and_stale_rows_and_keeps_the_matching_generation() {
 }
 
 #[test]
+#[ignore = "requires Node and workspace Yarn dependencies; run with --include-ignored"]
+fn actual_worker_round_trip_preserves_native_restore_ownership() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    for generation in [Some(7), Some(6), Some(0), None] {
+        let (mut env, view) = (Env::new(), View::default());
+        let mut row = persisted("round-trip", "running", env.now + 15_000.);
+        if let Some(generation) = generation {
+            row["ownerGeneration"] = json!(generation);
+        } else {
+            row.as_object_mut().unwrap().remove("ownerGeneration");
+        }
+        let rows = json!([row]);
+        let mut control = owned_book();
+        control.handle("twap:state", &rows, &mut env, &view);
+        assert_eq!(control.ids().count(), usize::from(generation == Some(7)));
+
+        let mut worker = Command::new("node")
+            .args([
+                "--import",
+                "tsx",
+                "packages/safe-cex/src/__tests__/fixtures/twapWorkerRestore.ts",
+            ])
+            .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.."))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("worker contract test needs Node and the workspace's Yarn dependencies");
+        worker
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                json!({ "rows": rows, "now": env.now })
+                    .to_string()
+                    .as_bytes(),
+            )
+            .unwrap();
+        let output = worker.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "TypeScript wrapper failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let forwarded: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(forwarded.as_array().unwrap().len(), 1);
+        let mut actual = owned_book();
+        actual.handle("twap:state", &forwarded, &mut env, &view);
+        assert_eq!(
+            actual.serialize_state(),
+            control.serialize_state(),
+            "generation {generation:?}: the actual TS boundary must preserve native restore eligibility"
+        );
+        assert_eq!(forwarded[0]["ownerId"], rows[0]["ownerId"]);
+        assert_eq!(
+            forwarded[0].get("ownerGeneration"),
+            rows[0].get("ownerGeneration"),
+            "never replace missing/stale persisted generation evidence"
+        );
+        env.advance(15_001.);
+        assert_eq!(
+            market_amounts(&actual.wake(&mut env, &view)),
+            if generation == Some(7) {
+                vec![0.5]
+            } else {
+                vec![]
+            }
+        );
+    }
+}
+
+#[test]
 fn restored_owner_round_trip_adds_generation_to_the_worker_fixture() {
     let mut expected: Value = serde_json::from_str(include_str!(
         "../../../../packages/safe-cex/src/__tests__/fixtures/twap-owner-state.json"

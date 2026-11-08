@@ -16,3 +16,12 @@ all persisted restores. Hosts using those constructors must bind a trusted
 owner before enabling restore; a TypeScript precheck cannot replace the native
 ownership check. Existing rows without generation evidence are not adopted or
 automatically assigned the current owner.
+
+The native `actual_worker_round_trip_preserves_native_restore_ownership` test
+runs the real TypeScript restore wrapper before restoring its JSON into the
+native book. It requires Node and the workspace's Yarn dependencies. It checks
+that matching rows resume with the same schedule and sizing, while stale or
+missing generation evidence remains rejected through that boundary.
+It is opt-in so Rust-only jobs need no JavaScript dependencies. From `sdk-rs/`,
+run `cargo test --locked -p safe-cex-algo-twap -- --include-ignored` after installing
+the workspace dependencies with Yarn.
