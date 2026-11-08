@@ -442,47 +442,27 @@ fn an_empty_cancellation_list_remains_a_successful_noop() {
 }
 
 #[test]
-fn nonmultiple_splits_conserve_native_quantity_and_honor_maximum() {
-    for (amount, maximum, step, expected) in [
-        (250.0, 100.0, 0.001, vec![100.0, 100.0, 50.0]),
-        (250.0, 100.0, 1.0, vec![100.0, 100.0, 50.0]),
-        (1.0, 0.3, 0.1, vec![0.3, 0.3, 0.3, 0.1]),
-        (0.75, 0.5, 0.25, vec![0.5, 0.25]),
-    ] {
-        let (mut e, _) = startup();
-        let mut markets = e.store().markets().to_vec();
-        markets[0].precision.amount = step;
-        markets[0].limits.amount.max = maximum;
-        markets[0].limits.amount.min = step;
-        e.store_mut().set_markets(markets);
-        let mut opts = order("");
-        opts.amount = amount;
-        e.handle(
-            1.0,
-            Event::Command(Command::PlaceOrders {
-                command: 901,
-                orders: vec![opts],
-            }),
-        );
-        let writes = requests(&mut e);
-        assert_eq!(writes.len(), 1);
-        let body: serde_json::Value =
-            serde_json::from_str(writes[0].body.as_deref().unwrap()).unwrap();
-        let rows = body["orderList"].as_array().unwrap();
-        let quantities: Vec<f64> = rows
-            .iter()
-            .map(|row| row["qty"].as_str().unwrap().parse().unwrap())
-            .collect();
-        assert_eq!(quantities, expected);
-        assert!(quantities.iter().all(|qty| *qty <= maximum));
-        assert_eq!(
-            quantities
-                .iter()
-                .map(|qty| (qty / step).round() as u64)
-                .sum::<u64>(),
-            (amount / step).round() as u64
-        );
-    }
+fn nonmultiple_ts_equal_lots_pin_fractional_sum() {
+    assert_ts_allocated_writes(
+        250.0,
+        100.0,
+        0.001,
+        &["66.667", "66.667", "66.667", "50"],
+        250.001,
+    );
+}
+#[test]
+fn nonmultiple_ts_equal_lots_pin_integer_sum() {
+    assert_ts_allocated_writes(250.0, 100.0, 1.0, &["67", "67", "67", "50"], 251.0);
+}
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 0.9 of requested 1); kept for parity per Sam; decision pending
+fn nonmultiple_ts_equal_lots_pin_tenth_step_sum() {
+    assert_ts_allocated_writes(1.0, 0.3, 0.1, &["0.2", "0.2", "0.2", "0.2", "0.1"], 0.9);
+}
+#[test]
+fn nonmultiple_ts_equal_lots_pin_quarter_step_sum() {
+    assert_ts_allocated_writes(0.75, 0.5, 0.25, &["0.25", "0.25", "0.25"], 0.75);
 }
 
 #[test]
@@ -1797,4 +1777,130 @@ fn unknown_fallback_replacement_http503_keeps_engine_sealed_wording() {
         failures[0].message,
         "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders"
     );
+}
+
+// Legacy allocation: packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:2219,2292-2302.
+fn assert_ts_allocated_writes(amount: f64, maximum: f64, step: f64, expected: &[&str], sum: f64) {
+    let (mut e, _) = startup();
+    let mut markets = e.store().markets().to_vec();
+    markets[0].precision.amount = step;
+    markets[0].limits.amount.min = step;
+    markets[0].limits.amount.max = maximum;
+    e.store_mut().set_markets(markets);
+    let mut opts = order("");
+    opts.amount = amount;
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1200,
+            orders: vec![opts],
+        }),
+    );
+    let mut quantities = Vec::new();
+    let mut actions = after_failure_actions(&mut e);
+    for _ in 0..12 {
+        if actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1200, .. })))
+        {
+            assert_eq!(quantities, expected);
+            let actual_sum: f64 = quantities
+                .iter()
+                .map(|q: &String| q.parse::<f64>().unwrap())
+                .sum();
+            assert!(
+                (actual_sum - sum).abs() < 1e-12,
+                "wire sum {actual_sum} differs from TS sum {sum}"
+            );
+            assert!(after_failure_writes(&actions).is_empty());
+            return;
+        }
+        assert!(
+            !actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { command: 1200, .. })
+            )),
+            "allocation failed before completion: {actions:?}"
+        );
+        let writes = after_failure_writes(&actions);
+        if let Some(write) = writes.first() {
+            assert_eq!(writes.len(), 1, "only one chunk is released at a time");
+            let body: serde_json::Value =
+                serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
+            let rows = body["orderList"]
+                .as_array()
+                .cloned()
+                .unwrap_or_else(|| vec![body.clone()]);
+            let first = quantities.len();
+            quantities.extend(
+                rows.iter()
+                    .map(|row| row["qty"].as_str().unwrap().to_owned()),
+            );
+            let ids: Vec<_> = (first..quantities.len())
+                .map(|i| serde_json::json!({"orderId":format!("alloc-{}",i+1)}))
+                .collect();
+            let data = if write.url.ends_with("/batch_order") {
+                assert!(rows.len() <= 5);
+                serde_json::json!({"successList":ids,"failureList":[]})
+            } else {
+                assert!(write.url.ends_with("/place_order"));
+                assert_eq!(rows.len(), 1);
+                ids[0].clone()
+            };
+            reply(
+                &mut e,
+                write.id,
+                &serde_json::json!({"code":0,"data":data}).to_string(),
+            );
+        } else {
+            let (timer, at) = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } if *at_ms == 1000.0 => Some((*timer, *at_ms)),
+                    _ => None,
+                })
+                .expect("next five-row chunk has the TS one-second cooldown");
+            e.handle(at, Event::TimerFired { timer });
+        }
+        actions = after_failure_actions(&mut e);
+    }
+    panic!("allocation did not complete");
+}
+
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+fn alloc_ts_26_5_1() {
+    assert_ts_allocated_writes(26.0, 5.0, 1.0, &["4", "4", "4", "4", "4", "4", "1"], 25.0);
+}
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+fn alloc_ts_11_5_1() {
+    assert_ts_allocated_writes(11.0, 5.0, 1.0, &["3", "3", "3", "1"], 10.0);
+}
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+fn alloc_ts_12_5_1() {
+    assert_ts_allocated_writes(12.0, 5.0, 1.0, &["3", "3", "3", "2"], 11.0);
+}
+#[test]
+fn alloc_ts_10_5_1() {
+    assert_ts_allocated_writes(10.0, 5.0, 1.0, &["5", "5"], 10.0);
+}
+#[test]
+fn alloc_ts_7_3_half_step() {
+    assert_ts_allocated_writes(7.0, 3.0, 0.5, &["2", "2", "2", "1"], 7.0);
+}
+#[test]
+fn alloc_ts_fractional_thousandth_step() {
+    assert_ts_allocated_writes(
+        1.0005,
+        0.3,
+        0.001,
+        &["0.225", "0.225", "0.225", "0.225", "0.101"],
+        1.001,
+    );
+}
+#[test]
+fn alloc_ts_at_maximum_control() {
+    assert_ts_allocated_writes(5.0, 5.0, 1.0, &["5"], 5.0);
 }
