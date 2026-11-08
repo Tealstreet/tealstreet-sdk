@@ -28,5 +28,5 @@ export type Ticker = {
     readonly fundingTime: number;
     readonly volume: number;
     readonly quoteVolume: number;
-    readonly info?: any;
+    readonly info?: unknown;
 };

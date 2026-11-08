@@ -71,7 +71,8 @@ it('native snapshots and midpoint clears decode into the generated contract with
       tickerObservations: readTickerObservationFrame(frame, tickers ?? store.tickers),
     });
   };
-  const table = new Frame(Uint8Array.from(frames[0]).buffer).tickers()!;
+  const table = new Frame(Uint8Array.from(frames[0]).buffer).tickers();
+  if (!table) throw new Error('Native fixture is missing its ticker table');
   expect(() => readTickerFrame({ ...table, identity: undefined }, () => undefined)).toThrow('Missing native ticker identity');
   expect(readTickerDeltaFrame(new Frame(Uint8Array.from(frames[1]).buffer), 2, true)).toBeUndefined();
   apply(frames[0]);

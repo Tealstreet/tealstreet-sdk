@@ -50,7 +50,7 @@ export function readTickerDeltaFrame(frame: Frame, count: number, hasSnapshot = 
     let width = 0;
     for (let field = 0; field < TICKER_FIELDS.length; field++) if (mask & (1 << field)) width++;
     if (i + 2 + width > deltas.length) throw new Error('Truncated ticker delta');
-    packed.push(Array.from(deltas.subarray(i, i + 2 + width)) as PackedTickerDelta);
+    packed.push([row, mask, ...deltas.subarray(i + 2, i + 2 + width)]);
     i += 2 + width;
   }
   return packed;

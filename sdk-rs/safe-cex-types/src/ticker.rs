@@ -32,7 +32,7 @@ pub struct Ticker {
     #[ts(skip)]
     pub timestamp: Option<f64>,
 
-    #[ts(type = "any", optional)]
+    #[ts(type = "unknown", optional)]
     pub info: Option<crate::retained_json::RetainedJsonInput>,
 }
 

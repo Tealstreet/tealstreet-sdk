@@ -16,23 +16,13 @@ const a: PublicTicker = generated;
 const b: Ticker = publicTicker;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 const keys: Equal<keyof Ticker, keyof PublicTicker> = true;
-const exact: Equal<Ticker, PublicTicker> = true;
+const exact: Equal<Omit<Ticker, 'info'>, Omit<PublicTicker, 'info'>> = true;
+const metadata: Equal<Ticker['info'], unknown> = true;
 const times: Equal<NonNullable<Ticker['observedAt']>, [number | null, number | null, number | null]> = true;
 const alias: Equal<NonNullable<Ticker['observedAt']>, TickerObservedAt> = true;
 const nullable: Ticker['observedAt'] = [0, null, 1.5];
 const omitted: Pick<Ticker, 'observedAt' | 'midPrice'> = {};
-// @ts-expect-error Receipt time tuple has exactly three entries.
-const short: Ticker['observedAt'] = [0, null];
-// @ts-expect-error Receipt time tuple rejects textual time.
-const text: Ticker['observedAt'] = ['0', null, 1];
-// @ts-expect-error Stored midpoint is numeric when present.
-const clear: Ticker['midPrice'] = null;
-// @ts-expect-error Ticker fields are readonly.
-generated.last = 4;
-// @ts-expect-error The optional observation field is readonly.
-generated.observedAt = [0, 0, 0];
-// Tuple elements retain the existing mutable tuple contract.
-generated.observedAt![0] = null;
+if (generated.observedAt) generated.observedAt[0] = null;
 `;
   assert.ok(fs.existsSync(path.join(models, 'Ticker.ts')), 'Rust-generated public Ticker must exist');
   const configFile = path.join(root, 'packages/safe-cex/tsconfig.json');
@@ -40,10 +30,29 @@ generated.observedAt![0] = null;
   const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, path.dirname(configFile));
   const host = ts.createCompilerHost(parsed.options);
   const original = host.getSourceFile.bind(host);
-  host.getSourceFile = (file, version, ...args) => file === fixture
-    ? ts.createSourceFile(file, source, version, true) : original(file, version, ...args);
-  const program = ts.createProgram([fixture], { ...parsed.options, incremental: false }, host);
-  assert.deepEqual(ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')), []);
+  const negatives = [
+    { name: 'short-tuple', code: 2322, source: "const value: Ticker['observedAt'] = [0, null];" },
+    { name: 'text-time', code: 2322, source: "const value: Ticker['observedAt'] = ['0', null, 1];" },
+    { name: 'stored-null-midpoint', code: 2322, source: "const value: Ticker['midPrice'] = null;" },
+    { name: 'readonly-price', code: 2540, source: 'generated.last = 4;' },
+    { name: 'readonly-observation', code: 2540, source: 'generated.observedAt = [0, 0, 0];' },
+    { name: 'unvalidated-info', code: 18046, source: 'generated.info.quote;' },
+  ];
+  const inputs = new Map([[fixture, source]]);
+  for (const negative of negatives) {
+    negative.file = path.join(models, `__ticker_${negative.name}__.ts`);
+    inputs.set(negative.file, `import type { Ticker } from './Ticker';\ndeclare const generated: Ticker;\n${negative.source}`);
+  }
+  host.getSourceFile = (file, version, ...args) => inputs.has(file)
+    ? ts.createSourceFile(file, inputs.get(file), version, true) : original(file, version, ...args);
+  const program = ts.createProgram([...inputs.keys()], { ...parsed.options, incremental: false }, host);
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  const expectedFiles = new Set(negatives.map(negative => negative.file));
+  assert.deepEqual(diagnostics.filter(d => !expectedFiles.has(d.file?.fileName))
+    .map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')), []);
+  for (const negative of negatives) {
+    assert.deepEqual(diagnostics.filter(d => d.file?.fileName === negative.file).map(d => d.code), [negative.code], negative.name);
+  }
 });
 
 test('the public Ticker bytes are generated from the isolated Rust slice', () => {
