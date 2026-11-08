@@ -31,7 +31,9 @@ use safe_cex_engine::{
 };
 use std::collections::VecDeque;
 
+mod cancellations;
 mod placements;
+use cancellations::Cancellations;
 
 /// Every native call (and its one fresh-signature resend) has a 20 s window.
 const CALL_TIMEOUT_MS: u32 = 20_000;
@@ -84,6 +86,7 @@ enum Stage {
 
 struct Run {
     plan: Plan,
+    cancellations: Option<Cancellations>,
     partial: Option<Box<partial::Flow>>,
     /// Logical calls in slot order; a selected fallback goes to the front.
     queue: VecDeque<Leg>,
@@ -561,8 +564,20 @@ impl BybitLinear {
             )
         }
         .ok()?;
+        let cancellations = Cancellations::new(
+            &entry.command,
+            &legs
+                .iter()
+                .flat_map(|leg| match &leg.planned.call {
+                    Call::Cancel { ids } => ids.as_slice(),
+                    _ => &[],
+                })
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        );
         Some(Run {
             plan,
+            cancellations,
             partial,
             queue: legs,
             active: None,
@@ -1074,7 +1089,7 @@ impl BybitLinear {
                 }
             }
         } else {
-            self.leg_decision(cx, id, &active, response)
+            self.leg_decision(cx, id, &active, response, run.cancellations.as_mut())
         };
         // The logical replacement has settled (a resend is the same write, still
         // open), so the already-gone mark has served.
@@ -1192,6 +1207,9 @@ impl BybitLinear {
                 }
             }
             Decision::Failed(mut error) => {
+                if let Some(report) = &mut run.cancellations {
+                    error = report.failure(cx, id, &active.leg.planned.call, error);
+                }
                 if matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
                     && error.outcome != Some(Outcome::Unknown)
                 {
@@ -1631,6 +1649,7 @@ impl BybitLinear {
         id: CommandId,
         active: &Active,
         response: &Response<'_>,
+        cancellations: Option<&mut Cancellations>,
     ) -> Decision {
         let context = &active.context;
         if matches!(
@@ -1658,7 +1677,7 @@ impl BybitLinear {
                 self.refused_leg(cx, id, active, code, message, result, ext, http_ok)
             }
             Ok(Answer::Success { result, ext }) => {
-                self.accepted_leg(cx, active, response, result, ext)
+                self.accepted_leg(cx, active, response, result, ext, cancellations)
             }
         }
     }
@@ -1957,6 +1976,7 @@ impl BybitLinear {
         response: &Response<'_>,
         result: Option<&serde_json::value::RawValue>,
         ext: Option<&serde_json::value::RawValue>,
+        cancellations: Option<&mut Cancellations>,
     ) -> Decision {
         let context = &active.context;
         let planned = &active.leg.planned;
@@ -2071,6 +2091,9 @@ impl BybitLinear {
                 if !Self::accepted(cx, context, Vec::new()) {
                     return Decision::Lost;
                 }
+                if let Some(report) = cancellations {
+                    report.accepted(target);
+                }
                 self.note_order_terminal(ids);
                 mark_canceled(cx, ids, local);
                 Decision::Next(Vec::new())
@@ -2101,6 +2124,11 @@ impl BybitLinear {
                 ) else {
                     return Decision::Lost;
                 };
+                if let Some(report) = cancellations
+                    && (200..300).contains(&response.status)
+                {
+                    report.rows(ids, &rows, response);
+                }
                 if !matches!(outcome, WriteResult::Failed(_)) {
                     let canceled: Vec<String> = rows
                         .iter()

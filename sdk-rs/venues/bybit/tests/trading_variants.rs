@@ -494,22 +494,26 @@ fn spot_split_plan_exact_minimum_tail_uses_legacy_main_lots() {
 fn spot_ts_parity_does_not_preflight_small_main_lots_or_off_grid_caps() {
     // TS reference/bybit/bybitspot.exchange.ts:828-841 rounds each main lot independently.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | split-tail
-    for (minimum, maximum, amount, quantities) in [
-        ("0.75", "1", 1.001, vec!["0.5", "0.5", "0.001"]),
+    for (minimum, maximum, amount, quantities, expected_sum) in [
+        ("0.75", "1", 1.001, vec!["0.5", "0.5", "0.001"], 1.001),
         (
             "0.01",
             "1190.0005",
             1190.02,
             vec!["595.001", "595.001", "0.019"],
+            1190.021,
         ),
-        ("0.0001", "0.0004", 0.002, vec!["0"; 5]),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 0 of requested 0.002); kept for exact TS parity per Sam's decision
+        ("0.0001", "0.0004", 0.002, vec!["0"; 5], 0.0),
     ] {
         let mut h = spot_split_plan_market(minimum, maximum);
         place(&mut h, 196, vec![protected_spot_split_order(amount)]);
+        let mut sum = 0.0;
         for (index, quantity) in quantities.iter().enumerate() {
             let request = h.take("/v5/order/create");
             let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
             assert_eq!(wire["qty"], *quantity);
+            sum += wire["qty"].as_str().unwrap().parse::<f64>().unwrap();
             h.reply(
                 request.id,
                 200,
@@ -518,6 +522,10 @@ fn spot_ts_parity_does_not_preflight_small_main_lots_or_off_grid_caps() {
             );
         }
         assert!(matches!(h.result(196), Some(Ok(_))));
+        assert!(
+            (sum - expected_sum).abs() < 1e-9,
+            "sum {sum}, expected {expected_sum}"
+        );
         assert!(!h.has_request("/v5/order/create"));
     }
 }
@@ -4376,6 +4384,189 @@ fn applied_batch_cancel_unknown_row_records_only_confirmed_cancellations() {
         serde_json::json!({ "orderIds": [], "total": 2, "failedIndex": 1 }),
         "the JS boundary still needs the attempted count and Unknown target index"
     );
+    let elements = serde_json::to_value(errors[0]).unwrap()["elements"].clone();
+    assert_eq!(
+        elements[0],
+        serde_json::json!({ "index": 0, "status": "applied", "effect": "cancel", "targetOrderId": "one" })
+    );
+    assert_eq!(elements[1]["index"], 1);
+    assert_eq!(elements[1]["status"], "unknown");
+    assert_eq!(elements[1]["error"]["outcome"], "unknown");
+    assert_eq!(elements[1]["error"]["venueCode"], "10016");
+    assert_eq!(elements.as_array().unwrap().len(), 2);
+}
+
+fn cancel_unknown_pair() -> Harness {
+    managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"two"},{"orderId":"one"}]},"retExtInfo":{"list":[{"code":10016,"msg":"unknown cancellation outcome"},{"code":0,"msg":"OK"}]}}"#,
+    )
+}
+
+#[test]
+fn applied_cancel_unknown_has_actionable_guidance_and_native_diagnostics() {
+    let h = cancel_unknown_pair();
+    let error = spot_parity_error(&h, 120);
+    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(error.venue_code.as_deref(), Some("10016"));
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("unknown cancellation outcome")
+    );
+    assert_eq!(
+        error.kind,
+        Some(safe_cex_engine::ErrorKind::VenueUnavailable)
+    );
+}
+
+#[test]
+fn applied_cancel_unknown_emits_one_bounded_outcome_event() {
+    let mut h = cancel_unknown_pair();
+    h.advance(1_000.0);
+    let events: Vec<_> = h
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        events[0].message,
+        "The outcome is unknown. Check Open Orders"
+    );
+    assert_eq!(
+        events[0].fields,
+        vec![
+            ("command", 120_u32.into()),
+            ("outcome", "unknown".into()),
+            ("attemptedCount", 2_f64.into()),
+            ("appliedCount", 1_f64.into()),
+            ("unknownCount", 1_f64.into()),
+        ]
+    );
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+}
+
+#[test]
+fn applied_cancel_confirmed_and_refused_rows_emit_no_unknown_event() {
+    for code in [0, 10005] {
+        let h = managed_cancel_pair(&format!(
+            r#"{{"retCode":0,"result":{{"list":[{{"orderId":"one"}},{{"orderId":"two"}}]}},"retExtInfo":{{"list":[{{"code":0}},{{"code":{code},"msg":"permission denied"}}]}}}}"#
+        ));
+        assert!(!h.notices.iter().any(|notice| matches!(notice,
+            safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown")));
+        if code == 0 {
+            assert_eq!(h.result(120), Some(&Ok("[]".into())));
+        } else {
+            let error = spot_parity_error(&h, 120);
+            assert_eq!(
+                error.outcome, None,
+                "the existing known-partial classification is retained"
+            );
+            assert_eq!(error.venue_code.as_deref(), Some("10005"));
+            assert_eq!(error.message, "Bybit cancel was not confirmed");
+        }
+    }
+}
+
+#[test]
+fn applied_cancel_reports_prior_batches_and_an_unsent_tail_after_unknown() {
+    let mut h = ready(Variant::Demo);
+    let ids: Vec<String> = (0..21).map(|index| format!("target-{index}")).collect();
+    let rows: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            serde_json::json!({
+                "symbol":"BTCUSDT", "orderId":id, "orderStatus":"New", "orderType":"Limit",
+                "side":"Buy", "price":"100", "qty":"1", "leavesQty":"1"
+            })
+        })
+        .collect();
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic":"order", "data":rows}).to_string(),
+    );
+    h.command(Command::CancelOrders {
+        command: 123,
+        ids: ids.clone(),
+    });
+    for batch in 0..2 {
+        let request = h.take("/v5/order/cancel-batch");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let expected: Vec<_> = ids[batch * 10..batch * 10 + 10]
+            .iter()
+            .map(|id| serde_json::json!({"symbol":"BTCUSDT", "orderId":id}))
+            .collect();
+        assert_eq!(wire["request"], serde_json::json!(expected));
+        let targets: Vec<_> = ids[batch * 10..batch * 10 + 10]
+            .iter()
+            .rev()
+            .map(|id| serde_json::json!({"orderId":id}))
+            .collect();
+        let statuses: Vec<_> = ids[batch * 10..batch * 10 + 10]
+            .iter()
+            .rev()
+            .map(|id| serde_json::json!({"code":if id == "target-11" {10016} else {0}}))
+            .collect();
+        h.reply(request.id, 200, &serde_json::json!({"retCode":0,"result":{"list":targets},"retExtInfo":{"list":statuses}}).to_string());
+        h.advance(1_000.0);
+    }
+    let error = spot_parity_error(&h, 123);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(elements.as_array().unwrap().len(), 21);
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(elements[index]["index"], index);
+        if index == 11 {
+            assert_eq!(elements[index]["status"], "unknown");
+        } else if index == 20 {
+            assert_eq!(
+                elements[index],
+                serde_json::json!({"index":20,"status":"notSent"})
+            );
+        } else {
+            assert_eq!(
+                elements[index],
+                serde_json::json!({"index":index,"status":"applied","effect":"cancel","targetOrderId":id})
+            );
+        }
+        assert_eq!(
+            h.engine.store().order(id).is_some(),
+            index == 11 || index == 20
+        );
+    }
+    assert!(error.partial.as_ref().unwrap().order_ids.is_empty());
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+    let events: Vec<_> = h
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert!(
+        events[0]
+            .fields
+            .contains(&("attemptedCount", 20_f64.into()))
+    );
+    assert!(events[0].fields.contains(&("appliedCount", 19_f64.into())));
+    assert!(events[0].fields.contains(&("unknownCount", 1_f64.into())));
 }
 
 #[test]
@@ -5545,13 +5736,15 @@ fn spot_ts_parity_batch_keeps_prefix_before_a_missing_market() {
 #[test]
 fn spot_ts_parity_protects_only_first_main_lot_and_remainder() {
     // TS reference/bybit/bybitspot.exchange.ts:833-841 omits brackets after main lot zero.
-    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | split-tpsl
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 2499.999 of requested 2500); kept for exact TS parity per Sam's decision
     let mut h = ready(Variant::Spot);
     place(&mut h, 193, vec![protected_spot_split_order(2500.0)]);
+    let mut sum = 0.0;
     for (i, qty) in ["793.333", "793.333", "793.333", "120"].iter().enumerate() {
         let request = h.take("/v5/order/create");
         let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
         assert_eq!(wire["qty"], *qty);
+        sum += wire["qty"].as_str().unwrap().parse::<f64>().unwrap();
         for key in ["stopLoss", "takeProfit", "slOrderType", "tpOrderType"] {
             assert_eq!(wire.get(key).is_some(), i == 0 || i == 3, "{key} lot {i}");
         }
@@ -5563,6 +5756,7 @@ fn spot_ts_parity_protects_only_first_main_lot_and_remainder() {
         );
     }
     assert!(matches!(h.result(193), Some(Ok(_))));
+    assert!((sum - 2499.999).abs() < 1e-9, "sum {sum}, requested 2500");
     assert!(!h.has_request("/v5/order/create"));
 }
 

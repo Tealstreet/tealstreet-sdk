@@ -24,3 +24,8 @@ The existing engine journal and CommandFailed telemetry retain those facts.
 These partial-placement and protection-attachment behaviors are known legacy
 issues, recorded under `bybit-spot` in the owner's known-issues report. This change
 restores parity rather than introducing new admission rules.
+
+KNOWN-ISSUE: legacy TS under-allocates (sum 0 of requested 0.002); kept for exact TS parity per Sam's decision.
+KNOWN-ISSUE: legacy TS under-allocates (sum 2499.999 of requested 2500); kept for exact TS parity per Sam's decision.
+KNOWN-ISSUE: legacy TS under-allocates (sum 4 of requested 5); kept for exact TS parity per Sam's decision.
+The recording pins assert both the individual payloads and these totals.

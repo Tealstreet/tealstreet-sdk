@@ -180,9 +180,19 @@ it('retains applied cancel batch counts and the unknown index without created or
 it('preserves Bybit applied cancel counts when one target is canceled and the other is unknown', async () => {
   const r = await fixture('bybit');
   const detail: VenueErrorDetail = {
-    message: 'Bybit cancel was not confirmed',
+    message: 'The outcome is unknown. Check Open Orders',
+    kind: 'venueUnavailable',
     outcome: 'unknown',
+    venueCode: '10016',
+    venueMessage: 'unknown cancellation outcome',
     partial: { orderIds: [], total: 2, failedIndex: 1 },
+    elements: [
+      { index: 0, status: 'applied', effect: 'cancel', targetOrderId: 'one' },
+      { index: 1, status: 'unknown', error: {
+        message: 'The outcome is unknown. Check Open Orders', kind: 'venueUnavailable',
+        outcome: 'unknown', venueCode: '10016', venueMessage: 'unknown cancellation outcome',
+      } },
+    ],
   };
   // Matches trading_variants::applied_batch_cancel_unknown_row_records_only_confirmed_cancellations.
   // Zero counts created IDs; the native test proves target "one" was canceled.
@@ -194,6 +204,7 @@ it('preserves Bybit applied cancel counts when one target is canceled and the ot
   const expected = {
     message: detail.message,
     outcome: 'unknown',
+    elements: detail.elements,
     partialOrderIds: [],
     partialOrderCount: 0,
     totalOrderCount: 2,
