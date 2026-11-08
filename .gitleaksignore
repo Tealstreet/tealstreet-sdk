@@ -130,8 +130,7 @@ c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-r
 # Exact commit/path/rule/line only.
 94f58d0d64773c6c915a6da1ada5d756442f8871:docs/plans/RUST_LIGHTER_REMAINING_FUNNEL.md:generic-api-key:7
 
-# Kraken hosted WASM secondary-slot fixture: base64 of literal read-secret,
-# verified by decoding both historical occurrences. Current fixture encodes at
-# runtime; exact historical fingerprints only, matching existing Kraken fixtures.
-c231996640e10820a0e8d777b51eb0c52e12789d:packages/safe-cex/src/__tests__/audit-regressions/rust.kraken-hosted-provider.wasm.test.ts:generic-api-key:69
+# Synthetic Kraken WASM fixture: base64 of literal test input read-secret, PR #3304.
 4b78349affff8025ae51d120d62fd5275ebb3fd5:packages/safe-cex/src/__tests__/audit-regressions/rust.kraken-hosted-provider.wasm.test.ts:generic-api-key:70
+# Synthetic Kraken WASM fixture: base64 of literal test input read-secret, PR #3304.
+c231996640e10820a0e8d777b51eb0c52e12789d:packages/safe-cex/src/__tests__/audit-regressions/rust.kraken-hosted-provider.wasm.test.ts:generic-api-key:69
