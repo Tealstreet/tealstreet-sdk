@@ -14,6 +14,9 @@ struct H {
     http: Vec<HttpRequest>,
     done: Vec<(u32, Result<String, String>)>,
     failures: Vec<safe_cex_engine::VenueError>,
+    events: Vec<safe_cex_engine::LogEvent>,
+    diagnostics: Vec<(u32, String)>,
+    timers: Vec<(safe_cex_engine::TimerId, f64)>,
     private: Option<SocketId>,
 }
 impl H {
@@ -38,6 +41,9 @@ impl H {
             http: vec![],
             done: vec![],
             failures: vec![],
+            events: vec![],
+            diagnostics: vec![],
+            timers: vec![],
             private: None,
         };
         h.e.start(h.now);
@@ -67,6 +73,11 @@ impl H {
                     self.done.push((command, Err(error.legacy_text())));
                     self.failures.push(error);
                 }
+                Action::Notice(Notice::CommandError { command, message }) => {
+                    self.diagnostics.push((command, message));
+                }
+                Action::Notice(Notice::Event(event)) => self.events.push(event),
+                Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::WsConnect {
                     socket,
                     channel: Some(safe_cex_engine::SocketChannel::Private),
@@ -219,8 +230,8 @@ fn legacy_ts_above_max_sends_one_payload_and_surfaces_native_refusal() {
             );
             assert_eq!(
                 h.failures.last().unwrap().outcome,
-                None,
-                "preserve the existing native false-ack classification"
+                Some(safe_cex_engine::Outcome::Rejected),
+                "the native false acknowledgement is a definite refusal"
             );
             assert_eq!(h.writes(), 0, "native refusal must not split or resend");
         }
@@ -233,12 +244,12 @@ fn legacy_ts_to_fixed_precision_and_midpoints_precede_builder_rounding() {
     // Precision is decimal digits, not a step.
     for (amount, precision, maximum, shares, collateral) in [
         // KNOWN-ISSUE: legacy TS under-allocates (sum 5 of requested 5.005);
-        // kept for parity per Sam; decision pending.
+        // kept for exact TS parity per Sam's decision.
         (5.005, 2.0, 5.0, "5000000", "2500000"),
         (5.125, 2.0, 10.0, "5130000", "2565000"),
         (5.25, 1.0, 10.0, "5300000", "2650000"),
         // KNOWN-ISSUE: legacy TS under-allocates (sum 5.12 of requested 5.129);
-        // kept for parity per Sam; decision pending (official builder floors to 2dp).
+        // kept for exact TS parity per Sam's decision (official builder floors to 2dp).
         (5.129, 3.0, 10.0, "5120000", "2560000"),
         (5.6, 0.001, 10.0, "6000000", "3000000"),
         (6.5, 0.0, 10.0, "7000000", "3500000"),
@@ -269,6 +280,179 @@ fn legacy_ts_to_fixed_precision_and_midpoints_precede_builder_rounding() {
         assert!(h.done.last().unwrap().1.is_ok());
         let sum = shares.parse::<f64>().unwrap() / 1e6;
         assert_eq!(h.e.store().order("rounded").unwrap().amount, sum);
+        assert_eq!(h.writes(), 0);
+    }
+}
+
+#[test]
+fn oversized_native_unknown_has_one_report_and_indexed_outcomes_without_resend() {
+    use safe_cex_engine::write_plan::ElementResult;
+    use safe_cex_engine::{Outcome, UNKNOWN_OUTCOME_TEXT};
+    for accepted_prefix in [false, true] {
+        for body in [
+            "not-json",
+            r#"{"orderID":"unproven"}"#,
+            r#"{"success":true,"orderID":""}"#,
+            r#"{"success":true}"#,
+            r#"{"success":true,"orderID":null}"#,
+        ] {
+            let mut h = H::new();
+            h.e.store_mut()
+                .update_markets(|market| market.limits.amount.max = 5.0);
+            let mut input = order();
+            input.amount = 26.0;
+            h.command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![input; 3],
+            });
+            if accepted_prefix {
+                h.response(
+                    "/order",
+                    200,
+                    r#"{"success":true,"orderID":"accepted","status":"live"}"#,
+                );
+            }
+            let request = h.take("/order");
+            let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["order"]["takerAmount"], "26000000");
+            h.respond(request.clone(), 200, body);
+            let error = h.failures.last().unwrap();
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_eq!(error.message, UNKNOWN_OUTCOME_TEXT);
+            assert!(
+                error
+                    .venue_message
+                    .as_deref()
+                    .unwrap()
+                    .contains("Invalid Polymarket placement acknowledgement")
+            );
+            let elements = error.elements.as_ref().expect("indexed outcome journal");
+            assert_eq!(elements.len(), 3);
+            assert_eq!(
+                elements
+                    .iter()
+                    .map(|row| row.element.index)
+                    .collect::<Vec<_>>(),
+                vec![0, 1, 2]
+            );
+            let index = usize::from(accepted_prefix);
+            if accepted_prefix {
+                assert_eq!(
+                    elements[0].result,
+                    ElementResult::Placed {
+                        order_ids: vec!["accepted".into()]
+                    }
+                );
+                assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted"]);
+            }
+            assert!(
+                matches!(&elements[index].result, ElementResult::Unknown { error }
+                if error.message == UNKNOWN_OUTCOME_TEXT && error.outcome == Some(Outcome::Unknown))
+            );
+            assert!(
+                elements[index + 1..]
+                    .iter()
+                    .all(|row| row.result == ElementResult::NotSent { error: None })
+            );
+            assert_eq!(h.diagnostics, vec![(91, UNKNOWN_OUTCOME_TEXT.into())]);
+            let events: Vec<_> = h
+                .events
+                .iter()
+                .filter(|event| event.code == "order.outcome_unknown")
+                .collect();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].message, UNKNOWN_OUTCOME_TEXT);
+            assert!(
+                events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "placedCount" && *value == (index as f64).into())
+            );
+            assert!(
+                events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "unknownRequest"
+                        && value.as_str() == Some("place election-Yes"))
+            );
+            assert!(
+                events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "command" && *value == 91u32.into())
+            );
+            assert!(
+                events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "elementIndex" && *value == (index as f64).into())
+            );
+            assert_eq!(h.writes(), 0);
+            let original = error.clone();
+            h.respond(
+                request,
+                200,
+                r#"{"success":true,"orderID":"late","status":"live"}"#,
+            );
+            h.now += 60_000.0;
+            for (timer, at) in std::mem::take(&mut h.timers) {
+                if at <= h.now {
+                    h.event(Event::TimerFired { timer });
+                }
+            }
+            assert_eq!(h.writes(), 0);
+            assert_eq!(h.failures, vec![original]);
+            assert_eq!(h.diagnostics.len(), 1);
+            assert_eq!(
+                h.events
+                    .iter()
+                    .filter(|event| event.code == "order.outcome_unknown")
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
+fn oversized_native_refusal_is_rejected_with_an_indexed_journal() {
+    use safe_cex_engine::Outcome;
+    use safe_cex_engine::write_plan::ElementResult;
+    for body in [
+        r#"{"success":false,"orderID":"","errorMsg":"native size refusal"}"#,
+        r#"{"success":false,"errorMsg":"native size refusal"}"#,
+        r#"{"success":false,"orderID":null,"errorMsg":"native size refusal"}"#,
+    ] {
+        let mut h = H::new();
+        h.e.store_mut()
+            .update_markets(|market| market.limits.amount.max = 5.0);
+        let mut input = order();
+        input.amount = 26.0;
+        h.command(Command::PlaceOrders {
+            command: 92,
+            orders: vec![input; 2],
+        });
+        h.response("/order", 200, body);
+        let error = h.failures.last().unwrap();
+        assert_eq!(error.outcome, Some(Outcome::Rejected));
+        assert_eq!(
+            error.message,
+            "Polymarket placement rejected: native size refusal"
+        );
+        let elements = error.elements.as_ref().expect("refusal journal");
+        assert_eq!(elements.len(), 2);
+        assert!(
+            matches!(&elements[0].result, ElementResult::NotSent { error: Some(error) }
+        if error.outcome == Some(Outcome::Rejected) && error.message.contains("native size refusal"))
+        );
+        assert_eq!(elements[1].result, ElementResult::NotSent { error: None });
+        assert_eq!(
+            h.events
+                .iter()
+                .filter(|event| event.code == "order.outcome_unknown")
+                .count(),
+            0
+        );
         assert_eq!(h.writes(), 0);
     }
 }
@@ -325,6 +509,31 @@ fn dispatched_ambiguous_writes_are_unknown_without_resend_or_replacement() {
                 error.outcome,
                 Some(safe_cex_engine::Outcome::Unknown),
                 "{operation} {status} {body}: {error:?}"
+            );
+            use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+            let index = usize::from(operation == "replacement");
+            let elements = error.elements.as_ref().expect("mutation journal");
+            assert!(
+                matches!(&elements[index].result, ElementResult::Unknown { error }
+                if error.message.contains(safe_cex_engine::UNKNOWN_OUTCOME_TEXT))
+            );
+            if operation == "replacement" {
+                assert!(matches!(&elements[0].result, ElementResult::Applied {
+                    effect: AppliedEffect::Cancel, target_order_id: Some(id), ..
+                } if id == "o1"));
+            } else if operation == "amend-cancel" {
+                assert_eq!(elements[1].result, ElementResult::NotSent { error: None });
+            }
+            assert_eq!(
+                h.diagnostics,
+                vec![(91, safe_cex_engine::UNKNOWN_OUTCOME_TEXT.into())]
+            );
+            assert_eq!(
+                h.events
+                    .iter()
+                    .filter(|event| event.code == "order.outcome_unknown")
+                    .count(),
+                1
             );
             let text = error.legacy_text().to_ascii_lowercase();
             assert!(
@@ -749,7 +958,7 @@ fn price_tick_and_ts_decimal_share_rounding_precede_official_builder_rounding() 
     for (raw_size, expected_shares, expected_collateral) in [
         (5.999, "6000000", "3180000"),
         // KNOWN-ISSUE: legacy TS under-allocates (sum 5 of requested 5.005);
-        // kept for parity per Sam; decision pending.
+        // kept for exact TS parity per Sam's decision.
         (5.005, "5000000", "2650000"),
         (5.125, "5130000", "2718900"),
         (5.129, "5130000", "2718900"),
@@ -765,6 +974,7 @@ fn price_tick_and_ts_decimal_share_rounding_precede_official_builder_rounding() 
             command: 1,
             orders: vec![input],
         });
+        assert_eq!(h.writes(), 1);
         let request = h.take("/order");
         let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
         assert_eq!(
@@ -777,6 +987,15 @@ fn price_tick_and_ts_decimal_share_rounding_precede_official_builder_rounding() 
         );
         h.respond(request, 200, &ack("rounded"));
         assert_eq!(h.e.store().order("rounded").unwrap().price, 0.53);
+        let sum = body["order"]["takerAmount"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap()
+            / 1e6;
+        assert_eq!(sum, expected_shares.parse::<f64>().unwrap() / 1e6);
+        assert_eq!(h.e.store().order("rounded").unwrap().amount, sum);
+        assert_eq!(h.writes(), 0);
     }
 }
 
@@ -1376,7 +1595,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         (
             200,
             r#"{"success":false,"orderID":"","errorMsg":"not enough balance","status":""}"#,
-            (None, None),
+            (None, Some(Outcome::Rejected)),
             Some("Polymarket placement rejected: not enough balance"),
         ),
         (200, "not json", (None, Some(Outcome::Unknown)), None),
@@ -1401,10 +1620,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         if matches!(status, 408 | 429 | 500..) {
             assert_eq!(
                 h.done,
-                [(
-                    9,
-                    Err("Polymarket write outcome is unknown. Check Open Orders".into())
-                )]
+                [(9, Err("The outcome is unknown. Check Open Orders".into()))]
             );
             assert_eq!(error.venue_message.as_deref(), Some(text.as_str()));
         } else if status != 200 || text.starts_with("Polymarket placement") {
@@ -1427,7 +1643,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
     );
     assert_eq!(
         h.failures[0].message,
-        "Polymarket write outcome is unknown. Check Open Orders"
+        "The outcome is unknown. Check Open Orders"
     );
     assert_eq!(
         h.failures[0].venue_message.as_deref(),
