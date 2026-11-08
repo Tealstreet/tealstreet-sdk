@@ -157,7 +157,10 @@ fn keyed_missing_callbacks_keep_adoption_and_configuration_refusals() {
                     }
                     .expect_err("missing callback provider");
                     let unadopted_payload = flag == "payloadSigner"
-                        && matches!(venue, "kodiakfi" | "mode" | "what" | "woofi");
+                        && matches!(
+                            venue,
+                            "kraken" | "krakenspot" | "kodiakfi" | "mode" | "what" | "woofi"
+                        );
                     let expected_kind = if unadopted_payload {
                         ErrorKind::Unsupported
                     } else {
@@ -263,6 +266,8 @@ fn explicit_client_context_constructs_public_engines_with_unused_callback_intent
 fn unadopted_private_payload_admission_precedes_callback_configuration() {
     use safe_cex_venues::{ConstructionContext, build_in_context, build_with_signer_in_context};
     for venue in [
+        "kraken",
+        "krakenspot",
         "coinbase",
         "coinbasespot",
         "txflow",
