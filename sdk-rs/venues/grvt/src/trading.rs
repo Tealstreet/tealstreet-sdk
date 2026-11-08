@@ -746,6 +746,17 @@ impl Grvt {
         execution: Option<(bool, f64)>,
         used: &mut HashSet<String>,
     ) -> Result<Step, VenueError> {
+        self.placement_with_maximum_check(cx, opts, parent, execution, used, true)
+    }
+    fn placement_with_maximum_check(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+        parent: Option<&str>,
+        execution: Option<(bool, f64)>,
+        used: &mut HashSet<String>,
+        enforce_maximum: bool,
+    ) -> Result<Step, VenueError> {
         if opts.stp_mode.is_some() {
             return Err("Per-order self-trade prevention is unsupported on GRVT".into());
         }
@@ -834,7 +845,9 @@ impl Grvt {
         let amount = safe_cex_engine::num::adjust(opts.amount, market.precision.amount);
         positive(amount, "rounded order amount")?;
         if amount < market.limits.amount.min
-            || (market.limits.amount.max > 0. && amount > market.limits.amount.max)
+            || (enforce_maximum
+                && market.limits.amount.max > 0.
+                && amount > market.limits.amount.max)
         {
             return Err("GRVT order amount is outside market limits".into());
         }
@@ -1079,7 +1092,9 @@ impl Grvt {
                     {
                         return Err("GRVT trigger orders cannot carry attached brackets".into());
                     }
-                    let entry = self.placement(cx, &opts, None, None, &mut used)?;
+                    // Legacy TS sends new creates above max; replacement and put-back stay bounded.
+                    let entry =
+                        self.placement_with_maximum_check(cx, &opts, None, None, &mut used, false)?;
                     let Effect::Place(entry_order) = &entry.effect else {
                         unreachable!()
                     };
@@ -1121,12 +1136,13 @@ impl Grvt {
                                 bybit_slippage_tolerance_ticks: None,
                                 implied_volatility: None,
                             };
-                            plan.steps.push_back(self.placement(
+                            plan.steps.push_back(self.placement_with_maximum_check(
                                 cx,
                                 &child,
                                 Some(&parent),
                                 Some((true, 0.)),
                                 &mut used,
+                                false,
                             )?);
                         }
                     }
