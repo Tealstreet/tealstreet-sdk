@@ -27,7 +27,7 @@ const toNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const mapBitunixTradeToIncomeRecords = (row: Record<string, any>): IncomeRecord[] => {
+export const mapBitunixTradeToIncomeRecords = (row: Record<string, unknown>): IncomeRecord[] => {
   const timestamp = parseInt(String(row.ctime ?? '0'), 10);
   const symbol = String(row.symbol ?? '');
   if (!timestamp || !symbol) {
@@ -70,7 +70,7 @@ export const mapBitunixTradeToIncomeRecords = (row: Record<string, any>): Income
   return records;
 };
 
-export const mapBitunixClosedPosition = (row: Record<string, any>, accountName: string): ClosedPnlEntry | null => {
+export const mapBitunixClosedPosition = (row: Record<string, unknown>, accountName: string): ClosedPnlEntry | null => {
   const openTime = parseInt(String(row.ctime ?? '0'), 10);
   const symbol = String(row.symbol ?? '');
   if (!openTime || !symbol) {

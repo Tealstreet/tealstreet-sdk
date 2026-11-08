@@ -1,3 +1,4 @@
+use safe_cex_types::retained_json;
 use safe_cex_types::{ExecutionPositionSide, OrderSide, OrderStatus, OrderType};
 use serde::Deserialize;
 use std::{fs, path::Path};
@@ -138,4 +139,72 @@ fn consumer_fixture_is_the_native_serializers_output() {
     let mut invalid = serde_json::to_value(&closed[0]).unwrap();
     invalid.as_object_mut().unwrap().remove("provenance");
     assert!(serde_json::from_value::<history::ClosedPnlEntry>(invalid).is_err());
+}
+
+#[test]
+fn actual_native_closed_pnl_replies_satisfy_the_canonical_contract() {
+    let fixture: std::collections::HashMap<String, Vec<Box<serde_json::value::RawValue>>> =
+        serde_json::from_str(include_str!(
+            "../../engine/tests/fixtures/history-closed-output.json"
+        ))
+        .unwrap();
+    for rows in fixture.values() {
+        for row in rows {
+            let decoded: history::ClosedPnlEntry = serde_json::from_str(row.get()).unwrap();
+            let serialized = serde_json::to_string(&decoded).unwrap();
+            let expected: serde_json::Value = serde_json::from_str(row.get()).unwrap();
+            let actual: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(
+                actual.as_object().unwrap().len(),
+                expected.as_object().unwrap().len()
+            );
+            for (key, value) in expected.as_object().unwrap() {
+                if value.is_number() {
+                    assert_eq!(
+                        actual[key].as_f64().map(f64::to_bits),
+                        value.as_f64().map(f64::to_bits),
+                        "{key}"
+                    );
+                } else {
+                    assert_eq!(actual[key], *value, "{key}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn closed_numeric_unions_reject_non_scalar_inputs_and_preserve_decimal_values() {
+    let fixture = output_fixture::fixture();
+    let row = &fixture.closed[0];
+    let base = serde_json::to_value(row).unwrap();
+    for field in [
+        "notional",
+        "entryPrice",
+        "exitPrice",
+        "unrealizedPnl",
+        "fees",
+        "contracts",
+        "leverage",
+    ] {
+        for invalid in [
+            serde_json::json!(null),
+            serde_json::json!([]),
+            serde_json::json!({"$serde_json::private::Number":"1.5"}),
+            serde_json::json!(true),
+        ] {
+            let mut input = base.clone();
+            input[field] = invalid;
+            assert!(
+                serde_json::from_str::<history::ClosedPnlEntry>(&input.to_string()).is_err(),
+                "{field}"
+            );
+        }
+        let mut input = base.clone();
+        input[field] = serde_json::json!(0.125);
+        let text = input.to_string();
+        let parsed: history::ClosedPnlEntry = serde_json::from_str(&text).unwrap();
+        let value = serde_json::to_value(parsed).unwrap();
+        assert_eq!(value[field].as_f64(), Some(0.125));
+    }
 }

@@ -26,15 +26,29 @@ function nativeOutput(): {
   );
 }
 
+function reportedNativeOutput(): Record<'bybit' | 'okx' | 'blofin' | 'bitunix', ClosedPnlEntry[]> {
+  return JSON.parse(
+    readFileSync(
+      new URL('../../../../sdk-rs/engine/tests/fixtures/history-closed-output.json', import.meta.url),
+      'utf8',
+    ),
+  );
+}
+
 describe('Rust-generated history command results', () => {
   it('decodes actual Rust output through EngineHost without fabricating optional fields or identities', async () => {
-    const output = nativeOutput();
+    const output = { ...nativeOutput(), closed: Object.values(reportedNativeOutput()).flat() };
     const host = new EngineHost(
       // @ts-expect-error This protocol fixture implements command replies, not the WASM lifecycle.
       {
         command(text: string) {
-          const { command, op } = JSON.parse(text);
-          return JSON.stringify([{ op: 'done', command, result: JSON.stringify(output[op as keyof typeof output]) }]);
+          const request: unknown = JSON.parse(text);
+          if (typeof request !== 'object' || request === null || !('command' in request) || !('op' in request))
+            throw new Error('invalid history command');
+          const { command, op } = request;
+          if (typeof command !== 'number' || (op !== 'orders' && op !== 'trades' && op !== 'closed' && op !== 'income'))
+            throw new Error('invalid history operation');
+          return JSON.stringify([{ op: 'done', command, result: JSON.stringify(output[op]) }]);
         },
       },
       {
@@ -48,6 +62,7 @@ describe('Rust-generated history command results', () => {
     try {
       const orders = await host.command({ op: 'orders' });
       const trades = await host.command({ op: 'trades' });
+      expect(await host.command({ op: 'closed' })).toEqual(output.closed);
       if (!Array.isArray(orders) || !Array.isArray(trades)) throw new Error('history result must be an array');
       expect(orders).toEqual(output.orders);
       expect(trades).toEqual(output.trades);
@@ -63,6 +78,16 @@ describe('Rust-generated history command results', () => {
       expect(JSON.parse(JSON.stringify(trades))).toEqual(output.trades);
     } finally {
       host.dispose();
+    }
+  });
+
+  it('consumes the four native venue reply projections without a TypeScript mapper', async () => {
+    for (const entries of Object.values(reportedNativeOutput())) {
+      const result = await resolveClosedPositions({ fetchClosedPnl: async () => entries }, { symbol: 'BTC' }, false);
+      expect(result.entries).toEqual(entries);
+      expect(result.independentlyVerifiable).toBe(true);
+      expect(result.entries.every((entry) => entry.provenance === 'venue')).toBe(true);
+      expect(result.entries.every((entry) => typeof entry.contracts === 'number')).toBe(true);
     }
   });
 

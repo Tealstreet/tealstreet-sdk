@@ -147,7 +147,7 @@ pub enum DataProvenance {
 }
 
 /// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(untagged)]
 pub enum ClosedPnlEntryNotional {
     Variant0(String),
@@ -155,7 +155,7 @@ pub enum ClosedPnlEntryNotional {
 }
 
 /// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(untagged)]
 pub enum ClosedPnlEntryEntryPrice {
     Variant0(String),
@@ -163,7 +163,7 @@ pub enum ClosedPnlEntryEntryPrice {
 }
 
 /// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(untagged)]
 pub enum ClosedPnlEntryExitPrice {
     Variant0(String),
@@ -171,7 +171,7 @@ pub enum ClosedPnlEntryExitPrice {
 }
 
 /// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(untagged)]
 pub enum ClosedPnlEntryUnrealizedPnl {
     Variant0(String),
@@ -179,7 +179,7 @@ pub enum ClosedPnlEntryUnrealizedPnl {
 }
 
 /// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(untagged)]
 pub enum ClosedPnlEntryFees {
     Variant0(String),
@@ -187,7 +187,7 @@ pub enum ClosedPnlEntryFees {
 }
 
 /// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(untagged)]
 pub enum ClosedPnlEntryContracts {
     Variant0(String),
@@ -195,7 +195,7 @@ pub enum ClosedPnlEntryContracts {
 }
 
 /// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(untagged)]
 pub enum ClosedPnlEntryLeverage {
     Variant0(f64),
@@ -652,5 +652,90 @@ mod strict_codecs {
                 ],
             );
         }
+    }
+}
+
+// Untagged Content buffers arbitrary-precision decimals as maps. Retained scalar
+// capture distinguishes real numbers from objects imitating Serde number markers.
+enum NumberOrText {
+    Text(String),
+    Number(f64),
+}
+fn number_or_text<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<NumberOrText, D::Error> {
+    use crate::retained_json::RetainedJsonInput;
+    match RetainedJsonInput::deserialize(deserializer)? {
+        RetainedJsonInput::Text(units) => String::from_utf16(&units)
+            .map(NumberOrText::Text)
+            .map_err(serde::de::Error::custom),
+        RetainedJsonInput::Float(value) => Ok(NumberOrText::Number(value)),
+        RetainedJsonInput::Lexeme(value) => serde_json::from_str::<f64>(&value)
+            .map(NumberOrText::Number)
+            .map_err(serde::de::Error::custom),
+        _ => Err(serde::de::Error::custom("expected a number or string")),
+    }
+}
+
+impl<'de> Deserialize<'de> for ClosedPnlEntryNotional {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        number_or_text(deserializer).map(|value| match value {
+            NumberOrText::Text(value) => Self::Variant0(value),
+            NumberOrText::Number(value) => Self::Variant1(value),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for ClosedPnlEntryEntryPrice {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        number_or_text(deserializer).map(|value| match value {
+            NumberOrText::Text(value) => Self::Variant0(value),
+            NumberOrText::Number(value) => Self::Variant1(value),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for ClosedPnlEntryExitPrice {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        number_or_text(deserializer).map(|value| match value {
+            NumberOrText::Text(value) => Self::Variant0(value),
+            NumberOrText::Number(value) => Self::Variant1(value),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for ClosedPnlEntryUnrealizedPnl {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        number_or_text(deserializer).map(|value| match value {
+            NumberOrText::Text(value) => Self::Variant0(value),
+            NumberOrText::Number(value) => Self::Variant1(value),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for ClosedPnlEntryFees {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        number_or_text(deserializer).map(|value| match value {
+            NumberOrText::Text(value) => Self::Variant0(value),
+            NumberOrText::Number(value) => Self::Variant1(value),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for ClosedPnlEntryContracts {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        number_or_text(deserializer).map(|value| match value {
+            NumberOrText::Text(value) => Self::Variant0(value),
+            NumberOrText::Number(value) => Self::Variant1(value),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for ClosedPnlEntryLeverage {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        number_or_text(deserializer).map(|value| match value {
+            NumberOrText::Text(value) => Self::Variant1(value),
+            NumberOrText::Number(value) => Self::Variant0(value),
+        })
     }
 }

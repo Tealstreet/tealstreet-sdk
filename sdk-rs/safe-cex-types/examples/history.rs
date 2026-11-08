@@ -1,3 +1,4 @@
+use safe_cex_types::retained_json;
 use safe_cex_types::{ExecutionPositionSide, OrderSide, OrderStatus, OrderType};
 use serde::Deserialize;
 use std::{fs, path::Path};

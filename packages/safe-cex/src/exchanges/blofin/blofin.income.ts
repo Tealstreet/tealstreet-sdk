@@ -31,7 +31,7 @@ const toNumber = (value: unknown) => {
 };
 
 export const mapBlofinFillToIncomeRecords = (
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   resolveSymbol: (instId: string) => string | undefined,
 ): IncomeRecord[] => {
   const timestamp = parseInt(String(row.ts ?? '0'), 10);
@@ -78,7 +78,7 @@ export const mapBlofinFillToIncomeRecords = (
 };
 
 export const mapBlofinClosedPosition = (
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   resolveSymbol: (instId: string) => string | undefined,
   accountName: string,
 ): ClosedPnlEntry | null => {
