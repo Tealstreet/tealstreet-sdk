@@ -1366,9 +1366,10 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                 let message = h.result(7).as_ref().expect_err(body);
                 let error = &h.failures.iter().find(|(id, _)| *id == 7).unwrap().1;
                 if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
-                    assert_eq!(
-                        error.message,
-                        safe_cex_engine::VenueError::unknown_write().message
+                    assert!(
+                        error
+                            .message
+                            .contains("The outcome is unknown. Check Open Orders")
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");

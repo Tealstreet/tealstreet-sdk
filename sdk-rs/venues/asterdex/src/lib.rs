@@ -1440,6 +1440,10 @@ impl Venue for AsterDex {
         self.on_trade_preflight_ready(cx, preflight);
     }
 
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::write_failure_text)
+    }
+
     fn unproven_http_evidence(
         &self,
         pending: &Pending,

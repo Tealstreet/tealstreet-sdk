@@ -15,9 +15,7 @@ use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
 };
-use safe_cex_engine::write_plan::{
-    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult,
-};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -68,6 +66,45 @@ impl Request {
             } => Intent::Amend,
             Call::Cancel { .. } | Call::CancelSymbol(_) => Intent::Cancel,
             _ => Intent::Setting,
+        }
+    }
+}
+
+pub(crate) const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+pub(crate) fn write_failure_text(error: &VenueError) -> String {
+    if error.outcome == Some(Outcome::Unknown) {
+        // Projection retains uncertainty context without its presentation marker.
+        if error.message.contains(ENGINE_UNKNOWN_TEXT) {
+            error.message.clone()
+        } else if error.presents || error.message.contains("Check Open Orders") {
+            format!("{}: {ENGINE_UNKNOWN_TEXT}", error.message)
+        } else {
+            ENGINE_UNKNOWN_TEXT.to_owned()
+        }
+    } else {
+        error.message.clone()
+    }
+}
+
+fn failed_element(mut error: VenueError) -> ElementResult {
+    if error
+        .partial
+        .as_ref()
+        .is_some_and(|p| !p.order_ids.is_empty())
+    {
+        error.outcome = Some(Outcome::Unknown);
+    }
+    match error.outcome {
+        Some(Outcome::NotSent | Outcome::Rejected) => ElementResult::NotSent {
+            error: Some(Box::new(error)),
+        },
+        _ => {
+            error.outcome = Some(Outcome::Unknown);
+            error.message = write_failure_text(&error);
+            ElementResult::Unknown {
+                error: Box::new(error),
+            }
         }
     }
 }
@@ -278,7 +315,7 @@ struct Job {
     restore: Option<Planned>,
     restoring: bool,
     steps: VecDeque<Planned>,
-    elements: Vec<ElementOutcome>,
+    journal: Option<WritePlan>,
     next_element: usize,
     ids: Vec<String>,
     successes: usize,
@@ -293,11 +330,11 @@ struct Job {
     replacing_order: Option<String>,
 }
 impl Job {
-    fn failure(&self, mut error: VenueError) -> VenueError {
-        if !self.elements.is_empty() {
-            error.elements = Some(Box::new(ElementOutcomes(self.elements.clone())));
+    fn failure(&self, error: VenueError) -> VenueError {
+        match &self.journal {
+            Some(journal) => journal.attach(error),
+            None => error,
         }
-        error
     }
     /// What a failed replacement cost, once its cancel has landed.
     fn gone_text(&self, unknown: bool) -> Option<String> {
@@ -513,8 +550,13 @@ impl AsterDex {
         let Pending::Trade(request) = &signed.pending else {
             return;
         };
-        if let Some(job) = self.trading.jobs.get(&request.command) {
-            evidence.write_plan_outcomes(job.elements.clone());
+        if let Some(journal) = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .and_then(|job| job.journal.as_ref())
+        {
+            evidence.write_plan(journal);
         }
     }
 
@@ -740,19 +782,16 @@ impl AsterDex {
                 (VenueError::new(error).kind(ErrorKind::InvalidInput), prune_on_refusal)
             })
             .and_then(|mut job| {
-                job.elements = job
+                job.journal = Some(WritePlan::new(job
                     .steps
                     .iter()
                     .chain(job.restore.iter())
                     .enumerate()
-                    .map(|(index, step)| ElementOutcome {
-                        element: Element {
-                            index,
-                            client_order_id: step.query.value("newClientOrderId").map(str::to_owned),
-                        },
-                        result: ElementResult::NotSent { error: None },
+                    .map(|(index, step)| Element {
+                        index,
+                        client_order_id: step.query.value("newClientOrderId").map(str::to_owned),
                     })
-                    .collect();
+                    .collect()));
                 // Validate the shared auth shape before reserving any split step.
                 if let Some(step) = job.steps.front()
                     && let Err((error, kind)) = self.check_signing(step.call.role())
@@ -945,13 +984,11 @@ impl AsterDex {
             }
             let write = job.next_element;
             job.next_element += 1;
-            if let Some(element) = job.elements.get_mut(write) {
-                element.result = ElementResult::Unknown {
-                    error: Box::new(
-                        VenueError::new("Write dispatched; awaiting outcome")
-                            .outcome(Outcome::Unknown),
-                    ),
-                };
+            if let Some(journal) = &mut job.journal {
+                let _ = journal.record(
+                    write,
+                    failed_element(VenueError::new(ENGINE_UNKNOWN_TEXT).outcome(Outcome::Unknown)),
+                );
             }
             let path = self.path(step.endpoint);
             // The request layer consumes the pending request and reports any
@@ -986,6 +1023,14 @@ impl AsterDex {
                 // A later rejection after a step took effect cannot mean nothing happened.
                 if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
                     error.outcome = None;
+                }
+                if error.outcome == Some(Outcome::Unknown) {
+                    cx.event(
+                        safe_cex_engine::Level::Warn,
+                        "write.unknown",
+                        ENGINE_UNKNOWN_TEXT,
+                        vec![("command", id.into()), ("outcome", "unknown".into())],
+                    );
                 }
                 cx.fail_plan(&plan, job.failure(error))
             }
@@ -1400,8 +1445,8 @@ impl AsterDex {
                     job.error = Some(error);
                 }
             }
-            if let Some(row) = request.write.and_then(|index| job.elements.get_mut(index)) {
-                row.result = if outcome.is_ok() || cancel_applied {
+            if let (Some(index), Some(journal)) = (request.write, &mut job.journal) {
+                let result = if outcome.is_ok() || cancel_applied {
                     if let Some(id) = &placed {
                         ElementResult::Placed {
                             order_ids: vec![id.clone()],
@@ -1413,14 +1458,15 @@ impl AsterDex {
                             position_key,
                         }
                     } else {
-                        ElementResult::failed(VenueError::new("Aster write acceptance is unproven"))
+                        failed_element(VenueError::new("Aster write acceptance is unproven"))
                     }
                 } else {
-                    ElementResult::failed(
+                    failed_element(
                         element_error
                             .unwrap_or_else(|| VenueError::new("Aster write outcome is unknown")),
                     )
                 };
+                let _ = journal.record(index, result);
             }
             if let Some(id) = placed {
                 job.ids.push(id);

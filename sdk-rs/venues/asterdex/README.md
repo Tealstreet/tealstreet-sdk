@@ -41,4 +41,6 @@ continuation), and 1000–1081 (cancel-replace and cancellation fan-out).
 Stop-after-Unknown is a recorded TS parity exception (Sean/daxx, 2026-11-08).
 An uncertain row ends the action with its placed/applied prefix, Unknown row
 and unsent suffix in the journal, standard Check Open Orders guidance and a
-`write.unknown` event. Definite refusals keep the TS continuation behavior.
+`write.unknown` event for venue-decoded failures. Engine-owned HTTP ambiguity
+seals still need a venue telemetry callback; this PR remains held for that helper
+change. Definite refusals keep the TS continuation behavior.

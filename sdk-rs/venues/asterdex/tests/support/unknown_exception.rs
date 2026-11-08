@@ -3,7 +3,7 @@ use super::*;
 use safe_cex_engine::write_plan::ElementResult;
 use safe_cex_engine::{Outcome, VenueError};
 
-const UNKNOWN: &str = "outcome is unknown. Check Open Orders, then try again";
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 #[derive(Clone, Copy, Debug)]
 enum Path {
@@ -28,14 +28,15 @@ enum Uncertain {
     MissingIdentity,
 }
 
-fn check(path: Path) {
-    for uncertain in [
-        Uncertain::NativeTimeout,
-        Uncertain::RateLimit,
-        Uncertain::Gateway,
-        Uncertain::Transport,
-        Uncertain::MissingIdentity,
-    ] {
+const VENUE_FAILURES: &[Uncertain] = &[
+    Uncertain::NativeTimeout,
+    Uncertain::RateLimit,
+    Uncertain::Transport,
+    Uncertain::MissingIdentity,
+];
+
+fn check(path: Path, cases: &[Uncertain]) {
+    for &uncertain in cases {
         if matches!(
             (path, uncertain),
             (Path::Cancels, Uncertain::MissingIdentity)
@@ -201,13 +202,13 @@ fn check(path: Path) {
             );
         }
         assert!(
-            error.message.contains(UNKNOWN),
+            error.message.contains(ENGINE_UNKNOWN_TEXT),
             "{label}: {}",
             error.message
         );
         if let ElementResult::Unknown { error } = &rows[pending].result {
             assert!(
-                error.message.contains(UNKNOWN),
+                error.message.contains(ENGINE_UNKNOWN_TEXT),
                 "{label}: {}",
                 error.message
             );
@@ -218,7 +219,7 @@ fn check(path: Path) {
             .filter(|event| event.code == "write.unknown")
             .collect();
         assert_eq!(events.len(), 1, "{label}: {:?}", h.events);
-        assert!(events[0].message.contains(UNKNOWN), "{label}");
+        assert!(events[0].message.contains(ENGINE_UNKNOWN_TEXT), "{label}");
         assert!(
             events[0]
                 .fields
@@ -263,51 +264,72 @@ fn check(path: Path) {
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:867,975-997.
 #[test]
 fn unknown_exception_max_quantity_split() {
-    check(Path::Split);
+    check(Path::Split, VENUE_FAILURES);
 }
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:975-997.
 #[test]
 fn unknown_exception_serial_batch() {
-    check(Path::Batch);
+    check(Path::Batch, VENUE_FAILURES);
 }
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:812-814,975-997.
 #[test]
 fn unknown_exception_protection_children() {
-    check(Path::Bracket);
+    check(Path::Bracket, VENUE_FAILURES);
 }
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:1040,867,975-997.
 #[test]
 fn unknown_exception_split_replacement() {
-    check(Path::Replace);
+    check(Path::Replace, VENUE_FAILURES);
 }
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:773-774,975-997.
 #[test]
 fn unknown_exception_admitted_algo_intents() {
-    check(Path::Capacity);
+    check(Path::Capacity, VENUE_FAILURES);
 }
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:1051-1076.
 #[test]
 fn unknown_exception_cancel_fanout() {
-    check(Path::Cancels);
+    check(Path::Cancels, VENUE_FAILURES);
 }
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:975-997.
 #[test]
 fn unknown_exception_runtime_placement() {
-    check(Path::Runtime);
+    check(Path::Runtime, VENUE_FAILURES);
 }
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:955-966,975-997.
 #[test]
 fn unknown_exception_conditional_batch() {
-    check(Path::Conditional);
+    check(Path::Conditional, VENUE_FAILURES);
 }
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:955-966,975-997.
 #[test]
 fn unknown_exception_market_without_mark() {
-    check(Path::Market);
+    check(Path::Market, VENUE_FAILURES);
 }
 
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts:975-997.
 #[test]
 fn unknown_exception_replaces_prior_refusal_text() {
-    check(Path::PriorRefusal);
+    check(Path::PriorRefusal, VENUE_FAILURES);
 }
+
+macro_rules! gateway_pin {
+    ($name:ident, $path:ident) => {
+        #[test]
+        fn $name() {
+            check(Path::$path, &[Uncertain::Gateway]);
+        }
+    };
+}
+
+// The same exception pins also cover the engine-owned HTTP seal independently.
+gateway_pin!(unknown_exception_gateway_split, Split);
+gateway_pin!(unknown_exception_gateway_batch, Batch);
+gateway_pin!(unknown_exception_gateway_bracket, Bracket);
+gateway_pin!(unknown_exception_gateway_replace, Replace);
+gateway_pin!(unknown_exception_gateway_capacity, Capacity);
+gateway_pin!(unknown_exception_gateway_cancels, Cancels);
+gateway_pin!(unknown_exception_gateway_runtime, Runtime);
+gateway_pin!(unknown_exception_gateway_conditional, Conditional);
+gateway_pin!(unknown_exception_gateway_market, Market);
+gateway_pin!(unknown_exception_gateway_prior_refusal, PriorRefusal);
