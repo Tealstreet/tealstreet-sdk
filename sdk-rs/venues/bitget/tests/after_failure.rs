@@ -651,6 +651,60 @@ fn unknown_pin(h: &Harness, placed: &[String], unknown_identity: &str) {
     }));
 }
 
+#[test]
+fn classic_batch_row_timeout_emits_unknown_once_without_suffix_writes() {
+    for accepted_rows in [false, true] {
+        let mut h = ready(false);
+        let mut orders = vec![normal(1.0); 51];
+        orders.push(stop());
+        place(&mut h, orders);
+        let (first, body) = take_write(&mut h, "/batch-place-order");
+        let rows = body["orderList"].as_array().unwrap();
+        let unknown = rows[0]["clientOid"].as_str().unwrap();
+        let successes: Vec<_> = rows.iter().skip(1).filter(|_| accepted_rows).map(|row| {
+            json!({"orderId":format!("native-{}",row["clientOid"].as_str().unwrap()),"clientOid":row["clientOid"]})
+        }).collect();
+        let placed: Vec<_> = successes
+            .iter()
+            .map(|row| row["orderId"].as_str().unwrap().to_owned())
+            .collect();
+        h.reply(first.id, 200, &json!({"code":"00000","data":{
+            "successList":successes,
+            "failureList":[{"clientOid":unknown,"errorCode":"40010","errorMsg":"Request timed out"}]
+        }}).to_string());
+        assert_eq!(
+            h.failures[0].outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+        assert_eq!(
+            h.events
+                .iter()
+                .filter(|event| event.code == "order.outcome_unknown")
+                .count(),
+            1
+        );
+        unknown_pin(&h, &placed, unknown);
+        assert!(h.failures[0].message.contains(ENGINE_UNKNOWN_TEXT));
+        let event = h
+            .events
+            .iter()
+            .find(|event| event.code == "order.outcome_unknown")
+            .unwrap();
+        assert_eq!(event.message, ENGINE_UNKNOWN_TEXT);
+        accepted(&mut h, first, &body);
+        unknown_pin(&h, &placed, unknown);
+    }
+    let mut h = ready(false);
+    place(&mut h, vec![normal(1.0)]);
+    let (request, body) = take_write(&mut h, "/batch-place-order");
+    row_refusal(&mut h, request, &body, false);
+    assert!(
+        !h.events
+            .iter()
+            .any(|event| event.code == "order.outcome_unknown")
+    );
+}
+
 fn unknown_placement_sequence(split: bool, bare: bool, attached: bool) {
     for uta in [false, true] {
         let mut h = ready(uta);

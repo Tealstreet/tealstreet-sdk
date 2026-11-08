@@ -1858,11 +1858,7 @@ impl BitgetFutures {
             if max <= 0.0 {
                 return Err("Bitget maximum size is smaller than one lot".into());
             }
-            let max = if !self.account.uta && cap.is_finite() {
-                cap
-            } else {
-                max
-            };
+            let max = if cap.is_finite() { cap } else { max };
             let count = (total / max).ceil() as usize;
             if o.client_order_id.is_some() && count > 1 {
                 return Err("Bitget caller clientOrderId would split across native orders".into());
@@ -1870,21 +1866,8 @@ impl BitgetFutures {
             if count > 10_000 {
                 return Err("Bitget order exceeds the split bound".into());
             }
-            if self.account.uta {
-                let mut left = total;
-                while left > 0.0 {
-                    let size = left.min(max);
-                    left = num::adjust(left - size, m.precision.amount);
-                    calls.push(Planned {
-                        path: paths::UTA_PLACE,
-                        payload: self.normal_payload(cx, o, size)?,
-                        effect: Effect::Place { expected: 1 },
-                    });
-                }
-                continue;
-            }
-            // TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2059-2073.
-            // Classic repeats the rounded equal lot, then appends its rounded remainder.
+            // TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2059-2073,2127-2141.
+            // Both routes repeat the rounded equal lot, then append its rounded remainder.
             let rest = if total > max {
                 num::adjust(total % max, m.precision.amount)
             } else {
@@ -1893,7 +1876,14 @@ impl BitgetFutures {
             let size = num::adjust((total - rest) / count as f64, m.precision.amount);
             for size in std::iter::repeat_n(size, count).chain((rest != 0.0).then_some(rest)) {
                 let payload = self.normal_payload(cx, o, size)?;
-                if let Some((_, group)) = groups.iter_mut().find(|(symbol, _)| symbol == &o.symbol)
+                if self.account.uta {
+                    calls.push(Planned {
+                        path: paths::UTA_PLACE,
+                        payload,
+                        effect: Effect::Place { expected: 1 },
+                    });
+                } else if let Some((_, group)) =
+                    groups.iter_mut().find(|(symbol, _)| symbol == &o.symbol)
                 {
                     group.push(payload);
                 } else {
@@ -3471,7 +3461,9 @@ impl BitgetFutures {
             let (_, _, native_unknown) =
                 self.record_once(cx, &request, native, answer, &message, &mut recorded);
             let mut error = match &parsed {
-                _ if unproven => VenueError::new(message).outcome(Outcome::Unknown),
+                _ if unproven || batch_unknown => {
+                    VenueError::new(message).outcome(Outcome::Unknown)
+                }
                 Ok(reply) if explicit_rejection => {
                     // The table's kind for the native code, else its documented
                     // status row; a 401/403/429 carries no code (`native_code`).

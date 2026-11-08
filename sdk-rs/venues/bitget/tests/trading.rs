@@ -283,21 +283,40 @@ fn caller_id_rejects_brackets_stops_and_precision_induced_split() {
 
 #[test]
 fn classic_lot_allocation_matches_the_six_ts_audit_sequences() {
+    assert_lot_allocation(false);
+}
+
+#[test]
+fn uta_lot_allocation_matches_the_six_ts_audit_sequences() {
+    assert_lot_allocation(true);
+}
+
+fn assert_lot_allocation(unified: bool) {
     let mut mismatches = vec![];
-    for (amount, max, step, expected) in [
-        (26.0, 5.0, 1.0, vec!["4", "4", "4", "4", "4", "4", "1"]),
-        (11.0, 5.0, 1.0, vec!["3", "3", "3", "1"]),
-        (12.0, 5.0, 1.0, vec!["3", "3", "3", "2"]),
-        (10.0, 5.0, 1.0, vec!["5", "5"]),
-        (7.0, 3.0, 0.5, vec!["2", "2", "2", "1"]),
+    for (amount, max, step, expected, expected_sum) in [
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+        (
+            26.0,
+            5.0,
+            1.0,
+            vec!["4", "4", "4", "4", "4", "4", "1"],
+            25.0,
+        ),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+        (11.0, 5.0, 1.0, vec!["3", "3", "3", "1"], 10.0),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+        (12.0, 5.0, 1.0, vec!["3", "3", "3", "2"], 11.0),
+        (10.0, 5.0, 1.0, vec!["5", "5"], 10.0),
+        (7.0, 3.0, 0.5, vec!["2", "2", "2", "1"], 7.0),
         (
             1.0005,
             0.3,
             0.001,
             vec!["0.225", "0.225", "0.225", "0.225", "0.101"],
+            1.001,
         ),
     ] {
-        let mut h = Harness::classic();
+        let mut h = if unified { uta() } else { Harness::classic() };
         h.engine.store_mut().update_markets(|market| {
             market.precision.amount = step;
             market.limits.amount.min = step;
@@ -306,23 +325,46 @@ fn classic_lot_allocation_matches_the_six_ts_audit_sequences() {
         let mut order = limit();
         order["amount"] = json!(amount);
         place(&mut h, vec![order]);
-        let (request, payload) = body(&mut h, "/batch-place-order");
-        let actual: Vec<_> = payload["orderList"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|row| row["size"].as_str().unwrap())
-            .collect();
+        let mut actual = vec![];
+        while h.done.is_empty() {
+            if unified {
+                let (request, payload) = body(&mut h, "/place-order");
+                actual.push(payload["qty"].as_str().unwrap().to_owned());
+                h.reply(
+                    request,
+                    200,
+                    &json!({"code":"00000","data":{"orderId":format!("native-{}", actual.len())}})
+                        .to_string(),
+                );
+            } else {
+                let (request, payload) = body(&mut h, "/batch-place-order");
+                actual.extend(
+                    payload["orderList"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|row| row["size"].as_str().unwrap().to_owned()),
+                );
+                let ids: Vec<_> = (0..actual.len())
+                    .map(|index| format!("native-{index}"))
+                    .collect();
+                batch_success(
+                    &mut h,
+                    request,
+                    &ids.iter().map(String::as_str).collect::<Vec<_>>(),
+                );
+            }
+        }
         if actual != expected {
             mismatches.push(format!("{amount}/{max}/{step}: {actual:?} != {expected:?}"));
         }
-        let ids: Vec<_> = (0..actual.len())
-            .map(|index| format!("native-{index}"))
-            .collect();
-        batch_success(
-            &mut h,
-            request,
-            &ids.iter().map(String::as_str).collect::<Vec<_>>(),
+        let sum: f64 = actual
+            .iter()
+            .map(|quantity| quantity.parse::<f64>().unwrap())
+            .sum();
+        assert!(
+            (sum - expected_sum).abs() < 1e-12,
+            "{amount}/{max}/{step}: sum {sum} != {expected_sum}"
         );
         assert!(h.done[0].1.is_ok());
         assert!(
@@ -1178,7 +1220,7 @@ fn split_batch_and_uta_receipts_match_only_dispatched_native_ids() {
         o["amount"] = json!(7);
         place(&mut h, vec![o]);
         let mut ids = Vec::new();
-        for _ in 0..if unified { 3 } else { 1 } {
+        for _ in 0..if unified { 4 } else { 1 } {
             let request = h.take(if unified {
                 "/place-order"
             } else {
@@ -1222,7 +1264,7 @@ fn split_batch_and_uta_receipts_match_only_dispatched_native_ids() {
                 batch_success(&mut h, request.id, &["a", "b", "c", "d"]);
             }
         }
-        let expected = if unified { 3 } else { 4 };
+        let expected = 4;
         assert_eq!(ids.len(), expected);
         assert_eq!(
             ids.iter().collect::<std::collections::HashSet<_>>().len(),
