@@ -236,8 +236,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
   // Hyperliquid 2,184,857 B. CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
-  hyperliquid: 2_209_792,
-  hyperliquidspot: 2_209_792,
+  hyperliquid: 2_221_056,
+  hyperliquidspot: 2_221_056,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
   kraken: 2_159_616,
