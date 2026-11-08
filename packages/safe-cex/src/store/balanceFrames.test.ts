@@ -9,6 +9,7 @@ import { emptyBalance } from '../generated/Balance';
 import { getBalanceSlice } from '../utils/getBalanceSlice';
 import { getTotalBalanceFromBalance } from '../utils/getTotalBalanceFromBalance';
 import { readBalanceFrame } from './balanceFrames';
+import { FrameApplier } from './frameApplier';
 import { DefaultStore } from './store.base';
 
 type Fixture = { name: string; bytes: number[] };
@@ -92,6 +93,24 @@ describe('native Balance frames into the generated contract', () => {
     expect(readBalanceFrame(frame('currencies-only'))).not.toHaveProperty('coins');
     expect(readBalanceFrame(frame('empty-coins'))).toHaveProperty('coins', {});
     expect(readBalanceFrame(frame('empty-coins'))).not.toHaveProperty('currencies');
+  });
+  it.each(['zero', 'currencies-only'])('replaces rich balance maps through FrameApplier with %s', (next) => {
+    const store = new DefaultStore();
+    const applier = new FrameApplier(store);
+    applier.apply(frame('rich'));
+    const previous = store.serialize().balance;
+    assert.ok(previous.coins);
+    assert.ok(previous.currencies);
+    expect(previous.coins.BTC.amount).toBe(0);
+
+    applier.apply(frame(next));
+    expect(store.balance).toEqual(requiredBalance(next));
+    expect(store.balance).not.toHaveProperty('coins');
+    expect(store.serialize().balance).toEqual(requiredBalance(next));
+    if (next === 'zero') expect(store.balance).not.toHaveProperty('currencies');
+    else expect(store.balance.currencies).toEqual(requiredBalance(next).currencies);
+    expect(previous.coins.BTC.amount).toBe(0);
+    expect(previous.currencies.USD.total).toBe(19);
   });
   it('retains native nonfinite numbers and signed zero rather than fabricating display defaults', () => {
     const balance = requiredBalance('nonfinite');
