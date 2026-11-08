@@ -9,10 +9,11 @@ The legacy TypeScript adapters define the correct behaviour. It has been tuned o
 - Rust matches what the legacy TypeScript did, including its validation, its write order, and any compensating writes it performs (protective restores, amend-to-replace fallbacks, endpoint fallbacks, algo re-placement).
 - Where Rust deviates from the TypeScript, the fix makes Rust match the TypeScript. A behaviour the TypeScript lacked is not added in a parity change.
 - Where the TypeScript also places a split order partially, or leaves another known gap, that is recorded as a known issue for a separate product decision, not changed in a port fix.
+- After a refused or failed element, Rust does what the TypeScript does for that path: where the TypeScript continues with the remaining writes, Rust continues; where it stops, Rust stops. No shared helper imposes stop-at-first-failure.
 
 ## Outcome reporting
 
-Per-element outcome reporting (`placed`, `applied`, `notSent`, `unknown`) records what happened without changing which writes are sent:
+Per-element outcome reporting (`placed`, `applied`, `notSent`, `unknown`) records what happened for whatever writes the venue's TypeScript-parity path sends. The reporting layer never decides which writes are sent, never stops dispatch, and never refuses a plan the TypeScript would send:
 
 - Accepted elements are `placed` (new order id) or `applied` (accepted effect with no new order id).
 - Elements the venue definitively refused, and elements never sent, are `notSent`.
@@ -22,6 +23,6 @@ Per-element outcome reporting (`placed`, `applied`, `notSent`, `unknown`) record
 
 Every PR that touches such a path:
 
-- Cites the legacy TypeScript reference for that path (file and line), and states whether the TypeScript validates the whole plan before writing.
+- Cites the legacy TypeScript reference for that path (file and line), states whether the TypeScript validates the whole plan before writing, and states whether it continues or stops after a refused element.
 - Carries a parity test showing the Rust write sequence matches the TypeScript for that path. Use a scripted transport that records every request, and cover at least one predictably invalid element and one runtime refusal.
 - States in the PR body whether the defect was a parity gap (fixed here) or legacy TypeScript behaviour (known issue, unchanged).
