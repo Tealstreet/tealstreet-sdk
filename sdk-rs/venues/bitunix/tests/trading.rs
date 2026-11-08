@@ -504,7 +504,7 @@ fn nonmultiple_ts_equal_lots_pin_integer_sum() {
     assert_ts_allocated_writes(250.0, 100.0, 1.0, &["67", "67", "67", "50"], 251.0);
 }
 #[test]
-// KNOWN-ISSUE: legacy TS under-allocates (sum 0.9 of requested 1); kept for parity per Sam; decision pending
+// KNOWN-ISSUE: legacy TS under-allocates (sum 0.9 of requested 1); kept for exact TS parity per Sam's decision
 fn nonmultiple_ts_equal_lots_pin_tenth_step_sum() {
     assert_ts_allocated_writes(1.0, 0.3, 0.1, &["0.2", "0.2", "0.2", "0.2", "0.1"], 0.9);
 }
@@ -1912,17 +1912,17 @@ fn assert_ts_allocated_writes(amount: f64, maximum: f64, step: f64, expected: &[
 }
 
 #[test]
-// KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+// KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
 fn alloc_ts_26_5_1() {
     assert_ts_allocated_writes(26.0, 5.0, 1.0, &["4", "4", "4", "4", "4", "4", "1"], 25.0);
 }
 #[test]
-// KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+// KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
 fn alloc_ts_11_5_1() {
     assert_ts_allocated_writes(11.0, 5.0, 1.0, &["3", "3", "3", "1"], 10.0);
 }
 #[test]
-// KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+// KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
 fn alloc_ts_12_5_1() {
     assert_ts_allocated_writes(12.0, 5.0, 1.0, &["3", "3", "3", "2"], 11.0);
 }
@@ -2028,4 +2028,22 @@ fn unknown_second_chunk_reports_accepted_ids_current_clients_and_withheld_tail()
             ("withheld", "clientOrderId", "inventory-10"),
         ],
     );
+}
+
+#[test]
+// KNOWN-ISSUE: legacy TS rounds above-max lots (sum 2 of requested 1.9); kept for exact TS parity per Sam's decision
+fn alloc_ts_rounded_lots_above_maximum() {
+    assert_ts_allocated_writes(1.9, 0.95, 0.1, &["1", "1"], 2.0);
+}
+
+#[test]
+// KNOWN-ISSUE: legacy TS rounds above-max lots (sum 6 of requested 5); kept for exact TS parity per Sam's decision
+fn alloc_ts_rounded_whole_unit_lots_above_maximum() {
+    assert_ts_allocated_writes(5.0, 2.5, 1.0, &["3", "3"], 6.0);
+}
+
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 1.9 of requested 2); kept for exact TS parity per Sam's decision
+fn alloc_ts_rounded_lots_adjacent_underallocation_control() {
+    assert_ts_allocated_writes(2.0, 0.95, 0.1, &["0.6", "0.6", "0.6", "0.1"], 1.9);
 }

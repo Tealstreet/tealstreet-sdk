@@ -398,8 +398,9 @@ fn split_quantities(
         0.0
     };
     let lot_size = num::adjust((amount - rest) / lots, step);
+    // Retain TS's rounded lots even when rounding crosses the maximum.
     let quantity = |value: f64| -> Result<f64, String> {
-        if !value.is_finite() || value < minimum || value <= 0.0 || value > maximum {
+        if !value.is_finite() || value < minimum || value <= 0.0 {
             return Err("Bitunix split quantity is outside native lot limits".into());
         }
         Ok(value)
@@ -2925,11 +2926,14 @@ mod split_tests {
 
     #[test]
     fn ts_equal_lots_keep_input_checks_and_the_equal_lot_count_bound() {
-        // KNOWN-ISSUE: legacy TS under-allocates (sum 1.9 of requested 2); kept for parity per Sam; decision pending
+        let rounded_above_max = split_quantities(1.9, 0.1, 0.1, 0.95).unwrap();
+        assert_eq!(rounded_above_max, [1.0, 1.0]);
+        assert_eq!(rounded_above_max.iter().sum::<f64>(), 2.0);
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 1.9 of requested 2); kept for exact TS parity per Sam's decision
         let awkward = split_quantities(2.0, 0.1, 0.1, 0.95).unwrap();
         assert_eq!(awkward, [0.6, 0.6, 0.6, 0.1]);
         assert!((awkward.iter().sum::<f64>() - 1.9).abs() < 1e-12);
-        // KNOWN-ISSUE: legacy TS under-allocates (sum 0.9 of requested 1); kept for parity per Sam; decision pending
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 0.9 of requested 1); kept for exact TS parity per Sam's decision
         let tenths = split_quantities(1.0, 0.1, 0.1, 0.3).unwrap();
         assert_eq!(tenths, [0.2, 0.2, 0.2, 0.2, 0.1]);
         assert!((tenths.iter().sum::<f64>() - 0.9).abs() < 1e-12);
