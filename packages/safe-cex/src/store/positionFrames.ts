@@ -31,9 +31,9 @@ export function readPositionFrame(frame: Frame, store: Store, markets?: readonly
     }
     const predictionHoldings = frame.predictionHoldings?.();
     const holdingFlags = predictionHoldings && new Map<number, number>();
-    if (predictionHoldings) {
+    if (predictionHoldings && holdingFlags) {
       for (let i = 0; i < predictionHoldings.count; i++)
-        holdingFlags!.set(predictionHoldings.market[i], predictionHoldings.flags[i]);
+        holdingFlags.set(predictionHoldings.market[i], predictionHoldings.flags[i]);
     }
     for (let i = 0; i < positions.count; i++) {
       const enums = positionEnums(positions.enums[i]);
