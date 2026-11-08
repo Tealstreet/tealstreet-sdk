@@ -1144,6 +1144,11 @@ impl Venue for Orderly {
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::History(request) => self.history_refused(cx, request, error),
+            Pending::Trade(request) => self.trade_failed(
+                cx,
+                request,
+                error.outcome(safe_cex_engine::Outcome::NotSent),
+            ),
             pending => self.on_sign_failed(cx, pending, &error.message),
         });
     }

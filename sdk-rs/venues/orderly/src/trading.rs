@@ -1035,7 +1035,7 @@ impl Orderly {
             reject_unsupported_order_controls(cx);
             return;
         }
-        if self.account.credentials.is_none()
+        if !self.signed()
             || !cx.store.loaded().orders
             || !cx.store.loaded().positions
             || !cx.store.loaded().balance
@@ -1195,36 +1195,41 @@ impl Orderly {
             }
             Effect::FetchLeverage { .. } => {}
         }
-        let credentials = self.account.credentials.as_ref().unwrap();
-        match credentials.headers(
-            step.method,
-            &step.path,
-            step.body.as_deref(),
-            cx.protocol_now(),
-        ) {
-            Ok(headers) => {
-                if let Effect::Place(order) = &step.effect
-                    && let Some(identity) = &order.client_order_id
-                {
-                    cx.command_progress(
-                        command,
-                        vec![OrderIdentityReceipt {
-                            symbol: order.symbol.clone(),
-                            kind: OrderIdentityKind::ClientOrderId,
-                            identity: identity.clone(),
-                        }],
-                    );
-                }
-                cx.request(
-                    step.method,
-                    format!("{}{}", self.rest(), step.path),
-                    headers,
-                    step.body.clone(),
-                    Pending::Trade(Request { command, step }),
-                );
-            }
-            Err(e) => self.trade_failed(cx, Request { command, step }, not_sent(e)),
+        let Some(identity) = self.options.identities.primary.clone() else {
+            self.trade_failed(
+                cx,
+                Request { command, step },
+                not_sent("Orderly primary identity unavailable"),
+            );
+            return;
+        };
+        if let Effect::Place(order) = &step.effect
+            && let Some(identity) = &order.client_order_id
+        {
+            cx.command_progress(
+                command,
+                vec![OrderIdentityReceipt {
+                    symbol: order.symbol.clone(),
+                    kind: OrderIdentityKind::ClientOrderId,
+                    identity: identity.clone(),
+                }],
+            );
         }
+        let recipe = Box::new(crate::sign::Http::new(
+            identity,
+            self.options.application_id.as_deref().unwrap_or_default(),
+            step.method,
+            self.rest(),
+            &step.path,
+        ));
+        let request = cx.request(
+            step.method,
+            format!("{}{}", self.rest(), step.path),
+            vec![],
+            step.body.clone(),
+            Pending::Trade(Request { command, step }),
+        );
+        cx.sign_http(request, recipe);
     }
     pub(crate) fn trade_response(
         &mut self,

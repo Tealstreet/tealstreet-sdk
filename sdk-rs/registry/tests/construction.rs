@@ -772,10 +772,7 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             "hyperliquidspot",
             "Hyperliquid requires its primary signing provider",
         ),
-        (
-            "orderly",
-            "Injected signing is not supported for this venue yet",
-        ),
+        ("orderly", "Orderly remote signing admission is closed"),
     ] {
         assert_eq!(
             rejected(

@@ -4042,8 +4042,12 @@ name = "safe-cex-remote-signer"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bs58",
  "getrandom 0.2.17",
+ "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venues",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "tokio",

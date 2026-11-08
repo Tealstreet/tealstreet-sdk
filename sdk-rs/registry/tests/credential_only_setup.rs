@@ -33,7 +33,7 @@ impl safe_cex_venues::Visit for Accept {
 /// Omni, the eighth, is pinned after the socket sign-failure fix lane.
 #[test]
 fn k4_non_validating_crates_without_dispatch_signing_refuse_injected_identities() {
-    for venue in ["orderly", "polymarket"] {
+    for venue in ["polymarket"] {
         for primary in [
             r#"{"credential":"primary.credential","signing":""}"#,
             r#"{"credential":"","signing":"primary.signing"}"#,

@@ -3,6 +3,8 @@
 //! through a [`Visit`]or; each venue's construction rules live here.
 #[cfg(feature = "mexc")]
 mod mexc_setup;
+#[cfg(feature = "orderly")]
+mod orderly_setup;
 #[cfg(not(any(
     feature = "grvt",
     feature = "paradex",
@@ -329,10 +331,12 @@ fn orderly_rules(options: &EngineOptions) -> Result<(), VenueError> {
     {
         return Err(invalid("Orderly private applicationId is required"));
     }
-    if !safe_cex_venue_orderly::signing_keys_valid(
-        options.key.as_deref().unwrap_or_default(),
-        options.secret.as_deref().unwrap_or_default(),
-    ) {
+    if options.signing.is_none()
+        && !safe_cex_venue_orderly::signing_keys_valid(
+            options.key.as_deref().unwrap_or_default(),
+            options.secret.as_deref().unwrap_or_default(),
+        )
+    {
         return Err(invalid(
             "Orderly requires base58-encoded 32-byte key and secret",
         ));
@@ -1404,7 +1408,7 @@ pub fn build_with_signer<T: Visit>(
     venue: &str,
     mut options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
-    signer: Option<safe_cex_engine::signing::Provider>,
+    mut signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
     #[cfg(feature = "polymarket")]
@@ -1415,7 +1419,20 @@ pub fn build_with_signer<T: Visit>(
     if !supported(venue) {
         return Err(unsupported_venue(venue));
     }
+    let orderly = cfg!(feature = "orderly")
+        && matches!(venue, "orderly" | "kodiakfi" | "mode" | "what" | "woofi");
+    let orderly_injected = orderly && (options.signing.is_some() || signer.is_some());
+    if orderly && construction::signer_setup_public_data_only(&options) {
+        options.public_data_only = true;
+        options.signing = None;
+        signer = None;
+    }
+    // Explicit provider injection is trusted native setup, not hosted admission.
+    if orderly_injected && options.remote_signing && !options.public_data_only {
+        return Err(invalid("Orderly remote signing admission is closed"));
+    }
     if (options.signing.is_some() || signer.is_some())
+        && !orderly
         && !construction::bridge(venue, &options).dispatch_signing
     {
         return Err(invalid(
@@ -1430,7 +1447,9 @@ pub fn build_with_signer<T: Visit>(
                 .map_err(|_| invalid("Invalid local signer setup"))?;
         }
     }
-    if let Some(mode) = construction::resolve(venue, &options) {
+    if let Some(mode) = construction::resolve(venue, &options)
+        && !(orderly_injected && !options.public_data_only)
+    {
         if let Some(error) = mode.explicit_private_error {
             return Err(invalid(error));
         }
@@ -1779,7 +1798,13 @@ pub fn build_with_signer<T: Visit>(
         #[cfg(feature = "orderly")]
         "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => {
             orderly_rules(&options)?;
-            let (provider, identities) = orderly_signer(&options)?;
+            let (provider, identities) = if options.signing.is_some() || signer.is_some() {
+                orderly_setup::injected(&mut options, signer)?
+            } else {
+                orderly_signer(&options)?
+            };
+            // The venue keeps metadata and refs; only its provider owns a seed.
+            safe_cex_crypto::secrets::erase(&mut options.secret);
             let mut engine = Engine::new(
                 Orderly::new(OrderlyOptions {
                     broker: match venue {
