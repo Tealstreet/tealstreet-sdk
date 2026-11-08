@@ -63,3 +63,19 @@ malformed replies cannot release a second DELETE. Unknown write warnings and
 terminals, including native `500000` and transport failures, direct callers to
 Check Open Orders while retaining native diagnostics. An exhausted cancellation
 confirmation read emits its warning after adding the same uncertainty guidance.
+
+## Hosted signing for Spot
+
+KuCoin Spot shares Futures' dispatch-time HMAC-SHA256 recipe: timestamp, method,
+path/query and exact body bytes, plus a separate passphrase MAC and optional
+broker MAC. RemoteSigner resolves the whole `kucoin-batch` atomically on the
+device, using the selected primary or secondary API-key slot. The origin keeps
+only public identity and opaque refs. Private WebSocket authentication uses the
+signed `POST /api/v1/bullet-private` request and the returned socket token.
+
+Private `PayloadSigner` is unsupported (`unsupported` / `notSent`): signing one request
+payload cannot produce the separate device-owned passphrase and broker MACs.
+There is no agent/API-wallet signing mode in this integration. See
+[`kucoinspot-hosted-signing.md`](../../../docs/plans/callers/kucoinspot-hosted-signing.md)
+for caller impact and deterministic parity coverage. Explicit public-only accounts
+ignore unused signing configuration and install no signing authority.
