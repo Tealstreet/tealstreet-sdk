@@ -54,19 +54,9 @@ struct View {
     started: std::cell::RefCell<Vec<safe_cex_algo_twap::ChaserRequest>>,
     refuse_chasers: std::cell::Cell<bool>,
     step: Option<f64>,
-    rules: Option<safe_cex_algo_twap::plan::OrderRules>,
 }
 
 impl TwapMarketView for View {
-    fn order_rules(
-        &self,
-        _request: &safe_cex_algo_twap::TwapOrderRequest,
-    ) -> Option<safe_cex_algo_twap::plan::OrderRules> {
-        Some(safe_cex_algo_twap::plan::OrderRules {
-            amount_step: self.step,
-            ..self.rules.unwrap_or_default()
-        })
-    }
     fn amount_step(&self, _symbol: &str) -> Option<f64> {
         self.step
     }
@@ -1538,71 +1528,4 @@ fn a_restored_paused_twap_is_persisted_so_the_host_sees_it_adopted() {
     let effects = book.handle("twap:state", &restore, &mut env, &view);
     let persisted = state_updates(&effects).last().copied().unwrap().clone();
     assert_eq!(persisted["restored"]["state"]["status"], "paused");
-}
-
-#[test]
-fn random_pair_valid_first_subminimum_second_refuses_before_any_dispatch() {
-    for chaser in [false, true] {
-        let mut env = Env::new();
-        env.units = vec![0.999_999];
-        let view = View {
-            step: Some(1.0),
-            rules: Some(safe_cex_algo_twap::plan::OrderRules {
-                minimum_amount: 2.0,
-                maximum_amount: 10.0,
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let mut book = TwapBook::new("test-account");
-        let options = serde_json::from_value(options(json!({
-            "size": 4, "ordersCount": 2, "randomnessPercentage": 50, "useChaserOrders": chaser
-        })))
-        .unwrap();
-        let (result, effects) = book.start(options, &mut env, &view);
-        let error = result.expect_err("3 followed by 1 must refuse as a whole");
-        assert_eq!(
-            error.kind,
-            Some(safe_cex_engine::error::ErrorKind::InvalidInput)
-        );
-        assert_eq!(
-            error.outcome,
-            Some(safe_cex_engine::error::Outcome::NotSent)
-        );
-        assert!(placements(&effects).is_empty());
-        assert!(view.started.borrow().is_empty());
-        assert!(book.ids().next().is_none());
-    }
-}
-
-#[test]
-fn last_slice_notional_refuses_the_complete_plan_at_the_native_reference() {
-    let mut env = Env::new();
-    env.units = vec![0.999_999];
-    let view = View {
-        step: Some(1.0),
-        rules: Some(safe_cex_algo_twap::plan::OrderRules {
-            minimum_amount: 1.0,
-            maximum_amount: 10.0,
-            notional: Some(safe_cex_algo_twap::plan::NotionalRule {
-                minimum: 20.0,
-                per_unit: 10.0,
-            }),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-    let mut book = TwapBook::new("test-account");
-    let options = serde_json::from_value(options(json!({
-        "size": 4, "ordersCount": 2, "randomnessPercentage": 50
-    })))
-    .unwrap();
-    let (result, effects) = book.start(options, &mut env, &view);
-    let error = result.expect_err("last slice costs 10, below native minimum 20");
-    assert_eq!(
-        error.outcome,
-        Some(safe_cex_engine::error::Outcome::NotSent)
-    );
-    assert!(error.message.contains("notional"));
-    assert!(placements(&effects).is_empty());
 }

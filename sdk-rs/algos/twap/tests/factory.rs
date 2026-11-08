@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
 
+#[derive(Default)]
 struct Port {
     store: RefCell<AlgoStore>,
     ids: Cell<CommandId>,
@@ -24,23 +25,6 @@ struct Port {
     fail: Cell<bool>,
     fail_outcome: Cell<Option<safe_cex_engine::error::Outcome>>,
     answer_ms: Cell<u64>,
-}
-
-impl Default for Port {
-    fn default() -> Self {
-        let mut store = AlgoStore::default();
-        let market = market();
-        store.markets.insert(market.symbol.clone(), market);
-        Self {
-            store: RefCell::new(store),
-            ids: Cell::new(0),
-            commands: RefCell::new(Vec::new()),
-            emits: RefCell::new(Vec::new()),
-            fail: Cell::new(false),
-            fail_outcome: Cell::new(None),
-            answer_ms: Cell::new(0),
-        }
-    }
 }
 
 impl AccountPort for Port {
@@ -528,7 +512,7 @@ async fn typed_start_and_stop_for_the_exec_twap_command() {
             unbounded.orders_count = u32::MAX;
             let emitted = port.emits.borrow().len();
             assert_eq!(
-                factory.start(unbounded).map_err(|error| error.message),
+                factory.start(unbounded),
                 Err("TWAP BTCUSDT rejected: ordersCount must be between 1 and 1000".to_owned())
             );
             assert_eq!(
@@ -585,141 +569,6 @@ async fn refusals_reach_the_user_as_errors() {
                 )]
             );
             assert!(placed_amounts(&port).is_empty());
-        })
-        .await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn last_wire_slice_above_max_refuses_with_zero_transport_requests() {
-    LocalSet::new()
-        .run_until(async {
-            let port = Rc::new(Port::default());
-            let mut rules = market();
-            rules.precision.amount = 1.0;
-            rules.limits.amount = MinMax { min: 1.0, max: 1.5 };
-            port.store
-                .borrow_mut()
-                .markets
-                .insert(rules.symbol.clone(), rules);
-            let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
-            let options = serde_json::from_str(&twap_options(json!({ "size": 3 }))).unwrap();
-            // Exact wire quantities are 1 then 2 after carrying the first slice's dust.
-            let error: VenueError = factory.start(options).expect_err("invalid last slice");
-            assert_eq!(
-                error.kind,
-                Some(safe_cex_engine::error::ErrorKind::InvalidInput)
-            );
-            assert_eq!(
-                error.outcome,
-                Some(safe_cex_engine::error::Outcome::NotSent)
-            );
-            settle().await;
-            assert!(
-                port.commands.borrow().is_empty(),
-                "every transport command is recorded"
-            );
-            assert!(factory.active_twaps("a").is_empty());
-        })
-        .await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn restored_valid_first_subminimum_last_refuses_before_resume() {
-    LocalSet::new()
-        .run_until(async {
-            let port = Rc::new(Port::default());
-            let mut rules = market();
-            rules.precision.amount = 1.0;
-            rules.limits.amount = MinMax {
-                min: 2.0,
-                max: 10.0,
-            };
-            port.store
-                .borrow_mut()
-                .markets
-                .insert(rules.symbol.clone(), rules);
-            let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
-            let options: Value = serde_json::from_str(&twap_options(
-                json!({ "size": 4, "randomnessPercentage": 50 }),
-            ))
-            .unwrap();
-            let state = json!({ "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" },
-            "size": 4, "ordersSizes": [3, 1], "side": "buy", "status": "paused",
-            "ordersCount": 2, "ordersExecuted": 0, "nextOrderAt": 0 });
-            factory
-                .handle(
-                    "twap:state",
-                    &json!([{ "id": "restored", "options": options, "state": state }]).to_string(),
-                    &cx,
-                )
-                .unwrap();
-            factory.handle("twap:resume", r#""restored""#, &cx).unwrap();
-            settle().await;
-            tokio::time::advance(Duration::from_secs(120)).await;
-            settle().await;
-            assert!(
-                port.commands.borrow().is_empty(),
-                "must not dispatch the valid prefix"
-            );
-            assert!(factory.active_twaps("a").is_empty());
-            assert!(port.emits.borrow().iter().any(|(op, data)| op == "error"
-                && data.as_str().is_some_and(|text| text.contains("minimum"))));
-        })
-        .await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn all_valid_wire_slices_dispatch_once_with_reduce_only_and_ids() {
-    LocalSet::new().run_until(async {
-        let port = Rc::new(Port::default());
-        let mut rules = market();
-        rules.precision.amount = 1.0;
-        rules.limits.amount = MinMax { min: 2.0, max: 3.0 };
-        port.store.borrow_mut().markets.insert(rules.symbol.clone(), rules);
-        port.store.borrow_mut().venue = "binance".to_owned();
-        let cx = AlgoCx::new(port.clone(), Scope::new());
-        let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
-        let options = serde_json::from_str(&twap_options(json!({ "size": 4, "reduceOnly": true }))).unwrap();
-        factory.start(options).unwrap();
-        settle().await;
-        tokio::time::advance(Duration::from_secs(31)).await;
-        settle().await;
-        assert_eq!(placed_amounts(&port), [2.0, 2.0]);
-        let commands = port.commands.borrow();
-        assert_eq!(commands.len(), 2);
-        let orders: Vec<_> = commands.iter().flat_map(|command| match command {
-            Command::PlaceOrders { orders, .. } => orders.iter().collect(),
-            _ => Vec::new(),
-        }).collect();
-        assert!(orders.iter().all(|order| order.reduce_only == Some(true) && order.client_order_id.is_some()));
-        assert_ne!(orders[0].client_order_id, orders[1].client_order_id);
-    }).await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn caller_market_cannot_replace_missing_native_rules() {
-    LocalSet::new()
-        .run_until(async {
-            let port = Rc::new(Port::default());
-            port.store.borrow_mut().markets.clear();
-            let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
-            let options = serde_json::from_str(&twap_options(json!({
-                "activeMarket": { "symbol": "BTCUSDT", "precision": { "amount": 0.001 },
-                    "limits": { "amount": { "min": 0.001, "max": 100 } } }
-            })))
-            .unwrap();
-            let error = factory
-                .start(options)
-                .expect_err("only the native store supplies rules");
-            assert_eq!(
-                error.outcome,
-                Some(safe_cex_engine::error::Outcome::NotSent)
-            );
-            settle().await;
-            assert!(port.commands.borrow().is_empty());
         })
         .await;
 }

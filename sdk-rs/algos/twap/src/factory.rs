@@ -111,7 +111,7 @@ impl TwapFactory {
 
     /// Start a TWAP for a typed caller such as the exec `twap` command, with
     /// the same validation and effects as `twap:start`. Returns the new id.
-    pub fn start(&self, options: TwapOptions) -> Result<String, VenueError> {
+    pub fn start(&self, options: TwapOptions) -> Result<String, String> {
         let cx = &self.inner.cx;
         let (started, effects) = {
             let mut env = self.inner.env.borrow_mut();
@@ -381,18 +381,6 @@ impl TwapMarketView for CxView<'_> {
             .markets
             .get(symbol)
             .map(|market| market.precision.amount)
-    }
-
-    fn order_rules(&self, request: &TwapOrderRequest) -> Option<crate::plan::OrderRules> {
-        let store = self.cx.port.store();
-        let market = store.markets.get(&request.symbol)?;
-        Some(crate::plan::OrderRules {
-            minimum_amount: market.limits.amount.min,
-            maximum_amount: market.limits.amount.max,
-            amount_step: Some(market.precision.amount),
-            price_tick: (market.precision.price != 0.0).then_some(market.precision.price),
-            notional: None,
-        })
     }
 
     /// As the chaser's: only the account's markets, never an order the venue would split.

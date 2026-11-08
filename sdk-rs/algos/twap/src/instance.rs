@@ -8,7 +8,6 @@ use crate::types::{
 use crate::{
     ChaserRequest, OrderKind, SliceFailure, TwapEffect, TwapEnv, TwapMarketView, TwapOrderRequest,
 };
-use safe_cex_engine::error::VenueError;
 use serde_json::Map;
 
 /// The chaser a slice spawns gives up after this many reprices, as in TS.
@@ -46,7 +45,6 @@ pub struct TwapInstance {
     pending: Vec<PendingSlice>,
     next_token: u64,
     state_changed: bool,
-    prepared: bool,
 }
 
 impl TwapInstance {
@@ -68,7 +66,6 @@ impl TwapInstance {
             pending: Vec::new(),
             next_token: 0,
             state_changed: false,
-            prepared: false,
         }
     }
 
@@ -103,65 +100,20 @@ impl TwapInstance {
         std::mem::take(&mut self.state_changed)
     }
 
-    /// Materialize every wire quantity, carrying dust before checking any slice.
-    pub(crate) fn prepare(&mut self, view: &dyn TwapMarketView) -> Result<(), VenueError> {
-        let mut sizes = self.state.orders_sizes.clone();
-        let step = view
+    /// `size` floored to the market's step; the rest rides on the next slice.
+    fn whole_steps(&mut self, size: f64, view: &dyn TwapMarketView) -> f64 {
+        let Some(step) = view
             .amount_step(self.options.symbol())
-            .filter(|step| step.is_finite() && *step > 0.0);
-        if !self.prepared
-            && let Some(step) = step
-        {
-            let original = sizes.iter().sum::<f64>();
-            let mut carry = 0.0;
-            for size in &mut sizes {
-                let raw = add(*size, carry);
-                let whole = multiply((raw / step + 1e-9).floor(), step);
-                carry = subtract(raw, whole);
-                *size = whole;
-            }
-            if (sizes.iter().sum::<f64>() - original).abs() > step * 1e-8 {
-                return Err(crate::plan::invalid(
-                    "TWAP size cannot be conserved on the native step",
-                ));
-            }
-        }
-        for size in &sizes {
-            let request = self.request(*size, view);
-            let rules = view
-                .order_rules(&request)
-                .ok_or_else(|| crate::plan::invalid("TWAP native market rules are unavailable"))?;
-            crate::plan::validate_write(&crate::plan::PlannedOrder { request, rules })?;
-        }
-        self.state.orders_sizes = sizes;
-        self.prepared = true;
-        Ok(())
-    }
-
-    fn request(&self, amount: f64, view: &dyn TwapMarketView) -> TwapOrderRequest {
-        let symbol = self.options.symbol().to_owned();
-        let price = if self.options.use_limit_orders || self.options.use_chaser_orders {
-            view.ticker(&symbol)
-                .and_then(|ticker| match self.options.side {
-                    OrderSide::Buy => truthy(ticker.bid).or(truthy(ticker.last)),
-                    OrderSide::Sell => truthy(ticker.ask).or(truthy(ticker.last)),
-                })
-        } else {
-            None
+            .filter(|step| step.is_finite() && *step > 0.0)
+        else {
+            return size;
         };
-        TwapOrderRequest {
-            symbol,
-            side: self.options.side,
-            kind: if price.is_some() {
-                OrderKind::Limit
-            } else {
-                OrderKind::Market
-            },
-            price,
-            amount,
-            reduce_only: self.options.reduce_only,
-            client_order_id: None,
+        let steps = (size / step + 1e-9).floor();
+        let whole = multiply(steps, step);
+        if let Some(next) = self.state.orders_sizes.first_mut() {
+            *next = add(*next, subtract(size, whole));
         }
+        whole
     }
 
     fn set_status(&mut self, status: TwapStatus) {
@@ -185,15 +137,9 @@ impl TwapInstance {
         ) {
             return;
         }
-        if let Err(error) = self.prepare(view) {
-            effects.push(TwapEffect::Log {
-                message: error.message,
-            });
-            self.terminate();
-            return;
-        }
         let order_size =
             (!self.state.orders_sizes.is_empty()).then(|| self.state.orders_sizes.remove(0));
+        let order_size = order_size.map(|size| self.whole_steps(size, view));
         let randomness = self.options.randomness_percentage;
         let rand = multiply(
             lodash_random(-randomness, randomness, env.random_unit()),
@@ -212,7 +158,8 @@ impl TwapInstance {
         }
 
         let executed_before = self.state.orders_executed;
-        let Some(order_size) = order_size else {
+        // TS tests `if (orderSize)`: a zero or NaN slice places nothing.
+        let Some(order_size) = order_size.filter(|size| *size != 0.0 && !size.is_nan()) else {
             self.finish_slice(executed_before, next_order_at, wait_ms, now);
             return;
         };
@@ -229,8 +176,17 @@ impl TwapInstance {
             return;
         }
 
-        let mut request = self.request(order_size, view);
-        let priced = request.kind == OrderKind::Limit;
+        let symbol = self.options.symbol().to_owned();
+        let price = if self.options.use_limit_orders {
+            view.ticker(&symbol)
+                .map_or(0.0, |ticker| match self.options.side {
+                    OrderSide::Buy => truthy(ticker.bid).or(truthy(ticker.last)).unwrap_or(0.0),
+                    OrderSide::Sell => truthy(ticker.ask).or(truthy(ticker.last)).unwrap_or(0.0),
+                })
+        } else {
+            0.0
+        };
+        let priced = truthy(Some(price)).is_some();
         let token = self.next_token;
         self.next_token += 1;
         self.pending.push(PendingSlice {
@@ -240,6 +196,19 @@ impl TwapInstance {
             next_order_at,
             wait_ms,
         });
+        let mut request = TwapOrderRequest {
+            symbol,
+            side: self.options.side,
+            kind: if priced {
+                OrderKind::Limit
+            } else {
+                OrderKind::Market
+            },
+            price: priced.then_some(price),
+            amount: order_size,
+            reduce_only: self.options.reduce_only,
+            client_order_id: None,
+        };
         request.client_order_id = view.client_order_id(&request);
         // Persisted before the order goes out: a host that dies before the slice
         // is counted leaves a restore something to look up instead of re-placing.

@@ -582,7 +582,7 @@ impl Adapter {
                 let options: TwapOptions =
                     serde_json::from_value(value).map_err(|_| "Invalid TWAP options")?;
                 let symbol = options.symbol().to_string();
-                let id = factory.start(options).map_err(|error| error.message)?;
+                let id = factory.start(options)?;
                 reply.message = format!("Starting TWAP for {symbol} [{id}]");
             }
             AlgoRequest::TwapList => {
