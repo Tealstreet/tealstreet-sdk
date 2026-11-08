@@ -1426,6 +1426,8 @@ pub fn build_with_signer<T: Visit>(
         options.public_data_only = true;
         options.signing = None;
         signer = None;
+    } else if orderly_injected {
+        options.public_data_only = false;
     }
     // Explicit provider injection is trusted native setup, not hosted admission.
     if orderly_injected && options.remote_signing && !options.public_data_only {
@@ -1447,16 +1449,21 @@ pub fn build_with_signer<T: Visit>(
                 .map_err(|_| invalid("Invalid local signer setup"))?;
         }
     }
-    if let Some(mode) = construction::resolve(venue, &options)
-        && !(orderly_injected && !options.public_data_only)
-    {
-        if let Some(error) = mode.explicit_private_error {
-            return Err(invalid(error));
+    if let Some(mode) = construction::resolve(venue, &options) {
+        if !(orderly_injected && !options.public_data_only) {
+            if let Some(error) = mode.explicit_private_error {
+                return Err(invalid(error));
+            }
+            options.public_data_only = mode.public_data_only;
         }
-        options.public_data_only = mode.public_data_only;
-        options.account_startup = !mode.public_data_only;
+        options.account_startup = !options.public_data_only;
     }
-    payload_signing_rules(venue, &options, signer.is_some())?;
+    if orderly_injected {
+        // A seedless provider's private intent must not resolve as keyless public.
+        payload_signing_rules_in_mode(venue, &options, signer.is_some(), options.public_data_only)?;
+    } else {
+        payload_signing_rules(venue, &options, signer.is_some())?;
+    }
     #[cfg(feature = "bybit")]
     if venue == "hyrotrader"
         && let Some(config) = options.hyrotrader.take()

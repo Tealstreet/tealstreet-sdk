@@ -49,6 +49,8 @@ fn provider(venue: &str, link: Arc<SignerLink>) -> TestResult<RemoteProvider> {
                 signing: KeyRef("owned-signing".into()),
                 public: text(&golden()?["publicKey"])?.as_bytes().to_vec(),
                 passphrase: None,
+                passphrase_value: None,
+                broker: None,
             },
         )),
     })

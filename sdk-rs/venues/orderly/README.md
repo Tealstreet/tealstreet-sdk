@@ -5,6 +5,15 @@ What Exchange through `Options::broker`. Both EVM mainnet and testnet use
 Orderly ED25519 keys; `application_id` is the account ID for private requests.
 The public-only default is Orderly's common WebSocket application ID.
 
+Trusted native registry setup can inject an owned Ed25519 provider and identity
+references without a seed in engine options. Captured `publicMode` intent takes
+precedence over the legacy `publicDataOnly` flag. Public setup removes the
+provider and references before validating unused signer material. Private setup
+tracks account startup from pending until markets, balance, orders, and positions
+have loaded, just like local construction. Hosted RemoteSigner and PayloadSigner
+admission remains closed; a private `payloadSigner` request refuses with typed
+`Unsupported` and `NotSent` before engine construction or signing.
+
 Broker-suffixed native contracts retain their suffix in SDK symbols, for
 example `PERP_XLM_USDC_mythos` becomes `XLMUSDC_mythos`. Private positions
 retain distinct cross/isolated IDs. A selected margin mode controls settings

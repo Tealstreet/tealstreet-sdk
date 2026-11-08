@@ -380,7 +380,11 @@ impl Visit for Startup {
             }
             for action in actions {
                 if let Action::Http(http) = action {
-                    if http.headers.iter().any(|(name, _)| *name == "orderly-signature") {
+                    if http
+                        .headers
+                        .iter()
+                        .any(|(name, _)| *name == "orderly-signature")
+                    {
                         signed_reads += 1;
                     }
                     engine.handle(
@@ -420,23 +424,26 @@ fn captured_private_options(setup: &Setup) -> TestResult<EngineOptions> {
 }
 
 fn refuses_captured_private_payload_signer(venue: &str) -> TestResult {
-    let setup = setup()?;
-    let mut options = captured_private_options(&setup)?;
-    options.payload_signer = true;
-    let result = build_with_signer(
-        venue,
-        options,
-        Some(safe_cex_engine::test_support::seeded_entropy(17)),
-        Some(setup.provider),
-        Startup,
-    );
-    let error = match result {
-        Err(error) => error,
-        Ok(_) => return Err("closed PayloadSigner admission constructed an engine".into()),
-    };
-    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
-    assert_eq!(error.outcome, Some(Outcome::NotSent));
-    assert!(setup.seen.lock().map_err(|_| "poisoned record")?.is_empty());
+    for legacy_public in [false, true] {
+        let setup = setup()?;
+        let mut options = captured_private_options(&setup)?;
+        options.public_data_only = legacy_public;
+        options.payload_signer = true;
+        let result = build_with_signer(
+            venue,
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(17)),
+            Some(setup.provider),
+            Startup,
+        );
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => return Err("closed PayloadSigner admission constructed an engine".into()),
+        };
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(setup.seen.lock().map_err(|_| "poisoned record")?.is_empty());
+    }
     Ok(())
 }
 
@@ -456,14 +463,43 @@ fn injected_startup_matches_local(venue: &str) -> TestResult {
     )?;
     assert!(local.account && local.pending_before && !local.complete_before);
     assert!(!local.pending_after && local.complete_after && local.signed_reads >= 4);
-    let injected = build_with_signer(
-        venue,
-        captured_private_options(&setup)?,
-        Some(safe_cex_engine::test_support::seeded_entropy(17)),
-        Some(setup.provider),
-        Startup,
-    )?;
-    assert_eq!(injected, local);
+    for legacy_public in [false, true] {
+        let mut options = captured_private_options(&setup)?;
+        options.public_data_only = legacy_public;
+        let injected = build_with_signer(
+            venue,
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(17)),
+            Some(setup.provider.clone()),
+            Startup,
+        )?;
+        assert_eq!(injected, local);
+    }
+    Ok(())
+}
+
+#[test]
+fn orderly_captured_public_ignores_private_flags_and_unused_signer_material() -> TestResult {
+    for venue in ALIASES {
+        let setup = setup()?;
+        let mut options: EngineOptions = serde_json::from_value(json!({
+            "publicDataOnly": false,
+            "publicMode": {"requested": true},
+            "payloadSigner": true,
+            "remoteSigning": true,
+            "key": "unused malformed key",
+            "secret": "unused malformed secret",
+        }))?;
+        options.signing = Some(setup.ids);
+        build_with_signer(
+            venue,
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(17)),
+            Some(setup.provider),
+            Public,
+        )??;
+        assert!(setup.seen.lock().map_err(|_| "poisoned record")?.is_empty());
+    }
     Ok(())
 }
 
