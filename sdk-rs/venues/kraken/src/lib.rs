@@ -556,8 +556,31 @@ fn resolution(interval: Interval) -> Option<&'static str> {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
-    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
-        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        let pending = if let Pending::Signing(pending, _) = pending {
+            pending.as_ref()
+        } else {
+            pending
+        };
+        if !matches!(pending, Pending::Trade(_)) {
+            return;
+        }
+        #[derive(serde::Deserialize)]
+        struct Error<'a> {
+            error: Option<&'a str>,
+            status: Option<&'a str>,
+        }
+        if let Ok(error) = serde_json::from_str::<Error<'_>>(response.body)
+            && let Some(code) = error.error.or(error.status).filter(|code| !code.is_empty())
+        {
+            evidence.venue_code(code.split(':').next().unwrap_or(code).trim());
+            evidence.venue_message(code);
+        }
     }
     fn capture_http_reconciliation(
         &self,

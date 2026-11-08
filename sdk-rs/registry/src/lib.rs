@@ -1685,11 +1685,6 @@ pub fn build_with_signer<T: Visit>(
                 .flatten()
             {
                 identity.validate().map_err(invalid)?;
-                if identity.stable_id.is_none() && !options.public_data_only {
-                    return Err(invalid(
-                        "Kraken Futures requires caller-assigned stable signing identities",
-                    ));
-                }
             }
             if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
             {

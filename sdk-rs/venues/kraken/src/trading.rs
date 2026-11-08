@@ -803,15 +803,22 @@ impl Kraken {
             let fact = match &result {
                 Ok(_) => safe_cex_engine::classify::WriteFact::Accepted { order_ids: ids },
                 Err(error) => {
-                    let code = native_code
+                    let code = error
+                        .venue_code
                         .as_deref()
+                        .or(native_code.as_deref())
                         .map(|code| code.split(':').next().unwrap_or(code).trim());
                     let native = code.map(|code| Native {
                         code: NativeCode::Text(code),
                         message: code,
                     });
+                    let table = if code.is_some_and(documented_status_refusal) {
+                        &STATUS_CODES
+                    } else {
+                        &ERROR_CODES
+                    };
                     let Ok(fact) =
-                        cx.classify_write(context, &ERROR_CODES, native.as_ref(), &error.message)
+                        cx.classify_write(context, table, native.as_ref(), &error.message)
                     else {
                         self.trading_finish(
                             cx,
@@ -819,12 +826,19 @@ impl Kraken {
                         );
                         return;
                     };
+                    let prior_effects = before > 0
+                        || self
+                            .trading
+                            .active
+                            .as_ref()
+                            .is_some_and(|job| job.effective);
                     safe_cex_engine::classify::WriteFact::Failed {
-                        fact: if error.outcome == Some(Outcome::Rejected) {
+                        fact: if error.outcome == Some(Outcome::Rejected) && !prior_effects {
                             fact
                         } else {
                             fact.unproven()
-                        },
+                        }
+                        .with_order_ids(&ids),
                         known_effects: ids.len() > before,
                     }
                 }
@@ -1292,6 +1306,166 @@ fn classified_failure(
     error
 }
 
+// Native order-status vocabulary shared by local and provider classifications.
+const STATUS_CODES: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Text("invalidOrderType"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("invalidSide"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("clientOrderIdTooLong"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("invalidDomainConfiguration"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("marketSuspended"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("marketInactive"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("invalidPrice"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("invalidSize"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("tooManySmallOrders"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("insufficientAvailableFunds"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("wouldCauseLiquidation"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("clientOrderIdTooBig"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("clientOrderIdInvalid"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("maxPositionViolation"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("outsidePriceCollar"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("wouldIncreasePriceDispersion"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("wouldIncreasePriceDislocation"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("notFound"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("orderForEditNotAStop"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("orderForEditNotFound"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("postWouldExecute"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("iocWouldNotExecute"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("selfFill"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("wouldNotReducePosition"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("marketIsPostOnly"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("tooManyOrders"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("fixedLeverageTooHigh"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("cannotEditTriggerPriceOfTrailingStop"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("cannotEditLimitPriceOfTrailingStop"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+    ],
+    success: &[],
+    unlisted: Verdict::Unknown(None),
+    status: ERROR_CODES.status,
+};
+fn documented_status_refusal(status: &str) -> bool {
+    STATUS_CODES
+        .rows
+        .iter()
+        .any(|row| matches!(row.key, Key::Text(code) if code == status))
+}
+
 /// A send/edit/cancel status that is not success. Only Kraken's documented
 /// refusal statuses prove nothing happened.
 fn status_failure(message: String, status: &str, edit: bool) -> VenueError {
@@ -1305,38 +1479,7 @@ fn status_failure(message: String, status: &str, edit: bool) -> VenueError {
         return error.outcome(Outcome::Unknown).venue_code(status);
     }
     // Documented: docs.kraken.com/api/docs/futures-api/trading/send-order
-    let refused = matches!(
-        status,
-        "invalidOrderType"
-            | "invalidSide"
-            | "clientOrderIdTooLong"
-            | "invalidDomainConfiguration"
-            | "marketSuspended"
-            | "marketInactive"
-            | "invalidPrice"
-            | "invalidSize"
-            | "tooManySmallOrders"
-            | "insufficientAvailableFunds"
-            | "wouldCauseLiquidation"
-            | "clientOrderIdTooBig"
-            | "clientOrderIdInvalid"
-            | "maxPositionViolation"
-            | "outsidePriceCollar"
-            | "wouldIncreasePriceDispersion"
-            | "wouldIncreasePriceDislocation"
-            | "notFound"
-            | "orderForEditNotAStop"
-            | "orderForEditNotFound"
-            | "postWouldExecute"
-            | "iocWouldNotExecute"
-            | "selfFill"
-            | "wouldNotReducePosition"
-            | "marketIsPostOnly"
-            | "tooManyOrders"
-            | "fixedLeverageTooHigh"
-            | "cannotEditTriggerPriceOfTrailingStop"
-            | "cannotEditLimitPriceOfTrailingStop"
-    );
+    let refused = documented_status_refusal(status);
     if refused {
         error
             .kind(ErrorKind::Rejected)

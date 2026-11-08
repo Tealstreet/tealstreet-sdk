@@ -24,7 +24,7 @@ function fixture(options: Partial<ExchangeOptions> = {}) {
   setRustEngineTransport(() => ({ prepareHttp: prepareRecordedHttp, now: () => stamp, request: io, connect: io,
     setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) }));
   const exchange = new RustEngineExchange('kraken', { key: 'fixture-key', secret: 'c2VjcmV0',
-    localSigner: { primary: { stableId: 'kraken-proof-primary' } }, ...options }, new DefaultStore());
+    ...options }, new DefaultStore());
   live.push(exchange);
   return { exchange, io };
 }
@@ -66,11 +66,10 @@ it('actual WASM local/device and keyless remote/origin sign every Futures REST e
 });
 
 it('actual WASM WS auth routes challenge hashing through remote custody and binds secondary keys', async () => {
-  const localSigner = { primary: { stableId: 'kraken-proof-primary' }, secondary: { stableId: 'kraken-proof-secondary' } };
-  const browser = fixture({ secondary_key: 'fixture-read-key', secondary_secret: 'cmVhZC1zZWNyZXQ=', localSigner });
+  const browser = fixture({ secondary_key: 'fixture-read-key', secondary_secret: 'cmVhZC1zZWNyZXQ=' });
   const sign = vi.fn((request: RemoteSignerRequest) => browser.exchange.signWsAuth(request));
   const remoteSigner: RemoteSigner = { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
-  const server = fixture({ secret: '', secondary_key: 'fixture-read-key', secondary_secret: '', remoteSigner, localSigner });
+  const server = fixture({ secret: '', secondary_key: 'fixture-read-key', secondary_secret: '', remoteSigner });
   const challenge = 'challenge-æ-123';
   const result = await server.exchange.signWsAuth({ id: 'ws', type: 'ws-auth', exchangeName: 'kraken',
     wsAuth: { outputFormat: 'kraken-challenge', toSign: challenge } });
@@ -83,6 +82,31 @@ it('actual WASM WS auth routes challenge hashing through remote custody and bind
   expect(sign).toHaveBeenCalledTimes(2);
   expect(browser.io).not.toHaveBeenCalled();
   expect(server.io).not.toHaveBeenCalled();
+});
+
+it('concurrent local and hosted engines on one key use nonce-free auth without caller identity metadata', async () => {
+  const browser = fixture();
+  const sign = vi.fn((request: RemoteSignerRequest) => browser.exchange.signWsAuth(request));
+  const remoteSigner: RemoteSigner = { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
+  const server = fixture({ secret: '', remoteSigner });
+  for (const [method, path] of endpoints) {
+    const form = 'symbol=PF_XBTUSD';
+    const request: RemoteSignerRequest = { id: path, type: 'http', exchangeName: 'kraken', config: {
+      method, baseURL: 'https://futures.kraken.com', url: method === 'GET' ? `${path}?${form}` : path,
+      ...(method === 'GET' ? {} : { data: form }), headers: {},
+    } };
+    const answers = await Promise.all([
+      browser.exchange.signHttpRequest(request), server.exchange.signHttpRequest(request),
+    ]);
+    for (const answer of answers) {
+      expect(answer.error).toBeUndefined();
+      expect(Object.keys(answer.config!.headers).map((key) => key.toLowerCase())).not.toContain('nonce');
+      expect(answer.config!.headers.Authent).toBe(signature(`${form}${path.replace(/^\/derivatives/, '')}`));
+    }
+  }
+  expect(sign).toHaveBeenCalledTimes(endpoints.length);
+  expect(browser.exchange.options.localSigner).toBeUndefined();
+  expect(server.exchange.options.localSigner).toBeUndefined();
 });
 
 it('actual WASM rejects unsupported modes and malformed or unavailable remote answers without material in errors', async () => {

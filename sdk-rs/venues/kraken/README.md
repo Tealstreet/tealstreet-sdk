@@ -9,7 +9,7 @@ signing failures before transport remain NotSent, and ambiguous writes stay
 Unknown. The public `Kraken::new` local compatibility constructor is retained;
 registry construction uses `Kraken::with_signing` with opaque refs only.
 
-REST signs the exact encoded form, frozen decimal nonce and path (without the
+REST signs the exact encoded form, optional frozen decimal nonce and path (without the
 `/derivatives` prefix) with SHA256 followed by HMAC-SHA512. WS signs SHA256 of
 the challenge with the same MAC. See Kraken's [REST authentication](https://support.kraken.com/ca/articles/360022635592-generate-authentication-strings-rest-api-derivatives)
 and [WS challenge signing](https://support.kraken.com/articles/360022635652-sign-challenge-websocket-api-derivatives).
@@ -24,15 +24,24 @@ batch. The existing `kraken-challenge` format remains a primary challenge API.
 Wrong-account replies, foreign refs, partial graphs, unavailable devices,
 cancellation and callback errors refuse without local-secret fallback.
 
-SDK/native registry custody requires a caller-assigned stable ID for every
-installed slot (`localSigner.primary.stableId` and, when used,
-`localSigner.secondary.stableId`). These IDs identify the intended nonce domain;
-the SDK never derives them from key material. Local setup decodes base64 secrets.
-Native REST uses the engine's managed nonce reservation and final release.
+SDK/native registry custody uses the existing engine-owned opaque slot refs;
+caller-assigned `stableId` metadata and account migration are unnecessary.
+Local setup decodes base64 secrets. Provider REST omits the optional Futures
+`Nonce` header and signs `form + path`. [Kraken's Futures guide](https://docs.kraken.com/exchange/guides/futures/rest)
+describes supplied nonces as incrementing with only brief out-of-order tolerance,
+not as scoped to a connection or session. Independent per-engine counters would
+therefore be unsafe when sending a nonce on the same key. Omitting it avoids
+duplicates, arrival-order races and shared nonce state across local and hosted
+engines, including separate processes/WASM memories. This is a nonce-free mode,
+not a claim that generated nonces are unique across engines.
+
 The compatibility HTTP signing API preserves a supplied decimal `Nonce` header
 byte-for-byte, including u64 values beyond JS safe integers. If absent, it omits
 the optional nonce instead of creating a competing JS counter; [Kraken permits
 nonce-free Futures REST authentication](https://support.kraken.com/articles/360000906023-what-is-a-nonce-).
+Callers explicitly supplying nonces still own key-wide coordination: our managed
+nonce allocator shares state only within one native process or WASM module.
+The existing explicit-nonce recipe API and Spot nonce behavior are unchanged.
 
 PayloadSigner remains typed unsupported/NotSent: that callback's current
 `hmac-sha256` string contract cannot express Kraken's binary SHA256-to-HMAC-SHA512
@@ -40,8 +49,8 @@ graph. Kraken Futures uses symmetric API keys rather than this SDK's wallet-agen
 cosigning modes. [Subaccounts have separately controlled API keys](https://support.kraken.com/ca/articles/360042809671-understanding-derivatives-subaccounts);
 configure that subaccount's matching device key instead of a separate agent key.
 
-NEEDS-NX: account setup must supply those stable IDs and carry the new
-`kraken-sha512` format through to the updated SDK on the device. The refused list
+NEEDS-NX: carry the new `kraken-sha512` format through to the updated SDK on the
+device; no new identity assignment or forwarding is required. The refused list
 derived from construction-rules by NX #9032 follows the explicit policy
 automatically. No ExchangeName or account-key field is added. WASM size caps are
 left to the lead's exact-head CI budget commit.

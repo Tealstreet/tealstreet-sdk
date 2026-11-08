@@ -450,6 +450,7 @@ impl Kraken {
     ) -> Result<(), String> {
         if let Some(ids) = &self.identities {
             let selected = self.select_http(ids, method, path)?;
+            let selection = *selected.selection();
             let context = self.signing_context(cx, &pending, method, selected.credential())?;
             if let Pending::Trade(request) = &mut pending {
                 request.context = Some(context.clone());
@@ -457,8 +458,9 @@ impl Kraken {
             let recipe = selected
                 .futures_http(method, path, &form, self.options.testnet, 5000.)
                 .map_err(|_| "Invalid Kraken signing request")?;
-            cx.request_signed_managed(
+            cx.request_selected_managed(
                 context.clone(),
+                &selection,
                 None,
                 method,
                 recipe.url().into(),
@@ -484,6 +486,7 @@ impl Kraken {
     ) -> Result<(), String> {
         if let Some(ids) = &self.identities {
             let selected = self.select_http(ids, method, path)?;
+            let selection = *selected.selection();
             let context = self.signing_context(cx, &pending, method, selected.credential())?;
             if let Pending::History(request) = &mut pending {
                 request.set_leg(context.clone());
@@ -492,8 +495,9 @@ impl Kraken {
                 .futures_http(method, path, &form, self.options.testnet, 5000.)
                 .map_err(|_| "Invalid Kraken signing request")?;
             let id = cx
-                .request_signed_managed(
+                .request_selected_managed(
                     context.clone(),
+                    &selection,
                     None,
                     method,
                     recipe.url().into(),
@@ -590,8 +594,8 @@ impl Kraken {
         } else {
             CredentialRole::Mutation
         };
-        sign::dispatch::Selected::futures(ids, role)
-            .map_err(|_| "Kraken requires a stable signing identity".into())
+        sign::dispatch::Selected::futures_without_nonce(ids, role)
+            .map_err(|_| "Kraken signing identity is unavailable".into())
     }
     fn signing_context(
         &self,

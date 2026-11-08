@@ -100,24 +100,49 @@ fn device_refuses_unknown_fields_missing_slots_wrong_formats_and_bad_completions
 }
 
 #[test]
-fn missing_nonce_identity_refuses_before_startup() {
-    let (signer, mut ids) = custody();
-    ids.primary.as_mut().unwrap().stable_id = None;
-    let options = serde_json::from_value(
-        serde_json::json!({"signing": ids, "remoteSigning": true, "accountStartup": true}),
-    )
-    .unwrap();
-    let error = safe_cex_venues::build_with_signer(
-        "kraken",
-        options,
-        Some(safe_cex_engine::test_support::seeded_entropy(5)),
-        Some(std::sync::Arc::new(signer)),
-        Startup,
-    )
-    .err()
-    .unwrap();
-    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
-    assert!(error.message.contains("stable signing identities"));
+fn concurrent_engines_on_one_key_need_no_stable_id_or_shared_nonce_state() {
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let threads: Vec<_> = (0..2)
+        .map(|seed| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let (signer, mut ids) = custody();
+                ids.primary.as_mut().unwrap().stable_id = None;
+                let options = serde_json::from_value(serde_json::json!({
+                    "signing": ids, "remoteSigning": true, "accountStartup": true
+                }))
+                .unwrap();
+                barrier.wait();
+                let actions = safe_cex_venues::build_with_signer(
+                    "kraken",
+                    options,
+                    Some(safe_cex_engine::test_support::seeded_entropy(seed + 5)),
+                    Some(std::sync::Arc::new(signer)),
+                    Startup,
+                )
+                .unwrap();
+                let mut signed = 0;
+                for action in &actions {
+                    if let safe_cex_engine::Action::Http(request) = action
+                        && request.headers.iter().any(|(name, _)| *name == "Authent")
+                    {
+                        signed += 1;
+                        assert!(!request.headers.iter().any(|(name, _)| *name == "Nonce"));
+                        assert!(!request.body.as_deref().unwrap_or("").contains("nonce="));
+                    }
+                }
+                assert!(signed >= 5);
+                for expected in [77, 78] {
+                    assert!(actions.iter().any(|action| matches!(action,
+                        safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandDone {command, ..})
+                            if *command == expected)));
+                }
+            })
+        })
+        .collect();
+    for thread in threads {
+        thread.join().unwrap();
+    }
 }
 
 struct Startup;
@@ -209,7 +234,11 @@ impl safe_cex_venues::Visit for Startup {
                     control
                         .signature(
                             request.body.as_deref().unwrap(),
-                            header("Nonce"),
+                            request
+                                .headers
+                                .iter()
+                                .find(|(name, _)| *name == "Nonce")
+                                .map_or("", |(_, value)| value.as_str()),
                             "/derivatives/api/v3/sendorder"
                         )
                         .unwrap()
