@@ -14,6 +14,7 @@ fn configured(minimum: f64, maximum: f64, step: f64, notional: f64, algos: u32) 
     h.requests.clear();
     h.sent_requests = 0;
     h.sent_writes = 0;
+    h.writes.clear();
     h.engine.store_mut().set_tickers(vec![Ticker {
         symbol: "BTCUSDT".into(),
         last: 1.0,
@@ -37,36 +38,75 @@ fn batch(h: &mut Harness, orders: Vec<serde_json::Value>) {
     });
 }
 
+fn write_sequence(h: &Harness) -> Vec<String> {
+    h.writes
+        .iter()
+        .map(|(method, url)| {
+            let (path, query) = url.split_once('?').expect("signed native query");
+            let mut parts = vec![
+                format!("{method:?}"),
+                path.rsplit('/').next().unwrap().to_owned(),
+            ];
+            for key in ["type", "quantity", "orderId"] {
+                if let Some(pair) = query
+                    .split('&')
+                    .find(|pair| pair.split_once('=').is_some_and(|(name, _)| name == key))
+                {
+                    parts.push(pair.to_owned());
+                }
+            }
+            parts.join(" ")
+        })
+        .collect()
+}
+
 // Legacy TS: asterdex.exchange.ts:831-867, 911-913 does not rebalance or validate every lot.
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | max-qty-splitting (audit trading.rs:1711)
+// Legacy TS: asterdex.exchange.ts:975-997; dispatch/result sequence is intentional.
 #[test]
 fn legacy_limit_tail_is_sent_without_a_new_whole_plan_minimum_gate() {
     let mut h = configured(3.0, 5.0, 1.0, 0.0, 10);
     h.place(ordinary(7.0, 1.0));
     assert_eq!(quantities(&mut h), ["5", "2"]);
     assert!(h.result(1).is_ok());
+    assert_eq!(
+        write_sequence(&h),
+        [
+            "Post order type=LIMIT quantity=5",
+            "Post order type=LIMIT quantity=2"
+        ]
+    );
 }
 
-// Legacy TS: :975-997 catches each row failure and returns IDs if any succeeded.
+// Legacy TS: asterdex.exchange.ts:747-750,975-997 refuses a trailing row and returns accepted IDs.
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | serial-batch-preflight (audit trading.rs:1535)
+// Legacy TS: asterdex.exchange.ts:975-997; dispatch/result sequence is intentional.
 #[test]
 fn legacy_batch_keeps_a_valid_prefix_when_the_last_row_is_invalid() {
     let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
-    batch(&mut h, vec![ordinary(1.0, 1.0), ordinary(1.0, 0.0)]);
+    let mut unsupported = ordinary(1.0, 1.0);
+    unsupported["type"] = json!("trailing_stop_market");
+    batch(&mut h, vec![ordinary(1.0, 1.0), unsupported]);
     assert_eq!(quantities(&mut h), ["1"]);
     assert!(h.result(1).is_ok());
+    assert_eq!(write_sequence(&h), ["Post order type=LIMIT quantity=1"]);
 }
 
-// Legacy TS: :762-814 submits entry and children through the same partial batch driver.
+// Inherited Rust local-formatting control; TS submits negative triggers to the venue.
+// The TS sequence pin for this path uses a native child refusal below.
 #[test]
-fn legacy_bracket_keeps_the_entry_when_a_child_cannot_be_formatted() {
+fn inherited_bracket_keeps_the_entry_when_a_child_cannot_be_formatted() {
     let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
     let mut bracket = ordinary(1.0, 1.0);
     bracket["stopLoss"] = json!(-1.0);
     h.place(bracket);
     assert_eq!(quantities(&mut h), ["1"]);
     assert!(h.result(1).is_ok());
+    assert_eq!(write_sequence(&h), ["Post order type=LIMIT quantity=1"]);
 }
 
 // Legacy TS: :773-774 and :1571-1584 check each bracket, without reserving the batch total.
+// Legacy TS: asterdex.exchange.ts:975-997; dispatch/result sequence is intentional.
 #[test]
 fn legacy_bracket_capacity_is_checked_per_intent_without_a_new_cumulative_gate() {
     let mut h = configured(1.0, 5.0, 1.0, 0.0, 1);
@@ -75,9 +115,20 @@ fn legacy_bracket_capacity_is_checked_per_intent_without_a_new_cumulative_gate()
     batch(&mut h, vec![bracket.clone(), bracket]);
     assert_eq!(quantities(&mut h), ["1", "1", "1", "1"]);
     assert!(h.result(1).is_ok());
+    assert_eq!(
+        write_sequence(&h),
+        [
+            "Post order type=LIMIT quantity=1",
+            "Post order type=STOP_MARKET quantity=1",
+            "Post order type=LIMIT quantity=1",
+            "Post order type=STOP_MARKET quantity=1"
+        ]
+    );
 }
 
 // Legacy TS: :1039-1040 cancels, then dispatches the replacement through placeOrder.
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | cancel-replace (audit trading.rs:1407)
+// Legacy TS: asterdex.exchange.ts:975-997; dispatch/result sequence is intentional.
 #[test]
 fn legacy_cancel_replace_does_not_add_a_split_lot_minimum_preflight() {
     let mut h = configured(4.0, 5.0, 1.0, 0.0, 10);
@@ -93,8 +144,18 @@ fn legacy_cancel_replace_does_not_add_a_split_lot_minimum_preflight() {
     let cancel = h.take(Method::Delete);
     h.reply(cancel, r#"{"orderId":10,"status":"CANCELED"}"#);
     assert_eq!(quantities(&mut h), ["5", "1"]);
+    assert_eq!(
+        write_sequence(&h),
+        [
+            "Delete order orderId=10",
+            "Post order type=LIMIT quantity=5",
+            "Post order type=LIMIT quantity=1"
+        ]
+    );
 }
 
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | runtime placement continuation
+// Legacy TS: asterdex.exchange.ts:975-997; dispatch/result sequence is intentional.
 #[test]
 fn legacy_runtime_refusal_keeps_later_writes_and_partial_success_ids() {
     let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
@@ -107,8 +168,17 @@ fn legacy_runtime_refusal_keeps_later_writes_and_partial_success_ids() {
     h.reply(third, r#"{"orderId":803}"#);
     assert_eq!(h.sent_writes, 3);
     assert_eq!(h.result(1).as_ref().unwrap(), "[\"801\",\"803\"]");
+    assert_eq!(
+        write_sequence(&h),
+        [
+            "Post order type=LIMIT quantity=5",
+            "Post order type=LIMIT quantity=5",
+            "Post order type=LIMIT quantity=2"
+        ]
+    );
 }
 
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | runtime placement continuation
 #[test]
 fn reporting_all_refusals_keeps_the_complete_journal_without_stopping_dispatch() {
     use safe_cex_engine::write_plan::ElementResult;
@@ -151,6 +221,7 @@ fn reporting_gateway_ambiguity_preserves_the_existing_engine_seal() {
     assert_eq!(h.sent_writes, 2);
 }
 
+// Legacy TS: asterdex.exchange.ts:970-971; exchanges/base.ts:1191-1200.
 #[test]
 fn existing_whole_batch_caller_id_refusal_matches_ts() {
     let mut h = Harness::new();
@@ -162,18 +233,40 @@ fn existing_whole_batch_caller_id_refusal_matches_ts() {
     assert_eq!(h.failures[0].1.kind, Some(ErrorKind::InvalidInput));
 }
 
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | serial-batch-preflight (audit trading.rs:1535)
+// Legacy TS: asterdex.exchange.ts:975-997; dispatch/result sequence is intentional.
 #[test]
 fn legacy_batch_refusal_does_not_stop_the_next_row() {
-    let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
-    batch(&mut h, vec![ordinary(1.0, 1.0), ordinary(2.0, 1.0)]);
-    let first = h.take(Method::Post);
-    h.reply(first, r#"{"code":-2010,"msg":"insufficient margin"}"#);
-    assert_eq!(quantities(&mut h), ["2"]);
-    assert!(h.result(1).is_ok());
+    for (kind, native) in [
+        ("limit", "LIMIT"),
+        ("market", "MARKET"),
+        ("stop_market", "STOP_MARKET"),
+        ("take_profit_market", "TAKE_PROFIT_MARKET"),
+    ] {
+        let mut h = configured(1.0, 5.0, 1.0, 0.5, 10);
+        h.engine.store_mut().set_tickers(vec![]);
+        let mut first = ordinary(1.0, 1.0);
+        first["type"] = json!(kind);
+        first["triggerPrice"] = json!(0.5);
+        batch(&mut h, vec![first, ordinary(2.0, 1.0)]);
+        let first = h.take(Method::Post);
+        h.reply(first, r#"{"code":-2010,"msg":"insufficient margin"}"#);
+        assert_eq!(quantities(&mut h), ["2"]);
+        assert!(h.result(1).is_ok(), "{kind}");
+        assert_eq!(
+            write_sequence(&h),
+            [
+                format!("Post order type={native} quantity=1"),
+                "Post order type=LIMIT quantity=2".into(),
+            ]
+        );
+    }
 }
 
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | separate-TP-SL-children (audit trading.rs:1574)
+// Legacy TS: asterdex.exchange.ts:975-997; dispatch/result sequence is intentional.
 #[test]
-fn legacy_bracket_refusal_does_not_stop_the_next_child() {
+fn mini_parity_bracket_refusal_does_not_stop_the_next_child() {
     let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
     let mut bracket = ordinary(1.0, 1.0);
     bracket["stopLoss"] = json!(0.5);
@@ -188,8 +281,17 @@ fn legacy_bracket_refusal_does_not_stop_the_next_child() {
     h.reply(profit, r#"{"orderId":803}"#);
     assert_eq!(h.sent_writes, 3);
     assert_eq!(h.result(1).as_ref().unwrap(), "[\"801\",\"803\"]");
+    assert_eq!(
+        write_sequence(&h),
+        [
+            "Post order type=LIMIT quantity=1",
+            "Post order type=STOP_MARKET quantity=1",
+            "Post order type=TAKE_PROFIT_MARKET quantity=1"
+        ]
+    );
 }
 
+// Legacy TS: asterdex.exchange.ts:975-997; dispatch/result sequence is intentional.
 #[test]
 fn legacy_capacity_refusal_keeps_the_next_batch_intent() {
     let mut h = configured(1.0, 5.0, 1.0, 0.0, 1);
@@ -199,8 +301,11 @@ fn legacy_capacity_refusal_keeps_the_next_batch_intent() {
     batch(&mut h, vec![bracket, ordinary(2.0, 1.0)]);
     assert_eq!(quantities(&mut h), ["2"]);
     assert!(h.result(1).is_ok());
+    assert_eq!(write_sequence(&h), ["Post order type=LIMIT quantity=2"]);
 }
 
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | cancellation fan-out
+// Legacy TS: asterdex.exchange.ts:1050-1081; dispatch/result sequence is intentional.
 #[test]
 fn legacy_cancellation_refusal_does_not_stop_later_cancels() {
     use safe_cex_engine::write_plan::ElementResult;
@@ -225,8 +330,13 @@ fn legacy_cancellation_refusal_does_not_stop_later_cancels() {
         rows.iter()
             .all(|r| matches!(r.result, ElementResult::NotSent { error: Some(_) }))
     );
+    assert_eq!(
+        write_sequence(&h),
+        ["Delete order orderId=10", "Delete order orderId=11"]
+    );
 }
 
+// Legacy TS: asterdex.exchange.ts:1039-1040; dispatch/result sequence is intentional.
 #[test]
 fn legacy_cancel_replace_stops_if_its_single_cancel_is_refused() {
     let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
@@ -244,8 +354,11 @@ fn legacy_cancel_replace_stops_if_its_single_cancel_is_refused() {
     assert_eq!(h.sent_writes, 1);
     assert!(h.requests.is_empty());
     assert!(h.result(1).is_err());
+    assert_eq!(write_sequence(&h), ["Delete order orderId=10"]);
 }
 
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | cancel-replace (audit trading.rs:1407)
+// Legacy TS: asterdex.exchange.ts:1040,865-867,975-997; dispatch/result sequence is intentional.
 #[test]
 fn legacy_split_replacement_continues_after_a_rejected_lot() {
     let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
@@ -267,8 +380,18 @@ fn legacy_split_replacement_continues_after_a_rejected_lot() {
     h.reply(tail, r#"{"orderId":803}"#);
     assert_eq!(h.result(1).as_ref().unwrap(), "[\"803\"]");
     assert_eq!(h.sent_writes, 3);
+    assert_eq!(
+        write_sequence(&h),
+        [
+            "Delete order orderId=10",
+            "Post order type=LIMIT quantity=5",
+            "Post order type=LIMIT quantity=1"
+        ]
+    );
 }
 
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | cancel-replace (audit trading.rs:1407)
+// Legacy TS: asterdex.exchange.ts:1040,865-867,975-997; dispatch/result sequence is intentional.
 #[test]
 fn legacy_split_replacement_with_no_accepted_lots_still_fails() {
     let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
@@ -290,4 +413,98 @@ fn legacy_split_replacement_with_no_accepted_lots_still_fails() {
     assert!(h.result(1).is_err());
     assert_eq!(h.sent_writes, 3);
     assert_eq!(h.failures[0].1.elements.as_ref().unwrap().len(), 3);
+    assert_eq!(
+        write_sequence(&h),
+        [
+            "Delete order orderId=10",
+            "Post order type=LIMIT quantity=5",
+            "Post order type=LIMIT quantity=1"
+        ]
+    );
+}
+
+// Legacy TS: asterdex.exchange.ts:833-867,912; only regular orders split.
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | max-qty-splitting (audit trading.rs:1711)
+#[test]
+fn mini_parity_conditional_is_one_unsplit_write() {
+    let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
+    h.place(json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":7.0,"triggerPrice":0.5,"reduceOnly":true}));
+    assert_eq!(quantities(&mut h), ["7"]);
+    assert_eq!(
+        write_sequence(&h),
+        ["Post order type=STOP_MARKET quantity=7"]
+    );
+    assert!(h.result(1).is_ok());
+}
+
+// Legacy TS: asterdex.exchange.ts:773-774,813-814,833-867,912; capacity counts two children.
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | separate-TP-SL-children (audit trading.rs:1574)
+#[test]
+fn mini_parity_bracket_splits_entry_but_admits_two_unsplit_children() {
+    let mut h = configured(1.0, 5.0, 1.0, 0.0, 2);
+    let mut bracket = ordinary(7.0, 1.0);
+    bracket["stopLoss"] = json!(0.5);
+    bracket["takeProfit"] = json!(2.0);
+    h.place(bracket);
+    assert_eq!(quantities(&mut h), ["5", "2", "7", "7"]);
+    assert_eq!(
+        write_sequence(&h),
+        [
+            "Post order type=LIMIT quantity=5",
+            "Post order type=LIMIT quantity=2",
+            "Post order type=STOP_MARKET quantity=7",
+            "Post order type=TAKE_PROFIT_MARKET quantity=7",
+        ]
+    );
+    assert!(h.result(1).is_ok());
+}
+
+// Legacy TS: asterdex.exchange.ts:912,955; market submission does not read a ticker.
+#[test]
+fn mini_parity_market_submission_does_not_require_a_mark_snapshot() {
+    let mut h = configured(1.0, 5.0, 1.0, 0.5, 10);
+    h.engine.store_mut().set_tickers(vec![]);
+    h.place(json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":1.0}));
+    assert_eq!(quantities(&mut h), ["1"]);
+    assert_eq!(write_sequence(&h), ["Post order type=MARKET quantity=1"]);
+    assert!(h.result(1).is_ok());
+}
+
+// Legacy TS: asterdex.exchange.ts:1050-1081; a successful cancel survives an earlier refusal.
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: asterdex | cancellation fan-out
+#[test]
+fn mini_parity_cancellation_continues_and_resolves_after_partial_success() {
+    let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
+    h.engine.store_mut().set_orders(vec![
+        order("10", OrderType::Limit),
+        order("11", OrderType::Limit),
+    ]);
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["10".into(), "11".into()],
+    });
+    let first = h.take(Method::Delete);
+    h.reply(first, r#"{"code":-2010,"msg":"cancel refused"}"#);
+    let second = h.take(Method::Delete);
+    h.reply(second, r#"{"orderId":11,"status":"CANCELED"}"#);
+    assert_eq!(
+        write_sequence(&h),
+        ["Delete order orderId=10", "Delete order orderId=11"]
+    );
+    assert!(h.result(1).is_ok());
+}
+
+// Legacy TS: asterdex.exchange.ts:773-774,1571-1584; refuse this bracket before sending its entry.
+#[test]
+fn legacy_single_intent_capacity_refusal_records_zero_requests() {
+    let mut h = configured(1.0, 5.0, 1.0, 0.0, 1);
+    let mut bracket = ordinary(1.0, 1.0);
+    bracket["stopLoss"] = json!(0.5);
+    bracket["takeProfit"] = json!(2.0);
+    h.place(bracket);
+    assert_eq!(h.sent_requests, 0);
+    assert_eq!(h.sent_writes, 0);
+    assert!(write_sequence(&h).is_empty());
+    assert!(h.result(1).is_err());
+    assert_eq!(h.failures[0].1.outcome, Some(Outcome::NotSent));
 }

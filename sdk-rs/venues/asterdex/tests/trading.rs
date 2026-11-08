@@ -12,6 +12,7 @@ struct Harness {
     requests: Vec<HttpRequest>,
     sent_requests: usize,
     sent_writes: usize,
+    writes: Vec<(Method, String)>,
     done: Vec<(u32, Result<String, String>)>,
     failures: Vec<(u32, safe_cex_engine::VenueError)>,
 }
@@ -61,6 +62,7 @@ impl Harness {
             requests: Vec::new(),
             sent_requests: 0,
             sent_writes: 0,
+            writes: Vec::new(),
             done: Vec::new(),
             failures: Vec::new(),
         }
@@ -71,6 +73,9 @@ impl Harness {
                 Action::Http(request) => {
                     self.sent_requests += 1;
                     self.sent_writes += usize::from(request.method != Method::Get);
+                    if request.method != Method::Get {
+                        self.writes.push((request.method, request.url.clone()));
+                    }
                     self.requests.push(request);
                 }
                 Action::Notice(Notice::CommandDone { command, result }) => {
