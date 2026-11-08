@@ -1,7 +1,8 @@
 import type { LocalIdentityMetadata, LocalSignerMetadata, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { CredentialPresence, IdentitySetupPolicy, SignerSetupPolicy } from './construction';
+import { derivePublicMode, deriveSignerSetupPolicy } from './construction';
 
 type LocalIdentity = LocalIdentityMetadata & {
   key?: string;
@@ -55,6 +56,32 @@ export const effectiveIdentityMetadata = (
   if (policy?.trimCredential !== undefined) effective = { ...effective, trimCredential: policy.trimCredential };
   if (policy?.trimSigning !== undefined) effective = { ...effective, trimSigning: policy.trimSigning };
   return effective;
+};
+
+/** Use setup's normalized key presence; malformed keyed setup stays private for validation. */
+const primaryKeyPresence = (name: ExchangeName, options: Partial<ExchangeOptions>):
+  { key: boolean; primary?: LocalIdentityMetadata; malformed: boolean } => {
+  const rawKey: unknown = options.key;
+  if (rawKey !== undefined && typeof rawKey !== 'string') return { key: true, malformed: true };
+  try {
+    const primary = effectiveIdentityMetadata(parseLocalSignerMetadata(options.localSigner).primary, deriveSignerSetupPolicy(name).primary);
+    return { key: credentialPresent(options.key, primary?.trimCredential === true), primary, malformed: false };
+  } catch {
+    const keyed = options.key !== undefined && options.key !== '';
+    return { key: keyed, malformed: keyed };
+  }
+};
+
+/** Resolve public mode before custody checks; only a keyed callback supplies signing presence. */
+export const resolveEffectivePublicDataOnly = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean => {
+  if (options.publicDataOnly === true) return true;
+  const { key, primary, malformed } = primaryKeyPresence(name, options);
+  if (malformed) return false;
+  const remoteSigner = options.remoteSigner !== undefined;
+  const payloadSigner = options.payloadSigner !== undefined;
+  const secret = credentialPresent(options.secret, primary?.trimSigning === true) || (key && (remoteSigner || payloadSigner));
+  const callbacks = key ? { remoteSigner, payloadSigner } : {};
+  return derivePublicMode(name, { key: '', secret: '', ...options }, undefined, { key, secret, ...callbacks }).publicDataOnly;
 };
 
 /** One required-field/fallback policy for trusted local and callback setup.
