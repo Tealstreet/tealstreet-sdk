@@ -12,8 +12,10 @@ import { OrderSide } from '../types';
 import { calcOrderBookTotal, sortOrderBook } from '../utils/orderbook';
 import { BookFrames } from './bookFrames';
 import { readCandleFrame } from './candleFrames';
-import { FrameApplier } from './frameApplier';
+import { marketDataFrameApplier } from './marketDataFrameApplier.fixture';
 import { DefaultStore } from './store.base';
+
+const FrameApplier = marketDataFrameApplier();
 
 let fixtures: Record<string, number[]>;
 const symbols = ['ZERO/USD'];
@@ -110,14 +112,66 @@ describe('Rust market data frames', () => {
     const applier = new FrameApplier(store);
     applier.apply(snapshot);
     const serialized = JSON.parse(JSON.stringify(store.serialize()));
-    const marketSymbols = serialized.markets.map((market: { symbol: string }) => market.symbol);
-    const marketIds = serialized.markets.map((market: { id: string }) => market.id);
-    expect(new BookFrames().read(snapshot, marketSymbols, marketIds)).toEqual(applier.books(snapshot));
-    expect(readCandleFrame(snapshot, marketSymbols)).toEqual(applier.candles(snapshot));
+    expect(applier.books(snapshot)).toEqual([
+      {
+        symbol: 'ZERO/USD',
+        orderbook: {
+          bids: [
+            { price: 2, amount: 1, total: 1 },
+            { price: 0, amount: 2, total: 3 },
+          ],
+          asks: [{ price: 3, amount: 4, total: 4 }],
+        },
+      },
+    ]);
+    expect(applier.candles(snapshot)).toEqual([
+      {
+        symbol: 'ZERO/USD',
+        interval: '1m',
+        candle: {
+          timestamp: 1_700_000_040_000,
+          open: 0,
+          high: 2,
+          low: 0,
+          close: 1,
+          volume: 0,
+        },
+      },
+    ]);
     expect(serialized.markets[0].symbol).toBe('ZERO/USD');
     expect(serialized).not.toHaveProperty('books');
     expect(serialized).not.toHaveProperty('candles');
   });
+
+  it.each(['unordered', 'invalidTotal'])(
+    'integrated FrameApplier refuses %s book batches and discards their baselines',
+    (name) => {
+      const store = new DefaultStore();
+      const applier = new FrameApplier(store);
+      applier.apply(frame('snapshot'));
+      const invalid = frame(name);
+      expect(() => applier.apply(invalid)).toThrow();
+      expect(() => applier.books(invalid)).toThrow();
+      expect(() => applier.apply(frame('delta'))).toThrow();
+      applier.apply(frame('snapshot'));
+      expect(applier.books(frame('delta'))[0].orderbook.bids[0].price).toBe(1);
+      expect(JSON.parse(JSON.stringify(store.serialize())).markets[0].symbol).toBe('ZERO/USD');
+    },
+  );
+
+  it.each(['unknownCandle', 'invalidCandle'])(
+    'integrated FrameApplier refuses %s candle batches without emitting repaired values',
+    (name) => {
+      const store = new DefaultStore();
+      const applier = new FrameApplier(store);
+      applier.apply(frame('snapshot'));
+      const invalid = frame(name);
+      applier.apply(invalid);
+      expect(() => applier.candles(invalid)).toThrow();
+      expect(JSON.parse(JSON.stringify(store.serialize()))).not.toHaveProperty('candles');
+      expect(applier.candles(frame('snapshot'))[0].candle.volume).toBe(0);
+    },
+  );
 
   it('preserves candle milliseconds, zero prices, zero volume and absence of lastSide', () => {
     const row = readCandleFrame(frame('snapshot'), symbols)[0];

@@ -1,4 +1,3 @@
-
 import throttle from 'lodash/throttle';
 
 import { exchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';

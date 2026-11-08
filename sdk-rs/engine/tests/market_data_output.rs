@@ -8,6 +8,13 @@ use book::{Book, BookSide};
 use model::Candle;
 use wire::FrameWriter;
 
+// Captured from the pre-slice writers at de0744043; never regenerate from the new modules.
+fn assert_golden(name: &str, bytes: Vec<u8>) {
+    let golden: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/market-data-output.json")).unwrap();
+    assert_eq!(serde_json::to_value(bytes).unwrap(), golden[name]);
+}
+
 #[test]
 fn native_book_output_preserves_existing_snapshot_and_delta_bytes() {
     let mut book = Book::default();
@@ -17,16 +24,12 @@ fn native_book_output_preserves_existing_snapshot_and_delta_bytes() {
     let previous = book.clone();
     book.apply(BookSide::Bids, 1.0, 0.0);
     book.apply(BookSide::Asks, 2.0, 5.0);
-    let mut old = FrameWriter::new(Vec::new(), 42.0);
     let mut new = FrameWriter::new(Vec::new(), 42.0);
-    book.write(7, &mut old);
     book_output::write(&book, 7, &mut new);
-    assert_eq!(new.finish(), old.finish());
-    let mut old = FrameWriter::new(Vec::new(), 42.0);
+    assert_golden("snapshot", new.finish());
     let mut new = FrameWriter::new(Vec::new(), 42.0);
-    assert!(book.write_delta(&previous, 7, &mut old));
     assert!(book_output::write_delta(&book, &previous, 7, &mut new));
-    assert_eq!(new.finish(), old.finish());
+    assert_golden("delta", new.finish());
     let mut empty = FrameWriter::new(Vec::new(), 42.0);
     assert!(!book_output::write_delta(&book, &book, 7, &mut empty));
     assert!(empty.is_empty());
@@ -46,11 +49,9 @@ fn native_candle_output_preserves_existing_bytes_and_milliseconds() {
             volume: 0.0,
         },
     )];
-    let mut old = FrameWriter::new(Vec::new(), 42.0);
     let mut new = FrameWriter::new(Vec::new(), 42.0);
-    old.candles(&rows);
     candle_output::write(&mut new, &rows);
-    assert_eq!(new.finish(), old.finish());
+    assert_golden("candles", new.finish());
     let mut empty = FrameWriter::new(Vec::new(), 42.0);
     candle_output::write(&mut empty, &[]);
     assert!(empty.is_empty());

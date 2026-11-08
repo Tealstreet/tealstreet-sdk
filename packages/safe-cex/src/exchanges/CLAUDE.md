@@ -233,6 +233,22 @@ venues that do not publish one of those values use `0`; consumers must treat
 that value as "zero or unavailable," not proof that the upstream value is
 genuinely zero.
 
+Worker-frame decode recovery permits one snapshot RPC at a time. The first
+request is immediate; repeated rejected frames are gated by monotonic time with
+exponential equal jitter (250–500 ms initially, capped at 15–30 seconds).
+Repeated rejections coalesce behind one cooldown timer, including rejections
+received during an in-flight RPC; there is no independent polling loop.
+Accepted replacement identity and accepted data for the rejected sections reset
+the gate; unrelated book/candle traffic cannot reset another failed section.
+A recovered stream also fences any older in-flight snapshot from applying.
+
+`listenOrderBookWebworker` and `listenOHLCVWebworker` accept an optional third
+rejection callback. Its signal names the requested stream/symbol (and candle
+interval) and carries the original error. A rejected book batch invalidates all
+book baselines, so book subscribers receive that scoped rejection; candle-only
+errors notify candle subscribers. Unreadable envelopes notify both. Rejection-observer
+exceptions are isolated, and unsubscribe/dispose removes the rejection listener.
+
 ### Common Startup Sequence
 
 Most exchange `start()` implementations follow this shape:

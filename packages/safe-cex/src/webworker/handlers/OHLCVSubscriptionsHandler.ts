@@ -1,4 +1,3 @@
-
 import throttle from 'lodash/throttle';
 
 import { Candle, OHLCVOptions } from '../../types';

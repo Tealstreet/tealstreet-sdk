@@ -65,6 +65,28 @@ fn main() {
         }),
     );
     frames.insert(
+        "bookOnly",
+        packed(|writer| {
+            market(writer);
+            book_output::write(&initial, 0, writer);
+        }),
+    );
+    frames.insert(
+        "candleOnly",
+        packed(|writer| {
+            market(writer);
+            candle_output::write(writer, &[(0, "1m", candle(0.0))]);
+        }),
+    );
+    frames.insert(
+        "bookUpdate",
+        packed(|writer| book_output::write(&initial, 0, writer)),
+    );
+    frames.insert(
+        "candleUpdate",
+        packed(|writer| candle_output::write(writer, &[(0, "1m", candle(0.0))])),
+    );
+    frames.insert(
         "delta",
         packed(|writer| {
             assert!(book_output::write_delta(&current, &initial, 0, writer));

@@ -18,7 +18,15 @@ type BookLevels = Map<number, number> | Float64Array;
 type BookState = { id: string; bids: BookLevels; asks: BookLevels };
 export type FrameCandle = { symbol: string; interval: string; candle: Candle };
 
-export class FrameApplyError extends Error {}
+export class FrameApplyError extends Error {
+  constructor(
+    message: string,
+    readonly bookRejected = false,
+    readonly otherRejected = !bookRejected,
+  ) {
+    super(message);
+  }
+}
 
 const finite = (value: number) => (Number.isFinite(value) ? value : undefined);
 /** The sizing rules each `QuantityUnits` convention implies for order and position extras. */
@@ -86,6 +94,7 @@ export class FrameApplier {
     const update: Writable<StoreUpdate> = {};
 
     const errors: unknown[] = [];
+    let bookRejected = false;
     const attempt = (read: () => void, section = 0) => {
       try {
         read();
@@ -496,6 +505,7 @@ export class FrameApplier {
       try {
         this.ingestBooks(frame, symbols, ids);
       } catch (error) {
+        bookRejected = true;
         // A rejected batch may discard valid deltas too; require fresh baselines.
         this.bookStates.clear();
         this.frameBooks.set(frame, []);
@@ -533,7 +543,8 @@ export class FrameApplier {
         errors.push(error);
       }
     }
-    if (errors.length) throw new FrameApplyError(errors.map(String).join('; '));
+    if (errors.length)
+      throw new FrameApplyError(errors.map(String).join('; '), bookRejected, errors.length > (bookRejected ? 1 : 0));
   }
 
   invalidateMarketIdentity(): void {
