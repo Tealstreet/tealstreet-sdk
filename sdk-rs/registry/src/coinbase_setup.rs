@@ -112,13 +112,21 @@ fn install(
 ) -> Result<(Provider, Identities), VenueError> {
     let mut provider = Owned { slots: vec![] };
     let mut ids = Identities::default();
+    options.coinbase_signing = None;
+    options.coinbase_read_signing = None;
+    // Match Coinbase::new: without private primary authority, neither slot is used.
+    if construction::signer_setup_public_data_only(options)
+        || setup
+            .primary
+            .as_ref()
+            .is_none_or(|slot| slot.key.is_empty())
+    {
+        return Ok((std::sync::Arc::new(provider), ids));
+    }
     for (name, slot) in [("primary", setup.primary), ("secondary", setup.secondary)] {
         let Some(mut slot) = slot else {
             continue;
         };
-        if construction::signer_setup_public_data_only(options) && name == "primary" {
-            continue;
-        }
         if slot.key.is_empty() && slot.secret.is_empty() {
             continue;
         }

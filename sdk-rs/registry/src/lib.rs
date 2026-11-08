@@ -1567,7 +1567,12 @@ pub fn build_with_signer<T: Visit>(
             {
                 return Err(invalid("Coinbase signing material belongs in signer setup"));
             }
-            let identities = options.signing.take().unwrap_or_default();
+            let mut identities = options.signing.take().unwrap_or_default();
+            if options.public_data_only || identities.primary.is_none() {
+                identities = Default::default();
+                options.coinbase_signing = None;
+                options.coinbase_read_signing = None;
+            }
             let primary = options
                 .coinbase_signing
                 .take()
@@ -1576,7 +1581,7 @@ pub fn build_with_signer<T: Visit>(
                 .coinbase_read_signing
                 .take()
                 .zip(identities.secondary.clone());
-            if !options.public_data_only && (primary.is_none() || signer.is_none()) {
+            if identities.primary.is_some() && (primary.is_none() || signer.is_none()) {
                 return Err(invalid("Coinbase requires a bound JWT signing provider"));
             }
             let venue = Coinbase::with_signing(

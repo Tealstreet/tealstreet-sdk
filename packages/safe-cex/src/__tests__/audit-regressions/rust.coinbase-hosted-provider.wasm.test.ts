@@ -71,15 +71,18 @@ it.each(['coinbase', 'coinbasespot'] as ExchangeName[])(
     for (const { options, capsule } of cases) {
       const engine = new WasmEngine(name, JSON.stringify(options), capsule && JSON.stringify(capsule));
       try {
-        expect(JSON.parse(engine.coinbaseSigningMetadata!())).toBeNull();
-        const actions = JSON.parse(engine.start(now)) as { type: string; url?: string; headers?: [string, string][] }[];
-        const requests = actions.filter((action) => action.type === 'http');
+        expect(() => engine.coinbaseSigningMetadata!()).toThrow('Signing provider is unavailable');
+        type Packet = { url?: string; headers?: [string, string][] };
+        const actions = JSON.parse(engine.start(now)) as (Packet & { op: string; packet?: Packet })[];
+        const requests = actions.flatMap((action) =>
+          action.op === 'http' ? [action] : action.op === 'managedHttp' && action.packet ? [action.packet] : [],
+        );
         expect(requests.length).toBeGreaterThan(0);
         for (const request of requests) {
           expect(request.url).toContain(name === 'coinbasespot' ? '/market/products' : 'drb.coinbase.com');
           expect(request.headers?.some(([header]) => header.toLowerCase() === 'authorization')).toBe(false);
         }
-        expect(actions.some((action) => action.type === 'sign')).toBe(false);
+        expect(actions.some((action) => action.op === 'sign')).toBe(false);
       } finally {
         engine.free?.();
       }

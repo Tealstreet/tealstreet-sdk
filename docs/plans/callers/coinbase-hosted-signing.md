@@ -4,6 +4,9 @@ Both `coinbase` and `coinbasespot` admit RemoteSigner custody and REST-only
 PayloadSigner custody. Construction consumes local CDP credentials into an owned
 provider; production venue state receives opaque references and public JWT
 bindings. Direct `Coinbase::new` remains the existing native compatibility API.
+Public-only construction and local setup without a nonempty primary key ignore
+both credential slots and start unsigned public discovery, including native and
+direct WASM callers. Private primary authority still requires a bound provider.
 
 ## Authentication and signed operations
 

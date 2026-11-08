@@ -161,7 +161,13 @@ fn keyless_aliases_ignore_stale_signing_material_and_start_publicly() {
             r#"{"secret":"not a key","readCredentials":{"key":"stale","secret":"malformed"}}"#,
             r#"{"key":"","secret":"malformed","readCredentials":{"key":"stale","secret":"malformed"}}"#,
         ] {
-            let actions = build(venue, serde_json::from_str(json).unwrap(), None, Start).unwrap();
+            let actions = build(
+                venue,
+                serde_json::from_str(json).unwrap(),
+                Some(safe_cex_engine::test_support::seeded_entropy(4)),
+                Start,
+            )
+            .unwrap();
             assert_public_start(venue, &actions);
         }
     }
@@ -170,7 +176,16 @@ fn keyless_aliases_ignore_stale_signing_material_and_start_publicly() {
 fn explicit_public_aliases_ignore_both_raw_credential_slots() {
     for venue in ["coinbase", "coinbasespot"] {
         let options = serde_json::from_str(r#"{"publicDataOnly":true,"key":"stale","secret":"malformed","readCredentials":{"key":"stale","secret":"malformed"}}"#).unwrap();
-        assert_public_start(venue, &build(venue, options, None, Start).unwrap());
+        assert_public_start(
+            venue,
+            &build(
+                venue,
+                options,
+                Some(safe_cex_engine::test_support::seeded_entropy(4)),
+                Start,
+            )
+            .unwrap(),
+        );
     }
 }
 #[test]
@@ -196,9 +211,14 @@ fn public_and_keyless_capsules_ignore_unused_credential_slots() {
             assert!(ids.primary.is_none() && ids.secondary.is_none());
             assert!(options.coinbase_signing.is_none() && options.coinbase_read_signing.is_none());
             options.signing = Some(ids);
-            let actions =
-                safe_cex_venues::build_with_signer(venue, options, None, Some(provider), Start)
-                    .unwrap();
+            let actions = safe_cex_venues::build_with_signer(
+                venue,
+                options,
+                Some(safe_cex_engine::test_support::seeded_entropy(4)),
+                Some(provider),
+                Start,
+            )
+            .unwrap();
             assert_public_start(venue, &actions);
         }
     }
@@ -207,10 +227,44 @@ fn public_and_keyless_capsules_ignore_unused_credential_slots() {
 fn private_authority_still_requires_valid_material_and_a_bound_provider() {
     for venue in ["coinbase", "coinbasespot"] {
         let malformed = serde_json::from_str(r#"{"key":"stale","secret":"malformed"}"#).unwrap();
-        assert!(build(venue, malformed, None, Start).is_err());
+        assert!(
+            build(
+                venue,
+                malformed,
+                Some(safe_cex_engine::test_support::seeded_entropy(4)),
+                Start
+            )
+            .is_err()
+        );
         let (_, ids, mut options) = setup();
         options.signing = Some(ids);
-        assert!(safe_cex_venues::build_with_signer(venue, options, None, None, Start).is_err());
+        let error = safe_cex_venues::build_with_signer(
+            venue,
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(4)),
+            None,
+            Start,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Coinbase requires a bound JWT signing provider"
+        );
+        let (provider, ids, mut options) = setup();
+        options.signing = Some(ids);
+        options.coinbase_signing = None;
+        let error = safe_cex_venues::build_with_signer(
+            venue,
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(4)),
+            Some(provider),
+            Start,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Coinbase requires a bound JWT signing provider"
+        );
     }
 }
 #[test]
