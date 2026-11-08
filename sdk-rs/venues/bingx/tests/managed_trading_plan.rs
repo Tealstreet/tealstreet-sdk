@@ -696,8 +696,10 @@ fn absent_cancel_keeps_the_row_until_a_fresh_managed_reconciliation_read() {
     assert!(e.store().orders().is_empty());
     assert!(failures(&done).is_empty());
 }
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:940-962.
 #[test]
-fn independent_cancel_sibling_survives_a_delivered_gateway_failure_without_retry() {
+fn independent_cancel_unknown_halts_the_sibling_without_retry() {
     let mut e = engine();
     e.store_mut()
         .set_orders(vec![open_order("old-a"), open_order("old-b")]);
@@ -716,26 +718,29 @@ fn independent_cancel_sibling_survives_a_delivered_gateway_failure_without_retry
         503,
         r#"{"code":100001,"msg":"Signature verification failed"}"#,
     );
-    let second = cancel_packet(&next);
-    assert_ne!(second.id, first.id);
-    assert!(second.url.contains("orderId=old-b"));
-    assert!(failures(&next).is_empty());
-    let done = respond(
-        &mut e,
-        &second,
-        START + 2.,
-        200,
-        r#"{"code":0,"data":{"orderId":"old-b","status":"CANCELED"}}"#,
-    );
-    assert_eq!(failures(&done).len(), 1);
-    assert_eq!(failures(&done)[0].outcome, Some(Outcome::Unknown));
+    assert!(writes(&next).is_empty(), "Unknown halts the action");
+    assert_eq!(failures(&next).len(), 1);
+    let error = &failures(&next)[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(error.message.contains("outcome is unknown"));
+    assert!(error.message.contains("Check Open Orders"));
+    let rows = error.elements.as_ref().expect("complete cancel report");
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        &rows[0].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(matches!(
+        &rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+    ));
     assert_eq!(
         e.store().order("old-a").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
     );
     assert_eq!(
         e.store().order("old-b").unwrap().status,
-        safe_cex_engine::model::OrderStatus::Canceled
+        safe_cex_engine::model::OrderStatus::Open
     );
 }
 #[test]

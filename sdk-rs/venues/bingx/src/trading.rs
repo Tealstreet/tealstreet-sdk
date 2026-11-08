@@ -40,10 +40,10 @@ const ORDER: &str = "/openApi/swap/v2/trade/order";
 const CANCEL_ALL: &str = "/openApi/swap/v2/trade/allOpenOrders";
 const AMEND: &str = "/openApi/swap/v1/trade/amend";
 const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
+const UNKNOWN_WORDS: &str = "The outcome is unknown. Check Open Orders, then try again";
 const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
 
 pub struct Request {
-    journal: usize,
     write: usize,
     command: CommandId,
     call: Call,
@@ -87,7 +87,6 @@ impl Request {
         matches!(self.call, Call::Place)
     }
 }
-#[derive(Clone)]
 enum Call {
     Place,
     Cancel {
@@ -117,7 +116,6 @@ enum Call {
         hedged: bool,
     },
 }
-#[derive(Clone)]
 struct Step {
     receipts: Vec<OrderIdentityReceipt>,
     method: Method,
@@ -129,6 +127,7 @@ struct Step {
 struct Job {
     steps: VecDeque<Step>,
     continue_on_error: bool,
+    continue_after_refusal: bool,
     sets_both_hedged_sides: bool,
     // A trigger move cancels before placing; a failed placement must say so.
     replaces_cancelled: Option<(String, OrderSide, OrderType)>,
@@ -446,6 +445,18 @@ fn parse_envelope(body: &str) -> Result<Envelope<'_>, serde_json::Error> {
 fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
+fn present_unknown(mut error: VenueError, note: Option<&str>) -> VenueError {
+    if error.venue_message.is_none() {
+        error.venue_message = Some(error.message.clone().into_boxed_str());
+    }
+    error.message = match note {
+        Some(note) => format!("{UNKNOWN_WORDS}. {note}"),
+        None => UNKNOWN_WORDS.into(),
+    };
+    error.outcome = Some(Outcome::Unknown);
+    error.presents = true;
+    error
+}
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
@@ -597,17 +608,9 @@ impl Trading {
             return true;
         }
         match result {
-            Ok(mut job) => {
+            Ok(job) => {
                 let count = job.steps.len();
-                let writes =
-                    match Journals::new(std::mem::take(&mut job.steps), job.continue_on_error) {
-                        Ok(writes) => writes,
-                        Err(error) => {
-                            on_entry(cx);
-                            entry.reject(cx, error);
-                            return true;
-                        }
-                    };
+                let writes = Journals::new(&job.steps);
                 let admitted = if job.continue_on_error {
                     entry.admit_independent(cx, count).map(|plan| (plan, None))
                 } else {
@@ -649,7 +652,11 @@ impl Trading {
         let Some(run) = self.jobs.get_mut(&command) else {
             return;
         };
-        if run.error.is_some() && !run.job.continue_on_error && !run.job.restoring {
+        if run.error.is_some()
+            && !run.job.continue_on_error
+            && !run.job.continue_after_refusal
+            && !run.job.restoring
+        {
             let plan = run.plan.clone();
             let error = run
                 .error
@@ -659,7 +666,8 @@ impl Trading {
             let _ = cx.fail_plan(&plan, error);
             return;
         }
-        if let Some((journal, write, step)) = run.writes.next() {
+        if let Some(step) = run.job.steps.pop_front() {
+            let write = run.writes.begin(&step);
             let plan = run.plan.clone();
             let next = match run.next.take() {
                 Some(slot) => Ok(slot),
@@ -671,7 +679,7 @@ impl Trading {
                 Ok(slot) => slot,
                 Err(error) => {
                     let error = error.venue_error().outcome(Outcome::NotSent);
-                    run.writes.fail(journal, write, error.clone());
+                    run.writes.fail(write, &step.call, error.clone());
                     let error = run.writes.failure(error);
                     let _ = cx.fail_plan(&plan, error);
                     return;
@@ -692,7 +700,7 @@ impl Trading {
                 Ok(context) => context,
                 Err(error) => {
                     let error = error.venue_error().outcome(Outcome::NotSent);
-                    run.writes.fail(journal, write, error.clone());
+                    run.writes.fail(write, &step.call, error.clone());
                     let error = run.writes.failure(error);
                     let _ = cx.fail_plan(&plan, error);
                     return;
@@ -710,15 +718,17 @@ impl Trading {
                 };
                 if let Err(error) = cx.store.metadata_write_started(command, scope) {
                     let error = error.outcome(Outcome::NotSent);
-                    run.writes.fail(journal, write, error.clone());
+                    run.writes.fail(write, &step.call, error.clone());
                     let error = run.writes.failure(error);
                     let _ = cx.fail_plan(&plan, error);
                     return;
                 }
             }
-            if let Some(words) = run.job.unknown_words() {
-                let _ = cx.present_plan_failure(&plan, words);
-            }
+            let words = run
+                .job
+                .unknown_words()
+                .unwrap_or_else(|| UNKNOWN_WORDS.into());
+            let _ = cx.present_plan_failure(&plan, words);
             let protective = run.job.guard.is_some()
                 && (matches!(step.call, Call::Cancel { .. } | Call::Replace { .. })
                     || run.job.restoring);
@@ -728,7 +738,6 @@ impl Trading {
                 cx,
                 credentials,
                 Request {
-                    journal,
                     write,
                     command,
                     call: step.call,
@@ -764,8 +773,7 @@ impl Trading {
             let plan = request.plan.clone();
             let error = not_sent("BingX credentials unavailable").kind(ErrorKind::AuthInvalid);
             let error = if let Some(run) = self.jobs.get_mut(&request.command) {
-                run.writes
-                    .fail(request.journal, request.write, error.clone());
+                run.writes.fail(request.write, &request.call, error.clone());
                 run.writes.failure(error)
             } else {
                 error
@@ -816,15 +824,19 @@ impl Trading {
         };
         // A transport loss arrives here too; only a call never sent is certainly not live.
         let note = partial_failure_note(run, &request, error.outcome != Some(Outcome::NotSent));
-        let error = if run.job.cancelled {
+        let error = if !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
+            && run.job.guard.is_none()
+        {
+            present_unknown(error, None)
+        } else if run.job.cancelled {
             run.job.protection_error(error, false)
         } else {
             error
         };
-        run.writes
-            .fail(request.journal, request.write, error.clone());
+        run.writes.fail(request.write, &request.call, error.clone());
         let _ = run.error.get_or_insert(error.clone());
         if run.job.continue_on_error
+            && error.outcome == Some(Outcome::NotSent)
             && cx
                 .finish_plan_failed_call(&request.plan, &request.slot, &request.context)
                 .is_ok()
@@ -847,8 +859,7 @@ impl Trading {
         else {
             return error;
         };
-        run.writes
-            .fail(request.journal, request.write, error.clone());
+        run.writes.fail(request.write, &request.call, error.clone());
         run.writes.failure(error)
     }
     pub fn on_failed(
@@ -1133,7 +1144,7 @@ impl Trading {
             let timestamp = crate::sign::timestamp::refused(response.body);
             let table = if half_refused {
                 &protection::REPLACEMENT_FAILED
-            } else if (restoring || request.write > 0)
+            } else if (restoring || (request.write > 0 && !matches!(call, Call::Cancel { .. })))
                 && (timestamp || envelope.as_ref().is_ok_and(|e| e.code == 100001))
             {
                 &protection::RESTORE_AUTH
@@ -1218,6 +1229,14 @@ impl Trading {
             if satisfied {
                 Ok(Vec::new())
             } else {
+                let mut error = error;
+                if error.outcome == Some(Outcome::Unknown) && !guarded {
+                    let note = self
+                        .jobs
+                        .get(&request.command)
+                        .and_then(|run| partial_failure_note(run, &request, true));
+                    error = present_unknown(error, note.as_deref());
+                }
                 Err(error)
             }
         };
@@ -1243,13 +1262,10 @@ impl Trading {
         {
             run.job.cancelled = true;
         }
-        if let Err(error) = run.writes.settle(&request, &result, canceled) {
-            run.writes
-                .fail(request.journal, request.write, error.clone());
-            let error = run.writes.failure(error);
-            let _ = cx.fail_plan(&request.plan, error);
-            return;
-        }
+        run.writes.settle(&request, &result, canceled);
+        let uncertain = result
+            .as_ref()
+            .is_err_and(|error| error.outcome == Some(Outcome::Unknown));
         match result {
             Ok(ids) => {
                 run.native_ids.extend(ids);
@@ -1267,11 +1283,11 @@ impl Trading {
                 } else {
                     error
                 };
-                if guarded || run.error.is_none() {
+                if guarded || uncertain || run.error.is_none() {
                     run.error = Some(error);
                 }
-                if guarded {
-                    run.writes.discard_suffix();
+                if guarded || uncertain {
+                    run.job.steps.clear();
                 }
                 if guarded
                     && run.job.cancelled
@@ -1286,11 +1302,8 @@ impl Trading {
                         params,
                         call: Call::Place,
                     };
-                    if let Err(error) = run.writes.restore(restore) {
-                        let error = run.writes.failure(error);
-                        let _ = cx.fail_plan(&request.plan, error);
-                        return;
-                    }
+                    run.writes.restore(&restore);
+                    run.job.steps.push_back(restore);
                     run.job.restoring = true;
                 } else {
                     run.job.restoring = false;
@@ -1298,9 +1311,16 @@ impl Trading {
             }
         }
         // An ordered write continues only from this call's accepted DATA.
+        if uncertain {
+            let error = run
+                .writes
+                .failure(run.error.clone().unwrap_or_else(|| unknown(UNKNOWN_WORDS)));
+            let _ = cx.fail_plan(&request.plan, error);
+            return;
+        }
         let settled = if !run.job.continue_on_error
-            && (run.error.is_none() || run.job.restoring)
-            && run.writes.has_next()
+            && (run.error.is_none() || run.job.restoring || run.job.continue_after_refusal)
+            && !run.job.steps.is_empty()
         {
             cx.continue_serial_plan(
                 &request.plan,
@@ -1357,7 +1377,10 @@ impl Trading {
                 }
             }
         }
-        let mut job = Job::default();
+        let mut job = Job {
+            continue_after_refusal: true,
+            ..Job::default()
+        };
         for o in orders {
             job.steps.extend(self.format(cx, o)?);
             if orders.len() == 1 && (o.stop_loss.is_some() || o.take_profit.is_some()) {

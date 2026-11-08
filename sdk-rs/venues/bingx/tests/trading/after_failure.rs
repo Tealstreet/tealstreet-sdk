@@ -194,7 +194,7 @@ fn amend(amount: bool, unknown: bool) {
     assert!(h.requests.is_empty());
     assert_eq!(h.sent.len(), 1, "single native call never repeats");
     if unknown {
-        assert_unknown(&h, 0);
+        assert_unknown(&h, 0, if amount { 1 } else { 2 });
     }
 }
 
@@ -211,7 +211,7 @@ fn atomic_replace_stops_after_refusal() {
     amend(false, false);
 }
 
-fn assert_unknown(h: &Harness, current: usize) {
+fn assert_unknown(h: &Harness, current: usize, count: usize) {
     assert!(h.requests.is_empty());
     let e = &h.failures[0];
     assert_eq!(e.outcome, Some(safe_cex_engine::Outcome::Unknown));
@@ -222,20 +222,25 @@ fn assert_unknown(h: &Harness, current: usize) {
         e.message
     );
     let rows = e.elements.as_ref().expect("unknown journal");
-    assert!(
-        matches!(&rows[current].result, ElementResult::Unknown { error }
-        if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
-    );
-    for row in &rows[current + 1..] {
+    for row in &rows[current..current + count] {
+        assert!(matches!(&row.result, ElementResult::Unknown { error }
+            if error.outcome == Some(safe_cex_engine::Outcome::Unknown)));
+    }
+    for row in &rows[current + count..] {
         assert!(matches!(
             &row.result,
             ElementResult::NotSent { error: None }
         ));
     }
+    assert_eq!(
+        h.failures.len(),
+        1,
+        "one structured CommandFailed telemetry event"
+    );
+    assert_eq!(h.done.len(), 1);
     assert!(
-        h.telemetry
-            .iter()
-            .any(|event| event.code == safe_cex_engine::log::code::COMMAND_FAILED)
+        h.done[0].is_err(),
+        "terminal event carries the complete journal"
     );
 }
 
@@ -250,7 +255,7 @@ fn unknown(path: Path) {
             h.failed();
         }
         assert_eq!(h.sent.len(), 2);
-        assert_unknown(&h, 1);
+        assert_unknown(&h, 1, 1);
         let rows = h.failures[0].elements.as_ref().unwrap();
         assert!(
             matches!(&rows[0].result, ElementResult::Placed { order_ids } if order_ids == &["prefix"])
@@ -305,5 +310,37 @@ fn independent_cancel_unknown_stops() {
     });
     h.failed();
     assert_eq!(h.sent.len(), 1);
-    assert_unknown(&h, 0);
+    assert_unknown(&h, 0, 1);
+}
+
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1871-1889.
+#[test]
+fn definite_refusal_then_unknown_keeps_every_fact() {
+    for gateway in [false, true] {
+        let mut h = Harness::new(None);
+        h.place(vec![PlaceOrderOpts {
+            amount: 31.,
+            price: Some(2.),
+            ..opts()
+        }]);
+        accept_parity_payload(&mut h, "prefix");
+        h.reply(r#"{"code":100400,"msg":"definite refusal"}"#);
+        assert_eq!(h.requests.len(), 1);
+        if gateway {
+            h.reply_status(503, r#"{"msg":"unavailable"}"#);
+        } else {
+            h.failed();
+        }
+        assert_eq!(h.sent.len(), 3);
+        assert_unknown(&h, 2, 1);
+        let rows = h.failures[0].elements.as_ref().unwrap();
+        assert_eq!(rows.len(), 4);
+        assert!(
+            matches!(&rows[0].result, ElementResult::Placed { order_ids } if order_ids == &["prefix"])
+        );
+        assert!(
+            matches!(&rows[1].result, ElementResult::NotSent { error: Some(error) } if error.venue_code.as_deref() == Some("100400"))
+        );
+    }
 }

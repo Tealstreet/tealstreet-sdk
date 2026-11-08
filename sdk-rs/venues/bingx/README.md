@@ -24,8 +24,8 @@ Writes are sequenced and never retried after transport failures. A refusal
 BingX makes before processing, a bad signature (100001) or a stale timestamp
 (109400 naming it), is re-signed and resent once on the initial write; later
 ordered writes never resend after an accepted prefix. A timestamp resend reads
-BingX server time and recalibrates this account's signing clock. A batch is
-fully preflighted before any order is sent. Caller IDs are honored verbatim on
+BingX server time and recalibrates this account's signing clock. Batch inputs
+are formatted before the first write, retaining the existing input rules. Caller IDs are honored verbatim on
 one ordinary order or rejected before writes. Leverage changes without a side
 update both hedge sides sequentially, matching the engine's symbol-level API.
 
@@ -41,9 +41,12 @@ Prepared native writes use the shared `WritePlan` journal. Failures expose an
 ordered `elements` array covering each placed, refused, unknown and unsent lot
 or child, with exact client/native identities. Accepted cancellation, amendment
 and settings effects use `Applied`, without claiming newly created order IDs.
-Native independent cancel continuation and the held confirmed-cancel/definite-
-replacement-refusal restore each retain their existing decisions; separate
-shared journals report those branches with consecutive element indices.
+Like the perp TS loop, later lots, batch rows and TP/SL children continue after
+an individual definite refusal. A genuine Unknown halts further writes for the
+action, including independent cancels, and asks the user to check Open Orders.
+This is the recorded stop-after-UNKNOWN parity exception. Native confirmed-
+cancel/definite-replacement-refusal restore stays kept pending policy. The
+shared journal only reports facts; it never validates or schedules writes.
 
 An ordinary cancel answered `109400` with exactly `order not exist`, or `109421`,
 uses the same satisfied-cancel path as `80016`: the command completes, but its

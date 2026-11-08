@@ -416,7 +416,12 @@ fn unclassified_native_response_after_or_before_unsent_cancel_is_unknown() {
                 },
             );
             if !provider_first {
-                h.refuse(SignError::Refused);
+                assert!(
+                    h.preparing
+                        .values()
+                        .all(|request| request.method == safe_cex_engine::Method::Get),
+                    "Unknown must not prepare a later cancellation"
+                );
             }
             assert_eq!(
                 h.error().outcome,

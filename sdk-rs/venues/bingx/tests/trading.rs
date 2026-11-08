@@ -193,7 +193,6 @@ struct Harness {
     done: Vec<Result<String, String>>,
     failures: Vec<safe_cex_engine::VenueError>,
     receipted: std::collections::HashSet<String>,
-    telemetry: Vec<safe_cex_engine::log::LogEvent>,
     sent: Vec<(safe_cex_engine::Method, String, Option<String>)>,
     now: f64,
 }
@@ -238,7 +237,6 @@ impl Harness {
             done: Vec::new(),
             failures: Vec::new(),
             receipted: Default::default(),
-            telemetry: Vec::new(),
             sent: Vec::new(),
             now: 1_000.,
         };
@@ -283,7 +281,6 @@ impl Harness {
                     self.sent.push((r.method, r.url.clone(), r.body.clone()));
                     self.requests.push(r);
                 }
-                Action::Notice(Notice::Event(event)) => self.telemetry.push(event),
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(Ok(result)),
                 Action::Notice(Notice::CommandFailed { error, .. }) => {
                     self.failures.push(error.clone());
@@ -829,11 +826,14 @@ fn legacy_parity_serial_batch_has_no_new_combined_native_write_limit() {
     assert_eq!(h.requests.len(), 1);
     assert!(h.failures.is_empty());
     h.reply(r#"{"code":109400,"msg":"scripted venue refusal"}"#);
+    assert_eq!(h.requests.len(), 1, "legacy continues after refusal");
+    h.failed();
     assert!(h.requests.is_empty());
     assert_eq!(
         h.failures[0].outcome,
-        Some(safe_cex_engine::Outcome::Rejected)
+        Some(safe_cex_engine::Outcome::Unknown)
     );
+    assert_eq!(h.failures[0].elements.as_ref().unwrap().len(), 10_001);
 }
 
 fn writeplan_split() -> Harness {
@@ -880,7 +880,17 @@ fn assert_writeplan_middle_failure(h: &Harness, unknown: bool) {
 fn writeplan_rejected_middle_lot_reports_every_element() {
     let mut h = writeplan_split();
     h.reply(r#"{"code":100400,"msg":"bad quantity"}"#);
-    assert_writeplan_middle_failure(&h, false);
+    assert_eq!(accept_parity_payload(&mut h, "last-lot")["quantity"], 1.);
+    let rows = h.failures[0].elements.as_ref().unwrap();
+    assert!(
+        matches!(&rows[0].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["accepted-first-lot"])
+    );
+    assert!(
+        matches!(&rows[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(e) } if e.outcome == Some(safe_cex_engine::Outcome::Rejected))
+    );
+    assert!(
+        matches!(&rows[2].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["last-lot"])
+    );
 }
 
 #[test]
@@ -904,7 +914,14 @@ fn writeplan_gateway_middle_lot_keeps_prefix_and_unsent_suffix() {
 fn writeplan_signature_refusal_after_accepted_prefix_never_resends() {
     let mut h = writeplan_split();
     h.reply(r#"{"code":100001,"msg":"Signature verification failed"}"#);
-    assert_writeplan_middle_failure(&h, false);
+    assert_eq!(accept_parity_payload(&mut h, "last-lot")["quantity"], 1.);
+    let rows = h.failures[0].elements.as_ref().unwrap();
+    assert!(
+        matches!(&rows[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(e) } if e.venue_code.as_deref() == Some("100001"))
+    );
+    assert!(
+        matches!(&rows[2].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["last-lot"])
+    );
 }
 
 #[test]
@@ -1140,7 +1157,7 @@ fn cancel_continues_after_failure_and_marks_only_successes() {
         command: 1,
         ids: vec![order().id, "2".into()],
     });
-    h.reply(r#"{"code":109500,"msg":"busy"}"#);
+    h.reply(r#"{"code":100400,"msg":"definite refusal"}"#);
     assert_eq!(h.requests.len(), 1);
     assert_eq!(
         h.engine.store().order(&order().id).unwrap().status,
@@ -1278,10 +1295,12 @@ fn shared_hedged_leverage_short_failure_reports_long_success_without_rollback() 
                 .contains("SHORT leverage update was not confirmed")
         );
         match failure {
-            Some(body) if body != "malformed" => assert!(message.contains("SHORT refused")),
-            Some(_) => assert!(message.contains("Invalid BingX trading response")),
+            Some(body) if body != "malformed" => {
+                assert_eq!(error.venue_message.as_deref(), Some("SHORT refused"))
+            }
+            Some(_) => assert!(message.contains("outcome is unknown")),
             None => {
-                assert!(message.contains("connection lost"));
+                assert!(message.contains("outcome is unknown"));
                 assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
             }
         }
@@ -2126,7 +2145,7 @@ fn assert_prior_placements_survive_failure(failure: u8) {
     for acknowledged in 0..=2 {
         let mut h = Harness::new(None);
         h.place(vec![opts(), opts(), opts()]);
-        let ids: Vec<_> = (0..acknowledged).map(|i| format!("accepted-{i}")).collect();
+        let mut ids: Vec<_> = (0..acknowledged).map(|i| format!("accepted-{i}")).collect();
         for id in &ids {
             h.reply(&format!(r#"{{"code":0,"data":{{"orderId":"{id}"}}}}"#));
         }
@@ -2136,15 +2155,18 @@ fn assert_prior_placements_survive_failure(failure: u8) {
             1 => h.failed(),
             _ => h.reply(r#"{"code":0,"data":{}}"#),
         }
+        if failure == 0 {
+            for index in acknowledged + 1..3 {
+                let id = format!("later-{index}");
+                accept_parity_payload(&mut h, &id);
+                ids.push(id);
+            }
+        }
         assert_eq!(h.done.len(), 1);
         assert_eq!(h.failures.len(), 1);
-        assert!(
-            h.requests.is_empty(),
-            "failure must stop the remaining writes"
-        );
+        assert!(h.requests.is_empty());
         let error = &h.failures[0];
         let expected_outcome = match failure {
-            0 if acknowledged == 0 => Some(Outcome::Rejected),
             0 => None,
             _ => Some(Outcome::Unknown),
         };
@@ -2334,6 +2356,7 @@ fn mid_split_signature_refusal_keeps_accepted_ids_without_resending() {
     h.place(vec![split_order(30.)]);
     h.reply(r#"{"code":0,"data":{"orderId":"lot-0"}}"#);
     h.reply(r#"{"code":100001,"msg":"Signature verification failed"}"#);
+    assert_eq!(accept_parity_payload(&mut h, "lot-2")["quantity"], 10.);
     assert!(h.requests.is_empty());
     let [error] = h.failures.as_slice() else {
         panic!("{:?}", h.failures);
@@ -2342,7 +2365,10 @@ fn mid_split_signature_refusal_keeps_accepted_ids_without_resending() {
         (error.kind, error.outcome),
         (Some(ErrorKind::AuthInvalid), None)
     );
-    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["lot-0"]);
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["lot-0", "lot-2"]
+    );
 }
 
 /// cancelReplace runs STOP_ON_FAILURE, so a refusal may follow the cancel: native
@@ -2428,7 +2454,10 @@ fn a_limit_replace_that_cancels_and_refuses_says_the_order_is_gone() {
     });
     h.reply(r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"FAILED"}}"#);
     let error = h.done[0].as_ref().unwrap_err();
-    assert!(error.contains("order is gone"), "{error}");
+    assert!(
+        error.contains("outcome is unknown") && error.contains("Check Open Orders"),
+        "{error}"
+    );
 }
 
 fn moved_stop() -> Harness {

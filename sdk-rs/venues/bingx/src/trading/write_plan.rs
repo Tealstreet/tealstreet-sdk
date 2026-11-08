@@ -1,77 +1,36 @@
-//! Shared journals retain facts; native cancellation and held restore policy stay in Trading.
+//! Passive outcome reporting; native Job owns every dispatch decision.
 use super::*;
-use safe_cex_engine::write_plan::{
-    AppliedEffect, Element, ElementOutcomes, ElementResult, PlannedWrite, WritePlan,
-};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 
 pub(super) struct Journals {
-    plans: Vec<WritePlan<Step>>,
-    active: usize,
-    independent: bool,
-    remaining: usize,
+    plan: WritePlan,
+    next: usize,
 }
 
-fn validate_prepared(step: &Step) -> Result<(), VenueError> {
-    // Legacy input/quantity/price rules already ran while formatting the entire Job.
-    // Check only its closed native route here; do not add new economic refusals.
-    let valid = match &step.call {
-        Call::Place => step.method == Method::Post && step.path == ORDER,
-        Call::Cancel { .. } => {
-            step.method == Method::Delete && matches!(step.path, ORDER | CANCEL_ALL)
-        }
-        Call::Amend { .. } => step.method == Method::Post && step.path == AMEND,
-        Call::Replace { .. } => step.method == Method::Post && step.path == REPLACE,
-        Call::Leverage { .. } => step.method == Method::Post && step.path == crate::paths::LEVERAGE,
-        Call::Margin { .. } => {
-            step.method == Method::Post && step.path == "/openApi/swap/v2/trade/marginType"
-        }
-        Call::Mode { .. } => {
-            step.method == Method::Post && step.path == "/openApi/swap/v1/positionSide/dual"
-        }
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err(not_sent("Invalid prepared BingX write route").kind(ErrorKind::Internal))
+fn count(call: &Call) -> usize {
+    match call {
+        Call::Replace { .. } => 2,
+        Call::Cancel { ids, .. } => ids.len().max(1),
+        _ => 1,
     }
 }
 
-fn planned(steps: impl IntoIterator<Item = Step>) -> Result<WritePlan<Step>, VenueError> {
-    let mut index = 0;
-    let writes = steps
-        .into_iter()
-        .map(|step| {
-            let count = match &step.call {
-                Call::Replace { .. } => 2,
-                Call::Cancel { ids, .. } => ids.len().max(1),
-                _ => 1,
-            };
-            let client = step
-                .receipts
-                .iter()
-                .find(|receipt| receipt.kind == OrderIdentityKind::ClientOrderId)
-                .map(|receipt| receipt.identity.clone());
-            let elements = (0..count)
-                .map(|row| {
-                    let element = Element {
-                        index,
-                        client_order_id: if matches!(step.call, Call::Replace { .. }) && row == 0 {
-                            None
-                        } else {
-                            client.clone()
-                        },
-                    };
-                    index += 1;
-                    element
-                })
-                .collect();
-            PlannedWrite {
-                payload: step,
-                elements,
-            }
+fn elements(step: &Step, start: usize) -> Vec<Element> {
+    let client = step
+        .receipts
+        .iter()
+        .find(|receipt| receipt.kind == OrderIdentityKind::ClientOrderId)
+        .map(|receipt| receipt.identity.clone());
+    (0..count(&step.call))
+        .map(|row| Element {
+            index: start + row,
+            client_order_id: if matches!(step.call, Call::Replace { .. }) && row == 0 {
+                None
+            } else {
+                client.clone()
+            },
         })
-        .collect();
-    WritePlan::validate(writes, validate_prepared)
+        .collect()
 }
 
 fn applied(
@@ -160,51 +119,35 @@ fn results(
 }
 
 impl Journals {
-    pub(super) fn new(steps: VecDeque<Step>, independent: bool) -> Result<Self, VenueError> {
-        let remaining = steps.len();
-        let plans = if independent {
-            steps
-                .into_iter()
-                .map(|step| planned([step]))
-                .collect::<Result<_, _>>()?
-        } else {
-            vec![planned(steps)?]
-        };
-        Ok(Self {
-            plans,
-            active: 0,
-            independent,
-            remaining,
-        })
-    }
-
-    pub(super) fn next(&mut self) -> Option<(usize, usize, Step)> {
-        loop {
-            let plan = self.plans.get_mut(self.active)?;
-            if let Some((write, planned)) = plan.next_write() {
-                self.remaining = self.remaining.saturating_sub(1);
-                return Some((self.active, write, planned.payload.clone()));
-            }
-            if !self.independent {
-                return None;
-            }
-            self.active += 1;
+    pub(super) fn new(steps: &VecDeque<Step>) -> Self {
+        let mut rows = Vec::new();
+        for step in steps {
+            rows.extend(elements(step, rows.len()));
+        }
+        Self {
+            plan: WritePlan::new(rows),
+            next: 0,
         }
     }
 
-    pub(super) fn has_next(&self) -> bool {
-        self.remaining > 0
+    pub(super) fn begin(&mut self, step: &Step) -> usize {
+        let start = self.next;
+        self.next += count(&step.call);
+        self.fail(start, &step.call, unknown(UNKNOWN_WORDS));
+        start
     }
 
-    pub(super) fn discard_suffix(&mut self) {
-        self.remaining = 0;
-    }
-
-    pub(super) fn restore(&mut self, step: Step) -> Result<(), VenueError> {
-        self.plans.push(planned([step])?);
-        self.active = self.plans.len() - 1;
-        self.remaining = 1;
-        Ok(())
+    pub(super) fn restore(&mut self, step: &Step) {
+        let rows = self.plan.outcomes();
+        let mut all = rows
+            .iter()
+            .map(|row| row.element.clone())
+            .collect::<Vec<_>>();
+        all.extend(elements(step, all.len()));
+        self.plan = WritePlan::new(all);
+        for row in rows {
+            let _ = self.plan.record(row.element.index, row.result);
+        }
     }
 
     pub(super) fn settle(
@@ -212,40 +155,31 @@ impl Journals {
         request: &Request,
         result: &Result<Vec<String>, VenueError>,
         canceled: bool,
-    ) -> Result<(), VenueError> {
-        self.plans
-            .get_mut(request.journal)
-            .ok_or_else(|| unknown("BingX write journal is unavailable"))?
-            .settle(request.write, results(&request.call, result, canceled))
-            .map_err(|error| unknown(error.to_string()).kind(ErrorKind::Internal))
+    ) {
+        for (offset, result) in results(&request.call, result, canceled)
+            .into_iter()
+            .enumerate()
+        {
+            let _ = self.plan.record(request.write + offset, result);
+        }
     }
 
-    pub(super) fn fail(&mut self, journal: usize, write: usize, mut error: VenueError) {
+    pub(super) fn fail(&mut self, start: usize, call: &Call, mut error: VenueError) {
         error.elements = None;
-        if let Some(plan) = self.plans.get_mut(journal) {
-            let _ = plan.fail(write, error);
+        for index in start..start + count(call) {
+            let _ = self.plan.record(index, failed(&error));
         }
     }
 
-    pub(super) fn failure(&mut self, mut error: VenueError) -> VenueError {
-        let mut outcomes = Vec::new();
-        for plan in &mut self.plans {
-            error = plan.failure(error);
-            if let Some(elements) = error.elements.take() {
-                for mut row in elements.0 {
-                    row.element.index = outcomes.len();
-                    outcomes.push(row);
-                }
-            }
-        }
-        error.elements = Some(Box::new(ElementOutcomes(outcomes)));
-        error
+    pub(super) fn failure(&self, mut error: VenueError) -> VenueError {
+        error.presents = true;
+        self.plan.attach(error)
     }
 
     pub(super) fn evidence(
         &self,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
-        evidence.write_plans(&self.plans);
+        evidence.write_plan(&self.plan);
     }
 }
