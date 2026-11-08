@@ -20,6 +20,12 @@ retry and compensating writes. The journal never decides which writes are sent.
    counts, text and every other native fact stay exactly as supplied. The engine's
    existing physical lifecycle remains authoritative for aggregate classification.
 
+Native batches that do not create orders can record their physical facts through
+`Cx::http_write_applied_batch`. It retains the existing batch classifier and
+absent-order reconciliation fences while omitting cancelled or amended target IDs
+from created-order IDs. The logical journal separately records those existing
+targets in `Applied` results; the entry point refuses placement and read intents.
+
 `ElementResult` retains its existing serialized alternatives: `placed` with
 `orderIds`; `applied` with an `effect` and optional existing `targetOrderId` or
 `positionKey`; `notSent` with optional `error`; and `unknown` with required `error`.
@@ -40,3 +46,11 @@ its existing read-only `UnprovenEvidence::write_plan(&journal)` hook. It retains
 the recorded prefix and untouched suffix and projects the engine's failure into
 Unknown rows without changing the parent failure's classification or partial IDs.
 Neither this hook nor `attach` grants send, completion or retry authority.
+
+Terminal projection retains the caller's attached journal or, when absent, the
+latest journal captured on a failed physical attempt. Choosing an earlier native
+refusal for its error details does not replace that complete journal with an older
+snapshot. Existing aggregate outcome and error-message rules still apply.
+The latest captured journal follows a monotonic recording sequence assigned when
+each callback records its result, including unproven HTTP/native evidence; request
+registration order does not determine snapshot freshness.
