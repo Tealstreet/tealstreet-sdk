@@ -112,27 +112,17 @@ impl UnprovenEvidence {
         }
     }
 
-    /// Preserve a validated plan's logical facts when the engine seals an
+    /// Preserve the venue's recorded logical facts when the engine seals an
     /// unproven response before the venue decoder runs. Pending rows stay Unknown.
-    pub fn write_plan<T>(&mut self, plan: &crate::write_plan::WritePlan<T>) {
-        self.write_plans(std::iter::once(plan));
-    }
-
-    /// Compose shared journals for independently continued calls or an explicitly
-    /// retained recovery branch. This copies facts and grants no dispatch authority.
-    pub fn write_plans<'a, T: 'a>(
-        &mut self,
-        plans: impl IntoIterator<Item = &'a crate::write_plan::WritePlan<T>>,
-    ) {
+    pub fn write_plan(&mut self, plan: &crate::write_plan::WritePlan) {
+        let mut elements = plan.outcomes();
         let mut failure = self.error.clone();
         failure.elements = None;
         failure.partial = None;
-        let mut elements = plans
-            .into_iter()
-            .flat_map(|plan| plan.unproven_outcomes(&failure))
-            .collect::<Vec<_>>();
-        for (index, element) in elements.iter_mut().enumerate() {
-            element.element.index = index;
+        for element in &mut elements {
+            if let crate::write_plan::ElementResult::Unknown { error } = &mut element.result {
+                **error = failure.clone();
+            }
         }
         self.error.elements = Some(Box::new(crate::write_plan::ElementOutcomes(elements)));
     }
@@ -331,130 +321,34 @@ pub(super) fn mark_id_overflow(error: &mut VenueError) {
 #[cfg(test)]
 mod write_plan_tests {
     use super::*;
-    use crate::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
-
-    #[test]
-    fn composed_gateway_evidence_does_not_replace_an_earlier_settled_unknown() {
-        let single = || {
-            WritePlan::validate(
-                vec![PlannedWrite {
-                    payload: (),
-                    elements: vec![Element {
-                        index: 0,
-                        client_order_id: None,
-                    }],
-                }],
-                |_| Ok(()),
-            )
-            .unwrap()
-        };
-        let mut earlier = single();
-        earlier.next_write().unwrap();
-        earlier
-            .fail(
-                0,
-                VenueError::new("earlier socket lost")
-                    .kind(ErrorKind::Network)
-                    .outcome(Outcome::Unknown),
-            )
-            .unwrap();
-        let mut current = single();
-        current.next_write().unwrap();
-        let mut evidence = UnprovenEvidence::new(EvidenceBudget::default(), 503).unwrap();
-        evidence.write_plans([&earlier, &current]);
-        let (_, error, _) = evidence.finish();
-        let elements = error.elements.unwrap();
-        assert!(
-            matches!(&elements[0].result, ElementResult::Unknown { error }
-            if error.kind == Some(ErrorKind::Network) && error.message == "earlier socket lost")
-        );
-        assert!(
-            matches!(&elements[1].result, ElementResult::Unknown { error }
-            if error.kind == Some(ErrorKind::VenueUnavailable))
-        );
-    }
-
-    #[test]
-    fn unproven_recovery_keeps_earlier_journal_facts_and_global_indices() {
-        let writes = |count| {
-            (0..count)
-                .map(|index| PlannedWrite {
-                    payload: (),
-                    elements: vec![Element {
-                        index,
-                        client_order_id: None,
-                    }],
-                })
-                .collect()
-        };
-        let mut original = WritePlan::validate(writes(2), |_| Ok(())).unwrap();
-        original.next_write().unwrap();
-        original
-            .settle(
-                0,
-                vec![ElementResult::Applied {
-                    effect: crate::write_plan::AppliedEffect::Cancel,
-                    target_order_id: Some("old-stop".into()),
-                    position_key: None,
-                }],
-            )
-            .unwrap();
-        original.next_write().unwrap();
-        original
-            .fail(
-                1,
-                VenueError::new("replacement refused").outcome(Outcome::Rejected),
-            )
-            .unwrap();
-        let mut recovery = WritePlan::validate(writes(1), |_| Ok(())).unwrap();
-        recovery.next_write().unwrap();
-        let mut evidence = UnprovenEvidence::new(EvidenceBudget::default(), 503).unwrap();
-        evidence.write_plans([&original, &recovery]);
-        let (_, error, _) = evidence.finish();
-        let elements = error.elements.unwrap();
-        assert_eq!(elements.len(), 3);
-        assert_eq!(
-            elements
-                .iter()
-                .map(|row| row.element.index)
-                .collect::<Vec<_>>(),
-            [0, 1, 2]
-        );
-        assert!(matches!(&elements[0].result, ElementResult::Applied {
-            effect: crate::write_plan::AppliedEffect::Cancel, target_order_id: Some(id), ..
-        } if id == "old-stop"));
-        assert!(
-            matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) }
-            if error.outcome == Some(Outcome::Rejected))
-        );
-        assert!(
-            matches!(&elements[2].result, ElementResult::Unknown { error }
-            if error.kind == Some(ErrorKind::VenueUnavailable)
-                && error.outcome == Some(Outcome::Unknown) && error.elements.is_none())
-        );
-    }
+    use crate::write_plan::{Element, ElementResult, WritePlan};
 
     #[test]
     fn unproven_http_seal_preserves_prefix_pending_and_unissued_rows() {
-        let writes = (0..3)
-            .map(|index| PlannedWrite {
-                payload: (),
-                elements: vec![Element {
+        let mut plan = WritePlan::new(
+            (0..3)
+                .map(|index| Element {
                     index,
                     client_order_id: None,
-                }],
-            })
-            .collect();
-        let mut plan = WritePlan::validate(writes, |_| Ok(())).unwrap();
-        plan.next_write().unwrap();
-        plan.settle(
+                })
+                .collect(),
+        );
+        plan.record(
             0,
-            vec![ElementResult::Placed {
+            ElementResult::Placed {
                 order_ids: vec!["native-0".into()],
-            }],
+            },
         )
         .unwrap();
-        plan.next_write().unwrap();
+        plan.record(
+            1,
+            ElementResult::Unknown {
+                error: Box::new(
+                    VenueError::new("awaiting native response").outcome(Outcome::Unknown),
+                ),
+            },
+        )
+        .unwrap();
         let mut evidence = UnprovenEvidence::new(EvidenceBudget::default(), 503).unwrap();
         evidence.write_plan(&plan);
         evidence.write_plan(&plan);
@@ -469,6 +363,9 @@ mod write_plan_tests {
                 && error.outcome == Some(Outcome::Unknown) && error.elements.is_none())
         );
         assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
-        assert!(plan.next_write().is_none());
+        assert!(matches!(
+            plan.outcomes()[1].result,
+            ElementResult::Unknown { .. }
+        ));
     }
 }
