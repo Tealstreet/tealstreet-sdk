@@ -688,26 +688,17 @@ impl Cryptocom {
         error: VenueError,
     ) {
         self.account.writes += 1;
-        let Physical::Write {
-            plan,
-            slot,
-            context,
-        } = &request.physical
-        else {
+        let Physical::Write { plan, .. } = &request.physical else {
             self.trade_reject(cx, request, error);
             return;
         };
-        if self
-            .trading
-            .jobs
-            .get(&request.command)
-            .is_some_and(|job| job.best_effort)
-            && cx.finish_plan_failed_call(plan, slot, context).is_ok()
-        {
-            self.trade_settled(cx);
-        } else {
-            let _ = cx.fail_plan(plan, error);
-        }
+        let mut error = error;
+        error.message = format!(
+            "{}. The outcome is unknown. Check Open Orders",
+            error.message
+        );
+        error.presents = true;
+        let _ = cx.fail_plan(plan, error);
     }
     fn trade_settled(&mut self, cx: &mut Cx<'_, Pending>) {
         self.trading.active = false;
@@ -950,6 +941,8 @@ impl Cryptocom {
             }
         };
         let accepted = matches!(&fact, WriteFact::Accepted { .. });
+        let unknown = matches!(&fact, WriteFact::Failed { fact, .. }
+            if fact.error().outcome == Some(safe_cex_engine::Outcome::Unknown));
         let diagnostic = match &fact {
             WriteFact::Failed { fact, .. } => Some(fact.error().message.clone()),
             _ => None,
@@ -974,6 +967,16 @@ impl Cryptocom {
             }
             Ok(_) => {}
             Err(_) => return,
+        }
+        if unknown {
+            let mut error = VenueError::new(format!(
+                "{}. The outcome is unknown. Check Open Orders",
+                diagnostic.as_deref().unwrap_or("Write was not confirmed")
+            ))
+            .outcome(Outcome::Unknown);
+            error.presents = true;
+            let _ = cx.fail_plan(plan, error);
+            return;
         }
         if let Some(message) = diagnostic {
             let _ = cx.command_error_context(context, message);
