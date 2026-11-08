@@ -68,8 +68,15 @@ fn history_generated_bindings_match_the_owned_rust_module() {
     let raw = Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/history/raw");
     let config = Config::new().with_out_dir(&raw);
     fn check<T: TS + 'static>(raw: &Path, config: &Config, name: &str) {
+        let generated = T::export_to_string(config).unwrap();
+        let normalized = generated
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
         assert_eq!(
-            T::export_to_string(config).unwrap(),
+            normalized,
             fs::read_to_string(raw.join(format!("{name}.ts"))).unwrap(),
             "regenerate {name}"
         );

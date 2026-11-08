@@ -26,7 +26,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         raw: &Path,
         name: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        fs::write(raw.join(format!("{name}.ts")), T::export_to_string(config)?)?;
+        let generated = T::export_to_string(config)?;
+        let normalized = generated
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(raw.join(format!("{name}.ts")), normalized)?;
         Ok(())
     }
     export::<history::HistoricalOrder>(&config, &raw, "HistoricalOrder")?;
