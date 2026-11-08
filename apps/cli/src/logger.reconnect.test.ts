@@ -5,6 +5,12 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { HOWWebSocket } from '@tealstreet/http-over-websocket/src/HOWWebSocket';
 
+// These tests isolate terminal/file formatting; profile routing has real-FS tests.
+vi.mock('./storage-context', () => ({
+  getStorageDir: () => '/tmp/cli-logger-test',
+  onStorageOwnerChange: () => () => {},
+}));
+
 const fileLines: string[] = [];
 vi.mock('fs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('fs')>()),
