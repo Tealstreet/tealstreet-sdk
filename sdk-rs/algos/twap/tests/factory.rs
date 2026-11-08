@@ -572,3 +572,159 @@ async fn refusals_reach_the_user_as_errors() {
         })
         .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn legacy_parity_bingx_unbounded_max_does_not_gate_the_schedule() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            port.store
+                .borrow_mut()
+                .markets
+                .insert("BTCUSDT".to_owned(), market());
+            {
+                let mut store = port.store.borrow_mut();
+                store.venue = "bingx".to_owned();
+                store.markets.get_mut("BTCUSDT").unwrap().limits.amount.max = f64::INFINITY;
+            }
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+            factory
+                .start(serde_json::from_str(&twap_options(json!({ "size": 4 }))).unwrap())
+                .unwrap();
+            settle().await;
+            tokio::time::advance(Duration::from_secs(31)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&port), [2.0, 2.0]);
+            assert_eq!(port.commands.borrow().len(), 2);
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn legacy_parity_restored_invalid_tail_is_left_to_each_native_write() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            port.store
+                .borrow_mut()
+                .markets
+                .insert("BTCUSDT".to_owned(), market());
+            {
+                let mut store = port.store.borrow_mut();
+                let market = store.markets.get_mut("BTCUSDT").unwrap();
+                market.precision.amount = 1.0;
+                market.limits.amount.min = 2.0;
+                market.limits.amount.max = 10.0;
+            }
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            let options: Value = serde_json::from_str(&twap_options(json!({ "size": 4 }))).unwrap();
+            let restore = json!([{
+                "id": "legacy-tail", "options": options,
+                "state": { "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" },
+                    "size": 4, "ordersSizes": [3, 1], "side": "buy", "status": "running",
+                    "ordersCount": 2, "ordersExecuted": 0, "nextOrderAt": cx.now_ms() }
+            }]);
+            factory
+                .handle("twap:state", &restore.to_string(), &cx)
+                .unwrap();
+            tokio::time::advance(Duration::from_millis(1)).await;
+            settle().await;
+            assert_eq!(
+                placed_amounts(&port),
+                [3.0],
+                "legacy starts the valid prefix without a tail gate"
+            );
+            port.fail.set(true);
+            port.fail_outcome
+                .set(Some(safe_cex_engine::error::Outcome::Rejected));
+            tokio::time::advance(Duration::from_secs(31)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&port), [3.0, 1.0]);
+            assert_eq!(port.commands.borrow().len(), 2);
+            assert!(
+                port.emits.borrow().iter().any(
+                    |(op, data)| op == "error" && data == "TWAP BTCUSDT slice failed: rejected"
+                )
+            );
+            assert!(factory.active_twaps("a").is_empty());
+        })
+        .await;
+}
+
+async fn legacy_continues_after_child_failure(outcome: safe_cex_engine::error::Outcome) {
+    let port = Rc::new(Port::default());
+    port.store
+        .borrow_mut()
+        .markets
+        .insert("BTCUSDT".to_owned(), market());
+    port.store.borrow_mut().venue = "binance".to_owned();
+    let cx = AlgoCx::new(port.clone(), Scope::new());
+    let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
+    factory
+        .start(
+            serde_json::from_str(&twap_options(json!({
+                "size": 3, "ordersCount": 3, "reduceOnly": true
+            })))
+            .unwrap(),
+        )
+        .unwrap();
+    settle().await;
+    assert_eq!(placed_amounts(&port), [1.0]);
+    port.fail.set(true);
+    port.fail_outcome.set(Some(outcome));
+    tokio::time::advance(Duration::from_secs(21)).await;
+    settle().await;
+    assert_eq!(placed_amounts(&port), [1.0, 1.0]);
+    port.fail.set(false);
+    tokio::time::advance(Duration::from_secs(21)).await;
+    settle().await;
+    tokio::time::advance(Duration::from_secs(100)).await;
+    settle().await;
+    let commands = port.commands.borrow();
+    assert_eq!(
+        commands.len(),
+        3,
+        "one distinct command per legacy child, with no resend or repair"
+    );
+    let mut client_ids = std::collections::HashSet::new();
+    for command in commands.iter() {
+        let Command::PlaceOrders { orders, .. } = command else {
+            panic!("no repair/cancel belongs to this schedule")
+        };
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].reduce_only, Some(true));
+        assert!(client_ids.insert(orders[0].client_order_id.as_ref().unwrap()));
+    }
+    assert!(factory.active_twaps("a").is_empty());
+    let expected = if outcome == safe_cex_engine::error::Outcome::Unknown {
+        "TWAP BTCUSDT slice failed: outcome unknown, the order may be live: rejected"
+    } else {
+        "TWAP BTCUSDT slice failed: rejected"
+    };
+    assert!(
+        port.emits
+            .borrow()
+            .iter()
+            .any(|(op, data)| op == "error" && data == expected)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn legacy_parity_rejected_child_does_not_stop_later_children() {
+    LocalSet::new()
+        .run_until(legacy_continues_after_child_failure(
+            safe_cex_engine::error::Outcome::Rejected,
+        ))
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn legacy_parity_unknown_child_does_not_stop_later_children() {
+    LocalSet::new()
+        .run_until(legacy_continues_after_child_failure(
+            safe_cex_engine::error::Outcome::Unknown,
+        ))
+        .await;
+}
