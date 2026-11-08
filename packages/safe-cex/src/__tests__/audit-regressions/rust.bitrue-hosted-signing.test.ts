@@ -1,9 +1,9 @@
-import type { EngineHost, SignRequest } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions, RemoteSigner, RemoteSignerRequest } from '../../types';
+import type { HostedSigningInput, SignRequest } from '@tealstreet/safe-cex-wasm/host';
+import type { InternalAxiosRequestConfig } from 'axios';
+import type { RemoteSigner, RemoteSignerRequest } from '../../types';
 
+import { AxiosHeaders } from 'axios';
 import { createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 
 import { assertBetaAccount } from '../../exchanges/rust/betaVenues';
@@ -13,6 +13,7 @@ import { prepareBitrueRequest, signHostedHttp } from '../../exchanges/rust/legac
 import { createRemoteSignerProvider } from '../../exchanges/rust/remoteSignerProvider';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import vectors from '../../../../../sdk-rs/venues/bitrue/tests/fixtures/hosted-signing.json';
 
 // Preserve configured read keys at the constructor boundary; the global bypass
 // would otherwise discard them before delegated custody validation.
@@ -23,11 +24,10 @@ const key = 'fixture-bitrue-public';
 const secret = 'fixture-bitrue-signing-material';
 const mac = (payload: string) => createHmac('sha256', secret).update(payload).digest('hex');
 const identity = { credential: 'owned/public', signing: 'owned/hmac', publicCredential: key };
-const vectors = JSON.parse(readFileSync(resolve(__dirname,
-  '../../../../../sdk-rs/venues/bitrue/tests/fixtures/hosted-signing.json'), 'utf8')) as Array<{
-  label: string; method: string; url: string; body: string | null; payload: string; signature: string;
-}>;
-const remote = (sign: RemoteSigner['sign'] = async ({ id, wsAuth }) => ({ id, wsAuthSignature: mac(wsAuth!.toSign) })): RemoteSigner => ({
+const remote = (sign: RemoteSigner['sign'] = async ({ id, wsAuth }) => {
+  if (!wsAuth) throw new Error('Expected fixture WS-auth request');
+  return { id, wsAuthSignature: mac(wsAuth.toSign) };
+}): RemoteSigner => ({
   sign: vi.fn(sign), isAvailable: () => true, onAvailabilityChange: () => () => {},
 });
 const request = (payload: string): SignRequest => ({
@@ -40,7 +40,7 @@ it('admits Bitrue and Crypto.com signing through the shared declaration and keep
   const remoteSigner = remote();
   expect(deriveRemoteSigningPolicy('bitrue')).toMatchObject({ enabled: true, payloadSupported: true, payloadRestOnly: true,
     protectedHeaders: ['X-CH-APIKEY', 'X-CH-SIGN', 'X-CH-TS', 'recvWindow', 'Content-Type', 'X-Referer'] });
-  expect(deriveBridgeConstruction('bitrue', {} as ExchangeOptions).dispatchSigning).toBe(true);
+  expect(deriveBridgeConstruction('bitrue', { key: '', secret: '' }).dispatchSigning).toBe(true);
   expect(() => assertBetaAccount('bitrue', { key, secret: '', remoteSigner })).not.toThrow();
   expect(() => assertBetaAccount('bitrue', { key, payloadSigner: async () => ({ signature: '' }) })).not.toThrow();
   expect(() => assertBetaAccount('cryptocom', { key, remoteSigner })).not.toThrow();
@@ -66,9 +66,12 @@ it.each(vectors)('Bitrue $label: remote and payload provider MACs match the inde
 });
 
 it.each(vectors)('Bitrue $label: browser hosted HTTP preserves the native preimage and wire bytes', async (vector) => {
-  const hostedSigning = vi.fn(async (input: { kind: string; payload?: string }) => input.kind === 'credential'
-    ? { credential: key } : { credential: key, signature: mac(input.payload!) });
-  const host = { hostedSigning, hostedSigningClock: () => ({ stampMs: stamp, revision: '7' }) } as unknown as EngineHost;
+  const hostedSigning = vi.fn(async (input: HostedSigningInput) => {
+    if (input.kind === 'credential') return { credential: key };
+    if (input.kind !== 'http') throw new Error('Expected fixture HTTP signing request');
+    return { credential: key, signature: mac(input.payload) };
+  });
+  const host = { hostedSigning, hostedSigningClock: () => ({ stampMs: stamp, revision: '7' }) };
   const input: RemoteSignerRequest = { id: 'fixture', type: 'http', exchangeName: 'bitrue',
     config: { method: vector.method, baseURL: 'https://fapi.bitrue.com', url: vector.url, ...(vector.body === null ? {} : { data: vector.body }), headers: {} } };
   const before = structuredClone(input);
@@ -141,9 +144,9 @@ it('selects the explicit secondary public key for PayloadSigner work', async () 
 });
 
 it('preserves encoded queries, UTF-8 JSON and integer protocol stamps without mutating input', () => {
-  const config = { url: '/fapi/v2/order?fixed=a%2Bb', method: 'post', params: { symbol: 'E-BTC-USDT', tag: 'é +' },
-    data: { note: 'é +', size: 0 }, headers: {} } as Parameters<typeof prepareBitrueRequest>[0];
-  const before = structuredClone(config);
+  const config: InternalAxiosRequestConfig = { url: '/fapi/v2/order?fixed=a%2Bb', method: 'post', params: { symbol: 'E-BTC-USDT', tag: 'é +' },
+    data: { note: 'é +', size: 0 }, headers: new AxiosHeaders() };
+  const before = { ...structuredClone(config), headers: new AxiosHeaders(config.headers) };
   expect(prepareBitrueRequest(config, stamp + 0.9).payload).toBe(`${stamp}POST/fapi/v2/order?fixed=a%2Bb&symbol=E-BTC-USDT&tag=%C3%A9%20%2B{"note":"é +","size":0}`);
   expect(config).toEqual(before);
 });

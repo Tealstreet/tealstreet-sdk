@@ -1,23 +1,28 @@
 import type { ExchangeOptions, RemoteSigner, RemoteSignerRequest } from '../../types';
 
 import { createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { prepareRecordedHttp } from '../support/managedHttp';
+import vectors from '../../../../../sdk-rs/venues/bitrue/tests/fixtures/hosted-signing.json';
 
 let stamp = 1_700_000_000_123;
 const key = 'fixture-bitrue-public';
 const secret = 'fixture-bitrue-signing-material';
 const mac = (payload: string) => createHmac('sha256', secret).update(payload).digest('hex');
-const vectors = JSON.parse(readFileSync(resolve(__dirname,
-  '../../../../../sdk-rs/venues/bitrue/tests/fixtures/hosted-signing.json'), 'utf8')) as Array<{
-  label: string; method: string; url: string; body: string | null; payload: string; signature: string;
-}>;
+const timers = {
+  setTimeout: (fn: () => void, ms: number) => {
+    const timer = setTimeout(fn, ms);
+    return () => clearTimeout(timer);
+  },
+  clearTimeout: (cancel: unknown) => {
+    if (typeof cancel !== 'function') throw new Error('Expected fixture timer cancellation');
+    cancel();
+  },
+};
 const live: RustEngineExchange[] = [];
 afterEach(() => {
   live.splice(0).forEach((exchange) => exchange.dispose());
@@ -29,7 +34,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
   setWasmEngineLoader(loadNodeEngine);
   const io = vi.fn(() => { throw new Error('No network in signing capture'); });
   setRustEngineTransport(() => ({ prepareHttp: prepareRecordedHttp, now: () => stamp, request: io, connect: io,
-    setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) }));
+    ...timers }));
   const exchange = new RustEngineExchange('bitrue', { key, secret, ...options }, new DefaultStore());
   live.push(exchange);
   return { exchange, io };
@@ -107,7 +112,7 @@ it.each(['remote', 'payload'] as const)('actual native startup with %s custody a
       return { status: 200, body: new TextEncoder().encode(JSON.stringify(data)) };
     },
     connect: (url, handlers) => { sockets.push(url); queueMicrotask(() => handlers.onOpen()); return { send() {}, close() {} }; },
-    setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) }));
+    ...timers }));
   const server = new RustEngineExchange('bitrue', { key, secret: '', ...(mode === 'remote' ? { remoteSigner }
     : { payloadSigner: ({ payload }) => ({ signature: mac(payload) }) }) }, new DefaultStore());
   live.push(server);

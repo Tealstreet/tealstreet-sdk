@@ -58,8 +58,9 @@ not introduce an agent-wallet or EIP-712 signing mode.
 
 `construction-rules.json` declares `remoteSigning.enabled`, `payloadSupported`
 and `payloadRestOnly`. Bitrue is included in both SDK and Wasm beta rosters;
-the existing beta release roster guard counts its additional family. No Wasm
-budget cap changes are part of this activation. NX's derived refusal list
+the existing beta release roster guard counts its additional family. Measured
+cap-only follow-ups in this PR are recorded in `sdk-rs/harness/wasm-budget.test.mjs`.
+NX's derived refusal list
 follows the SDK declaration on import; no separate NX implementation is needed.
 
 Independent HMAC vectors cover every signed route plus listen-key creation and

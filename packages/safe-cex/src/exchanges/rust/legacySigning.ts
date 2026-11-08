@@ -125,7 +125,7 @@ export const signHostedHttp = async (
   name: ExchangeName,
   options: ExchangeOptions,
   primaryComplete: boolean,
-  host: EngineHost,
+  host: Pick<EngineHost, 'hostedSigning' | 'hostedSigningClock'>,
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
