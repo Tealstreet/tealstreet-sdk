@@ -590,6 +590,7 @@ impl BingxSpot {
                 cx,
                 "BingX Spot history axis is unsupported",
                 Operation::Read,
+                ErrorKind::Unsupported,
             );
             return;
         };
@@ -685,11 +686,22 @@ impl BingxSpot {
             let _ = rows.finish(cx, Err(error.venue_error()));
         }
     }
-    fn local_failure(&self, cx: &mut Cx<'_, Pending>, message: &str, operation: Operation) {
+    fn local_failure(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        message: &str,
+        operation: Operation,
+        kind: ErrorKind,
+    ) {
         let mut policy = Self::policy(None);
         policy.operation = operation;
         if let Ok(context) = cx.admit_http_command(policy) {
-            let _ = cx.fail_context(&context, invalid(message).kind(ErrorKind::Unsupported));
+            let _ = cx.fail_context(
+                &context,
+                invalid(message)
+                    .kind(kind)
+                    .outcome(safe_cex_engine::Outcome::NotSent),
+            );
         }
     }
 }
@@ -1072,11 +1084,21 @@ impl Venue for BingxSpot {
                 to_ms,
             } => {
                 let Some(i) = wire::interval(interval, false) else {
-                    self.local_failure(cx, "Unsupported BingX Spot interval", Operation::Read);
+                    self.local_failure(
+                        cx,
+                        "Unsupported BingX Spot interval",
+                        Operation::Read,
+                        ErrorKind::Unsupported,
+                    );
                     return;
                 };
                 let Some(m) = cx.store.market(&symbol) else {
-                    self.local_failure(cx, "Unknown BingX Spot market", Operation::Read);
+                    self.local_failure(
+                        cx,
+                        "Unknown BingX Spot market",
+                        Operation::Read,
+                        ErrorKind::InvalidInput,
+                    );
                     return;
                 };
                 let p = Params::new()
@@ -1094,7 +1116,12 @@ impl Venue for BingxSpot {
                 limit,
             } => {
                 let Some(m) = cx.store.market(&symbol) else {
-                    self.local_failure(cx, "Unknown BingX Spot market", Operation::Read);
+                    self.local_failure(
+                        cx,
+                        "Unknown BingX Spot market",
+                        Operation::Read,
+                        ErrorKind::InvalidInput,
+                    );
                     return;
                 };
                 let p = Params::new()
@@ -1115,11 +1142,21 @@ impl Venue for BingxSpot {
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b == b'_')
                 {
-                    self.local_failure(cx, "Invalid BingX Spot clientOrderId", Operation::Read);
+                    self.local_failure(
+                        cx,
+                        "Invalid BingX Spot clientOrderId",
+                        Operation::Read,
+                        ErrorKind::InvalidInput,
+                    );
                     return;
                 }
                 let Some(m) = cx.store.market(&symbol) else {
-                    self.local_failure(cx, "Unknown BingX Spot market", Operation::Read);
+                    self.local_failure(
+                        cx,
+                        "Unknown BingX Spot market",
+                        Operation::Read,
+                        ErrorKind::InvalidInput,
+                    );
                     return;
                 };
                 let params = Params::new()
@@ -1142,6 +1179,7 @@ impl Venue for BingxSpot {
                 cx,
                 "BingX Spot has no account identity endpoint",
                 Operation::Read,
+                ErrorKind::Unsupported,
             ),
             c => self.write_command(cx, c),
         }

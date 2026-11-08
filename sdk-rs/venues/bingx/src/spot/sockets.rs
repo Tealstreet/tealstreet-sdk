@@ -204,16 +204,17 @@ impl BingxSpot {
                 let id = order.id.clone();
                 let symbol = order.symbol.clone();
                 let terminal = order.status != OrderStatus::Open;
+                let side = order.side;
                 cx.store.upsert_order(order);
                 if terminal {
                     self.remember_terminal(id.clone());
                 }
-                if r.l > 0. && r.last_price > 0. && r.t.as_ref().is_some_and(Id::valid) {
-                    let key = format!(
-                        "{}:{}",
-                        id,
-                        r.t.as_ref().expect("validated trade ID").text()
-                    );
+                if let Some(trade) = r.t.as_ref().filter(|t| t.valid())
+                    && r.l > 0.
+                    && r.last_price > 0.
+                {
+                    let trade_id = trade.text();
+                    let key = format!("{id}:{trade_id}");
                     if self.seen_fills.insert(key.clone()) {
                         self.fill_fifo.push_back(key);
                         while self.fill_fifo.len() > 20_000 {
@@ -223,10 +224,10 @@ impl BingxSpot {
                         }
                         cx.fill_with_financials(
                             Fill {
-                                id: Some(r.t.as_ref().expect("validated trade ID").text()),
+                                id: Some(trade_id),
                                 order_id: id,
                                 symbol,
-                                side: wire::side(&r.side).expect("validated report"),
+                                side,
                                 price: r.last_price,
                                 amount: r.l,
                             },

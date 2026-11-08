@@ -77,7 +77,7 @@ use safe_cex_venue_binance::{
     BinanceFutures, Options as BinanceOptions, Variant as BinanceVariant,
 };
 #[cfg(feature = "bingx")]
-use safe_cex_venue_bingx::{Bingx, Options as BingxOptions, spot::BingxSpot};
+use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 #[cfg(feature = "bitget")]
 use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 #[cfg(feature = "bitrue")]
@@ -524,7 +524,7 @@ pub fn supported(venue: &str) -> bool {
         #[cfg(feature = "kucoin")]
         "kucoin" => true,
         #[cfg(feature = "bingx")]
-        "bingx" | "bingxspot" => true,
+        "bingx" => true,
         #[cfg(feature = "weex")]
         "weex" => true,
         #[cfg(feature = "woo")]
@@ -2121,12 +2121,7 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "bingx")]
-        "bingx" | "bingxspot" => {
-            if venue == "bingxspot" && options.testnet {
-                return Err(VenueError::new("BingX Spot testnet is unsupported")
-                    .kind(ErrorKind::Unsupported)
-                    .outcome(safe_cex_engine::Outcome::NotSent));
-            }
+        "bingx" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
                 || options.secret.as_ref().is_some_and(|s| !s.is_empty())
                 || options.read_credentials.is_some()
@@ -2148,15 +2143,9 @@ pub fn build_with_signer<T: Visit>(
                 public_data_only: options.public_data_only,
                 credentials: identities.primary,
             };
-            if venue == "bingxspot" {
-                let mut engine = Engine::new(BingxSpot::new(venue_options), entropy)?;
-                engine.set_signer(signer)?;
-                finish(visitor, policy, startup, engine)
-            } else {
-                let mut engine = Engine::new(Bingx::new(venue_options), entropy)?;
-                engine.set_signer(signer)?;
-                finish(visitor, policy, startup, engine)
-            }
+            let mut engine = Engine::new(Bingx::new(venue_options), entropy)?;
+            engine.set_signer(signer)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "weex")]
         "weex" => {

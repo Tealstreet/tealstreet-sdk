@@ -16,7 +16,7 @@ fn full_metadata_native_fields_unified_mobile_and_domains() {
     let table = exchange_metadata();
     let roster: Vec<String> =
         serde_json::from_str(include_str!("fixtures/exchange-metadata-roster.json")).unwrap();
-    assert_eq!(roster.len(), 47);
+    assert_eq!(roster.len(), 48);
     let mut native_names = table.keys().cloned().collect::<Vec<_>>();
     native_names.sort();
     assert_eq!(native_names, roster);
@@ -100,4 +100,22 @@ fn full_metadata_native_fields_unified_mobile_and_domains() {
     let expected_groups: Vec<(String, Vec<String>)> =
         serde_json::from_value(oracle["groups"].clone()).unwrap();
     assert_eq!(domains.into_iter().collect::<Vec<_>>(), expected_groups);
+}
+
+#[test]
+fn bingx_spot_metadata_and_symbol_conversion_stay_separate_and_disabled() {
+    let spot: ExchangeName = serde_json::from_str("\"bingxspot\"").unwrap();
+    assert_eq!(serde_json::to_value(&spot).unwrap(), "bingxspot");
+    let metadata = get_exchange_metadata("bingxspot", false).unwrap();
+    assert!(!metadata.enabled);
+    assert!(!metadata.enabled_in_dev);
+    assert_eq!(metadata.enable_in_preview, Some(false));
+    assert_eq!(
+        safe_cex_types::symbol_converter::to_binance("BTCUSDT", &spot),
+        "BTCUSDT"
+    );
+    assert_eq!(
+        safe_cex_types::symbol_converter::from_binance("BTCUSDT", &spot),
+        "BTCUSDT"
+    );
 }

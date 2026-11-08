@@ -314,7 +314,12 @@ impl BingxSpot {
     }
     pub(super) fn write_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let Some(identity) = self.credentials().cloned() else {
-            self.local_failure(cx, "BingX Spot credentials required", Operation::Mutation);
+            self.local_failure(
+                cx,
+                "BingX Spot credentials required",
+                Operation::Mutation,
+                ErrorKind::AuthInvalid,
+            );
             return;
         };
         let credential = Credential {
@@ -423,7 +428,10 @@ impl BingxSpot {
         };
         let Some(step) = run.steps.pop_front() else {
             let plan = run.plan.clone();
-            let value = serde_json::to_string(&run.ids).expect("string IDs");
+            let Ok(value) = serde_json::to_string(&run.ids) else {
+                let _ = cx.fail_plan(&plan, not_sent("Unable to encode Spot order IDs"));
+                return;
+            };
             let _ = cx.done_plan(&plan, value);
             return;
         };

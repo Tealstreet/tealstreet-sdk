@@ -681,3 +681,108 @@ fn documented_placement_envelope_keeps_its_exact_integer_identity() {
     reply(&mut e, &r, 200, &body.to_string());
     assert_eq!(done(&collect(&mut e), 41), json!([id]));
 }
+
+#[test]
+fn caller_read_errors_are_invalid_input_and_unsupported_axes_remain_unsupported() {
+    let (mut e, _) = seed(true);
+    for (command, expected) in [
+        (
+            Command::FetchOrderBook {
+                command: 81,
+                symbol: "UNKNOWN".into(),
+                limit: None,
+            },
+            safe_cex_engine::ErrorKind::InvalidInput,
+        ),
+        (
+            Command::Query {
+                command: 81,
+                query: Query::OrderByClientId {
+                    symbol: "BTCUSDT".into(),
+                    client_order_id: "invalid-id!".into(),
+                },
+            },
+            safe_cex_engine::ErrorKind::InvalidInput,
+        ),
+        (
+            Command::FetchCandles {
+                command: 81,
+                symbol: "BTCUSDT".into(),
+                interval: safe_cex_engine::model::Interval::S1,
+                limit: None,
+                from_ms: None,
+                to_ms: None,
+            },
+            safe_cex_engine::ErrorKind::Unsupported,
+        ),
+    ] {
+        e.handle(NOW, Event::Command(command));
+        let actions = collect(&mut e);
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 81, error }) if error.kind == Some(expected) && error.outcome == Some(Outcome::NotSent))), "{actions:?}");
+    }
+}
+
+#[test]
+fn lost_write_transport_is_unknown_network_and_never_resends() {
+    for route in ["order", "cancel", "cancelOpenOrders"] {
+        let (mut e, _) = seed(true);
+        let actions = match route {
+            "order" => place(&mut e, "limit", "buy"),
+            "cancel" => {
+                e.handle(
+                    NOW,
+                    Event::Command(Command::CancelOrdersWithSymbols {
+                        command: 41,
+                        orders: serde_json::from_value(
+                            json!([{"id":"9007199254740993","symbol":"BTCUSDT"}]),
+                        )
+                        .unwrap(),
+                    }),
+                );
+                collect(&mut e)
+            }
+            _ => {
+                e.handle(
+                    NOW,
+                    Event::Command(Command::CancelSymbolOrders {
+                        command: 41,
+                        symbol: "BTCUSDT".into(),
+                    }),
+                );
+                collect(&mut e)
+            }
+        };
+        let r = request(&actions, &format!("/trade/{route}"));
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: r.id,
+                error: "connection lost after send",
+            },
+        );
+        let actions = collect(&mut e);
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 41, error }) if error.kind == Some(safe_cex_engine::ErrorKind::Network) && error.outcome == Some(Outcome::Unknown))), "{route}: {actions:?}");
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        );
+        if route == "order" {
+            let _reconcile = request(&actions, "/trade/openOrders");
+            let second = place(&mut e, "limit", "buy");
+            assert!(second.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 41, error }) if error.outcome == Some(Outcome::NotSent) && error.message == "Placement outcome is uncertain; reconcile before placing or amending")), "{second:?}");
+            assert!(
+                !second
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+            );
+        }
+        for action in actions {
+            if let Action::SetTimer { timer, at_ms } = action {
+                e.handle(at_ms, Event::TimerFired { timer });
+            }
+        }
+        assert!(!collect(&mut e).iter().any(|a| matches!(a, Action::Http(r) if r.method == Method::Post && r.url.contains("/trade/"))));
+    }
+}

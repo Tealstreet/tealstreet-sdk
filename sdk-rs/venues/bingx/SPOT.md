@@ -10,14 +10,13 @@ load it.
 
 **Native and fixture-only until live-key smoke passes.** `bingxspot` is absent
 from both SDK `BETA_VENUES` and the WASM beta table. `assertBetaVenue` refuses it
-in every environment before I/O. Metadata is production-disabled. Its dev and
-preview metadata flags prepare the variant; they grant no factory admission.
+in every environment before I/O. The native/hosted registry also refuses it
+through the shared unsupported-venue path. Production, dev and preview metadata
+flags are all disabled. Native fixture tests construct the module directly.
 Admission is a separate follow-up after smoke, not part of this change.
-Testnet construction is explicitly refused; it cannot silently use live routes.
 
-- **NEEDS-NX:** the new public `ExchangeName` member is `bingxspot`. NX must group
-  Perps and Spot under the existing BingX add-account tile and mode toggle, and
-  test the Spot category before this PR merges. `apps/web` is outside this repo.
+- **NX:** #9111 has merged the account-picker integration for the new public
+  `ExchangeName` member `bingxspot`. `apps/web` is outside this repo.
 - **NEEDS-SMOKE:** the lead must verify the AWS-era transport dependency with
   live keys, exercise both compressed Spot streams and REST trading, and then
   explicitly admit the venue. This implementation does not claim that the AWS

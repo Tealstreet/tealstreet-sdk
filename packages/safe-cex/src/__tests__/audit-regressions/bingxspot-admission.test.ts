@@ -13,6 +13,8 @@ describe('BingX Spot native-only admission', () => {
     expect(exchangeMetadata[name]).toMatchObject({
       exchangeName: 'bingxspot',
       enabled: false,
+      enabledInDev: false,
+      enableInPreview: false,
       hasEmptyPositions: true,
       prettyName: 'BingX Spot',
     });
