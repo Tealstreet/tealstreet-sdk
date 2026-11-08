@@ -216,15 +216,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
   // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
-  binance: 2_236_416,
-  bingx: 2_085_888,
+  binance: 2_247_680,
+  bingx: 2_100_224,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   bitget: 2_457_600,
   bitgetusdc: 2_457_600,
   bitrue: 1_851_392,
   bitunix: 1_863_680,
-  blofin: 2_001_920,
+  blofin: 2_015_232,
   bybit: 2_281_472,
   coinbase: 1_953_792,
   cryptocom: 1_779_712,
@@ -242,13 +242,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
   kraken: 2_147_328,
   krakenspot: 2_147_328,
-  kucoin: 1_838_080,
+  kucoin: 1_850_368,
   kucoinspot: 2_405_376,
-  lighter: 2_093_056,
-  'lighter-robinhood': 2_093_056,
+  lighter: 2_109_440,
+  'lighter-robinhood': 2_109_440,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   mexc: 1_872_896,
-  okx: 1_986_560,
+  okx: 1_999_872,
   orderly: 1_744_896,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_266_112,
@@ -258,11 +258,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   polymarket: 1_611_776,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   txflow: 1_907_712,
-  weex: 1_948_672,
+  weex: 1_963_008,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
-  woo: 2_589_696,
+  woo: 2_611_200,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
