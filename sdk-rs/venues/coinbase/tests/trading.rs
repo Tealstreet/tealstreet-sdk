@@ -705,6 +705,102 @@ fn create_wire(request: &HttpRequest) -> CreateWire {
 }
 
 #[test]
+fn legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal() {
+    // TS reference: packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts:1659,1772.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses.
+    for (amount, maximum, step, expected) in [
+        (26., 5., 1., "26"),
+        (11., 5., 1., "11"),
+        (12., 5., 1., "12"),
+        (10., 5., 1., "10"),
+        (7., 3., 0.5, "7"),
+        (1.0005, 0.3, 0.001, "1.001"),
+    ] {
+        let mut s = Session::new("DEFAULT", false).ready();
+        s.e.store_mut().update_markets(|market| {
+            market.precision.amount = step;
+            market.limits.amount.min = step;
+            market.limits.amount.max = maximum;
+        });
+        s.command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![opts("BTC-USD", OrderType::Limit, OrderSide::Buy, amount)],
+        });
+        let mut request = None;
+        for _ in 0..100 {
+            for r in s.collect() {
+                if r.method == safe_cex_engine::Method::Post {
+                    assert!(request.is_none(), "multiple placement payloads");
+                    request = Some(r);
+                } else {
+                    s.answer(r);
+                }
+            }
+            assert!(
+                s.results.iter().all(|(id, _)| *id != 91),
+                "pre-HTTP refusal for {amount}/{maximum}/{step}: {:?}",
+                s.results
+            );
+            if request.is_some() {
+                break;
+            }
+            s.fire();
+        }
+        let request = request.expect("one placement payload");
+        assert!(request.url.ends_with("/orders"));
+        let config = create_wire(&request).order_configuration;
+        assert!(config.market_market_ioc.is_none());
+        assert!(config.stop_limit_stop_limit_gtc.is_none());
+        let sizes = [config.limit_limit_gtc.unwrap().base_size];
+        assert_eq!(sizes, [expected]);
+        let sum: f64 = sizes.iter().map(|s| s.parse::<f64>().unwrap()).sum();
+        assert_eq!(sum, expected.parse::<f64>().unwrap());
+        s.reply(
+            request,
+            400,
+            r#"{"error":"INVALID_ARGUMENT","message":"venue maximum exceeded"}"#,
+        );
+        assert!(s.done(91).unwrap_err().contains("venue maximum exceeded"));
+        assert_eq!(
+            s.failures[&91].outcome,
+            Some(safe_cex_engine::Outcome::Rejected)
+        );
+        s.advance(35_000.);
+        assert_eq!(
+            s.requests
+                .iter()
+                .filter(|r| r.method == safe_cex_engine::Method::Post)
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn above_max_amendments_still_refuse_before_any_write() {
+    // TS native edit bound: packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts:1573.
+    for (kind, symbol) in [("DEFAULT", "BTC-USD"), ("INTX", "BTC-PERP-INTX")] {
+        let mut s = Session::new(kind, false).ready();
+        s.seed("old", symbol, "1", "100");
+        s.e.store_mut()
+            .update_markets(|market| market.limits.amount.max = 5.);
+        s.command(Command::AmendOrder {
+            command: 92,
+            id: "old".into(),
+            price: None,
+            amount: Some(26.),
+        });
+        assert!(s.done(92).unwrap_err().contains("outside market limits"));
+        assert!(
+            !s.requests
+                .iter()
+                .any(|r| r.method == safe_cex_engine::Method::Post)
+        );
+        assert_eq!(s.e.store().order("old").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
 fn caller_and_generated_batch_identities_precede_each_native_placement() {
     fn placement(s: &mut Session) -> HttpRequest {
         let mut receipts = Vec::new();
