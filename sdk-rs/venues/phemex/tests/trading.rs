@@ -577,7 +577,113 @@ fn split_malformed_ack_reports_unknown_with_same_contract() {
 }
 
 #[test]
-fn split_definite_refusal_keeps_its_native_error_and_suppressed_suffix() {
+fn split_definite_first_refusal_continues_all_ts_lots() {
+    assert_split_refusals(&[0]);
+}
+
+#[test]
+fn split_definite_middle_refusal_continues_all_ts_lots() {
+    assert_split_refusals(&[1]);
+}
+
+#[test]
+fn split_multiple_and_all_refusals_keep_each_native_row() {
+    assert_split_refusals(&[0, 2]);
+    assert_split_refusals(&[3]);
+    assert_split_refusals(&[0, 1, 2, 3]);
+}
+
+fn assert_split_refusals(refused: &[usize]) {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut e = engine();
+    let mut order = opts("");
+    order.amount = 2.123;
+    let mut actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 94,
+            orders: vec![order],
+        },
+    );
+    let mut accepted = Vec::new();
+    let mut clients = Vec::new();
+    let mut quantities = Vec::new();
+    for (index, quantity) in ["0.667", "0.667", "0.667", "0.123"].iter().enumerate() {
+        let sent = writes(&actions);
+        assert_eq!(
+            sent.len(),
+            1,
+            "TS continues after a definite refusal at lot {index}"
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
+        let request = &sent[0];
+        assert_eq!(p(request, "orderQtyRq").as_deref(), Some(*quantity));
+        quantities.push(quantity.parse::<f64>().unwrap());
+        let client = p(request, "clOrdID").unwrap();
+        assert!(!clients.contains(&client));
+        clients.push(client);
+        actions = if refused.contains(&index) {
+            respond(
+                &mut e,
+                request,
+                json!({"code":11001,"msg":format!("refused-{index}"),"data":null}),
+            )
+        } else {
+            let id = format!("accepted-{index}");
+            accepted.push(id.clone());
+            respond(&mut e, request, ack(request, &id))
+        };
+    }
+    assert_eq!(
+        safe_cex_engine::num::adjust(quantities.iter().sum(), 0.001),
+        2.124
+    );
+    assert!(writes(&actions).is_empty());
+    let error = failure(&actions);
+    assert_eq!(
+        error.outcome,
+        if accepted.is_empty() {
+            Some(safe_cex_engine::Outcome::Rejected)
+        } else {
+            None
+        }
+    );
+    assert_eq!(
+        error.message,
+        format!("Phemex 11001 refused-{}", refused.last().unwrap())
+    );
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.as_slice())
+            .unwrap_or_default(),
+        accepted
+    );
+    let rows = error.elements.as_ref().expect("complete placement journal");
+    assert_eq!(rows.len(), 4);
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row.element.index, index);
+        assert_eq!(row.element.client_order_id.as_ref(), Some(&clients[index]));
+        if refused.contains(&index) {
+            assert!(
+                matches!(&row.result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected) && error.message == format!("Phemex 11001 refused-{index}"))
+            );
+        } else {
+            assert!(
+                matches!(&row.result, ElementResult::Placed { order_ids } if order_ids == &[format!("accepted-{index}")])
+            );
+        }
+    }
+    assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")));
+}
+
+#[test]
+fn split_definite_refusal_then_unknown_still_stops_suffix() {
     use safe_cex_engine::write_plan::ElementResult;
     let mut e = engine();
     let mut order = opts("");
@@ -585,43 +691,38 @@ fn split_definite_refusal_keeps_its_native_error_and_suppressed_suffix() {
     let actions = command(
         &mut e,
         Command::PlaceOrders {
-            command: 94,
+            command: 95,
             orders: vec![order],
         },
     );
     let first = writes(&actions).remove(0);
-    let actions = respond(&mut e, &first, ack(&first, "accepted-prefix"));
+    let actions = respond(
+        &mut e,
+        &first,
+        json!({"code":11001,"msg":"refused","data":null}),
+    );
     let second = writes(&actions).remove(0);
     let actions = respond(
         &mut e,
         &second,
-        json!({"code":11001,"msg":"refused","data":null}),
+        json!({"code":10500,"msg":"internal","data":null}),
     );
     assert!(writes(&actions).is_empty());
     let error = failure(&actions);
-    assert_eq!(
-        error.outcome, None,
-        "known accepted prefix plus a definite refusal"
-    );
-    assert_eq!(error.message, "Phemex 11001 refused");
-    assert_eq!(
-        error.partial.as_ref().unwrap().order_ids,
-        ["accepted-prefix"]
-    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
     let rows = error.elements.as_ref().unwrap();
-    assert_eq!(rows.len(), 4);
-    assert!(
-        matches!(&rows[0].result, ElementResult::Placed { order_ids } if order_ids == &["accepted-prefix"])
-    );
-    assert!(
-        matches!(&rows[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
-    );
+    assert!(matches!(
+        rows[0].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    assert!(matches!(rows[1].result, ElementResult::Unknown { .. }));
     assert!(
         rows[2..]
             .iter()
             .all(|row| row.result == ElementResult::NotSent { error: None })
     );
-    assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")));
+    assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")).count(), 1);
 }
 
 fn assert_split_unknown(unknown: usize, body: Value) {

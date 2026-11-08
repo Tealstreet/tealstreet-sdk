@@ -56,6 +56,7 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     placement_report: Option<WritePlan>,
+    placement_refusal: Option<VenueError>,
     settings: bool,
     /// Symbols a `PlaceOrders` job may leave with an unknown outcome.
     placing: Vec<String>,
@@ -74,6 +75,17 @@ struct Job {
     restoring: bool,
 }
 impl Job {
+    fn record_placement(&mut self, client_order_id: &Option<String>, result: ElementResult) {
+        if let Some(report) = &mut self.placement_report
+            && let Some(row) = report.outcomes().iter().find(|row| {
+                &row.element.client_order_id == client_order_id
+                    && !matches!(row.result, ElementResult::Placed { .. })
+            })
+        {
+            let _ = report.record(row.element.index, result);
+        }
+    }
+
     fn gone_note(&self, unknown: bool) -> Option<String> {
         self.replacing
             .as_ref()
@@ -1940,6 +1952,7 @@ impl PhemexPerpetuals {
                         steps,
                         ids: Vec::new(),
                         placement_report,
+                        placement_refusal: None,
                         settings: is_settings,
                         placing,
                         effective: false,
@@ -2011,6 +2024,12 @@ impl PhemexPerpetuals {
                 error.protection = Some(safe_cex_engine::error::Protection::Restored);
                 error.presents = true;
                 cx.command_error(id, error.message.clone());
+                let _ = cx.fail_plan(&job.plan, error.partial_ids(&job.ids));
+            } else if let Some(mut error) = job.placement_refusal {
+                error.presents = true;
+                if let Some(report) = &job.placement_report {
+                    error = report.attach(error);
+                }
                 let _ = cx.fail_plan(&job.plan, error.partial_ids(&job.ids));
             } else {
                 let _ = cx.done_plan(&job.plan, serde_json::to_string(&job.ids).unwrap());
@@ -2484,14 +2503,12 @@ impl PhemexPerpetuals {
                         .command
                         .and_then(|command| self.trading.jobs.get_mut(&command))
                         .ok_or("Phemex missing write job")?;
-                    if let Some(report) = &mut job.placement_report {
-                        let _ = report.record(
-                            job.ids.len(),
-                            ElementResult::Placed {
-                                order_ids: vec![identity.order_id.clone()],
-                            },
-                        );
-                    }
+                    job.record_placement(
+                        &order.client_order_id,
+                        ElementResult::Placed {
+                            order_ids: vec![identity.order_id.clone()],
+                        },
+                    );
                     job.ids.push(identity.order_id);
                 }
                 Call::Cancel { before, ids } => {
@@ -2668,6 +2685,41 @@ impl PhemexPerpetuals {
                 } else if let Err(error) = cx.finish_plan_call(plan, slot, context) {
                     self.finish_failed_trade(cx, request, error.venue_error(), true);
                     return;
+                }
+            } else if resolved
+                && let Err(message) = &result
+                && let Call::Place { order, .. } = &request.call
+                && let Some(job) = request
+                    .command
+                    .and_then(|id| self.trading.jobs.get_mut(&id))
+                && !job.placing.is_empty()
+                && !job.steps.is_empty()
+            {
+                // TS placeOrder keeps later payloads after a proven native refusal.
+                match cx.continue_serial_plan(plan, slot, context, serial_call()) {
+                    Ok(next) => {
+                        let error = VenueError::new(message.clone())
+                            .outcome(safe_cex_engine::Outcome::Rejected);
+                        job.record_placement(
+                            &order.client_order_id,
+                            ElementResult::NotSent {
+                                error: Some(Box::new(error.clone())),
+                            },
+                        );
+                        job.placement_refusal = Some(error.clone());
+                        job.slot = Some(next);
+                        let command = request.command;
+                        self.restore_failed_trade(cx, &request);
+                        if let Some(command) = command {
+                            cx.command_error(command, error.message);
+                            self.trade_next(cx, command);
+                        }
+                        return;
+                    }
+                    Err(error) => {
+                        self.finish_failed_trade(cx, request, error.venue_error(), false);
+                        return;
+                    }
                 }
             } else if resolved
                 && let Call::Place { .. } = &request.call
@@ -2939,7 +2991,7 @@ impl PhemexPerpetuals {
             job.gone_note(uncertain || error.outcome == Some(safe_cex_engine::Outcome::Unknown))
         });
         if let Some(job) = &mut job
-            && let Some(report) = &mut job.placement_report
+            && job.placement_report.is_some()
         {
             let unknown = error.outcome == Some(safe_cex_engine::Outcome::Unknown);
             if unknown {
@@ -2955,13 +3007,11 @@ impl PhemexPerpetuals {
                     ],
                 );
             }
+            if error.outcome == Some(safe_cex_engine::Outcome::Rejected) {
+                error.presents = true;
+            }
             // Observe the submitted identity; this journal has no dispatch authority.
-            if let Call::Place { order, .. } = &request.call
-                && let Some(row) = report.outcomes().iter().find(|row| {
-                    row.element.client_order_id == order.client_order_id
-                        && !matches!(row.result, ElementResult::Placed { .. })
-                })
-            {
+            if let Call::Place { order, .. } = &request.call {
                 let result = if unknown {
                     ElementResult::Unknown {
                         error: Box::new(error.clone()),
@@ -2971,9 +3021,11 @@ impl PhemexPerpetuals {
                         error: Some(Box::new(error.clone())),
                     }
                 };
-                let _ = report.record(row.element.index, result);
+                job.record_placement(&order.client_order_id, result);
             }
-            error = report.attach(error);
+            if let Some(report) = &job.placement_report {
+                error = report.attach(error);
+            }
         }
         if let Some(job) = &job {
             if !uncertain && (job.effective || !job.ids.is_empty()) {
@@ -3116,6 +3168,7 @@ mod tests {
                     }]),
                     ids: vec![],
                     placement_report: None,
+                    placement_refusal: None,
                     settings: false,
                     placing: vec![],
                     effective: false,
