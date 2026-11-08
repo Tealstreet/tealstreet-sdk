@@ -39,23 +39,32 @@ const frames: number[][] = JSON.parse(
 );
 const frame = (bytes: number[]) => new Frame(Uint8Array.from(bytes).buffer);
 
+function required<T>(value: T | undefined | null, label: string): T {
+  if (value === undefined || value === null) throw new Error(`Expected ${label}`);
+  return value;
+}
+
+const orders = (input: Frame) => required(input.orders(), 'native order table');
+const decodedOrders = (input: Frame, store: DefaultStore) => required(readOrderFrame(input, store), 'decoded orders');
+const profiles: [number, number[]][] = frames.slice(0, 7).map((bytes, index) => [index, bytes]);
+
 describe('Rust Order output through the packed frame and Store consumer', () => {
   it('materializes placement units in Rust before the JS decoder sees them', () => {
-    const nativePlacement = frame(frames[1]).orders()!;
-    expect(nativePlacement.remainingNative![0]).toBe(7);
-    expect(nativePlacement.filledInPlacementUnits![0]).toBe(3);
-    const contractCount = frame(frames[4]).orders()!;
-    expect(contractCount.remainingNative![0]).toBe(7);
-    expect(contractCount.filledInPlacementUnits![0]).toBe(3);
-    expect(frame(frames[2]).orders()!.remainingNotional![1]).toBe(700);
+    const nativePlacement = orders(frame(frames[1]));
+    expect(required(nativePlacement.remainingNative, 'remainingNative column')[0]).toBe(7);
+    expect(required(nativePlacement.filledInPlacementUnits, 'filledInPlacementUnits column')[0]).toBe(3);
+    const contractCount = orders(frame(frames[4]));
+    expect(required(contractCount.remainingNative, 'remainingNative column')[0]).toBe(7);
+    expect(required(contractCount.filledInPlacementUnits, 'filledInPlacementUnits column')[0]).toBe(3);
+    expect(required(orders(frame(frames[2])).remainingNotional, 'remainingNotional column')[1]).toBe(700);
   });
 
   it('does not recreate absent native quantities from base sizes', () => {
     const input = frame(frames[4]);
-    const table = input.orders()!;
-    table.remainingNative![0] = NaN;
-    table.filledInPlacementUnits![0] = NaN;
-    const row = readOrderFrame(input, new DefaultStore())![0];
+    const table = orders(input);
+    required(table.remainingNative, 'remainingNative column')[0] = NaN;
+    required(table.filledInPlacementUnits, 'filledInPlacementUnits column')[0] = NaN;
+    const row = decodedOrders(input, new DefaultStore())[0];
     expect(row.extra).toBeUndefined();
     expect(row.remaining).toBe(0.7);
     expect(row.filled).toBe(0.3);
@@ -63,18 +72,18 @@ describe('Rust Order output through the packed frame and Store consumer', () => 
 
   it('refuses missing required enums and malformed optional numbers', () => {
     const missing = frame(frames[0]);
-    missing.orders()!.enums[0] |= 255;
+    orders(missing).enums[0] |= 255;
     expect(() => readOrderFrame(missing, new DefaultStore())).toThrow('missing Order enum');
     const malformed = frame(frames[0]);
-    malformed.orders()!.remainingNative![0] = Infinity;
+    required(orders(malformed).remainingNative, 'remainingNative column')[0] = Infinity;
     expect(() => readOrderFrame(malformed, new DefaultStore())).toThrow('invalid Order optional number');
   });
 
-  it.each(frames.map((bytes, index) => [index, bytes] as const))(
+  it.each(profiles)(
     'preserves exact extras, absent/zero triggers and terminal identity for profile %i',
     (_, bytes) => {
       const store = new DefaultStore();
-      const rows = readOrderFrame(frame(bytes), store)!;
+      const rows = decodedOrders(frame(bytes), store);
       const [ordinary, exact, terminal] = rows;
       const ordinaryExtras = [
         undefined,
@@ -121,9 +130,16 @@ describe('Rust Order output through the packed frame and Store consumer', () => 
     },
   );
 
+  it('preserves explicit inverse-native remaining without market metadata', () => {
+    const rows = readOrderFrame(frame(frames[7]), new DefaultStore());
+    if (!rows) throw new Error('Expected native order rows');
+    expect(rows[1].extra?.remainingNative).toBe(7);
+    expect(rows[0].extra?.remainingNative).toBe(9.7);
+  });
+
   it('feeds generated orders into real mutation consumers without losing exact leaves or zero stops', () => {
     const store = new DefaultStore();
-    const rows = readOrderFrame(frame(frames[4]), store)!;
+    const rows = decodedOrders(frame(frames[4]), store);
     store.addOrUpdateOrders(rows);
     store.updateOrder(rows[1], { stopLoss: 0 });
     const result: Order | undefined = store.orders.find((order) => order.id === 'exact');

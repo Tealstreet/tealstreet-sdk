@@ -52,7 +52,7 @@ fn extras(order: &Order, market: Option<&Market>, units: u32) -> [Option<f64>; 4
                             1.
                         },
                 );
-            } else if units == 2 {
+            } else if units == 2 && native.is_none() {
                 leaves = Some(subtract(order.amount, order.filled).max(0.));
             }
         }

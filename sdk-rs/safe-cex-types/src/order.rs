@@ -1,5 +1,8 @@
 //! Canonical SDK Order, placement and amendment contracts.
-use crate::ModelField;
+//! ```compile_fail
+//! use safe_cex_types::order::strict_codecs::WireOrder;
+//! ```
+use crate::{ModelField, deserialize_present};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -356,5 +359,639 @@ impl serde::Serialize for Order {
         self.stop_loss.serialize_field(&mut state, "stopLoss")?;
         self.extra.serialize_field(&mut state, "extra")?;
         state.end()
+    }
+}
+
+mod strict_codecs {
+    use super::*;
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OrderStatus")]
+    enum WireOrderStatus {
+        #[serde(rename = "open")]
+        Open,
+        #[serde(rename = "closed")]
+        Closed,
+        #[serde(rename = "canceled")]
+        Canceled,
+        #[serde(rename = "creating")]
+        Creating,
+        #[serde(rename = "updating")]
+        Updating,
+        #[serde(rename = "canceling")]
+        Canceling,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OrderStatus {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireOrderStatus::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+                value,
+            ))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OrderType")]
+    enum WireOrderType {
+        #[serde(rename = "market")]
+        Market,
+        #[serde(rename = "limit")]
+        Limit,
+        #[serde(rename = "conditional")]
+        Conditional,
+        #[serde(rename = "stop_market")]
+        StopLoss,
+        #[serde(rename = "take_profit_market")]
+        TakeProfit,
+        #[serde(rename = "trailing_stop_market")]
+        TrailingStopLoss,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OrderType {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireOrderType::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OrderSide")]
+    enum WireOrderSide {
+        #[serde(rename = "buy")]
+        Buy,
+        #[serde(rename = "sell")]
+        Sell,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OrderSide {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireOrderSide::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OrderTimeInForce")]
+    enum WireOrderTimeInForce {
+        #[serde(rename = "GoodTillCancel")]
+        GoodTillCancel,
+        #[serde(rename = "ImmediateOrCancel")]
+        ImmediateOrCancel,
+        #[serde(rename = "FillOrKill")]
+        FillOrKill,
+        #[serde(rename = "PostOnly")]
+        PostOnly,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OrderTimeInForce {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireOrderTimeInForce::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OrderStopTriggerType")]
+    // Remote variants must retain the canonical public variant names.
+    #[allow(clippy::enum_variant_names)]
+    enum WireOrderStopTriggerType {
+        #[serde(rename = "mark_price")]
+        MarkPrice,
+        #[serde(rename = "last_price")]
+        LastPrice,
+        #[serde(rename = "index_price")]
+        IndexPrice,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OrderStopTriggerType {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireOrderStopTriggerType::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OrderRejectReason")]
+    enum WireOrderRejectReason {
+        #[serde(rename = "PostOnly")]
+        PostOnly,
+        #[serde(rename = "InsufficientBalance")]
+        InsufficientBalance,
+        #[serde(rename = "ReduceOnly")]
+        ReduceOnly,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OrderRejectReason {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireOrderRejectReason::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OrderExtra")]
+    #[serde(rename_all = "camelCase")]
+    struct WireOrderExtra {
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        remaining_native: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        filled_in_placement_units: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        remaining_notional: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        conditional_order_price: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        reject_reason: Option<OrderRejectReason>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        is_from_chaser: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        chaser_id: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        chaser_attempts: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        chaser_max_attempts: Option<f64>,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OrderExtra {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireOrderExtra::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::Order")]
+    #[serde(rename_all = "camelCase")]
+    struct WireOrder {
+        id: String,
+        #[serde(default)]
+        parent_id: ModelField<String>,
+        #[serde(default)]
+        status: ModelField<OrderStatus>,
+        symbol: String,
+        #[serde(default)]
+        r#type: ModelField<OrderType>,
+        #[serde(default)]
+        side: ModelField<OrderSide>,
+        #[serde(default)]
+        price: ModelField<f64>,
+        amount: f64,
+        filled: f64,
+        remaining: f64,
+        #[serde(default)]
+        reduce_only: ModelField<bool>,
+        #[serde(default)]
+        close: ModelField<bool>,
+        #[serde(default, deserialize_with = "crate::model_field::deserialize_info")]
+        info: ModelField<crate::retained_json::RetainedJsonInput>,
+        #[serde(default)]
+        client_order_id: ModelField<String>,
+        #[serde(default)]
+        time_in_force: ModelField<OrderTimeInForce>,
+        last_update: f64,
+        #[serde(default)]
+        trigger_type: ModelField<OrderStopTriggerType>,
+        #[serde(default)]
+        tp_trigger_type: ModelField<OrderStopTriggerType>,
+        #[serde(default)]
+        sl_trigger_type: ModelField<OrderStopTriggerType>,
+        #[serde(default)]
+        take_profit: ModelField<f64>,
+        #[serde(default)]
+        stop_loss: ModelField<f64>,
+        #[serde(default)]
+        extra: ModelField<OrderExtra>,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::Order {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct RecordVisitor;
+            impl<'de> serde::de::Visitor<'de> for RecordVisitor {
+                type Value = super::Order;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a model record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    decoder: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WireOrder::deserialize(crate::strict_decode::object(decoder))
+                }
+                // Map-forwarding decoders (flatten/MapAccessDeserializer) skip the hint.
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    map: A,
+                ) -> Result<Self::Value, A::Error> {
+                    WireOrder::deserialize(crate::strict_decode::object(
+                        serde::de::value::MapAccessDeserializer::new(map),
+                    ))
+                }
+            }
+            deserializer.deserialize_newtype_struct(crate::model_field::MODEL_RECORD, RecordVisitor)
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::PlaceOrderOpts")]
+    #[serde(rename_all = "camelCase")]
+    struct WirePlaceOrderOpts {
+        symbol: String,
+        r#type: OrderType,
+        side: OrderSide,
+        amount: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        price: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        trigger_price: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        stop_loss: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        take_profit: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        reduce_only: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        time_in_force: Option<OrderTimeInForce>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        trigger_type: Option<OrderStopTriggerType>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        tp_trigger_type: Option<OrderStopTriggerType>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        sl_trigger_type: Option<OrderStopTriggerType>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        client_order_id: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        max_slippage_pct: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        close: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        implied_volatility: Option<f64>,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::PlaceOrderOpts {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WirePlaceOrderOpts::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::UpdateOrderOptsUpdateVariant0")]
+    struct WireUpdateOrderOptsUpdateVariant0 {
+        #[serde(rename = "amount")]
+        amount: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        price: Option<f64>,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::UpdateOrderOptsUpdateVariant0 {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireUpdateOrderOptsUpdateVariant0::deserialize(crate::strict_decode::object(
+                deserializer,
+            ))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::UpdateOrderOptsUpdateVariant1")]
+    struct WireUpdateOrderOptsUpdateVariant1 {
+        #[serde(rename = "price")]
+        price: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        amount: Option<f64>,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::UpdateOrderOptsUpdateVariant1 {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireUpdateOrderOptsUpdateVariant1::deserialize(crate::strict_decode::object(
+                deserializer,
+            ))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::UpdateOrderOpts")]
+    struct WireUpdateOrderOpts {
+        #[serde(rename = "order")]
+        order: Order,
+        #[serde(rename = "update")]
+        update: UpdateOrderOptsUpdate,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::UpdateOrderOpts {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireUpdateOrderOpts::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[cfg(test)]
+    mod shape_tests {
+        use super::*;
+
+        #[test]
+        fn every_order_codec_has_a_narrow_input_shape() {
+            crate::strict_decode::tests::string_union::<OrderStatus>(
+                "OrderStatus",
+                WireOrderStatus::deserialize(serde::de::value::StringDeserializer::<
+                    crate::strict_decode::tests::Inventory,
+                >::new("__unknown_inventory__".into()))
+                .err()
+                .unwrap()
+                .0,
+                vec![
+                    serde_json::to_value(OrderStatus::Open)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderStatus::Closed)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderStatus::Canceled)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderStatus::Creating)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderStatus::Updating)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderStatus::Canceling)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                ],
+            );
+            crate::strict_decode::tests::string_union::<OrderType>(
+                "OrderType",
+                WireOrderType::deserialize(serde::de::value::StringDeserializer::<
+                    crate::strict_decode::tests::Inventory,
+                >::new("__unknown_inventory__".into()))
+                .err()
+                .unwrap()
+                .0,
+                vec![
+                    serde_json::to_value(OrderType::Market)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderType::Limit)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderType::Conditional)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderType::StopLoss)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderType::TakeProfit)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderType::TrailingStopLoss)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                ],
+            );
+            crate::strict_decode::tests::string_union::<OrderSide>(
+                "OrderSide",
+                WireOrderSide::deserialize(serde::de::value::StringDeserializer::<
+                    crate::strict_decode::tests::Inventory,
+                >::new("__unknown_inventory__".into()))
+                .err()
+                .unwrap()
+                .0,
+                vec![
+                    serde_json::to_value(OrderSide::Buy)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderSide::Sell)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                ],
+            );
+            crate::strict_decode::tests::string_union::<OrderTimeInForce>(
+                "OrderTimeInForce",
+                WireOrderTimeInForce::deserialize(serde::de::value::StringDeserializer::<
+                    crate::strict_decode::tests::Inventory,
+                >::new(
+                    "__unknown_inventory__".into()
+                ))
+                .err()
+                .unwrap()
+                .0,
+                vec![
+                    serde_json::to_value(OrderTimeInForce::GoodTillCancel)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderTimeInForce::ImmediateOrCancel)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderTimeInForce::FillOrKill)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderTimeInForce::PostOnly)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                ],
+            );
+            crate::strict_decode::tests::string_union::<OrderStopTriggerType>(
+                "OrderStopTriggerType",
+                WireOrderStopTriggerType::deserialize(serde::de::value::StringDeserializer::<
+                    crate::strict_decode::tests::Inventory,
+                >::new(
+                    "__unknown_inventory__".into()
+                ))
+                .err()
+                .unwrap()
+                .0,
+                vec![
+                    serde_json::to_value(OrderStopTriggerType::MarkPrice)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderStopTriggerType::LastPrice)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderStopTriggerType::IndexPrice)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                ],
+            );
+            crate::strict_decode::tests::string_union::<OrderRejectReason>(
+                "OrderRejectReason",
+                WireOrderRejectReason::deserialize(serde::de::value::StringDeserializer::<
+                    crate::strict_decode::tests::Inventory,
+                >::new(
+                    "__unknown_inventory__".into()
+                ))
+                .err()
+                .unwrap()
+                .0,
+                vec![
+                    serde_json::to_value(OrderRejectReason::PostOnly)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderRejectReason::InsufficientBalance)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(OrderRejectReason::ReduceOnly)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                ],
+            );
+            crate::strict_decode::tests::record::<OrderExtra>("OrderExtra");
+            crate::strict_decode::tests::record::<Order>("Order");
+            crate::strict_decode::tests::record::<PlaceOrderOpts>("PlaceOrderOpts");
+            crate::strict_decode::tests::record::<UpdateOrderOptsUpdateVariant0>(
+                "UpdateOrderOptsUpdateVariant0",
+            );
+            crate::strict_decode::tests::record::<UpdateOrderOptsUpdateVariant1>(
+                "UpdateOrderOptsUpdateVariant1",
+            );
+            crate::strict_decode::tests::record::<UpdateOrderOpts>("UpdateOrderOpts");
+        }
     }
 }

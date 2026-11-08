@@ -71,21 +71,14 @@ const zero: PlaceOrderOpts = {symbol:'BTC', type:OrderType.StopLoss, side:OrderS
  triggerType:OrderStopTriggerType.MarkPrice};
 const priceUpdate: UpdateOrderOpts = {order, update:{price:0}};
 const sizeUpdate: UpdateOrderOpts = {order, update:{amount:0}};
-// @ts-expect-error Readonly top-level fields.
-minimal.remaining = 2;
-// @ts-expect-error Readonly placement fields.
-zero.amount = 2;
-// @ts-expect-error Readonly nested update.
-if ('price' in priceUpdate.update) priceUpdate.update.price = 2;
-// @ts-expect-error At least one amendment is required.
-const emptyUpdate: UpdateOrderOpts = {order, update:{}};
-// @ts-expect-error Bare strings cannot replace the generated enum.
-const side: Order['side'] = 'buy';
-// @ts-expect-error Optional prices are not nullable.
-const badTrigger: PlaceOrderOpts = {...zero, triggerPrice:null};
+minimal.remaining = 2; // error 2540
+zero.amount = 2; // error 2540
+if ('price' in priceUpdate.update) priceUpdate.update.price = 2; // error 2540
+const emptyUpdate: UpdateOrderOpts = {order, update:{}}; // error 2322
+const side: Order['side'] = 'buy'; // error 2322
+const badTrigger: PlaceOrderOpts = {...zero, triggerPrice:null}; // error 2322
 declare const extra: NonNullable<Order['extra']>;
-// @ts-expect-error Nested extras remain readonly.
-extra.remainingNative = 2;
+extra.remainingNative = 2; // error 2540
 const reject: NonNullable<Order['extra']> = {rejectReason:OrderRejectReason.PostOnly};
 `;
   const configPath = path.join(root, 'packages/safe-cex/tsconfig.json');
@@ -96,5 +89,14 @@ const reject: NonNullable<Order['extra']> = {rejectReason:OrderRejectReason.Post
   host.getSourceFile = (file, version, ...args) => file === fixture
     ? ts.createSourceFile(file, source, version, true) : original(file, version, ...args);
   const program = ts.createProgram([fixture], {...parsed.options, incremental:false}, host);
-  assert.deepEqual(ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')), []);
+  const expected = source.split('\n').flatMap((line, index) => {
+    const match = /\/\/ error (\d+)/.exec(line);
+    return match ? [{ line: index + 1, code: Number(match[1]) }] : [];
+  });
+  const actual = ts.getPreEmitDiagnostics(program).map(diagnostic => ({
+    line: diagnostic.file && diagnostic.start !== undefined
+      ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1 : undefined,
+    code: diagnostic.code,
+  }));
+  assert.deepEqual(actual, expected);
 });

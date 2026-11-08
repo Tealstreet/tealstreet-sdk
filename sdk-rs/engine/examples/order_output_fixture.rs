@@ -64,7 +64,7 @@ fn order(symbol: &str, id: &str, extra: Option<OrderExtra>) -> Order {
 
 fn main() {
     let mut frames = Vec::new();
-    for (units, inverse) in [
+    for (profile, (units, inverse)) in [
         (QuantityUnits::Base, false),
         (QuantityUnits::NativePlacement, false),
         (QuantityUnits::NativePlacement, true),
@@ -72,13 +72,19 @@ fn main() {
         (QuantityUnits::ContractCount, false),
         (QuantityUnits::ContractCount, true),
         (QuantityUnits::InverseContractSized, true),
-    ] {
+        (QuantityUnits::InverseNative, false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut store = Store::default();
         store.set_quantity_units(units);
         let mut m = market("BTC", None);
         m.contract_size = Some(0.1);
         m.is_inverse = Some(inverse);
-        store.set_markets(vec![m]);
+        if profile < 7 {
+            store.set_markets(vec![m]);
+        }
         let mut base = order("BTC", "ordinary", None);
         base.amount = 10.;
         base.filled = 0.3;
