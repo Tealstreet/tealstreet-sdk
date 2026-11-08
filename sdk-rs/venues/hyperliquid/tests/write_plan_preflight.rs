@@ -209,6 +209,21 @@ fn runtime_failure_orders(
     second_reply: &str,
     expected: &str,
 ) {
+    runtime_failure_suffix(orders, status, second_reply, expected, false);
+}
+
+fn runtime_failure_suffix(
+    orders: Vec<PlaceOrderOpts>,
+    status: u16,
+    second_reply: &str,
+    expected: &str,
+    fenced_suffix: bool,
+) {
+    let second_rows = 1 + [orders[1].stop_loss, orders[1].take_profit]
+        .into_iter()
+        .flatten()
+        .filter(|price| *price > 0.)
+        .count();
     let mut engine = configured();
     engine.handle(
         2000.,
@@ -275,21 +290,31 @@ fn runtime_failure_orders(
     let elements = error["elements"]
         .as_array()
         .expect("complete per-element outcomes");
-    assert_eq!(elements.len(), 3);
+    assert_eq!(elements.len(), second_rows + 2);
     assert_eq!(elements[0]["index"], 0);
     assert_eq!(elements[0]["status"], "placed");
     assert_eq!(elements[0]["orderIds"], json!(["91"]));
-    assert_eq!(elements[1]["status"], expected);
-    assert_eq!(
-        elements[1]["error"]["outcome"],
-        if expected == "notSent" {
-            "rejected"
-        } else {
-            "unknown"
-        }
-    );
-    assert_eq!(elements[2]["status"], "notSent");
-    assert!(elements[2].get("error").is_none());
+    for element in &elements[1..=second_rows] {
+        assert_eq!(element["status"], expected);
+        assert_eq!(
+            element["error"]["outcome"],
+            if expected == "notSent" {
+                "rejected"
+            } else {
+                "unknown"
+            }
+        );
+    }
+    assert_eq!(elements[second_rows + 1]["status"], "notSent");
+    if fenced_suffix {
+        assert_eq!(elements[second_rows + 1]["error"]["outcome"], "notSent");
+        assert_eq!(
+            elements[second_rows + 1]["error"]["message"],
+            "Request is not in a sendable state"
+        );
+    } else {
+        assert!(elements[second_rows + 1].get("error").is_none(), "{error}");
+    }
 }
 
 #[test]
@@ -661,4 +686,51 @@ fn serial_tail_pins_native_rounding_and_below_minimum_group_wire() {
             assert_eq!(row["s"], expected_size);
         }
     }
+}
+
+#[test]
+fn context_free_deferred_plain_limit_reply_keeps_unknown_fence() {
+    // TS order-response.ts:137-145; hyperliquid.exchange.ts:3758-3760,4439-4442 accepts no-ID deferred rows.
+    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | serial-placement-batch/audit trading.rs:367
+    runtime_failure_suffix(
+        vec![order(3.), order(3.), order(3.)],
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill"]}}}"#,
+        "unknown",
+        true,
+    );
+}
+
+#[test]
+fn context_free_deferred_market_reply_keeps_fence_before_next_market() {
+    // TS order-response.ts:137-145; hyperliquid.exchange.ts:3927-3929,4441 accepts no-ID deferred rows.
+    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | live-price-freezing
+    let mut market = order(3.);
+    market.kind = safe_cex_engine::model::OrderType::Market;
+    market.price = None;
+    runtime_failure_suffix(
+        vec![order(3.), market.clone(), market],
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill"]}}}"#,
+        "unknown",
+        true,
+    );
+}
+
+#[test]
+fn deferred_group_without_proven_parent_keeps_unknown_fence() {
+    // TS order-response.ts:137-145; hyperliquid.exchange.ts:3758-3760,4441 accepts all-deferred groups.
+    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | limit-attached-TP-SL/audit trading.rs:733
+    let mut group = order(3.);
+    group.stop_loss = Some(80.);
+    group.take_profit = Some(120.);
+    runtime_failure_orders(
+        vec![order(3.), group, order(3.)],
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill","waitingForFill","waitingForFill"]}}}"#,
+        "unknown",
+    );
 }

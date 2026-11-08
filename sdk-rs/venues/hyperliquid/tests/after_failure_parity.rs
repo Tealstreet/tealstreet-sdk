@@ -1,6 +1,6 @@
 //! Legacy TS response interceptors and updateOrder determine continuation.
 mod support;
-use safe_cex_engine::{Action, Command, Event, Notice};
+use safe_cex_engine::{Action, Command, Event, Notice, Outcome};
 use serde_json::{Value, json};
 use support::{advance_packet_timers, message, prepared_now, ready, reply};
 
@@ -9,6 +9,25 @@ fn amend_trace(
     cancel_error: Option<&str>,
     replacement_error: Option<&str>,
     expected: &[&str],
+) {
+    amend_trace_statuses(
+        protective,
+        cancel_error.map_or_else(|| json!("success"), |error| json!({"error":error})),
+        replacement_error.map_or_else(
+            || json!({"resting":{"oid":91}}),
+            |error| json!({"error":error}),
+        ),
+        expected,
+        false,
+    );
+}
+
+fn amend_trace_statuses(
+    protective: bool,
+    cancel_status: Value,
+    replacement_status: Value,
+    expected: &[&str],
+    unknown: bool,
 ) {
     let (mut engine, socket) = ready("disabled");
     let source = if protective {
@@ -51,13 +70,9 @@ fn amend_trace(
                         "unexpected mutation after failure: {writes:?}"
                     );
                     let status = if kind == "cancel" {
-                        cancel_error
-                            .map_or_else(|| json!("success"), |error| json!({"error":error}))
+                        cancel_status.clone()
                     } else {
-                        replacement_error.map_or_else(
-                            || json!({"resting":{"oid":91}}),
-                            |error| json!({"error":error}),
-                        )
+                        replacement_status.clone()
                     };
                     reply(&mut engine, request, 200, &json!({"status":"ok","response":{"type":kind,"data":{"statuses":[status]}}}).to_string());
                 }
@@ -70,10 +85,15 @@ fn amend_trace(
                             .to_string(),
                     );
                 }
-                Action::Notice(
-                    Notice::CommandDone { command: 77, .. }
-                    | Notice::CommandFailed { command: 77, .. },
-                ) => {
+                Action::Notice(Notice::CommandFailed { command: 77, error }) => {
+                    assert!(!terminal, "one terminal notice");
+                    if unknown {
+                        assert_eq!(error.outcome, Some(Outcome::Unknown));
+                    }
+                    terminal = true;
+                }
+                Action::Notice(Notice::CommandDone { command: 77, .. }) => {
+                    assert!(!unknown, "uncertain write cannot report success");
                     assert!(!terminal, "one terminal notice");
                     terminal = true;
                 }
@@ -128,4 +148,35 @@ fn ordinary_replacement_refusal_pins_cancel_then_failed_place_without_suffix() {
         Some("Order has invalid price."),
         &["cancel", "order"],
     );
+}
+
+#[test]
+fn unknown_cancel_reply_keeps_fence_before_plain_or_protective_replacement() {
+    // TS hyperliquid.exchange.ts:4221-4233,4411-4416 does not validate this 2xx cancel row.
+    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | cancel-replace/audit trading.rs:405
+    for protective in [false, true] {
+        amend_trace_statuses(
+            protective,
+            json!({"mystery":true}),
+            json!({"resting":{"oid":91}}),
+            &["cancel"],
+            true,
+        );
+    }
+}
+
+#[test]
+fn unknown_replacement_reply_stops_without_retry_or_protective_put_back() {
+    // TS hyperliquid.exchange.ts:2256-2279,4411-4416 throws, with no restoration path.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | protective-compensation
+    for protective in [false, true] {
+        amend_trace_statuses(
+            protective,
+            json!("success"),
+            json!({"mystery":true}),
+            &["cancel", "order"],
+            true,
+        );
+    }
 }
