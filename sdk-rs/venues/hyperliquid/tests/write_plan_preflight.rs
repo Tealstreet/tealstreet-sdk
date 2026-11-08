@@ -209,7 +209,7 @@ fn runtime_failure_orders(
     second_reply: &str,
     expected: &str,
 ) {
-    runtime_failure_suffix(orders, status, second_reply, expected, false);
+    runtime_failure_suffix(orders, status, second_reply, expected, false, false);
 }
 
 fn runtime_failure_suffix(
@@ -218,6 +218,7 @@ fn runtime_failure_suffix(
     second_reply: &str,
     expected: &str,
     fenced_suffix: bool,
+    recorded_exception: bool,
 ) {
     let second_rows = 1 + [orders[1].stop_loss, orders[1].take_profit]
         .into_iter()
@@ -235,6 +236,7 @@ fn runtime_failure_suffix(
     let mut actions = prepared_now(&mut engine);
     let mut writes = Vec::new();
     let mut failure = None;
+    let mut events = Vec::new();
     for _ in 0..8 {
         for action in &actions {
             match action {
@@ -270,6 +272,7 @@ fn runtime_failure_suffix(
                 Action::Notice(Notice::CommandDone { command: 77, .. }) => {
                     panic!("failed intent reported whole")
                 }
+                Action::Notice(Notice::Event(event)) => events.push(event.clone()),
                 _ => {}
             }
         }
@@ -278,6 +281,9 @@ fn runtime_failure_suffix(
     }
     assert_eq!(writes.len(), 2);
     let error = failure.expect("terminal failure");
+    if recorded_exception {
+        support::assert_unknown_publication(&error, &events, 77);
+    }
     if expected == "notSent" {
         assert!(
             error.get("outcome").is_none(),
@@ -691,7 +697,7 @@ fn serial_tail_pins_native_rounding_and_below_minimum_group_wire() {
 #[test]
 fn context_free_deferred_plain_limit_reply_keeps_unknown_fence() {
     // TS order-response.ts:137-145; hyperliquid.exchange.ts:3758-3760,4439-4442 accepts no-ID deferred rows.
-    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquid.order-response.ts:137-145; hyperliquid.exchange.ts:4439-4442.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | serial-placement-batch/audit trading.rs:367
     runtime_failure_suffix(
         vec![order(3.), order(3.), order(3.)],
@@ -699,13 +705,14 @@ fn context_free_deferred_plain_limit_reply_keeps_unknown_fence() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill"]}}}"#,
         "unknown",
         true,
+        true,
     );
 }
 
 #[test]
 fn context_free_deferred_market_reply_keeps_fence_before_next_market() {
     // TS order-response.ts:137-145; hyperliquid.exchange.ts:3927-3929,4441 accepts no-ID deferred rows.
-    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquid.order-response.ts:137-145; hyperliquid.exchange.ts:3927-3929,4441.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | live-price-freezing
     let mut market = order(3.);
     market.kind = safe_cex_engine::model::OrderType::Market;
@@ -716,21 +723,24 @@ fn context_free_deferred_market_reply_keeps_fence_before_next_market() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill"]}}}"#,
         "unknown",
         true,
+        true,
     );
 }
 
 #[test]
 fn deferred_group_without_proven_parent_keeps_unknown_fence() {
     // TS order-response.ts:137-145; hyperliquid.exchange.ts:3758-3760,4441 accepts all-deferred groups.
-    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquid.order-response.ts:137-145; hyperliquid.exchange.ts:3758-3760,4439-4442.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | limit-attached-TP-SL/audit trading.rs:733
     let mut group = order(3.);
     group.stop_loss = Some(80.);
     group.take_profit = Some(120.);
-    runtime_failure_orders(
+    runtime_failure_suffix(
         vec![order(3.), group, order(3.)],
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill","waitingForFill","waitingForFill"]}}}"#,
         "unknown",
+        false,
+        true,
     );
 }

@@ -57,6 +57,8 @@ fn amend_trace_statuses(
     let mut actions = prepared_now(&mut engine);
     let mut writes = Vec::new();
     let mut terminal = false;
+    let mut unknown_failure = None;
+    let mut events = Vec::new();
     for _ in 0..10 {
         for action in &actions {
             match action {
@@ -89,6 +91,7 @@ fn amend_trace_statuses(
                     assert!(!terminal, "one terminal notice");
                     if unknown {
                         assert_eq!(error.outcome, Some(Outcome::Unknown));
+                        unknown_failure = Some(serde_json::to_value(error).expect("error"));
                     }
                     terminal = true;
                 }
@@ -97,6 +100,7 @@ fn amend_trace_statuses(
                     assert!(!terminal, "one terminal notice");
                     terminal = true;
                 }
+                Action::Notice(Notice::Event(event)) => events.push(event.clone()),
                 _ => {}
             }
         }
@@ -105,6 +109,9 @@ fn amend_trace_statuses(
     }
     assert_eq!(writes, expected);
     assert!(terminal, "one terminal notice");
+    if let Some(error) = unknown_failure {
+        support::assert_unknown_publication(&error, &events, 77);
+    }
 }
 
 #[test]
@@ -153,7 +160,7 @@ fn ordinary_replacement_refusal_pins_cancel_then_failed_place_without_suffix() {
 #[test]
 fn unknown_cancel_reply_keeps_fence_before_plain_or_protective_replacement() {
     // TS hyperliquid.exchange.ts:4221-4233,4411-4416 does not validate this 2xx cancel row.
-    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquid.exchange.ts:4221-4233,4411-4416.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | cancel-replace/audit trading.rs:405
     for protective in [false, true] {
         amend_trace_statuses(

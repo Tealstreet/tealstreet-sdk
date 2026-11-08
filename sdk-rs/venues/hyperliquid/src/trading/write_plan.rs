@@ -140,6 +140,43 @@ impl Journal {
         error
     }
 
+    pub(super) fn report_unknown(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        message: &str,
+    ) {
+        let outcomes = self.outcomes();
+        let unknown = outcomes
+            .iter()
+            .filter(|row| matches!(row.result, ElementResult::Unknown { .. }))
+            .map(|row| row.element.index.to_string())
+            .collect::<Vec<_>>();
+        if unknown.is_empty() {
+            return;
+        }
+        let placed = outcomes
+            .iter()
+            .filter_map(|row| match &row.result {
+                ElementResult::Placed { order_ids } => Some(order_ids.iter()),
+                _ => None,
+            })
+            .flatten()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        cx.event(
+            safe_cex_engine::log::Level::Warn,
+            "order.outcome_unknown",
+            message,
+            vec![
+                ("command", command.to_string().into()),
+                ("outcome", "unknown".into()),
+                ("placedOrderIds", placed.join(",").into()),
+                ("unknownIndices", unknown.join(",").into()),
+            ],
+        );
+    }
+
     pub(super) fn evidence(
         &self,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,

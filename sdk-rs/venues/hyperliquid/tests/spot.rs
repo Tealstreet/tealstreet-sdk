@@ -1998,6 +1998,18 @@ fn spot_cancel_status_trace(status: serde_json::Value, unknown: bool) {
     );
     if unknown {
         assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let events = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) => Some(event.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        support::assert_unknown_publication(
+            &serde_json::to_value(failures[0]).expect("error"),
+            &events,
+            2,
+        );
     }
 }
 
@@ -2016,7 +2028,7 @@ fn spot_cancel_errors_stop_before_replacement_including_terminal_misses() {
 #[test]
 fn spot_unknown_cancel_reply_keeps_fence_before_replacement() {
     // TS spot exchange:1182-1187,1205-1209 does not validate this 2xx cancellation row.
-    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquidspot.exchange.ts:787-790,1013-1016,1182-1187,1205-1209.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
     spot_cancel_status_trace(serde_json::json!({"mystery":true}), true);
 }
@@ -2045,6 +2057,8 @@ fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, un
     let mut actions = prepared_now(&mut e);
     let mut writes = Vec::new();
     let mut terminals = Vec::new();
+    let mut events = Vec::new();
+    let mut unknown_failure = None;
     for _ in 0..8 {
         for action in &actions {
             match action {
@@ -2063,6 +2077,7 @@ fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, un
                 Action::Notice(Notice::CommandDone { command: 72, .. }) => terminals.push(false),
                 Action::Notice(Notice::CommandFailed { command: 72, error }) => {
                     if unknown {
+                        unknown_failure = Some(serde_json::to_value(error).expect("error"));
                         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
                         assert_eq!(
                             error.partial.as_ref().expect("accepted prefix").order_ids,
@@ -2084,11 +2099,15 @@ fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, un
                     }
                     terminals.push(true);
                 }
+                Action::Notice(Notice::Event(event)) => events.push(event.clone()),
                 _ => {}
             }
         }
         let next = prepared_now(&mut e);
         actions = support::advance_packet_timers(&mut e, next, 20_000.);
+    }
+    if let Some(error) = unknown_failure {
+        support::assert_unknown_publication(&error, &events, 72);
     }
     assert_eq!(writes.len(), 2);
     assert_eq!(terminals, vec![failed]);
@@ -2117,7 +2136,7 @@ fn spot_serial_rows_pin_native_partial_sends_and_stop_after_refusal() {
 #[test]
 fn spot_unrecognized_or_empty_statuses_keep_unknown_fence_after_accepted_prefix() {
     // TS spot exchange:787-790,1013-1016 drops unknown/empty rows; BaseExchange:1111-1114 continues.
-    // PARITY-EXCEPTION-PENDING: engine fence stays; TS continues; Sam to decide.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquidspot.exchange.ts:787-790,1013-1016,1182-1187,1205-1209.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
     for statuses in [serde_json::json!([]), serde_json::json!([{"mystery":true}])] {
         spot_serial_status_trace(statuses, true, true);

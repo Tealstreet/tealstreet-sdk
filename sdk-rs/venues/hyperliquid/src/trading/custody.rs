@@ -407,7 +407,11 @@ impl Hyperliquid {
         job: &Job,
         result: Result<String, VenueError>,
     ) {
-        let result = result.map_err(|error| job.journal.failure(error));
+        let result = result.map_err(|error| {
+            let error = job.journal.failure(error);
+            job.journal.report_unknown(cx, job.command, &error.message);
+            error
+        });
         let custody = job.custody.as_ref().unwrap();
         if let Some(timer) = custody.intent_timer {
             cx.clear_timer(timer);
