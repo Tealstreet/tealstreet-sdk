@@ -1137,6 +1137,17 @@ test('#3298 (run 42433363173 at a42fcf9deaf) retains measured wasm headroom', ()
   }
 });
 
+test('#3316 (run 42449269046, job 128635008984) retains measured BingX headroom', () => {
+  const measured = 2_087_229;
+  const minimumCap = 2_098_176;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
+
 test('#3263 (run 42434407009 at e78c6873b82) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['bitunix', 1_863_786, 1_874_944],
