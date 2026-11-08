@@ -477,6 +477,14 @@ fn accepted_idless_prefix(first: PlaceOrderOpts, statuses: Value, expected: &[&s
     }
     assert_eq!(writes.len(), 2);
     let error = failure.expect("terminal failure");
+    if expected.first() == Some(&"placed") {
+        assert_eq!(error["partial"]["orderIds"], json!(["91"]));
+    } else {
+        assert!(
+            error.get("partial").is_none(),
+            "client identity is not a native oid: {error}"
+        );
+    }
     let elements = error["elements"]
         .as_array()
         .expect("every dispatched row journaled");
@@ -519,4 +527,120 @@ fn full_position_trigger_has_applied_outcome_before_later_rejection() {
         json!(["waitingForTrigger"]),
         &["applied", "notSent", "notSent"],
     );
+}
+
+#[test]
+fn mixed_native_group_retains_placed_applied_refused_and_unsent_rows() {
+    let mut engine = configured();
+    let mut first = order(3.);
+    first.stop_loss = Some(80.);
+    first.take_profit = Some(120.);
+    engine.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 77,
+            orders: vec![first, order(3.)],
+        }),
+    );
+    let mut actions = prepared_now(&mut engine);
+    let mut writes = 0;
+    let mut failure = None;
+    for _ in 0..8 {
+        for action in &actions {
+            match action {
+                Action::Http(request) if request.url.ends_with("/exchange") => {
+                    writes += 1;
+                    assert_eq!(writes, 1, "no suffix, retry or rollback");
+                    reply(
+                        &mut engine,
+                        request,
+                        200,
+                        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":91}},"waitingForFill",{"error":"Insufficient margin to place order."}]}}}"#,
+                    );
+                }
+                Action::Notice(Notice::CommandFailed { command: 77, error }) => {
+                    failure = Some(serde_json::to_value(error).expect("error JSON"))
+                }
+                Action::Notice(Notice::CommandDone { command: 77, .. }) => {
+                    panic!("failed group reported whole")
+                }
+                _ => {}
+            }
+        }
+        let next = prepared_now(&mut engine);
+        actions = advance_packet_timers(&mut engine, next, 20_000.);
+    }
+    assert_eq!(writes, 1);
+    let error = failure.expect("terminal failure");
+    assert_eq!(error["partial"]["orderIds"], json!(["91"]));
+    let elements = error["elements"]
+        .as_array()
+        .expect("complete group outcomes");
+    assert_eq!(elements.len(), 4);
+    assert_eq!(elements[0]["status"], "placed");
+    assert_eq!(elements[1]["status"], "applied");
+    assert_eq!(elements[1]["effect"], "deferredChild");
+    assert_eq!(elements[1]["targetOrderId"], "91");
+    assert_eq!(elements[2]["status"], "notSent");
+    assert_eq!(elements[2]["error"]["outcome"], "rejected");
+    assert_eq!(elements[3]["status"], "notSent");
+    assert!(elements[3].get("error").is_none());
+}
+
+#[test]
+fn settings_and_schedule_controls_have_journaled_runtime_refusals() {
+    let commands = [
+        (
+            Command::SetLeverage {
+                command: 77,
+                symbol: "BTC-PERP".into(),
+                leverage: 5.,
+                side: None,
+            },
+            "Cannot switch leverage type with open position.",
+        ),
+        (
+            safe_cex_engine::command::decode_command(r#"{"op":"scheduleCancel","command":77}"#)
+                .expect("schedule command"),
+            "Cannot set scheduled cancel time until enough volume traded",
+        ),
+    ];
+    for (command, refusal) in commands {
+        let mut engine = configured();
+        engine.handle(2000., Event::Command(command));
+        let actions = prepared_now(&mut engine);
+        let requests: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].url.ends_with("/exchange"));
+        reply(
+            &mut engine,
+            requests[0],
+            200,
+            &json!({"status":"err","response":refusal}).to_string(),
+        );
+        let actions = prepared_now(&mut engine);
+        let errors: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 77, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{actions:?}");
+        assert_eq!(errors[0].outcome, Some(Outcome::Rejected));
+        let elements = errors[0].elements.as_ref().expect("control journal");
+        assert_eq!(elements.len(), 1);
+        assert!(
+            matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+        );
+        assert!(!actions.iter().any(
+            |action| matches!(action, Action::Http(request) if request.url.ends_with("/exchange"))
+        ));
+    }
 }

@@ -962,8 +962,18 @@ fn journaled_partial_replacement_never_restores_full_position_source() {
         .elements
         .as_ref()
         .expect("journaled replacement");
-    assert_eq!(elements.len(), 1);
     assert!(
-        matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+        failures[0].partial.is_none(),
+        "canceled target is not a new placement"
+    );
+    assert_eq!(elements.len(), 2);
+    assert!(
+        matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::Applied {
+        effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
+        target_order_id: Some(id), position_key: None,
+    } if id == "9")
+    );
+    assert!(
+        matches!(&elements[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
     );
 }

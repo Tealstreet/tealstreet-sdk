@@ -48,7 +48,6 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     writes: Option<safe_cex_engine::write_plan::WritePlan<write_plan::PreparedWrite>>,
-    frozen: Option<VecDeque<write_plan::PreparedWrite>>,
     pending_write: Option<usize>,
     replacement: Option<String>,
     amend_source: Option<String>,
@@ -611,7 +610,6 @@ impl Hyperliquid {
                 steps,
                 ids: Vec::new(),
                 writes: None,
-                frozen: None,
                 pending_write: None,
                 replacement,
                 amend_deadline: None,
@@ -1284,6 +1282,7 @@ impl Hyperliquid {
         }
         self.trading.inflight = false;
         if request.effect.is_schedule_control() {
+            let status = result.as_ref().ok().map(|response| response.status);
             let outcome = schedule::reply(result);
             let reported = match &outcome {
                 Ok(()) => self.report_trade_batch(cx, &request, &[], "", false),
@@ -1299,6 +1298,12 @@ impl Hyperliquid {
             };
             if let Err(error) = reported {
                 self.finish_trade(cx, Err(error.venue_error().outcome(Outcome::Unknown)));
+                return;
+            }
+            if outcome.is_ok()
+                && let Err(error) = self.settle_write_rows(&request, &[], status)
+            {
+                self.finish_trade(cx, Err(error));
                 return;
             }
             self.finish_trade(cx, outcome);
@@ -1689,7 +1694,9 @@ impl Hyperliquid {
                 if let Some(plan) = job.writes.as_mut() {
                     error = plan.failure(error);
                 }
-                error = error.partial_ids(&job.ids);
+                if job.writes.is_none() {
+                    error = error.partial_ids(&job.ids);
+                }
                 let unknown = error.outcome != Some(Outcome::Rejected)
                     || error.kind == Some(ErrorKind::RateLimited);
                 if job.effective

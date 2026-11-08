@@ -35,7 +35,6 @@ impl Venue for RetirementProbe {
             steps: VecDeque::new(),
             ids: Vec::new(),
             writes: None,
-            frozen: None,
             pending_write: None,
             replacement: None,
             amend_source: None,

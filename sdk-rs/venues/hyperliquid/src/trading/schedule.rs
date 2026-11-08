@@ -50,7 +50,6 @@ impl Hyperliquid {
                 steps: VecDeque::from([Step::ScheduleCancel { time_ms }]),
                 ids: vec![],
                 writes: None,
-                frozen: None,
                 pending_write: None,
                 replacement: None,
                 amend_source: None,

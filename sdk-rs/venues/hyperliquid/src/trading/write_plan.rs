@@ -7,7 +7,6 @@ pub(super) struct PreparedWrite {
     action: Action,
     effect: Effect,
     native: Option<NativePlacement>,
-    tracked: bool,
 }
 
 fn validate(write: &PreparedWrite) -> Result<(), VenueError> {
@@ -37,12 +36,11 @@ impl Hyperliquid {
             .trading
             .active
             .as_ref()
-            .filter(|job| job.frozen.is_none())
+            .filter(|job| job.writes.is_none())
         else {
             return Ok(());
         };
         let steps = job.steps.clone();
-        let mut frozen = VecDeque::new();
         let mut writes = Vec::new();
         let mut index = 0;
         for step in steps {
@@ -63,44 +61,43 @@ impl Hyperliquid {
                 }
                 _ => None,
             };
-            // ID-less successes need the shared Applied result before journal adoption.
-            let tracked = matches!(effect, Effect::Place(_))
-                && OrderReply::for_action(&action, self.spot) == OrderReply::Rows;
             let prepared = PreparedWrite {
                 action,
                 effect,
                 native,
-                tracked,
             };
-            validate(&prepared)?;
-            if tracked {
-                let elements = prepared.native.as_ref().map_or_else(Vec::new, |native| {
-                    native
-                        .wires
-                        .iter()
-                        .map(|wire| {
-                            let element = Element {
-                                index,
-                                client_order_id: Some(wire.c.clone()),
-                            };
-                            index += 1;
-                            element
-                        })
-                        .collect()
-                });
-                writes.push(PlannedWrite {
-                    payload: prepared.clone(),
-                    elements,
-                });
+            let clients = match &prepared.effect {
+                Effect::Place(records) => records
+                    .iter()
+                    .map(|record| record.order.client_order_id.clone())
+                    .collect(),
+                Effect::Cancel(orders) => orders
+                    .iter()
+                    .map(|order| order.client_order_id.clone())
+                    .collect(),
+                Effect::ScheduleCancel | Effect::Leverage { .. } => vec![None],
+            };
+            let elements = clients
+                .into_iter()
+                .map(|client_order_id| {
+                    let element = Element {
+                        index,
+                        client_order_id,
+                    };
+                    index += 1;
+                    element
+                })
+                .collect::<Vec<_>>();
+            if elements.is_empty() {
+                continue;
             }
-            frozen.push_back(prepared);
-        }
-        if writes.is_empty() {
-            return Ok(());
+            writes.push(PlannedWrite {
+                payload: prepared,
+                elements,
+            });
         }
         let plan = Some(WritePlan::validate(writes, validate)?);
         if let Some(job) = self.trading.active.as_mut() {
-            job.frozen = Some(frozen);
             job.writes = plan;
         }
         Ok(())
@@ -119,28 +116,16 @@ impl Hyperliquid {
             .steps
             .pop_front()
             .ok_or_else(|| not_sent("No planned step"))?;
-        // Entirely ID-less paths remain with their existing driver until Applied lands.
-        if job.frozen.is_none() {
-            let (action, effect) = self.prepare_write(cx, step).map_err(not_sent)?;
-            if matches!(&effect, Effect::Cancel(orders) if orders.is_empty()) {
-                return Ok(None);
-            }
-            return Ok(Some((action, effect)));
+        if matches!(&step, Step::Cancel(orders) if orders.is_empty()) {
+            return Ok(None);
         }
-        let mut prepared = job
-            .frozen
+        let (index, write) = job
+            .writes
             .as_mut()
-            .and_then(VecDeque::pop_front)
-            .ok_or_else(|| not_sent("No frozen write"))?;
-        if prepared.tracked {
-            let (index, write) = job
-                .writes
-                .as_mut()
-                .and_then(WritePlan::next_write)
-                .ok_or_else(|| not_sent("Write plan stopped"))?;
-            job.pending_write = Some(index);
-            prepared = write.payload.clone();
-        }
+            .and_then(WritePlan::next_write)
+            .ok_or_else(|| not_sent("Write plan stopped"))?;
+        job.pending_write = Some(index);
+        let prepared = write.payload.clone();
         // Recheck live inputs without replacing the validated wire bytes.
         let (current, _) = self.prepare_write(cx, step).map_err(not_sent)?;
         let frozen_bytes =

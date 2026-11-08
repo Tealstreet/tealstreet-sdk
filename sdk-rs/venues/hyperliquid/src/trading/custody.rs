@@ -727,42 +727,60 @@ impl Hyperliquid {
         status: Option<u16>,
     ) -> Result<(), VenueError> {
         use safe_cex_engine::classify::{self, Intent, Native, NativeCode, Released};
-        use safe_cex_engine::write_plan::ElementResult;
+        use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
         let Some(job) = self.trading.active.as_ref() else {
             return Ok(());
         };
         let Some(index) = job.pending_write else {
             return Ok(());
         };
+        let idempotent_cancel = job.amend_source.is_none();
+        let intent = match &request.effect {
+            Effect::Place(_) if request.order_reply == OrderReply::FullPosition => Intent::Setting,
+            Effect::Place(_) if job.amend_source.is_some() => Intent::Amend,
+            Effect::Place(_) => Intent::Place,
+            Effect::Cancel(_) if idempotent_cancel || job.protection.is_some() => Intent::Cancel,
+            Effect::Cancel(_) => Intent::Amend,
+            Effect::ScheduleCancel | Effect::Leverage { .. } => Intent::Setting,
+        };
         let count = match &request.effect {
             Effect::Place(records) => records.len(),
-            _ => return Err(unproven("Unexpected journal effect")),
-        };
-        let intent = if job.amend_source.is_some() {
-            Intent::Amend
-        } else {
-            Intent::Place
+            Effect::Cancel(orders) => orders.len(),
+            Effect::ScheduleCancel | Effect::Leverage { .. } => 1,
         };
         let response = Response {
             status: status.ok_or_else(|| unproven("Missing native reply"))?,
             headers: "",
             body: "",
         };
+        let applied = |effect, target_order_id, position_key| ElementResult::Applied {
+            effect,
+            target_order_id,
+            position_key,
+        };
         let mut results = Vec::new();
         for row in 0..count {
-            let status = if matches!(statuses, [Status::Error { .. }]) {
+            let status = if matches!(&request.effect, Effect::Place(_))
+                && matches!(statuses, [Status::Error { .. }])
+            {
                 statuses.first()
             } else {
                 statuses.get(row)
             };
-            let result = match status {
-                Some(Status::Resting { resting }) => ElementResult::Placed {
-                    order_ids: vec![resting.oid.to_string()],
-                },
-                Some(Status::Filled { filled }) => ElementResult::Placed {
-                    order_ids: vec![filled.oid.to_string()],
-                },
-                Some(Status::Error { error }) => {
+            let result = match (&request.effect, status) {
+                (Effect::ScheduleCancel, _) => applied(AppliedEffect::Settings, None, None),
+                (Effect::Leverage { symbol, .. }, _) => {
+                    applied(AppliedEffect::Settings, None, Some(symbol.clone()))
+                }
+                (Effect::Cancel(orders), Some(Status::Text(text))) if text == "success" => {
+                    applied(AppliedEffect::Cancel, Some(orders[row].id.clone()), None)
+                }
+                (Effect::Cancel(orders), Some(Status::Error { error }))
+                    if idempotent_cancel && only_terminal_cancel(error) =>
+                {
+                    applied(AppliedEffect::Cancel, Some(orders[row].id.clone()), None)
+                }
+                (_, Some(Status::Error { error })) => {
                     let native = Native {
                         code: NativeCode::None,
                         message: table_message(error),
@@ -784,8 +802,41 @@ impl Hyperliquid {
                         ElementResult::Unknown { error }
                     }
                 }
+                (Effect::Place(_), Some(Status::Resting { resting })) => ElementResult::Placed {
+                    order_ids: vec![resting.oid.to_string()],
+                },
+                (Effect::Place(_), Some(Status::Filled { filled })) => ElementResult::Placed {
+                    order_ids: vec![filled.oid.to_string()],
+                },
+                (Effect::Place(records), Some(Status::Text(text)))
+                    if request.order_reply == OrderReply::FullPosition
+                        && text == "waitingForTrigger" =>
+                {
+                    applied(
+                        AppliedEffect::PositionTrigger,
+                        None,
+                        Some(records[row].order.symbol.clone()),
+                    )
+                }
+                (Effect::Place(_), Some(Status::Text(text)))
+                    if request.order_reply == OrderReply::Attached
+                        && row > 0
+                        && deferred_child(text) =>
+                {
+                    let parent = match statuses.first() {
+                        Some(Status::Resting { resting }) => Some(resting.oid.to_string()),
+                        Some(Status::Filled { filled }) => Some(filled.oid.to_string()),
+                        _ => None,
+                    };
+                    match parent {
+                        Some(parent) => applied(AppliedEffect::DeferredChild, Some(parent), None),
+                        None => ElementResult::Unknown {
+                            error: Box::new(unproven("Deferred child has no accepted parent")),
+                        },
+                    }
+                }
                 _ => ElementResult::Unknown {
-                    error: Box::new(unproven("Unknown Hyperliquid order status")),
+                    error: Box::new(unproven("Unknown Hyperliquid write status")),
                 },
             };
             results.push(result);
@@ -840,6 +891,12 @@ impl Hyperliquid {
                 .any(|status| matches!(status, Status::Text(text) if deferred_child(text)))
         {
             return self.report_attached_order(cx, request, statuses, message);
+        }
+        if matches!(&request.effect, Effect::Cancel(_))
+            && statuses.iter().all(|status| matches!(status, Status::Text(text) if text == "success")
+                || matches!(status, Status::Error { error } if idempotent_cancel && only_terminal_cancel(error)))
+        {
+            return cx.http_write_fact(&request.context, WriteFact::Accepted { order_ids: vec![] }, None).map(drop);
         }
         let ids: Vec<_> = statuses
             .iter()
