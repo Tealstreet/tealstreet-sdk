@@ -61,6 +61,15 @@ To control external logging:
 - In development: Set `NEXT_PUBLIC_FORCE_EXTERNAL_LOGGING=1` to enable Grafana logging
 - Set `NEXT_PUBLIC_FORCE_SENTRY=1` to enable Sentry error tracking in development
 
+### Ingest Token Ownership
+
+`startLoggingToGrafana(userId, username?)` returns the cleanup for that logging
+session. Call it on logout. Cleanup and user changes invalidate cached ingest
+tokens and pending token requests; a late response cannot authorize the next
+user's uploads. Uploads waiting on a token or compression stop when their session
+ends. Restarting logging for the same active user can reuse an unexpired token,
+and a stale cleanup cannot invalidate the current session.
+
 ### Web Worker Usage
 
 The debug logger works in Web Workers, but requires additional configuration since `process.env` is not available:

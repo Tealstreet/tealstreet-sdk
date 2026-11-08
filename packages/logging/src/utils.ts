@@ -59,10 +59,20 @@ type LogIngestToken = {
   token: string;
 };
 
-let cachedLogIngestToken: LogIngestToken | undefined;
-let logIngestTokenRequest: Promise<LogIngestToken> | undefined;
+let cachedLogIngestToken: (LogIngestToken & { userId: string }) | undefined;
+let logIngestTokenRequest: { userId: string; epoch: number; promise: Promise<LogIngestToken | undefined> } | undefined;
+let logIngestTokenEpoch = 0;
 
 const LOG_INGEST_TOKEN_REFRESH_SKEW_MS = 60_000;
+
+function resetLogIngestToken() {
+  logIngestTokenEpoch++;
+  cachedLogIngestToken = undefined;
+  logIngestTokenRequest = undefined;
+}
+
+const isLoggingOwnerCurrent = (userId: string, epoch: number) =>
+  userId === localUserId && epoch === logIngestTokenEpoch;
 
 export const getSessionKey = () => sessionKey;
 
@@ -75,8 +85,7 @@ export const resetLoggingStateForTests = () => {
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
   uploadInProgress = false;
-  cachedLogIngestToken = undefined;
-  logIngestTokenRequest = undefined;
+  resetLogIngestToken();
 };
 
 function splitStringByBytes(input: string, byteSize: number = 200000): string[] {
@@ -157,6 +166,7 @@ export const dumpLogQueue = () => {
 };
 
 export const startLoggingToGrafana = (userId: string, username?: string) => {
+  if (userId !== localUserId) resetLogIngestToken();
   localUserId = userId;
   localUsername = username;
 
@@ -195,6 +205,7 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
       flushInterval = undefined;
       localUserId = '';
       localUsername = undefined;
+      resetLogIngestToken();
     }
     if (visibilityListener === activeVisibilityListener && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', activeVisibilityListener);
@@ -215,13 +226,20 @@ const getLogIngestOrigin = () => {
   return origin?.replace(/\/+$/, '') || undefined;
 };
 
-const getLogIngestToken = async (baseUrl: string) => {
-  if (cachedLogIngestToken && cachedLogIngestToken.expiresAt - Date.now() > LOG_INGEST_TOKEN_REFRESH_SKEW_MS) {
+const getLogIngestToken = async (baseUrl: string, userId: string) => {
+  const epoch = logIngestTokenEpoch;
+  if (!isLoggingOwnerCurrent(userId, epoch)) return undefined;
+  if (
+    cachedLogIngestToken?.userId === userId &&
+    cachedLogIngestToken.expiresAt - Date.now() > LOG_INGEST_TOKEN_REFRESH_SKEW_MS
+  ) {
     return cachedLogIngestToken.token;
   }
 
-  if (!logIngestTokenRequest) {
-    logIngestTokenRequest = fetch(`${baseUrl}/api/logs/token`, { credentials: 'same-origin' })
+  if (logIngestTokenRequest?.userId !== userId || logIngestTokenRequest.epoch !== epoch) {
+    const request: Promise<LogIngestToken | undefined> = fetch(`${baseUrl}/api/logs/token`, {
+      credentials: 'same-origin',
+    })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`Log token API responded with status ${response.status}`);
@@ -232,15 +250,17 @@ const getLogIngestToken = async (baseUrl: string) => {
           throw new Error('Log token API returned an invalid response');
         }
 
-        cachedLogIngestToken = { expiresAt: payload.expiresAt, token: payload.token };
+        if (!isLoggingOwnerCurrent(userId, epoch)) return undefined;
+        cachedLogIngestToken = { expiresAt: payload.expiresAt, token: payload.token, userId };
         return cachedLogIngestToken;
       })
       .finally(() => {
-        logIngestTokenRequest = undefined;
+        if (logIngestTokenRequest?.promise === request) logIngestTokenRequest = undefined;
       });
+    logIngestTokenRequest = { userId, epoch, promise: request };
   }
 
-  return (await logIngestTokenRequest).token;
+  return (await logIngestTokenRequest.promise)?.token;
 };
 
 const drainLogBatches = async () => {
@@ -262,6 +282,7 @@ const drainLogBatches = async () => {
 };
 
 const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<boolean> => {
+  const ownerEpoch = logIngestTokenEpoch;
   // Skip logging in development unless explicitly forced
   // Default to logging if process is undefined (e.g., in web workers)
   let isDevelopment = false;
@@ -281,6 +302,7 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
   if (queue.length === 0) return true;
 
   for (let retries = 0; retries <= MAX_RETRIES; retries++) {
+    if (!isLoggingOwnerCurrent(userId, ownerEpoch)) return true;
     if (!isPageReadyForLogging()) return false;
     const reportMetrics = Date.now() - lastMetricsReportAt >= METRICS_REPORT_INTERVAL_MS;
     const metricsSnapshot = reportMetrics ? { ...loggingMetrics } : undefined;
@@ -315,12 +337,16 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
       const logIngestOrigin = getLogIngestOrigin();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (logIngestOrigin) {
-        headers.Authorization = `Bearer ${await getLogIngestToken(baseUrl)}`;
+        const token = await getLogIngestToken(baseUrl, userId);
+        if (!token) return true;
+        headers.Authorization = `Bearer ${token}`;
       }
 
+      const body = await compress(JSON.stringify(nr));
+      if (!isLoggingOwnerCurrent(userId, ownerEpoch)) return true;
       const response = await fetch(logIngestOrigin ? `${logIngestOrigin}/v1/logs` : `${baseUrl}/api/logs`, {
         method: 'POST',
-        body: await compress(JSON.stringify(nr)),
+        body,
         headers,
       });
       if (!response.ok) throw new Error(`Logs API responded with status ${response.status}`);
@@ -333,6 +359,7 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
       }
       return true;
     } catch (error) {
+      if (!isLoggingOwnerCurrent(userId, ownerEpoch)) return true;
       if (retries === MAX_RETRIES) {
         console.error(`Error in startLoggingToGrafana: ${error}. Dropping batch after ${MAX_RETRIES} retries`);
         return true;
