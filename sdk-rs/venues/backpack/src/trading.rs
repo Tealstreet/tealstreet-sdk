@@ -211,7 +211,7 @@ fn record_failure(plan: &mut WritePlan, indices: &[usize], error: &VenueError) {
             }
         } else {
             ElementResult::Unknown {
-                error: Box::new(error.clone()),
+                error: Box::new(error.clone().outcome(Outcome::Unknown)),
             }
         };
         let _ = plan.record(*index, result);
