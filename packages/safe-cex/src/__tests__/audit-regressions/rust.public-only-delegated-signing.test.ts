@@ -19,6 +19,35 @@ const unusedSigners = () => ({
   payloadSigner: vi.fn(),
 });
 
+it.each<{ key?: string; publicDataOnly?: boolean }>([
+  {}, { key: '' }, { publicDataOnly: false }, { key: '', publicDataOnly: false },
+])('keyless AsterDEX V3 PayloadSigner resolves public mode for %j', (input) => {
+  const payloadSigner = vi.fn();
+  const options: ExchangeOptions = { key: '', secret: '', payloadSigner, extra: { asterdexApiVersion: 'v3' }, ...input };
+  if (input.key === undefined) Reflect.deleteProperty(options, 'key');
+  const setup = new DelegatedSignerSetup('asterdex', options);
+  try {
+    expect(setup.primaryComplete).toBe(false);
+    expect(setup.credentialPresence).toEqual({ key: false, secret: true });
+    const exchange = new RustEngineExchange('asterdex', options, new DefaultStore());
+    try {
+      expect(exchange.isPublicDataOnly).toBe(true);
+      expect(exchange.privateWebsocket).toBeUndefined();
+      expect(payloadSigner).not.toHaveBeenCalled();
+    } finally { exchange.dispose(); }
+  } finally { setup.dispose(); }
+});
+
+it('private AsterDEX V3 PayloadSigner with a wallet key retains its typed custody refusal', () => {
+  const payloadSigner = vi.fn();
+  expect(() => new RustEngineExchange('asterdex', { key: `0x${'11'.repeat(20)}`, secret: '', payloadSigner,
+    extra: { asterdexApiVersion: 'v3' } }, new DefaultStore())).toThrowError(expect.objectContaining({
+    kind: 'unsupported', outcome: 'notSent',
+    message: 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only',
+  }));
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
 it.each(['kucoin', 'kucoinspot'] as const)('%s constructs explicitly public-only accounts with an unused PayloadSigner', (name) => {
   const payloadSigner = vi.fn();
   for (const key of ['', 'unused-public-key']) {

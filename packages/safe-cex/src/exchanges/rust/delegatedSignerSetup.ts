@@ -68,10 +68,6 @@ export class DelegatedSignerSetup {
     const setupPolicy = deriveSignerSetupPolicy(name);
     const primaryMetadata = effectiveIdentityMetadata(metadata.primary, setupPolicy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
-    if (name === 'asterdex' && this.usesPayloadSigner && resolveAsterDEXSignerVersion(options) === 'v3') {
-      const message = 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only';
-      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
-    }
     if (name === 'grvt' && this.usesPayloadSigner) {
       const message = 'GRVT PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
@@ -99,6 +95,10 @@ export class DelegatedSignerSetup {
     if (secondaryRequested && !secondary) invalid('Rust engine secondary delegated signing requires a nonempty public key');
     const presence = { key: primary !== undefined, secret: Boolean(remoteSigner || payloadSigner) };
     const publicDataOnly = derivePublicMode(name, options, undefined, presence).publicDataOnly;
+    if (name === 'asterdex' && this.usesPayloadSigner && !publicDataOnly && resolveAsterDEXSignerVersion(options) === 'v3') {
+      const message = 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     if (name === 'backpack' && this.usesPayloadSigner && !publicDataOnly) {
       const message = 'Backpack requires RemoteSigner Ed25519 custody';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
