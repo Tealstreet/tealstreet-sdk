@@ -376,6 +376,26 @@ pub(crate) struct Lot {
     pub(crate) single: Body,
 }
 
+struct LimitPrice {
+    price: Option<f64>,
+    bbo: bool,
+}
+
+// Pure normalized-wire gate, also usable by the shared WritePlan validator.
+// Options keep their separate price/IV formatter.
+fn validate_limit_price(write: &LimitPrice) -> Result<(), VenueError> {
+    if !write.bbo && write.price.is_none() {
+        return Err(not_sent("Bybit limit orders require a price or BBO"));
+    }
+    if write
+        .price
+        .is_some_and(|price| !price.is_finite() || price <= 0.0)
+    {
+        return Err(not_sent("Order prices must be finite and positive"));
+    }
+    Ok(())
+}
+
 impl BybitLinear {
     fn local_order_lifecycle(&self) -> bool {
         self.variant == crate::Variant::Demo || self.variant.is_hyro() || self.brazil_site
@@ -848,10 +868,12 @@ impl BybitLinear {
             && (opts.kind == OrderType::Limit || (conditional && price.is_some())))
         .then_some(price)
         .flatten();
-        // A missing price must not escape the normalized-price checks below.
-        // Options use their own price/IV formatter; BBO supplies its native price.
-        if opts.kind == OrderType::Limit && execution.bbo_side.is_none() && limit_price.is_none() {
-            return Err("Bybit limit orders require a price or BBO".into());
+        if order_type == "Limit" {
+            validate_limit_price(&LimitPrice {
+                price: limit_price,
+                bbo: execution.bbo_side.is_some(),
+            })
+            .map_err(|error| error.message)?;
         }
         let direction = match trigger_price.filter(|_| !self.variant.is_spot()) {
             Some(trigger) => {
