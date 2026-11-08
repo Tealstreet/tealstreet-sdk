@@ -1,5 +1,6 @@
-import type { Balance } from '../../../../packages/safe-cex/src/types';
-export type { Balance, CoinBalance } from '../../../../packages/safe-cex/src/types';
+import type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
+export type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
+export type { CoinBalance } from '../../../../packages/safe-cex/src/generated/CoinBalance.js';
 /** Reader for the engine's flush frame. See wire.mjs and docs/plans/RUST_REWRITE.md. */
 export const SECTION: {
   STRINGS: 1;
