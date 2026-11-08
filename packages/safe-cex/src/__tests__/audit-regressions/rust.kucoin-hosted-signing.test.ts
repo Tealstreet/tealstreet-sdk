@@ -18,10 +18,10 @@ it.each(['kucoin', 'kucoinspot'] as const)('%s: admits KuCoin remote custody whi
   expect(() => assertBetaAccount(venue, { remoteSigner })).not.toThrow();
   for (const name of ['krakenspot', 'kraken'] as const) {
     const prettyName = exchangeMetadata[name].prettyName;
-    expect(() => assertBetaAccount(name, { remoteSigner })).toThrow(
+    expect(() => assertBetaAccount(name, { key: 'fixture-private-key', remoteSigner })).toThrow(
       `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
     );
-    expect(() => assertBetaAccount(name, { payloadSigner: vi.fn() })).toThrow(
+    expect(() => assertBetaAccount(name, { key: 'fixture-private-key', payloadSigner: vi.fn() })).toThrow(
       `${prettyName} delegated signing is unsupported in this build`,
     );
   }
