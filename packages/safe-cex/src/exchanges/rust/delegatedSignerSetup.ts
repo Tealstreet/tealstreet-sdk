@@ -48,19 +48,14 @@ export class DelegatedSignerSetup {
 
   constructor(name: ExchangeName, options: ExchangeOptions) {
     this.#venue = name;
+    this.#publicOnly = options.publicDataOnly === true;
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
-    // A configured callback counts as signing intent even when malformed: only
-    // public accounts bypass validation, never an invalid private callback.
-    this.#publicOnly = derivePublicMode(name, options, undefined, {
-      key: Boolean(options.key),
-      secret: Boolean(options.secret) || this.intent.remoteSigner || this.intent.payloadSigner,
-    }).publicDataOnly;
-    this.#publicMode = Object.freeze({ requested: this.#publicOnly ? true : options.publicDataOnly ?? null,
+    this.#publicMode = Object.freeze({ requested: options.publicDataOnly ?? null,
       ...this.intent, apiKeyIndexPresent: Boolean(options.apiKeyIndex) });
     this.usesPayloadSigner = !this.#publicOnly && selectDelegatedSigningMode(options) === 'payload';
     this.signerAlgorithms = this.#publicOnly ? [] : remoteSignerAlgorithms(name);
-    // Public and keyless accounts have no signing authority. Ignore unused
-    // callbacks, credentials and setup metadata before validating private mode.
+    // Explicit public mode grants no signing authority. Do not validate or retain
+    // callbacks, keys, passphrases or setup metadata that this account cannot use.
     if (this.#publicOnly) {
       this.#identities = Object.freeze({});
       this.hasSecondary = false;
@@ -81,8 +76,11 @@ export class DelegatedSignerSetup {
       const message = 'GRVT PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    const kucoin = name === 'kucoin';
-    if (kucoin && this.usesPayloadSigner) invalid('KuCoin requires RemoteSigner batch custody');
+    const kucoin = name === 'kucoin' || name === 'kucoinspot';
+    if (kucoin && this.usesPayloadSigner) {
+      const message = 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     const remoteSigner = options.remoteSigner;
     const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');

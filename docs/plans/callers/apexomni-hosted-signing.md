@@ -62,10 +62,11 @@ generic PayloadSigner cannot execute zkLink contract work. Private PayloadSigner
 and all configured secondary signing credentials on private accounts refuse with typed
 unsupported/notSent errors. RemoteSigner takes precedence and never falls back.
 
-Public mode is resolved before private signer validation. Public-only and
-keyless public accounts ignore unused callbacks, passphrases and setup metadata,
-install no provider or identities, and cannot sign. Captured public mode remains
-public even if later construction input supplies a key or requests private mode.
+Explicit `publicDataOnly: true` is resolved before private signer validation.
+These accounts, including those with no key, ignore unused callbacks,
+passphrases and setup metadata, install no provider or identities, and cannot
+sign. Captured public mode remains public even if later construction input
+supplies a key or requests private mode.
 
 Public type changes are the additive `apexomni-batch` RemoteSigner/host input
 format and the Apex HMAC/zkLink capability declaration. Hosts/devices must run

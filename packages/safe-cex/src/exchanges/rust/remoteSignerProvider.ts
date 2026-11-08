@@ -242,7 +242,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
   const apexomni = exchangeName === 'apexomni';
   if (apexomni && !remoteSigner) throw refused();
   if (exchangeName === 'grvt' && !remoteSigner) throw refused();
-  const kucoin = exchangeName === 'kucoin';
+  const kucoin = exchangeName === 'kucoin' || exchangeName === 'kucoinspot';
   const declaration = deriveRemoteSigningPolicy(exchangeName)?.wire;
   const wire = declaration && { ...declaration,
     ...(declaration.secondsSuffix && { secondsSuffix: { ...declaration.secondsSuffix } }) };

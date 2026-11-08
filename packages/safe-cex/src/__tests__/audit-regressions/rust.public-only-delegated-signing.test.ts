@@ -1,5 +1,5 @@
 import type { SignRequest, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { expect, it, vi } from 'vitest';
 
@@ -11,7 +11,9 @@ import { DefaultStore } from '../../store/store.base';
 
 const venues = BETA_VENUES.filter((name) => deriveRemoteSigningPolicy(name)?.enabled);
 const unusedSigners = () => ({
-  remoteSigner: { sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn() },
+  remoteSigner: {
+    sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn(),
+  },
   payloadSigner: vi.fn(),
 });
 
@@ -43,15 +45,27 @@ it.each(['apexomni', 'kucoin'] as const)('%s constructs public-only accounts wit
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it.each(['apexomni', 'kucoin', 'binance', 'okx'] as const)('%s resolves keyless accounts as public before validating callbacks', (name) => {
+it.each(['apexomni', 'kucoin', 'binance', 'okx'] as const)('%s resolves explicitly public keyless accounts before validating callbacks', (name) => {
   const { remoteSigner, payloadSigner } = unusedSigners();
-  for (const publicDataOnly of [undefined, false]) {
-    for (const callbacks of [{ remoteSigner }, { payloadSigner }, { remoteSigner, payloadSigner }]) {
-      const exchange = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly, ...callbacks }, new DefaultStore());
-      try { expect(exchange.isPublicDataOnly).toBe(true); } finally { exchange.dispose(); }
-    }
+  for (const callbacks of [{ remoteSigner }, { payloadSigner }, { remoteSigner, payloadSigner }]) {
+    const exchange = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true, ...callbacks }, new DefaultStore());
+    try { expect(exchange.isPublicDataOnly).toBe(true); } finally { exchange.dispose(); }
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+it.each(['kucoin', 'kucoinspot'] as const)('%s constructs explicitly public-only accounts with an unused PayloadSigner', (name) => {
+  const payloadSigner = vi.fn();
+  for (const key of ['', 'unused-public-key']) {
+    const exchange = new RustEngineExchange(name, { key, secret: '', publicDataOnly: true, payloadSigner }, new DefaultStore());
+    try {
+      expect(exchange.isPublicDataOnly).toBe(true);
+      expect(exchange.privateWebsocket).toBeUndefined();
+      for (const field of ['key', 'secret', 'passphrase', 'payloadSigner', 'remoteSigner'])
+        expect(exchange.options).not.toHaveProperty(field);
+    } finally { exchange.dispose(); }
+  }
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
@@ -92,8 +106,8 @@ it.each(venues)('%s public-only shared setup ignores signing configuration and c
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it('captured keyless public mode cannot be replaced with private signing input', () => {
-  const setup = new DelegatedSignerSetup('apexomni', { key: '', secret: '', payloadSigner: vi.fn() });
+it('captured explicit public mode cannot be replaced with private signing input', () => {
+  const setup = new DelegatedSignerSetup('apexomni', { key: '', secret: '', publicDataOnly: true, payloadSigner: vi.fn() });
   let config: Record<string, unknown> = {};
   class Engine { constructor(_venue: string, json: string) { config = JSON.parse(json); } }
   setup.construct(Engine as unknown as new (venue: string, json: string) => WasmEngineLike, 'apexomni',
@@ -103,11 +117,11 @@ it('captured keyless public mode cannot be replaced with private signing input',
   setup.dispose();
 });
 
-it('a disposed public-only setup cannot construct an engine', () => {
-  const setup = new DelegatedSignerSetup('apexomni', { key: '', secret: '', publicDataOnly: true });
+it.each<ExchangeName>(['apexomni', 'kucoinspot'])('%s disposed public-only setup cannot construct an engine', (name) => {
+  const setup = new DelegatedSignerSetup(name, { key: '', secret: '', publicDataOnly: true });
   setup.dispose();
   const Engine = vi.fn();
-  expect(() => setup.construct(Engine as unknown as new (venue: string, json: string) => WasmEngineLike, 'apexomni', '{}'))
+  expect(() => setup.construct(Engine as unknown as new (venue: string, json: string) => WasmEngineLike, name, '{}'))
     .toThrow('disposed');
   expect(Engine).not.toHaveBeenCalled();
 });
