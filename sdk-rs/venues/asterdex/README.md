@@ -38,8 +38,8 @@ fresh position commands, without registering a private feed or creating,
 renewing or reconnecting a listen-key session. WS signing stays refused.
 Private V3 PayloadSigner is `unsupported` / `notSent`: its HMAC-only callback cannot
 derive account-bound wallet signatures or prove the wallet address. It requires
-RemoteSigner wallet custody instead. Public-only construction accepts unused
-PayloadSigner and RemoteSigner configuration for both API versions.
+RemoteSigner wallet custody instead. Explicit public-only construction ignores
+delegated callbacks and credentials for both API versions and retains no signing authority.
 Generic HTTP signing captures remain V1
 only; V3 native REST requests use the structured wallet protocol above. Aster
 has no independent WS login signature: signed listen-key creation/keepalive

@@ -77,19 +77,22 @@ it('resolves a keyless V3 API wallet and read agent from public addresses', () =
 it('refuses foreign graphs and raw wallet digests before callback, and cancels late answers without fallback or leaked errors', async () => {
   const sign = vi.fn();
   const provider = createRemoteSignerProvider({ exchangeName: 'asterdex', identities: { primary }, remoteSigner: remote(sign), payloadSigner: () => { throw new Error('must not fall back'); } });
+  const credential: SignRequest['operations'][number] = { kind: 'present', key: primary.credential };
+  const hmac: SignRequest['operations'][number] = { kind: 'sign', key: primary.signing, algorithm: 'hmacSha256', payload: [{ kind: 'bytes', bytes: [97] }] };
   const work: SignRequest = { receipt: {}, context: { venue: '', method: '', host: '', path: '' }, operations: [
-    { kind: 'present', key: primary.credential }, { kind: 'sign', key: primary.signing, algorithm: 'hmacSha256', payload: [{ kind: 'bytes', bytes: [97] }] },
+    credential, hmac,
   ] };
-  for (const operations of [work.operations.slice(1), [work.operations[0], { ...work.operations[1], key: 'foreign' }],
-    [work.operations[0], { ...work.operations[1], algorithm: 'secp256k1Digest' }]] as SignRequest['operations'][]) {
+  const foreignGraphs: SignRequest['operations'][] = [[hmac], [credential, { ...hmac, key: 'foreign' }],
+    [credential, { ...hmac, algorithm: 'secp256k1Digest' }]];
+  for (const operations of foreignGraphs) {
     await expect(provider({ ...work, operations }, { signal: new AbortController().signal })).rejects.toThrow('Remote signing request refused');
   }
   expect(sign).not.toHaveBeenCalled();
   sign.mockRejectedValueOnce(new Error('fixture-sensitive-error'));
   await expect(provider(work, { signal: new AbortController().signal })).rejects.toThrow(/^Remote signing request refused$/);
-  let release!: (value: unknown) => void;
-  sign.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+  const late = Promise.withResolvers<unknown>();
+  sign.mockImplementationOnce(() => late.promise);
   const controller = new AbortController();
   const pending = provider(work, { signal: controller.signal }); controller.abort();
-  await expect(pending).rejects.toThrow('Remote signing canceled'); release({ id: 'late', wsAuthSignature: 'late' });
+  await expect(pending).rejects.toThrow('Remote signing canceled'); late.resolve({ id: 'late', wsAuthSignature: 'late' });
 });

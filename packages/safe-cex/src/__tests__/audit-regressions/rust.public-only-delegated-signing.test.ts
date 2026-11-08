@@ -1,5 +1,5 @@
 import type { SignRequest, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { expect, it, vi } from 'vitest';
 
@@ -10,6 +10,8 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const venues = BETA_VENUES.filter((name) => deriveRemoteSigningPolicy(name)?.enabled);
+const publicCases: Array<{ name: ExchangeName; version?: 'v1' | 'v3' }> = venues.map((name) => ({ name }));
+publicCases.push({ name: 'asterdex', version: 'v1' }, { name: 'asterdex', version: 'v3' });
 const unusedSigners = () => ({
   remoteSigner: {
     sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn(),
@@ -31,13 +33,15 @@ it.each(['kucoin', 'kucoinspot'] as const)('%s constructs explicitly public-only
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it.each(venues)('%s public-only shared setup ignores signing configuration and confers no authority', async (name) => {
+it.each(publicCases)('$name $version public-only shared setup ignores signing configuration and confers no authority', async ({ name, version }) => {
   const { remoteSigner, payloadSigner } = unusedSigners();
   for (const callbacks of [{ payloadSigner }, { remoteSigner }, { remoteSigner, payloadSigner },
+    { remoteSigner: { sign: remoteSigner.sign } }, { payloadSigner: 'unused-invalid-callback' },
     { remoteSigner: null, payloadSigner: 'unused-invalid-callback' }]) {
     const input = {
       key: 'unused-key', secret: 'unused-material', publicDataOnly: true,
       secondary_secret: 'unused-read-material', secondary_passphrase: '', localSigner: null,
+      extra: { asterdexApiVersion: version },
       ...callbacks,
     } as unknown as ExchangeOptions;
     const setup = new DelegatedSignerSetup(name, input);

@@ -16,19 +16,52 @@ const corpus = golden.cases;
 let stamp = 1_748_310_859_508;
 const live: RustEngineExchange[] = [];
 const primary = { credential: 'origin/key', signing: 'origin/sign', publicCredential: 'fixture-key' };
+const timers = {
+  setTimeout: (fn: () => void, ms: number) => {
+    const timer = setTimeout(fn, ms);
+    return () => clearTimeout(timer);
+  },
+  clearTimeout: (cancel: unknown) => { if (typeof cancel === 'function') cancel(); },
+};
 vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 afterEach(() => { live.splice(0).forEach((exchange) => exchange.dispose()); vi.useRealTimers(); setWasmEngineLoader(loadNodeEngine); setRustEngineTransport(); });
 function device(options: Partial<ExchangeOptions>) {
   setWasmEngineLoader(loadNodeEngine);
   const io = vi.fn(() => { throw new Error('No network in hosted fixture'); });
   setRustEngineTransport(() => ({ now: () => stamp, prepareHttp: prepareRecordedHttp, request: io, connect: io,
-    setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) }));
-  const exchange = new RustEngineExchange('asterdex', { key: 'fixture-key', secret: 'fixture-material', ...options } as ExchangeOptions, new DefaultStore());
+    ...timers }));
+  const exchange = new RustEngineExchange('asterdex', { key: 'fixture-key', secret: 'fixture-material', ...options }, new DefaultStore());
   live.push(exchange);
   const logs: string[] = []; exchange.emitter.on('log', (message: string) => logs.push(message));
   const sign = vi.fn((request: RemoteSignerRequest) => exchange.signWsAuth(request));
   return { exchange, sign, io, logs, remoteSigner: { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} } };
 }
+
+it.each<{ version: 'v1' | 'v3' }>([{ version: 'v1' }, { version: 'v3' }])(
+  'actual public-only $version signing APIs cannot reach unused or malformed providers', async ({ version }) => {
+    const callback = vi.fn();
+    for (const callbacks of [{ remoteSigner: { sign: callback } }, { payloadSigner: 'unused-invalid-callback' },
+      { payloadSigner: callback }, { remoteSigner: { sign: callback, isAvailable: () => true, onAvailabilityChange: () => () => {} } }]) {
+      const options: ExchangeOptions = { key: 'unused-key', secret: 'unused-material', publicDataOnly: true,
+        extra: { asterdexApiVersion: version } };
+      Object.assign(options, callbacks);
+      const browser = device(options);
+      expect(browser.exchange.isPublicDataOnly).toBe(true);
+      expect(browser.exchange.privateWebsocket).toBeUndefined();
+      for (const field of ['key', 'secret', 'remoteSigner', 'payloadSigner', 'localSigner'])
+        expect(browser.exchange.options).not.toHaveProperty(field);
+      const http = await browser.exchange.signHttpRequest({ id: 'public-http', type: 'http', exchangeName: 'asterdex',
+        config: { method: 'GET', url: '/fapi/v4/account', baseURL: 'https://fapi.asterdex.com' } });
+      expect(http.config?.params ?? {}).not.toHaveProperty('signature');
+      const ws = await browser.exchange.signWsAuth({ id: 'public-ws', type: 'ws-auth', exchangeName: 'asterdex',
+        wsAuth: { outputFormat: 'asterdex-hmac', toSign: JSON.stringify({ slot: 'primary', payload: 'fixture' }) } });
+      expect(ws.wsAuthSignature).toBeUndefined();
+      expect(ws.error).toBeDefined();
+      expect(callback).not.toHaveBeenCalled();
+      expect(browser.io).not.toHaveBeenCalled();
+    }
+  },
+);
 
 it('actual WASM V1 keyless origin matches local HTTP signing at fixed and corrected clocks', async () => {
   for (stamp of [1_748_310_859_508, 1_748_310_869_508]) {
@@ -63,7 +96,13 @@ it('actual WASM wallet device matches independent ethers golden bytes for EIP-19
       : vector.name.startsWith('decimal') ? ['symbol', 'quantity', 'price', 'reduceOnly', 'note']
       : vector.name.startsWith('query') ? ['symbol', 'note'] : [];
     for (const method of ['GET', 'POST']) {
-      const statement = JSON.stringify({ method, path: '/fapi/v3/order', query: keys.map((key) => [key, (vector.params as Record<string, string>)[key]]),
+      const params: Record<string, unknown> = vector.params;
+      const query = keys.map((key) => {
+        const value = params[key];
+        if (typeof value !== 'string') throw new Error(`Invalid golden parameter: ${key}`);
+        return [key, value];
+      });
+      const statement = JSON.stringify({ method, path: '/fapi/v3/order', query,
         user: vector.user, signer: vector.signer, nonce: vector.nonce, stampMs: stamp, testnet: vector.testnet });
       const digest = method === 'POST' ? vector.codeHash : vector.hash;
       const work: SignRequest = { receipt: { nonce: vector.nonce, ...(method === 'GET' ? { stampMs: stamp } : {}) },
@@ -107,7 +146,7 @@ it('the device selects secondary HMAC custody, and V1 PayloadSigner signs the sa
   expect(payloadSigner).toHaveBeenCalledWith(expect.objectContaining({ payload, scheme: 'hmac-sha256', encoding: 'hex' }));
 });
 
-it.each(['v1', 'v3'] as const)('actual %s native startup uses keyless hosted REST and listen-key WS authentication', async (version) => {
+it.each<{ version: 'v1' | 'v3' }>([{ version: 'v1' }, { version: 'v3' }])('actual $version native startup uses keyless hosted REST and listen-key WS authentication', async ({ version }) => {
   const { EngineHost } = await import('@tealstreet/safe-cex-wasm/host');
   const { WasmEngine } = await loadNodeEngine();
   const vector = corpus[0]; stamp = vector.nowMs;
@@ -178,13 +217,12 @@ it('actual SDK V1 PayloadSigner loads and polls REST without private session wor
       queueMicrotask(() => handlers.onOpen());
       return { send: () => {}, close: () => {} };
     },
-    setTimeout: (fn, ms) => setTimeout(fn, ms),
-    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    ...timers,
   }));
   const store = new DefaultStore();
   const exchange = new RustEngineExchange('asterdex', {
     key: 'fixture-key', secret: '', payloadSigner, extra: { asterdexApiVersion: 'v1' },
-  } as ExchangeOptions, store);
+  }, store);
   live.push(exchange);
   const logs: string[] = [];
   exchange.emitter.on('log', (message: string) => logs.push(message));
