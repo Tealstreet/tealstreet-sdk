@@ -233,9 +233,7 @@ export async function login(): Promise<boolean> {
     setProxyToken(result.token);
     if (legacyDataRequiresReentry())
       console.log(
-        chalk.yellow(
-          'Older CLI files have no verified owner and were not imported. Re-enter the accounts and settings you need.',
-        ),
+        chalk.yellow('Some older CLI files could not be safely imported. Re-enter the accounts and settings you need.'),
       );
 
     console.log(chalk.green(`Successfully logged in as ${result.email || result.userId || 'user'}`));

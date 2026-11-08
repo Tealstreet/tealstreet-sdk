@@ -35,6 +35,12 @@ competing config owners or a conflicting alias-sync owner leave them unclaimed.
 Discovery checks config contents regardless of filename extension. Symlinks
 are inspected only within the source directory; links outside it, broken links
 and link loops leave shared ownership unproven and prevent shared migration.
+An explicitly selected `CONFIG_FILE` symlink migrates its accounts, defaults and
+login only when its target stays inside the source directory and ownership is
+consistent. An unsafe or competing target stays quarantined and requires
+re-entry; migration does not publish a completion marker after skipping it.
+If an earlier version left an empty profile with a completion marker, the CLI
+warns that re-entry is needed rather than overwriting that profile.
 Files without ownership
 evidence remain untouched and are never assigned to the next login: sign in
 and re-enter the accounts/settings you need. Original legacy files remain

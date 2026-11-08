@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { BRAND, brandEnv } from './brand';
 
 const homeDir = join(homedir(), BRAND.configDirName);
@@ -47,6 +47,28 @@ function readJson(file: string): unknown {
     return null;
   }
 }
+function selectedLegacyConfig() {
+  let present = false;
+  let linked = false;
+  try {
+    const entry = lstatSync(legacyConfig);
+    present = true;
+    linked = entry.isSymbolicLink();
+    const file = linked
+      ? root === dirname(legacyConfig)
+        ? resolveLegacyEntry(realpathSync(root), basename(legacyConfig))
+        : null
+      : entry.isFile()
+        ? legacyConfig
+        : null;
+    return { present: true, linked, snapshot: file ? readJson(file) : null };
+  } catch {
+    return { present, linked, snapshot: null };
+  }
+}
+// Freeze the explicitly selected config after resolving any in-root link. The
+// same snapshot establishes ownership and supplies the eventual private copy.
+const selectedConfig = selectedLegacyConfig();
 export function authOwner(auth: unknown): string | null {
   if (!isRecord(auth)) return null;
   if (typeof auth.userId === 'string' && auth.userId) return auth.userId;
@@ -88,7 +110,7 @@ function writeExclusive(file: string, write: (temp: string) => void): void {
 // makes two concurrently launched profiles agree; unknown ownership stays unknown.
 function legacyOwner(): string | null {
   if (!existsSync(claimFile)) {
-    const config = readJson(legacyConfig);
+    const config = selectedConfig.snapshot;
     let candidate = isRecord(config) ? authOwner(config.auth) : null;
     const aliases = readJson(join(root, 'aliases-sync.json'));
     if (isRecord(aliases) && typeof aliases.owner === 'string' && aliases.owner !== candidate) candidate = null;
@@ -194,6 +216,13 @@ function sharedLegacyOwner(): string | null {
   return isRecord(claim) && claim.authority === authority && typeof claim.owner === 'string' ? claim.owner : null;
 }
 const originalSharedOwner = sharedLegacyOwner();
+const originalConfigOwned =
+  originalOwner !== null &&
+  isRecord(selectedConfig.snapshot) &&
+  Array.isArray(selectedConfig.snapshot.accounts) &&
+  authOwner(selectedConfig.snapshot.auth) === originalOwner &&
+  (!selectedConfig.linked || originalSharedOwner === originalOwner);
+let migrationIncomplete = false;
 
 const selected = readJson(selector);
 owner = isRecord(selected) ? (typeof selected.owner === 'string' ? selected.owner : null) : originalOwner;
@@ -216,8 +245,26 @@ function migrate(subject: string | null) {
   // The config's recorded owner establishes provenance for its directory, not
   // an unrelated default home directory when CONFIG_FILE selects another one.
   const marker = join(target, '.legacy-migrated');
-  if (existsSync(marker)) return;
-  copyOwnedFile(legacyConfig, join(target, 'config.json'));
+  const configFile = join(target, 'config.json');
+  const hasOwnedConfig = () => {
+    const config = readJson(configFile);
+    return isRecord(config) && Array.isArray(config.accounts) && authOwner(config.auth) === subject;
+  };
+  if (existsSync(marker)) {
+    // Earlier versions could publish this marker after skipping a selected
+    // symlink. Warn about that empty profile without overwriting its contents.
+    if (selectedConfig.linked && !hasOwnedConfig()) migrationIncomplete = true;
+    return;
+  }
+  if (!originalConfigOwned) {
+    migrationIncomplete = true;
+    return;
+  }
+  writeExclusive(configFile, (temp) => writeFileSync(temp, JSON.stringify(selectedConfig.snapshot), { mode: 0o600 }));
+  if (!hasOwnedConfig()) {
+    migrationIncomplete = true;
+    return;
+  }
   if (root !== dirname(legacyConfig) || subject !== originalSharedOwner) {
     writeJson(marker, { owner: subject });
     return;
@@ -278,7 +325,13 @@ export function getStoragePath(name: string): string {
   return join(getStorageDir(), name);
 }
 export function getOwnedLegacyDatabase(): string | null {
-  return owner && owner === originalSharedOwner && root === dirname(legacyConfig) ? join(root, 'market-data.db') : null;
+  return !migrationIncomplete &&
+    (!selectedConfig.linked || originalConfigOwned) &&
+    owner &&
+    owner === originalSharedOwner &&
+    root === dirname(legacyConfig)
+    ? join(root, 'market-data.db')
+    : null;
 }
 export function onStorageOwnerChange(listener: () => void): () => void {
   listeners.add(listener);
@@ -314,7 +367,13 @@ export function selectStorageOwner(subject: string | null): void {
 }
 
 export function legacyDataRequiresReentry(): boolean {
-  return existsSync(legacyConfig) && (originalOwner === null || originalSharedOwner !== originalOwner);
+  return (
+    selectedConfig.present &&
+    (originalOwner === null ||
+      originalSharedOwner !== originalOwner ||
+      (selectedConfig.linked && !originalConfigOwned) ||
+      migrationIncomplete)
+  );
 }
 
 export class QueuedSessionCancelledError extends Error {
