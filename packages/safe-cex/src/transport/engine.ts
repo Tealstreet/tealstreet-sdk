@@ -115,11 +115,11 @@ const aliasHeaders = (headers: AxiosHeaders, aliases: Record<string, string>): v
   }
 };
 
-// Axios already omits disabled headers and normalizes scalars. Match fetch's
-// existing array-to-string conversion without changing the direct wire bytes.
+// Authorization can assign unnormalized scalars directly. Axios omits disabled
+// values; fetch stringifies each remaining value, including arrays without spaces.
 const wireHeaders = (headers: AxiosHeaders): Record<string, string> => Object.fromEntries(
   Object.entries(headers.toJSON()).map(([name, value]): [string, string] =>
-    [name, typeof value === 'string' ? value : value.join(',')]),
+    [name, String(value)]),
 );
 
 const isTunnelPreparation = (value: unknown): value is DisposableAxiosAdapter['prepare'] =>
