@@ -51,19 +51,22 @@ const fixture = ({
   markets = true,
   secondaryMarket = false,
   reversedMarkets = false,
-  fillSymbol,
+  fillSymbol = 'BTCUSDT',
   loaded,
 }: FixtureOptions = {}) => {
-  const strings = ['BTCUSDT', 'BTC', 'USDT', 'order-1', '1m', 'ETHUSDT', 'ETH'];
+  const fillIds = Array.from({ length: fills }, (_, i) => `execution-${i + 1}`);
+  const strings = ['BTCUSDT', 'BTC', 'USDT', 'order-1', '1m', 'ETHUSDT', 'ETH', ...fillIds];
   const sections: Array<{ kind: number; bytes: Uint8Array; revision?: number }> = [];
-  const table = (kind: number, words: number[], numbers: number[], tail: number[] = []) => {
+  const table = (kind: number, words: number[], numbers: number[], tail: number[] = [], financials: number[] = []) => {
     const numericOffset = align8(words.length * 4);
-    const bytes = new Uint8Array(align8(numericOffset + numbers.length * 8 + tail.length * 4));
+    const financialOffset = align8(numericOffset + numbers.length * 8 + tail.length * 4);
+    const bytes = new Uint8Array(financialOffset + financials.length * 8);
     const view = new DataView(bytes.buffer);
     words.forEach((word, i) => view.setUint32(i * 4, word, true));
     numbers.forEach((number, i) => view.setFloat64(numericOffset + i * 8, number, true));
     tail.forEach((word, i) => view.setUint32(numericOffset + numbers.length * 8 + i * 4, word, true));
-    sections.push({ kind, bytes, revision: kind === SECTION.POSITIONS ? 2 : tail.length ? 1 : 0 });
+    financials.forEach((number, i) => view.setFloat64(financialOffset + i * 8, number, true));
+    sections.push({ kind, bytes, revision: kind === SECTION.POSITIONS || kind === SECTION.FILLS ? 2 : tail.length ? 1 : 0 });
   };
   if (markets) {
     const columns = [0.001, 1, 0.001, 100, 1, 100, NaN, 1, NaN, NaN];
@@ -83,7 +86,8 @@ const fixture = ({
     SECTION.FILLS,
     [fills, ...Array(fills).fill(3), ...Array(fills).fill(0), ...Array(fills).fill(0)],
     Array.from({ length: fills }, () => [100, 0.25]).flat(),
-    fillSymbol === undefined ? [] : Array(fills).fill(strings.indexOf(fillSymbol)),
+    [...Array(fills).fill(strings.indexOf(fillSymbol)), ...fillIds.map((id) => strings.indexOf(id))],
+    Array(fills * 2).fill(NaN),
   );
   table(SECTION.CANDLES, [1, 0, 4], [1234, 100, 101, 99, 100, 5]);
   if (book) table(SECTION.BOOK, [0, brokenBook ? 2 : 1, 0, 0], [100, 1, 1]);
@@ -169,7 +173,12 @@ describe('Rust frame recovery callers', () => {
 
     expect(() => receive(exchange, fixture({ brokenBook: true }))).not.toThrow();
     expect(fills).toHaveLength(2);
+    expect(fills.map((fill) => fill.id)).toEqual(['execution-1', 'execution-2']);
     expect(fills.map((fill) => fill.orderId)).toEqual(['order-1', 'order-1']);
+    for (const fill of fills) {
+      expect(fill).not.toHaveProperty('fee');
+      expect(fill).not.toHaveProperty('realizedPnl');
+    }
     expect(accountAtFill).toEqual(Array(2).fill({ total: 42, orderId: 'order-1', contracts: 0.5, leverage: 5 }));
     expect(snapshot).toHaveBeenCalledTimes(1);
     expect(store.balance.total).toBe(100);
@@ -215,7 +224,7 @@ describe('Rust frame recovery callers', () => {
       marketIds: kind === SECTION.MARKETS ? [] : ['BTCUSDT'],
       orderIds: kind === SECTION.FILLS ? ['order-1'] : [],
     });
-    expect(fills.map((fill) => fill.orderId)).toEqual(kind === SECTION.ORDERS ? ['order-1'] : []);
+    expect(fills.map((fill) => fill.orderId)).toEqual(kind === SECTION.FILLS ? [] : ['order-1']);
     exchange.dispose();
   });
 
@@ -295,7 +304,7 @@ describe('Rust frame recovery callers', () => {
       send(fixture({ markets: false, fills: 1, book: false, fillSymbol: 'ETHUSDT' }));
       expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT']);
       send(fixture({ markets: false, fills: 1, book: false }));
-      expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT']);
+      expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT', 'BTCUSDT']);
 
       const recovered = fixture({ fills: 0, secondaryMarket: true, reversedMarkets: true });
       if (exchange instanceof RustEngineExchange) {
@@ -306,8 +315,8 @@ describe('Rust frame recovery callers', () => {
         resolve(bundle(recovered));
         await settle();
       }
-      send(fixture({ markets: false, fills: 1, book: false }));
-      expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT', 'ETHUSDT']);
+      send(fixture({ markets: false, fills: 1, book: false, fillSymbol: 'ETHUSDT' }));
+      expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT', 'BTCUSDT', 'ETHUSDT']);
       exchange.dispose();
     },
   );
