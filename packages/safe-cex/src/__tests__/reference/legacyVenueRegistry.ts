@@ -1,14 +1,11 @@
 // Test-only pre-beta adapter characterization; never imported by SDK runtime.
 
 import type { BaseExchange } from '../../exchanges/base';
-import { unsupportedVenueError } from '../../unsupportedVenue';
 import type { ExchangeName } from '../../types';
 
 type ExchangeLoader = () => Promise<typeof BaseExchange>;
 
 export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
-  // The Spot oracle accepts fixture transport, never a live legacy adapter.
-  bingxspot: async () => { throw unsupportedVenueError('BingX Spot reference is fixture-only'); },
   // Apex Omni
   apexomni: () =>
     import(/* webpackChunkName: "exchange-apexomni" */ './apexomni/apexomni.exchange').then(
@@ -62,6 +59,9 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
     import(/* webpackChunkName: "exchange-bingx" */ './bingx/bingx.exchange').then(
       (m) => m.BingxExchange,
     ),
+
+  // Native-only characterization; the real registry and beta gates still refuse.
+  bingxspot: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
   // Bitget
   bitget: () =>
