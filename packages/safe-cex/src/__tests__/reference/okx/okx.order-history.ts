@@ -54,7 +54,7 @@ const toNumber = (value: unknown) => {
 };
 
 export const mapOkxHistoricalOrder = (
-  row: Record<string, unknown>,
+  row: Record<string, any>,
   market: Market | undefined,
   toBase: (contractsNative: number, market: Market, referencePrice?: number) => number,
 ): HistoricalOrder | null => {
