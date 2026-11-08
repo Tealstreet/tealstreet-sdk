@@ -10,6 +10,9 @@ use safe_cex_engine::request_context::{
     plan::{CallAuth, SerialCall, SerialPolicy, Slot},
 };
 use safe_cex_engine::signing::{Algorithm, KeyUse, Need};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
+
+const CANCEL_UNKNOWN: &str = "The outcome is unknown. Check Open Orders";
 
 pub(crate) const PACING: safe_cex_engine::request_context::Pacing =
     safe_cex_engine::request_context::Pacing {
@@ -36,6 +39,7 @@ pub(super) struct Custody {
     context: Option<Context>,
     ready: bool,
     wait: Option<ConditionWait>,
+    cancel_failure: Option<WritePlan>,
 }
 impl Custody {
     pub(super) fn owner(&self) -> safe_cex_engine::request_context::Owner {
@@ -128,6 +132,7 @@ impl Hyperliquid {
             context: None,
             ready,
             wait: None,
+            cancel_failure: None,
         });
         self.trading.queue.push_back(job);
         self.pump_trades(cx);
@@ -412,7 +417,27 @@ impl Hyperliquid {
         }
         if let Some(plan) = &custody.plan {
             match result {
-                Err(error) => {
+                Err(mut error) => {
+                    if let Some(journal) = &custody.cancel_failure {
+                        let uncertain = journal
+                            .outcomes()
+                            .iter()
+                            .any(|row| matches!(row.result, ElementResult::Unknown { .. }));
+                        error = journal.attach(error);
+                        if uncertain {
+                            error.message = CANCEL_UNKNOWN.into();
+                            error.presents = true;
+                            cx.event(
+                                safe_cex_engine::Level::Warn,
+                                "order.outcome_unknown",
+                                CANCEL_UNKNOWN,
+                                vec![
+                                    ("commandId", job.command.into()),
+                                    ("outcome", "unknown".into()),
+                                ],
+                            );
+                        }
+                    }
                     let _ = match &job.stop_note {
                         Some(note) => cx.fail_plan_noted(plan, error, note),
                         None => cx.fail_plan(plan, error),
@@ -693,7 +718,7 @@ impl Hyperliquid {
         .map(drop)
     }
     pub(super) fn report_trade_batch(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         request: &Request,
         statuses: &[Status],
@@ -769,18 +794,102 @@ impl Hyperliquid {
                 _ => BatchItem::Accepted(ids[index].as_str()),
             })
             .collect();
-        cx.http_write_batch(
-            &request.context,
-            if statuses.iter().all(|s| matches!(s, Status::Error { .. })) && (self.protective_replacement_active() && statuses.iter().all(|s| matches!(s, Status::Error { error } if known_protective_refusal(error)))) { &PROTECTIVE_REFUSAL } else { &BATCH },
-            statuses.len(),
-            &items,
-            if message.is_empty() && statuses.iter().any(|status| matches!(status, Status::Text(_))) {
-                if statuses.iter().any(|status| matches!(status, Status::Text(text) if text != "waitingForFill" && text != "waitingForTrigger")) {
-                    "Unknown Hyperliquid order status"
-                } else { "Hyperliquid pending order acknowledgement has no native order ID" }
-            } else { message },
-            None,
-        )
+        let table = if statuses.iter().all(|s| matches!(s, Status::Error { .. }))
+            && (self.protective_replacement_active()
+                && statuses.iter().all(
+                    |s| matches!(s, Status::Error { error } if known_protective_refusal(error)),
+                )) {
+            &PROTECTIVE_REFUSAL
+        } else {
+            &BATCH
+        };
+        let message = if message.is_empty()
+            && statuses
+                .iter()
+                .any(|status| matches!(status, Status::Text(_)))
+        {
+            if statuses.iter().any(|status| matches!(status, Status::Text(text) if text != "waitingForFill" && text != "waitingForTrigger")) {
+                "Unknown Hyperliquid order status"
+            } else {
+                "Hyperliquid pending order acknowledgement has no native order ID"
+            }
+        } else {
+            message
+        };
+        // Cancellation targets are existing orders, never created-order evidence.
+        match &request.effect {
+            Effect::Cancel(orders) => {
+                let mut journal = WritePlan::new(
+                    (0..orders.len())
+                        .map(|index| Element {
+                            index,
+                            client_order_id: None,
+                        })
+                        .collect(),
+                );
+                for (index, item) in items.iter().enumerate() {
+                    let result = match item {
+                        BatchItem::Accepted(_) => ElementResult::Applied {
+                            effect: AppliedEffect::Cancel,
+                            target_order_id: Some(orders[index].id.clone()),
+                            position_key: None,
+                        },
+                        BatchItem::Native(native) => {
+                            let fact = cx.classify_write(
+                                &request.context,
+                                table,
+                                Some(native),
+                                native.message,
+                            )?;
+                            let mut error = fact.error().clone();
+                            if error.outcome == Some(Outcome::Unknown) {
+                                error.message = CANCEL_UNKNOWN.into();
+                                ElementResult::Unknown {
+                                    error: Box::new(error),
+                                }
+                            } else {
+                                ElementResult::NotSent {
+                                    error: Some(Box::new(error)),
+                                }
+                            }
+                        }
+                    };
+                    journal
+                        .record(index, result)
+                        .map_err(|_| safe_cex_engine::request_context::Error::State)?;
+                }
+                let result = cx.http_write_applied_batch(
+                    &request.context,
+                    table,
+                    statuses.len(),
+                    &items,
+                    message,
+                    None,
+                )?;
+                if !matches!(
+                    result,
+                    safe_cex_engine::request_context::WriteResult::Accepted { .. }
+                ) {
+                    let custody = self
+                        .trading
+                        .active
+                        .as_mut()
+                        .filter(|job| job.command == request.command)
+                        .and_then(|job| job.custody.as_mut())
+                        .ok_or(safe_cex_engine::request_context::Error::State)?;
+                    custody.cancel_failure = Some(journal);
+                }
+                Ok(result)
+            }
+            _ => cx.http_write_batch(
+                &request.context,
+                table,
+                statuses.len(),
+                &items,
+                message,
+                None,
+            ),
+        }
         .map(drop)
     }
 

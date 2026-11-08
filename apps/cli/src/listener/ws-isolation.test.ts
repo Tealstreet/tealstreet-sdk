@@ -18,7 +18,10 @@ beforeEach(() => {
 
 function socket() {
   const frames: unknown[] = [];
+  // Spread so bun-types releases without socket flow control still accept the fixture.
+  const flowControl = { pause() {}, resume() {}, isPaused: false };
   const ws: ServerWebSocket<WsSessionData> = {
+    ...flowControl,
     data: { origin: 'https://v3.tealstreet.io', trusted: false, helloSeen: false, webCrossTradeActive: false },
     send: (data) => {
       if (typeof data === 'string') frames.push(JSON.parse(data));
@@ -40,10 +43,9 @@ function socket() {
     remoteAddress: '127.0.0.1',
     readyState: 1,
     getBufferedAmount: () => 0,
-    cork: (callback) => callback(ws),
-    pause() {},
-    resume() {},
-    isPaused: false,
+    cork: () => {
+      throw new Error('the listener never corks');
+    },
   };
   return { ws, frames };
 }
