@@ -7244,6 +7244,11 @@ mod strict_codecs {
                         .as_str()
                         .unwrap()
                         .to_owned(),
+                    serde_json::to_value(ExchangeName::Bingxspot)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
                     serde_json::to_value(ExchangeName::Bitget)
                         .unwrap()
                         .as_str()
