@@ -5,6 +5,8 @@
 // Shared with Hyro's adoption (hyro.rs).
 pub(crate) mod acknowledgement;
 pub(crate) mod codes;
+#[cfg(test)]
+mod lot_tests;
 pub(crate) mod ordinary;
 mod partial;
 
@@ -762,8 +764,6 @@ impl BybitLinear {
         Ok(job)
     }
 
-    /// One order as create bodies, split into lots above the market's
-    /// maximum size; only the first lot carries the attached TP/SL.
     pub(crate) fn hyro_stop(
         &self,
         cx: &Cx<'_, Pending>,
@@ -784,6 +784,8 @@ impl BybitLinear {
         Ok(None)
     }
 
+    /// Split oversized entries into create bodies. Each spot lot owns its TP/SL;
+    /// derivatives keep position-wide protection on the first lot only.
     pub(crate) fn format_lots(
         &self,
         cx: &Cx<'_, Pending>,
@@ -906,7 +908,8 @@ impl BybitLinear {
             remaining = num::adjust(remaining - max, p_amount);
         }
         sizes.push(remaining);
-        let lot = |qty: f64, brackets: bool, category: bool| {
+        let lot = |qty: f64, first: bool, category: bool| {
+            let brackets = self.variant.is_spot() || first;
             let mut body = Body::new();
             if category {
                 body = body.str("category", self.category_for(&opts.symbol).as_str());

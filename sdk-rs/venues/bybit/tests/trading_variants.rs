@@ -381,6 +381,44 @@ fn spot_market_buys_use_base_amount_and_single_endpoint() {
 }
 
 #[test]
+fn spot_split_limit_entries_keep_take_profit_on_every_released_lot() {
+    for entries in [1, 2] {
+        let mut h = ready(Variant::Spot);
+        let orders = (0..entries)
+            .map(|_| {
+                let mut opts = order("BTCUSDT", 2500.);
+                opts.take_profit = Some(110.);
+                opts
+            })
+            .collect();
+        place(&mut h, 3, orders);
+        let mut ids = Vec::new();
+        for index in 0..entries * 3 {
+            let request = h.take("/v5/order/create");
+            let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            assert_eq!(sent["category"], "spot");
+            assert_eq!(sent["orderType"], "Limit");
+            assert_eq!(sent["takeProfit"], "110", "lot {index}, entries={entries}");
+            assert_eq!(sent["tpOrderType"], "Market");
+            assert_eq!(sent["qty"], if index % 3 == 2 { "120" } else { "1190" });
+            let id = format!("spot-{index}");
+            h.reply(
+                request.id,
+                200,
+                &serde_json::json!({
+                    "retCode": 0, "result": {"orderId": id}
+                })
+                .to_string(),
+            );
+            ids.push(id);
+        }
+        assert_eq!(h.result(3), Some(&Ok(serde_json::to_string(&ids).unwrap())));
+        assert!(!h.unknown.contains(&3));
+        assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+#[test]
 fn spot_stops_use_native_filter_and_derivative_controls_fail_before_writes() {
     let mut h = ready(Variant::Spot);
     let mut opts = order("BTCUSDT", 0.1);
