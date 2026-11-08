@@ -340,6 +340,76 @@ fn native_50004_emits_one_diagnostic_and_companion_without_changing_its_journal(
     }
 }
 
+fn confirmed_sibling_placement(unknown_index: usize) {
+    for code in ["0", "50004", "51412"] {
+        let mut e = trading_engine();
+        let out = place(
+            &mut e,
+            serde_json::from_value(json!([normal(1.), normal(1.), algo(false)])).unwrap(),
+        );
+        let request = mutation(&out);
+        let payload: Vec<Value> = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.len(), 2);
+        assert!(payload.iter().all(|row| row["sz"] == "1"));
+        let identity = payload[unknown_index]["clOrdId"].as_str().unwrap();
+        let mut rows = vec![
+            json!({"sCode":code}),
+            json!({"ordId":"proven-sibling","sCode":"0"}),
+        ];
+        if unknown_index == 1 {
+            rows.reverse();
+        }
+        let body = json!({"code":"0","data":rows}).to_string();
+        reply(&mut e, &Action::Http(request.clone()), &body, 6.);
+        let mut out = prepared(&mut e, 6.);
+        let events: Vec<_> = out
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 1);
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(key, value)| *key == "placedCount"
+                    && *value == safe_cex_engine::log::Value::Num(1.)),
+            "code={code}: {:?}",
+            events[0]
+        );
+        let placed = ["proven-sibling".to_owned()];
+        let error = pin(&out, 1, &placed, identity, true, 1);
+        let elements = error.elements.as_ref().expect("placement journal");
+        assert_eq!(elements.len(), 3);
+        assert!(matches!(
+            &elements[unknown_index].result,
+            ElementResult::Unknown { .. }
+        ));
+        assert!(
+            matches!(&elements[1 - unknown_index].result, ElementResult::Placed { order_ids } if order_ids == &placed)
+        );
+        assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+        reply(&mut e, &Action::Http(request), &body, 7.);
+        out.extend(prepared(&mut e, 7.));
+        out.extend(fire_armed(&mut e, &out.clone(), 30_000.));
+        assert_eq!(pin(&out, 1, &placed, identity, true, 1), error);
+    }
+}
+
+#[test]
+fn missing_id_first_retains_confirmed_sibling_placement() {
+    confirmed_sibling_placement(0);
+}
+
+#[test]
+fn missing_id_last_retains_confirmed_sibling_placement() {
+    confirmed_sibling_placement(1);
+}
+
 #[test]
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/okx/okx.exchange.ts:2355-2363,2375-2383.
 fn unknown_exception_cancel_rows() {
