@@ -7,11 +7,11 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 it('backpack_public_init_never_installs_signer_or_opens_private_ws', () => {
-  const sign = vi.fn();
-  const available = vi.fn(() => true);
-  const subscribe = vi.fn(() => () => {});
+  const sign = vi.fn<RemoteSigner['sign']>();
+  const available = vi.fn<RemoteSigner['isAvailable']>(() => true);
+  const subscribe = vi.fn<RemoteSigner['onAvailabilityChange']>(() => () => {});
   const remoteSigner: RemoteSigner = { sign, isAvailable: available, onAvailabilityChange: subscribe };
-  const payloadSigner = vi.fn();
+  const payloadSigner = vi.fn<NonNullable<ExchangeOptions['payloadSigner']>>();
   const inputs: ExchangeOptions[] = [
     { key: 'unused', secret: '', publicDataOnly: true, remoteSigner },
     { key: '', secret: '', remoteSigner },
@@ -20,12 +20,20 @@ it('backpack_public_init_never_installs_signer_or_opens_private_ws', () => {
     { key: '', secret: '', payloadSigner },
 
   ];
+  for (const field of ['remoteSigner', 'payloadSigner']) {
+    for (const callback of [null, false, 'unused-invalid-callback']) {
+      const options: ExchangeOptions = { key: '', secret: '' };
+      Reflect.set(options, field, callback);
+      inputs.push(options);
+    }
+  }
   const missing: ExchangeOptions = { key: '', secret: '', remoteSigner };
   Reflect.deleteProperty(missing, 'key');
   inputs.push(missing);
   for (const options of inputs) {
     const setup = new DelegatedSignerSetup('backpack', options);
     try {
+      expect(setup.intent).toEqual({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
       expect(setup.primaryComplete).toBe(false);
       expect(setup.hasSecondary).toBe(false);
       expect(setup.credentialPresence).toEqual({ key: false, secret: false });

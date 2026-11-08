@@ -1885,6 +1885,15 @@ impl Backpack {
         error: VenueError,
         data: bool,
     ) {
+        // Released transport failures arrive without an outcome; precommit
+        // refusals already carry NotSent. Project uncertainty before branching.
+        let error =
+            if !data && !matches!(request.step, Step::OpenOrders { .. }) && error.outcome.is_none()
+            {
+                error.outcome(Outcome::Unknown)
+            } else {
+                error
+            };
         let managed = request.managed.as_ref().expect("foreground delivery");
         let optional = matches!(
             request.step,
@@ -1916,7 +1925,9 @@ impl Backpack {
         {
             return self.guarded_failed(cx, request, error, data);
         }
-        if !optional {
+        // An optional leg may still be resting after transport loss. Preserve
+        // that uncertainty and prior IDs instead of advancing the serial plan.
+        if !optional || error.outcome == Some(Outcome::Unknown) {
             // The amend's cancel landed and nothing replaced it.
             let gone = match &request.step {
                 Step::Place { order, .. } => self

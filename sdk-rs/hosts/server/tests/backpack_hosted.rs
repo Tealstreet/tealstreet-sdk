@@ -271,12 +271,19 @@ async fn backpack_hosted_unknown_write_never_replays() -> Result {
         "cancel-all",
         "amend-cancel",
         "amend-replace",
+        "limit-amend-cancel",
+        "limit-amend-replace",
         "put-back",
         "protective-child",
     ] {
         for status in [0, 408, 429, 500, 503] {
             let mut device = Device::new()?;
-            let (mut driver, _) = ready(&mut device, &format!("[{STOP}]")).await?;
+            let resting = if op.starts_with("limit-") {
+                ORDER
+            } else {
+                STOP
+            };
+            let (mut driver, _) = ready(&mut device, &format!("[{resting}]")).await?;
             let order = json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":1,"price":140});
             let value = match op {
                 "place" => json!({"op":"placeOrders","command":51,"orders":[order]}),
@@ -293,7 +300,7 @@ async fn backpack_hosted_unknown_write_never_replays() -> Result {
                 .pop()
                 .ok_or("write not dispatched")?;
             assert_signature_shape(&packet)?;
-            if ["amend-replace", "put-back"].contains(&op) {
+            if op.ends_with("amend-replace") || op == "put-back" {
                 response(
                     &mut *driver,
                     &packet,
@@ -344,11 +351,14 @@ async fn backpack_hosted_unknown_write_never_replays() -> Result {
             assert_eq!(writes(&out), 0, "ambiguous leg replayed: {op} {status}");
             let error = failure(&out, 51)?;
             assert_eq!(error.outcome, Some(Outcome::Unknown), "{op} {status}");
-            if op == "put-back" || op == "amend-replace" {
-                assert!(
-                    error.legacy_text().contains("Check Open Orders"),
-                    "{op} {status}"
-                );
+            if op == "put-back" || op.ends_with("amend-replace") {
+                let warning = error.legacy_text().contains("Check Open Orders")
+                    || out.iter().any(|action| {
+                        matches!(action,
+                        Action::Notice(Notice::CommandError { command: 51, message })
+                        if message.contains("Check Open Orders"))
+                    });
+                assert!(warning, "{op} {status}");
             }
             if op == "protective-child" {
                 assert_eq!(
@@ -408,7 +418,26 @@ async fn backpack_public_init_never_installs_signer_or_opens_private_ws() -> Res
         assert!(driver.ids().primary.is_none());
         assert!(driver.signer().is_none());
         driver.start();
-        let actions = driver.pump(&mut device).await?;
+        let mut actions = vec![];
+        for _ in 0..12 {
+            let next = driver.pump(&mut device).await?;
+            for action in &next {
+                if let Action::Http(request) = action {
+                    response(
+                        &mut *driver,
+                        request,
+                        200,
+                        &startup_body(&request.url, "[]"),
+                    );
+                }
+            }
+            let empty = next.is_empty();
+            actions.extend(next);
+            if empty {
+                break;
+            }
+        }
+        assert!(driver.store().loaded().markets);
         assert!(!private_socket(&actions));
         assert!(device.payloads.is_empty());
         assert!(device.frames.try_recv().is_err());

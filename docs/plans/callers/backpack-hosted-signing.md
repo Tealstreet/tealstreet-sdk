@@ -104,5 +104,43 @@ may move to a resumed socket; that is not an exchange write retry.
 This slice changes no admission flag, construction rule or venue capability
 manifest. Native Ed25519 capability ships with its operational provider branch.
 NEEDS-NX: caller tests using Backpack as a native Hosted refusal example need
-integration verification. Real server startup/all-endpoint proof remains a
-separate slice; native secondary custody and private PayloadSigner stay refused.
+integration verification. Native host integration is described below;
+native secondary custody and private PayloadSigner stay refused.
+
+## Native host integration proof
+
+The native REST-base resolver must name Backpack as well as the registry and
+signer provider. It now selects `https://api.backpack.exchange` for production
+and refuses testnet rather than sending a testnet account to production.
+Keyless SDK setup resolves public mode before keeping delegated authority,
+using the shared normalized-presence rule being integrated in #3320. It retains
+no primary identity, signing algorithms or callback subscriptions in that mode.
+No construction-rule, beta message or capability-manifest value changes here.
+
+`hosts/server/tests/backpack_hosted.rs` drives `accounts::prepare`, the injected
+registry engine, actual `SignerLink` request/response frames and the existing
+device codec. Its startup proof also runs the native `Host` with a prepared and
+bound recording transport through final handoff; no network executor is used.
+The fixed-clock driver keeps prepared resources across asynchronous signatures,
+checks final release claims, and fences stale results after a clock revision.
+
+Ninety-six REST cases pin every supported signed endpoint plus escaped queries,
+at two fractional clocks and three window settings, to literal signatures from
+the TypeScript Node/OpenSSL oracle. Two WS goldens retain its separate 5-second
+window. Real account reads check configured-window flooring and clamping;
+pre-account history and identity reads retain their existing 60-second behavior.
+Server init still does not forward a custom receive window: that optional caller
+wire extension is outside this proof, which supplies custom engine options.
+
+The ambiguous-write matrix covers single/batch placement, cancellation,
+cancel-all, protective amend cancellation/replacement/proof/put-back and child
+legs, including late acknowledgements and prior IDs. A newly exposed transport
+loss on an optional child now stops the serial plan with `Unknown` and preserves
+accepted entry IDs; it cannot advance to the next child. Definite optional
+refusals keep their existing handling. Pre-transport refusal remains `NotSent`.
+Private PayloadSigner, native secondary custody and undeclared remote venues
+stay refused; public accounts open no private socket or signing channel.
+
+NEEDS-NX remains: this runtime routing repair changes a native Hosted refusal
+example. Review and integration are required; this evidence does not authorize
+a live-key smoke, deployment, or merge during the freeze.
