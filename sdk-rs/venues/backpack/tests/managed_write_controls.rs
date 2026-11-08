@@ -106,8 +106,9 @@ fn required_amend_preparation_refusal_restores_only_unchanged_cancel_state() {
     }
 }
 
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025.
 #[test]
-fn hosted_unproven_child_continues_legacy_sl_and_keeps_native_metadata_and_ids()
+fn hosted_unknown_child_halts_and_keeps_native_metadata_and_ids()
 -> Result<(), Box<dyn std::error::Error>> {
     // ready() installs the local/device parity provider for every dispatched write.
     for status in [408, 429, 500, 503] {
@@ -126,32 +127,18 @@ fn hosted_unproven_child_continues_legacy_sl_and_keeps_native_metadata_and_ids()
             r#"{"code":"NATIVE_UNAVAILABLE","message":"native detail"}"#,
         );
         let out = actions(&mut e);
-        assert!(!out.iter().any(|action| matches!(
-            action,
-            Action::Notice(Notice::CommandFailed { command: 722, .. })
-        )));
-        let sl = out
-            .iter()
-            .find_map(|action| match action {
-                Action::Http(request) => Some(request),
-                _ => None,
-            })
-            .ok_or("legacy SL missing")?;
-        assert!(
-            sl.body
-                .as_deref()
-                .ok_or("SL body missing")?
-                .contains("\"triggerPrice\":\"130.00\"")
-        );
-        reply(&mut e, sl, 200, r#"{"id":"accepted-sl"}"#);
-        let out = actions(&mut e);
         let error = failure(&out, 722);
+        assert!(
+            error
+                .message
+                .contains("The outcome is unknown. Check Open Orders")
+        );
         assert_eq!(error.outcome, Some(Outcome::Unknown));
         assert_eq!(error.venue_code.as_deref(), Some("NATIVE_UNAVAILABLE"));
         assert_eq!(error.venue_message.as_deref(), Some("native detail"));
         assert_eq!(
             error.partial.as_ref().unwrap().order_ids,
-            ["accepted-entry", "accepted-sl"]
+            ["accepted-entry"]
         );
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
         reply(&mut e, &child, 200, r#"{"id":"late-child"}"#);

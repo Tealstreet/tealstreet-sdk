@@ -81,27 +81,63 @@ const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025,1072-1079,1207-1229.
 fn unknown_stop(path: &str) -> Result {
     for status in [Some(400), Some(200), Some(503), None] {
-        if path == "pair" && status != Some(200) { continue; }
+        if path == "pair" && status != Some(200) {
+            continue;
+        }
         let rows = ["123", "456", "789"].map(|id| ORDER.replace("\"123\"", &format!("\"{id}\"")));
         let (mut engine, _) = ready_orders(&format!("[{}]", rows.join(",")));
-        engine.store_mut().update_markets(|market| market.limits.amount.max = 1000.);
+        engine
+            .store_mut()
+            .update_markets(|market| market.limits.amount.max = 1000.);
         let mut transport = vec![];
         let bracket = json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130});
         let (unknown, count, accepted) = match path {
             "cancel" => {
-                engine.handle(2000., Event::Command(Command::CancelOrders { command:901, ids:vec!["123".into(),"456".into(),"789".into()] }));
+                engine.handle(
+                    2000.,
+                    Event::Command(Command::CancelOrders {
+                        command: 901,
+                        ids: vec!["123".into(), "456".into(), "789".into()],
+                    }),
+                );
                 (1, 3, vec![])
             }
-            "pair" => { place(&mut engine, [140.,141.,142.,143.].into_iter().map(limit).collect())?; (1,4,vec!["prefix".to_owned()]) }
+            "pair" => {
+                place(
+                    &mut engine,
+                    [140., 141., 142., 143.].into_iter().map(limit).collect(),
+                )?;
+                (1, 4, vec!["prefix".to_owned()])
+            }
             "tp" | "sl" | "entry" => {
-                place(&mut engine, vec![bracket,limit(142.)])?;
-                let index = if path == "entry" {0} else if path == "tp" {1} else {2};
-                (index,4,(0..index).map(|i| format!("prefix-{i}")).collect())
+                place(&mut engine, vec![bracket, limit(142.)])?;
+                let index = if path == "entry" {
+                    0
+                } else if path == "tp" {
+                    1
+                } else {
+                    2
+                };
+                (
+                    index,
+                    4,
+                    (0..index).map(|i| format!("prefix-{i}")).collect(),
+                )
             }
             _ => {
-                let orders = (1..=3).map(|id| { let mut row=limit(if path=="cap" && id==2 {1000.01} else {140.}); row["clientOrderId"]=json!(id.to_string()); row }).collect();
+                let orders = (1..=3)
+                    .map(|id| {
+                        let mut row = limit(if path == "cap" && id == 2 {
+                            1000.01
+                        } else {
+                            140.
+                        });
+                        row["clientOrderId"] = json!(id.to_string());
+                        row
+                    })
+                    .collect();
                 place(&mut engine, orders)?;
-                (1,3,vec!["prefix-0".to_owned()])
+                (1, 3, vec!["prefix-0".to_owned()])
             }
         };
         if path != "pair" {
@@ -113,36 +149,187 @@ fn unknown_stop(path: &str) -> Result {
         let request = packet(&mut engine, &mut transport)?;
         if path == "pair" {
             let mut ack: Vec<Value> = serde_json::from_str(&pair_ack(&request)?)?;
-            ack[0]["id"]=json!("prefix"); ack[1]["operation"]=json!("Error"); ack[1]["id"]=json!("");
+            ack[0]["id"] = json!("prefix");
+            ack[1]["operation"] = json!("Error");
+            ack[1]["id"] = json!("");
             reply(&mut engine, &request, 200, &serde_json::to_string(&ack)?);
-        } else if let Some(status)=status {
-            reply(&mut engine, &request, status, r#"{"code":"UNCLASSIFIED","message":"uncertain"}"#);
+        } else if let Some(status) = status {
+            reply(
+                &mut engine,
+                &request,
+                status,
+                r#"{"code":"UNCLASSIFIED","message":"uncertain"}"#,
+            );
         } else {
-            engine.handle(2000., Event::HttpFailed { request:request.id, error:"lost reply" });
+            engine.handle(
+                2000.,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "lost reply",
+                },
+            );
         }
         let out = actions(&mut engine);
-        assert!(!out.iter().any(|action| matches!(action,Action::Http(_))), "Unknown must halt {path}");
+        assert!(
+            !out.iter().any(|action| matches!(action, Action::Http(_))),
+            "Unknown must halt {path}"
+        );
         let error = failure(&out)?;
-        assert_eq!(error.outcome,Some(safe_cex_engine::Outcome::Unknown));
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT),"{}",error.message);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(
+            error.message.contains(ENGINE_UNKNOWN_TEXT),
+            "{}",
+            error.message
+        );
         let elements = error.elements.as_ref().ok_or("missing journal")?;
-        assert_eq!(elements.len(),count);
-        assert!(matches!(&elements[unknown].result,ElementResult::Unknown { error } if error.message.contains(ENGINE_UNKNOWN_TEXT)));
-        assert!(elements[unknown+1..].iter().all(|element|matches!(element.result,ElementResult::NotSent{error:None})));
-        let ids = error.partial.as_ref().map_or(&[][..],|partial|partial.order_ids.as_slice());
-        assert_eq!(ids,accepted);
-        if path=="cancel" { assert!(matches!(elements[0].result,ElementResult::Applied{effect:AppliedEffect::Cancel,..})); }
+        assert_eq!(elements.len(), count);
+        assert!(
+            matches!(&elements[unknown].result,ElementResult::Unknown { error } if error.message.contains(ENGINE_UNKNOWN_TEXT))
+        );
+        assert!(
+            elements[unknown + 1..]
+                .iter()
+                .all(|element| matches!(element.result, ElementResult::NotSent { error: None }))
+        );
+        let ids = error
+            .partial
+            .as_ref()
+            .map_or(&[][..], |partial| partial.order_ids.as_slice());
+        assert_eq!(ids, accepted);
+        if path == "cancel" {
+            assert!(matches!(
+                elements[0].result,
+                ElementResult::Applied {
+                    effect: AppliedEffect::Cancel,
+                    ..
+                }
+            ));
+        }
         assert!(out.iter().any(|action| matches!(action,Action::Notice(Notice::Event(event)) if event.code=="backpack.write.unknown" && event.message.contains(ENGINE_UNKNOWN_TEXT))));
-        reply(&mut engine,&request,200,r#"{"id":"late"}"#);
-        assert!(!actions(&mut engine).iter().any(|action|matches!(action,Action::Http(_) | Action::Notice(Notice::CommandDone { command:901,.. } | Notice::CommandFailed { command:901,.. }))));
-        assert_eq!(transport.len(),if path=="pair" {1} else {unknown+1});
+        reply(&mut engine, &request, 200, r#"{"id":"late"}"#);
+        assert!(!actions(&mut engine).iter().any(|action| matches!(
+            action,
+            Action::Http(_)
+                | Action::Notice(
+                    Notice::CommandDone { command: 901, .. }
+                        | Notice::CommandFailed { command: 901, .. }
+                )
+        )));
+        assert_eq!(
+            transport.len(),
+            if path == "pair" { 1 } else { unknown + 1 }
+        );
     }
     Ok(())
 }
 
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1223-1229.
 #[test]
-fn over_cap_unknown_halts_later_row() -> Result { unknown_stop("cap") }
+fn over_cap_unknown_halts_later_row() -> Result {
+    unknown_stop("cap")
+}
+
+struct RefuseTakeProfit(safe_cex_engine::signing::Provider);
+
+impl RefuseTakeProfit {
+    fn refuses(request: &safe_cex_engine::signing::SignRequest) -> bool {
+        use safe_cex_engine::signing::{Operation, PayloadPart};
+        request.operations.iter().any(|operation| match operation {
+            Operation::Sign { payload, .. } => payload.iter().any(|part| matches!(part,
+                PayloadPart::Bytes { bytes } if String::from_utf8_lossy(bytes).contains("triggerPrice=150.00")
+            )),
+            _ => false,
+        })
+    }
+}
+
+impl safe_cex_engine::signing::Signer for RefuseTakeProfit {
+    fn immediate(&self) -> bool {
+        self.0.immediate()
+    }
+    fn can_sign(
+        &self,
+        key: &safe_cex_engine::signing::KeyRef,
+        algorithm: safe_cex_engine::signing::Algorithm,
+    ) -> safe_cex_engine::signing::Capability {
+        self.0.can_sign(key, algorithm)
+    }
+    fn sign(
+        &self,
+        request: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        if Self::refuses(&request) {
+            Box::pin(async { Err(safe_cex_engine::signing::SignError::Refused) })
+        } else {
+            self.0.sign(request)
+        }
+    }
+    fn sign_ready(
+        &self,
+        request: &safe_cex_engine::signing::SignRequest,
+    ) -> Option<
+        std::result::Result<
+            safe_cex_engine::signing::SignResult,
+            safe_cex_engine::signing::SignError,
+        >,
+    > {
+        if Self::refuses(request) {
+            Some(Err(safe_cex_engine::signing::SignError::Refused))
+        } else {
+            self.0.sign_ready(request)
+        }
+    }
+}
+
+// Proven pre-release refusal is safe to continue, matching TS's child catch.
+#[test]
+fn definite_not_sent_child_refusal_still_allows_sl() -> Result {
+    let (snapshot, _) = ready();
+    let signer = snapshot.signer().ok_or("missing fixture signer")?;
+    let identity = snapshot
+        .identities()
+        .primary
+        .clone()
+        .ok_or("missing fixture identity")?;
+    let mut engine = identity_only_orders(
+        "[]",
+        identity,
+        std::sync::Arc::new(RefuseTakeProfit(signer)),
+        None,
+    );
+    let mut transport = vec![];
+    place(
+        &mut engine,
+        vec![
+            json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}),
+        ],
+    )?;
+    let entry = packet(&mut engine, &mut transport)?;
+    reply(&mut engine, &entry, 200, r#"{"id":"entry"}"#);
+    let sl = packet(&mut engine, &mut transport)?;
+    let row: Value = serde_json::from_str(sl.body.as_deref().ok_or("missing SL")?)?;
+    assert_eq!(row["triggerPrice"], "130.00");
+    reply(&mut engine, &sl, 200, r#"{"id":"sl"}"#);
+    let out = actions(&mut engine);
+    let error = failure(&out)?;
+    assert_ne!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let elements = error.elements.as_ref().ok_or("missing outcomes")?;
+    assert_eq!(elements.len(), 3);
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error:Some(error) } if error.outcome==Some(safe_cex_engine::Outcome::NotSent))
+    );
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .ok_or("missing accepted IDs")?
+            .order_ids,
+        ["entry", "sl"]
+    );
+    assert_eq!(transport.len(), 2);
+    assert!(requests(&mut engine).is_empty());
+    Ok(())
+}
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:728-779,1207-1229.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | sdk-rs/venues/backpack/src/trading.rs:522 pair-batching-and-serial-rows

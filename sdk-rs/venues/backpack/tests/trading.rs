@@ -181,8 +181,9 @@ fn duplicate_client_ids_and_bracket_client_id_fail_closed() {
         );
     }
 }
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025.
 #[test]
-fn legacy_limit_bracket_waits_for_entry_and_continues_after_a_child_failure()
+fn limit_bracket_waits_for_entry_and_halts_after_unknown_child()
 -> Result<(), Box<dyn std::error::Error>> {
     let (mut e, _) = ready();
     place(
@@ -205,14 +206,14 @@ fn legacy_limit_bracket_waits_for_entry_and_continues_after_a_child_failure()
     assert!(body.contains("\"triggerPrice\":\"150.00\""));
     assert!(body.contains("\"triggerBy\":\"MarkPrice\""));
     reply(&mut e, &tp, 400, r#"{"message":"rejected"}"#);
-    let sl = requests(&mut e).pop().ok_or("legacy SL missing")?;
-    let body = sl.body.as_deref().ok_or("SL body missing")?;
-    assert!(body.contains("\"triggerPrice\":\"130.00\""));
-    assert!(body.contains("\"reduceOnly\":true"));
-    reply(&mut e, &sl, 200, r#"{"id":"sl"}"#);
     let out = actions(&mut e);
     assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
     let error = failure(&out);
+    assert!(
+        error
+            .message
+            .contains("The outcome is unknown. Check Open Orders")
+    );
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert_eq!(
         error
@@ -220,7 +221,7 @@ fn legacy_limit_bracket_waits_for_entry_and_continues_after_a_child_failure()
             .as_ref()
             .ok_or("prior accepted ID missing")?
             .order_ids,
-        ["entry", "sl"]
+        ["entry"]
     );
     Ok(())
 }
@@ -1394,10 +1395,22 @@ fn snapshot_pair_ack_fence(accepted: bool, stored: bool) {
     if accepted {
         assert_eq!(done(&mut e).unwrap(), r#"["new-bid","new-ask"]"#);
     } else {
+        let out = actions(&mut e);
+        let Some(error) = out.iter().find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 701,
+                error,
+            }) => Some(error),
+            _ => None,
+        }) else {
+            panic!("missing uncertain batch failure");
+        };
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
         assert!(
-            done(&mut e)
-                .unwrap_err()
-                .contains("batch response identity")
+            error
+                .message
+                .contains("The outcome is unknown. Check Open Orders")
         );
     }
     assert_eq!(e.store().order("123").is_some(), stored);
