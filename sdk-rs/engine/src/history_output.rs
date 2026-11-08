@@ -169,7 +169,13 @@ impl ClosedPnlOutput {
             ),
             ClosedPositionFormat::Unsupported => return None,
         };
-        let symbol = text(&row[symbol_key]);
+        let symbol = if self.format == ClosedPositionFormat::Bybit
+            && (row[symbol_key] == false || row[symbol_key].as_f64() == Some(0.))
+        {
+            String::new()
+        } else {
+            text(&row[symbol_key])
+        };
         let time = timestamp(row, time_key);
         if symbol.is_empty()
             || time == 0.
@@ -281,8 +287,11 @@ pub fn finish<P>(
     cx: &mut Cx<'_, P>,
     history: ReadCursorHistory<String>,
     result: Result<(), VenueError>,
-    output: Option<ClosedPnlOutput>,
+    mut output: Option<ClosedPnlOutput>,
 ) {
+    if let Some(output) = output.as_mut() {
+        output.markets = cx.store.markets().to_vec();
+    }
     let _ = history.finish_with(cx, result, |rows| match output {
         Some(output) => output.encode(&rows),
         None => Ok(format!("[{}]", rows.join(","))),

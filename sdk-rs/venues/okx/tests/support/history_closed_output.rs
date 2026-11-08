@@ -64,3 +64,18 @@ fn reported_closed_pnl_is_shaped_before_the_native_terminal() {
     .unwrap();
     assert_eq!(result, expected["okx"]);
 }
+
+#[test]
+fn reported_output_uses_the_catalogue_at_completion_like_the_sdk_consumer() {
+    let mut e = trading_engine();
+    fetch(&mut e, Some("BTCUSDT"), Some(1.), Some(NOW));
+    let first = request(&mut e);
+    let mut markets = e.store().markets().to_vec();
+    markets[0].contract_size = Some(0.02);
+    e.store_mut().set_markets(markets);
+    reply(&mut e, &first, &page(&[row(2, 1709500000000)]), NOW);
+    let result: serde_json::Value =
+        serde_json::from_str(&done(&actions(&mut e)).unwrap().unwrap()).unwrap();
+    assert_eq!(result[0]["contracts"], 0.04);
+    assert_eq!(result[0]["notional"], 1640.);
+}
