@@ -14,7 +14,7 @@ use safe_cex_engine::request_context::{
     PreflightPolicy, PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
     plan::{CallBound, RetryWindow, Slot, StepBound},
 };
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, PlannedWrite, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, CommandWait, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -131,7 +131,8 @@ pub enum Step {
     },
     Leverage(f64),
 }
-fn write_plan(steps: &[Step]) -> Result<WritePlan<Step>, VenueError> {
+fn write_plan(steps: &[Step]) -> (WritePlan, Vec<Vec<usize>>) {
+    let mut journal = vec![];
     let mut index = 0;
     let writes = steps
         .iter()
@@ -159,13 +160,12 @@ fn write_plan(steps: &[Step]) -> Result<WritePlan<Step>, VenueError> {
                 });
                 index += 1;
             }
-            PlannedWrite {
-                payload: step.clone(),
-                elements,
-            }
+            let indices = elements.iter().map(|element| element.index).collect();
+            journal.extend(elements);
+            indices
         })
         .collect();
-    WritePlan::validate(writes, |_| Ok(()))
+    (WritePlan::new(journal), writes)
 }
 
 pub struct Request {
@@ -187,7 +187,10 @@ pub struct Repair {
 }
 struct Job {
     managed: Option<Plan>,
-    write_plan: WritePlan<Step>,
+    write_plan: WritePlan,
+    steps: Vec<Step>,
+    elements: Vec<Vec<usize>>,
+    next: usize,
     continue_rows: bool,
     skip_children: bool,
     failure: Option<VenueError>,
@@ -198,6 +201,21 @@ struct Job {
     amendment: bool,
     /// The amended order's side and kind: what its lost replacement costs.
     amended: Option<(OrderSide, OrderType)>,
+}
+
+fn record_failure(plan: &mut WritePlan, indices: &[usize], error: &VenueError) {
+    for index in indices {
+        let result = if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
+            ElementResult::NotSent {
+                error: Some(Box::new(error.clone())),
+            }
+        } else {
+            ElementResult::Unknown {
+                error: Box::new(error.clone()),
+            }
+        };
+        let _ = plan.record(*index, result);
+    }
 }
 
 #[derive(Default)]
@@ -662,13 +680,7 @@ impl Backpack {
                     _ => None,
                 });
                 let preflight = preflight.as_ref().unwrap();
-                let mut write_plan = match write_plan(&steps) {
-                    Ok(plan) => plan,
-                    Err(error) => {
-                        let _ = cx.fail_preflight(preflight, error);
-                        return;
-                    }
-                };
+                let (write_plan, elements) = write_plan(&steps);
                 if steps.is_empty() {
                     let _ = cx.done_empty_plan(preflight, "[]".into());
                     return;
@@ -678,7 +690,7 @@ impl Backpack {
                     Ok(plan) => plan,
                     Err(error) => {
                         let mut error = error.venue_error();
-                        error = write_plan.failure(error);
+                        error = write_plan.attach(error);
                         let _ = cx.fail_preflight(preflight, error);
                         return;
                     }
@@ -688,6 +700,9 @@ impl Backpack {
                     Job {
                         managed: Some(plan),
                         write_plan,
+                        steps,
+                        elements,
+                        next: 0,
                         continue_rows,
                         skip_children: false,
                         failure: None,
@@ -772,10 +787,10 @@ impl Backpack {
         if job.waiting {
             return;
         }
-        let complete = job.write_plan.is_complete();
+        let complete = job.next == job.steps.len();
         if complete && let Some(plan) = &job.managed {
             if let Some(error) = job.failure.take() {
-                let error = job.write_plan.failure(error);
+                let error = job.write_plan.attach(error);
                 let _ = cx.fail_plan(plan, error);
                 return;
             }
@@ -795,20 +810,14 @@ impl Backpack {
         else {
             return;
         };
-        let writes = &mut job.write_plan;
-        let Some((write, planned)) = writes.observe_next_write() else {
+        let write = job.next;
+        let Some(step) = job.steps.get(write).cloned() else {
             return;
         };
-        let step = planned.payload.clone();
+        job.next += 1;
         if job.skip_children && matches!(step, Step::Place { optional: true, .. }) {
-            if let Err(reason) = writes.settle(write, vec![ElementResult::NotSent { error: None }])
-            {
-                let error = writes.failure(VenueError::new(reason.to_string()));
-                let _ = cx.fail_plan(plan, error);
-                return;
-            }
             if let Err(reason) = cx.retire_unissued_plan_call(plan, &slot) {
-                let error = writes.failure(reason.venue_error());
+                let error = job.write_plan.attach(reason.venue_error());
                 let _ = cx.fail_plan(plan, error);
                 return;
             }
@@ -825,11 +834,9 @@ impl Backpack {
         let context = match cx.plan_leg_context_with_intent(plan, &slot, intent) {
             Ok(context) => context,
             Err(error) => {
-                let mut error = error.venue_error().outcome(Outcome::NotSent);
-                if let Err(reason) = writes.fail(write, error.clone()) {
-                    error.message = format!("{}; {reason}", error.message);
-                }
-                let error = writes.failure(error);
+                let error = error.venue_error().outcome(Outcome::NotSent);
+                record_failure(&mut job.write_plan, &job.elements[write], &error);
+                let error = job.write_plan.attach(error);
                 let _ = cx.fail_plan(plan, error);
                 return;
             }
@@ -1318,15 +1325,22 @@ impl Backpack {
         request: &Request,
         results: Vec<ElementResult>,
     ) -> Result<(), String> {
-        let index = request.write;
-        let plan = self
+        let job = self
             .trading
             .jobs
             .get_mut(&request.command)
-            .map(|job| &mut job.write_plan)
             .ok_or("Backpack write plan unavailable")?;
-        plan.settle(index, results)
-            .map_err(|error| error.to_string())
+        let indices = job
+            .elements
+            .get(request.write)
+            .ok_or("missing write elements")?;
+        if indices.len() != results.len() {
+            return Err("Backpack reporting arity mismatch".into());
+        }
+        for (index, result) in indices.iter().zip(results) {
+            let _ = job.write_plan.record(*index, result);
+        }
+        Ok(())
     }
 
     fn plan_failure(
@@ -1335,18 +1349,11 @@ impl Backpack {
         mut error: VenueError,
         pending: bool,
     ) -> VenueError {
-        let index = request.write;
-        if let Some(plan) = self
-            .trading
-            .jobs
-            .get_mut(&request.command)
-            .map(|job| &mut job.write_plan)
-        {
-            if pending && let Err(reason) = plan.fail(index, error.clone()) {
-                error.message = format!("{}; {reason}", error.message);
-                error.outcome = Some(Outcome::Unknown);
+        if let Some(job) = self.trading.jobs.get_mut(&request.command) {
+            if pending {
+                record_failure(&mut job.write_plan, &job.elements[request.write], &error);
             }
-            error = plan.failure(error);
+            error = job.write_plan.attach(error);
         }
         error
     }
@@ -1447,10 +1454,8 @@ impl Backpack {
             return false;
         };
         job.waiting = false;
-        if pending && let Err(reason) = job.write_plan.fail(request.write, error.clone()) {
-            let error = job.write_plan.failure(VenueError::new(reason.to_string()));
-            let _ = cx.fail_plan(&managed.plan, error);
-            return true;
+        if pending {
+            record_failure(&mut job.write_plan, &job.elements[request.write], &error);
         }
         job.skip_children = matches!(
             request.step,
@@ -1468,7 +1473,7 @@ impl Backpack {
             cx.finish_plan_failed_call(&managed.plan, &managed.slot, &managed.context)
         };
         if let Err(reason) = finished {
-            let error = job.write_plan.failure(reason.venue_error());
+            let error = job.write_plan.attach(reason.venue_error());
             let _ = cx.fail_plan(&managed.plan, error);
             return true;
         }
