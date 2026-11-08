@@ -21,3 +21,5 @@ An uncertain lot retains accepted native IDs, marks the untouched suffix as
 unsent, and reports `The outcome is unknown. Check Open Orders` in the failure
 and one command diagnostic, together with one `order.outcome_unknown` event.
 The command stops after that lot without retrying or sending the suffix.
+An accepted protective-parent cancellation records its cancel effect and target
+parent ID in the journal before any replacement outcome.

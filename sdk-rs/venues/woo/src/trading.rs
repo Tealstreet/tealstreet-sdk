@@ -16,6 +16,7 @@ enum Accepted {
     Regular(Option<OrderIdentityReceipt>),
     Algo,
     Ids(Vec<String>),
+    Canceled(String),
     CancelAll,
     Leverage {
         symbol: String,
@@ -623,7 +624,9 @@ impl Woo {
                         ),
                         vec![],
                         None,
-                        Accepted::Ids(vec![]),
+                        Accepted::Canceled(
+                            sibling.parent_id.as_ref().unwrap_or(&sibling.id).clone(),
+                        ),
                     ));
                 }
                 steps.push_back(self.positional(cx, &o, sl, tp, sl_trigger, tp_trigger)?);
@@ -1476,7 +1479,7 @@ impl Woo {
                                 .ids
                                 .extend(rows.rows.into_iter().map(|r| r.order_id));
                         }
-                        Accepted::CancelAll => (),
+                        Accepted::CancelAll | Accepted::Canceled(_) => (),
                         Accepted::Ids(ids) => self
                             .trading
                             .active
@@ -1592,12 +1595,15 @@ impl Woo {
         })();
         match outcome {
             Ok(()) => {
-                if matches!(request.step, Step::Write { .. })
+                if let Step::Write { accepted, .. } = &request.step
                     && let Some(job) = self.trading.active.as_mut()
                 {
                     job.effective = true;
                     if let Some(report) = job.split_report.as_mut() {
-                        report.placed(&job.ids[accepted_ids..]);
+                        match accepted {
+                            Accepted::Canceled(target) => report.canceled(target),
+                            _ => report.placed(&job.ids[accepted_ids..]),
+                        }
                     }
                 }
             }

@@ -2112,3 +2112,76 @@ fn assert_split_unknown_contract(sized_stop: bool) {
         }
     }
 }
+
+#[test]
+fn confirmed_parent_cancel_is_applied_before_unknown_replacement() {
+    let mut e = positional_engine();
+    let mut o = opts();
+    o.kind = OrderType::StopLoss;
+    o.side = OrderSide::Sell;
+    o.amount = 0.0;
+    o.price = Some(58500.0);
+    let actions = placed(&mut e, vec![o]);
+    let cancel = req(&actions, Method::Delete, "/v3/algo/order/100");
+    let actions = reply(&mut e, &cancel, 1010., r#"{"success":true}"#);
+    let actions = tick(&mut e, &actions);
+    let replacement = req(&actions, Method::Post, "/v3/algo/order");
+    let actions = reply(
+        &mut e,
+        &replacement,
+        1020.,
+        r#"{"success":false,"code":-1000,"message":"ambiguous"}"#,
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let rows = error.elements.as_ref().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        &rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(
+        matches!(&rows[0].result,
+        safe_cex_engine::write_plan::ElementResult::Applied {
+            effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
+            target_order_id: Some(target), ..
+        } if target == "100"),
+        "accepted DELETE /v3/algo/order/100 was misreported: {rows:?}"
+    );
+}
+
+#[test]
+fn parent_cancel_unknown_stops_before_replacement() {
+    let mut e = positional_engine();
+    let mut o = opts();
+    o.kind = OrderType::StopLoss;
+    o.side = OrderSide::Sell;
+    o.amount = 0.0;
+    o.price = Some(58500.0);
+    let actions = placed(&mut e, vec![o]);
+    let cancel = req(&actions, Method::Delete, "/v3/algo/order/100");
+    let actions = reply(
+        &mut e,
+        &cancel,
+        1010.,
+        r#"{"success":false,"code":-1000,"message":"ambiguous"}"#,
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let rows = error.elements.as_ref().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        rows[0].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(matches!(
+        rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+    ));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+    );
+    assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")).count(), 1);
+}

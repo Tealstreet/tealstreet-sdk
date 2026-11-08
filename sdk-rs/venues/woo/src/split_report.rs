@@ -1,5 +1,5 @@
 //! Passive lot outcomes; dispatch and stop policy remain in trading.
-use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 use safe_cex_engine::{CommandId, Level, LogEvent, Outcome, RequestId, VenueError};
 
 pub(crate) struct SplitReport {
@@ -20,14 +20,23 @@ impl SplitReport {
     }
 
     pub fn placed(&mut self, ids: &[String]) {
+        self.record(ElementResult::Placed {
+            order_ids: ids.to_vec(),
+        });
+    }
+
+    pub fn canceled(&mut self, target: &str) {
+        self.record(ElementResult::Applied {
+            effect: AppliedEffect::Cancel,
+            target_order_id: Some(target.into()),
+            position_key: None,
+        });
+    }
+
+    fn record(&mut self, result: ElementResult) {
         self.plan
-            .record(
-                self.next,
-                ElementResult::Placed {
-                    order_ids: ids.to_vec(),
-                },
-            )
-            .expect("accepted split lot has a reporting index");
+            .record(self.next, result)
+            .expect("accepted split write has a reporting index");
         self.next += 1;
     }
 
