@@ -24,46 +24,9 @@ pub struct EngineUnknownOutcome<'a> {
 /// Static telemetry projection: no mutable venue receiver or engine capability.
 pub type UnknownOutcomeTelemetry = fn(&EngineUnknownOutcome<'_>) -> LogEvent;
 
-impl<V: super::Venue> super::Engine<V> {
-    #[inline]
-    pub(super) fn emit_engine_unknown(
-        &mut self,
-        now: f64,
-        request: RequestId,
-        owner: crate::request_context::Owner,
-        status: Option<u16>,
-        first_action: usize,
-    ) {
-        let Some(telemetry) = V::unknown_outcome_telemetry() else {
-            return;
-        };
-        // Only new sealed notices are observed; returned telemetry cannot be
-        // revisited, nor can a late response re-emit an earlier completion.
-        let end = self.io.core.actions.len();
-        for index in first_action..end {
-            let super::Action::Notice(super::Notice::CommandFailed { command, error }) =
-                &self.io.core.actions[index]
-            else {
-                continue;
-            };
-            if error.outcome != Some(crate::Outcome::Unknown)
-                || matches!(owner, crate::request_context::Owner::Command { id, .. } if id != *command)
-            {
-                continue;
-            }
-            let event = telemetry(&EngineUnknownOutcome {
-                now,
-                command: *command,
-                request,
-                status,
-                error,
-            });
-            super::push_event(
-                &mut self.io.core.actions,
-                &mut self.io.core.health,
-                self.io.core.min_level,
-                event,
-            );
-        }
-    }
+/// First engine-owned uncertainty for one bounded owner generation.
+#[derive(Clone, Copy)]
+pub(super) struct UnknownOutcomeSource {
+    pub request: RequestId,
+    pub status: Option<u16>,
 }

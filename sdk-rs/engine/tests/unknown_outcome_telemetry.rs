@@ -179,8 +179,8 @@ fn events(actions: &[Action]) -> Vec<&LogEvent> {
         .collect()
 }
 
-fn status_reply<const REGISTERED: bool>(
-    engine: &mut Engine<Demo<REGISTERED>>,
+fn status_reply(
+    engine: &mut Engine<impl Venue>,
     request: RequestId,
     status: u16,
     split: bool,
@@ -308,4 +308,313 @@ fn callback_cannot_reclassify_or_retry_a_lost_transport() {
         },
     );
     assert!(engine.drain_actions().next().is_none());
+}
+
+#[cfg(feature = "http-plans")]
+mod independent {
+    use super::*;
+    use safe_cex_engine::request_context::{
+        Plan, PlanPolicy, PreflightPolicy, PreflightPurpose,
+        plan::{CallBound, RetryWindow, Slot, StepBound},
+    };
+
+    struct Recipe;
+    impl safe_cex_engine::SignStep for Recipe {
+        fn freshness_ms(&self) -> f64 {
+            3000.
+        }
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &safe_cex_engine::DispatchContext<'_>,
+        ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError>
+        {
+            Ok(safe_cex_engine::signing::SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![safe_cex_engine::signing::Operation::Present {
+                    key: safe_cex_engine::signing::KeyRef("fixture".into()),
+                }],
+            })
+        }
+        fn apply(
+            &mut self,
+            _: &mut Action,
+            _: &safe_cex_engine::signing::SignResult,
+        ) -> Result<(), safe_cex_engine::signing::SignError> {
+            Ok(())
+        }
+    }
+    #[derive(Default)]
+    struct Batch {
+        physical: bool,
+        plan: Option<Plan>,
+        settled: usize,
+    }
+    impl Venue for Batch {
+        type Pending = (Context, Slot);
+        fn unknown_outcome_telemetry() -> Option<UnknownOutcomeTelemetry> {
+            Some(telemetry)
+        }
+        fn start(&mut self, _: &mut Cx<'_, Self::Pending>) {}
+        fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, _: Command) {
+            let credential = Some(safe_cex_engine::request_context::Credential {
+                slot: safe_cex_engine::CredentialSlot::Primary,
+                reference: safe_cex_engine::signing::KeyRef("fixture".into()),
+            });
+            let preflight = cx
+                .begin_preflight(PreflightPolicy {
+                    purpose: PreflightPurpose::WriteAfterReads,
+                    read_credential: None,
+                    write_credential: credential.clone(),
+                })
+                .unwrap();
+            let calls: [_; 2] = std::array::from_fn(|_| CallBound {
+                timeout_ms: 1000,
+                attempts: 1,
+                retry_window: RetryWindow::Shared,
+                after_refusal: &[],
+            });
+            let policy = PlanPolicy {
+                independent_calls: true,
+                operation: Operation::Mutation,
+                credential,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            };
+            let steps = [StepBound {
+                wait_ms: 0,
+                calls: &calls,
+            }];
+            let plan = if self.physical {
+                cx.begin_planned_execution(
+                    &preflight,
+                    &steps,
+                    policy,
+                    safe_cex_engine::engine::Window::UntilTerminal,
+                    "batch",
+                )
+                .unwrap()
+                .0
+            } else {
+                cx.admit_plan(&preflight, &steps, policy).unwrap()
+            };
+            let slots = cx.plan_slots(&plan).unwrap();
+            assert_eq!(slots.len(), 2);
+            for slot in slots {
+                let context = cx.plan_leg_context(&plan, &slot).unwrap();
+                cx.request_signed_managed(
+                    context.clone(),
+                    None,
+                    Method::Post,
+                    "https://venue.test/batch".into(),
+                    None,
+                    Box::new(Recipe),
+                    (context, slot),
+                )
+                .unwrap();
+            }
+            self.plan = Some(plan);
+        }
+        fn on_http_failed(
+            &mut self,
+            cx: &mut Cx<'_, Self::Pending>,
+            (context, slot): Self::Pending,
+            error: VenueError,
+        ) {
+            if error.kind != Some(ErrorKind::Network) {
+                assert_eq!(error.outcome, Some(Outcome::Unknown));
+            }
+            // A native callback cannot overwrite the engine's recorded failure.
+            assert!(
+                cx.http_write_fact(
+                    &context,
+                    safe_cex_engine::classify::WriteFact::Accepted {
+                        order_ids: vec!["forged".into()],
+                    },
+                    None
+                )
+                .is_err()
+            );
+            cx.finish_plan_failed_call(self.plan.as_ref().unwrap(), &slot, &context)
+                .unwrap();
+            self.settle(cx);
+        }
+        fn on_response(
+            &mut self,
+            cx: &mut Cx<'_, Self::Pending>,
+            (context, slot): Self::Pending,
+            response: Response<'_>,
+        ) {
+            assert_eq!(response.status, 200);
+            let plan = self.plan.as_ref().unwrap();
+            cx.validate_plan_delivery(plan, &context).unwrap();
+            cx.http_write_fact(
+                &context,
+                safe_cex_engine::classify::WriteFact::Accepted {
+                    order_ids: vec!["accepted".into()],
+                },
+                None,
+            )
+            .unwrap();
+            cx.finish_plan_call(plan, &slot, &context).unwrap();
+            self.settle(cx);
+        }
+        fn capture_http_reconciliation(
+            &self,
+            _: &Self::Pending,
+        ) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
+            ReconciliationData::new("batch".into())
+        }
+        fn on_request_failed(&mut self, _: &mut Cx<'_, Self::Pending>, _: Self::Pending, _: &str) {
+            panic!("untyped failure")
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, Self::Pending>, _: SocketId) {}
+        fn on_close(&mut self, _: &mut Cx<'_, Self::Pending>, _: SocketId, _: u16) {}
+        fn on_message(&mut self, _: &mut Cx<'_, Self::Pending>, _: SocketId, _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, Self::Pending>, _: TimerId) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    impl Batch {
+        fn settle(&mut self, cx: &mut Cx<'_, <Self as Venue>::Pending>) {
+            self.settled += 1;
+            if self.settled == 2 {
+                cx.fail_plan(self.plan.as_ref().unwrap(), "batch finished")
+                    .unwrap();
+            }
+        }
+    }
+    fn run(
+        second_status: u16,
+        split: bool,
+        transport: bool,
+        physical: bool,
+    ) -> (Vec<Action>, RequestId) {
+        let mut engine = support::seeded_engine(Batch {
+            physical,
+            ..Batch::default()
+        });
+        engine.start(0.);
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            1.,
+            Event::Command(Command::PlaceOrders {
+                command: 7,
+                orders: vec![],
+            }),
+        );
+        let mut queue =
+            std::collections::VecDeque::from(engine.drain_actions().collect::<Vec<_>>());
+        let mut requests = Vec::new();
+        while let Some(action) = queue.pop_front() {
+            use safe_cex_engine::request_context::{HttpAction, Prepared};
+            match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { preparation, .. } => engine.http_prepared(
+                        2.,
+                        preparation,
+                        Prepared {
+                            id: preparation.attempt().request.0,
+                            expires_at: None,
+                        },
+                    ),
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => {
+                        assert!(matches!(
+                            engine.claim_http(2., permit).unwrap(),
+                            safe_cex_engine::request_context::Claim::Released(_)
+                        ));
+                        requests.push(request.id);
+                    }
+                    _ => panic!("unexpected managed action"),
+                },
+                Action::Sign { attempt, work, .. } => engine.handle(
+                    2.,
+                    Event::Signed {
+                        attempt,
+                        result: Ok(safe_cex_engine::signing::SignResult {
+                            values: vec![b"fixture".to_vec()],
+                            receipt: work.receipt,
+                            headers: vec![],
+                        }),
+                    },
+                ),
+                _ => {}
+            }
+            queue.extend(engine.drain_actions());
+        }
+        assert_eq!(requests.len(), 2, "both writes must already be sent");
+        let first = if transport {
+            engine.handle(
+                6.,
+                Event::HttpFailed {
+                    request: requests[0],
+                    error: "connection lost",
+                },
+            );
+            engine.drain_actions().collect()
+        } else {
+            status_reply(&mut engine, requests[0], 503, split)
+        };
+        assert!(events(&first).is_empty(), "no terminal outcome yet");
+        assert!(!first.iter().any(|a| match a {
+            Action::Http(_)
+            | Action::Sign { .. }
+            | Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. }) => true,
+            Action::ManagedHttp(a) => matches!(
+                **a,
+                safe_cex_engine::request_context::HttpAction::Prepare { .. }
+                    | safe_cex_engine::request_context::HttpAction::Bind { .. }
+            ),
+            _ => false,
+        }));
+        let terminal = status_reply(&mut engine, requests[1], second_status, split);
+        assert_eq!(failure(&terminal).outcome, Some(Outcome::Unknown));
+        assert!(!failure(&terminal).message.contains("pretend"));
+        for &request in &requests {
+            assert!(status_reply(&mut engine, request, 503, split).is_empty());
+        }
+        (terminal, requests[0])
+    }
+    #[test]
+    fn deferred_independent_unknown_emits_after_successful_sibling() {
+        for split in [false, true] {
+            for (transport, physical) in
+                [(false, false), (false, true), (true, false), (true, true)]
+            {
+                let (actions, request) = run(200, split, transport, physical);
+                let observed = events(&actions);
+                assert_eq!(observed.len(), 1);
+                assert!(
+                    observed[0]
+                        .fields
+                        .contains(&("request", request.0.to_string().into()))
+                );
+                assert!(
+                    observed[0]
+                        .fields
+                        .contains(&("status", if transport { 0u32 } else { 503u32 }.into()))
+                );
+                assert_eq!(
+                    failure(&actions).partial.as_ref().unwrap().order_ids,
+                    ["accepted"]
+                );
+            }
+        }
+    }
+    #[test]
+    fn two_independent_unknown_replies_emit_once() {
+        for split in [false, true] {
+            for physical in [false, true] {
+                let (actions, _) = run(503, split, false, physical);
+                assert_eq!(events(&actions).len(), 1, "one event per sealed command");
+            }
+        }
+    }
 }

@@ -2764,7 +2764,12 @@ impl<V: Venue> Engine<V> {
                     },
                 );
                 if recorded.is_ok() {
-                    let unknown_start = self.io.core.actions.len();
+                    if self.io.core.unknown_outcome_telemetry.is_some() {
+                        self.io
+                            .core
+                            .request_contexts
+                            .remember_engine_unknown(&delivery, Some(response.status));
+                    }
                     self.venue
                         .observe_unproven_http_response(now, &pending.value, response);
                     #[cfg(feature = "http-plans")]
@@ -2804,13 +2809,6 @@ impl<V: Venue> Engine<V> {
                         self.venue
                             .discard_unproven_http_command(delivery.context.owner());
                     }
-                    self.emit_engine_unknown(
-                        now,
-                        request,
-                        delivery.context.owner(),
-                        Some(response.status),
-                        unknown_start,
-                    );
                 }
             } else {
                 observe_account_auth(
