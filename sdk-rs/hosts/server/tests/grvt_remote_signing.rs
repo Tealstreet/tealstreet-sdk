@@ -32,19 +32,25 @@ fn init() -> Check<InitPayload> {
 
 struct Accept;
 impl safe_cex_venues::Visit for Accept {
-    type Output = ();
-    fn visit<V: safe_cex_engine::Venue + 'static>(self, _: safe_cex_engine::Engine<V>) {}
+    type Output = bool;
+    fn visit<V: safe_cex_engine::Venue + 'static>(
+        self,
+        engine: safe_cex_engine::Engine<V>,
+    ) -> bool {
+        !engine.account_startup()
+    }
 }
 
-fn construct(options: Value, provider: Option<Provider>) -> Result<(), String> {
-    safe_cex_venues::build_with_signer(
-        "grvt",
-        serde_json::from_value(options).map_err(|error| error.to_string())?,
-        Some(safe_cex_native::production_entropy()),
-        provider,
-        Accept,
-    )
-    .map_err(|error| error.to_string())
+fn construct(options: Value, provider: Option<Provider>) -> Result<bool, String> {
+    let options = serde_json::from_value(options).map_err(|error| error.to_string())?;
+    let entropy = Some(safe_cex_native::production_entropy());
+    let result = match provider {
+        Some(provider) => {
+            safe_cex_venues::build_with_signer("grvt", options, entropy, Some(provider), Accept)
+        }
+        None => safe_cex_venues::build("grvt", options, entropy, Accept),
+    };
+    result.map_err(|error| error.to_string())
 }
 
 #[test]
@@ -148,7 +154,7 @@ fn grvt_missing_or_invalid_private_signer_address_refuses_before_order_dispatch(
 
 #[test]
 fn grvt_public_and_keyless_construction_never_require_wallet_metadata() -> Check {
-    for options in [
+    for (index, options) in [
         json!({}),
         json!({ "key": "grvt-fixture-api" }),
         json!({ "publicDataOnly": true, "grvtSignerAddress": "stale-invalid-address" }),
@@ -156,9 +162,21 @@ fn grvt_public_and_keyless_construction_never_require_wallet_metadata() -> Check
             "publicMode": { "requested": true }, "grvtSignerAddress": "stale-invalid-address" }),
         json!({ "key": "grvt-fixture-api", "publicDataOnly": false,
             "publicMode": { "requested": true }, "grvtSignerAddress": "stale-invalid-address" }),
-    ] {
-        construct(options, None)?;
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        construct(options, None)
+            .map_err(|error| format!("public construction case {index}: {error}"))?;
     }
+    let mut options = json!({
+        "key": "grvt-fixture-api", "secret": format!("{:064x}", 1u8),
+        "grvtSignerAddress": "stale-invalid-address", "publicDataOnly": false,
+        "publicMode": { "requested": true },
+    });
+    assert!(construct(options.clone(), None)?);
+    options["publicMode"]["requested"] = false.into();
+    assert!(!construct(options, None)?);
     Ok(())
 }
 
@@ -174,7 +192,7 @@ fn grvt_explicit_public_ignores_unused_signer_metadata_and_has_no_private_link_w
     assert!(options.get("grvtSignerAddress").is_none());
     assert!(options.get("grvtTradingAccountId").is_none());
     assert!(prepared.remote.is_none());
-    construct(options, None)?;
+    assert!(construct(options, None)?);
     fields["grvtSignerAddress"] = ADDRESS.into();
     fields["grvtTradingAccountId"] = "other-unused-account".into();
     let other: InitPayload = serde_json::from_value(fields)?;
@@ -566,6 +584,14 @@ async fn exercise(mode: &str) -> Check {
         1
     );
     assert_eq!(recording.private_headers.len(), 1);
+    let login = recording
+        .requests
+        .iter()
+        .find(|r| r.url.ends_with("auth/api_key/login"))
+        .ok_or("missing login")?;
+    let login_body: Value =
+        serde_json::from_str(login.body.as_deref().ok_or("missing login body")?)?;
+    assert_eq!(login_body, json!({ "api_key": "grvt-fixture-api" }));
     assert!(
         recording.private_headers[0]
             .iter()
