@@ -66,7 +66,7 @@ it('actual WASM local/device and keyless remote/origin sign every Futures REST e
 });
 
 it('actual WASM WS auth routes challenge hashing through remote custody and binds secondary keys', async () => {
-  const browser = fixture({ secondary_key: 'fixture-read-key', secondary_secret: 'cmVhZC1zZWNyZXQ=' });
+  const browser = fixture({ secondary_key: 'fixture-read-key', secondary_secret: Buffer.from('read-secret').toString('base64') });
   const sign = vi.fn((request: RemoteSignerRequest) => browser.exchange.signWsAuth(request));
   const remoteSigner: RemoteSigner = { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
   const server = fixture({ secret: '', secondary_key: 'fixture-read-key', secondary_secret: '', remoteSigner });
