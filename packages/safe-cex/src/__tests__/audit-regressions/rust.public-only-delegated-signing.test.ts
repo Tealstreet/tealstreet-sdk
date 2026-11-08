@@ -277,8 +277,9 @@ const callbackFields: Array<'remoteSigner' | 'payloadSigner'> = ['remoteSigner',
 const falsyCallbacks = callbackFields.flatMap((field) => [null, false, ''].map((value) => ({ field, value })));
 
 it('covers every disabled-delegation beta venue', () => {
+  expect(venues).toContain('cryptocom');
   expect(disabledDelegation.map(({ label }) => label).sort()).toEqual([
-    'apexomni', 'asterdex-v1', 'asterdex-v3', 'coinbase', 'coinbasespot', 'cryptocom', 'kodiakfi', 'kraken', 'krakenspot',
+    'apexomni', 'asterdex-v1', 'asterdex-v3', 'coinbase', 'coinbasespot', 'kodiakfi', 'kraken', 'krakenspot',
     'mexc', 'mode', 'what', 'woofi',
   ].sort());
 });

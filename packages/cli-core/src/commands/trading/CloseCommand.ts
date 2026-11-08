@@ -61,15 +61,17 @@ export class CloseCommand extends TradingBaseCommand {
     const args = this.getRawArgs(ctx);
     const assignment = this.refuseOrderAssignments(ctx);
     if (assignment) return assignment;
-    const duplicate = this.refuseDuplicateModifiers(ctx, [['long'], ['short']]);
-    if (duplicate) return duplicate;
+    const selector = args[1]?.toLowerCase();
+    const onlyLongs = selector === 'long';
+    const onlyShorts = selector === 'short';
+    if ((onlyLongs || onlyShorts) && args.length === 3 && ['long', 'short'].includes(args[2].toLowerCase())) {
+      if (this.validateSymbols(exchange, [args[2]]).length > 0) this.refuseAmbiguousOrderToken(args[2]);
+      return this.error('Cannot have both long and short closing requests');
+    }
     const global = ['longs', 'shorts', 'allpos', 'all'].includes(args[1]?.toLowerCase());
     const size = this.findSizeToken(args);
     const consumed = size ? [args.indexOf(size)] : [];
-    for (const keyword of global ? [args[1]] : ['long', 'short']) {
-      const index = args.indexOf(keyword);
-      if (index > 0) consumed.push(index);
-    }
+    if (global || onlyLongs || onlyShorts) consumed.push(1);
     const possibleSymbols: string[] = [];
     if (!global) {
       for (let i = 1; i <= 3 && i < args.length; i++) {
@@ -91,13 +93,6 @@ export class CloseCommand extends TradingBaseCommand {
     const head = (args[1] ?? '').toLowerCase();
     if (head === 'longs' || head === 'shorts' || head === 'allpos' || head === 'all') {
       return this.executeGlobalClose(ctx, exchange, args, head);
-    }
-
-    const onlyLongs = this.hasArgValue(args, 'long');
-    const onlyShorts = this.hasArgValue(args, 'short');
-
-    if (onlyLongs && onlyShorts) {
-      return this.error('Cannot have both long and short closing requests');
     }
 
     // Detect a partial-close size token. It can appear as args[1] or
@@ -138,14 +133,7 @@ export class CloseCommand extends TradingBaseCommand {
         let amount: number;
         if (sizeArg) {
           try {
-            amount = this.parseSizeAndConvertIfUsd(
-              exchange,
-              symbol,
-              sizeArg,
-              true,
-              position.side,
-              'position',
-            );
+            amount = this.parseSizeAndConvertIfUsd(exchange, symbol, sizeArg, true, position.side, 'position');
           } catch (e) {
             return this.error((e as Error).message);
           }
@@ -226,7 +214,8 @@ export class CloseCommand extends TradingBaseCommand {
     }
 
     if (targets.length === 0) {
-      const skippedNote = skipped.length > 0 ? ` (skipped whitelisted: ${[...new Set(skipped)].sort().join(', ')})` : '';
+      const skippedNote =
+        skipped.length > 0 ? ` (skipped whitelisted: ${[...new Set(skipped)].sort().join(', ')})` : '';
       this.printInfo(
         ctx,
         `(no ${head === 'allpos' || head === 'all' ? 'open' : head} positions to close)${skippedNote}`,
@@ -234,10 +223,7 @@ export class CloseCommand extends TradingBaseCommand {
       return this.success();
     }
     if (skipped.length > 0) {
-      this.printWarning(
-        ctx,
-        `Skipping whitelisted: ${[...new Set(skipped)].sort().join(', ')}`,
-      );
+      this.printWarning(ctx, `Skipping whitelisted: ${[...new Set(skipped)].sort().join(', ')}`);
     }
 
     let placed = 0;
@@ -275,17 +261,10 @@ export class CloseCommand extends TradingBaseCommand {
       }
     }
 
-    const label =
-      head === 'longs'
-        ? 'long'
-        : head === 'shorts'
-          ? 'short'
-          : 'open';
+    const label = head === 'longs' ? 'long' : head === 'shorts' ? 'short' : 'open';
     this.printSuccess(
       ctx,
-      sizeArg
-        ? `Partial close placed on ${placed} ${label} position(s)`
-        : `Closing ${placed} ${label} position(s)`,
+      sizeArg ? `Partial close placed on ${placed} ${label} position(s)` : `Closing ${placed} ${label} position(s)`,
     );
     return this.success();
   }

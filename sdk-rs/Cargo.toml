@@ -111,6 +111,10 @@ all = { level = "deny", priority = -1 }
 [profile.dev]
 debug = "line-tables-only"
 
+# Native fixtures sign thousands of JWTs; debug curve arithmetic dominates test time.
+[profile.test.package.curve25519-dalek]
+opt-level = 3
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

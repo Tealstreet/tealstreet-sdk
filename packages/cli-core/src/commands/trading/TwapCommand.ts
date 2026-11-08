@@ -5,6 +5,9 @@ import { twapManager } from '@tealstreet/safe-cex/src/webworker/twap/TwapManager
 import { TwapStatus } from '@tealstreet/safe-cex/src/webworker/twap/TwapStatus';
 import { GREEN, RED, YELLOW, CYAN, RESET, DIM, BOLD } from './colors';
 import { formatPrice } from '@tealstreet/utils/src/formatting/formatPrice';
+import type { TwapTaskParams } from '../../types';
+
+type TwapChasePolicy = Pick<TwapTaskParams, 'useChaserOrders' | 'timeoutPct' | 'timeoutAction' | 'failAction'>;
 
 /**
  * Parse duration string to milliseconds
@@ -81,11 +84,22 @@ export class TwapCommand extends TradingBaseCommand {
   async execute(ctx: CommandContext): Promise<CommandResult> {
     const sideIndex = ctx.args._[1]?.toLowerCase() === 'chase' ? 2 : 1;
     if (['buy', 'sell'].includes(ctx.args._[sideIndex]?.toLowerCase())) {
+      this.assertUnambiguousOrderModifiers(
+        ctx,
+        sideIndex + 1,
+        ['into', 'over', 'reduce', 'chaser', 'timeout', 'fail'],
+        { into: 1, over: 1, timeout: 2, fail: 1 },
+      );
       ctx = this.resolveLeadingSymbolSlot(ctx, sideIndex + 1);
     }
     const args = this.getRawArgs(ctx);
     const duplicate = this.refuseDuplicateModifiers(ctx, [
-      ['timeout'], ['fail'], ['into', 'slices'], ['over', 'duration'], ['reduce'], ['chaser'],
+      ['timeout'],
+      ['fail'],
+      ['into', 'slices'],
+      ['over', 'duration'],
+      ['reduce'],
+      ['chaser'],
     ]);
     if (duplicate) return duplicate;
     const assignment = this.refuseOrderAssignments(ctx);
@@ -192,23 +206,12 @@ export class TwapCommand extends TradingBaseCommand {
       args: { ...ctx.args, _: reframed },
     };
 
-    const innerResult = this.handleBuySell(innerCtx, side);
-
-    if (!innerResult.success) return innerResult;
-
-    // Patch the produced taskAction with the chaser policy fields. The
-    // 'chaser' flag is forced on because twap chase always uses
-    // chasers per slice.
-    if (innerResult.taskAction?.type === 'twap' && innerResult.taskAction.params) {
-      const params = innerResult.taskAction.params as { params?: Record<string, unknown> };
-      if (params.params) {
-        params.params.useChaserOrders = true;
-        params.params.timeoutPct = finalTimeoutPct;
-        params.params.timeoutAction = finalTimeoutAction;
-        params.params.failAction = finalFailAction;
-      }
-    }
-    return innerResult;
+    return this.handleBuySell(innerCtx, side, {
+      useChaserOrders: true,
+      timeoutPct: finalTimeoutPct,
+      timeoutAction: finalTimeoutAction,
+      failAction: finalFailAction,
+    });
   }
 
   /**
@@ -321,7 +324,7 @@ export class TwapCommand extends TradingBaseCommand {
   /**
    * Handle twap buy/sell command
    */
-  private handleBuySell(ctx: CommandContext, side: OrderSide): CommandResult {
+  private handleBuySell(ctx: CommandContext, side: OrderSide, chasePolicy?: TwapChasePolicy): CommandResult {
     const exchange = ctx.exchange;
     if (!exchange) {
       return this.error('Not connected to exchange');
@@ -400,9 +403,8 @@ export class TwapCommand extends TradingBaseCommand {
     }
 
     const sizeArg = args[leadingSymbol ? 3 : 2];
-    const symbol = leadingSymbols[0] ?? (symbolIndex > 0
-      ? this.validateSymbols(exchange, [args[symbolIndex]])[0]
-      : ctx.symbol);
+    const symbol =
+      leadingSymbols[0] ?? (symbolIndex > 0 ? this.validateSymbols(exchange, [args[symbolIndex]])[0] : ctx.symbol);
 
     if (!sizeArg || !this.looksLikeSize(sizeArg)) {
       return this.error('Size must be in USD format (e.g., $100). Usage: twap buy $100 duration=1h');
@@ -467,6 +469,7 @@ export class TwapCommand extends TradingBaseCommand {
             ordersExecuted: 0,
             useChaserOrders,
             reduceOnly,
+            ...chasePolicy,
           },
         },
       },
