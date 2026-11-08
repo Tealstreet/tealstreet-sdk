@@ -286,7 +286,7 @@ fn trailing_rejects_missing_last_or_zero_distance() {
     }
 }
 #[test]
-fn ambiguous_write_is_not_retried_and_next_command_is_independent() {
+fn ambiguous_write_is_not_retried_and_queued_command_is_not_sent() {
     let (mut e, _) = ready();
     place(&mut e, vec![limit()]);
     let r = http(&mut e, "sendorder");
@@ -305,16 +305,21 @@ fn ambiguous_write_is_not_retried_and_next_command_is_independent() {
             error: "response lost",
         },
     );
-    let all = e.drain_plain().collect::<Vec<_>>();
-    assert!(
-        all.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
-    );
+    let all = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(all.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error })
+                if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+    ));
+    assert!(all.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, error })
+                if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                    && error.message.contains("Check Open Orders"))
+    ));
     assert_eq!(
         all.iter()
             .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("sendorder")))
             .count(),
-        1
+        0
     );
 }
 #[test]
@@ -1932,6 +1937,321 @@ fn dispatched_write_ambiguity_matrix() {
                 "resend/put-back: {case}"
             );
         }
+    }
+}
+
+fn futures_queued_write_after_failure(
+    first_kind: &str,
+    next_kind: &str,
+    status: u16,
+    body: &str,
+    unknown: bool,
+) {
+    use safe_cex_engine::Outcome;
+    let (mut e, _) = ready();
+    inject(&mut e, "active-edit", OrderType::Limit, None);
+    inject(&mut e, "active-cancel", OrderType::Limit, None);
+    inject(&mut e, "queued-edit", OrderType::Limit, None);
+    let first_command = match first_kind {
+        "sendorder" => Command::PlaceOrders {
+            command: 901,
+            orders: vec![limit()],
+        },
+        "editorder" => Command::AmendOrder {
+            command: 901,
+            id: "active-edit".into(),
+            price: Some(94.),
+            amount: None,
+        },
+        "cancelorder" => Command::CancelOrders {
+            command: 901,
+            ids: vec!["active-cancel".into()],
+        },
+        _ => unreachable!(),
+    };
+    command(&mut e, first_command);
+    let first = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with(first_kind))
+        .expect("first physical write");
+    let next = if next_kind == "place" {
+        Command::PlaceOrders {
+            command: 902,
+            orders: vec![limit()],
+        }
+    } else {
+        Command::AmendOrder {
+            command: 902,
+            id: "queued-edit".into(),
+            price: Some(95.),
+            amount: None,
+        }
+    };
+    command(&mut e, next);
+    let queued = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        !queued.iter().any(|a| matches!(a, Action::Http(r) if
+        r.url.ends_with("sendorder") || r.url.ends_with("editorder"))),
+        "second command must queue"
+    );
+    assert!(
+        !queued.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: 902, .. })
+        )),
+        "queued command was genuinely admitted"
+    );
+    if status == 0 {
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: first.id,
+                error: body,
+            },
+        );
+    } else {
+        reply(&mut e, &first, status, body);
+    }
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: 901,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .expect("original write completes");
+    assert_eq!(
+        error.outcome,
+        Some(if unknown {
+            Outcome::Unknown
+        } else {
+            Outcome::Rejected
+        })
+    );
+    let writes: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("sendorder") || r.url.ends_with("editorder") => {
+                Some(r.url.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    if unknown {
+        if first_kind != "cancelorder" {
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 903,
+                    orders: vec![limit()],
+                },
+            );
+            let blocked = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+            assert!(blocked.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command: 903, error })
+                    if error.outcome == Some(Outcome::NotSent) && error.message.contains("uncertain"))),
+                "the original uncertainty fence must remain held");
+        }
+        assert!(
+            writes.is_empty(),
+            "{first_kind} released queued {next_kind} before reconciliation: {writes:?}"
+        );
+        assert!(actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: 902, error })
+                if error.outcome == Some(Outcome::NotSent) && error.message.contains("Check Open Orders"))));
+        if first_kind != "cancelorder" {
+            let read = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Http(r) if r.url.ends_with("openorders") => Some(r),
+                    _ => None,
+                })
+                .expect("the original uncertainty starts reconciliation");
+            reply(&mut e, read, 200, OPEN);
+            assert!(
+                requests(&mut e)
+                    .iter()
+                    .all(|r| { !r.url.ends_with("sendorder") && !r.url.ends_with("editorder") }),
+                "reconciliation must not replay refused jobs"
+            );
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 908,
+                    orders: vec![limit()],
+                },
+            );
+            http(&mut e, "sendorder");
+        }
+    } else {
+        assert_eq!(writes.len(), 1, "definitive refusals may advance the queue");
+    }
+}
+
+fn futures_unknown_queued_writes(first_kind: &str) {
+    for next_kind in ["place", "amend"] {
+        for (status, body) in [
+            (200, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+            (503, "<html>"),
+            (0, "connection reset"),
+        ] {
+            futures_queued_write_after_failure(first_kind, next_kind, status, body, true);
+        }
+    }
+}
+#[test]
+fn futures_unknown_sendorder_refuses_queued_place_and_edit() {
+    futures_unknown_queued_writes("sendorder");
+}
+#[test]
+fn futures_unknown_editorder_refuses_queued_place_and_edit() {
+    futures_unknown_queued_writes("editorder");
+}
+#[test]
+fn futures_unknown_cancel_refuses_queued_place_and_edit() {
+    futures_unknown_queued_writes("cancelorder");
+}
+#[test]
+fn futures_definitive_refusals_advance_queued_writes() {
+    for first_kind in ["sendorder", "editorder", "cancelorder"] {
+        for next_kind in ["place", "amend"] {
+            futures_queued_write_after_failure(
+                first_kind,
+                next_kind,
+                200,
+                r#"{"result":"error","error":"insufficientFunds"}"#,
+                false,
+            );
+        }
+    }
+}
+
+#[test]
+fn futures_unknown_or_partial_result_keeps_queued_cancels_and_settings() {
+    use safe_cex_engine::Outcome;
+    for partial in [false, true] {
+        let (mut e, _) = ready();
+        inject(&mut e, "queued-edit", OrderType::Limit, None);
+        let orders = if partial {
+            vec![limit(), limit()]
+        } else {
+            vec![limit()]
+        };
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 901,
+                orders,
+            },
+        );
+        let mut first = http(&mut e, "sendorder");
+        for next in [
+            Command::PlaceOrders {
+                command: 902,
+                orders: vec![limit()],
+            },
+            Command::AmendOrder {
+                command: 903,
+                id: "queued-edit".into(),
+                price: Some(95.),
+                amount: None,
+            },
+            Command::CancelOrders {
+                command: 904,
+                ids: vec!["safety-cancel".into()],
+            },
+            Command::SetLeverage {
+                command: 905,
+                symbol: "PF_XBTUSD".into(),
+                leverage: 10.,
+                side: None,
+            },
+            Command::FetchLeverage {
+                command: 906,
+                symbol: "PF_XBTUSD".into(),
+            },
+        ] {
+            command(&mut e, next);
+        }
+        assert!(
+            requests(&mut e).is_empty(),
+            "all later jobs wait for the active write"
+        );
+        if partial {
+            ack(&mut e, &first, "accepted-entry", "placed");
+            first = http(&mut e, "sendorder");
+        }
+        reply(
+            &mut e,
+            &first,
+            200,
+            if partial {
+                r#"{"result":"error","error":"insufficientFunds"}"#
+            } else {
+                r#"{"result":"error","error":"apiLimitExceeded"}"#
+            },
+        );
+        let settled = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let original = settled
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 901,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .expect("original command settles");
+        assert_eq!(original.outcome, Some(Outcome::Unknown));
+        if partial {
+            assert_eq!(
+                original.partial.as_ref().unwrap().order_ids,
+                ["accepted-entry"]
+            );
+        }
+        for refused in [902, 903] {
+            assert!(settled.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command, error })
+                    if *command == refused && error.outcome == Some(Outcome::NotSent))));
+        }
+        let writes: Vec<_> = settled
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) if r.method != Method::Get => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(writes.len(), 1);
+        assert!(writes[0].url.ends_with("cancelorder"));
+        cancel_ack(&mut e, writes[0], "safety-cancel");
+        let after_cancel = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        assert!(
+            after_cancel
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 904, .. })))
+        );
+        let setting = after_cancel
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r)
+                    if r.method == Method::Put && r.url.ends_with("leveragepreferences") =>
+                {
+                    Some(r)
+                }
+                _ => None,
+            })
+            .expect("queued setting survives");
+        reply(&mut e, setting, 200, r#"{"result":"success"}"#);
+        let after_setting = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        for completed in [905, 906] {
+            assert!(after_setting.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandDone { command, .. }) if *command == completed)));
+        }
+        assert!(!after_setting.iter().any(|a| matches!(a, Action::Http(r)
+            if r.url.ends_with("sendorder") || r.url.ends_with("editorder"))));
     }
 }
 
