@@ -1655,3 +1655,64 @@ fn an_unknown_put_back_says_check_open_orders_never_re_place() {
         assert!(posts(&out).is_empty(), "{case}: never resent");
     }
 }
+
+#[test]
+fn rounded_original_quantity_does_not_gate_guarded_amend_or_put_back()
+-> Result<(), Box<dyn std::error::Error>> {
+    // Keep the existing guarded put-back; TS reference/backpack/backpack.exchange.ts:918-925
+    // formats quantities without rechecking rounded bounds.
+    let mut e = resting_stop();
+    e.store_mut().update_markets(|market| {
+        market.precision.amount = 0.1;
+        market.limits.amount.max = 0.95;
+    });
+    let mut original = e.store().order("123").cloned().ok_or("missing original")?;
+    original.amount = 0.95;
+    original.remaining = 0.95;
+    e.store_mut().upsert_order(original);
+    e.handle(
+        2000.,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "123".into(),
+            price: Some(125.),
+            amount: Some(0.4),
+        }),
+    );
+    let cancel = requests(&mut e).pop().ok_or("missing guarded cancel")?;
+    assert_eq!(cancel.method, Method::Delete);
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
+    let replacement = posts(&actions(&mut e)).pop().ok_or("missing replacement")?;
+    let row: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().ok_or("missing body")?)?;
+    assert_eq!(row["triggerQuantity"], "0.4");
+    reply(&mut e, &replacement, 400, REFUSED);
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.method == Method::Get && r.url.contains("/api/v1/orders"))
+        .ok_or("missing proof read")?;
+    reply(&mut e, &read, 200, "[]");
+    let restore = posts(&actions(&mut e)).pop().ok_or("missing put-back")?;
+    let row: serde_json::Value =
+        serde_json::from_str(restore.body.as_deref().ok_or("missing body")?)?;
+    assert_eq!(row["triggerQuantity"], "1.0");
+    assert_eq!(row["triggerPrice"], "130.00");
+    reply(
+        &mut e,
+        &restore,
+        200,
+        r#"{"id":"777","status":"New","orderType":"Market","side":"Ask"}"#,
+    );
+    let out = actions(&mut e);
+    assert_eq!(
+        failure(&out).protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+    assert!(posts(&out).is_empty());
+    Ok(())
+}

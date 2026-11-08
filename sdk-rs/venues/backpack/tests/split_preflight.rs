@@ -1,6 +1,6 @@
 mod support;
 
-use safe_cex_engine::{Action, Command, ErrorKind, Event, HttpRequest, Method, Notice, Outcome};
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, VecDeque};
 use support::managed::*;
@@ -53,71 +53,116 @@ fn submit(engine: &mut Driver, orders: Vec<Value>) -> Result {
     Ok(())
 }
 
-fn refused_before_transport(engine: &mut Driver) -> Result {
-    let mut transport = ScriptedTransport::default();
-    let out = transport.poll(engine);
-    assert_eq!(
-        transport.requests.len(),
-        0,
-        "the entire intent must be validated before the first transport request"
-    );
-    let errors: Vec<_> = out
+fn assert_placement_sequence(engine: &mut Driver, quantities: &[Vec<&str>]) -> Result {
+    let mut expected_ids = vec![];
+    for (step, expected) in quantities.iter().enumerate() {
+        let packets = requests(engine);
+        assert_eq!(packets.len(), 1, "step {step}: exactly one legacy write");
+        let packet = packets.first().ok_or("missing placement")?;
+        assert_eq!(packet.method, Method::Post);
+        let wire: Value = serde_json::from_str(packet.body.as_deref().ok_or("missing body")?)?;
+        let rows = match &wire {
+            Value::Array(rows) => rows.clone(),
+            row => vec![row.clone()],
+        };
+        assert_eq!(rows.len(), expected.len());
+        assert!(
+            packet
+                .url
+                .ends_with(if wire.is_array() { "/orders" } else { "/order" })
+        );
+        let mut acknowledgements = vec![];
+        for (index, (row, quantity)) in rows.iter().zip(expected).enumerate() {
+            let sent = row.get("quantity").or_else(|| row.get("triggerQuantity"));
+            assert_eq!(sent, Some(&json!(quantity)), "step {step} row {index}");
+            let id = format!("placed-{step}-{index}");
+            expected_ids.push(id.clone());
+            acknowledgements.push(json!({
+                "operation":"Ok", "id":id, "clientId":row["clientId"],
+                "symbol":SYMBOL, "side":row["side"], "orderType":row["orderType"]
+            }));
+        }
+        let response = if wire.is_array() {
+            Value::Array(acknowledgements)
+        } else {
+            acknowledgements
+                .pop()
+                .ok_or("missing single acknowledgement")?
+        };
+        reply(engine, packet, 200, &response.to_string());
+    }
+    let out = actions(engine);
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    let result = out
         .iter()
-        .filter_map(|action| match action {
-            Action::Notice(Notice::CommandFailed {
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandDone {
                 command: 901,
-                error,
-            }) => Some(error),
+                result,
+            }) => Some(result),
             _ => None,
         })
-        .collect();
-    assert_eq!(errors.len(), 1);
-    let error = errors.first().ok_or("missing planning failure")?;
-    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
-    assert_eq!(error.outcome, Some(Outcome::NotSent));
-    assert!(error.partial.is_none());
-    transport.poll(engine);
-    assert!(transport.requests.is_empty());
+        .ok_or("missing placement completion")?;
+    assert_eq!(serde_json::from_str::<Vec<String>>(result)?, expected_ids);
     Ok(())
 }
 
 #[test]
-fn rounded_second_pair_row_above_max_zero_writes() -> Result {
-    for orders in [
-        vec![limit(0.4), limit(0.95)],
-        vec![limit(0.4), limit(0.5), limit(0.95)],
-        vec![limit(0.4), limit(0.5), limit(0.6), limit(0.95)],
+fn rounded_pair_quantities_follow_legacy_ts_without_wire_bound_recheck() -> Result {
+    // TS reference/backpack/backpack.exchange.ts:746-779,872-878,1203-1232 rounds after raw bounds.
+    // KNOWN-ISSUE: a rounded quantity may be rejected after earlier pairs were placed.
+    for (amounts, quantities) in [
+        (vec![0.4, 0.95], vec![vec!["0.4", "1.0"]]),
+        (vec![0.4, 0.5, 0.95], vec![vec!["0.4", "0.5"], vec!["1.0"]]),
+        (
+            vec![0.4, 0.5, 0.6, 0.95],
+            vec![vec!["0.4", "0.5"], vec!["0.6", "1.0"]],
+        ),
     ] {
         let mut engine = constrained(0.1, 0.95);
-        submit(&mut engine, orders)?;
-        refused_before_transport(&mut engine)?;
+        submit(&mut engine, amounts.into_iter().map(limit).collect())?;
+        assert_placement_sequence(&mut engine, &quantities)?;
     }
     Ok(())
 }
 
 #[test]
-fn rounded_bracket_quantity_above_max_zero_writes() -> Result {
+fn rounded_bracket_quantity_follows_legacy_ts() -> Result {
+    // TS reference/backpack/backpack.exchange.ts:918-925,980-1047 sends rounded entry/TP/SL.
+    // KNOWN-ISSUE: native bounds can refuse a rounded entry or protective child after earlier writes.
     for kind in ["limit", "market"] {
-        for prefix in [vec![], vec![limit(0.4), limit(0.5)]] {
-            let mut orders = prefix;
+        for prefix in [false, true] {
+            let mut orders = vec![];
+            let mut quantities = vec![];
+            if prefix {
+                orders.extend([limit(0.4), limit(0.5)]);
+                quantities.push(vec!["0.4", "0.5"]);
+            }
             orders.push(json!({"symbol":SYMBOL,"type":kind,"side":"buy","amount":0.95,"price":140,"takeProfit":150,"stopLoss":130}));
+            quantities.push(vec!["1.0"]);
+            if kind == "limit" {
+                quantities.extend([vec!["1.0"], vec!["1.0"]]);
+            }
             let mut engine = constrained(0.1, 0.95);
             submit(&mut engine, orders)?;
-            refused_before_transport(&mut engine)?;
+            assert_placement_sequence(&mut engine, &quantities)?;
         }
     }
     Ok(())
 }
 
 #[test]
-fn rounded_last_row_below_min_zero_writes() -> Result {
+fn rounded_last_row_below_min_follows_legacy_ts() -> Result {
+    // TS reference/backpack/backpack.exchange.ts:746-779,918-925 formats without rounded bounds.
+    // KNOWN-ISSUE: a rounded last row can be below the minimum after the valid pair was placed.
     let mut engine = constrained(0.14, 1.);
     submit(&mut engine, vec![limit(0.4), limit(0.5), limit(0.14)])?;
-    refused_before_transport(&mut engine)
+    assert_placement_sequence(&mut engine, &[vec!["0.4", "0.5"], vec!["0.1"]])
 }
 
 #[test]
-fn rounded_invalid_replacement_never_cancels() -> Result {
+fn rounded_replacement_follows_legacy_cancel_then_place() -> Result {
+    // TS reference/backpack/backpack.exchange.ts:1096-1147 cancels then calls the rounded formatter.
     let (mut engine, _) = ready_orders(&format!("[{ORDER}]"));
     engine.store_mut().update_markets(|market| {
         market.precision.amount = 0.1;
@@ -132,7 +177,12 @@ fn rounded_invalid_replacement_never_cancels() -> Result {
             amount: Some(0.95),
         }),
     );
-    refused_before_transport(&mut engine)
+    let packets = requests(&mut engine);
+    assert_eq!(packets.len(), 1, "legacy cancellation must be released");
+    let cancel = packets.first().ok_or("missing cancellation")?;
+    assert_eq!(cancel.method, Method::Delete);
+    reply(&mut engine, cancel, 200, ORDER);
+    assert_placement_sequence(&mut engine, &[vec!["1.0"]])
 }
 
 #[test]
