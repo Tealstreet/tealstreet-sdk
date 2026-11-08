@@ -1411,6 +1411,7 @@ struct WriteAttempt {
     leg: u64,
     released: bool,
     result: Option<WriteResult>,
+    record_sequence: u64,
     reports: RejectionReports,
     id_overflow: bool,
 }
@@ -1430,6 +1431,8 @@ pub(crate) const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change
 /// Registration order is logical planning order, never callback arrival order.
 pub struct CommandWrites {
     attempts: Vec<WriteAttempt>,
+    // Callback completion order is independent of logical registration order.
+    record_sequence: u64,
     legs: Vec<WriteLeg>,
     capacity: usize,
     sealed: bool,
@@ -1506,6 +1509,7 @@ impl CommandWrites {
         }
         Ok(Self {
             attempts: Vec::new(),
+            record_sequence: 0,
             legs: Vec::new(),
             capacity,
             sealed: false,
@@ -1546,6 +1550,7 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            record_sequence: 0,
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
@@ -1569,6 +1574,7 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            record_sequence: 0,
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
@@ -1896,7 +1902,9 @@ impl CommandWrites {
         let mut evidence = writer(self.evidence)?;
         capture(&mut evidence);
         let (budget, error, overflow) = evidence.finish();
+        self.record_sequence += 1;
         self.attempts[index].result = Some(WriteResult::Failed(error));
+        self.attempts[index].record_sequence = self.record_sequence;
         self.attempts[index].id_overflow = overflow;
         self.evidence = budget;
         Ok(())
@@ -1938,7 +1946,9 @@ impl CommandWrites {
             return Err(Error::State);
         }
         let (budget, result, id_overflow) = self.evidence.result(result);
+        self.record_sequence += 1;
         attempt.result = Some(result);
+        attempt.record_sequence = self.record_sequence;
         attempt.id_overflow = id_overflow;
         attempt.reports = reports;
         self.evidence = budget;
@@ -2167,16 +2177,20 @@ impl CommandWrites {
         let elements = elements.or_else(|| {
             self.attempts
                 .iter()
-                .rev()
-                .find_map(|attempt| match &attempt.result {
+                .filter_map(|attempt| match &attempt.result {
                     Some(
                         WriteResult::Rejected(error)
                         | WriteResult::KnownPartial(error)
                         | WriteResult::PartialUnknown(error)
                         | WriteResult::Failed(error),
-                    ) => error.elements.clone(),
+                    ) => error
+                        .elements
+                        .as_ref()
+                        .map(|elements| (attempt.record_sequence, elements)),
                     _ => None,
                 })
+                .max_by_key(|(sequence, _)| *sequence)
+                .map(|(_, elements)| elements.clone())
         });
         // Choose the terminal physical attempt of the earliest logical leg,
         // preferring legs that reached the venue. Callback order is irrelevant.
