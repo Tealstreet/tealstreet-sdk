@@ -32,6 +32,7 @@ pub(crate) enum Family {
     Kucoin,
     DoubleSha256,
     Hyperliquid,
+    Grvt,
     Lighter,
     Paradex,
 }
@@ -41,6 +42,7 @@ impl Family {
             "kucoin" | "kucoinspot" => Self::Kucoin,
             "bitunix" => Self::DoubleSha256,
             "hyperliquid" | "hyperliquidspot" => Self::Hyperliquid,
+            "grvt" => Self::Grvt,
             "lighter" | "lighter-robinhood" => Self::Lighter,
             "paradex" => Self::Paradex,
             _ => Self::Hmac,
@@ -50,7 +52,7 @@ impl Family {
         match self {
             Self::Hmac | Self::Kucoin => Algorithm::HmacSha256,
             Self::DoubleSha256 => Algorithm::Sha256SecretSuffix,
-            Self::Hyperliquid => Algorithm::Secp256k1Digest,
+            Self::Hyperliquid | Self::Grvt => Algorithm::Secp256k1Digest,
             Self::Lighter => Algorithm::SchnorrDigest,
             Self::Paradex => Algorithm::StarkDigest,
         }
@@ -458,6 +460,7 @@ impl Inner {
         let operations = request.operations;
         let values = match self.family {
             Family::Hyperliquid => self.sign_wallet(&operations).await?,
+            Family::Grvt => self.sign_grvt(&operations).await?,
             Family::Lighter => self.sign_lighter(&operations).await?,
             Family::Paradex => self.sign_stark(&operations).await?,
             Family::DoubleSha256 => self.sign_double_sha256(&operations).await?,
@@ -513,6 +516,36 @@ impl Inner {
                     .device(utf8(&preimage)?, "hyperliquid-l1", |v| prefixed(v, 65))
                     .await?;
                 Ok(vec![sha256(&preimage), bound, signature])
+            }
+            _ => refused(),
+        }
+    }
+
+    // GRVT login presents its API credential; orders bind one statement, address
+    // and signature atomically. The engine verifies the returned signing proof.
+    async fn sign_grvt(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        match operations {
+            [Operation::Present { key }] if *key == self.primary.credential => {
+                Ok(vec![self.primary.public.clone()])
+            }
+            [
+                Operation::Sha256 { payload: statement },
+                Operation::PublicAddress { key: address },
+                Operation::Sign {
+                    algorithm: Algorithm::Secp256k1Digest,
+                    key,
+                    payload,
+                },
+            ] if address == key && self.owns_signing(key) => {
+                let preimage = single_bytes(statement, MAX_PAYLOAD)?;
+                if single_bytes(payload, 32)?.len() != 32 {
+                    return refused();
+                }
+                let joined = self
+                    .device(utf8(preimage)?, "grvt-order", |value| prefixed(value, 85))
+                    .await?;
+                let (address, signature) = joined.split_at(20);
+                Ok(vec![sha256(preimage), address.to_vec(), signature.to_vec()])
             }
             _ => refused(),
         }

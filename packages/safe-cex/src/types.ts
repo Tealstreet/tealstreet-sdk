@@ -1341,6 +1341,7 @@ export interface RemoteSignerRequest {
       | 'apexomni-base64'
       | 'bitunix-double-sha256'
       | 'backpack-ed25519'
+      | 'orderly-ed25519'
       | 'kucoin-batch'
       // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
       // the digest from; `hyperliquid-address` binds the agent address.
