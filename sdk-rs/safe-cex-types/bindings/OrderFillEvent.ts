@@ -14,17 +14,14 @@ export type OrderFillEvent = {
     readonly symbol: string;
     /**
      * Native order identity used by the chaser.
-     * @ts-mutable
      */
     orderId?: string;
     /**
      * Live venue PnL convention; distinct from historical gross realized PnL.
-     * @ts-mutable
      */
     realizedPnl?: number;
     /**
      * Venue-reported execution fee; absent is distinct from zero.
-     * @ts-mutable
      */
     fee?: number;
 };

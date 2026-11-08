@@ -9,17 +9,8 @@ export type ExchangeOptions = {
     readonly secondary_passphrase?: string;
     readonly secondaryProxyUrl?: string;
     readonly auth?: {
-        /**
-         * @ts-mutable
-         */
         userAddress?: string;
-        /**
-         * @ts-mutable
-         */
         signerAddress?: string;
-        /**
-         * @ts-mutable
-         */
         privateKey?: string;
     };
     readonly paradexAddress?: string;
@@ -57,53 +48,17 @@ export type ExchangeOptions = {
         readonly consoleLogging?: boolean;
     };
     readonly extra?: {
-        /**
-         * @ts-mutable
-         */
         tickInterval?: number;
-        /**
-         * @ts-mutable
-         */
         rustCommandTimeoutMs?: number;
-        /**
-         * @ts-mutable
-         */
         recvWindow?: number;
-        /**
-         * @ts-mutable
-         */
         asterdexApiVersion?: "v1" | "v3";
-        /**
-         * @ts-mutable
-         */
         asterBuilderAddress?: string;
-        /**
-         * @ts-mutable
-         */
         asterBuilderFeeRateMaker?: string;
-        /**
-         * @ts-mutable
-         */
         asterBuilderFeeRateTaker?: string;
-        /**
-         * @ts-mutable
-         */
         lighterBuilderFeeMode?: "dynamic" | "static";
-        /**
-         * @ts-mutable
-         */
         lighterIntegratorAccountIndex?: string;
-        /**
-         * @ts-mutable
-         */
         lighterStopSlippagePct?: number;
-        /**
-         * @ts-mutable
-         */
         hyrotraderMode?: "demo" | "production";
-        /**
-         * @ts-mutable
-         */
         kucoinBroker?: {
             readonly partner: string;
             readonly brokerKey: string;
@@ -127,30 +82,12 @@ export type ExchangeOptions = {
     readonly payloadSigner?: PayloadSigner;
     readonly hostedMode?: boolean;
     readonly externalPublicData?: {
-        /**
-         * @ts-mutable
-         */
         type: "websocket";
-        /**
-         * @ts-mutable
-         */
         url: string;
-        /**
-         * @ts-mutable
-         */
         exchangeId: string;
-        /**
-         * @ts-mutable
-         */
         authToken?: string;
     } | {
-        /**
-         * @ts-mutable
-         */
         type: "in-process";
-        /**
-         * @ts-mutable
-         */
         source: PublicDataSource;
     };
     readonly localSigner?: LocalSignerMetadata;

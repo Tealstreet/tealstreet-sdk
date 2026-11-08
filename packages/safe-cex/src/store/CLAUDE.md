@@ -439,3 +439,17 @@ The null regression also runs `DisplayedPositionsPostprocessor`, transfers its
 snapshot to a receiving store, and checks the `displayedPositions` getter used
 by the web's Open Positions selector. Raw `positions` alone does not cover that
 derived display path.
+
+## Book and candle type ownership
+
+`market_data.rs` owns Candle, OrderBook and OrderBookOrders, re-exported through
+the Rust root and TS facade. `BookFrames` and `readCandleFrame` decode the native
+output directly; FrameApplier delegates to them and preserves other model readers.
+Full books retain native totals, deltas reconstruct totals from absolute amounts,
+and malformed or unresolved rows require recovery. Retained book baselines copy
+source arrays so transferred buffers and consumer mutations cannot corrupt them.
+The generator consumes Rust mutability tags, then removes those internal tags
+from public declarations; book levels remain mutable and candle fields readonly.
+The separate Store publisher applies the same filter after choosing field
+modifiers, so mutable leverage fields and update counters retain their shape
+without exposing the internal tags.

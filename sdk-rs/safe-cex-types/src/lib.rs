@@ -31,6 +31,9 @@ pub use order::{
     UpdateOrderOptsUpdateVariant0, UpdateOrderOptsUpdateVariant1,
 };
 
+pub mod market_data;
+pub use market_data::{Candle, OrderBook, OrderBookOrders};
+
 pub mod position;
 pub(crate) use position::serialize_position_fields;
 pub use position::{Position, PositionExtra, PositionOption};
@@ -387,46 +390,6 @@ pub struct AccountGreeks {
     pub vega: f64,
     pub theta: f64,
     pub units: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct Candle {
-    pub timestamp: f64,
-    pub open: f64,
-    pub high: f64,
-    pub low: f64,
-    pub close: f64,
-    pub volume: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub last_side: Option<OrderSide>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct OrderBookOrders {
-    /// @ts-mutable
-    pub price: f64,
-    /// @ts-mutable
-    pub amount: f64,
-    /// @ts-mutable
-    pub total: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct OrderBook {
-    /// @ts-mutable
-    pub bids: Vec<OrderBookOrders>,
-    /// @ts-mutable
-    pub asks: Vec<OrderBookOrders>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -1353,6 +1316,8 @@ mod strict_codecs {
     #[cfg(test)]
     use super::ExchangeName;
     #[cfg(test)]
+    use super::OrderBookOrders;
+    #[cfg(test)]
     use super::OrderFillEvent;
     #[cfg(test)]
     use super::{
@@ -1368,9 +1333,9 @@ mod strict_codecs {
         ExchangeOptionsBybitSiteId, ExchangeOptionsExternalPublicData, ExchangeOptionsExtra,
         ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, Market, MarketLimits,
         MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice, MarketPrecision, ModelField,
-        OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, OrderBookOrders,
-        OrderSide, OrderStatus, PayloadSignerCapability, PositionSide, RemoteSignerCapability,
-        Timeframe, TransportCapability, True, deserialize_present,
+        OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, OrderStatus,
+        PayloadSignerCapability, PositionSide, RemoteSignerCapability, Timeframe,
+        TransportCapability, True, deserialize_present,
     };
     use super::{
         ExchangeOptionsEngine, ExchangeOptionsPolymarket, LocalSignerMetadataCapability,
@@ -1893,59 +1858,6 @@ mod strict_codecs {
     impl<'de> serde::Deserialize<'de> for super::AccountGreeks {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             WireAccountGreeks::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::Candle")]
-    #[serde(rename_all = "camelCase")]
-    struct WireCandle {
-        timestamp: f64,
-        open: f64,
-        high: f64,
-        low: f64,
-        close: f64,
-        volume: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        last_side: Option<OrderSide>,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::Candle {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireCandle::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::OrderBookOrders")]
-    #[serde(rename_all = "camelCase")]
-    struct WireOrderBookOrders {
-        price: f64,
-        amount: f64,
-        total: f64,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::OrderBookOrders {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireOrderBookOrders::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::OrderBook")]
-    #[serde(rename_all = "camelCase")]
-    struct WireOrderBook {
-        bids: Vec<OrderBookOrders>,
-        asks: Vec<OrderBookOrders>,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::OrderBook {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireOrderBook::deserialize(crate::strict_decode::object(deserializer))
         }
     }
 

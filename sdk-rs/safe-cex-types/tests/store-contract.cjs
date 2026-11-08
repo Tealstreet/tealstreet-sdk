@@ -6,7 +6,11 @@ const ts = require('typescript');
 const root = path.resolve(__dirname, '../../..');
 const names = ['StoreData', 'StoreOptions', 'StoreDataLoaded', 'StoreUpdateIds', 'FetchedLeverage', 'DisplayedMargin'];
 
-test('Store contracts are the exact isolated Rust-generated modules', () => {
+test('Store contracts are exact Rust-generated modules without internal mutability directives', () => {
+  for (const name of names) {
+    const source = fs.readFileSync(path.join(root, 'packages/safe-cex/src/generated', `${name}.ts`), 'utf8');
+    assert(!source.includes('@ts-mutable'), `${name}: internal mutability directive leaked`);
+  }
   const { generateStore } = require('../store-generate.cjs');
   assert.equal(generateStore({ check: true }), true);
 });

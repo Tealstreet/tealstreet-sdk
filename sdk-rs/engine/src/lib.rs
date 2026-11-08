@@ -1,6 +1,8 @@
 //! Sans-I/O exchange engine core. See docs/plans/RUST_REWRITE.md.
 pub mod backoff;
 pub mod book;
+pub mod book_output;
+pub mod candle_output;
 pub mod capabilities;
 pub mod classify;
 pub mod command;

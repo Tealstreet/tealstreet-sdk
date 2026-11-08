@@ -8,51 +8,97 @@ const runtimeBoundaries = ['RemoteSigner', 'PayloadSigner', 'TransportProvider',
 
 function stringLiterals(type) {
   const types = ts.isUnionTypeNode(type) ? type.types : [type];
-  return types.every(t => ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal))
-    ? types.map(t => t.literal.text) : undefined;
+  return types.every((t) => ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal))
+    ? types.map((t) => t.literal.text)
+    : undefined;
+}
+
+function stripMutableDirectives(source) {
+  const ast = ts.createSourceFile('public.ts', source, ts.ScriptTarget.Latest, true);
+  const edits = [];
+  function visit(node) {
+    for (const doc of node.jsDoc || []) {
+      if (!doc.tags?.some((tag) => tag.tagName.text === 'ts-mutable')) continue;
+      const original = source.slice(doc.pos, doc.end);
+      const cleaned = original
+        .split('\n')
+        .filter((line) => !/^\s*\*\s*@ts-mutable\s*$/.test(line))
+        .join('\n')
+        .replace(/@ts-mutable\b/g, '');
+      if (!cleaned.slice(3, -2).replace(/\*/g, '').trim()) {
+        const start = source.lastIndexOf('\n', doc.pos - 1) + 1;
+        const wholeLine = !source.slice(start, doc.pos).trim();
+        edits.push([wholeLine ? start : doc.pos, doc.end + (wholeLine && source[doc.end] === '\n' ? 1 : 0), '']);
+      } else edits.push([doc.pos, doc.end, cleaned]);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(ast);
+  for (const [start, end, replacement] of edits.sort((a, b) => b[0] - a[0]))
+    source = source.slice(0, start) + replacement + source.slice(end);
+  return source;
 }
 
 function transform(source, metadata, filename, unions = {}) {
   const parsed = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
   assert.equal(parsed.parseDiagnostics.length, 0, `${filename}: invalid raw TypeScript`);
   const enumNames = [];
-  const transformed = ts.transform(parsed, [context => {
-    const visit = node => {
-      if (ts.isTypeAliasDeclaration(node)) {
-        const values = stringLiterals(node.type);
-        if (values) {
-          const name = node.name.text;
-          const members = metadata[name];
-          if (!members) {
-            assert(unions[name], `${name}: missing Rust enum metadata or literal-alias intent`);
-            assert.deepEqual(values, unions[name].map(m => m.value), `${name}: raw alias literal drift`);
-            return node;
+  const transformed = ts.transform(parsed, [
+    (context) => {
+      const visit = (node) => {
+        if (ts.isTypeAliasDeclaration(node)) {
+          const values = stringLiterals(node.type);
+          if (values) {
+            const name = node.name.text;
+            const members = metadata[name];
+            if (!members) {
+              assert(unions[name], `${name}: missing Rust enum metadata or literal-alias intent`);
+              assert.deepEqual(
+                values,
+                unions[name].map((m) => m.value),
+                `${name}: raw alias literal drift`,
+              );
+              return node;
+            }
+            assert.equal(new Set(members.map((m) => m.name)).size, members.length, `${name}: duplicate member name`);
+            assert.equal(new Set(members.map((m) => m.value)).size, members.length, `${name}: duplicate literal value`);
+            assert.deepEqual(
+              values,
+              members.map((m) => m.value),
+              `${name}: raw literal drift`,
+            );
+            enumNames.push(name);
+            const declaration = ts.factory.createEnumDeclaration(
+              node.modifiers,
+              node.name,
+              members.map((m) => ts.factory.createEnumMember(m.name, ts.factory.createStringLiteral(m.value))),
+            );
+            return ts.setTextRange(ts.setOriginalNode(declaration, node), node);
           }
-          assert.equal(new Set(members.map(m => m.name)).size, members.length, `${name}: duplicate member name`);
-          assert.equal(new Set(members.map(m => m.value)).size, members.length, `${name}: duplicate literal value`);
-          assert.deepEqual(values, members.map(m => m.value), `${name}: raw literal drift`);
-          enumNames.push(name);
-          const declaration = ts.factory.createEnumDeclaration(node.modifiers, node.name,
-            members.map(m => ts.factory.createEnumMember(m.name, ts.factory.createStringLiteral(m.value))));
-          return ts.setTextRange(ts.setOriginalNode(declaration, node), node);
+          assert(!metadata[node.name.text], `${node.name.text}: expected raw string union`);
         }
-        assert(!metadata[node.name.text], `${node.name.text}: expected raw string union`);
-      }
-      if (ts.isPropertySignature(node)) {
-        // Rust field documentation owns mutability; the checker compares the oracle structurally.
-        const mutable = node.jsDoc?.some(doc => doc.tags?.some(tag => tag.tagName.text === "ts-mutable"));
-        const modifiers = node.modifiers?.filter(m => m.kind !== ts.SyntaxKind.ReadonlyKeyword) || [];
-        return ts.factory.updatePropertySignature(node,
-          mutable ? modifiers : [...modifiers, ts.factory.createModifier(ts.SyntaxKind.ReadonlyKeyword)],
-          node.name, node.questionToken, ts.visitNode(node.type, visit));
-      }
-      return ts.visitEachChild(node, visit, context);
-    };
-    return root => ts.visitNode(root, visit);
-  }]);
+        if (ts.isPropertySignature(node)) {
+          // Rust field documentation owns mutability; the checker compares the oracle structurally.
+          const mutable = node.jsDoc?.some((doc) => doc.tags?.some((tag) => tag.tagName.text === 'ts-mutable'));
+          const modifiers = node.modifiers?.filter((m) => m.kind !== ts.SyntaxKind.ReadonlyKeyword) || [];
+          return ts.factory.updatePropertySignature(
+            node,
+            mutable ? modifiers : [...modifiers, ts.factory.createModifier(ts.SyntaxKind.ReadonlyKeyword)],
+            node.name,
+            node.questionToken,
+            ts.visitNode(node.type, visit),
+          );
+        }
+        return ts.visitEachChild(node, visit, context);
+      };
+      return (root) => ts.visitNode(root, visit);
+    },
+  ]);
   try {
     return {
-      source: ts.createPrinter({ newLine: ts.NewLineKind.LineFeed }).printFile(transformed.transformed[0]),
+      source: stripMutableDirectives(
+        ts.createPrinter({ newLine: ts.NewLineKind.LineFeed }).printFile(transformed.transformed[0]),
+      ),
       enumNames,
     };
   } finally {
@@ -119,12 +165,22 @@ function publishExecution() {
   }
 }
 
-module.exports = { transform, stringLiterals };
+function publishMarketData() {
+  for (const name of ['Candle', 'OrderBook', 'OrderBookOrders']) {
+    const source = fs
+      .readFileSync(path.join(__dirname, 'bindings', `${name}.ts`), 'utf8')
+      .replace('from "./OrderSide"', 'from "../types"');
+    fs.writeFileSync(path.resolve(__dirname, '../../packages/safe-cex/src/generated', `${name}.ts`), source);
+  }
+}
+
+module.exports = { transform, stringLiterals, stripMutableDirectives };
 
 if (require.main === module) {
   generate(path.join(__dirname, 'bindings'));
   publishModels();
   publishExecution();
+  publishMarketData();
   require('./generate-balance.cjs').generate();
   const { renderOptions } = require('./tests/options-render.cjs');
   for (const name of ['ExchangeOptions', 'ExchangeAccount', 'ExchangeAccountConfig']) {

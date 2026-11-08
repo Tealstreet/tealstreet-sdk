@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { CallableMethodsInWorker, EngineSnapshot } from '../../exchanges/base';
 import type { OrderFillEvent } from '../../types';
 
@@ -16,6 +11,11 @@ import { DefaultStore } from '../../store/store.base';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { CallMethodHandler } from '../../webworker/handlers/CallMethodHandler';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const align8 = (value: number) => Math.ceil(value / 8) * 8;
 type FixtureOptions = {
@@ -140,12 +140,18 @@ describe('Rust frame recovery callers', () => {
     const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, new DefaultStore());
     adoptEngineCapabilities(exchange, { isolatedBookSubscriptions: true });
     const observed: number[] = [];
-    exchange.listenOrderBook('BTCUSDT', (book) => { book.bids[0].price = 999; });
-    exchange.listenOrderBook('BTCUSDT', (book) => { observed.push(book.bids[0].price); });
+    exchange.listenOrderBook('BTCUSDT', (book) => {
+      book.bids[0].price = 999;
+    });
+    exchange.listenOrderBook('BTCUSDT', (book) => {
+      observed.push(book.bids[0].price);
+    });
     try {
       receive(exchange, fixture());
       expect(observed).toEqual([100]);
-    } finally { exchange.dispose(); }
+    } finally {
+      exchange.dispose();
+    }
   });
 
   beforeEach(() => {
@@ -485,7 +491,14 @@ describe('Rust frame recovery callers', () => {
       bookListeners: Map<string, Map<number, () => void>>;
       feedBookListeners: Set<() => void>;
     };
-    internal.bookListeners.set('BTCUSDT', new Map([[1, provider], [2, laterProvider], [3, ordinary]]));
+    internal.bookListeners.set(
+      'BTCUSDT',
+      new Map([
+        [1, provider],
+        [2, laterProvider],
+        [3, ordinary],
+      ]),
+    );
     internal.feedBookListeners.add(provider);
     internal.feedBookListeners.add(laterProvider);
     const fills: OrderFillEvent[] = [];
@@ -654,6 +667,7 @@ describe('Rust frame recovery callers', () => {
     receive(worker, new ArrayBuffer(0));
     receive(worker, new ArrayBuffer(0));
     expect(snapshot).toHaveBeenCalledTimes(2);
+    const recoveryClock = vi.spyOn(performance, 'now').mockReturnValue(1000);
     const main = new BaseExchange('binance', { key: '', secret: '' }, new DefaultStore());
     const rpc = vi
       .spyOn(main, 'callMethodInWorker')
@@ -661,6 +675,7 @@ describe('Rust frame recovery callers', () => {
       .mockResolvedValue(bundle(fixture({ fills: 0 })) as never);
     main.applyWorkerFrame(new ArrayBuffer(0));
     await settle();
+    recoveryClock.mockReturnValue(1500);
     main.applyWorkerFrame(new ArrayBuffer(0));
     await settle();
     expect(rpc).toHaveBeenCalledTimes(2);
@@ -685,27 +700,31 @@ describe('Rust frame recovery callers', () => {
     exchange.dispose();
   });
 
-  it.each([true, false])('flushes pending authoritative SETTINGS before local recovery (settings present: %s)', (settings) => {
-    const store = new DefaultStore();
-    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
-    receive(exchange, fixture({ fills: 0 }));
-    (exchange as unknown as { applier: FrameApplier }).applier.applyLeverage('DELISTED', {
-      buyLeverage: 9, sellLeverage: 9,
-    });
-    const pending = fixture({ fills: 0, leverage: 12, settings });
-    const flush = vi.fn(() => receive(exchange, pending));
-    const snapshot = vi.fn(() => pending);
-    (exchange as unknown as { host: unknown }).host = { flush, snapshot, dispose: vi.fn() };
-    receive(exchange, new ArrayBuffer(0));
-    expect(flush).toHaveBeenCalledTimes(1);
-    expect(snapshot).toHaveBeenCalledTimes(1);
-    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(snapshot.mock.invocationCallOrder[0]);
-    expect(store.fetchedLeverage.DELISTED).toBeUndefined();
-    if (settings) {
-      expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 12, sellLeverage: 12 });
-    } else expect(store.fetchedLeverage).toEqual({});
-    exchange.dispose();
-  });
+  it.each([true, false])(
+    'flushes pending authoritative SETTINGS before local recovery (settings present: %s)',
+    (settings) => {
+      const store = new DefaultStore();
+      const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
+      receive(exchange, fixture({ fills: 0 }));
+      (exchange as unknown as { applier: FrameApplier }).applier.applyLeverage('DELISTED', {
+        buyLeverage: 9,
+        sellLeverage: 9,
+      });
+      const pending = fixture({ fills: 0, leverage: 12, settings });
+      const flush = vi.fn(() => receive(exchange, pending));
+      const snapshot = vi.fn(() => pending);
+      (exchange as unknown as { host: unknown }).host = { flush, snapshot, dispose: vi.fn() };
+      receive(exchange, new ArrayBuffer(0));
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(snapshot).toHaveBeenCalledTimes(1);
+      expect(flush.mock.invocationCallOrder[0]).toBeLessThan(snapshot.mock.invocationCallOrder[0]);
+      expect(store.fetchedLeverage.DELISTED).toBeUndefined();
+      if (settings) {
+        expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 12, sellLeverage: 12 });
+      } else expect(store.fetchedLeverage).toEqual({});
+      exchange.dispose();
+    },
+  );
 
   it('restores forwarded query-only leverage from the RPC bundle when engine SETTINGS is empty', async () => {
     const workerStore = new DefaultStore();
@@ -815,7 +834,11 @@ describe('Rust frame recovery callers', () => {
 
   it('publishes KuCoin Spot leverage acknowledgements from engine SETTINGS and keeps them authoritative', async () => {
     const store = new DefaultStore();
-    const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret', passphrase: 'fixture-passphrase' }, store);
+    const exchange = new RustEngineExchange(
+      'kucoinspot',
+      { key: 'key', secret: 'secret', passphrase: 'fixture-passphrase' },
+      store,
+    );
     receive(exchange, fixture({ fills: 0 }));
     const command = vi.fn().mockResolvedValue(undefined);
     (exchange as unknown as { command: unknown }).command = command;

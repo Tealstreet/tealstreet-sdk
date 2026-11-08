@@ -3633,10 +3633,11 @@ export class RustEngineExchange extends BaseExchange {
         ? [...listeners].find(([, listener]) => listener === callback)?.[0]
         : undefined) ?? ++this.nextBookListenerId;
     listeners.set(listenerId, callback);
+    const callbacks = listeners;
     if (first) this.bookDemand(symbol, true);
     return () => {
-      if (!listeners!.delete(listenerId)) return;
-      if (listeners!.size === 0 && this.bookListeners.get(symbol) === listeners) {
+      if (!callbacks.delete(listenerId)) return;
+      if (callbacks.size === 0 && this.bookListeners.get(symbol) === callbacks) {
         this.bookListeners.delete(symbol);
         this.bookDemand(symbol, false);
       }
@@ -3670,10 +3671,11 @@ export class RustEngineExchange extends BaseExchange {
       this.candleListeners.set(key, listeners);
     }
     listeners.add(callback);
+    const callbacks = listeners;
     if (first) this.candleDemand(opts.symbol, interval, true);
     return () => {
-      listeners!.delete(callback);
-      if (listeners!.size === 0 && this.candleListeners.get(key) === listeners) {
+      callbacks.delete(callback);
+      if (callbacks.size === 0 && this.candleListeners.get(key) === callbacks) {
         this.candleListeners.delete(key);
         this.candleDemand(opts.symbol, interval, false);
       }

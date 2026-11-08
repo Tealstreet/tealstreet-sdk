@@ -1,8 +1,12 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import type { Candle, FetchedLeverage, OrderBook, OrderFillEvent, Writable } from '../types';
+import type { FetchedLeverage, OrderFillEvent, Writable } from '../types';
+import type { FrameBook } from './bookFrames';
+import type { FrameCandle } from './candleFrames';
 import type { Store, StoreUpdate } from './store.interface';
 
 import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
+import { BookFrames } from './bookFrames';
+import { readCandleFrame } from './candleFrames';
 import { readFillFrame } from './fillFrames';
 import { readBalanceFrame } from './balanceFrames';
 import { readMarketFrame } from './marketFrames';
@@ -11,12 +15,18 @@ import { readPositionFrame } from './positionFrames';
 import { readStoreStatus, readStoreSettings } from './storeFrames';
 import { readTickerFrame, readTickerDeltaFrame, readTickerObservationFrame } from './tickerFrames';
 
-export type FrameBook = { symbol: string; orderbook: OrderBook };
-type BookLevels = Map<number, number> | Float64Array;
-type BookState = { id: string; bids: BookLevels; asks: BookLevels };
-export type FrameCandle = { symbol: string; interval: string; candle: Candle };
+export type { FrameBook } from './bookFrames';
+export type { FrameCandle } from './candleFrames';
 
-export class FrameApplyError extends Error {}
+export class FrameApplyError extends Error {
+  constructor(
+    message: string,
+    readonly bookRejected = false,
+    readonly otherRejected = !bookRejected,
+  ) {
+    super(message);
+  }
+}
 
 /**
  * Applies the Rust engine's flush frames to a `DefaultStore`, so every reader
@@ -27,7 +37,8 @@ export class FrameApplyError extends Error {}
 export class FrameApplier {
   private marketSymbols: string[] = [];
   private marketIds: string[] = [];
-  private bookStates = new Map<string, BookState>();
+  private readonly bookFrames = new BookFrames();
+  private readonly bookErrors = new WeakMap<Frame, unknown>();
   private readonly frameBooks = new WeakMap<Frame, FrameBook[]>();
   private readonly frameMarkets = new WeakMap<Frame, { symbols: string[]; ids: string[] }>();
   private readonly invalidMarketFrames = new WeakSet<Frame>();
@@ -55,6 +66,7 @@ export class FrameApplier {
     const update: Writable<StoreUpdate> = {};
 
     const errors: unknown[] = [];
+    let bookRejected = false;
     const attempt = (read: () => void, section = 0) => {
       try {
         read();
@@ -157,13 +169,15 @@ export class FrameApplier {
       try {
         this.ingestBooks(frame, symbols, ids);
       } catch (error) {
+        bookRejected = true;
         // A rejected batch may discard valid deltas too; require fresh baselines.
-        this.bookStates.clear();
+        this.bookFrames.clear();
+        this.bookErrors.set(frame, error);
         this.frameBooks.set(frame, []);
         errors.push(error);
       }
     } else if (marketsFailed) this.frameBooks.set(frame, []);
-    else this.bookStates.clear();
+    else this.bookFrames.clear();
 
     this.marketSymbols = symbols;
     this.marketIds = ids;
@@ -191,13 +205,14 @@ export class FrameApplier {
         errors.push(error);
       }
     }
-    if (errors.length) throw new FrameApplyError(errors.map(String).join('; '));
+    if (errors.length)
+      throw new FrameApplyError(errors.map(String).join('; '), bookRejected, errors.length > (bookRejected ? 1 : 0));
   }
 
   invalidateMarketIdentity(): void {
     this.appliedSections &= ~(LOADED_FLAG.MARKETS | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS | LOADED_FLAG.TICKERS);
     this.marketsNeedSnapshot = true;
-    this.bookStates.clear();
+    this.bookFrames.clear();
   }
 
   applyLeverage(symbol: string, leverage: FetchedLeverage): void {
@@ -218,7 +233,12 @@ export class FrameApplier {
     return this.marketSymbols[market] ?? fallback ?? '';
   }
 
+  marketSymbolsFor(frame: Frame): readonly string[] {
+    return this.frameMarkets.get(frame)?.symbols ?? this.marketSymbols;
+  }
+
   books(frame: Frame): FrameBook[] {
+    if (this.bookErrors.has(frame)) throw this.bookErrors.get(frame);
     const captured = this.frameMarkets.get(frame);
     const markets = captured ? undefined : frame.markets();
     return this.ingestBooks(
@@ -230,119 +250,12 @@ export class FrameApplier {
   }
 
   private ingestBooks(frame: Frame, symbols: string[], ids: string[]): FrameBook[] {
-    const cached = this.frameBooks.get(frame);
-    if (cached) return cached;
-    const fullBooks = [...(frame.books?.() ?? [])];
-    const deltaBooks = [...(frame.bookDeltas?.() ?? [])];
-    if (!fullBooks.length && !deltaBooks.length && symbols === this.marketSymbols) {
-      const empty: FrameBook[] = [];
-      this.frameBooks.set(frame, empty);
-      return empty;
-    }
-    // Stage every change: one invalid delta must not partially advance a baseline.
-    const states = new Map(this.bookStates);
-    if (symbols !== this.marketSymbols) {
-      const identities = new Map(symbols.map((symbol, i) => [symbol, ids[i]]));
-      for (const [symbol, state] of states) if (identities.get(symbol) !== state.id) states.delete(symbol);
-    }
-    const changed = new Set<string>();
-    const identity = (market: number) => {
-      const symbol = symbols[market];
-      const id = ids[market];
-      if (!symbol || id === undefined) throw new Error('Order book snapshot required: unknown market');
-      return { symbol, id };
-    };
-    const applyLevels = (levels: Map<number, number>, rows: Float64Array, width: number) => {
-      for (let i = 0; i < rows.length; i += width) {
-        const price = rows[i];
-        const amount = rows[i + 1];
-        if (!Number.isFinite(price) || !Number.isFinite(amount) || amount < 0) {
-          throw new Error('Order book snapshot required: invalid level');
-        }
-        if (amount === 0) levels.delete(price);
-        else levels.set(price, amount);
-      }
-    };
-    for (const book of fullBooks) {
-      const { symbol, id } = identity(book.market);
-      // A worker can transfer the source frame after reading it. Keep compact
-      // numeric baselines, without allocating price maps or sorting full books.
-      states.set(symbol, { id, bids: book.bids.slice(), asks: book.asks.slice() });
-      changed.add(symbol);
-    }
-    const levelMap = (levels: BookLevels) => {
-      if (levels instanceof Map) return new Map(levels);
-      const result = new Map<number, number>();
-      applyLevels(result, levels, 3);
-      return result;
-    };
-    for (const book of deltaBooks) {
-      const { symbol, id } = identity(book.market);
-      const previous = states.get(symbol);
-      if (!previous || previous.id !== id) throw new Error(`Order book snapshot required for ${symbol}`);
-      const state = { id, bids: levelMap(previous.bids), asks: levelMap(previous.asks) };
-      applyLevels(state.bids, book.bids, 2);
-      applyLevels(state.asks, book.asks, 2);
-      states.set(symbol, state);
-      changed.add(symbol);
-    }
-    const side = (levels: BookLevels, descending: boolean): OrderBook['bids'] => {
-      let total = 0;
-      if (levels instanceof Float64Array) {
-        const rows: OrderBook['bids'] = [];
-        let previous = descending ? Infinity : -Infinity;
-        for (let i = 0; i < levels.length; i += 3) {
-          const price = levels[i];
-          const amount = levels[i + 1];
-          if (!Number.isFinite(price) || !Number.isFinite(amount) || amount < 0) {
-            throw new Error('Order book snapshot required: invalid level');
-          }
-          if (descending ? price >= previous : price <= previous) return side(levelMap(levels), descending);
-          previous = price;
-          if (amount === 0) continue;
-          total += amount;
-          if (!Number.isFinite(total)) throw new Error('Order book snapshot required: invalid total');
-          rows.push({ price, amount, total });
-        }
-        return rows;
-      }
-      return [...levels]
-        .sort(([a], [b]) => (descending ? b - a : a - b))
-        .map(([price, amount]) => {
-          total += amount;
-          if (!Number.isFinite(total)) throw new Error('Order book snapshot required: invalid total');
-          return { price, amount, total };
-        });
-    };
-    const books = [...changed].map((symbol) => {
-      const state = states.get(symbol)!;
-      return { symbol, orderbook: { bids: side(state.bids, true), asks: side(state.asks, false) } };
-    });
-    this.bookStates = states;
-    this.frameBooks.set(frame, books);
-    return books;
+    return this.frameBooks.get(frame) ?? this.bookFrames.read(frame, symbols, ids);
   }
 
   candles(frame: Frame): FrameCandle[] {
     if (this.invalidMarketFrames.has(frame)) throw new FrameApplyError('Candle identity requires a market snapshot');
-    const rows = frame.candles();
-    const candles: FrameCandle[] = [];
-    for (let i = 0; i < (rows?.count ?? 0); i++) {
-      const at = i * 6;
-      candles.push({
-        symbol: this.symbol(rows!.market[i]),
-        interval: rows!.interval(i),
-        candle: {
-          timestamp: rows!.rows[at],
-          open: rows!.rows[at + 1],
-          high: rows!.rows[at + 2],
-          low: rows!.rows[at + 3],
-          close: rows!.rows[at + 4],
-          volume: rows!.rows[at + 5],
-        },
-      });
-    }
-    return candles;
+    return readCandleFrame(frame, this.frameMarkets.get(frame)?.symbols ?? this.marketSymbols);
   }
 
   fills(frame: Frame): OrderFillEvent[] {

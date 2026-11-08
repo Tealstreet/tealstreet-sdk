@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
+const { stripMutableDirectives } = require('./generate.cjs');
 const names = ['StoreOptions', 'StoreDataLoaded', 'StoreUpdateIds', 'FetchedLeverage', 'DisplayedMargin', 'StoreData'];
 
 function generateStore({ check = false } = {}) {
@@ -69,6 +70,7 @@ function generateStore({ check = false } = {}) {
       const initial = JSON.parse(fs.readFileSync(path.join(__dirname, 'bindings/store/initial.json'), 'utf8'));
       output += `\nexport const initialStoreData: StoreData = ${JSON.stringify(initial, null, 2)};\n`;
     }
+    output = stripMutableDirectives(output);
     const target = path.join(destination, filename);
     if (check) assert.equal(fs.readFileSync(target, 'utf8'), output, `regenerate ${name} from Rust`);
     else {

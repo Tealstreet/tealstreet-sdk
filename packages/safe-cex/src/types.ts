@@ -21,6 +21,10 @@ export type { FetchedLeverage } from './generated/FetchedLeverage';
 export type { DisplayedMargin } from './generated/DisplayedMargin';
 
 import type { ExchangeErrorKind } from './commandOutcome';
+import type { Candle } from './generated/Candle';
+import type { OrderBook } from './generated/OrderBook';
+export type { Candle, OrderBook };
+export type { OrderBookOrders } from './generated/OrderBookOrders';
 import type { Market } from './generated/Market';
 import type { OptionRight } from './generated/OptionRight';
 import type { OptionTerms } from './generated/OptionTerms';
@@ -242,15 +246,6 @@ export const timeframeToSeconds: { [key in Timeframe | SecondsTimeframe | Extend
   '1M': 2592000, // 30 days
 };
 
-export type Candle = {
-  readonly timestamp: number;
-  readonly open: number;
-  readonly high: number;
-  readonly low: number;
-  readonly close: number;
-  readonly volume: number;
-  readonly lastSide?: OrderSide;
-};
 
 export type OHLCVOptions = {
   readonly symbol: string;
@@ -284,16 +279,7 @@ export type OHLCVSOptions = {
  */
 export { LogSeverity } from '@tealstreet/logging/src/LogSeverity';
 
-export type OrderBookOrders = {
-  price: number;
-  amount: number;
-  total: number;
-};
 
-export type OrderBook = {
-  bids: OrderBookOrders[];
-  asks: OrderBookOrders[];
-};
 
 export type ActiveChaser = {
   id: string;

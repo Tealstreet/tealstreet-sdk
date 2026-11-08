@@ -7760,9 +7760,9 @@ impl<V: Venue> Engine<V> {
             if let Some(market) = self.store.market_index(symbol) {
                 // Recovering consumers may have missed the original invalidation frame.
                 if self.book(symbol).is_some() {
-                    book.write(market, &mut w);
+                    crate::book_output::write(book, market, &mut w);
                 } else {
-                    Book::default().write(market, &mut w);
+                    crate::book_output::write(&Book::default(), market, &mut w);
                 }
             }
         }
@@ -7886,11 +7886,11 @@ impl<V: Venue> Engine<V> {
                                 && &baseline.id == id
                                 && baseline.book.reset_generation() == book.reset_generation() =>
                         {
-                            book.write_delta(&baseline.book, market, &mut w);
+                            crate::book_output::write_delta(book, &baseline.book, market, &mut w);
                             baseline.book.clone_from(book);
                         }
                         baseline => {
-                            book.write(market, &mut w);
+                            crate::book_output::write(book, market, &mut w);
                             if let Some(baseline) = baseline {
                                 baseline.market = market;
                                 baseline.id.clone_from(id);
@@ -7909,10 +7909,10 @@ impl<V: Venue> Engine<V> {
                     }
                     continue;
                 }
-                book.write(market, &mut w);
+                crate::book_output::write(book, market, &mut w);
             } else {
                 // A lost sequence makes the old consumer book unusable immediately.
-                Book::default().write(market, &mut w);
+                crate::book_output::write(&Book::default(), market, &mut w);
                 #[cfg(feature = "book-deltas")]
                 self.book_baselines.remove(symbol);
             }
@@ -7926,7 +7926,7 @@ impl<V: Venue> Engine<V> {
                 Some((self.store.market_index(symbol)?, interval.as_str(), *candle))
             })
             .collect();
-        w.candles(&candles);
+        crate::candle_output::write(&mut w, &candles);
         let mut fills = std::mem::take(&mut self.io.core.fills);
         crate::fill_output::write_fills(&mut w, &fills, |symbol| self.store.market_index(symbol));
         let empty = w.is_empty();
