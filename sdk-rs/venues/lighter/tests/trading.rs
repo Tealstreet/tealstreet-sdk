@@ -1721,3 +1721,125 @@ fn parity_same_symbol_limit_batch_validates_the_last_row_before_transport() {
         ],
     );
 }
+
+fn after_failure_next(e: &mut Engine<Lighter>, request: &HttpRequest) -> HttpRequest {
+    ack(e, request);
+    let timer = timer(e);
+    e.handle(NOW + 100., Event::TimerFired { timer });
+    http_at(e, NOW + 100., "sendTx")
+}
+
+fn after_failure_stops(e: &mut Engine<Lighter>, request: &HttpRequest) {
+    reply_at(
+        e,
+        NOW + 100.,
+        request,
+        400,
+        r#"{"code":21101,"message":"fixture refusal"}"#,
+    );
+    let mut actions = safe_cex_engine::test_support::prepared_actions(e, NOW + 100.);
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms <= NOW + 1000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in timers {
+        e.handle(at, Event::TimerFired { timer });
+        actions.extend(safe_cex_engine::test_support::prepared_actions(e, at));
+    }
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx"))),
+        "{actions:?}"
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))),
+        "{actions:?}"
+    );
+}
+
+#[test]
+fn after_failure_market_lot_refusal_stops_later_exempt_lots() {
+    // TS lighter.exchange.ts:2433-2442,2627-2655 exempts minima but throws on a lot failure.
+    let mut e = parity_engine_with_limits(4., 5., 1000.);
+    let first = begin(&mut e, vec![parity_order(OrderType::Market, 8.)]);
+    assert_eq!(wire(&first)["BaseAmount"], 3);
+    let second = after_failure_next(&mut e, &first);
+    assert_eq!(wire(&second)["BaseAmount"], 3);
+    after_failure_stops(&mut e, &second);
+}
+
+#[test]
+fn after_failure_allocation_refusal_stops_the_legacy_oversized_tail() {
+    // TS lighter.exchange.ts:2483-2499,2627-2655: [4,4,4,6], abort before the tail.
+    let mut e = parity_engine_with_limits(3., 5., 1.);
+    let first = begin(&mut e, vec![parity_order(OrderType::Limit, 17.)]);
+    assert_eq!(wire(&first)["BaseAmount"], 4);
+    let second = after_failure_next(&mut e, &first);
+    assert_eq!(wire(&second)["BaseAmount"], 4);
+    after_failure_stops(&mut e, &second);
+}
+
+#[test]
+fn after_failure_valid_non_market_lots_stop_after_a_venue_refusal() {
+    // TS lighter.exchange.ts:2491-2507,2646-2655: valid preflight does not swallow a refusal.
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let first = begin(&mut e, vec![parity_order(OrderType::Limit, 8.)]);
+    let second = after_failure_next(&mut e, &first);
+    after_failure_stops(&mut e, &second);
+}
+
+#[test]
+fn after_failure_serial_entry_refusal_stops_the_next_entry() {
+    // TS lighter.exchange.ts:2711-2716 awaits each order without catching failures.
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let first = begin(
+        &mut e,
+        vec![
+            parity_order(OrderType::Limit, 1.),
+            parity_order(OrderType::Market, 1.),
+        ],
+    );
+    after_failure_stops(&mut e, &first);
+}
+
+#[test]
+fn after_failure_market_child_refusal_skips_its_sibling_and_next_entry() {
+    // TS lighter.exchange.ts:2673-2683 throws from the sibling loop; 2711-2716 stops entries.
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let mut parent = parity_order(OrderType::Market, 1.);
+    parent.stop_loss = Some(90.);
+    parent.take_profit = Some(110.);
+    let first = begin(&mut e, vec![parent, parity_order(OrderType::Limit, 1.)]);
+    let sl = after_failure_next(&mut e, &first);
+    assert_eq!(wire(&sl)["Type"], 2);
+    after_failure_stops(&mut e, &sl);
+}
+
+#[test]
+fn after_failure_native_limit_batch_is_not_retried_after_refusal() {
+    // TS lighter.exchange.ts:2805-2823: one native batch, then rethrow (no per-row retry).
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let batch = begin(&mut e, vec![parity_order(OrderType::Limit, 1.); 2]);
+    assert!(batch.url.contains("sendTxBatch"));
+    let rows: Vec<String> = serde_json::from_str(&param(&batch, "tx_infos")).unwrap();
+    assert_eq!(rows.len(), 2);
+    after_failure_stops(&mut e, &batch);
+}
+
+#[test]
+fn after_failure_group_refusal_stops_the_next_entry_without_fallback() {
+    // TS lighter.exchange.ts:2605-2621 rethrows grouped refusal; 2711-2716 stops entries.
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let mut parent = parity_order(OrderType::Limit, 1.);
+    parent.stop_loss = Some(90.);
+    parent.take_profit = Some(110.);
+    let group = begin(&mut e, vec![parent, parity_order(OrderType::Market, 1.)]);
+    assert_eq!(param(&group, "tx_type"), "28");
+    after_failure_stops(&mut e, &group);
+}

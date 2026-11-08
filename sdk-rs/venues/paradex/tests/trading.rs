@@ -396,22 +396,17 @@ fn logged_child_rejection(h: &Harness, expected: &str) -> bool {
     })
 }
 #[test]
-fn partial_bracket_failure_returns_the_accepted_entry_and_does_not_replay_it() {
+fn partial_bracket_failure_skips_the_remaining_child_and_does_not_replay_entry() {
     let mut h = private();
     bracket_entry(&mut h, 10, None);
     let tp = h.take("/orders");
     h.respond(tp, 400, r#"{"error":"REJECTED"}"#);
-    let sl = h.take("/orders");
-    let payload: Payload = serde_json::from_str(sl.body.as_deref().unwrap()).unwrap();
-    assert_eq!(payload.kind, "STOP_LOSS_MARKET");
-    assert_eq!(payload.flags, Some(vec!["REDUCE_ONLY".into()]));
-    h.respond(sl, 200, r#"{"id":"sl"}"#);
     assert!(h.pending.is_empty());
     // The entry stands, but a refused leg leaves it unprotected: the command fails.
     assert!(h.result(10).is_err());
     assert!(logged_child_rejection(
         &h,
-        "TP/SL take-profit placement failed: Paradex HTTP 400: REJECTED; still placing the stop-loss"
+        "TP/SL take-profit placement failed: Paradex HTTP 400: REJECTED"
     ));
 }
 #[test]
@@ -434,7 +429,7 @@ fn a_rejected_stop_loss_keeps_the_take_profit_and_the_next_order() {
     assert!(h.result(11).is_err());
     assert!(logged_child_rejection(
         &h,
-        "TP/SL stop-loss placement failed: Paradex HTTP 400: REJECTED; no other leg remains to send"
+        "TP/SL stop-loss placement failed: Paradex HTTP 400: REJECTED"
     ));
 }
 #[test]
@@ -571,13 +566,11 @@ fn a_child_leg_lost_in_transport_makes_the_command_unknown_with_accepted_ids() {
         },
     );
     h.collect();
-    // The sibling stop-loss is still placed.
-    let sl = h.take("/orders");
-    h.respond(sl, 200, r#"{"id":"sl"}"#);
+    // TS paradex.exchange.ts:1817-1896 skips SL after TP transport loss.
     reconcile_read_only(&mut h);
     let error = failed(&h, 12);
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert_eq!(error.partial.unwrap().order_ids, ["entry", "sl"]);
+    assert_eq!(error.partial.unwrap().order_ids, ["entry"]);
 }
 
 /// After an Unknown write the only pending request is the fence's order read.
@@ -3360,4 +3353,129 @@ fn parity_all_valid_batches_still_submit_each_row_once() {
         2
     );
     assert!(h.pending.is_empty());
+}
+
+fn after_failure_no_more_writes(h: &Harness) {
+    assert!(
+        h.pending.iter().all(|r| r.method == Method::Get),
+        "{:?}",
+        h.pending
+    );
+}
+
+fn after_failure_refuse(h: &mut Harness, request: safe_cex_engine::HttpRequest, lost: bool) {
+    if lost {
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: request.id,
+                error: "fixture transport loss",
+            },
+        );
+        h.collect();
+    } else {
+        h.respond(
+            request,
+            400,
+            r#"{"error":"VALIDATION","message":"fixture refusal"}"#,
+        );
+    }
+}
+
+#[test]
+fn after_failure_native_batch_stops_later_chunks_and_serial_entries() {
+    // TS paradex.exchange.ts:1942-1958 awaits flush outside the per-entry catch.
+    for lost in [false, true] {
+        let mut h = private();
+        h.receipt_trace.clear();
+        let mut order = opts(OrderType::Limit);
+        order.client_order_id = None;
+        let mut orders = vec![order; 21];
+        let mut serial = opts(OrderType::Market);
+        serial.client_order_id = Some("unsent-serial".into());
+        orders.push(serial);
+        place(&mut h, 91, orders);
+        let first = h.take("/orders/batch");
+        parity_ack_batch(&mut h, first, "first");
+        let second = h.take("/orders/batch");
+        after_failure_refuse(&mut h, second, lost);
+        after_failure_no_more_writes(&h);
+        assert_eq!(
+            h.receipt_trace
+                .iter()
+                .filter(|r| matches!(r, ReceiptTrace::Http(_)))
+                .count(),
+            if lost { 3 } else { 2 }
+        );
+    }
+}
+
+#[test]
+fn after_failure_serial_entry_continues_without_sending_its_children() {
+    // TS paradex.exchange.ts:1414-1431,1958-1965 catches one entry, then continues the loop.
+    for lost in [false, true] {
+        let mut h = private();
+        let mut entry = opts(OrderType::Market);
+        entry.client_order_id = None;
+        entry.take_profit = Some(110.);
+        entry.stop_loss = Some(90.);
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("next".into());
+        place(&mut h, 91, vec![entry, next]);
+        let first = h.take("/orders");
+        after_failure_refuse(&mut h, first, lost);
+        let next = take_method(&mut h, Method::Post, "/orders");
+        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "MARKET");
+        assert_eq!(payload.client_id.as_deref(), Some("next"));
+        h.respond(next, 200, r#"{"id":"next","client_id":"next"}"#);
+        after_failure_no_more_writes(&h);
+    }
+}
+
+#[test]
+fn after_failure_take_profit_skips_stop_loss_but_continues_the_next_entry() {
+    // TS paradex.exchange.ts:1817-1896 has one try for TP+SL; 1949-1965 continues entries.
+    for lost in [false, true] {
+        let mut h = private();
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("next".into());
+        bracket_entry(&mut h, 91, Some(next));
+        let tp = h.take("/orders");
+        let payload: Payload = serde_json::from_str(tp.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "TAKE_PROFIT_MARKET");
+        after_failure_refuse(&mut h, tp, lost);
+        let next = take_method(&mut h, Method::Post, "/orders");
+        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "MARKET");
+        assert_eq!(payload.client_id.as_deref(), Some("next"));
+        h.respond(next, 200, r#"{"id":"next","client_id":"next"}"#);
+        after_failure_no_more_writes(&h);
+    }
+}
+
+#[test]
+fn after_failure_protective_cancel_or_exact_restore_is_terminal() {
+    // Historical TS 31d7fda4:paradex.exchange.ts:1427-1438 stops cancel-replace on failure.
+    // Keep the existing Rust exact put-back per the lead's explicit no-removal instruction.
+    for cancel_failure in [true, false] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 91);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        if cancel_failure {
+            after_failure_refuse(&mut h, cancel, false);
+        } else {
+            h.respond(cancel, 204, "");
+            confirm_stop_cancel(&mut h);
+            let replacement = h.take("/orders");
+            after_failure_refuse(&mut h, replacement, false);
+            let restore = h.take("/orders");
+            let payload: Payload = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload.size.as_deref(), Some("2"));
+            assert_eq!(payload.trigger_price.as_deref(), Some("90"));
+            after_failure_refuse(&mut h, restore, false);
+        }
+        assert!(h.result(91).is_err());
+        after_failure_no_more_writes(&h);
+    }
 }

@@ -1472,21 +1472,16 @@ impl Trading {
                         job.errors.clear();
                     }
                 }
-                if let Kind::Place { leg, expected, .. } = &request.kind {
-                    let next_leg = match job.operations.front().map(|op| &op.kind) {
-                        Some(Kind::Place {
-                            leg: Some(next), ..
-                        }) => Some(*next),
-                        _ => None,
-                    };
-                    let message = match (leg, next_leg) {
-                        (Some(leg), Some(next)) => format!(
-                            "Paradex TP/SL {leg} placement failed: {error}; still placing the {next}"
-                        ),
-                        (Some(leg), None) => format!(
-                            "Paradex TP/SL {leg} placement failed: {error}; no other leg remains to send"
-                        ),
-                        (None, _) => {
+                if let Kind::Place {
+                    leg,
+                    expected,
+                    batch,
+                    ..
+                } = &request.kind
+                {
+                    let message = match leg {
+                        Some(leg) => format!("Paradex TP/SL {leg} placement failed: {error}"),
+                        None => {
                             format!("Paradex placement failed for client IDs {expected:?}: {error}")
                         }
                     };
@@ -1495,22 +1490,27 @@ impl Trading {
                     } else {
                         code::ORDER_REJECTED
                     };
-                    // A failed entry orphans its children; a failed child must not skip its
-                    // sibling, or a rejected TP would leave the position without its SL.
-                    if leg.is_none() {
-                        while job
-                            .operations
-                            .front()
-                            .is_some_and(|op| matches!(op.kind, Kind::Place { leg: Some(_), .. }))
-                        {
+                    // TS awaits batch flushes outside its serial-entry catch. A bracket's
+                    // TP and SL share one try, so either failure skips its remaining children.
+                    if *batch {
+                        job.operations.clear();
+                    } else {
+                        while job.operations.front().is_some_and(|op| {
+                            matches!(
+                                op.kind,
+                                Kind::Place {
+                                    leg: Some("take-profit" | "stop-loss"),
+                                    ..
+                                }
+                            )
+                        }) {
                             job.operations.pop_front();
                         }
-                        job.errors.push(error);
-                    } else {
-                        // A refused leg leaves the entry unprotected: the command says so.
-                        job.leg_refused = true;
-                        job.errors.push(error);
                     }
+                    if leg.is_some() {
+                        job.leg_refused = true;
+                    }
+                    job.errors.push(error);
                     // Only when the command fails on this entry does its caller name it; a toast
                     // would double that. Beside an accepted order, this line is the only report.
                     let fails_command =
