@@ -12,7 +12,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
-use safe_cex_engine::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
+use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -180,7 +180,7 @@ struct Job {
     preflight: Option<Preflight>,
     plan: Option<Plan>,
     steps: VecDeque<Step>,
-    writes: Option<WritePlan<ReportedWrite>>,
+    writes: Option<WritePlan>,
     pending_write: Option<usize>,
     ids: Vec<String>,
     finish: Finish,
@@ -299,45 +299,25 @@ enum Finish {
     Mode(bool),
 }
 
-struct ReportedWrite {
-    path: &'static str,
-    body: String,
-}
 impl Job {
-    fn track_writes(&mut self) -> Result<(), VenueError> {
+    fn track_writes(&mut self) {
         if !matches!(self.finish, Finish::Ids) || self.trailing.is_some() || self.lookup.is_some() {
-            return Ok(());
+            return;
         }
-        let mut writes = Vec::new();
-        let mut index = 0;
+        let mut elements = Vec::new();
         for step in &mut self.steps {
             if !step.collect_ids || step.receipts.is_empty() {
-                return Ok(());
+                return;
             }
-            step.write_index = Some(writes.len());
-            let elements = step
-                .receipts
-                .iter()
-                .map(|receipt| {
-                    let element = Element {
-                        index,
-                        client_order_id: Some(receipt.identity.clone()),
-                    };
-                    index += 1;
-                    element
-                })
-                .collect();
-            writes.push(PlannedWrite {
-                payload: ReportedWrite {
-                    path: step.path,
-                    body: step.body.clone(),
-                },
-                elements,
-            });
+            step.write_index = Some(elements.len());
+            for receipt in &step.receipts {
+                elements.push(Element {
+                    index: elements.len(),
+                    client_order_id: Some(receipt.identity.clone()),
+                });
+            }
         }
-        // Legacy formatters decide validity; this callback adds no trading rules.
-        self.writes = Some(WritePlan::validate(writes, |_| Ok(()))?);
-        Ok(())
+        self.writes = Some(WritePlan::new(elements));
     }
 }
 
@@ -581,13 +561,7 @@ impl Okx {
         }) else {
             return;
         };
-        if job.track_writes().is_err() {
-            cx.notice(
-                safe_cex_engine::Level::Warn,
-                safe_cex_engine::log::code::REQUEST_FAILED,
-                "OKX write outcome reporting is unavailable",
-            );
-        }
+        job.track_writes();
         if job.steps.is_empty() {
             let _ = match self.finish_effects(cx, &mut job) {
                 Ok(data) => cx.done_empty_plan(&preflight, data),
@@ -1360,12 +1334,15 @@ impl Okx {
         if job.pending_write.is_none()
             && let (Some(expected), Some(writes)) = (step.write_index, &mut job.writes)
         {
-            let matched = writes.next_write().is_some_and(|(index, write)| {
-                index == expected
-                    && write.payload.path == step.path
-                    && write.payload.body == step.body
+            let recorded = (0..step.receipts.len()).try_for_each(|offset| {
+                writes.record(
+                    expected + offset,
+                    ElementResult::Unknown {
+                        error: Box::new(unknown_outcome(VenueError::new(UNKNOWN_OUTCOME_TEXT))),
+                    },
+                )
             });
-            if matched {
+            if recorded.is_ok() {
                 job.pending_write = Some(expected);
             } else {
                 job.writes = None;
@@ -1716,8 +1693,10 @@ impl Okx {
             && acks.len() == step.expected
         {
             let recorded = placement_results(cx, &request.context, &acks).and_then(|results| {
-                writes
-                    .settle(index, results)
+                results
+                    .into_iter()
+                    .enumerate()
+                    .try_for_each(|(offset, result)| writes.record(index + offset, result))
                     .map_err(|error| VenueError::new(error.to_string()))
             });
             if recorded.is_ok() {
@@ -2121,7 +2100,27 @@ impl Okx {
             } else {
                 error.clone()
             };
-            if writes.fail(index, classified).is_err() {
+            let recorded = (0..job.steps.front().map_or(0, |step| step.receipts.len()))
+                .try_for_each(|offset| {
+                    let result = if matches!(
+                        classified.outcome,
+                        Some(Outcome::NotSent | Outcome::Rejected)
+                    ) && !classified
+                        .partial
+                        .as_ref()
+                        .is_some_and(|partial| !partial.order_ids.is_empty())
+                    {
+                        ElementResult::NotSent {
+                            error: Some(Box::new(classified.clone())),
+                        }
+                    } else {
+                        ElementResult::Unknown {
+                            error: Box::new(unknown_outcome(classified.clone())),
+                        }
+                    };
+                    writes.record(index + offset, result)
+                });
+            if recorded.is_err() {
                 job.writes = None;
                 cx.notice(
                     safe_cex_engine::Level::Warn,
@@ -2190,8 +2189,8 @@ impl Okx {
                 );
             }
         }
-        if let Some(writes) = &mut job.writes {
-            error = writes.failure(error);
+        if let Some(writes) = &job.writes {
+            error = writes.attach(error);
         }
         let _ = match (&job.plan, &job.preflight) {
             (Some(plan), _) => {

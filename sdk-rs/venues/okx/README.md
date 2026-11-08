@@ -23,20 +23,19 @@ children can partially execute before native rejection. This PR records that
 behavior; it does not impose a new order-planning policy.
 
 `safe_cex_engine::write_plan` supplies optional indexed placement error facts.
-Its callback adds no native validity rules, and reporting failures cannot block
-execution. A proven signature rejection retains its existing authorized resend
+Its passive journal adds no native validity rules, and reporting failures cannot
+block execution. A proven signature rejection retains its existing authorized resend
 while the same logical row awaits its final outcome. Ambiguous released writes
 stay unknown under the existing engine lifecycle. Cancel and compensating flows
 keep their existing scheduling and native evidence; the optional placement
-journal is omitted for those flows rather than changing their behavior to fit
-its fail-stop dispatcher. Removed pre-existing put-back and resend code is
-restored. The legacy TS snapshot proves protective cancel/re-place, not a
+journal is omitted for those flows. Removed pre-existing put-back and resend
+code is restored. The legacy TS snapshot proves protective cancel/re-place, not a
 separate original-stop put-back algorithm.
 
 After failure, normal and algo placement series stop, as TS's serial placement
 helpers throw. Cancellation row errors inside a code-0 envelope continue; every
 nonzero envelope stops, matching `okx.api.ts:77-82`. Regular and algo cancellation
-tests cover both paths without imposing WritePlan's dispatch policy.
+tests cover both paths; WritePlan does not control dispatch.
 
 Sequence pins require all entry batches before SL/trailing/TP algos. Children
 retain the original input amount, so a child refusal leaves the accepted entry
