@@ -14,6 +14,36 @@ use crate::order_read_cover::{Covers, OrderReadMark, OrderReadScope};
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
 use std::collections::{HashMap, HashSet};
 
+/// Each imported column owns its value (including absence) until its inputs
+/// change. A size update must not discard independent native PnL evidence.
+#[derive(Clone, Copy, Default)]
+struct PositionNativeExtras {
+    values: [Option<f64>; 2],
+    imported: [bool; 2],
+}
+
+impl PositionNativeExtras {
+    fn update(&mut self, position: &mut Position, update: impl FnOnce(&mut Position)) {
+        // Venue-owned rows have no imported evidence to invalidate.
+        let before = self
+            .imported
+            .iter()
+            .any(|&imported| imported)
+            .then(|| position.clone());
+        update(position);
+        if let Some(before) = before {
+            let same_row = before.id == position.id && before.symbol == position.symbol;
+            // Both sizing inputs matter: which one supplied the native quantity
+            // depends on the producer's units/catalogue, not the receiver's.
+            self.imported[0] &= same_row
+                && before.contracts.to_bits() == position.contracts.to_bits()
+                && before.notional.to_bits() == position.notional.to_bits();
+            self.imported[1] &=
+                same_row && before.unrealized_pnl.to_bits() == position.unrealized_pnl.to_bits();
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Store {
     markets: Vec<Market>,
@@ -48,7 +78,7 @@ pub struct Store {
     positions: Vec<Position>,
     /// Parallel to positions. Frame-fed metadata is authoritative, including
     /// absent values; venue-owned rows compute their metadata at output time.
-    position_native_extras: Vec<Option<[Option<f64>; 2]>>,
+    position_native_extras: Vec<PositionNativeExtras>,
     position_ids: bool,
     balance: Balance,
     coin_balances: Option<Vec<CoinBalance>>,
@@ -875,7 +905,7 @@ impl Store {
     }
 
     pub fn set_positions(&mut self, positions: Vec<Position>) {
-        self.position_native_extras = vec![None; positions.len()];
+        self.position_native_extras = vec![PositionNativeExtras::default(); positions.len()];
         self.positions = positions;
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
@@ -894,7 +924,13 @@ impl Store {
     ) {
         assert_eq!(positions.len(), native_extras.len());
         self.set_positions(positions);
-        self.position_native_extras = native_extras.into_iter().map(Some).collect();
+        self.position_native_extras = native_extras
+            .into_iter()
+            .map(|values| PositionNativeExtras {
+                values,
+                imported: [true; 2],
+            })
+            .collect();
     }
 
     #[cfg(feature = "prediction")]
@@ -925,13 +961,15 @@ impl Store {
                 self.position_native_extras.remove(index);
             }
             (Some(index), false) => {
-                self.positions[index] = position;
-                self.position_native_extras[index] = None;
+                self.position_native_extras[index].update(&mut self.positions[index], |stored| {
+                    *stored = position;
+                });
             }
             (None, true) => return,
             (None, false) => {
                 self.positions.push(position);
-                self.position_native_extras.push(None);
+                self.position_native_extras
+                    .push(PositionNativeExtras::default());
             }
         }
         #[cfg(any(test, feature = "product-semantics"))]
@@ -943,12 +981,18 @@ impl Store {
 
     /// Change positions in place; rows left with zero contracts are removed.
     pub fn update_positions(&mut self, mut update: impl FnMut(&mut Position)) {
-        for position in &mut self.positions {
-            update(position);
+        for (position, native) in self
+            .positions
+            .iter_mut()
+            .zip(&mut self.position_native_extras)
+        {
+            native.update(position, &mut update);
         }
+        // Filter the sidecar using the same rows before compacting positions.
+        let mut rows = self.positions.iter();
+        self.position_native_extras
+            .retain(|_| rows.next().is_some_and(|p| p.contracts != 0.0));
         self.positions.retain(|p| p.contracts != 0.0);
-        // Native venue updates own the quantities again; no stale frame values.
-        self.position_native_extras = vec![None; self.positions.len()];
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
         #[cfg(feature = "prediction")]
@@ -1805,12 +1849,22 @@ impl Store {
             .iter()
             .zip(&self.position_native_extras)
             .map(|(position, native)| {
-                native.unwrap_or_else(|| {
+                if native.imported == [true; 2] {
+                    return native.values;
+                }
+                let derived = {
                     let market = self
                         .market_by_symbol
                         .get(position.symbol.as_str())
                         .map(|index| &self.markets[*index as usize]);
                     crate::position_output::native_extras(position, market, self.quantity_units)
+                };
+                std::array::from_fn(|i| {
+                    if native.imported[i] {
+                        native.values[i]
+                    } else {
+                        derived[i]
+                    }
                 })
             })
             .collect();

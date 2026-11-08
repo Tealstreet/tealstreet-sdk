@@ -329,6 +329,43 @@ test('Position revision two decodes null and absence but refuses invalid native 
   }
 });
 
+test('Position numeric matrix matches Rust ingress for all eleven columns and presence states', () => {
+  // Keep this acceptance table in sync with position_frame_numeric_matrix_matches_js_decoder.
+  const values = [1, 0, -0, -1, NaN, Infinity, -Infinity];
+  const raw = [true, true, true, true, true, true, true];
+  const finite = [true, true, true, true, false, false, false];
+  const optional = [true, true, true, true, true, false, false];
+  const liquidation = [true, false, false, false, true, false, false];
+  const fields = [
+    ['entryPrice', raw], ['notional', raw], ['leverage', finite],
+    ['unrealizedPnl', finite], ['realizedPnl', optional], ['contracts', raw],
+    ['liquidationPrice', liquidation], ['marginSize', optional],
+    ['lastUpdate', optional], ['contractsNative', finite], ['unrealizedPnlNative', finite],
+  ];
+  for (const presence of [0, 3]) {
+    fields.forEach(([key, allowed], column) => {
+      values.forEach((value, index) => {
+        const frame = positionFrame(true);
+        const section = frame.first(SECTION.POSITIONS);
+        const view = new DataView(frame.buffer);
+        view.setUint32(section.offset + 12, presence << 24, true);
+        view.setFloat64(section.offset + 24 + column * 16, value, true);
+        const accepted = allowed[index] || (column >= 9 && presence === 0);
+        const label = `${key}=${value}, presence=${presence}`;
+        if (accepted) {
+          const decoded = frame.positions()[key][0];
+          const expected = column >= 9 && presence === 0 ? undefined
+            : Number.isNaN(value) && column === 6 ? null
+            : Number.isNaN(value) && [4, 7, 8].includes(column) ? undefined : value;
+          assert.equal(decoded, expected, label);
+        } else {
+          assert.throws(() => frame.positions(), { message: `invalid Position ${key}` }, label);
+        }
+      });
+    });
+  }
+});
+
 function balanceFrame(coins, currencies) {
   const coinsAbsent = coins === undefined;
   const currencyRows = Array.isArray(currencies)
