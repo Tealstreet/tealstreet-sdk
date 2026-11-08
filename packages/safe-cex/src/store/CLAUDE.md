@@ -21,6 +21,11 @@ string references for venue-defined position IDs; preserve these when present
 so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
 frames still derive identity from symbol and position mode.
 
+Position `liquidationPrice` is a finite positive price or `null` when unknown,
+including through serialization and worker snapshots. The frame applier maps
+non-finite and nonpositive columns to `null`. Empty, retained closed, stub and
+pending chaser positions also use `null` for an unknown liquidation price.
+
 Revised SCXF sections carry explicit revisions with fixed tails. Preserve venue
 `prettySymbol`, bracket trigger types, conditional prices, remaining notionals,
 and ticker `midPrice`, including clearing midpoint on packed and object worker

@@ -281,8 +281,11 @@ one `LOT_SIZE` filter, a positive `contractSize`, and valid supplied
 `PERCENT_PRICE` lower bounds. Quantity is in contracts, so the dollar notional
 is `quantity * contractSize`, independent of the resting price. Missing or
 ambiguous sizing metadata refuses the run; the fixed 100 USD cap still applies.
-Fine-tick prices and amounts tolerate float noise relative to their step count,
-while a real fraction of a step still floors prices and ceils minimum amounts.
+Price targets and step counts use exact decimal arithmetic: a real fraction of
+a step always floors prices and ceils minimum amounts. Notional sizing uses
+integer division against the notional per lot, without rounding an intermediate
+quantity. Sizing refuses with `unrepresentable-market-step` if 14-digit numeric
+cleanup changes the exact selected multiple, including a fraction of a step.
 
 `binancepm` has no test environment and no profile yet. Whether it runs on
 mainnet or stays unsmoked is an open decision. `binanceoptions` (European

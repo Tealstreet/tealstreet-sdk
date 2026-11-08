@@ -712,7 +712,8 @@ export type Position = {
   readonly realizedPnl?: number;
   // always in whole units of base for easy math elsewhere
   readonly contracts: number;
-  readonly liquidationPrice: number;
+  /** Null when the liquidation threshold is unavailable. */
+  readonly liquidationPrice: number | null;
   // absolute quote-currency margin allocated to the position, when the
   // exchange exposes it. Cross-margin positions may be reported as 0 by
   // some exchanges; mappers should fall back to notional/leverage in that

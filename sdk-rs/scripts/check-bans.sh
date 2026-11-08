@@ -38,7 +38,7 @@ ban 'JSON map-order or arbitrary-precision emulation' 'preserve_order|arbitrary_
 ban 'deleted port crates' 'safe-cex-(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle-cache|lighter-sdk)([^-_[:alnum:]]|$)|safe_cex_(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle_cache|lighter_sdk)([^-_[:alnum:]]|$)' $crates
 
 # Untyped JSON trees stay out of engine and venue hot paths.
-hot=$(ls -d engine/src registry/src venues/*/src 2>/dev/null || true)
+hot=$(ls -d engine/src registry/src venues/*/src venues/txflow/public-wire/src 2>/dev/null || true)
 if [[ -n $hot ]]; then
   ban 'serde_json::Value in engine or venue source' 'serde_json::Value|\bValue::(Object|Array)' $hot
 fi

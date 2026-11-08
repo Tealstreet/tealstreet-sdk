@@ -67,6 +67,11 @@ describe('DefaultStore', () => {
   });
 
   describe('initial state', () => {
+    it('uses unknown liquidation prices in store shape defaults', () => {
+      expect(stubStore.positions[0].liquidationPrice).toBeNull();
+      expect(stubStore.displayedPositions[0].liquidationPrice).toBeNull();
+    });
+
     it('should initialize with default values', () => {
       expect(store.latency).toBeNull();
       expect(store.balance).toEqual({ used: 0, free: 0, total: 0, upnl: 0 });
@@ -467,7 +472,7 @@ describe('DefaultStore', () => {
         expect(emptyPosition.entryPrice).toBe(0);
         expect(emptyPosition.notional).toBe(0);
         expect(emptyPosition.unrealizedPnl).toBe(0);
-        expect(emptyPosition.liquidationPrice).toBe(0);
+        expect(emptyPosition.liquidationPrice).toBeNull();
       });
 
       it('should preserve position id and symbol', () => {
@@ -479,6 +484,16 @@ describe('DefaultStore', () => {
     });
 
     describe('addOrUpdatePositionsFull', () => {
+      it('retains unknown liquidation as null when an omitted position closes', () => {
+        store.addOrUpdatePosition(createPosition({ liquidationPrice: null }));
+        for (let refresh = 0; refresh < 2; refresh++) {
+          store.addOrUpdatePositionsFull([]);
+          expect(store.positions).toHaveLength(1);
+          expect(store.positions[0]).toMatchObject({ contracts: 0, liquidationPrice: null });
+          expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
+        }
+      });
+
       it('should update provided positions and empty others', () => {
         store.addOrUpdatePosition(createPosition({ id: 'pos-1' }));
         store.addOrUpdatePosition(createPosition({ id: 'pos-2', contracts: 2 }));

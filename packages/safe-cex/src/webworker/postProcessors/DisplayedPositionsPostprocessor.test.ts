@@ -256,6 +256,7 @@ describe('DisplayedPositionsPostprocessor', () => {
       side: PositionSide.Long,
       isFakePosition: true,
       chaserSize: 4,
+      liquidationPrice: null,
     });
     expect(store.displayedPositions.find((position) => position.id === 'fake-chaser-eth-chaser')).toMatchObject({
       id: 'fake-chaser-eth-chaser',
@@ -263,6 +264,7 @@ describe('DisplayedPositionsPostprocessor', () => {
       side: PositionSide.Short,
       isFakePosition: true,
       chaserSize: 2,
+      liquidationPrice: null,
       hasActiveChaser: true,
       hasFullStop: false,
       hasFullTP: false,
