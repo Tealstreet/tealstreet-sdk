@@ -386,7 +386,7 @@ fn legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal() {
 }
 #[test]
 fn above_max_caller_id_refuses_the_whole_batch_before_any_write() {
-    // TS grvt.exchange.ts:1351 calls BaseExchange's rounded maximum guard first (:1211-1225).
+    // TS grvt.exchange.ts:1351 calls the legacy base exchange's rounded maximum guard first (:1211-1225).
     for valid_prefix in [false, true] {
         let mut e = boot();
         e.store_mut().update_markets(|market| {
