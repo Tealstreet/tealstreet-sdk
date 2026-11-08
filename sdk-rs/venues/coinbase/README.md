@@ -1,5 +1,20 @@
 # Coinbase derivatives foundation (S0)
 
+## Advanced Trade create sizing
+
+New Advanced Trade creates follow the legacy TypeScript formatter: normalize
+the requested amount to the market step and send one payload, including above
+the advertised maximum. Native refusals are returned to the caller without an
+automatic resend. `KNOWN-ISSUE: TS sends above-max; venue refuses`.
+
+Reference: `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts:1659`
+(normalization), `:1772` (single request) and `:1573` (native edit maximum).
+Native edit and INTX replacement checks retain their existing bounds.
+`tests/trading.rs::legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal`
+pins the six above-max cases and refusal propagation.
+
+## Transport foundation
+
 `drb::Transport` is the shared HTTP/main-WebSocket JSON-RPC transport owned by
 `Coinbase::drb`. `drb_auth::Session` holds auth state for exactly one `Channel`
 (HTTP or one socket ID). The existing venue flows are migrated by the separate
