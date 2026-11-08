@@ -24,7 +24,8 @@ Split dispatch follows the legacy TypeScript adapter in
 `packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts`.
 Legacy rows round without rechecking wire quantity bounds or native maximum
 prices. Independent rows, pairs, cancel batches and protective children continue
-after a sibling fails. A failed entry skips its own protective children.
+after a proven refusal; Unknown stops the remaining writes. A failed entry skips
+its own protective children.
 These inherited partial-placement cases remain known issues for Sam.
 
 The engine's `WritePlan` observes dispatch and reports indexed outcomes without
@@ -36,9 +37,11 @@ legacy loop finishes. A failed write is never resent.
 Accepted cancel and leverage effects use `Applied`, with existing cancel targets
 kept separate from newly created IDs. Legacy cancel-replace uses the requested
 total and edited price after cancellation, without a fill or reference veto.
-Its failed replacement is reported without a proof read or automatic put-back,
-matching TS `updateOrder`. Background missing-trigger-source repair continues
-its separate legacy cancel/re-place behavior.
+Protective put-back kept per Sam's decision, SPLIT_PLAN_INVARIANT.md exception 2:
+a definite coded refusal of a protective replacement can read open orders and
+put back the untouched original once, only after proving the replacement absent.
+Unknown replies stop without another write. Background missing-trigger-source
+repair continues its separate legacy cancel/re-place behavior.
 
 Account leverage is global. Position mode is fixed hedged, and margin mode is
 fixed cross; requests for another mode return an error. Private reconciliation

@@ -81,10 +81,10 @@ fn native_max_price_uses_rounded_wire_value_with_inclusive_bound() -> Result {
 }
 
 // TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1121-1141 cancels, replaces, then rethrows.
-// Master's extra proof read and put-back are absent from this legacy path.
-// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | AmendOrder pre-cancel wire validation and class-A restore
+// Protective put-back is retained under SPLIT_PLAN_INVARIANT.md exception 2.
+// Unknown replacement outcomes still stop without a proof read or another write.
 #[test]
-fn protective_rejection_never_reads_proof_or_puts_back_original_stop() -> Result {
+fn protective_refusal_puts_back_only_after_a_clean_proof() -> Result {
     for (old_trigger, new_trigger) in [("130", 125.), ("150", 155.)] {
         for status in [400, 200, 503] {
             let stop = ORDER
@@ -114,7 +114,7 @@ fn protective_rejection_never_reads_proof_or_puts_back_original_stop() -> Result
                     ),
                     (status, r#"{"code":"INVALID_ORDER","message":"bad"}"#.into()),
                     (200, "[]".into()),
-                    (200, r#"{"id":"unwanted-restoration"}"#.into()),
+                    (200, r#"{"id":"restored-original"}"#.into()),
                 ]
                 .into(),
                 ..Default::default()
@@ -148,6 +148,48 @@ fn protective_rejection_never_reads_proof_or_puts_back_original_stop() -> Result
                 })
             );
             let out = transport.poll(&mut engine);
+            if status == 400 {
+                transport.poll(&mut engine);
+                let out = transport.poll(&mut engine);
+                let error = failed(&out)?;
+                assert_eq!(
+                    error.protection,
+                    Some(safe_cex_engine::error::Protection::Restored)
+                );
+                assert_eq!(transport.requests.len(), 4);
+                assert_eq!(transport.requests[2].method, Method::Get);
+                assert!(transport.requests[2].url.contains("/api/v1/orders?"));
+                let restore = &transport.requests[3];
+                assert_eq!(restore.method, Method::Post);
+                let restored: Value =
+                    serde_json::from_str(restore.body.as_deref().ok_or("missing put-back")?)?;
+                assert_eq!(restored["triggerPrice"], format!("{}.00", old_trigger));
+                assert_eq!(restored["triggerQuantity"], "5.00");
+                let elements = error
+                    .elements
+                    .as_ref()
+                    .ok_or("missing protective outcomes")?;
+                assert_eq!(elements.len(), 3);
+                assert!(matches!(
+                    &elements[0].result,
+                    ElementResult::Applied {
+                        effect: AppliedEffect::Cancel,
+                        ..
+                    }
+                ));
+                assert!(
+                    matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+                );
+                assert!(
+                    matches!(&elements[2].result, ElementResult::Placed { order_ids } if order_ids == &["restored-original"])
+                );
+                assert!(transport.responses.is_empty());
+                reply(&mut engine, &replacement, 200, "[]");
+                let late = transport.poll(&mut engine);
+                assert!(!late.iter().any(|action| matches!(action, Action::Http(_))));
+                assert_eq!(transport.requests.len(), 4);
+                continue;
+            }
             let error = failed(&out)?;
             assert_eq!(error.outcome, Some(Outcome::Unknown));
             assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
@@ -179,7 +221,7 @@ fn protective_rejection_never_reads_proof_or_puts_back_original_stop() -> Result
                 transport.responses,
                 [
                     (200, "[]".into()),
-                    (200, r#"{"id":"unwanted-restoration"}"#.into())
+                    (200, r#"{"id":"restored-original"}"#.into())
                 ]
             );
             reply(&mut engine, &replacement, 200, "[]");

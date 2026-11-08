@@ -1089,11 +1089,11 @@ fn assert_failed_stop(out: &[Action]) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 #[test]
-fn a_coded_stop_failure_stops_without_proof_or_put_back() -> Result<(), Box<dyn std::error::Error>>
-{
+fn an_unclassified_stop_failure_stops_without_proof_or_put_back()
+-> Result<(), Box<dyn std::error::Error>> {
     let mut e = resting_stop();
     let replacement = to_replacement(&mut e);
-    reply(&mut e, &replacement, 400, REFUSED);
+    reply(&mut e, &replacement, 200, REFUSED);
     assert_failed_stop(&actions(&mut e))?;
     assert!(requests(&mut e).is_empty());
     Ok(())
@@ -1104,7 +1104,7 @@ fn a_late_success_after_stop_failure_cannot_restart_the_plan()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut e = resting_stop();
     let replacement = to_replacement(&mut e);
-    reply(&mut e, &replacement, 400, REFUSED);
+    reply(&mut e, &replacement, 200, REFUSED);
     assert_failed_stop(&actions(&mut e))?;
     reply(&mut e, &replacement, 200, r#"{"id":"late"}"#);
     let out = actions(&mut e);
@@ -1123,7 +1123,7 @@ fn a_resting_stream_row_after_stop_failure_cannot_trigger_put_back()
 -> Result<(), Box<dyn std::error::Error>> {
     let (mut e, socket) = resting_stop_with_socket();
     let replacement = to_replacement(&mut e);
-    reply(&mut e, &replacement, 400, REFUSED);
+    reply(&mut e, &replacement, 200, REFUSED);
     assert_failed_stop(&actions(&mut e))?;
     ws(
         &mut e,
@@ -1140,7 +1140,7 @@ fn a_late_transport_failure_after_stop_failure_is_inert() -> Result<(), Box<dyn 
 {
     let mut e = resting_stop();
     let replacement = to_replacement(&mut e);
-    reply(&mut e, &replacement, 400, REFUSED);
+    reply(&mut e, &replacement, 200, REFUSED);
     assert_failed_stop(&actions(&mut e))?;
     e.handle(
         2000.,
@@ -1458,7 +1458,7 @@ fn legacy_account_repair_must_adopt_dispatch_signing_before_account_cutover() {
 
 /// Unlisted native codes remain unknown on ordinary and trigger replacements.
 #[test]
-fn a_coded_4xx_stays_unknown_for_both_ordinary_and_trigger_placements()
+fn unlisted_ordinary_4xx_and_trigger_200_errors_stay_unknown()
 -> Result<(), Box<dyn std::error::Error>> {
     let (mut e, _) = ready();
     place(
@@ -1474,7 +1474,7 @@ fn a_coded_4xx_stays_unknown_for_both_ordinary_and_trigger_placements()
     );
     let mut e = resting_stop();
     let replacement = to_replacement(&mut e);
-    reply(&mut e, &replacement, 400, REFUSED);
+    reply(&mut e, &replacement, 200, REFUSED);
     assert_failed_stop(&actions(&mut e))?;
     Ok(())
 }
@@ -1546,4 +1546,226 @@ fn an_unknown_stop_replacement_reports_applied_cancel_and_unknown_creation()
         assert!(requests(&mut e).is_empty());
     }
     Ok(())
+}
+
+fn refused_then_read(e: &mut Driver) -> safe_cex_engine::HttpRequest {
+    let place = to_replacement(e);
+    reply(e, &place, 400, REFUSED);
+    let out = actions(e);
+    assert!(posts(&out).is_empty(), "no put-back before the read");
+    out.into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.method == Method::Get && r.url.contains("/api/v1/orders") => {
+                Some(r)
+            }
+            _ => None,
+        })
+        .expect("an open-orders proof read")
+}
+
+#[test]
+fn a_refused_stop_replacement_with_a_clean_read_is_put_back_once() {
+    use safe_cex_engine::error::Protection;
+    let mut e = resting_stop();
+    let read = refused_then_read(&mut e);
+    reply(&mut e, &read, 200, "[]");
+    let restore = posts(&actions(&mut e)).pop().expect("the put-back");
+    let body = restore.body.as_deref().unwrap();
+    for expected in [
+        r#""triggerPrice":"130.00"#,
+        r#""triggerQuantity":"5.00"#,
+        r#""side":"Ask""#,
+        r#""reduceOnly":true"#,
+        r#""triggerBy":"MarkPrice""#,
+    ] {
+        assert!(
+            body.contains(expected),
+            "the original, not the edit: {body}"
+        );
+    }
+    reply(
+        &mut e,
+        &restore,
+        200,
+        r#"{"id":"777","status":"New","orderType":"Market","side":"Ask"}"#,
+    );
+    let out = actions(&mut e);
+    let error = failure(&out);
+    assert!(
+        error.message.contains("is unchanged") && error.message.contains("put back"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Restored));
+    assert!(posts(&out).is_empty(), "one put-back only");
+}
+
+#[test]
+fn a_refused_put_back_is_unprotected_and_never_retried() {
+    use safe_cex_engine::error::Protection;
+    let mut e = resting_stop();
+    let read = refused_then_read(&mut e);
+    reply(&mut e, &read, 200, "[]");
+    let restore = posts(&actions(&mut e)).pop().expect("the put-back");
+    reply(&mut e, &restore, 400, REFUSED);
+    let out = actions(&mut e);
+    let error = failure(&out);
+    assert!(error.message.contains("both refused"), "{}", error.message);
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(posts(&out).is_empty());
+}
+
+#[test]
+fn a_refused_replacement_still_resting_is_never_put_back() {
+    let mut e = resting_stop();
+    let read = refused_then_read(&mut e);
+    reply(
+        &mut e,
+        &read,
+        200,
+        r#"[{"id":"9","symbol":"SOL_USDC_PERP","side":"Ask","orderType":"Market","triggerPrice":"125","triggerQuantity":"5","status":"TriggerPending"}]"#,
+    );
+    let out = actions(&mut e);
+    let error = failure(&out);
+    assert!(
+        error
+            .message
+            .contains("Your SOL_USDC_PERP long position may have no stop")
+            && error.message.contains("Check Open Orders"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, None);
+    assert!(
+        posts(&out).is_empty(),
+        "no put-back over a resting replacement"
+    );
+}
+
+#[test]
+fn a_lost_proof_read_is_unprotected_with_no_put_back() {
+    use safe_cex_engine::error::Protection;
+    let mut e = resting_stop();
+    let read = refused_then_read(&mut e);
+    e.handle(
+        1000.0,
+        Event::HttpFailed {
+            request: read.id,
+            error: "lost proof read",
+        },
+    );
+    let out = actions(&mut e);
+    let error = failure(&out);
+    assert!(
+        error.message.contains("was removed") && error.message.contains("please re-place it"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(posts(&out).is_empty());
+}
+
+#[test]
+fn a_stop_that_filled_during_its_cancel_is_not_put_back() {
+    use safe_cex_engine::error::Protection;
+    let mut e = resting_stop();
+    amend_stop(&mut e, 125.0);
+    let cancel = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"1"}"#,
+    );
+    let place = posts(&actions(&mut e)).pop().expect("the replacement");
+    reply(&mut e, &place, 400, REFUSED);
+    let out = actions(&mut e);
+    let error = failure(&out);
+    assert!(
+        error.message.contains("was removed") && error.message.contains("please re-place it"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == Method::Get)),
+        "no proof read"
+    );
+    assert!(posts(&out).is_empty());
+}
+
+#[test]
+fn an_unknown_put_back_says_check_open_orders_never_re_place() {
+    for case in ["429", "408", "500", "lost"] {
+        let mut e = resting_stop();
+        let read = refused_then_read(&mut e);
+        reply(&mut e, &read, 200, "[]");
+        let restore = posts(&actions(&mut e)).pop().expect("the put-back");
+        match case {
+            "408" => reply(&mut e, &restore, 408, ""),
+            "500" => reply(
+                &mut e,
+                &restore,
+                500,
+                r#"{"code":"INTERNAL_ERROR","message":"oops"}"#,
+            ),
+            "429" => reply(
+                &mut e,
+                &restore,
+                429,
+                r#"{"code":"TOO_MANY_REQUESTS","message":"slow"}"#,
+            ),
+            _ => e.handle(
+                1000.0,
+                Event::HttpFailed {
+                    request: restore.id,
+                    error: "lost put-back response",
+                },
+            ),
+        }
+        let out = actions(&mut e);
+        let error = failure(&out);
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("re-place")
+                && !error.message.contains("INVALID_ORDER"),
+            "{case}: {}",
+            error.message
+        );
+        assert_eq!(error.protection, None, "{case}");
+        assert!(posts(&out).is_empty(), "{case}: never resent");
+    }
+}
+
+#[test]
+fn repair_never_retires_a_put_back_in_flight() {
+    use safe_cex_engine::error::Protection;
+    let (mut e, socket) = resting_stop_with_socket();
+    let read = refused_then_read(&mut e);
+    reply(&mut e, &read, 200, "[]");
+    let restore = posts(&actions(&mut e)).pop().expect("the put-back");
+    // The original's cancel and an unrelated order's update both run repair.
+    for update in [
+        r#"{"e":"orderCancelled","i":"123","E":3000000,"X":"Cancelled","s":"SOL_USDC_PERP","o":"Market","S":"Ask","q":"5","z":"0","P":"130","Y":"5","r":true}"#,
+        r#"{"e":"orderAccepted","i":"other","E":3000001,"X":"New","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"100","q":"1","z":"0","f":"GTC"}"#,
+    ] {
+        ws(&mut e, socket, "account.orderUpdate", update);
+    }
+    let out = actions(&mut e);
+    assert!(posts(&out).is_empty(), "nothing re-sent or cancelled");
+    reply(
+        &mut e,
+        &restore,
+        200,
+        r#"{"id":"777","status":"New","orderType":"Market","side":"Ask"}"#,
+    );
+    let error = failure(&actions(&mut e));
+    assert_eq!(
+        error.protection,
+        Some(Protection::Restored),
+        "the put-back's answer still lands: {}",
+        error.message
+    );
 }

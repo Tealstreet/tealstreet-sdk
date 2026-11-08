@@ -12,7 +12,7 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{
     Context, Credential, HttpOwnerRetirement, Operation, Plan, PlanPolicy, Policy, Preflight,
     PreflightPolicy, PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
-    plan::{CallBound, RetryWindow, Slot, StepBound},
+    plan::{CallBound, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound},
 };
 use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 use safe_cex_engine::{
@@ -29,6 +29,15 @@ const BACKPACK: CodeTable = CodeTable {
     unlisted: Verdict::Unknown(None),
     status: &[],
 };
+/// Only a trigger amend's replacement refused with a coded 4xx (`definite_refusal`)
+/// is journaled refused, so its proof read and put-back may follow.
+const AMEND_REFUSAL: CodeTable = CodeTable {
+    rows: &[],
+    success: &[],
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: &[],
+};
+
 #[derive(Clone)]
 struct ManagedWrite {
     plan: Plan,
@@ -132,13 +141,39 @@ pub enum Step {
         symbol: String,
     },
     Leverage(f64),
+    OpenOrders {
+        symbol: String,
+    },
 }
+impl Step {
+    fn places(&self) -> bool {
+        matches!(self, Self::Place { .. })
+    }
+
+    fn reads_proof(&self) -> bool {
+        matches!(self, Self::OpenOrders { .. })
+    }
+
+    fn is_entry(&self) -> bool {
+        matches!(
+            self,
+            Self::Place {
+                optional: false,
+                ..
+            }
+        )
+    }
+}
+
 fn write_plan(steps: &[Step]) -> (WritePlan, Vec<Vec<usize>>) {
     let mut journal = vec![];
     let mut index = 0;
     let writes = steps
         .iter()
         .map(|step| {
+            if matches!(step, Step::OpenOrders { .. }) {
+                return vec![];
+            }
             let orders: &[NativeOrder] = match step {
                 Step::Place { order, .. } => std::slice::from_ref(order.as_ref()),
                 Step::Pair(orders) => orders,
@@ -203,6 +238,26 @@ struct Job {
     amendment: bool,
     /// The amended order's side and kind: what its lost replacement costs.
     amended: Option<(OrderSide, OrderType)>,
+    protect: Option<StopProtect>,
+    refused: Option<Box<NativeOrder>>,
+    restoring: bool,
+}
+
+struct StopProtect {
+    original: Order,
+    restore: Box<NativeOrder>,
+    restorable: bool,
+}
+
+fn append_step(job: &mut Job, step: Step) {
+    let outcomes = job.write_plan.outcomes();
+    job.steps.push(step);
+    let (plan, elements) = write_plan(&job.steps);
+    job.write_plan = plan;
+    job.elements = elements;
+    for outcome in outcomes {
+        let _ = job.write_plan.record(outcome.element.index, outcome.result);
+    }
 }
 
 fn record_failure(plan: &mut WritePlan, indices: &[usize], error: &VenueError) {
@@ -228,6 +283,47 @@ pub struct Trading {
     jobs: HashMap<u64, Job>,
     next_client: u32,
     cancels: HashMap<String, (usize, OrderStatus)>,
+}
+
+/// A trigger amend's write: one attempt, as every Backpack write.
+fn mutation_call() -> SerialCall {
+    SerialCall {
+        auth: Default::default(),
+        operation: Operation::Mutation,
+        timeout_ms: 20000,
+        attempts: 1,
+        pacing: None,
+    }
+}
+fn serial_call(step: &Step) -> SerialCall {
+    SerialCall {
+        operation: if matches!(step, Step::OpenOrders { .. }) {
+            Operation::Read
+        } else {
+            Operation::Mutation
+        },
+        ..mutation_call()
+    }
+}
+/// How a message names an amended trigger order of `kind`.
+fn what(kind: OrderType) -> &'static str {
+    match kind {
+        OrderType::TakeProfit => "take profit",
+        OrderType::StopLoss => "stop",
+        _ => "trigger order",
+    }
+}
+/// A definite refusal of an order write: a 4xx with a JSON code, except a
+/// timeout, conflict or rate limit. Backpack documents no code table.
+fn definite_refusal(status: u16, body: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Failure<'a> {
+        #[serde(borrow)]
+        code: Option<&'a serde_json::value::RawValue>,
+    }
+    (400..500).contains(&status)
+        && !matches!(status, 408 | 409 | 429)
+        && serde_json::from_str::<Failure<'_>>(body).is_ok_and(|failure| failure.code.is_some())
 }
 
 fn gone_text(symbol: &str, side: OrderSide, kind: OrderType, unknown: bool) -> String {
@@ -540,7 +636,9 @@ impl Backpack {
             });
             let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
                 purpose: PreflightPurpose::WriteAfterReads,
-                read_credential: None,
+                read_credential: credential
+                    .clone()
+                    .filter(|_| matches!(&command, Command::AmendOrder { .. })),
                 write_credential: credential,
             }) else {
                 return;
@@ -565,6 +663,7 @@ impl Backpack {
         } else {
             None
         };
+        let mut protect = None;
         let (id, plan) = match command {
             Command::PlaceOrders { command, orders } => {
                 (command, self.prepare_place(cx, orders).map(|s| (s, true)))
@@ -635,6 +734,25 @@ impl Backpack {
                         implied_volatility: None,
                     };
                     let o = edited(price, amount);
+                    let execution_price = old
+                        .extra
+                        .as_ref()
+                        .and_then(|extra| extra.conditional_order_price);
+                    if matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                        || execution_price.is_some()
+                    {
+                        let mut original = edited(None, None);
+                        original.trigger_type = old.trigger_type;
+                        if let Some(price) = execution_price {
+                            original.price = Some(price);
+                            original.trigger_price = Some(old.price);
+                        }
+                        protect = Some(StopProtect {
+                            original: old.clone(),
+                            restore: Box::new(self.native(cx, &original)?),
+                            restorable: old.filled == 0.0,
+                        });
+                    }
                     let mut steps = self.placement_steps(cx, &o)?;
                     steps.insert(
                         0,
@@ -690,7 +808,11 @@ impl Backpack {
                     let _ = cx.done_empty_plan(preflight, "[]".into());
                     return;
                 }
-                let admitted = self.admit_trade(cx, preflight, &steps, continue_rows);
+                let admitted = if protect.is_some() {
+                    self.admit_serial(cx, preflight)
+                } else {
+                    self.admit_trade(cx, preflight, &steps, continue_rows)
+                };
                 let plan = match admitted {
                     Ok(plan) => plan,
                     Err(error) => {
@@ -717,6 +839,9 @@ impl Backpack {
                         collect_ids,
                         amendment,
                         amended,
+                        protect,
+                        refused: None,
+                        restoring: false,
                     },
                 );
                 self.run_trade(cx, u64::from(id));
@@ -728,6 +853,25 @@ impl Backpack {
                 );
             }
         }
+    }
+    fn admit_serial(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &Preflight,
+    ) -> Result<Plan, safe_cex_engine::request_context::Error> {
+        cx.admit_serial_plan(
+            preflight,
+            mutation_call(),
+            SerialPolicy {
+                credential: self.options.identity.as_ref().map(|identity| Credential {
+                    slot: safe_cex_engine::CredentialSlot::Primary,
+                    reference: identity.credential.clone(),
+                }),
+                pacing: None,
+                refusals_complete: false,
+            },
+        )
+        .map(|(plan, _)| plan)
     }
     fn admit_trade(
         &self,
@@ -835,8 +979,13 @@ impl Backpack {
             Step::Cancel { .. } if job.amendment => Intent::Amend,
             Step::Cancel { .. } | Step::CancelAll { .. } => Intent::Cancel,
             Step::Leverage(..) => Intent::Setting,
+            Step::OpenOrders { .. } => Intent::Read,
         };
-        let context = match cx.plan_leg_context_with_intent(plan, &slot, intent) {
+        let context = match if matches!(step, Step::OpenOrders { .. }) {
+            cx.plan_leg_context(plan, &slot)
+        } else {
+            cx.plan_leg_context_with_intent(plan, &slot, intent)
+        } {
             Ok(context) => context,
             Err(error) => {
                 let error = error.venue_error().outcome(Outcome::NotSent);
@@ -943,6 +1092,20 @@ impl Backpack {
                     serde_json::to_string(&p).unwrap(),
                 )
             }
+            Step::OpenOrders { symbol } => {
+                let params: Params = [("symbol".into(), symbol.clone())].into();
+                let delivery = Request {
+                    managed: Some(managed),
+                    write,
+                    command,
+                    step,
+                    previous,
+                    targets,
+                    leverage_revision: self.account.leverage_revision,
+                };
+                self.send_managed_read(cx, delivery, params);
+                return;
+            }
             Step::Leverage(leverage) => {
                 self.account.leverage_revision += 1;
                 let p: Params = [("leverageLimit".into(), num::format(*leverage))].into();
@@ -966,6 +1129,40 @@ impl Backpack {
         self.send_managed_trade(cx, delivery, method, path, vec![params], body);
     }
 
+    fn send_managed_read(&mut self, cx: &mut Cx<'_, Pending>, delivery: Request, params: Params) {
+        let identity = self
+            .options
+            .identity
+            .as_ref()
+            .expect("admitted identity")
+            .clone();
+        let query = crate::sign::query(&params);
+        let recipe = crate::sign::Http::new(
+            identity,
+            crate::sign::Request {
+                method: Method::Get,
+                path: "/api/v1/orders".into(),
+                rows: vec![params],
+                body: None,
+                window: self
+                    .options
+                    .recv_window
+                    .filter(|window| window.is_finite() && *window > 0.)
+                    .map_or(60000, |window| window.min(60000.) as u32),
+            },
+        );
+        if let Err((Pending::Trade(delivery), error)) = cx.request_signed_managed(
+            delivery.managed.as_ref().unwrap().context.clone(),
+            None,
+            Method::Get,
+            format!("{REST}/api/v1/orders?{query}"),
+            None,
+            Box::new(recipe),
+            Pending::Trade(delivery),
+        ) {
+            self.trade_failed(cx, delivery, error.venue_error());
+        }
+    }
     fn send_managed_trade(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1025,6 +1222,9 @@ impl Backpack {
             }
             if let Some(job) = self.trading.jobs.get_mut(&request.command) {
                 job.waiting = false;
+            }
+            if request.step.reads_proof() {
+                return self.proof_response(cx, request, response);
             }
             if let Step::Pair(orders) = &request.step
                 && (200..300).contains(&response.status)
@@ -1148,6 +1348,24 @@ impl Backpack {
                     }
                 }
                 Step::Cancel { id, .. } => {
+                    if let Some(protect) = self
+                        .trading
+                        .jobs
+                        .get_mut(&request.command)
+                        .and_then(|job| job.protect.as_mut())
+                    {
+                        #[derive(Deserialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct Proof {
+                            status: String,
+                            executed_quantity: crate::wire::Number,
+                        }
+                        protect.restorable &= serde_json::from_str::<Proof>(response.body)
+                            .is_ok_and(|proof| {
+                                proof.status == "Cancelled"
+                                    && proof.executed_quantity.0 <= protect.original.filled
+                            });
+                    }
                     validate_ack(response.body)?;
                     accept_trade(cx, &request, vec![])?;
                     recorded = request.managed.is_some();
@@ -1199,6 +1417,7 @@ impl Backpack {
                         });
                     }
                 }
+                Step::OpenOrders { .. } => unreachable!("proof reads are answered apart"),
                 Step::Leverage(leverage) => {
                     // Documented: PATCH /api/v1/account answers 200 with no content.
                     if request.managed.is_some() && !response.body.trim().is_empty() {
@@ -1228,6 +1447,14 @@ impl Backpack {
         })();
         match result {
             Ok(()) => {
+                if self
+                    .trading
+                    .jobs
+                    .get(&request.command)
+                    .is_some_and(|job| job.protect.is_some())
+                {
+                    return self.continue_guarded(cx, &request);
+                }
                 if let Some(managed) = &request.managed {
                     if let Err(error) =
                         cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context)
@@ -1268,11 +1495,29 @@ impl Backpack {
                     }
                     let unproven =
                         (200..300).contains(&response.status) && !refused_in_body(response.body);
+                    let amend_refusal = !unproven
+                        && request.step.places()
+                        && definite_refusal(response.status, response.body)
+                        && self
+                            .trading
+                            .jobs
+                            .get(&request.command)
+                            .is_some_and(|job| job.protect.is_some() && job.ids.is_empty());
                     let fact = if unproven {
                         cx.http_write_unproven(&managed.context, &e)
                             .map(|()| VenueError::new(e.clone()).outcome(Outcome::Unknown))
                     } else {
-                        native_failure(cx, &managed.context, &BACKPACK, response.body, &e)
+                        native_failure(
+                            cx,
+                            &managed.context,
+                            if amend_refusal {
+                                &AMEND_REFUSAL
+                            } else {
+                                &BACKPACK
+                            },
+                            response.body,
+                            &e,
+                        )
                     };
                     let error = match fact {
                         Ok(error) => error,
@@ -1282,6 +1527,12 @@ impl Backpack {
                             return;
                         }
                     };
+                    if amend_refusal
+                        && let Step::Place { order, .. } = &request.step
+                        && let Some(job) = self.trading.jobs.get_mut(&request.command)
+                    {
+                        job.refused = Some(order.clone());
+                    }
                     self.managed_trade_failed(cx, request, error, true);
                     return;
                 }
@@ -1324,6 +1575,207 @@ impl Backpack {
         }
         self.trading.jobs.remove(&request.command);
         cx.notice(Level::Warn, code::ORDER_REJECTED, &error.message);
+    }
+
+    fn continue_guarded(&mut self, cx: &mut Cx<'_, Pending>, request: &Request) {
+        let managed = request.managed.as_ref().expect("a streamed amend");
+        let job = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .expect("an active amend");
+        let protect = job.protect.as_ref().expect("a guarded amend");
+        let symbol = protect.original.symbol.clone();
+        let what = what(protect.original.kind);
+        if let Some(next) = job.steps.get(job.next).filter(|_| !job.restoring) {
+            match cx.continue_serial_plan(
+                &managed.plan,
+                &managed.slot,
+                &managed.context,
+                serial_call(next),
+            ) {
+                Ok(_) => self.run_trade(cx, request.command),
+                Err(reason) => {
+                    let _ = cx.fail_plan(&managed.plan, reason.venue_error());
+                }
+            }
+            return;
+        }
+        let _ = cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context);
+        if job.restoring {
+            let mut error = VenueError::new(format!(
+                "Your {symbol} {what} is unchanged: its replacement was refused, so the original was put back as a new order"
+            ));
+            error.protection = Some(safe_cex_engine::error::Protection::Restored);
+            error.presents = true;
+            let _ = cx.fail_plan(
+                &managed.plan,
+                job.write_plan.attach(error.partial_ids(&job.ids)),
+            );
+        } else {
+            let _ = cx.done_plan(&managed.plan, serde_json::to_string(&job.ids).unwrap());
+        }
+    }
+
+    fn guarded_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+        data: bool,
+    ) {
+        let managed = request.managed.as_ref().expect("a streamed amend");
+        let job = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .expect("an active amend");
+        let protect = job.protect.as_ref().expect("a guarded amend");
+        let (symbol, side, kind) = (
+            protect.original.symbol.clone(),
+            protect.original.side,
+            protect.original.kind,
+        );
+        let what = what(kind);
+        let refused = job.refused.is_some();
+        // A definite refusal is put back only once an open-orders read shows
+        // nothing like the replacement resting.
+        if request.step.places()
+            && refused
+            && !job.restoring
+            && job.ids.is_empty()
+            && protect.restorable
+            && data
+        {
+            let next = Step::OpenOrders {
+                symbol: protect.original.symbol.clone(),
+            };
+            let call = serial_call(&next);
+            if cx
+                .continue_serial_plan(&managed.plan, &managed.slot, &managed.context, call)
+                .is_ok()
+            {
+                let job = self.trading.jobs.get_mut(&request.command).unwrap();
+                append_step(job, next);
+                return self.run_trade(cx, request.command);
+            }
+        }
+        let mut error = error;
+        error.presents = true;
+        let removed = |detail: &str| {
+            format!("Your {symbol} {what} was removed: {detail}, please re-place it")
+        };
+        let (message, protection) = match (&request.step, job.restoring, refused) {
+            (Step::OpenOrders { .. }, ..) => (
+                removed("its replacement was refused and nothing could prove it absent"),
+                Some(safe_cex_engine::error::Protection::Unprotected),
+            ),
+            (_, true, true) => (
+                removed("its replacement and the put-back were both refused"),
+                Some(safe_cex_engine::error::Protection::Unprotected),
+            ),
+            (_, true, false) => (
+                format!(
+                    "Your {symbol} {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                ),
+                None,
+            ),
+            (_, false, true) => (
+                removed("its replacement was refused"),
+                Some(safe_cex_engine::error::Protection::Unprotected),
+            ),
+            (_, false, false) => (gone_text(&symbol, side, kind, true), None),
+        };
+        error.message = format!("{message} ({})", error.message);
+        error.protection = protection;
+        if data {
+            let _ = cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context);
+        }
+        let _ = cx.fail_plan(&managed.plan, job.write_plan.attach(error));
+    }
+
+    fn proof_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Open {
+            #[serde(default)]
+            client_id: Option<u32>,
+            #[serde(default)]
+            side: String,
+            #[serde(default)]
+            trigger_price: Option<crate::wire::Number>,
+            #[serde(default)]
+            trigger_quantity: Option<crate::wire::Number>,
+        }
+        let rows = (200..300)
+            .contains(&response.status)
+            .then(|| serde_json::from_str::<Vec<Open>>(response.body).ok())
+            .flatten();
+        let Some(rows) = rows else {
+            let error = VenueError::new("Backpack open-orders proof read failed");
+            return self.guarded_failed(cx, request, error, true);
+        };
+        let job = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .expect("an active amend");
+        let replacement = job.refused.as_ref().expect("a refused replacement");
+        let number = |text: &Option<String>| text.as_deref().and_then(|t| t.parse::<f64>().ok());
+        let resting = rows.iter().any(|row| match replacement.client_id {
+            Some(id) => row.client_id == Some(id),
+            None => {
+                row.side == replacement.side
+                    && row.trigger_price.map(|n| n.0) == number(&replacement.trigger_price)
+                    && row.trigger_quantity.map(|n| n.0) == number(&replacement.trigger_quantity)
+            }
+        });
+        let managed = request.managed.as_ref().expect("a streamed amend");
+        if resting {
+            let protect = job.protect.as_ref().expect("a guarded amend");
+            let order = &protect.original;
+            let mut error = VenueError::new(gone_text(&order.symbol, order.side, order.kind, true));
+            error.presents = true;
+            let _ = cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context);
+            let _ = cx.fail_plan(&managed.plan, job.write_plan.attach(error));
+            return;
+        }
+        let protect = job.protect.as_ref().expect("a guarded amend");
+        let restore = Step::Place {
+            order: protect.restore.clone(),
+            optional: false,
+        };
+        // A 408 or 5xx on the put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        let words = format!(
+            "Your {} {}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders",
+            protect.original.symbol,
+            what(protect.original.kind)
+        );
+        if let Err(reason) = cx.present_plan_failure(&managed.plan, words) {
+            let error = VenueError::new(reason.venue_error().message);
+            return self.guarded_failed(cx, request, error, true);
+        }
+        if let Err(reason) = cx.continue_serial_plan(
+            &managed.plan,
+            &managed.slot,
+            &managed.context,
+            serial_call(&restore),
+        ) {
+            let error = VenueError::new(reason.venue_error().message);
+            return self.guarded_failed(cx, request, error, true);
+        }
+        let job = self.trading.jobs.get_mut(&request.command).unwrap();
+        append_step(job, restore);
+        job.restoring = true;
+        // The put-back is judged by its own answer, not the replacement's.
+        job.refused = None;
+        self.run_trade(cx, request.command);
     }
 
     fn record_write(&mut self, request: &Request, results: Vec<ElementResult>) {
@@ -1419,6 +1871,18 @@ impl Backpack {
                 });
             }
         }
+        if self
+            .trading
+            .jobs
+            .get(&request.command)
+            .is_some_and(|job| job.protect.is_some())
+            && (request.step.places() || request.step.reads_proof())
+        {
+            if let Some(job) = self.trading.jobs.get_mut(&request.command) {
+                record_failure(&mut job.write_plan, &job.elements[request.write], &error);
+            }
+            return self.guarded_failed(cx, request, error, data);
+        }
         let gone = match &request.step {
             Step::Place { order, .. } => self
                 .trading
@@ -1475,13 +1939,7 @@ impl Backpack {
         if pending {
             record_failure(&mut job.write_plan, &job.elements[request.write], &error);
         }
-        job.skip_children = matches!(
-            request.step,
-            Step::Place {
-                optional: false,
-                ..
-            }
-        );
+        job.skip_children = request.step.is_entry();
         if job.failure.is_none() {
             job.failure = Some(error);
         }
@@ -1868,6 +2326,9 @@ impl Request {
             Step::Cancel { id, .. } => ("cancel", vec![id.as_str()], vec![]),
             Step::CancelAll { .. } => ("cancelAll", vec![], vec![]),
             Step::Leverage(..) => ("leverage", vec![], vec![]),
+            Step::OpenOrders { .. } => {
+                return Err(safe_cex_engine::request_context::Error::Invalid);
+            }
         };
         let symbol = match &self.step {
             Step::CancelAll { symbol } => Some(symbol.as_str()),
