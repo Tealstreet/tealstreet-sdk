@@ -3,7 +3,8 @@ import type { Candle, FetchedLeverage, OrderBook, OrderFillEvent, Writable } fro
 import type { Store, StoreUpdate } from './store.interface';
 
 import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
-import { MarginType, OrderSide, PositionMode } from '../types';
+import { MarginType, PositionMode } from '../types';
+import { readFillFrame } from './fillFrames';
 import { readBalanceFrame } from './balanceFrames';
 import { readMarketFrame } from './marketFrames';
 import { readOrderFrame } from './orderFrames';
@@ -367,29 +368,10 @@ export class FrameApplier {
   }
 
   fills(frame: Frame): OrderFillEvent[] {
-    const rows = frame.fills();
-    const fills: OrderFillEvent[] = [];
-    for (let i = 0; i < (rows?.count ?? 0); i++) {
-      const fallback = rows!.symbol?.(i);
-      const symbol = this.invalidMarketFrames.has(frame)
-        ? fallback
-        : (this.frameMarkets.get(frame)?.symbols[rows!.market[i]] ?? this.symbol(rows!.market[i], fallback));
-      if (symbol === undefined) throw new FrameApplyError('Fill identity requires a market snapshot');
-      const realizedPnl = rows!.realizedPnl?.[i];
-      const fee = rows!.fee?.[i];
-      fills.push({
-        id: rows!.fillId?.(i) ?? rows!.orderId(i),
-        orderId: rows!.orderId(i),
-        symbol,
-        ...([OrderSide.Buy, OrderSide.Sell][rows!.side[i]] !== undefined && {
-          side: [OrderSide.Buy, OrderSide.Sell][rows!.side[i]],
-        }),
-        price: rows!.rows[i * 2],
-        amount: rows!.rows[i * 2 + 1],
-        ...(realizedPnl !== undefined && Number.isFinite(realizedPnl) && { realizedPnl }),
-        ...(fee !== undefined && Number.isFinite(fee) && { fee }),
-      } as OrderFillEvent);
+    try {
+      return readFillFrame(frame);
+    } catch (error) {
+      throw new FrameApplyError(error instanceof Error ? error.message : String(error));
     }
-    return fills;
   }
 }

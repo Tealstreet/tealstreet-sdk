@@ -19,6 +19,7 @@ pub mod history;
 mod id_map;
 pub(crate) use id_map::IdMap;
 mod balance_output;
+mod fill_output;
 pub mod json;
 pub mod log;
 mod market_output;

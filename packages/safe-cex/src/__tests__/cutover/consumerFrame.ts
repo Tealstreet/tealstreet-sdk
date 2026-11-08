@@ -8,7 +8,7 @@ const none = 0xffffffff;
 export function consumerFrame(
   data: Partial<StoreData>,
   delta?: number[],
-  events = false,
+  events: boolean | { fillId: string; fillSymbol: string } = false,
   marketSymbols: readonly string[] = data.markets?.map((market) => market.symbol) ?? ['BTCUSDT'],
   /** The venue's quantity-units code, written into market flag bits 8-11. */
   quantityUnits = 0,
@@ -284,7 +284,19 @@ export function consumerFrame(
   if (events) {
     table(5, [0, 1, 1, 0], [[99, 2, 2, 101, 3, 3]]);
     table(6, [1, 0, ref('1m')], [[1_700_000_000, 100, 102, 99, 101, 5]]);
-    table(11, [1, ref('order-1'), 0, 0], [[100, 0.3]]);
+    if (typeof events === 'object') {
+      const fills = new Uint8Array(56);
+      const fillView = new DataView(fills.buffer);
+      [1, ref('order-1'), 0, 0].forEach((word, i) => fillView.setUint32(i * 4, word, true));
+      [100, 0.3].forEach((value, i) => fillView.setFloat64(16 + i * 8, value, true));
+      fillView.setUint32(32, ref(events.fillSymbol), true);
+      fillView.setUint32(36, ref(events.fillId), true);
+      fillView.setFloat64(40, NaN, true);
+      fillView.setFloat64(48, NaN, true);
+      sections.push({ kind: 11, revision: 2, bytes: fills });
+    } else {
+      table(11, [1, ref('order-1'), 0, 0], [[100, 0.3]]);
+    }
   }
   const encoded = strings.map((s) => new TextEncoder().encode(s));
   const bytes = new Uint8Array(align8(4 + (strings.length + 1) * 4 + encoded.reduce((n, s) => n + s.length, 0)));

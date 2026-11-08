@@ -26,6 +26,9 @@ import { PositionMode } from './generated/PositionMode';
 import { PositionSide } from './generated/PositionSide';
 
 export type { Position, OptionGreeks, Market, OptionRight, OptionTerms, Ticker };
+export type { OrderFillEvent } from './generated/OrderFillEvent';
+export type { Execution } from './generated/Execution';
+export type { PublicTrade } from './generated/PublicTrade';
 export { PositionSide, PositionMode, MarginType };
 
 export type ExchangeName =
@@ -487,17 +490,6 @@ export type AccountGreeks = {
 /** [last, mark, index] source receipt-clock milliseconds; not seconds; not snapshot receipt time. Null is unobserved; zero is valid. */
 export type TickerObservedAt = NonNullable<Ticker['observedAt']>;
 
-export type PublicTrade = {
-  readonly id: string;
-  readonly symbol: string;
-  readonly price: number;
-  readonly qty: number;
-  readonly quoteQty?: number;
-  readonly timestamp: number; // ms
-  // which side is taker
-  readonly side: OrderSide;
-};
-
 export { OrderSide } from './generated/OrderSide';
 export { OrderStatus } from './generated/OrderStatus';
 export { OrderType } from './generated/OrderType';
@@ -595,54 +587,6 @@ export type Candle = {
   readonly lastSide?: OrderSide;
 };
 
-export type Execution = {
-  readonly id?: string;
-  /** SECONDS, unlike `HistoricalTrade.time` which is milliseconds. */
-  readonly timestamp: number;
-  readonly symbol: string;
-  readonly orderId?: string;
-  readonly price: number;
-  readonly qty: number;
-  readonly side: OrderSide;
-  readonly commission?: number;
-  readonly commissionAsset?: string;
-  /**
-   * The position leg this fill belongs to, for hedge-mode accounts.
-   *
-   * Absent means the venue did not report one — NOT that the account is
-   * one-way. Consumers that need a concrete leg default to `'both'`
-   * themselves. Map a present value through `normalizeExecutionPositionSide`;
-   * never pass a raw venue string, whose spellings include `net`, `Merged`,
-   * `BOTH` and `Close Long`.
-   */
-  readonly positionSide?: PositionSide | 'both';
-  /**
-   * Venue-reported realized PnL for this fill, **GROSS of fees** — the fee is
-   * `commission` on the same row and must not be netted twice.
-   *
-   * Every venue populating this today (binance `realizedPnl`, okx `fillPnl`,
-   * blofin `fillPnl`, hyperliquid `closedPnl`, paradex `realized_pnl`) reports
-   * gross. Bybit's closed-PnL figure is NET, so if this is ever populated from
-   * that source it must be converted first — summing the two conventions
-   * produces a residual exactly the size of the fee term and looks like a
-   * mapper bug. Absent where unreported.
-   */
-  readonly realizedPnl?: number;
-  readonly maker?: boolean;
-  /**
-   * What the VENUE says the integrator (us) earned on this fill — distinct from
-   * `commission`, which is what the USER paid the exchange.
-   *
-   * Almost always absent: of the twelve venues we attach broker attribution to,
-   * only hyperliquid reports it (`builderFee` on `userFills`). Everywhere else
-   * our cut is COMPUTED from the fill — see Tealstreet's revenue attribution, outside this package — and this field
-   * stays undefined. It is not a fallback for that computation; it is the only
-   * thing the computation can be checked against, on the one venue that offers it.
-   */
-  readonly venueReportedRevenue?: number;
-  readonly venueReportedRevenueAsset?: string;
-};
-
 export type OHLCVOptions = {
   readonly symbol: string;
   readonly interval: Timeframe;
@@ -673,12 +617,6 @@ export type OHLCVSOptions = {
  * positions). Venues reporting a cumulative total convert with
  * `utils/incrementalFills`.
  */
-export type OrderFillEvent = Pick<Order, 'id' | 'amount' | 'price' | 'side' | 'symbol'> & {
-  orderId?: string; // Order ID for tracking fills per order (used by chaser)
-  realizedPnl?: number;
-  fee?: number;
-};
-
 export { LogSeverity } from '@tealstreet/logging/src/LogSeverity';
 
 export type OrderBookOrders = {

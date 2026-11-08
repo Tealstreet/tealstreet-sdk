@@ -55,10 +55,12 @@ Apply failures request a bounded local engine snapshot or worker snapshot RPC;
 snapshots contain no executions, so deliver valid original FILLS once. Listener
 failures are distinct from protocol failures and do not trigger snapshot loops.
 
-FILLS revision 2 carries optional native execution IDs and the existing financial
-columns. Event `id` uses that ID when present, falling back to `orderId`; order
-attribution always uses the separate `orderId`. Legacy revision-1 frames remain
-readable both with and without the optional #1430 financial tails.
+FILLS revision 2 carries the native-computed public event ID and financial
+columns. Rust selects a reported execution ID or the order ID; the decoder
+requires that explicit result and a native symbol, including before MARKETS.
+Order attribution keeps the separate `orderId`. NaN is the binary absent-value
+sentinel; reported zero survives. Replace producer and reader together: legacy
+frames without an explicit event ID are refused rather than repaired in JS.
 
 Initial Rust SDK readiness requires successfully decoded catalogue and account
 sections as well as native STATUS flags. A failed section revokes its decoded

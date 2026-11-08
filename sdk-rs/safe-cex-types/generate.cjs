@@ -109,10 +109,21 @@ function publishModels() {
   for (const name of ['Position', 'Order', 'PlaceOrderOpts', 'UpdateOrderOpts', 'Market', 'Ticker']) copy(name);
 }
 
+function publishExecution() {
+  const destination = path.resolve(__dirname, '../../packages/safe-cex/src/generated');
+  fs.mkdirSync(destination, { recursive: true });
+  for (const name of ['OrderFillEvent', 'Execution', 'PublicTrade']) {
+    const source = fs.readFileSync(path.join(__dirname, 'bindings', `${name}.ts`), 'utf8');
+    // Order owns this enum; consumers use its stable public identity.
+    fs.writeFileSync(path.join(destination, `${name}.ts`), source.replace('from "./OrderSide"', 'from "../types"'));
+  }
+}
+
 module.exports = { transform, stringLiterals };
 
 if (require.main === module) {
   generate(path.join(__dirname, 'bindings'));
   publishModels();
+  publishExecution();
   require('./generate-balance.cjs').generate();
 }

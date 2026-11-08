@@ -13,6 +13,8 @@ pub mod position;
 pub(crate) use position::serialize_position_fields;
 pub use position::{Position, PositionExtra, PositionOption};
 
+mod execution;
+pub use execution::{Execution, OrderFillEvent, PublicTrade};
 pub mod model_field;
 pub use model_field::ModelField;
 mod info_record;
@@ -325,24 +327,6 @@ pub use balance::{Balance, CoinBalance, CurrencyBalance};
 pub mod ticker;
 pub use ticker::Ticker;
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct PublicTrade {
-    pub id: String,
-    pub symbol: String,
-    pub price: f64,
-    pub qty: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub quote_qty: Option<f64>,
-    pub timestamp: f64,
-    pub side: OrderSide,
-}
-
 /// One option's prices and implied volatilities. IVs are fractions; 0 means unavailable.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -437,72 +421,6 @@ pub struct Candle {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_side: Option<OrderSide>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct Execution {
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub id: Option<String>,
-    pub timestamp: f64,
-    pub symbol: String,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub order_id: Option<String>,
-    pub price: f64,
-    pub qty: f64,
-    pub side: OrderSide,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub commission: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub commission_asset: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[ts(inline)]
-    pub position_side: Option<ExecutionPositionSide>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub realized_pnl: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub maker: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub venue_reported_revenue: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub venue_reported_revenue_asset: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -2666,8 +2584,8 @@ pub mod extra_model;
 pub mod model_utils;
 pub mod symbol_converter;
 pub use extra_model::{
-    OrderFillEvent, PublicDataSource, PublicDataStore, READ_ONLY_ORDER_STATUSES,
-    TIMEFRAME_TO_SECONDS, Writable, WritableStoreData,
+    PublicDataSource, PublicDataStore, READ_ONLY_ORDER_STATUSES, TIMEFRAME_TO_SECONDS, Writable,
+    WritableStoreData,
 };
 // Shared gateway wire models are below venues; registry descriptors remain above.
 pub mod accounts;
@@ -2681,6 +2599,8 @@ pub mod strict_decode;
 mod strict_codecs {
     #[cfg(test)]
     use super::CoinBalance;
+    #[cfg(test)]
+    use super::OrderFillEvent;
     #[cfg(test)]
     use super::{
         AccountGreeks, BothPositionSide, Candle, ClosedPnlEntry, DisplayedMargin, ExchangeAccount,
@@ -3130,30 +3050,6 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
-    #[serde(remote = "super::PublicTrade")]
-    #[serde(rename_all = "camelCase")]
-    struct WirePublicTrade {
-        id: String,
-        symbol: String,
-        price: f64,
-        qty: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        quote_qty: Option<f64>,
-        timestamp: f64,
-        side: OrderSide,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::PublicTrade {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WirePublicTrade::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
     #[serde(remote = "super::OptionQuote")]
     #[serde(rename_all = "camelCase")]
     struct WireOptionQuote {
@@ -3275,77 +3171,6 @@ mod strict_codecs {
     impl<'de> serde::Deserialize<'de> for super::Candle {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             WireCandle::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::Execution")]
-    #[serde(rename_all = "camelCase")]
-    struct WireExecution {
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        id: Option<String>,
-        timestamp: f64,
-        symbol: String,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        order_id: Option<String>,
-        price: f64,
-        qty: f64,
-        side: OrderSide,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        commission: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        commission_asset: Option<String>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        position_side: Option<ExecutionPositionSide>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        realized_pnl: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        maker: Option<bool>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        venue_reported_revenue: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        venue_reported_revenue_asset: Option<String>,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::Execution {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireExecution::deserialize(crate::strict_decode::object(deserializer))
         }
     }
 
@@ -5739,6 +5564,7 @@ mod strict_codecs {
             crate::strict_decode::tests::record::<AccountGreeks>("AccountGreeks");
             crate::strict_decode::tests::record::<Candle>("Candle");
             crate::strict_decode::tests::record::<Execution>("Execution");
+            crate::strict_decode::tests::record::<OrderFillEvent>("OrderFillEvent");
             crate::strict_decode::tests::record::<OrderBookOrders>("OrderBookOrders");
             crate::strict_decode::tests::record::<OrderBook>("OrderBook");
 
