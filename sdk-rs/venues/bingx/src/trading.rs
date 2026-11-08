@@ -6,8 +6,6 @@ use crate::Pending;
 mod context;
 #[path = "trading/protection.rs"]
 pub(crate) mod protection;
-#[path = "trading/split_plan.rs"]
-mod split_plan;
 #[path = "trading/venue_state.rs"]
 mod venue_state;
 
@@ -40,7 +38,6 @@ const CANCEL_ALL: &str = "/openApi/swap/v2/trade/allOpenOrders";
 const AMEND: &str = "/openApi/swap/v1/trade/amend";
 const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
 const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
-const MAX_PLAN_WRITES: usize = 10_000;
 
 pub struct Request {
     command: CommandId,
@@ -114,24 +111,11 @@ enum Call {
     },
 }
 struct Step {
-    plan_len: usize,
-    order: Option<split_plan::WireOrder>,
     receipts: Vec<OrderIdentityReceipt>,
     method: Method,
     path: &'static str,
     params: Params,
     call: Call,
-}
-
-fn validate_write(step: &Step) -> Result<(), VenueError> {
-    if step.plan_len > MAX_PLAN_WRITES {
-        return Err(not_sent("Order plan would require too many native writes")
-            .kind(ErrorKind::InvalidInput));
-    }
-    match &step.order {
-        Some(order) => split_plan::validate_write(order),
-        None => Ok(()),
-    }
 }
 #[derive(Default)]
 struct Job {
@@ -605,11 +589,6 @@ impl Trading {
         }
         match result {
             Ok(job) => {
-                if let Err(error) = job.steps.iter().try_for_each(validate_write) {
-                    on_entry(cx);
-                    entry.reject(cx, error);
-                    return true;
-                }
                 let admitted = if job.continue_on_error {
                     entry
                         .admit_independent(cx, job.steps.len())
@@ -1210,8 +1189,6 @@ impl Trading {
                     && let Some(params) = run.job.restore.take()
                 {
                     run.job.steps.push_back(Step {
-                        plan_len: 1,
-                        order: None,
                         receipts: Vec::new(),
                         method: Method::Post,
                         path: ORDER,
@@ -1291,10 +1268,6 @@ impl Trading {
             if orders.len() == 1 && (o.stop_loss.is_some() || o.take_profit.is_some()) {
                 job.entry_with_brackets = Some(o.symbol.clone());
             }
-        }
-        let total = job.steps.len();
-        for step in &mut job.steps {
-            step.plan_len = total;
         }
         Ok(job)
     }
@@ -1393,6 +1366,7 @@ impl Trading {
         if full && position.is_none() {
             return Err("Full-position stop requires an opposite-side position".into());
         }
+        // A close stays out, as below: dust left by a partial close must still be closable.
         if !full && (amount <= 0.0 || (!closing && amount < market.limits.amount.min)) {
             return Err("Order quantity is below the market minimum".into());
         }
@@ -1407,8 +1381,14 @@ impl Trading {
         if price.is_some_and(|p| !p.is_finite() || p <= 0.0) {
             return Err("Order price rounds to zero".into());
         }
+        // Closes stay out: nothing says the venue holds a reduce to this, and a stuck close is worse.
         let min_value = self.min_order_value.get(&market.id).copied().unwrap_or(0.0);
         let reference = price.or_else(|| cx.store.ticker(&o.symbol).map(|t| t.last));
+        if !closing && reference.is_some_and(|p| p > 0.0 && amount * p < min_value) {
+            return Err(format!(
+                "Order value is below the BingX minimum of {min_value} USDT"
+            ));
+        }
         let kind = match o.kind {
             OrderType::Market => "MARKET",
             OrderType::Limit => "LIMIT",
@@ -1444,8 +1424,8 @@ impl Trading {
         } else {
             split(size, market.limits.amount.max, market.precision.amount)?
         };
-        if !full {
-            split_plan::validate_total(o.amount, &lots, market.precision.amount)?;
+        if !full && !closing && lots.iter().any(|lot| *lot < market.limits.amount.min) {
+            return Err("Split order lot is below the market minimum".into());
         }
         if o.client_order_id.is_some() && lots.len() != 1 {
             return Err("Client order id requires exactly one native order".into());
@@ -1467,13 +1447,6 @@ impl Trading {
                 });
             }
             let mut step = place_step(p);
-            step.order = Some(split_plan::WireOrder::new(
-                (!full).then_some(lot),
-                price,
-                reference,
-                market,
-                min_value,
-            ));
             step.receipts = receipts;
             out.push(step);
         }
@@ -1514,15 +1487,7 @@ impl Trading {
                 bracket = bracket.boolean("reduceOnly", true);
             }
             for &lot in &lots {
-                let mut step = place_step(bracket.clone().num("quantity", lot));
-                step.order = Some(split_plan::WireOrder::new(
-                    Some(lot),
-                    Some(trigger),
-                    Some(trigger),
-                    market,
-                    min_value,
-                ));
-                out.push(step);
+                out.push(place_step(bracket.clone().num("quantity", lot)));
             }
         }
         Ok(out)
@@ -1540,8 +1505,6 @@ impl Trading {
                 .ok_or_else(|| format!("Order {id} not found"))?;
             let market = cx.store.market(&o.symbol).ok_or("Order market not found")?;
             job.steps.push_back(Step {
-                plan_len: 1,
-                order: None,
                 receipts: Vec::new(),
                 method: Method::Delete,
                 path: ORDER,
@@ -1764,7 +1727,6 @@ impl Trading {
             return Err("BingX cannot move this limit order's price without dropping its TP/SL. Cancel it and place it again at the new price with its TP/SL, or change its size instead".into());
         }
         let base = Params::new().str("symbol", &market.id);
-        let min_value = self.min_order_value.get(&market.id).copied().unwrap_or(0.);
         if let Some(amount) = amount {
             let quantity =
                 num::adjust(positive(Some(amount), "Quantity")?, market.precision.amount);
@@ -1776,8 +1738,7 @@ impl Trading {
             {
                 return Err("Amended quantity must change and remain within market limits".into());
             }
-            split_plan::validate_total(amount, &[quantity], market.precision.amount)?;
-            let mut job = one(
+            return Ok(one(
                 Method::Post,
                 AMEND,
                 base.str("orderId", id).num("quantity", quantity),
@@ -1787,17 +1748,7 @@ impl Trading {
                     quantity,
                     step: market.precision.amount,
                 },
-            );
-            if let Some(step) = job.steps.front_mut() {
-                step.order = Some(split_plan::WireOrder::new(
-                    Some(quantity),
-                    Some(o.price),
-                    Some(o.price),
-                    market,
-                    min_value,
-                ));
-            }
-            return Ok(job);
+            ));
         }
         let price = num::adjust(positive(price, "Price")?, market.precision.price);
         if !price.is_finite() || price <= 0.0 || price == o.price {
@@ -1838,20 +1789,11 @@ impl Trading {
                 old_id: o.id.clone(),
             },
         );
-        if let Some(step) = job.steps.front_mut() {
-            step.order = Some(split_plan::WireOrder::new(
-                Some(o.amount),
-                Some(price),
-                Some(price),
-                market,
-                min_value,
-            ));
-            step.receipts = vec![OrderIdentityReceipt {
-                symbol: o.symbol.clone(),
-                kind: OrderIdentityKind::ClientOrderId,
-                identity,
-            }];
-        }
+        job.steps.front_mut().unwrap().receipts = vec![OrderIdentityReceipt {
+            symbol: o.symbol.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity,
+        }];
         job.replaces_order = Some(o.symbol.clone());
         if o.reduce_only {
             let guard = protection::Guard {
@@ -1889,8 +1831,6 @@ impl Trading {
         }
         let leverage = input.clamp(market.limits.leverage.min, market.limits.leverage.max);
         let step = |side| Step {
-            plan_len: 1,
-            order: None,
             receipts: Vec::new(),
             method: Method::Post,
             path: crate::paths::LEVERAGE,
@@ -1940,8 +1880,6 @@ impl Trading {
 fn one(method: Method, path: &'static str, params: Params, call: Call) -> Job {
     Job {
         steps: VecDeque::from([Step {
-            plan_len: 1,
-            order: None,
             receipts: Vec::new(),
             method,
             path,
@@ -1953,8 +1891,6 @@ fn one(method: Method, path: &'static str, params: Params, call: Call) -> Job {
 }
 fn place_step(params: Params) -> Step {
     Step {
-        plan_len: 1,
-        order: None,
         receipts: Vec::new(),
         method: Method::Post,
         path: ORDER,

@@ -28,25 +28,13 @@ fully preflighted before any order is sent. Caller IDs are honored verbatim on
 one ordinary order or rejected before writes. Leverage changes without a side
 update both hedge sides sequentially, matching the engine's symbol-level API.
 
-Every split lot must satisfy native min/max quantity, step and minimum notional
-before the first write in the batch. Notional uses the actual rounded LIMIT
-price, or the ticker's last price for MARKET orders; a required missing or
-nonpositive reference refuses the plan. Checked decimal arithmetic verifies
-inclusive notional bounds and exact quantity conservation. Invalid layouts are
-refused as InvalidInput/NotSent with zero requests, without resizing or
-rebalancing. TP/SL, time-in-force and reduce-only fields keep their existing
-per-lot values. Explicit reduce-only quantities also obey these minima, so a
-below-minimum dust intent refuses locally. The separate native full-position
-close path keeps its existing position-derived quantity and close flag.
-
-Serial placement preflights every row, including a market row with a missing
-last-price reference, before any earlier row can write. A placement plan is
-bounded to 10,000 native writes across all rows and TP/SL children. Submitted
-limit/trigger prices must also match a positive native tick, and each TP/SL
-child satisfies minimum notional at its own trigger price. Ordinary quantity
-amendments validate their new wire quantity at the existing order price;
-ordinary atomic cancel-replace validates its unchanged quantity at the new
-wire price before it can cancel anything. Both reuse the placement validator.
+Legacy TS formats all placement rows before sending them, but does not validate
+every lot or TP/SL child for notional, require a MARKET last-price reference,
+or impose a combined native-write count limit. Ordinary quantity amendment
+checks normalized quantity bounds; atomic price replacement leaves its new
+notional and quantity rules to the venue. These known partial-placement cases
+retain the pre-existing behavior rather than adding a new validation gate.
+Protective put-back, restore and replacement behavior is unchanged.
 
 An ordinary cancel answered `109400` with exactly `order not exist`, or `109421`,
 uses the same satisfied-cancel path as `80016`: the command completes, but its
