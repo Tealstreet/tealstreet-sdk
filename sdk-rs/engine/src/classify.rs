@@ -370,12 +370,6 @@ impl Fact {
         &self.error
     }
 
-    /// Keep classification and native evidence while presenting uncertainty explicitly.
-    pub fn with_unknown_guidance(mut self) -> Self {
-        self.error = self.error.with_unknown_guidance();
-        self
-    }
-
     /// Native order IDs this reply carried: reconciliation evidence only.
     pub fn with_order_ids(mut self, order_ids: &[String]) -> Self {
         self.error = self.error.partial_ids(order_ids);

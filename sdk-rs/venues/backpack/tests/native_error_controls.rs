@@ -7,11 +7,13 @@ use support::managed::*;
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 const UNKNOWN_MESSAGE: &str =
     "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders";
 
 fn assert_unknown(error: &VenueError) {
     assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
     assert_eq!(error.message, UNKNOWN_MESSAGE);
     assert!(!error.message.to_ascii_lowercase().contains("rejected"));
 }
@@ -109,11 +111,7 @@ fn unknown_child_stops(body: &str, expected_code: Option<&str>, expected_message
         .collect();
     assert_eq!(failures.len(), 1);
     let error = failures.first().ok_or("missing native failure")?;
-    assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert_eq!(
-        error.message,
-        "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
-    );
+    assert_unknown(error);
     let warning = out
         .iter()
         .find_map(|action| match action {
