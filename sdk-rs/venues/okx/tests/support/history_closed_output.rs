@@ -3,9 +3,9 @@
 #[path = "../support/mod.rs"]
 mod support;
 
-use support::*;
 use safe_cex_engine::{Action, Engine, Event, Notice};
 use safe_cex_venue_okx::Okx;
+use support::*;
 
 const NOW: f64 = 1_710_000_000_000.0;
 
