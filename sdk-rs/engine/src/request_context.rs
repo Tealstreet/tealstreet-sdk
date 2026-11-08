@@ -2102,12 +2102,13 @@ impl CommandWrites {
 
     fn failure_projection(
         &self,
-        fallback: VenueError,
+        mut fallback: VenueError,
         note: Option<&str>,
     ) -> Result<(VenueError, evidence::EvidenceBudget), Error> {
         if self.sealed {
             return Err(Error::State);
         }
+        let elements = fallback.elements.take();
         let presented = (fallback.protection.is_some() || fallback.presents)
             .then(|| (fallback.message.clone(), fallback.protection));
         let mut projected_budget = self.evidence;
@@ -2206,6 +2207,11 @@ impl CommandWrites {
                 error
             }
         };
+        // Native-error selection must retain the complete logical plan journal.
+        // Aggregate transport classification below remains engine-owned.
+        if elements.is_some() {
+            error.elements = elements;
+        }
         error.outcome = if self.inherited_uncertain {
             Some(Outcome::Unknown)
         } else if !any_released {
