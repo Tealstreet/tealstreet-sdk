@@ -225,7 +225,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_851_392,
   bitunix: 1_863_680,
   blofin: 2_001_920,
-  bybit: 2_270_208,
+  bybit: 2_281_472,
   coinbase: 1_953_792,
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
@@ -243,7 +243,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kraken: 2_147_328,
   krakenspot: 2_147_328,
   kucoin: 1_838_080,
-  kucoinspot: 2_357_248,
+  kucoinspot: 2_405_376,
   lighter: 2_093_056,
   'lighter-robinhood': 2_093_056,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
