@@ -34,9 +34,10 @@ export const SPOT_WS = 'wss://open-api-ws.bingx.com/market';
 type Params = Record<string, string | number>;
 export type SpotFixtureTransport = (method: 'GET' | 'POST', path: string, params: Params) => Promise<string>;
 type Row = Record<string, unknown>;
+const isRow = (value: unknown): value is Row => value !== null && typeof value === 'object' && !Array.isArray(value);
 const object = (value: unknown): Row => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid Spot object');
-  return value as Row;
+  if (!isRow(value)) throw new Error('Invalid Spot object');
+  return value;
 };
 const array = (value: unknown): unknown[] => {
   if (!Array.isArray(value)) throw new Error('Missing Spot list');

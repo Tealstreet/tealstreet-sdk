@@ -21,7 +21,8 @@ describe('BingX Spot native-only admission', () => {
     expect(exchangeMetadata[name].features.positions).toBe(false);
   });
   it('declares the BingX hosted-signing contract without enabling factories', async () => {
-    expect(deriveBridgeConstruction(name, {} as ExchangeOptions)).toMatchObject({ spot: true, dispatchSigning: true });
+    const options: ExchangeOptions = { key: '', secret: '' };
+    expect(deriveBridgeConstruction(name, options)).toMatchObject({ spot: true, dispatchSigning: true });
     expect(deriveRemoteSigningPolicy(name)).toMatchObject({
       enabled: true,
       payloadSupported: false,
