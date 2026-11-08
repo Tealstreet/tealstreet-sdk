@@ -558,7 +558,7 @@ fn private_ws_auth_waits_for_provider_at_native_ready_boundary() {
 }
 fn placement(id: &str) -> safe_cex_engine::model::PlaceOrderOpts {
     let mut order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_str(
-        r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.002,"price":90.0}"#,
+        r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.0021,"price":90.04}"#,
     )
     .unwrap();
     order.client_order_id = Some(id.into());

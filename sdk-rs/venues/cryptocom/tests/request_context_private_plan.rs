@@ -47,7 +47,7 @@ fn whole_plan_admits_128_writes_and_refuses_129_before_progress_or_io() {
             .map(|index| {
                 serde_json::from_value(serde_json::json!({
                     "symbol":"BTCUSD-PERP", "type":"limit", "side":"buy",
-                    "amount":0.002, "price":90.0, "clientOrderId":format!("batch-{index}")
+                    "amount":0.0021, "price":90.04, "clientOrderId":format!("batch-{index}")
                 }))
                 .unwrap()
             })

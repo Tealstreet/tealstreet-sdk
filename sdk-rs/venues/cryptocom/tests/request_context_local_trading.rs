@@ -103,7 +103,7 @@ const REFUSALS: [Case; 7] = [
     Case::Plan,
 ];
 fn placement() -> PlaceOrderOpts {
-    serde_json::from_str(r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.002,"price":90.0,"clientOrderId":"caller-123"}"#).unwrap()
+    serde_json::from_str(r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.0021,"price":90.04,"clientOrderId":"caller-123"}"#).unwrap()
 }
 fn stored_order() -> Order {
     Order {
@@ -512,8 +512,8 @@ fn native_valid_write_keeps_primary_bytes_and_progress_before_http() {
     let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
     assert_eq!(body["method"], "private/create-order");
     assert_eq!(body["api_key"], "local-fixture-identity");
-    assert_eq!(body["params"]["quantity"], "0.002");
-    assert_eq!(body["params"]["price"], "90");
+    assert_eq!(body["params"]["quantity"], "0.0021");
+    assert_eq!(body["params"]["price"], "90.04");
     assert_eq!(body["params"]["client_oid"], "caller-123");
     e.handle(
         NOW + 1.,

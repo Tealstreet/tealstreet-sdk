@@ -3,114 +3,10 @@ use safe_cex_engine::model::{BybitBbo, OrderSide, OrderType, PlaceOrderOpts, Sto
 use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
 fn order() -> PlaceOrderOpts {
-    serde_json::from_str(r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.002,"price":90.0,"clientOrderId":"caller-123"}"#).unwrap()
+    serde_json::from_str(r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.0021,"price":90.04,"clientOrderId":"caller-123"}"#).unwrap()
 }
 fn command(h: &mut Harness, c: Command) {
     h.event(Event::Command(c));
-}
-
-fn invalid_last_row(case: &str) {
-    let mut h = Harness::new();
-    h.load();
-    h.actions.clear();
-    let mut first = order();
-    first.amount = 0.002;
-    first.price = Some(90.0);
-    let mut last = first.clone();
-    last.client_order_id = Some("last".into());
-    match case {
-        "quantity" => last.amount = 0.0001,
-        "limit" => last.price = Some(90.04),
-        _ => {
-            last.kind = OrderType::StopLoss;
-            last.client_order_id = None;
-            last.trigger_price = Some(0.01);
-        }
-    }
-    command(
-        &mut h,
-        Command::PlaceOrders {
-            command: 980,
-            orders: vec![first, last],
-        },
-    );
-    let recorded: Vec<_> = h
-        .actions
-        .iter()
-        .filter_map(|action| match action {
-            Action::Http(request) => Some(request.clone()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        recorded.len(),
-        0,
-        "invalid last {case} released a valid prefix"
-    );
-    assert!(
-        h.failures
-            .iter()
-            .any(|error| error.outcome == Some(safe_cex_engine::Outcome::NotSent))
-    );
-}
-#[test]
-fn split_preflight_below_step_last_row_zero_writes() {
-    invalid_last_row("quantity");
-}
-#[test]
-fn split_preflight_off_tick_last_limit_zero_writes() {
-    invalid_last_row("limit");
-}
-#[test]
-fn split_preflight_invalid_last_trigger_zero_writes() {
-    invalid_last_row("trigger");
-}
-
-#[test]
-fn split_preflight_valid_rows_place_each_element_once() {
-    let mut h = Harness::new();
-    h.load();
-    h.actions.clear();
-    let orders = (0..2)
-        .map(|index| {
-            let mut row = order();
-            row.amount = 0.002;
-            row.price = Some(90.0);
-            row.client_order_id = Some(format!("split-{index}"));
-            row
-        })
-        .collect();
-    command(
-        &mut h,
-        Command::PlaceOrders {
-            command: 981,
-            orders,
-        },
-    );
-    let mut recorded = Vec::new();
-    for index in 0..2 {
-        let request = h.http("private/create-order");
-        let body: serde_json::Value =
-            serde_json::from_str(request.body.as_deref().expect("body")).expect("JSON");
-        assert_eq!(body["params"]["client_oid"], format!("split-{index}"));
-        assert_eq!(body["params"]["quantity"], "0.002");
-        recorded.push(request.clone());
-        h.respond(
-            &request,
-            &format!(r#"{{"code":0,"result":{{"order_id":"{index}"}}}}"#),
-        );
-        pace(&mut h);
-    }
-    assert_eq!(recorded.len(), 2);
-    assert!(
-        !h.actions
-            .iter()
-            .any(|action| matches!(action, Action::Http(_)))
-    );
-    assert!(h.actions.iter().any(|action| matches!(
-        action,
-        Action::Notice(Notice::CommandDone { command: 981, .. })
-    )));
 }
 fn pace(h: &mut Harness) {
     if h.actions
@@ -195,7 +91,7 @@ fn caller_receipt_precedes_write_and_missing_id_stays_missing() {
     }
 }
 #[test]
-fn caller_id_and_native_precision_are_sent_verbatim() {
+fn caller_id_and_precision_are_sent_verbatim() {
     let mut h = Harness::new();
     h.load();
     command(
@@ -208,8 +104,8 @@ fn caller_id_and_native_precision_are_sent_verbatim() {
     let r = h.http("private/create-order");
     let body = r.body.as_deref().unwrap();
     assert!(body.contains(r#""client_oid":"caller-123""#));
-    assert!(body.contains(r#""quantity":"0.002""#));
-    assert!(body.contains(r#""price":"90""#));
+    assert!(body.contains(r#""quantity":"0.0021""#));
+    assert!(body.contains(r#""price":"90.04""#));
     h.respond(&r, r#"{"code":0,"result":{"order_id":9007199254740993}}"#);
     pace(&mut h);
     assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1, result: s }) if s == r#"["9007199254740993"]"#)));

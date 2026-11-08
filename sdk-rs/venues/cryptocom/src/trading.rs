@@ -149,56 +149,6 @@ fn validate_id(opts: &PlaceOrderOpts, ids: &mut HashSet<String>) -> Result<(), S
     Ok(())
 }
 
-fn native_value(text: &str, step: f64) -> Result<f64, VenueError> {
-    let value = num::parse_decimal(text)
-        .filter(|value| *value > 0.0)
-        .ok_or_else(|| not_sent("Crypto.com wire quantity and prices must be positive"))?;
-    if !step.is_finite() || step <= 0.0 || num::format(num::adjust(value, step)) != text {
-        return Err(not_sent(
-            "Crypto.com wire value must align with its native step",
-        ));
-    }
-    Ok(value)
-}
-
-// Check the exact parameters retained in the plan, before any row is released.
-fn validate_placement(step: &Step, market: &Market) -> Result<(), VenueError> {
-    let amount = native_value(
-        step.params
-            .text_value("quantity")
-            .ok_or_else(|| not_sent("Crypto.com wire quantity is required"))?,
-        market.precision.amount,
-    )?;
-    let limits = &market.limits.amount;
-    if !limits.min.is_finite()
-        || limits.min < 0.0
-        || !limits.max.is_finite()
-        || limits.max < 0.0
-        || amount < limits.min
-        || (limits.max > 0.0 && amount > limits.max)
-    {
-        return Err(not_sent(
-            "Crypto.com wire quantity is outside native limits",
-        ));
-    }
-    for field in ["price", "ref_price"] {
-        if let Some(price) = step.params.text_value(field) {
-            let price = native_value(price, market.precision.price)?;
-            if market
-                .limits
-                .price
-                .as_ref()
-                .is_some_and(|limit| !limit.min.is_finite() || price < limit.min)
-            {
-                return Err(not_sent(
-                    "Crypto.com wire price is below the native minimum",
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
 impl Cryptocom {
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: Vec<PlaceOrderOpts>) -> Result<Job, String> {
         if orders.iter().any(|order| {
@@ -212,10 +162,9 @@ impl Cryptocom {
         }
         let mut steps = VecDeque::new();
         for order in orders {
-            let market = cx
-                .store
-                .market(&order.symbol)
-                .ok_or_else(|| format!("Market not found: {}", order.symbol))?;
+            if cx.store.market(&order.symbol).is_none() {
+                return Err(format!("Market not found: {}", order.symbol));
+            }
             if !order.amount.is_finite() || order.amount <= 0.0 {
                 return Err("A positive quantity is required".into());
             }
@@ -298,7 +247,7 @@ impl Cryptocom {
             if !instructions.is_empty() {
                 params = params.strings("exec_inst", instructions);
             }
-            let step = Step {
+            steps.push_back(Step {
                 path: if is_trigger {
                     "private/advanced/create-order"
                 } else {
@@ -306,9 +255,7 @@ impl Cryptocom {
                 },
                 params,
                 call: Call::Place(receipt),
-            };
-            validate_placement(&step, market).map_err(|error| error.legacy_text())?;
-            steps.push_back(step);
+            });
         }
         Ok(Job {
             steps,

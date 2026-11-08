@@ -1,13 +1,5 @@
 # Crypto.com socket recovery
 
-## Placement preflight
-
-Every placement row is validated before a serial batch releases its first write.
-Wire quantities must satisfy the instrument's minimum, available maximum and
-quantity step; limit and protective reference prices must be positive and tick
-aligned. An invalid later row refuses the whole batch with `notSent` and zero
-requests. Valid wire values and caller order IDs are preserved.
-
 ## Hosted signing
 
 REST and private WebSocket authentication use HMAC-SHA256 with the account's
