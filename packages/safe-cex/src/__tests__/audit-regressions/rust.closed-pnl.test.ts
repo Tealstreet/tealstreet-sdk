@@ -41,7 +41,7 @@ const market = (overrides: Partial<Market>): Market =>
     limits: { amount: { min: 0.01, max: 1000 }, leverage: { min: 1, max: 100 } },
     contractSize: 0.01,
     ...overrides,
-  }) as Market;
+  }) satisfies Market;
 
 const BYBIT_ROWS = [
   { symbol: 'ETHUSDT', side: 'Buy', closedSize: '1', avgEntryPrice: '2000', avgExitPrice: '1990', cumExitValue: '1990', closedPnl: '9', leverage: '5', openFee: '0.1', closeFee: '0.1', createdTime: '1699000000000', updatedTime: '1699000000001' },

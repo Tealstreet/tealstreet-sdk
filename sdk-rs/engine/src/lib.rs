@@ -21,6 +21,7 @@ pub(crate) use id_map::IdMap;
 mod balance_output;
 pub mod json;
 pub mod log;
+mod market_output;
 #[cfg(feature = "metadata-freshness")]
 pub mod metadata;
 pub mod model;

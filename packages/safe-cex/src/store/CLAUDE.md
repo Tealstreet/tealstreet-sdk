@@ -406,3 +406,8 @@ number as native coin PnL.
 Position enum-word bits 24 and 25 declare the presence of native contracts and
 native PnL columns. A present non-finite native size is rejected, never treated
 as absent (which could select an unsafe base-unit fallback).
+
+Market decoding lives in `marketFrames.ts`, using the generated Market contract.
+The native `market_output` module owns optional numeric display policy and
+contract-count labels. NaN encodes absence; zero limits and zero option terms
+remain published values. The frame reader refuses invalid optional infinities.

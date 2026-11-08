@@ -8,6 +8,9 @@ import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocke
 import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from './commandOutcome';
 import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
+import type { Market } from './generated/Market';
+import type { OptionRight } from './generated/OptionRight';
+import type { OptionTerms } from './generated/OptionTerms';
 import type { OptionGreeks } from './generated/OptionGreeks';
 import type { Position } from './generated/Position';
 import type { TransportProvider } from './transport/types';
@@ -21,7 +24,7 @@ import { MarginType } from './generated/MarginType';
 import { PositionMode } from './generated/PositionMode';
 import { PositionSide } from './generated/PositionSide';
 
-export type { Position, OptionGreeks };
+export type { Position, OptionGreeks, Market, OptionRight, OptionTerms };
 export { PositionSide, PositionMode, MarginType };
 
 export type ExchangeName =
@@ -444,22 +447,6 @@ import type { Balance } from './generated/Balance';
 export type { Balance } from './generated/Balance';
 export type { CoinBalance } from './generated/CoinBalance';
 
-export type OptionRight = 'call' | 'put';
-
-/** What makes a market an option. Absent on every other market. */
-export type OptionTerms = {
-  readonly underlying: string;
-  /** Expiry, ms since epoch. */
-  readonly expiry: number;
-  readonly strike: number;
-  readonly right: OptionRight;
-  readonly style: 'european';
-  readonly settlement: 'cash';
-  /** The asset the premium is quoted in, which is the unit of `price` on an option order. */
-  readonly premiumAsset: string;
-  readonly settleAsset: string;
-};
-
 /** One option's prices and implied volatilities. IVs are fractions; 0 means unavailable. */
 export type OptionQuote = {
   readonly symbol: string;
@@ -494,42 +481,6 @@ export type AccountGreeks = {
   readonly vega: number;
   readonly theta: number;
   readonly units: string;
-};
-
-export type Market = {
-  readonly id: string;
-  readonly symbol: string;
-  readonly prettySymbol?: string;
-  readonly base: string;
-  readonly quote: string;
-  readonly active: boolean;
-  readonly precision: {
-    readonly amount: number;
-    readonly price: number;
-  };
-  readonly limits: {
-    readonly amount: {
-      readonly min: number;
-      readonly max: number;
-    };
-    readonly leverage: {
-      readonly min: number;
-      readonly max: number;
-    };
-    readonly price?: {
-      readonly min: number;
-    };
-  };
-  readonly option?: OptionTerms;
-  readonly contractSize?: number;
-  readonly isExpiring?: boolean;
-  readonly isInverse?: boolean;
-  readonly isSpot?: boolean;
-  readonly isPerpetual?: boolean;
-  readonly isReadOnly?: boolean;
-  readonly info?: any;
-  readonly takerFee?: number;
-  readonly makerFee?: number;
 };
 
 /** Source engine receipt times for last, mark and index; null is unobserved. */

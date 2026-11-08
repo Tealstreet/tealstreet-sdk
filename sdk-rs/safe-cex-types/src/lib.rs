@@ -316,45 +316,8 @@ pub struct MarketRuntime {
     pub fees: Option<MarketFees>,
 }
 
-#[derive(Debug, Clone, PartialEq, TS)]
-#[ts(optional_fields, rename_all = "camelCase")]
-pub struct Market {
-    pub id: String,
-    pub symbol: String,
-
-    pub pretty_symbol: Option<String>,
-    pub base: String,
-    pub quote: String,
-    pub active: bool,
-    #[ts(inline)]
-    pub precision: MarketPrecision,
-    #[ts(inline)]
-    pub limits: MarketLimits,
-
-    pub option: Option<OptionTerms>,
-
-    pub contract_size: Option<f64>,
-
-    pub is_expiring: Option<bool>,
-
-    pub is_inverse: Option<bool>,
-
-    pub is_spot: Option<bool>,
-
-    pub is_perpetual: Option<bool>,
-
-    pub is_read_only: Option<bool>,
-
-    #[ts(type = "any", optional)]
-    pub info: Option<crate::retained_json::RetainedJsonInput>,
-
-    pub taker_fee: Option<f64>,
-
-    pub maker_fee: Option<f64>,
-    /// Runtime venue properties; serialized at the Market object's top level.
-    #[ts(skip)]
-    pub runtime: MarketRuntime,
-}
+pub mod market;
+pub use market::Market;
 
 pub mod balance;
 pub use balance::{Balance, CoinBalance, CurrencyBalance};
@@ -2750,8 +2713,8 @@ mod strict_codecs {
         ExchangeAccountConfig, ExchangeOptions, ExchangeOptionsExternalPublicDataVariant0,
         ExchangeOptionsExternalPublicDataVariant1, Execution, ExecutionsOptions, ExtendedTimeframe,
         FetchedLeverage, HistoricalOrder, HistoricalTrade, HistoricalTradeOptions,
-        IncomeHistoryOptions, IncomeRecord, Market, MessageHandlerStatsType, OHLCVOptions,
-        OHLCVSOptions, OptionChainQuery, OptionChainRow, OptionGreeks, OptionQuote, OrderBook,
+        IncomeHistoryOptions, IncomeRecord, MessageHandlerStatsType, OHLCVOptions, OHLCVSOptions,
+        OptionChainQuery, OptionChainRow, OptionGreeks, OptionQuote, OrderBook,
         OrderHistoryOptions, OrderRiskProfile, PublicExchangeOptions, PublicTrade, RequestOutcome,
         RequestOutcomeCounts, SecondsTimeframe, StoreDataLoaded, StoreOptions, StoreUpdateIds,
         Ticker, ValidateAccountResult,
@@ -2767,7 +2730,7 @@ mod strict_codecs {
         ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraHyrotraderMode,
         ExchangeOptionsExtraKucoinBroker, ExchangeOptionsExtraLighterBuilderFeeMode,
         ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, ExecutionPositionSide,
-        IncomeCategory, MarginType, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage,
+        IncomeCategory, MarginType, Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage,
         MarketLimitsPrice, MarketPrecision, ModelField, OptionRight, OptionTerms,
         OptionTermsSettlement, OptionTermsStyle, OrderBookOrders, OrderSide, OrderStatus,
         OrderType, PayloadSignerCapability, PositionMode, PositionSide, PublicDataSourceCapability,
@@ -3346,7 +3309,7 @@ mod strict_codecs {
     #[serde(remote = "super::OptionChainRow")]
     #[serde(rename_all = "camelCase")]
     struct WireOptionChainRow {
-        market: super::Market,
+        market: Market,
         quote: super::OptionQuote,
     }
 

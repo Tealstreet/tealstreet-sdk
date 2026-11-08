@@ -11,7 +11,9 @@ use crate::model::{DerivativeProduct, InstrumentClassification, PositionGreeks, 
 #[cfg(feature = "prediction")]
 use crate::model::{PredictionHolding, PredictionMarket};
 use crate::order_read_cover::{Covers, OrderReadMark, OrderReadScope};
-use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
+#[cfg(test)]
+use crate::wire::market_flag;
+use crate::wire::{self, FrameWriter, loaded_flag, section};
 use std::collections::{HashMap, HashSet};
 
 /// Each imported column owns its value (including absence) until its inputs
@@ -225,7 +227,10 @@ impl Store {
     /// An empty catalogue is never authoritative: a venue outage can answer an
     /// empty list, which would otherwise mark markets loaded and wipe the
     /// previous catalogue. The engine reports each rejection as a warning.
-    pub fn set_markets(&mut self, markets: Vec<Market>) {
+    pub fn set_markets(&mut self, mut markets: Vec<Market>) {
+        for market in &mut markets {
+            crate::market_output::prepare(market, self.quantity_units);
+        }
         if markets.is_empty() {
             self.rejected_empty_catalogue = true;
             return;
@@ -1556,8 +1561,14 @@ impl Store {
             w.u32s(refs);
         }
         w.pad();
-        w.f64s(rows.iter().map(|row| row.expiry.unwrap_or(f64::NAN)));
-        w.f64s(rows.iter().map(|row| row.strike.unwrap_or(f64::NAN)));
+        w.f64s(
+            rows.iter()
+                .map(|row| crate::market_output::optional(row.expiry)),
+        );
+        w.f64s(
+            rows.iter()
+                .map(|row| crate::market_output::optional(row.strike)),
+        );
         w.end();
     }
 
@@ -1626,58 +1637,7 @@ impl Store {
     }
 
     fn write_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
-        let markets = &self.markets;
-        let pretty = markets.iter().any(|market| market.pretty_symbol.is_some());
-        w.begin_revision(section::MARKETS, u16::from(pretty));
-        w.u32(markets.len() as u32);
-        for m in markets {
-            let refs = [
-                w.string(&m.id),
-                w.string(&m.symbol),
-                w.string(&m.base),
-                w.string(&m.quote),
-            ];
-            w.u32s(refs);
-        }
-        w.u32s(markets.iter().map(|m| {
-            [
-                (Some(m.active), market_flag::ACTIVE),
-                (m.is_inverse, market_flag::INVERSE),
-                (m.is_spot, market_flag::SPOT),
-                (m.is_perpetual, market_flag::PERPETUAL),
-                (m.is_expiring, market_flag::EXPIRING),
-                (m.is_read_only, market_flag::READ_ONLY),
-            ]
-            .iter()
-            .filter(|(set, _)| *set == Some(true))
-            .fold(
-                self.quantity_units << market_flag::UNITS_SHIFT,
-                |bits, (_, flag)| bits | flag,
-            )
-        }));
-        w.pad();
-        let columns: [fn(&Market) -> f64; 10] = [
-            |m| m.precision.amount,
-            |m| m.precision.price,
-            |m| m.limits.amount.min,
-            |m| m.limits.amount.max,
-            |m| m.limits.leverage.min,
-            |m| m.limits.leverage.max,
-            |m| m.limits.price.map_or(f64::NAN, |p| p.min),
-            |m| m.contract_size.unwrap_or(f64::NAN),
-            |m| m.taker_fee.unwrap_or(f64::NAN),
-            |m| m.maker_fee.unwrap_or(f64::NAN),
-        ];
-        for column in columns {
-            w.f64s(markets.iter().map(column));
-        }
-        if pretty {
-            for market in markets {
-                let reference = w.optional_string(market.pretty_symbol.as_deref());
-                w.u32(reference);
-            }
-        }
-        w.end();
+        crate::market_output::write(&self.markets, self.quantity_units, w);
     }
 
     fn write_tickers<'a>(&'a self, w: &mut FrameWriter<'a>) {

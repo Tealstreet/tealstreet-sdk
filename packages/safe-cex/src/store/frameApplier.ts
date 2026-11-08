@@ -1,15 +1,14 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import type { Candle, FetchedLeverage, Market, OrderBook, OrderFillEvent, Ticker, Writable } from '../types';
+import type { Candle, FetchedLeverage, OrderBook, OrderFillEvent, Ticker, Writable } from '../types';
 import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import {
   LOADED_FLAG,
-  MARKET_FLAG,
-  marketQuantityUnits,
   TICKER_FIELDS,
 } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, OrderSide, PositionMode } from '../types';
 import { readBalanceFrame } from './balanceFrames';
+import { readMarketFrame } from './marketFrames';
 import { readOrderFrame } from './orderFrames';
 import { readPositionFrame } from './positionFrames';
 
@@ -76,129 +75,9 @@ export class FrameApplier {
     }, LOADED_FLAG.MARKETS);
     attempt(() => {
       if (markets) {
-        const predictionMarkets = frame.predictionMarkets?.();
-        const rows: Writable<Market>[] = [];
-        const nextUnits = Array.from(markets.flags, marketQuantityUnits);
-        const nextSymbols: string[] = new Array(markets.count);
-        for (let i = 0; i < markets.count; i++) {
-          const flags = markets.flags[i];
-          const flag = (bit: number) => ((flags & bit) !== 0 ? true : undefined);
-          const minPrice = finite(markets.minPrice[i]);
-          rows.push({
-            id: markets.id(i),
-            symbol: markets.symbol(i),
-            ...(markets.prettySymbol?.(i) !== undefined
-              ? { prettySymbol: markets.prettySymbol!(i) }
-              : nextUnits[i] === 'contractCount' &&
-                !markets.id(i).endsWith('-SWAP') && {
-                  prettySymbol: `${markets.base(i)}/${markets.quote(i)} XPERP`,
-                }),
-            base: markets.base(i),
-            quote: markets.quote(i),
-            active: (flags & MARKET_FLAG.ACTIVE) !== 0,
-            precision: { amount: markets.precisionAmount[i], price: markets.precisionPrice[i] },
-            limits: {
-              amount: { min: markets.minAmount[i], max: markets.maxAmount[i] },
-              leverage: { min: markets.minLeverage[i], max: markets.maxLeverage[i] },
-              ...(minPrice !== undefined && { price: { min: minPrice } }),
-            },
-            contractSize: finite(markets.contractSize[i]),
-            isInverse: flag(MARKET_FLAG.INVERSE),
-            isSpot: flag(MARKET_FLAG.SPOT),
-            isPerpetual: flag(MARKET_FLAG.PERPETUAL),
-            isExpiring: flag(MARKET_FLAG.EXPIRING),
-            isReadOnly: flag(MARKET_FLAG.READ_ONLY),
-            takerFee: finite(markets.takerFee[i]),
-            makerFee: finite(markets.makerFee[i]),
-          });
-          nextSymbols[i] = rows[i].symbol;
-        }
-        if (predictionMarkets) {
-          for (let i = 0; i < predictionMarkets.count; i++) {
-            const market = rows[predictionMarkets.market[i]];
-            if (!market) continue;
-            market.info = {
-              conditionId: predictionMarkets.conditionId(i),
-              tokenId: market.id,
-              outcome: predictionMarkets.outcome(i),
-              tickSize: predictionMarkets.tickSize[i],
-              negRisk: (predictionMarkets.flags[i] & 1) !== 0,
-              question: predictionMarkets.question(i),
-              description: predictionMarkets.description(i),
-              endDate: predictionMarkets.endDate(i),
-              slug: predictionMarkets.slug(i),
-            };
-          }
-        }
-        const classifications = frame.instrumentClassifications?.();
-        if (classifications) {
-          for (let i = 0; i < classifications.count; i++) {
-            const market = rows[classifications.market[i]];
-            if (!market) throw new Error('Instrument classification has no market');
-            market.info = {
-              ...market.info,
-              symbolType: classifications.symbolType(i),
-              marketRegion: classifications.marketRegion(i),
-              underlyingTicker: classifications.underlyingTicker(i),
-            };
-          }
-        }
-        // TS Hyperliquid's merged spot disclosure: the wrapped token behind the pair.
-        const underlying = frame.underlyingTokens?.();
-        if (underlying) {
-          for (let i = 0; i < underlying.count; i++) {
-            const market = rows[underlying.market[i]];
-            if (!market) throw new Error('Underlying token has no market');
-            market.info = {
-              ...market.info,
-              hlTokenName: underlying.name(i),
-              hlTokenFullName: underlying.fullName(i),
-            };
-          }
-        }
-        const products = frame.derivativeProducts?.();
-        if (products) {
-          for (let i = 0; i < products.count; i++) {
-            const market = rows[products.market[i]];
-            if (!market) throw new Error('Derivative product has no market');
-            const kind = products.kind[i];
-            const expiry = finite(products.expiry[i]);
-            const strike = finite(products.strike[i]);
-            const style = products.style(i);
-            const settlement = products.settlement(i);
-            const settleAsset = products.settleAsset(i);
-            const premiumAsset = products.premiumAsset(i);
-            market.info = {
-              ...market.info,
-              ...(({ 1: 'FUTURE', 2: 'CALL', 3: 'PUT' } as Record<number, string>)[kind] !== undefined && {
-                instrumentKind: ({ 1: 'FUTURE', 2: 'CALL', 3: 'PUT' } as Record<number, string>)[kind],
-              }),
-              underlying: products.underlying(i),
-              expiry,
-              strike,
-            };
-            if (
-              (kind === 2 || kind === 3) &&
-              expiry !== undefined &&
-              strike !== undefined &&
-              style === 'european' &&
-              settlement === 'cash' &&
-              settleAsset &&
-              premiumAsset
-            ) {
-              market.option = {
-                underlying: products.underlying(i),
-                expiry,
-                strike,
-                right: kind === 2 ? 'call' : 'put',
-                style,
-                settlement,
-                settleAsset,
-                premiumAsset,
-              };
-            }
-          }
-        }
+        const rows = readMarketFrame(frame, markets);
+        if (rows === undefined) throw new Error('Missing Market output');
+        const nextSymbols = rows.map((row) => row.symbol);
         update.markets = rows;
         symbols = nextSymbols;
         ids = rows.map((row) => row.id);
