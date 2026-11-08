@@ -428,6 +428,8 @@ fn unclassified_native_response_after_or_before_unsent_cancel_is_unknown() {
                 Some(Outcome::Unknown),
                 "status {status}, provider first {provider_first}"
             );
+            const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+            assert!(h.error().message.contains(ENGINE_UNKNOWN_TEXT));
         }
     }
 }

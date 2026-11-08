@@ -215,12 +215,7 @@ fn assert_unknown(h: &Harness, current: usize, count: usize) {
     assert!(h.requests.is_empty());
     let e = &h.failures[0];
     assert_eq!(e.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert!(
-        e.message
-            .contains("outcome is unknown. Check Open Orders, then try again"),
-        "{}",
-        e.message
-    );
+    assert!(e.message.contains(ENGINE_UNKNOWN_TEXT), "{}", e.message);
     let rows = e.elements.as_ref().expect("unknown journal");
     for row in &rows[current..current + count] {
         assert!(matches!(&row.result, ElementResult::Unknown { error }

@@ -722,8 +722,8 @@ fn independent_cancel_unknown_halts_the_sibling_without_retry() {
     assert_eq!(failures(&next).len(), 1);
     let error = &failures(&next)[0];
     assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert!(error.message.contains("outcome is unknown"));
-    assert!(error.message.contains("Check Open Orders"));
+    const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
     let rows = error.elements.as_ref().expect("complete cancel report");
     assert_eq!(rows.len(), 2);
     assert!(matches!(

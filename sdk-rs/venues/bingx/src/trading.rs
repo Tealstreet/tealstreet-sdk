@@ -40,7 +40,7 @@ const ORDER: &str = "/openApi/swap/v2/trade/order";
 const CANCEL_ALL: &str = "/openApi/swap/v2/trade/allOpenOrders";
 const AMEND: &str = "/openApi/swap/v1/trade/amend";
 const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
-const UNKNOWN_WORDS: &str = "The outcome is unknown. Check Open Orders, then try again";
+const UNKNOWN_WORDS: &str = "The outcome is unknown. Check Open Orders";
 const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
 
 pub struct Request {

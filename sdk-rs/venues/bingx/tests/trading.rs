@@ -16,6 +16,8 @@ use safe_cex_engine::{
 use sign::Credentials;
 use trading::Trading;
 
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
 pub enum Pending {
     Trade(trading::Request),
 }
@@ -863,6 +865,7 @@ fn assert_writeplan_middle_failure(h: &Harness, unknown: bool) {
     assert!(matches!(&elements[0].result,
         ElementResult::Placed { order_ids } if order_ids == &["accepted-first-lot"]));
     if unknown {
+        assert!(h.failures[0].message.contains(ENGINE_UNKNOWN_TEXT));
         assert!(matches!(&elements[1].result,
             ElementResult::Unknown { error } if error.outcome == Some(safe_cex_engine::Outcome::Unknown)));
     } else {
@@ -1131,6 +1134,7 @@ fn writeplan_held_restore_journals_the_cancel_refusal_and_restore_attempt() {
             if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
         );
         if gateway {
+            assert!(h.failures[0].message.contains(ENGINE_UNKNOWN_TEXT));
             assert!(
                 matches!(&elements[2].result, ElementResult::Unknown { error }
                 if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
