@@ -13,9 +13,15 @@ const fixture = () => {
   return new Frame(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 };
 
+const readRows = (frame: Frame): Market[] => {
+  const rows = readMarketFrame(frame);
+  if (rows === undefined) throw new Error('Fixture is missing Market output');
+  return rows;
+};
+
 describe('native Market output through the real packed decoder', () => {
   it('retains native identity, zero limits, precision and optional metadata through DefaultStore serialization', () => {
-    const rows: Market[] = readMarketFrame(fixture())!;
+    const rows = readRows(fixture());
     const store = new DefaultStore();
     store.update({ markets: rows });
     const serialized = JSON.parse(JSON.stringify(store.serialize())).markets;
@@ -34,7 +40,7 @@ describe('native Market output through the real packed decoder', () => {
   });
 
   it('keeps published zero option terms, but never invents terms for an incomplete option', () => {
-    const rows = readMarketFrame(fixture())!;
+    const rows = readRows(fixture());
     expect(rows[2].option).toEqual({ underlying: 'BTC', expiry: 0, strike: 0, right: 'call', style: 'european', settlement: 'cash', premiumAsset: 'USDT', settleAsset: 'USDT' });
     expect(rows[3].info.instrumentKind).toBe('PUT');
     expect(rows[3]).not.toHaveProperty('option');
@@ -42,7 +48,7 @@ describe('native Market output through the real packed decoder', () => {
   });
 
   it('passes native classification to the real instrument consumer and clears metadata on replacement', () => {
-    const rows = readMarketFrame(fixture())!;
+    const rows = readRows(fixture());
     expect(rows[0].info).toMatchObject({ symbolType: 'innovation', marketRegion: '', hlTokenName: 'UBTC', hlTokenFullName: 'Unit Bitcoin' });
     expect(classifyMarket('bybit', rows[0])).toMatchObject({ kind: 'classified', assetClass: 'crypto' });
     expect(classifyMarket('bybit', { ...rows[0], info: null }).kind).toBe('unknown');
@@ -56,7 +62,9 @@ describe('native Market output through the real packed decoder', () => {
 
   it('refuses invalid optional wire numbers instead of silently repairing them', () => {
     const frame = fixture();
-    frame.markets()!.contractSize[0] = Number.POSITIVE_INFINITY;
+    const markets = frame.markets();
+    if (markets === undefined) throw new Error('Fixture is missing Market output');
+    markets.contractSize[0] = Number.POSITIVE_INFINITY;
     expect(() => readMarketFrame(frame)).toThrow('Nonfinite Market output');
   });
 });

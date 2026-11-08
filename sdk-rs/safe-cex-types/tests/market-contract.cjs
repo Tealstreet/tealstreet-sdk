@@ -34,18 +34,6 @@ const minimal: Market = { id: 'native-id', symbol: 'BTCUSDT', base: 'BTC', quote
  limits: { amount: { min: 0, max: 0 }, leverage: { min: 0, max: 0 } } };
 const option: NonNullable<Market['option']> = { underlying: 'BTC', expiry: 0, strike: 0,
  right: 'call', style: 'european', settlement: 'cash', premiumAsset: 'USDT', settleAsset: 'USDT' };
-// @ts-expect-error Top-level fields stay readonly.
-m.id = 'other';
-// @ts-expect-error Nested precision stays readonly.
-m.precision.amount = 1;
-// @ts-expect-error Nested limits stay readonly.
-m.limits.amount.max = 1;
-// @ts-expect-error Expiry is absent until known; it is not nullable.
-const badExpiry: NonNullable<Market['option']> = { ...option, expiry: null };
-// @ts-expect-error Option right is the declared literal union, not an arbitrary string.
-const badRight: NonNullable<Market['option']> = { ...option, right: 'CALL' };
-// @ts-expect-error Missing limits cannot silently become zero limits.
-const badMarket: Market = { id: 'x', symbol: 'x', base: 'x', quote: 'x', active: true, precision: { amount: 1, price: 1 } };
 `;
   const configFile = path.join(root, 'packages/safe-cex/tsconfig.json');
   const config = ts.readConfigFile(configFile, ts.sys.readFile);
@@ -54,6 +42,23 @@ const badMarket: Market = { id: 'x', symbol: 'x', base: 'x', quote: 'x', active:
   const original = host.getSourceFile.bind(host);
   host.getSourceFile = (file, version, ...args) => file === fixture
     ? ts.createSourceFile(file, source, version, true) : original(file, version, ...args);
-  const program = ts.createProgram([fixture], { ...parsed.options, incremental: false }, host);
+  const options = { ...parsed.options, incremental: false };
+  const program = ts.createProgram([fixture], options, host);
   assert.deepEqual(ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')), []);
+  const invalidSource = source + `m.id = 'other';
+m.precision.amount = 1;
+m.limits.amount.max = 1;
+const badExpiry: NonNullable<Market['option']> = { ...option, expiry: null };
+const badRight: NonNullable<Market['option']> = { ...option, right: 'CALL' };
+const badMarket: Market = { id: 'x', symbol: 'x', base: 'x', quote: 'x', active: true, precision: { amount: 1, price: 1 } };`;
+  host.getSourceFile = (file, version, ...args) => file === fixture
+    ? ts.createSourceFile(file, invalidSource, version, true) : original(file, version, ...args);
+  const invalid = ts.createProgram([fixture], options, host);
+  const errors = ts.getPreEmitDiagnostics(invalid);
+  assert.equal(errors.length, 6);
+  const messages = errors.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
+  for (const field of ['id', 'amount', 'max']) assert(messages.some(message => message.includes(field) && message.includes('read-only')));
+  assert(messages.some(message => message.includes('null')));
+  assert(messages.some(message => message.includes('CALL')));
+  assert(messages.some(message => message.includes('limits') && message.includes('missing')));
 });

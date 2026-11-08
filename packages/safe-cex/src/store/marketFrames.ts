@@ -20,10 +20,11 @@ export function readMarketFrame(frame: Frame, markets = frame.markets()): Market
     const flags = markets.flags[i];
     const flag = (bit: number) => ((flags & bit) !== 0 ? true : undefined);
     const minPrice = readOptionalNumber(markets.minPrice[i]);
+    const prettySymbol = markets.prettySymbol?.(i);
     rows.push({
       id: markets.id(i),
       symbol: markets.symbol(i),
-      ...(markets.prettySymbol?.(i) !== undefined && { prettySymbol: markets.prettySymbol!(i) }),
+      ...(prettySymbol !== undefined && { prettySymbol }),
       base: markets.base(i),
       quote: markets.quote(i),
       active: (flags & MARKET_FLAG.ACTIVE) !== 0,
@@ -98,11 +99,10 @@ export function readMarketFrame(frame: Frame, markets = frame.markets()): Market
       const settlement = products.settlement(i);
       const settleAsset = products.settleAsset(i);
       const premiumAsset = products.premiumAsset(i);
+      const instrumentKind = kind === 1 ? 'FUTURE' : kind === 2 ? 'CALL' : kind === 3 ? 'PUT' : undefined;
       market.info = {
         ...market.info,
-        ...(({ 1: 'FUTURE', 2: 'CALL', 3: 'PUT' } as Record<number, string>)[kind] !== undefined && {
-          instrumentKind: ({ 1: 'FUTURE', 2: 'CALL', 3: 'PUT' } as Record<number, string>)[kind],
-        }),
+        ...(instrumentKind !== undefined && { instrumentKind }),
         underlying: products.underlying(i),
         expiry,
         strike,
