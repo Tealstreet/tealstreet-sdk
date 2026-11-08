@@ -299,6 +299,118 @@ fn split_lots_preserve_every_tick_and_respect_native_maximum() {
     assert!((sum - 201.001).abs() < 1e-10);
     assert_eq!(result(&a).unwrap(), r#"["12","12","12"]"#);
 }
+
+fn allocation_engine(maximum: f64, step: f64) -> TestEngine {
+    let mut e = engine();
+    let mut markets = e.store().markets().to_vec();
+    let market = markets.iter_mut().find(|m| m.symbol == "BTCUSDT").unwrap();
+    market.precision.amount = step;
+    market.limits.amount.min = step;
+    market.limits.amount.max = maximum;
+    e.store_mut().set_markets(markets);
+    e
+}
+
+#[test]
+fn legacy_split_lots_match_ts_sequences_and_sums() {
+    // TS woo.exchange.ts:2244/2303 normalizes before woo.order-state.ts:5-19.
+    let cases: &[(f64, f64, f64, &[f64], u64)] = &[
+        (26.0, 5.0, 1.0, &[5.0, 5.0, 4.0, 4.0, 4.0, 4.0], 26),
+        (11.0, 5.0, 1.0, &[4.0, 4.0, 3.0], 11),
+        (12.0, 5.0, 1.0, &[4.0, 4.0, 4.0], 12),
+        (10.0, 5.0, 1.0, &[5.0, 5.0], 10),
+        (7.0, 3.0, 0.5, &[2.5, 2.5, 2.0], 14),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 1 of requested 1.0004); kept for exact TS parity per Sam's decision
+        (1.0004, 0.3, 0.001, &[0.25, 0.25, 0.25, 0.25], 1000),
+        // KNOWN-ISSUE: legacy TS rounds up (sum 1.001 of requested 1.0005); kept for exact TS parity per Sam's decision
+        (1.0005, 0.3, 0.001, &[0.251, 0.25, 0.25, 0.25], 1001),
+    ];
+    for &(amount, maximum, step, expected, expected_ticks) in cases {
+        let mut e = allocation_engine(maximum, step);
+        let mut o = opts();
+        o.amount = amount;
+        let mut actions = placed(&mut e, vec![o]);
+        let mut lots = Vec::new();
+        for index in 0..expected.len() {
+            let request = req(&actions, Method::Post, "/v1/order");
+            let quantity = request
+                .body
+                .as_deref()
+                .unwrap()
+                .split('&')
+                .find_map(|part| part.strip_prefix("order_quantity="))
+                .unwrap()
+                .parse::<f64>()
+                .unwrap();
+            assert!(quantity > 0.0 && quantity <= maximum);
+            lots.push(quantity);
+            actions = reply(
+                &mut e,
+                &request,
+                1001.0 + index as f64,
+                r#"{"success":true,"order_id":12}"#,
+            );
+            if index + 1 < expected.len() {
+                actions = tick(&mut e, &actions);
+            }
+        }
+        assert_eq!(lots, expected, "{amount}/{maximum}/{step}");
+        let allocated_ticks = lots
+            .iter()
+            .map(|lot| (lot / step).round() as u64)
+            .sum::<u64>();
+        assert_eq!(allocated_ticks, expected_ticks, "{amount}/{maximum}/{step}");
+        let ids: Vec<String> = serde_json::from_str(&result(&actions).unwrap()).unwrap();
+        assert_eq!(ids.len(), expected.len());
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        );
+    }
+}
+
+#[test]
+fn legacy_sized_stop_normalizes_before_splitting() {
+    // TS woo.exchange.ts:2390/2417 uses the same normalization for sized stops.
+    // KNOWN-ISSUE: legacy TS rounds up (sum 1.001 of requested 1.0005); kept for exact TS parity per Sam's decision
+    let mut e = allocation_engine(0.3, 0.001);
+    let mut o = opts();
+    o.kind = OrderType::StopLoss;
+    o.side = OrderSide::Sell;
+    o.amount = 1.0005;
+    let mut actions = placed(&mut e, vec![o]);
+    let mut lots = Vec::new();
+    for index in 0..4 {
+        let request = req(&actions, Method::Post, "/v3/algo/order");
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        lots.push(body["quantity"].as_str().unwrap().parse::<f64>().unwrap());
+        assert_eq!(body["algoType"], "STOP");
+        actions = reply(
+            &mut e,
+            &request,
+            1001.0 + f64::from(index),
+            r#"{"success":true,"data":{"rows":[{"orderId":"12"}]}}"#,
+        );
+        if index < 3 {
+            actions = tick(&mut e, &actions);
+        }
+    }
+    assert_eq!(lots, [0.251, 0.25, 0.25, 0.25]);
+    assert_eq!(
+        lots.iter()
+            .map(|lot| (lot * 1000.0).round() as u64)
+            .sum::<u64>(),
+        1001
+    );
+    assert!(result(&actions).is_ok());
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+    );
+}
 #[test]
 fn market_reads_touch_and_crosses_inside_cap_when_default_slippage_would_miss() {
     let mut e = engine();

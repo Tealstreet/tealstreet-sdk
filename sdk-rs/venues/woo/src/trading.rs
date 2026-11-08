@@ -173,6 +173,8 @@ fn quantities(amount: f64, market: &Market) -> Result<Vec<f64>, String> {
     if !positive(amount) || !positive(step) || !positive(market.limits.amount.max) {
         return Err("Invalid WOO quantity or lot limits".into());
     }
+    // TS woo.exchange.ts:2244/2390 adjusts the amount before splitWooQuantity.
+    let amount = num::adjust(amount, step);
     let ticks = (amount / step).round();
     let max = (market.limits.amount.max / step).floor();
     let min = (market.limits.amount.min / step).ceil().max(1.0);
