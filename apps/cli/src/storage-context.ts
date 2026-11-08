@@ -11,13 +11,14 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   realpathSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { BRAND, brandEnv } from './brand';
 
 const homeDir = join(homedir(), BRAND.configDirName);
@@ -105,6 +106,48 @@ function legacyOwner(): string | null {
 }
 const originalOwner = legacyOwner();
 
+// Walk link targets one component at a time. Never stat/read a target outside
+// the physical source, even through an intermediate directory symlink.
+function resolveLegacyEntry(physicalRoot: string, name: string): string | null {
+  let directory = physicalRoot;
+  let pending = [name];
+  let links = 0;
+  try {
+    while (pending.length) {
+      const part = pending.shift();
+      if (!part || part === '.') continue;
+      if (part === '..') {
+        if (directory === physicalRoot) return null;
+        directory = dirname(directory);
+        continue;
+      }
+      const candidate = join(directory, part);
+      const stat = lstatSync(candidate);
+      if (stat.isSymbolicLink()) {
+        if (++links > 40) return null;
+        const target = readlinkSync(candidate);
+        if (isAbsolute(target)) {
+          // Conservatively refuse non-canonical absolute targets. Relative
+          // targets with '..' are checked component by component above.
+          if (target.split(sep).includes('..')) return null;
+          const within = relative(physicalRoot, target);
+          if (isAbsolute(within) || within === '..' || within.startsWith(`..${sep}`)) return null;
+          directory = physicalRoot;
+          pending = [...within.split(sep), ...pending];
+        } else {
+          pending = [...target.split(sep), ...pending];
+        }
+      } else {
+        if (pending.length && !stat.isDirectory()) return null;
+        directory = candidate;
+      }
+    }
+    return lstatSync(directory).isFile() ? directory : null;
+  } catch {
+    return null;
+  }
+}
+
 // A config file proves ownership of that file, not every sibling file. Freeze
 // one claim for the physical shared source, across all config profiles/brands.
 // Conflicting or unknown config owners leave the shared files quarantined.
@@ -117,8 +160,13 @@ function sharedLegacyOwner(): string | null {
     const owners = new Set<string>();
     let ambiguous = false;
     for (const entry of readdirSync(physicalRoot, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
-      const value = readJson(join(physicalRoot, entry.name));
+      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+      const file = resolveLegacyEntry(physicalRoot, entry.name);
+      if (!file) {
+        ambiguous = true;
+        continue;
+      }
+      const value = readJson(file);
       if (!isRecord(value) || !Array.isArray(value.accounts)) continue;
       const id = authOwner(value.auth);
       if (id) owners.add(id);

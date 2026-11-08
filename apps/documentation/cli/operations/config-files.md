@@ -31,7 +31,11 @@ Each legacy config can identify the owner of its own accounts. Shared legacy
 files (hooks, browser approvals, vars, scripts and recordings) have one claim
 for their physical source directory across config profiles, brands and path
 aliases. They migrate only when the available ownership evidence is consistent;
-competing config owners or a conflicting alias-sync owner leave them unclaimed. Files without ownership
+competing config owners or a conflicting alias-sync owner leave them unclaimed.
+Discovery checks config contents regardless of filename extension. Symlinks
+are inspected only within the source directory; links outside it, broken links
+and link loops leave shared ownership unproven and prevent shared migration.
+Files without ownership
 evidence remain untouched and are never assigned to the next login: sign in
 and re-enter the accounts/settings you need. Original legacy files remain
 as backups; protect or remove those backups yourself when no longer needed.
