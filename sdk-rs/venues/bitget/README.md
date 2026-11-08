@@ -41,8 +41,14 @@ which resolve to their shared native strategy ID.
 
 Trading uses sequenced jobs for orders, brackets, conditional stops and account
 settings. Native amendments send a fresh `newClientOid`; cancellation retains
-the original native `loss_plan` or `pos_loss` identity. Ambiguous writes are
-never retried. History reads page executions, orders, income and public trades
+the original native `loss_plan` or `pos_loss` identity. Ambiguous writes halt the remaining writes of that action and are
+never retried. This is the recorded stop-after-UNKNOWN parity exception
+(Sean/daxx, 2026-11-08): legacy TS can continue after an unproven acknowledgement.
+Venue-authored terminal write failures retain acknowledged IDs and name the
+unconfirmed request with
+`The outcome is unknown. Check Open Orders`; the companion
+`order.outcome_unknown` event reports the command, acknowledged count and
+unconfirmed request. Engine-sealed failures retain the engine's canonical text. History reads page executions, orders, income and public trades
 into the engine query shapes and reject incomplete financial results.
 
 After a placement refusal, dispatch follows the legacy TS path: Classic

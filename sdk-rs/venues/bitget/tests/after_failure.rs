@@ -601,3 +601,272 @@ fn below_minimum_protective_quantity_is_sent_at_its_rounded_trigger() {
         stopped(&h);
     }
 }
+
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_SEALED_UNKNOWN_TEXT: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+const UNKNOWN_REPLY: &str = r#"{"code":"40010","msg":"Request timeout","data":null}"#;
+
+fn unknown_pin(h: &Harness, placed: &[String], unknown_identity: &str) {
+    stopped(h);
+    let error = &h.failures[0];
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        error.message.contains(unknown_identity),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.message.contains(ENGINE_UNKNOWN_TEXT)
+            || error.message.contains(ENGINE_SEALED_UNKNOWN_TEXT),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.as_slice())
+            .unwrap_or(&[]),
+        placed
+    );
+    let events: Vec<_> = h
+        .events
+        .iter()
+        .filter(|e| e.code == "order.outcome_unknown")
+        .collect();
+    assert_eq!(events.len(), 1, "one journal companion event");
+    assert!(events[0].message.contains(ENGINE_UNKNOWN_TEXT));
+    assert!(
+        events[0]
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "placedCount"
+                && *value == safe_cex_engine::log::Value::Num(placed.len() as f64))
+    );
+    assert!(events[0].fields.iter().any(|(key, value)| {
+        *key == "unknownRequest"
+            && value
+                .as_str()
+                .is_some_and(|value| value.contains(unknown_identity))
+    }));
+}
+
+fn unknown_placement_sequence(split: bool, bare: bool, attached: bool) {
+    for uta in [false, true] {
+        let mut h = ready(uta);
+        let mut rows = if split {
+            vec![normal(12120.0)]
+        } else {
+            vec![normal(1.0); 101]
+        };
+        if attached {
+            for row in &mut rows {
+                row["stopLoss"] = json!(0.04);
+            }
+        }
+        rows.push(stop());
+        place(&mut h, rows);
+        let path = if uta {
+            "/place-order"
+        } else {
+            "/batch-place-order"
+        };
+        let (first, body) = take_write(&mut h, path);
+        let placed: Vec<String> = if uta {
+            vec![format!("native-{}", body["clientOid"].as_str().unwrap())]
+        } else {
+            body["orderList"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| format!("native-{}", row["clientOid"].as_str().unwrap()))
+                .collect()
+        };
+        accepted(&mut h, first, &body);
+        let (r, body) = take_write(&mut h, path);
+        let identity = if uta {
+            body["clientOid"].as_str().unwrap()
+        } else {
+            body["orderList"][0]["clientOid"].as_str().unwrap()
+        }
+        .to_owned();
+        if attached {
+            assert_eq!(
+                if uta {
+                    &body["stopLoss"]
+                } else {
+                    &body["orderList"][0]["presetStopLossPrice"]
+                },
+                "0"
+            );
+        }
+        h.reply(
+            r.id,
+            200,
+            if bare {
+                UNKNOWN_REPLY
+            } else {
+                r#"{"code":"00000","data":{}}"#
+            },
+        );
+        unknown_pin(&h, &placed, &identity);
+        h.reply(r.id, 200, r#"{"code":"00000","data":{"orderId":"late"}}"#);
+        unknown_pin(&h, &placed, &identity);
+    }
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2299-2308,2330-2334.
+fn unknown_exception_max_quantity_split() {
+    unknown_placement_sequence(true, false, false);
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2291-2308.
+fn unknown_exception_max_quantity_classic_envelope() {
+    unknown_placement_sequence(true, true, false);
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:1999-2008,2299-2308,2330-2334.
+fn unknown_exception_batch_and_serial() {
+    unknown_placement_sequence(false, false, false);
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2008,2291-2308.
+fn unknown_exception_batch_classic_envelope() {
+    unknown_placement_sequence(false, true, false);
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2050-2051,2119-2120,2299-2308,2330-2334.
+fn unknown_exception_rounded_attached_trigger() {
+    unknown_placement_sequence(false, false, true);
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2351-2359,2379-2388.
+fn unknown_exception_algo_identity() {
+    for uta in [false, true] {
+        let mut h = ready(uta);
+        place(&mut h, vec![stop(), stop(), stop()]);
+        let path = if uta {
+            "/place-strategy-order"
+        } else {
+            "/place-tpsl-order"
+        };
+        let (first, body) = take_write(&mut h, path);
+        let placed = vec![format!("native-{}", body["clientOid"].as_str().unwrap())];
+        accepted(&mut h, first, &body);
+        let (r, body) = take_write(&mut h, path);
+        let identity = body["clientOid"].as_str().unwrap();
+        h.reply(r.id, 200, r#"{"code":"00000","data":{}}"#);
+        unknown_pin(&h, &placed, identity);
+    }
+}
+
+fn unknown_amend_leg(cancel: bool, replacement: bool) {
+    let mut h = ready(false);
+    if replacement {
+        amend_fallback(&mut h, 12120.0);
+        cancel_ack(&mut h);
+        let (first, body) = take_write(&mut h, "/batch-place-order");
+        let placed: Vec<_> = body["orderList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| format!("native-{}", row["clientOid"].as_str().unwrap()))
+            .collect();
+        accepted(&mut h, first, &body);
+        let (r, body) = take_write(&mut h, "/batch-place-order");
+        let identity = body["orderList"][0]["clientOid"].as_str().unwrap();
+        h.reply(r.id, 200, UNKNOWN_REPLY);
+        unknown_pin(&h, &placed, identity);
+    } else {
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: "1".into(),
+            price: Some(95.0),
+            amount: Some(240.0),
+        });
+        let (r, body) = take_write(&mut h, "/modify-order");
+        if cancel {
+            h.reply(r.id, 200, REJECTED);
+            let (r, _) = take_write(&mut h, "/batch-cancel-orders");
+            h.reply(r.id, 200, r#"{"code":"00000","data":{}}"#);
+            unknown_pin(&h, &[], "1");
+        } else {
+            let identity = body["newClientOid"].as_str().unwrap();
+            h.reply(r.id, 200, UNKNOWN_REPLY);
+            unknown_pin(&h, &[], identity);
+        }
+    }
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2472-2480,2505-2529,1760-1769.
+fn unknown_exception_amend_cancel_replace() {
+    unknown_amend_leg(true, false);
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2472-2480,2505-2529.
+fn unknown_exception_native_amend_split_bypass() {
+    unknown_amend_leg(false, false);
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2551-2569.
+fn unknown_exception_compensating_restore() {
+    for restore in [false, true] {
+        let mut h = ready(true);
+        h.private_message(r#"{"arg":{"topic":"strategy-order"},"data":[{"category":"usdt-futures","orderId":"stop","symbol":"BTCUSDT","qty":"0.5","stopLoss":"80","slTriggerBy":"market","slOrderType":"market","side":"sell","posSide":"long","status":"pending"}]}"#);
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: "stop".into(),
+            price: Some(85.0),
+            amount: Some(0.0),
+        });
+        let (cancel, _) = take_write(&mut h, "/cancel-strategy-order");
+        h.reply(cancel.id, 200, r#"{"code":"00000","data":{}}"#);
+        if restore {
+            let (r, _) = take_write(&mut h, "/place-strategy-order");
+            h.reply(r.id, 200, REJECTED);
+        }
+        let (r, body) = take_write(&mut h, "/place-strategy-order");
+        let identity = body["clientOid"].as_str().unwrap();
+        h.reply(r.id, 200, UNKNOWN_REPLY);
+        unknown_pin(&h, &[], identity);
+    }
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2291-2316 (40010, not 40017).
+fn unknown_exception_split_envelope_terminal_witness() {
+    unknown_placement_sequence(true, true, false);
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2008,2291-2316 (40010, not 40017).
+fn unknown_exception_batch_envelope_terminal_witness() {
+    unknown_placement_sequence(false, true, false);
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2472-2480,2505-2529,2291-2316 (40010).
+fn unknown_exception_amend_envelope_terminal_witness() {
+    unknown_amend_leg(false, true);
+}

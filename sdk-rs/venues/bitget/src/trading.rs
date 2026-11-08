@@ -26,6 +26,7 @@ const CALL_MS: u32 = 20_000;
 /// Native wait for Classic/UTA account detection (scoped engine condition wait).
 const DETECTION_MS: u32 = 10_000;
 const DETECTION: &str = "Bitget account detection did not complete";
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 /// Bitget's native write codes: 40009 earns the one fresh resend; 40010, 40725,
 /// 45001 and the system, upgrade, busy and timeout codes prove nothing; the read side's key refusals keep their auth kind
@@ -1057,6 +1058,30 @@ impl BitgetFutures {
             let (original, note) = with_rollback(job.error.take(), error);
             error = original;
             job.note = note;
+        }
+        if error.outcome == Some(Outcome::Unknown)
+            && job.live.as_ref().is_some_and(|call| !call.read())
+        {
+            let request = job.live.as_ref().map_or_else(String::new, |call| {
+                serde_json::to_string(&call.payload).expect("native order payload")
+            });
+            // A prior refusal may supply the journal's projected message.
+            // Keep the uncertainty visible even when that refusal wins selection.
+            let unknown = format!("{UNKNOWN_TEXT}; unconfirmed request {request}");
+            job.note = Some(match job.note.take() {
+                Some(note) => format!("{note}; {unknown}"),
+                None => unknown,
+            });
+            cx.event(
+                Level::Warn,
+                "order.outcome_unknown",
+                UNKNOWN_TEXT,
+                vec![
+                    ("command", job.id.into()),
+                    ("placedCount", (job.ids.len() as f64).into()),
+                    ("unknownRequest", request.into()),
+                ],
+            );
         }
         // The cancel landed and nothing replaced it: lead with what the user must act on.
         if job.effective
@@ -3418,7 +3443,8 @@ impl BitgetFutures {
                         .is_ok_and(|reply| status == 200 && reply.code.0 == Some(0.0)))
                 || batch_unknown;
             if uncertain && !request.call.read() {
-                message.push_str("; outcome unknown, check Open Orders");
+                message.push_str("; ");
+                message.push_str(UNKNOWN_TEXT);
             }
             let native_unchanged = !uncertain
                 && explicit_rejection
