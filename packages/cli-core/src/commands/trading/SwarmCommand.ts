@@ -42,6 +42,7 @@ export class SwarmCommand extends TradingBaseCommand {
     if (!exchange) return this.error('Not connected to exchange');
     if (!exchange.placeOrder) return this.error('Exchange does not support placing orders');
 
+    this.assertUnambiguousOrderModifiers(ctx, 2, ['reduce', 'irregular', 'into'], { into: 1 });
     ctx = this.resolveLeadingSymbolSlot(ctx, 2);
     const args = this.getRawArgs(ctx);
     const duplicate = this.refuseDuplicateModifiers(ctx, [['reduce'], ['irregular']]);

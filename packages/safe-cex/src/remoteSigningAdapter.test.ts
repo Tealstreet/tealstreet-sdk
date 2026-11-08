@@ -1,7 +1,7 @@
 import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios';
 import type { RemoteSigner } from './types';
 
-import axios, { AxiosError, AxiosHeaders } from 'axios';
+import axios, { AxiosError, AxiosHeaders, CanceledError } from 'axios';
 import axiosRetry from 'axios-retry';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -66,6 +66,58 @@ describe('createRemoteSigningAdapter', () => {
     expect(inner).toHaveBeenCalledTimes(1);
     expect(inner.mock.calls[0][0].params).toEqual({ dualSidePosition: 'true', timestamp: 1, signature: 'abc' });
     expect(inner.mock.calls[0][0].data).toBeUndefined();
+  });
+
+  it('keeps the exact signed URL and body without restoring intentionally deleted params', async () => {
+    const config = configFor('/private');
+    config.params = { original: 'unsigned' };
+    config.data = 'unsigned-body';
+    const url = '/private?memo=%C3%A9%2F%2B%25&signature=fixture';
+    const data = '{"size":"0.10","memo":"é/+%"}';
+    sign.mockResolvedValueOnce({ id: 'signed', config: { headers: { 'X-Signed': 'exact' }, url, data } });
+
+    await build()(config);
+
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(inner.mock.calls[0][0].url).toBe(url);
+    expect(inner.mock.calls[0][0].data).toBe(data);
+    expect(inner.mock.calls[0][0].params).toBeUndefined();
+    expect(config.params).toEqual({ original: 'unsigned' });
+    expect(config.data).toBe('unsigned-body');
+  });
+
+  const malformedConfigs: unknown[] = [
+    undefined, null, false, 7, 'signed', [], {},
+    { headers: undefined }, { headers: null }, { headers: [] }, { headers: 'signed' },
+    { headers: { 'X-Signed': 7 } },
+    { headers: {}, url: 7 },
+    { headers: {}, params: null }, { headers: {}, params: [] }, { headers: {}, params: 'original=unsigned' },
+  ];
+  it.each(malformedConfigs.map((config) => ({ config })))('refuses a malformed signed config $config before HTTP', async ({ config }) => {
+    sign.mockResolvedValueOnce({ id: 'malformed', config });
+
+    await expect(build()(configFor('/private'))).rejects.toThrow('Remote signing failed: Invalid signed request config');
+
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(inner).not.toHaveBeenCalled();
+  });
+
+  it('preserves signer refusal text without executing HTTP', async () => {
+    sign.mockResolvedValueOnce({ id: 'refused', error: 'fixture signer unavailable' });
+
+    await expect(build()(configFor('/private'))).rejects.toThrow('Remote signing failed: fixture signer unavailable');
+
+    expect(inner).not.toHaveBeenCalled();
+  });
+
+  it('propagates signing cancellation without HTTP or a fallback', async () => {
+    const canceled = new CanceledError('fixture signing canceled');
+    sign.mockRejectedValueOnce(canceled);
+
+    await expect(build()(configFor('/private'))).rejects.toBe(canceled);
+
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(inner).not.toHaveBeenCalled();
   });
 
   // The point of the tag: a public endpoint costs a WebSocket hop to the device

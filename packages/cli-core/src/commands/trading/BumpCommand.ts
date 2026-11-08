@@ -55,7 +55,7 @@ export class BumpCommand extends TradingBaseCommand {
     if (
       args[i] &&
       args.length > i + 1 &&
-      !['buy', 'buys', 'sell', 'sells', 'top', 'bottom'].includes(args[i]) &&
+      !['buy', 'buys', 'sell', 'sells', 'top', 'bottom'].includes(args[i].toLowerCase()) &&
       this.validateSymbols(exchange, [args[i]]).length > 0
     ) {
       symbol = this.validateSymbols(exchange, [args[i]])[0];
@@ -64,10 +64,10 @@ export class BumpCommand extends TradingBaseCommand {
 
     // Optional side (positional)
     let side: OrderSide | null = null;
-    if (args[i] === 'buy' || args[i] === 'buys') {
+    if (args[i]?.toLowerCase() === 'buy' || args[i]?.toLowerCase() === 'buys') {
       side = OrderSide.Buy;
       i++;
-    } else if (args[i] === 'sell' || args[i] === 'sells') {
+    } else if (args[i]?.toLowerCase() === 'sell' || args[i]?.toLowerCase() === 'sells') {
       side = OrderSide.Sell;
       i++;
     }
@@ -75,8 +75,8 @@ export class BumpCommand extends TradingBaseCommand {
     // Optional top/bottom selector
     let selector: 'top' | 'bottom' | null = null;
     let selectorCount: number | null = null;
-    if (args[i] === 'top' || args[i] === 'bottom') {
-      selector = args[i] as 'top' | 'bottom';
+    if (args[i]?.toLowerCase() === 'top' || args[i]?.toLowerCase() === 'bottom') {
+      selector = args[i].toLowerCase() === 'top' ? 'top' : 'bottom';
       i++;
       selectorCount = this.parseOrderNumber(args[i]);
       if (!Number.isSafeInteger(selectorCount) || selectorCount <= 0) {
@@ -89,10 +89,7 @@ export class BumpCommand extends TradingBaseCommand {
     // Amount (required)
     const amountArg = args[i];
     if (!amountArg) {
-      this.printError(
-        ctx,
-        'Usage: bump [<inst>] [<buy|sell>] [<top|bottom> <n>] <amount>',
-      );
+      this.printError(ctx, 'Usage: bump [<inst>] [<buy|sell>] [<top|bottom> <n>] <amount>');
       return this.error('Missing amount argument');
     }
     const amount = this.parseOrderNumber(amountArg);
@@ -103,25 +100,20 @@ export class BumpCommand extends TradingBaseCommand {
     i++;
 
     // Trailing symbol (if a leading one wasn't already consumed)
-    if (
-      symbol === null &&
-      args[i] &&
-      this.validateSymbols(exchange, [args[i]]).length > 0
-    ) {
+    if (symbol === null && args[i] && this.validateSymbols(exchange, [args[i]]).length > 0) {
       symbol = this.validateSymbols(exchange, [args[i]])[0];
       i++;
     }
 
-    const invalid = this.refuseUnknownArgs(ctx, Array.from({ length: i }, (_, index) => index));
+    const invalid = this.refuseUnknownArgs(
+      ctx,
+      Array.from({ length: i }, (_, index) => index),
+    );
     if (invalid) return invalid;
 
     const flagBuys = this.hasFlag(ctx, 'buys', 'b');
     const flagSells = this.hasFlag(ctx, 'sells', 's');
-    if (
-      (flagBuys && flagSells) ||
-      (side === OrderSide.Buy && flagSells) ||
-      (side === OrderSide.Sell && flagBuys)
-    ) {
+    if ((flagBuys && flagSells) || (side === OrderSide.Buy && flagSells) || (side === OrderSide.Sell && flagBuys)) {
       return this.error('Conflicting side selectors. Nothing was changed.');
     }
     if (side === null) {
