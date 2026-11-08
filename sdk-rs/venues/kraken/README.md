@@ -1,5 +1,14 @@
 # Kraken venue adapters
 
+## Kraken Spot hosted signing
+
+Kraken Spot remains local-only, with hosted/remote signing deferred and the existing
+typed refusal retained. Its strictly increasing nonce per API key must be shared
+across local and hosted instances. Enabling hosted signing requires a caller-owned
+stable nonce identity (`localSigner.primary.stableId`) and an account migration;
+deriving that identity from key hashes or slot names is forbidden. If Kraken Spot
+demand appears, this identity and migration work is the path to hosted signing.
+
 ## Position liquidation prices
 
 Futures [`open_positions`](https://docs.kraken.com/exchange/api-reference/futures-websocket/open_position)
