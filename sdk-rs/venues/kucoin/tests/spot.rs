@@ -274,6 +274,76 @@ fn place(id: Option<&str>) -> safe_cex_engine::model::PlaceOrderOpts {
 }
 
 #[test]
+// TS packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts:450-457; base.ts:1113.
+fn after_failure_middle_spot_row_refusal_or_loss_stops_last_row() {
+    for lost in [false, true] {
+        let mut h = H::new(true);
+        h.command(Command::PlaceOrders {
+            command: 996,
+            orders: vec![
+                place(Some("first")),
+                place(Some("middle")),
+                place(Some("last")),
+            ],
+        });
+        let first = h.http("/hf/orders");
+        h.respond(
+            &first,
+            200,
+            r#"{"code":"200000","data":{"orderId":"first"}}"#,
+        );
+        let middle = h.http("/hf/orders");
+        if lost {
+            h.event(Event::HttpFailed {
+                request: middle.id,
+                error: "middle row response lost",
+            });
+        } else {
+            h.respond(
+                &middle,
+                400,
+                r#"{"code":"200004","msg":"balance insufficient"}"#,
+            );
+        }
+        let writes: Vec<_> = h
+            .requests
+            .iter()
+            .filter(|r| r.method == Method::Post && r.url.ends_with("/hf/orders"))
+            .collect();
+        assert_eq!(
+            writes.len(),
+            2,
+            "last row never leaves after the middle failure"
+        );
+        assert!(h.done(996).is_err());
+        if lost {
+            const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+            let errors: Vec<_> = h
+                .failures
+                .iter()
+                .filter(|e| e.outcome == Some(safe_cex_engine::Outcome::Unknown))
+                .collect();
+            assert_eq!(
+                errors.len(),
+                1,
+                "one journal terminal reaches host telemetry"
+            );
+            assert!(
+                errors[0].message.contains(ENGINE_UNKNOWN_TEXT),
+                "{}",
+                errors[0].message
+            );
+            assert_eq!(errors[0].partial.as_ref().unwrap().order_ids, ["first"]);
+        }
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        );
+    }
+}
+
+#[test]
 fn a_spot_placement_timestamp_refusal_is_not_replayed() {
     let mut h = H::new(true);
     h.command(Command::PlaceOrders {
@@ -1657,8 +1727,8 @@ fn failed_write_diagnostic_precedes_done_without_a_second_uncorrelated_log() {
         request: request.id,
         error: "failed write transport",
     });
-    let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="KuCoin write outcome is unknown. Check Open Orders")).unwrap();
-    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="KuCoin write outcome is unknown. Check Open Orders")).unwrap();
+    let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="The outcome is unknown. Check Open Orders")).unwrap();
+    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="The outcome is unknown. Check Open Orders")).unwrap();
     assert!(
         error < done,
         "owner mapping must still exist when diagnostic arrives"
@@ -2804,4 +2874,46 @@ fn postmerge_spot_server_error_warning_is_actionable() {
             "terminal={error:?}; warnings={warnings:?}"
         );
     }
+}
+
+#[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: kucoinspot | serial-placement-batch
+// TS packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts:426-448.
+fn parity_spot_batch_sends_below_minimum_zero_rounded_price_tail() {
+    let mut h = H::new(true);
+    let mut markets = h.e.store().markets().to_vec();
+    markets
+        .iter_mut()
+        .find(|m| m.symbol == "BTC-USDT")
+        .unwrap()
+        .limits
+        .amount
+        .min = 0.01;
+    h.e.store_mut().set_markets(markets);
+    let mut tail = place(Some("tail"));
+    tail.amount = 0.0012;
+    tail.price = Some(0.04);
+    h.command(Command::PlaceOrders {
+        command: 1105,
+        orders: vec![place(Some("first")), tail],
+    });
+    let first = h.http("/hf/orders");
+    h.respond(
+        &first,
+        200,
+        r#"{"code":"200000","data":{"orderId":"first"}}"#,
+    );
+    let last = h.http("/hf/orders");
+    let body: Value = serde_json::from_str(last.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["size"], "0.001");
+    assert_eq!(body["price"], "0");
+    h.respond(&last, 200, r#"{"code":"200000","data":{"orderId":"tail"}}"#);
+    assert_eq!(h.done(1105).unwrap(), json!(["first", "tail"]));
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|r| r.method == Method::Post && r.url.ends_with("/hf/orders"))
+            .count(),
+        2
+    );
 }
