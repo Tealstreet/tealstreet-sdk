@@ -20,6 +20,12 @@ retry and compensating writes. The journal never decides which writes are sent.
    counts, text and every other native fact stay exactly as supplied. The engine's
    existing physical lifecycle remains authoritative for aggregate classification.
 
+Native batches that do not create orders can record their physical facts through
+`Cx::http_write_applied_batch`. It retains the existing batch classifier and
+absent-order reconciliation fences while omitting cancelled or amended target IDs
+from created-order IDs. The logical journal separately records those existing
+targets in `Applied` results; the entry point refuses placement and read intents.
+
 `ElementResult` retains its existing serialized alternatives: `placed` with
 `orderIds`; `applied` with an `effect` and optional existing `targetOrderId` or
 `positionKey`; `notSent` with optional `error`; and `unknown` with required `error`.
