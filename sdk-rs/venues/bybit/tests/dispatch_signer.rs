@@ -711,7 +711,7 @@ fn static_ws_serialization_uses_primary_and_preserves_hyro_correlation_and_strin
 }
 
 #[test]
-fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence_in_both_orders() {
+fn spot_provider_refusal_stops_the_suffix_and_native_first_keeps_venue_evidence() {
     for provider_first in [true, false] {
         let (mut h, gate) = ready(Variant::Spot);
         gate.mode.store(4, Ordering::SeqCst);
@@ -726,6 +726,10 @@ fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence
                 vec![second, first]
             },
         });
+        if provider_first {
+            assert_provider_refusal_stops(&h);
+            continue;
+        }
         let request = h.take("/v5/order/create");
         assert!(
             !h.has_request("/v5/order/create"),
@@ -763,7 +767,7 @@ fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence
 }
 
 #[test]
-fn spot_mixed_provider_and_bare_http_failures_match_native_outcome_in_both_orders() {
+fn spot_provider_refusal_stops_the_suffix_and_native_first_keeps_http_evidence() {
     for status in [400, 429] {
         let (mut standalone, _) = ready(Variant::Spot);
         let mut native = order();
@@ -798,6 +802,10 @@ fn spot_mixed_provider_and_bare_http_failures_match_native_outcome_in_both_order
                     vec![native.clone(), order()]
                 },
             });
+            if provider_first {
+                assert_provider_refusal_stops(&h);
+                continue;
+            }
             let request = h.take("/v5/order/create");
             assert!(!h.has_request("/v5/order/create"));
             assert!(request.body.as_deref().unwrap().contains("\"qty\":\"0.2\""));
@@ -825,6 +833,29 @@ fn spot_mixed_provider_and_bare_http_failures_match_native_outcome_in_both_order
             assert!(h.engine.store().orders().is_empty());
         }
     }
+}
+
+fn assert_provider_refusal_stops(h: &Harness) {
+    assert!(!h.has_request("/v5/order/create"));
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: 42, error } => Some(error),
+            _ => None,
+        })
+        .expect("provider refusal terminates the plan");
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    let elements = error
+        .elements
+        .as_ref()
+        .expect("provider refusal has indexed outcomes");
+    assert_eq!(elements.len(), 2);
+    use safe_cex_engine::write_plan::ElementResult;
+    assert!(
+        matches!(&elements[0].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::NotSent))
+    );
+    assert_eq!(elements[1].result, ElementResult::NotSent { error: None });
 }
 
 fn refused_retry_after_initial_dispatch(

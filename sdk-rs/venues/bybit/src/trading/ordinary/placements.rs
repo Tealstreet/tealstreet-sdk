@@ -463,6 +463,13 @@ impl BybitLinear {
         mut entry: Ordinary,
         legs: VecDeque<Leg>,
     ) {
+        let writes = match super::write_plan::build(self, cx, &legs) {
+            Ok(writes) => writes,
+            Err(error) => {
+                let _ = cx.fail_preflight(&entry.preflight, error);
+                return;
+            }
+        };
         let Some(digest) = entry
             .hyro
             .as_ref()
@@ -506,6 +513,7 @@ impl BybitLinear {
         }
         entry.stage = Stage::Plan(Box::new(Run {
             plan,
+            writes,
             partial: None,
             queue: legs,
             active: None,
@@ -616,10 +624,10 @@ impl BybitLinear {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: &Request,
-        entry: Ordinary,
+        mut entry: Ordinary,
         error: VenueError,
     ) {
-        let Stage::Plan(run) = &entry.stage else {
+        let Stage::Plan(run) = &mut entry.stage else {
             self.park(request.command, entry);
             return;
         };
@@ -634,9 +642,18 @@ impl BybitLinear {
             return;
         };
         let key = call.key.clone();
+        if let Some(writes) = &mut run.writes
+            && let Some(index) = run.active.as_ref().and_then(|active| active.write_index)
+        {
+            let _ = writes.fail(index, error.clone());
+        }
         if error.outcome == Some(Outcome::NotSent) {
             // Refused before release: this send never happened (legacy sign failure).
             self.hyro_leg_unsent(&key, Some(lot));
+            if run.writes.is_some() {
+                run.fail(cx, error);
+                return;
+            }
             self.park(request.command, entry);
             return;
         }
@@ -654,7 +671,7 @@ impl BybitLinear {
         };
         // The journal keeps the transport text; each observer gets this report,
         // then its own terminal naming the link, with the journal's outcome.
-        let error = hyro::unknown(&link, &error.message);
+        let error = run.failure(hyro::unknown(&link, &error.message));
         for root in &call.observers {
             if let Owner::Command { id, .. } = root.owner() {
                 cx.command_error(id, error.message.clone());

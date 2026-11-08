@@ -26,12 +26,14 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{ElementResult, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError,
 };
 use std::collections::VecDeque;
 
 mod placements;
+mod write_plan;
 
 /// Every native call (and its one fresh-signature resend) has a 20 s window.
 const CALL_TIMEOUT_MS: u32 = 20_000;
@@ -84,8 +86,9 @@ enum Stage {
 
 struct Run {
     plan: Plan,
+    writes: Option<WritePlan<write_plan::CreateWrite>>,
     partial: Option<Box<partial::Flow>>,
-    /// Logical calls in slot order; a selected fallback goes to the front.
+    /// Logical calls in native dispatch order.
     queue: VecDeque<Leg>,
     active: Option<Active>,
     continue_on_error: bool,
@@ -122,6 +125,22 @@ struct Active {
     context: Context,
     leg: Leg,
     local: Option<LocalWrite>,
+    write_index: Option<usize>,
+    results: Option<Vec<ElementResult>>,
+}
+
+impl Run {
+    fn failure(&mut self, error: VenueError) -> VenueError {
+        match &mut self.writes {
+            Some(writes) => writes.failure(error),
+            None => error,
+        }
+    }
+
+    fn fail(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        let error = self.failure(error);
+        let _ = cx.fail_plan(&self.plan, error);
+    }
 }
 
 /// What one delivered plan call means for the rest of the plan.
@@ -132,7 +151,6 @@ enum Decision {
     Unlisted(Vec<String>),
     Failed(VenueError),
     Resend(ResendGrant),
-    Replace(Vec<(String, Vec<safe_cex_engine::model::OrderIdentityReceipt>)>),
     /// A Partial stop's replacement was refused: put the old stop back, once.
     Restore(Call),
     /// The engine refused the fact; the plan cannot continue.
@@ -462,8 +480,7 @@ impl BybitLinear {
         self.continue_ordinary(cx, id, entry);
     }
 
-    /// One serial step per native request; a batch's single-create fallback is
-    /// its declared after-refusal branch.
+    /// Admit every frozen create before the first native mutation.
     fn admit_ordinary(&self, cx: &mut Cx<'_, Pending>, entry: &Ordinary, job: Job) -> Option<Run> {
         let amend_virtual =
             matches!(&entry.command, Command::AmendOrder { id, .. } if is_virtual(id));
@@ -491,30 +508,19 @@ impl BybitLinear {
                 lot: None,
             });
         }
-        let fallbacks: Vec<Vec<CallBound<'_>>> = legs
+        let writes = match write_plan::build(self, cx, &legs) {
+            Ok(writes) => writes,
+            Err(error) => {
+                let _ = cx.fail_preflight(&entry.preflight, error);
+                return None;
+            }
+        };
+        let calls = [call_bound(&[])];
+        let steps: Vec<StepBound<'_>> = delays
             .iter()
-            .map(|leg| match &leg.planned.call {
-                Call::PlaceBatch { fallback } => fallback.iter().map(|_| call_bound(&[])).collect(),
-                _ => Vec::new(),
-            })
-            .collect();
-        let branches: Vec<Vec<StepBound<'_>>> = fallbacks
-            .iter()
-            .map(|calls| {
-                calls
-                    .chunks(1)
-                    .map(|calls| StepBound { wait_ms: 0, calls })
-                    .collect()
-            })
-            .collect();
-        let calls: Vec<[CallBound<'_>; 1]> =
-            branches.iter().map(|branch| [call_bound(branch)]).collect();
-        let steps: Vec<StepBound<'_>> = calls
-            .iter()
-            .zip(&delays)
-            .map(|(calls, wait_ms)| StepBound {
+            .map(|wait_ms| StepBound {
                 wait_ms: *wait_ms,
-                calls,
+                calls: &calls,
             })
             .collect();
         let partial = legs.front().and_then(|leg| match &leg.planned.call {
@@ -551,6 +557,7 @@ impl BybitLinear {
         .ok()?;
         Some(Run {
             plan,
+            writes,
             partial,
             queue: legs,
             active: None,
@@ -636,7 +643,7 @@ impl BybitLinear {
                 } else {
                     internal("Bybit trading plan lost its schedule")
                 };
-                let _ = cx.fail_plan(&run.plan, error);
+                run.fail(cx, error);
                 return;
             }
         };
@@ -665,7 +672,10 @@ impl BybitLinear {
                     None => serde_json::to_string(&run.ids).unwrap_or_default(),
                 };
                 let sealed = match run.error.take() {
-                    Some(error) => cx.fail_plan(&run.plan, error).map(|()| false),
+                    Some(error) => {
+                        let error = run.failure(error);
+                        cx.fail_plan(&run.plan, error).map(|()| false)
+                    }
                     None => cx.done_plan(&run.plan, ids.clone()).map(|()| true),
                 };
                 match sealed {
@@ -677,8 +687,7 @@ impl BybitLinear {
                     }
                     Ok(false) => {}
                     Err(_) => {
-                        let _ =
-                            cx.fail_plan(&run.plan, internal("Bybit trading plan was incomplete"));
+                        run.fail(cx, internal("Bybit trading plan was incomplete"));
                     }
                 }
                 return;
@@ -687,8 +696,9 @@ impl BybitLinear {
             self.park(id, entry);
             return;
         }
-        let (Ok([slot]), Some(leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front()) else {
-            let _ = cx.fail_plan(&run.plan, internal("Bybit trading plan is not serial"));
+        let (Ok([slot]), Some(mut leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front())
+        else {
+            run.fail(cx, internal("Bybit trading plan is not serial"));
             return;
         };
         let context = match leg.intent {
@@ -699,17 +709,27 @@ impl BybitLinear {
             LegIntent::Command => cx.plan_leg_context(&run.plan, &slot),
         };
         let Ok(context) = context else {
-            let _ = cx.fail_plan(
-                &run.plan,
-                internal("Bybit trading plan refused its next leg"),
-            );
+            run.fail(cx, internal("Bybit trading plan refused its next leg"));
             return;
         };
         // A later Hyro leg waits for reconciled private state (legacy text).
         if !self.private_ready() {
-            let _ = cx.fail_plan(&run.plan, not_sent(HYRO_RECOVERING));
+            let error = run.failure(not_sent(HYRO_RECOVERING));
+            let _ = cx.fail_plan(&run.plan, error);
             return;
         }
+        let write_index = if matches!(leg.planned.call, Call::PlaceOne | Call::PlaceBatch) {
+            let next = run.writes.as_mut().and_then(WritePlan::next_write);
+            let Some((index, write)) = next else {
+                let error = run.failure(internal("Bybit write plan refused its next create"));
+                let _ = cx.fail_plan(&run.plan, error);
+                return;
+            };
+            leg.planned.body.clone_from(&write.payload.body);
+            Some(index)
+        } else {
+            None
+        };
         let method = if matches!(leg.planned.call, Call::PartialProof(_)) {
             Method::Get
         } else {
@@ -752,20 +772,29 @@ impl BybitLinear {
             context: context.clone(),
             leg,
             local,
+            write_index,
+            results: None,
         });
         self.park(id, entry);
         if !self.send_ordinary(cx, id, context, method, path, body) {
             // A typed pre-send refusal seals the plan in the engine; never hang.
-            match &key {
+            let failed = match &key {
                 Some(key) => {
-                    self.take_hyro_live(key);
                     self.hyro_leg_unsent(key, lot);
+                    self.take_hyro_live(key)
                 }
-                None => {
-                    self.trading.ordinary.remove(&id);
+                None => self.trading.ordinary.remove(&id),
+            };
+            let mut error = internal("Bybit trading request was refused").outcome(Outcome::NotSent);
+            if let Some(mut failed) = failed
+                && let Stage::Plan(run) = &mut failed.stage
+            {
+                if let (Some(writes), Some(index)) = (&mut run.writes, write_index) {
+                    let _ = writes.fail(index, error.clone());
                 }
+                error = run.failure(error);
             }
-            let _ = cx.fail_plan(&plan, internal("Bybit trading request was refused"));
+            let _ = cx.fail_plan(&plan, error);
         }
     }
 
@@ -834,6 +863,38 @@ impl BybitLinear {
             .then(|| fields(&pending.rest.payload).order_link_id)
             .flatten();
         ReconciliationData::new(link.unwrap_or_default())
+    }
+
+    pub(crate) fn ordinary_write_evidence(
+        &self,
+        pending: &Pending,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        let Then::Ordinary(request) = &pending.then else {
+            return;
+        };
+        let entries =
+            self.trading
+                .ordinary
+                .values()
+                .chain(self.trading.hyro.intents.values().filter_map(
+                    |intent| match &intent.phase {
+                        crate::hyro::Phase::Live(entry) => Some(entry.as_ref()),
+                        _ => None,
+                    },
+                ));
+        for entry in entries {
+            if let Stage::Plan(run) = &entry.stage
+                && run
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| active.context == request.context)
+                && let Some(writes) = &run.writes
+            {
+                evidence.write_plan(writes);
+                return;
+            }
+        }
     }
 
     pub(crate) fn on_ordinary_response(
@@ -1002,7 +1063,7 @@ impl BybitLinear {
         let Stage::Plan(run) = &mut entry.stage else {
             return;
         };
-        let active = run.active.take().expect("matched active leg");
+        let mut active = run.active.take().expect("matched active leg");
         if cx
             .validate_plan_delivery(&run.plan, &active.context)
             .is_err()
@@ -1056,7 +1117,7 @@ impl BybitLinear {
                 }
             }
         } else {
-            self.leg_decision(cx, id, &active, response)
+            self.leg_decision(cx, &mut active, response)
         };
         // The logical replacement has settled (a resend is the same write, still
         // open), so the already-gone mark has served.
@@ -1075,6 +1136,34 @@ impl BybitLinear {
             return;
         };
         let plan = run.plan.clone();
+        if !matches!(decision, Decision::Resend(_))
+            && let (Some(writes), Some(index)) = (&mut run.writes, active.write_index)
+        {
+            let settled = if let Some(results) = active.results.take() {
+                writes.settle(index, results)
+            } else {
+                match &decision {
+                    Decision::Next(ids) => writes.settle(
+                        index,
+                        vec![ElementResult::Placed {
+                            order_ids: ids.clone(),
+                        }],
+                    ),
+                    Decision::Failed(error) => writes.fail(index, error.clone()),
+                    _ => writes.fail(
+                        index,
+                        internal("Bybit create outcome is unproven").outcome(Outcome::Unknown),
+                    ),
+                }
+            };
+            if settled.is_err() {
+                let error = run.failure(
+                    internal("Bybit write-plan settlement was refused").outcome(Outcome::Unknown),
+                );
+                let _ = cx.fail_plan(&plan, error);
+                return;
+            }
+        }
         match decision {
             Decision::ProofPoll(axis) => {
                 let planned = run.partial.as_ref().unwrap().proof(axis);
@@ -1149,7 +1238,7 @@ impl BybitLinear {
                     cx.finish_plan_call(&plan, &active.slot, &active.context)
                 };
                 if continued.is_err() {
-                    let _ = cx.fail_plan(&plan, internal("Bybit trading plan lost its call"));
+                    run.fail(cx, internal("Bybit trading plan lost its call"));
                     return;
                 }
             }
@@ -1164,6 +1253,11 @@ impl BybitLinear {
                 }
             }
             Decision::Failed(mut error) => {
+                if run.writes.is_some() {
+                    let error = run.failure(error);
+                    let _ = cx.fail_plan(&plan, error);
+                    return;
+                }
                 if matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
                     && error.outcome != Some(Outcome::Unknown)
                 {
@@ -1276,28 +1370,6 @@ impl BybitLinear {
                 self.park(id, entry);
                 return;
             }
-            Decision::Replace(fallback) => {
-                if cx
-                    .replace_plan_call(&plan, &active.slot, &active.context)
-                    .is_err()
-                {
-                    let _ = cx.fail_plan(&plan, internal("Bybit batch fallback was refused"));
-                    return;
-                }
-                // Refused whole: nothing was placed, so each order may go alone.
-                for (body, receipts) in fallback.into_iter().rev() {
-                    run.queue.push_front(Leg {
-                        planned: Planned {
-                            receipts,
-                            path: "/v5/order/create",
-                            body,
-                            call: Call::PlaceOne,
-                        },
-                        intent: LegIntent::Command,
-                        lot: None,
-                    });
-                }
-            }
             Decision::Restore(call) => {
                 let continued = cx.continue_serial_plan(
                     &plan,
@@ -1331,7 +1403,7 @@ impl BybitLinear {
                 });
             }
             Decision::Lost => {
-                let _ = cx.fail_plan(&plan, internal("Bybit write fact was refused"));
+                run.fail(cx, internal("Bybit write fact was refused"));
                 return;
             }
         }
@@ -1426,6 +1498,19 @@ impl BybitLinear {
             let key = call.key.clone();
             self.on_hyro_leg_failed(cx, &request, entry, error);
             self.after_hyro(cx, &key, request.command);
+            return;
+        }
+        if let Stage::Plan(run) = &mut entry.stage
+            && let Some(index) = run
+                .active
+                .as_ref()
+                .filter(|active| active.context == request.context)
+                .and_then(|active| active.write_index)
+            && let Some(writes) = &mut run.writes
+        {
+            let _ = writes.fail(index, error.clone());
+            let error = run.failure(error);
+            let _ = cx.fail_plan(&run.plan, error);
             return;
         }
         let Stage::Plan(run) = &mut entry.stage else {
@@ -1572,8 +1657,7 @@ impl BybitLinear {
     fn leg_decision(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        id: CommandId,
-        active: &Active,
+        active: &mut Active,
         response: &Response<'_>,
     ) -> Decision {
         let context = &active.context;
@@ -1599,7 +1683,7 @@ impl BybitLinear {
                 ext,
             }) => {
                 let http_ok = (200..300).contains(&response.status);
-                self.refused_leg(cx, id, active, code, message, result, ext, http_ok)
+                self.refused_leg(cx, active, code, message, result, ext, http_ok)
             }
             Ok(Answer::Success { result, ext }) => {
                 self.accepted_leg(cx, active, response, result, ext)
@@ -1635,7 +1719,6 @@ impl BybitLinear {
     fn refused_leg(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        id: CommandId,
         active: &Active,
         code: i64,
         message: String,
@@ -1763,6 +1846,9 @@ impl BybitLinear {
         if let (Verdict::RefusedResend(_), Some(server)) = (verdict, server) {
             Self::observe_clock(cx, server);
         }
+        if active.write_index.is_some() && !matches!(verdict, Verdict::RefusedResend(_)) {
+            return Decision::Failed(error);
+        }
         match (verdict, &planned.call) {
             (Verdict::Satisfied(_), call) => {
                 self.satisfied_effects(cx, call);
@@ -1799,15 +1885,6 @@ impl BybitLinear {
                     error.message
                 );
                 Decision::Failed(error)
-            }
-            (Verdict::Refused(_), Call::PlaceBatch { fallback })
-                if code == 10001 && !fallback.is_empty() =>
-            {
-                cx.command_error(
-                    id,
-                    format!("Failed to place batch orders: {}", error.message),
-                );
-                Decision::Replace(fallback.clone())
             }
             _ => Decision::Failed(error),
         }
@@ -1897,7 +1974,7 @@ impl BybitLinear {
     fn accepted_leg(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        active: &Active,
+        active: &mut Active,
         response: &Response<'_>,
         result: Option<&serde_json::value::RawValue>,
         ext: Option<&serde_json::value::RawValue>,
@@ -1925,7 +2002,7 @@ impl BybitLinear {
                 }
                 Decision::Next(vec![id])
             }
-            Call::PlaceBatch { .. } => {
+            Call::PlaceBatch => {
                 let links: Vec<Option<String>> = fields(&planned.body)
                     .items
                     .into_iter()
@@ -1945,6 +2022,38 @@ impl BybitLinear {
                     );
                 };
                 let items = Self::batch_items(&rows);
+                let results: Result<Vec<_>, _> = rows
+                    .iter()
+                    .map(|row| match row {
+                        Row::Accepted(id) => Ok(ElementResult::Placed {
+                            order_ids: vec![id.clone()],
+                        }),
+                        Row::Refused { code, message } => {
+                            let native = Native {
+                                code: NativeCode::Int(*code),
+                                message,
+                            };
+                            cx.classify_write(
+                                context,
+                                &BYBIT,
+                                Some(&native),
+                                describe((*code, message.clone())),
+                            )
+                            .map(|fact| {
+                                let error = Box::new(fact.error().clone());
+                                if fact.verdict().is_refusal() {
+                                    ElementResult::NotSent { error: Some(error) }
+                                } else {
+                                    ElementResult::Unknown { error }
+                                }
+                            })
+                        }
+                    })
+                    .collect();
+                match results {
+                    Ok(results) => active.results = Some(results),
+                    Err(_) => return Decision::Lost,
+                }
                 // The reason travels in the error: algo callers never see `command_error`.
                 let reasons: Vec<String> = rows
                     .iter()

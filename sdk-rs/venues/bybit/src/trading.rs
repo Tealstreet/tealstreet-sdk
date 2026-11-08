@@ -44,11 +44,7 @@ struct LocalWrite {
 /// What a response means for its job.
 enum Call {
     PlaceOne,
-    /// Single-order bodies to place one by one if the venue refuses the
-    /// whole batch (a refusal places nothing, so this cannot double-place).
-    PlaceBatch {
-        fallback: Vec<(String, Vec<OrderIdentityReceipt>)>,
-    },
+    PlaceBatch,
     TradingStop,
     PartialStop {
         /// The stop its cancel removed, named if this write then fails.
@@ -766,17 +762,13 @@ impl BybitLinear {
                     .str("category", category.as_str())
                     .raw("request", &format!("[{}]", items.join_with(",")))
                     .finish();
-                let fallback = chunk
-                    .iter()
-                    .map(|lot| (lot.single.clone().finish(), lot.receipts.clone()))
-                    .collect();
                 job.steps.push_back(Step {
                     delay_ms: if index > 0 { PLACE_BATCH_DELAY_MS } else { 0.0 },
                     requests: vec![Planned {
                         receipts: chunk.iter().flat_map(|lot| lot.receipts.clone()).collect(),
                         path: "/v5/order/create-batch",
                         body,
-                        call: Call::PlaceBatch { fallback },
+                        call: Call::PlaceBatch,
                     }],
                 });
             }
