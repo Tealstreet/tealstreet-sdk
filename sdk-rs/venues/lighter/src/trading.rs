@@ -12,7 +12,7 @@ use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
@@ -76,6 +76,15 @@ struct Job {
     /// The plan is parked in a settle-only wait for group proof.
     settled: bool,
 }
+// Field order preserves the sorted-key JSON used by the original journal.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnknownJournal<'a> {
+    not_sent: Vec<String>,
+    placed: Vec<&'a String>,
+    unknown: Vec<String>,
+}
+
 impl Job {
     /// Every acknowledged group leg has been seen by its own id.
     fn group_proven(&self) -> bool {
@@ -83,7 +92,7 @@ impl Job {
             .iter()
             .all(|id| self.group_seen.contains(id))
     }
-    fn unknown_journal(&self) -> serde_json::Value {
+    fn unknown_journal(&self) -> UnknownJournal<'_> {
         let mut unknown: Vec<_> = self
             .group_accepted
             .iter()
@@ -108,7 +117,11 @@ impl Job {
             .skip(skip)
             .flat_map(Step::placement_ids)
             .collect();
-        serde_json::json!({"placed":placed,"unknown":unknown,"notSent":not_sent})
+        UnknownJournal {
+            not_sent,
+            placed,
+            unknown,
+        }
     }
 }
 enum Step {
@@ -1292,8 +1305,9 @@ impl Lighter {
             return;
         }
         self.trading.inflight = false;
-        if matches!(response.status, 405 | 429) && !matches!(&request, Request::Submit(_)) {
-            if matches!(&request, Request::CancelProof | Request::RestoreProof) {
+        let kind = &request;
+        if matches!(response.status, 405 | 429) && !matches!(kind, Request::Submit(_)) {
+            if matches!(kind, Request::CancelProof | Request::RestoreProof) {
                 self.trade_finish(cx, uncertain("Lighter protection proof outcome unknown after rate limit; check Open Orders").kind(ErrorKind::RateLimited));
                 return;
             }
@@ -1886,13 +1900,12 @@ impl Lighter {
                     error.message = UNKNOWN_TEXT.into();
                 }
                 if let Some(journal) = &journal
-                    && journal["unknown"]
-                        .as_array()
-                        .is_some_and(|ids| !ids.is_empty())
+                    && !journal.unknown.is_empty()
                 {
                     error.message = format!(
                         "{}; unknown order indexes: {}",
-                        error.message, journal["unknown"]
+                        error.message,
+                        serde_json::to_string(&journal.unknown).unwrap()
                     );
                     cx.event(
                         safe_cex_engine::Level::Error,
@@ -1901,20 +1914,18 @@ impl Lighter {
                         vec![
                             ("command", job.command.into()),
                             ("outcome", "unknown".into()),
-                            ("journal", journal.to_string().into()),
+                            ("journal", serde_json::to_string(journal).unwrap().into()),
                         ],
                     );
                 }
             }
 
             if let Some(journal) = &journal {
-                if journal["placed"]
-                    .as_array()
-                    .is_some_and(|ids| !ids.is_empty())
-                {
+                if !journal.placed.is_empty() {
                     error.message = format!(
                         "{}; previously placed order indexes: {}",
-                        error.message, journal["placed"]
+                        error.message,
+                        serde_json::to_string(&journal.placed).unwrap()
                     );
                 }
             } else if !job.ids.is_empty() {
@@ -2747,7 +2758,8 @@ impl Lighter {
             return;
         }
         self.trading.inflight = false;
-        let error = if matches!(&request, Request::CancelProof | Request::RestoreProof) {
+        let kind = &request;
+        let error = if matches!(kind, Request::CancelProof | Request::RestoreProof) {
             uncertain(format!(
                 "Lighter protection proof outcome unknown: {}; check Open Orders",
                 error.message

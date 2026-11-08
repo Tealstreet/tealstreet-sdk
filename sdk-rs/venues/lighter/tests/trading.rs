@@ -1975,7 +1975,26 @@ fn unknown_exception_empty_hash(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOp
         .iter()
         .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten())
         .expect("journal snapshot");
-    let report: Value = serde_json::from_str(report).unwrap();
+    let decoded: Value = serde_json::from_str(report).unwrap();
+    // Pin the legacy Value encoding: sorted keys, compact arrays, and string indexes.
+    assert_eq!(
+        report,
+        format!(
+            r#"{{"notSent":{},"placed":{},"unknown":{}}}"#,
+            decoded["notSent"],
+            json!([accepted]),
+            json!(unknown_ids)
+        )
+    );
+    assert_eq!(
+        error.message,
+        format!(
+            "{ENGINE_UNKNOWN_TEXT}; unknown order indexes: {}; previously placed order indexes: {}",
+            json!(unknown_ids),
+            json!([accepted])
+        )
+    );
+    let report = decoded;
     assert_eq!(report["placed"], json!([accepted]));
     assert_eq!(report["unknown"], json!(unknown_ids));
     assert!(!report["notSent"].as_array().unwrap().is_empty());

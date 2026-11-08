@@ -1394,7 +1394,9 @@ impl Trading {
         result: Result<Vec<String>, VenueError>,
         rejected: bool,
     ) {
-        if !matches!(request.kind, Kind::Quotes(_)) {
+        let kind = &request.kind;
+        let is_quotes = matches!(kind, Kind::Quotes(_));
+        if !is_quotes {
             account.bump_orders(cx);
             account.bump_positions();
         }
@@ -1407,7 +1409,7 @@ impl Trading {
         };
         match result {
             Ok(ids) => {
-                if !matches!(request.kind, Kind::Quotes(_)) {
+                if !is_quotes {
                     job.effective = true;
                 }
                 job.results.extend(ids);
@@ -1498,9 +1500,10 @@ impl Trading {
                 {
                     let unknown = error.outcome == Some(Outcome::Unknown);
                     if unknown && job.placement {
+                        let unknown_labels = request.kind.placement_labels();
                         let journal = serde_json::json!({
                             "placed":job.results,
-                            "unknown":request.kind.placement_labels(),
+                            "unknown":unknown_labels,
                             "notSent":job.operations.iter().flat_map(|op| op.kind.placement_labels()).collect::<Vec<_>>()
                         });
                         error.message = format!(
@@ -1565,7 +1568,7 @@ impl Trading {
                     }
                 } else {
                     job.errors.push(error);
-                    if !job.attempt_all || matches!(request.kind, Kind::Quotes(_)) {
+                    if !job.attempt_all || is_quotes {
                         job.preparing = None;
                         job.operations.clear();
                     }
