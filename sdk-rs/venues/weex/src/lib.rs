@@ -1311,7 +1311,7 @@ impl Venue for WeexFutures {
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
         if let Task::Trade(request) = &pending.task {
-            request.unproven_evidence(response.body, evidence);
+            self.trade_unproven_evidence(request, response.body, evidence);
         }
     }
     fn capture_http_reconciliation(

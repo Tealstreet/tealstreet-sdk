@@ -4,6 +4,8 @@ use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
 };
+#[path = "trading/pulled_unknown.rs"]
+mod pulled_unknown;
 mod support;
 use safe_cex_venue_weex::WeexFutures;
 use serde_json::{Value, json};
@@ -2038,7 +2040,7 @@ fn weex_unknown_or_rejected_targeted_mode_does_not_emit_other_symbol_writes() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_native_text_with_unknown_guidance() {
     use safe_cex_engine::{ErrorKind, Outcome};
     for (status, body, kind, outcome) in [
         (
@@ -2088,7 +2090,10 @@ fn write_failures_are_classified_without_changing_their_text() {
                 "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
         } else {
-            assert_eq!(error.message, format!("HTTP {status}: {body}"));
+            assert_eq!(
+                error.message,
+                format!("HTTP {status}: {body}. The outcome is unknown. Check Open Orders")
+            );
         }
         assert_eq!(
             (error.kind, error.outcome),
