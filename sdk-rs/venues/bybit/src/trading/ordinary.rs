@@ -2035,7 +2035,7 @@ impl BybitLinear {
                     );
                 };
                 let items = Self::batch_items(&rows);
-                let Ok(outcome) = cx.http_write_batch(
+                let Ok(outcome) = cx.http_write_applied_batch(
                     context,
                     &BYBIT,
                     ids.len(),
@@ -2086,7 +2086,7 @@ impl BybitLinear {
                 };
                 let rows = [row];
                 let items = Self::batch_items(&rows);
-                let Ok(outcome) = cx.http_write_batch(
+                let Ok(outcome) = cx.http_write_applied_batch(
                     context,
                     &PROTECTIVE,
                     1,

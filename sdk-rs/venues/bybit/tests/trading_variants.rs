@@ -4343,6 +4343,44 @@ fn managed_cancel_batch_reordered_partial_success_only_retires_the_accepted_orde
 }
 
 #[test]
+fn applied_batch_cancel_unknown_row_records_only_confirmed_cancellations() {
+    let mut h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"two"},{"orderId":"one"}]},"retExtInfo":{"list":[{"code":10016,"msg":"unknown cancellation outcome"},{"code":0,"msg":"OK"}]}}"#,
+    );
+    assert!(h.engine.store().order("one").is_none());
+    assert_eq!(
+        h.engine.store().order("two").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open,
+        "an Unknown row must not confirm its target's cancellation"
+    );
+    h.advance(1_000.0);
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get),
+        "no cancellation replay or compensating write"
+    );
+    let errors: Vec<_> = h
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 120,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        errors[0].partial.as_ref().unwrap().order_ids.is_empty(),
+        "cancellation targets are existing orders, never newly created IDs: {:?}",
+        errors[0]
+    );
+}
+
+#[test]
 fn managed_cancel_batch_anonymous_already_gone_row_waits_for_reconciliation() {
     let mut h = managed_cancel_pair(
         r#"{"retCode":0,"result":{"list":[{"orderId":"one"},{"orderId":"","orderLinkId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110001,"msg":"order not exists"}]}}"#,
