@@ -17,7 +17,7 @@ Placement builds and validates the whole batch, including every split entry and
 attached TP/SL lot, before requesting the write clock or submitting an order.
 Any unsupported row, malformed price/trigger, invalid native lot, or cumulative
 algo-count overflow refuses the entire intent with `notSent` and no requests.
-Cancellation-only batches retain their existing best-effort behavior.
+Cancellation batches use the same fail-stop journal; an invalid reference refuses the whole batch before dispatch.
 
 Quantities retain nearest-step normalization; maximum quantities are floored to
 native units. A short tail borrows only from lots that remain above their own
@@ -28,7 +28,17 @@ Reduce-only and full-position closes retain the native notional exemption.
 Attached protection is split when necessary, in entry/SL/TP order, and every
 resulting protection counts toward the symbol's algo limit across the batch.
 
-Replacement planning completes before cancellation. Protective amendments must
-have one native replacement so their exact put-back contract stays intact.
-After dispatch, an ambiguous answer stops the plan without resending; a later
-venue refusal or concurrent fill can still leave a partial result.
+Replacement planning completes before cancellation. Protective amendments retain
+one native replacement and the final live stop guard. The shared engine
+`WritePlan` validates the exact immutable payloads before the first request and
+journals every dispatched write. A runtime refusal or ambiguity stops the suffix;
+there is no automatic resend, protective put-back, cancel or rollback after failure.
+Engine-granted signature/clock correction for a proven refusal keeps its existing
+custody and the same pending logical element.
+
+Terminal failures carry every planned element's indexed `placed`, `applied`,
+`notSent` or `unknown` outcome. Successful cancel/settings effects are `applied`
+with existing-target references, never invented placement IDs. A successful cancel
+followed by a refused replacement leaves the original order gone and reports both
+facts for the user to act on. Lost replies and engine-sealed HTTP ambiguity retain
+the placed prefix, unknown pending write and untouched notSent suffix.

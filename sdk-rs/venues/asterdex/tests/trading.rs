@@ -1046,7 +1046,7 @@ fn ack_routing_capacity_rejects_oversized_and_concurrent_jobs_before_new_writes(
 }
 
 #[test]
-fn unknown_id_does_not_prevent_other_cancellations_in_the_batch() {
+fn unknown_id_refuses_the_complete_cancellation_batch_before_writes() {
     let mut h = Harness::new();
     h.engine
         .store_mut()
@@ -1055,13 +1055,15 @@ fn unknown_id_does_not_prevent_other_cancellations_in_the_batch() {
         command: 1,
         ids: vec!["unknown".into(), "known".into()],
     });
-    let cancel = h.take(Method::Delete);
-    assert!(cancel.url.contains("orderId=known&"));
-    h.reply(cancel, r#"{"status":"CANCELED"}"#);
-    assert!(h.result(1).is_ok());
+    assert!(!h.requests.iter().any(|r| r.method != Method::Get));
+    assert!(h.result(1).is_err());
+    assert_eq!(
+        h.failures[0].1.outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
     assert_eq!(
         h.engine.store().order("known").unwrap().status,
-        OrderStatus::Canceled
+        OrderStatus::Open
     );
 }
 
@@ -1201,7 +1203,7 @@ fn an_amend_size_at_or_below_the_filled_amount_is_refused_before_any_write() {
 }
 
 #[test]
-fn a_refused_stop_replacement_restores_or_says_the_stop_is_gone() {
+fn a_refused_stop_replacement_reports_the_stop_is_gone_without_restoring() {
     let mut h = Harness::new();
     h.native_stop();
     h.command(Command::AmendOrder {
@@ -1217,11 +1219,10 @@ fn a_refused_stop_replacement_restores_or_says_the_stop_is_gone() {
         place,
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
-    let restore = h.take(Method::Post);
-    assert!(restore.url.contains("stopPrice=9300"));
-    h.reply(
-        restore,
-        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains("/order?"))
     );
     let message = h.result(1).as_ref().unwrap_err();
     assert!(message.contains("no stop"), "{message}");

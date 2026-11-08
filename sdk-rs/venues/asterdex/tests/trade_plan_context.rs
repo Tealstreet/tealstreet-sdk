@@ -534,7 +534,7 @@ fn a_transport_loss_after_release_is_unknown_and_never_resent() {
 }
 
 #[test]
-fn a_cancel_batch_continues_after_a_failure_through_one_plan() {
+fn a_cancel_batch_stops_after_a_failure_and_reports_the_unsent_suffix() {
     let mut e = engine();
     e.store_mut().set_orders(vec![open("777"), open("778")]);
     let sent = command(
@@ -547,11 +547,17 @@ fn a_cancel_batch_continues_after_a_failure_through_one_plan() {
     managed(&sent, 1);
     let first = write(&sent, Method::Delete, "/order").clone();
     let next = answer(&mut e, &first, 400, r#"{"code":-4000,"msg":"busy"}"#);
-    managed(&next, 1);
-    let second = write(&next, Method::Delete, "/order").clone();
-    assert!(second.url.contains("778"));
-    let done = answer(&mut e, &second, 200, r#"{"status":"CANCELED"}"#);
-    assert!(terminal(&done).is_some());
+    assert!(!next.requests.iter().any(|r| r.method == Method::Delete));
+    let error = terminal(&next).expect("one terminal").unwrap_err();
+    let rows = error.elements.as_ref().expect("every cancellation");
+    assert_eq!(rows.len(), 2);
+    assert!(
+        matches!(&rows[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(e) } if e.outcome == Some(Outcome::Rejected))
+    );
+    assert_eq!(
+        rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+    );
 }
 
 #[test]

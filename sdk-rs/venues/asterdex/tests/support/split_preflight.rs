@@ -325,3 +325,183 @@ fn replacement_notional_uses_its_normalized_wire_quantity() {
     assert_eq!(h.sent_writes, 2);
     assert!(h.result(1).is_ok());
 }
+
+#[test]
+fn runtime_second_lot_reports_complete_indexed_outcomes_without_more_writes() {
+    use safe_cex_engine::write_plan::ElementResult;
+    for (status, answer, unknown) in [
+        (200, r#"{"code":-2010,"msg":"insufficient margin"}"#, false),
+        (503, r#"{"code":-2010,"msg":"uncertain gateway"}"#, true),
+        (200, r#"{"code":-1007,"msg":"unknown execution"}"#, true),
+        (200, r#"{"code":200,"msg":"missing order ID"}"#, true),
+    ] {
+        let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
+        h.place(ordinary(12.0, 1.0));
+        let first = h.take(Method::Post);
+        h.reply(first, r#"{"orderId":801}"#);
+        let second = h.take(Method::Post);
+        h.reply_status(second, status, answer);
+        assert_eq!(h.sent_writes, 2);
+        assert!(!h.requests.iter().any(|r| r.method != Method::Get));
+        let error = &h.failures[0].1;
+        if unknown {
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+        } else {
+            assert!(!matches!(
+                error.outcome,
+                Some(Outcome::NotSent | Outcome::Rejected)
+            ));
+        }
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["801"]);
+        let rows = error.elements.as_ref().expect("all planned elements");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.iter().map(|r| r.element.index).collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        assert_eq!(
+            rows[0].result,
+            ElementResult::Placed {
+                order_ids: vec!["801".into()]
+            }
+        );
+        if unknown {
+            assert!(
+                matches!(&rows[1].result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown))
+            );
+        } else {
+            assert!(
+                matches!(&rows[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+            );
+        }
+        assert_eq!(rows[2].result, ElementResult::NotSent { error: None });
+        h.collect();
+        assert_eq!(h.sent_writes, 2, "no resend, cancel or rollback");
+    }
+}
+
+#[test]
+fn runtime_refused_stop_replacement_reports_applied_cancel_without_put_back() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut h = Harness::new();
+    h.native_stop();
+    h.requests.clear();
+    h.sent_writes = 0;
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(9200.0),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+    let replacement = h.take(Method::Post);
+    h.reply(
+        replacement,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    assert_eq!(h.sent_writes, 2, "no automatic protective put-back");
+    assert!(!h.requests.iter().any(|r| r.method != Method::Get));
+    let error = &h.failures[0].1;
+    let rows = error
+        .elements
+        .as_ref()
+        .expect("cancel and replacement outcomes");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0].result,
+        ElementResult::Applied {
+            effect: AppliedEffect::Cancel,
+            target_order_id: Some("283194212".into()),
+            position_key: None
+        }
+    );
+    assert!(
+        matches!(&rows[1].result, ElementResult::NotSent { error: Some(e) } if e.outcome == Some(Outcome::Rejected))
+    );
+    assert!(
+        error.partial.is_none(),
+        "canceled target is not a newly placed order"
+    );
+    assert!(error.message.contains("no stop"));
+}
+
+#[test]
+fn runtime_lost_second_reply_keeps_the_pending_element_unknown() {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
+    h.place(ordinary(12.0, 1.0));
+    let first = h.take(Method::Post);
+    h.reply(first, r#"{"orderId":801}"#);
+    let second = h.take(Method::Post);
+    h.engine.handle(
+        1700000000000.0,
+        Event::HttpFailed {
+            request: second.id,
+            error: "synthetic connection lost",
+        },
+    );
+    h.collect();
+    let rows = h.failures[0]
+        .1
+        .elements
+        .as_ref()
+        .expect("lost reply journal");
+    assert_eq!(rows.len(), 3);
+    assert!(
+        matches!(&rows[0].result, ElementResult::Placed { order_ids } if order_ids == &["801"])
+    );
+    assert!(
+        matches!(&rows[1].result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown))
+    );
+    assert_eq!(rows[2].result, ElementResult::NotSent { error: None });
+    assert_eq!(h.sent_writes, 2);
+}
+
+#[test]
+fn runtime_local_preparation_veto_settles_pending_element_not_sent() {
+    use safe_cex_engine::request_context::{Error, HttpAction};
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut h = configured(1.0, 5.0, 1.0, 0.0, 10);
+    h.engine.handle(
+        1700000000000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![serde_json::from_value(ordinary(12.0, 1.0)).unwrap()],
+        }),
+    );
+    h.engine.prepare_dispatch(1700000000000.0);
+    let preparation = h
+        .engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("pending write preparation");
+    h.engine.http_preparation_failed(
+        1700000000000.0,
+        preparation,
+        Error::Invalid,
+        safe_cex_engine::VenueError::new("synthetic local veto"),
+    );
+    h.collect();
+    assert_eq!(h.sent_writes, 0);
+    let rows = h.failures[0]
+        .1
+        .elements
+        .as_ref()
+        .expect("local veto journal");
+    assert_eq!(rows.len(), 3);
+    assert!(
+        matches!(&rows[0].result, ElementResult::NotSent { error: Some(e) } if e.outcome == Some(Outcome::NotSent))
+    );
+    assert!(
+        rows[1..]
+            .iter()
+            .all(|row| row.result == ElementResult::NotSent { error: None })
+    );
+}
