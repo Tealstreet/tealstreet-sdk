@@ -68,6 +68,14 @@ plan, allowed Tealstreet origins and challenge credentials. A credentialed beta
 smoke pass must cover validation, snapshots, chart/orderbook hydration,
 market/limit/conditional orders, chase/cancel-replace races, close, leverage,
 TP/SL/trailing and reconnect. Synthetic tests do not certify that live contract.
-Account UX, Requests Log diagnostics and the beta user document belong to the NX
-web workstream. No preview/production promotion should happen before reachability
-and that smoke pass are approved.
+The SDK emits opt-in `ws-diagnostic` events for Hyro and every Rust venue:
+`{ venue, channel, direction, message }`, with sanitized text for public/private/
+business sockets. Enable `setWsDiagnosticsEnabled(true)` in the exchange's realm
+or send the existing `__workerConfig.wsDiagnosticsEnabled` worker setting. The
+default is off. Auth frames and sensitive fields are redacted; connection URLs,
+headers and binary contents are omitted. `WsDiagnosticEvent` is exported from
+the SDK, and the worker posts `{ op: 'ws-diagnostic', data: [event] }`.
+
+Account UX, consuming that event in the web Requests Log, and the beta user
+document belong to the NX web workstream. No preview/production promotion should
+happen before reachability and that smoke pass are approved.

@@ -1,5 +1,5 @@
 import type { HttpPacket, HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
-import type { RequestsLogEvent } from '../../transport/requestsLog';
+import type { RequestsLogEvent, WsDiagnosticEvent } from '../../transport/requestsLog';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
@@ -61,8 +61,10 @@ const signedRequest = (): HttpPacket => ({
 
 const harness = (
   response: () => HttpResponse = () => ({ status: 200, body: new TextEncoder().encode('{"ok":1}') }),
+  label = 'binance',
 ) => {
   const events: Array<[RequestsLogEvent, string]> = [];
+  const diagnostics: WsDiagnosticEvent[] = [];
   const sockets: Array<{ handlers: Parameters<Transport['connect']>[1]; sent: string[] }> = [];
   const inner: Transport = {
     now: () => 0,
@@ -78,8 +80,13 @@ const harness = (
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   };
-  const transport = withRequestsLog(inner, 'binance', (event, message) => events.push([event, message]));
-  return { inner, transport, events, sockets };
+  const transport = withRequestsLog(
+    inner,
+    label,
+    (event, message) => events.push([event, message]),
+    (event) => diagnostics.push(event),
+  );
+  return { inner, transport, events, sockets, diagnostics };
 };
 
 const leaked = (events: Array<[RequestsLogEvent, string]>) =>
@@ -89,13 +96,16 @@ const leaked = (events: Array<[RequestsLogEvent, string]>) =>
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 it('logs nothing and builds nothing while the Requests Log toggle is off', async () => {
-  const { transport, events, sockets } = harness();
+  const { inner, transport, events, sockets, diagnostics } = harness();
+  const schedule = vi.spyOn(inner, 'setTimeout');
   await transport.request(signedRequest());
   const socket = transport.connect('wss://private', { channel: 'private', onOpen() {}, onMessage() {}, onClose() {} });
   socket.send('{"op":"subscribe"}');
   sockets[0].handlers.onMessage('{"e":"ORDER_TRADE_UPDATE"}');
   await tick();
   expect(events).toEqual([]);
+  expect(diagnostics).toEqual([]);
+  expect(schedule).not.toHaveBeenCalled();
 });
 
 it('logs each HTTP request and response with status and timing, every secret redacted and no header', async () => {
@@ -145,7 +155,7 @@ it("hands the caller the transport's own promise, response and stream, and never
   expect(leaked(events)).toEqual([]);
 });
 
-it('logs private socket frames redacted after delivering them, skips heartbeats, and leaves public sockets unwrapped', async () => {
+it('logs private socket frames redacted after delivering them and skips heartbeats', async () => {
   setWsDiagnosticsEnabled(true);
   const { transport, events, sockets } = harness();
   const delivered: string[] = [];
@@ -167,10 +177,126 @@ it('logs private socket frames redacted after delivering them, skips heartbeats,
   expect(events.map(([event]) => event)).toEqual(['grafana-pws-sub', 'grafana-pws']);
   expect(events[1][1]).toContain('ORDER_TRADE_UPDATE');
   expect(leaked(events)).toEqual([]);
+});
 
-  const handlers = { channel: 'public' as const, onOpen() {}, onMessage() {}, onClose() {} };
-  transport.connect('wss://public', handlers);
-  expect(sockets[1].handlers).toBe(handlers);
+it.each(['hyrotrader', 'binance', 'okx'])('opts %s into diagnostics for every socket channel', async (label) => {
+  const { transport, sockets, diagnostics } = harness(undefined, label);
+  for (const channel of ['public', 'private', 'business'] as const) {
+    const received = vi.fn();
+    const socket = transport.connect('wss://fixture.invalid/', {
+      channel,
+      onOpen() {},
+      onMessage: received,
+      onClose() {},
+    });
+    const wire = '{"op":"subscribe","args":["tickers.BTCUSDT"]}';
+    socket.send(wire);
+    sockets.at(-1)!.handlers.onMessage('{"topic":"tickers.BTCUSDT","data":{"lastPrice":"50000"}}');
+    expect(received).toHaveBeenCalledOnce();
+    expect(sockets.at(-1)!.sent).toEqual([wire]);
+  }
+  await tick();
+  expect(diagnostics).toEqual([]);
+  setWsDiagnosticsEnabled(true);
+  for (const socket of sockets) {
+    socket.handlers.onMessage('{"topic":"tickers.BTCUSDT","data":{"lastPrice":"50001"}}');
+  }
+  await tick();
+  expect(diagnostics.map(({ venue, channel, direction }) => ({ venue, channel, direction }))).toEqual(
+    ['public', 'private', 'business'].map((channel) => ({ venue: label, channel, direction: 'receive' })),
+  );
+  expect(diagnostics.every(({ message }) => message.includes('50001'))).toBe(true);
+});
+
+it('redacts auth payloads, keys, signatures and listen keys in both WS directions', async () => {
+  setWsDiagnosticsEnabled(true);
+  const { transport, sockets, diagnostics, events } = harness(undefined, 'hyrotrader');
+  const received: string[] = [];
+  const socket = transport.connect('wss://fixture.invalid/private?listenKey=FIXTURE_URL_KEY', {
+    channel: 'private',
+    onOpen() {},
+    onMessage: (message) => received.push(message),
+    onClose() {},
+  });
+  const auth = JSON.stringify({
+    op: 'auth',
+    args: ['FIXTURE_KEY', 123456789, 'FIXTURE_SIGN'],
+    payload: 'FIXTURE_AUTH',
+  });
+  const payload = JSON.stringify({
+    topic: 'order',
+    data: {
+      api_key: 'FIXTURE_KEY',
+      'X-BAPI-SIGN': 'FIXTURE_SIGN',
+      listen_key: 'FIXTURE_LISTEN',
+      auth_payload: { opaque: 'FIXTURE_OTHER_AUTH' },
+      credentials: ['FIXTURE_CREDENTIAL'],
+      wsAuth: 'FIXTURE_WS_AUTH',
+      cookie: 'FIXTURE_COOKIE',
+      opaque: 'f01df00daabbccdd0123456789abcdef0123456789abcdef',
+      orderId: 'order-1',
+    },
+  });
+  socket.send(auth);
+  socket.send(payload);
+  sockets[0].handlers.onMessage(auth);
+  sockets[0].handlers.onMessage(payload);
+  expect(received).toEqual([auth, payload]);
+  expect(sockets[0].sent).toEqual([auth, payload]);
+  await tick();
+  expect(diagnostics.map(({ direction }) => direction)).toEqual(['send', 'send', 'receive', 'receive']);
+  const logged = JSON.stringify({ diagnostics, events });
+  for (const secret of [
+    'FIXTURE_KEY',
+    '123456789',
+    'FIXTURE_SIGN',
+    'FIXTURE_AUTH',
+    'FIXTURE_LISTEN',
+    'FIXTURE_URL_KEY',
+    'FIXTURE_OTHER_AUTH',
+    'FIXTURE_CREDENTIAL',
+    'FIXTURE_WS_AUTH',
+    'FIXTURE_COOKIE',
+    'f01d',
+  ]) {
+    expect(logged).not.toContain(secret);
+  }
+  expect(logged).toContain('order-1');
+  expect(logged).toContain('[redacted]');
+});
+
+it('withholds malformed, oversized, binary and deeply nested frame contents and drops queued entries when disabled', async () => {
+  setWsDiagnosticsEnabled(true);
+  const { transport, sockets, diagnostics } = harness();
+  const binary = vi.fn();
+  const socket = transport.connect('wss://fixture.invalid/', {
+    onOpen() {},
+    onMessage() {},
+    onBinary: binary,
+    onClose() {},
+  });
+  let nested: unknown = { opaque: 'FIXTURE_DEEP_SECRET' };
+  for (let depth = 0; depth < 20; depth++) nested = { inner: nested };
+  for (const frame of [
+    '{"op":"auth","args":["FIXTURE_TRUNCATED_SECRET"',
+    'FIXTURE_OPAQUE_SECRET',
+    JSON.stringify({ data: nested }),
+    JSON.stringify({ data: 'x'.repeat(20_000), opaque: 'FIXTURE_LARGE_SECRET' }),
+    JSON.stringify({ echo: '{"op":"auth","args":["FIXTURE_EMBEDDED_SECRET"]}' }),
+    JSON.stringify([0, 'auth', 'FIXTURE_POSITIONAL_SECRET']),
+  ])
+    socket.send(frame);
+  const bytes = new TextEncoder().encode('FIXTURE_BINARY_SECRET');
+  sockets[0].handlers.onBinary!(bytes);
+  expect(binary).toHaveBeenCalledWith(bytes);
+  await tick();
+  expect(diagnostics).toHaveLength(7);
+  expect(JSON.stringify(diagnostics)).not.toContain('FIXTURE_');
+  expect(diagnostics.at(-1)?.message).toBe(`binary ${bytes.byteLength} bytes`);
+  socket.send('{"op":"subscribe","args":["orders"]}');
+  setWsDiagnosticsEnabled(false);
+  await tick();
+  expect(diagnostics).toHaveLength(7);
 });
 
 it('redacts token-shaped keys, query auth, any JWT, and secrets nested in a body longer than the log cap', async () => {

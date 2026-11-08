@@ -48,20 +48,24 @@ const SECRET_KEY_PARTS = [
   'listenkey',
   'authkey',
   'authorization',
+  'credential',
+  'cookie',
 ];
 
 const isSecretKey = (key: string): boolean => {
   const normalized = key.replace(/[^a-z0-9_]/gi, '').toLowerCase();
-  if (SECRET_KEYS.has(normalized) || normalized === 'auth') return true;
+  if (SECRET_KEYS.has(normalized) || normalized.startsWith('auth')) return true;
   const compact = normalized.replace(/_/g, '');
-  return SECRET_KEY_PARTS.some((part) => compact.includes(part));
+  return (
+    compact.endsWith('sign') || compact.endsWith('auth') || SECRET_KEY_PARTS.some((part) => compact.includes(part))
+  );
 };
 
 const JSON_KEY_VALUE_RE = /("((?:\\.|[^"\\])*)"\s*:\s*)("(?:\\.|[^"])*"|[^,}\]\s]+)/g;
 const QUERY_KEY_VALUE_RE = /((?:^|[?&\s])([A-Za-z0-9_.-]+)=)([^&\s]+)/g;
 /** A JWT, whatever key or position carries it. */
 const JWT_RE = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
-const AUTH_OPERATION_RE = /auth|login|signature|jwt/i;
+const AUTH_OPERATION_RE = /auth|login|logon|signature|jwt/i;
 
 export const setWsDiagnosticsEnabled = (enabled: boolean): void => {
   wsDiagnosticsEnabled = enabled === true;
@@ -138,24 +142,33 @@ export const stringifyWsDiagnosticPayload = (data: unknown): string => {
 const normalizeSecretKey = (key: string): string => key.replace(/[^a-z0-9_]/gi, '').toLowerCase();
 
 const isAuthOperationObject = (value: Record<string, unknown>): boolean =>
-  ['op', 'method', 'type', 'event'].some((key) => {
+  ['op', 'method', 'type', 'event', 'action'].some((key) => {
     const field = value[key];
     return typeof field === 'string' && AUTH_OPERATION_RE.test(field);
   });
 
-const redactJsonValue = (value: unknown, depth = 0, redactStrings = false): unknown => {
-  if (depth > MAX_JSON_REDACTION_DEPTH) return value;
-  if (typeof value === 'string') return redactStrings ? REDACTED : value;
-  if (Array.isArray(value)) return value.map((item) => redactJsonValue(item, depth + 1, redactStrings));
+const redactJsonValue = (value: unknown, depth = 0, redactStrings = false, strict = false): unknown => {
+  if (depth > MAX_JSON_REDACTION_DEPTH) return REDACTED;
+  if (typeof value === 'string') {
+    if (redactStrings || (strict && /(?:https?|wss?):\/\/|%3a%2f%2f|[\[{]/i.test(value))) return REDACTED;
+    return strict ? value.replace(HEX_SECRET_RE, REDACTED) : value;
+  }
+  if (Array.isArray(value)) return value.map((item) => redactJsonValue(item, depth + 1, redactStrings, strict));
   if (!value || typeof value !== 'object') return value;
 
+  if (strict && isAuthOperationObject(value as Record<string, unknown>)) return REDACTED;
   const result: Record<string, unknown> = {};
   const authScope = redactStrings || isAuthOperationObject(value as Record<string, unknown>);
   for (const [key, child] of Object.entries(value)) {
     const normalizedKey = normalizeSecretKey(key);
     result[key] = isSecretKey(key)
       ? REDACTED
-      : redactJsonValue(child, depth + 1, authScope && (normalizedKey === 'args' || normalizedKey === 'params'));
+      : redactJsonValue(
+          child,
+          depth + 1,
+          authScope && (normalizedKey === 'args' || normalizedKey === 'params'),
+          strict,
+        );
   }
   return result;
 };
@@ -182,4 +195,16 @@ export const redactWsDiagnosticPayload = (message: string): string => {
     .replace(QUERY_KEY_VALUE_RE, (match, prefix, key) => (isSecretKey(key) ? `${prefix}${REDACTED}` : match))
     .replace(JWT_RE, REDACTED)
     .replace(HEX_SECRET_RE, shortenHexSecret);
+};
+
+/** Opaque or incomplete frames cannot be safely redacted; never fall back to their wire text. */
+export const sanitizeWsDiagnosticFrame = (message: string): string => {
+  if (message.length > WS_DIAGNOSTIC_MAX_PAYLOAD_CHARS * 4) return '[redacted oversized frame]';
+  try {
+    const parsed: unknown = JSON.parse(message);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '[redacted opaque frame]';
+    return redactWsDiagnosticPayload(JSON.stringify(redactJsonValue(parsed, 0, false, true)));
+  } catch {
+    return '[redacted malformed frame]';
+  }
 };

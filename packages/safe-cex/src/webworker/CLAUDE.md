@@ -311,7 +311,9 @@ phase tag and never ship it. Counts from this tag are a floor, not a census.
   postMessaging `{op: '<event>', data: [...args]}` for a fixed
   set (`error`, `warning`, `log`, `exec-log`, `exec-result`,
   `chaser:complete`, `grafana-info`, `grafana-error`, `grafana-pws`, `grafana-pws-sub`,
-  `grafana-http-request`, `grafana-http-response`). Adding a new
+  `grafana-http-request`, `grafana-http-response`, `ws-diagnostic`). The latter
+  carries one sanitized `WsDiagnosticEvent` object and remains default-off via
+  `__workerConfig.wsDiagnosticsEnabled`. Adding a new
   bridged event requires adding it both to the worker-side
   forwarder in `_setupExchangeEventListeners` and the main-side
   `workerListener` switch in `exchangeAccountController.ts`, plus

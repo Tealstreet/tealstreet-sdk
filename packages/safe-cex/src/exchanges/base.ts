@@ -1660,6 +1660,7 @@ export class BaseExchange implements Exchange {
     this.off('grafana-info');
     this.off('grafana-pws');
     this.off('grafana-pws-sub');
+    this.off('ws-diagnostic');
 
     this.store.reset();
   }

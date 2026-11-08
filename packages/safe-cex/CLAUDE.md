@@ -1763,6 +1763,22 @@ The exchange emits `grafana-http-request` / `grafana-http-response` /
 `error` / `warning` events on `BaseExchange.emitter` — check your
 consuming app's CLAUDE.md for the capture playbook.
 
+Rust engine sockets also emit the opt-in `ws-diagnostic` event with a
+`WsDiagnosticEvent` object: `{ venue, channel, direction, message }`. Channels
+are public/private/business and directions are send/receive. This is generic
+across venues, including Hyro. The package exports `setWsDiagnosticsEnabled`,
+`isWsDiagnosticsEnabled` and the event type. The switch defaults off in each
+realm; worker hosts use the existing `__workerConfig.wsDiagnosticsEnabled` flag.
+`ExchangeWorker` forwards `{ op: 'ws-diagnostic', data: [event] }`; consuming web
+controllers must handle that op and re-emit it before rendering Requests Log rows.
+
+Diagnostics run after socket I/O, redact complete auth frames and sensitive
+fields, and never include connection URLs/headers or binary contents. Opaque,
+malformed, oversized and excessive-depth content is withheld. Heartbeats are
+omitted, output is capped and frames are sampled per socket. Disabling the
+switch drops queued entries too. Existing private grafana events remain available
+with the same sanitized frame text; do not display both as duplicate rows.
+
 ## Worker Position Refresh Bridge
 
 `BaseExchange.updatePositionsInWebworker()` emits the `updatePositions`

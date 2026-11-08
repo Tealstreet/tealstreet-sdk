@@ -1622,8 +1622,11 @@ export class RustEngineExchange extends BaseExchange {
     this.httpStartupDiagnostics = routedTransport.startupDiagnostics;
     this.invalidateInfoCatalogue = routedTransport.invalidateCatalogue;
     this.readReconnectDiagnostics = routedTransport.reconnectDiagnostics;
-    const transport = withRequestsLog(routedTransport, this.name, (event, message) =>
-      this.emitter.emit(event, message),
+    const transport = withRequestsLog(
+      routedTransport,
+      this.name,
+      (event, message) => this.emitter.emit(event, message),
+      (event) => this.emitter.emit('ws-diagnostic', event),
     );
     const engine = constructEngine(
       WasmEngine,
