@@ -105,6 +105,44 @@ fn ts_split_above_lodash_count_boundary_keeps_separate_remainder() {
     assert_ts_split(10_000_000_000_000_000., 0.75, 0.25, &[0.25], 0.25);
 }
 #[test]
+fn ts_split_rounding_overflow_sends_no_orders() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 0 of requested 1e308); kept for exact TS parity per Sam's decision
+    assert_ts_split(1., 20., 0.001, &[1.], 1.);
+    let (mut e, _) = ready();
+    actions(&mut e);
+    e.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 902,
+            orders: serde_json::from_value(json!([{
+                "symbol":"BTCUSDC", "type":"limit", "side":"buy", "amount":1e308, "price":60000
+            }]))
+            .unwrap(),
+        }),
+    );
+    let out = actions(&mut e);
+    let writes: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Http(request) if request.method != Method::Get => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(writes.is_empty(), "TS emits no overflow orders: {writes:?}");
+    let completions: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandDone {
+                command: 902,
+                result,
+            }) => Some(result),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(completions.len(), 1);
+    assert_eq!(*completions[0], "[]");
+}
+#[test]
 fn ts_split_exact_multiple_control() {
     assert_ts_split(10., 5., 1., &[5., 5.], 10.);
 }

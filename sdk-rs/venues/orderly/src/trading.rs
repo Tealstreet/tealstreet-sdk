@@ -539,8 +539,9 @@ impl Orderly {
             };
             let qty = num::adjust((amount - rest) / lots, market.precision.amount);
             let count = ts_lot_count(lots)?;
+            // TS `if (rest)` also excludes NaN after amount rounding overflows.
             for (index, qty) in std::iter::repeat_n(qty, count)
-                .chain((rest != 0.0).then_some(rest))
+                .chain((rest != 0.0 && !rest.is_nan()).then_some(rest))
                 .enumerate()
             {
                 let price = (o.kind == OrderType::Limit)
