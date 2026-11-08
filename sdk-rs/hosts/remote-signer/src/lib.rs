@@ -17,7 +17,7 @@ pub use link::{
 pub use provider::{FATAL_MIN_STREAK, MAX_CONSECUTIVE_FAILURES, RemoteProvider};
 
 use policy::PassphraseRule;
-use provider::{Inner, Owned};
+use provider::{Family, Inner, Owned};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SetupError(pub &'static str);
@@ -110,8 +110,10 @@ pub fn remote_account(
         .filter(Value::is_boolean)
         .unwrap_or(Value::Null);
     let public_only = requested == Value::Bool(true);
+    let kucoin = Family::of(venue) == Family::Kucoin;
     let passphrase = text(&options, "passphrase").filter(|value| !value.is_empty());
-    if passphrase.is_none()
+    if !kucoin
+        && passphrase.is_none()
         && policy
             .passphrase
             .is_some_and(|rule| rule != PassphraseRule::Optional)
@@ -121,8 +123,9 @@ pub fn remote_account(
             "Rust engine primary signing credentials require a passphrase",
         ));
     }
-    let passphrase = match (&policy.passphrase_header, passphrase) {
-        (Some(_), Some(value)) => {
+    let (passphrase, passphrase_value) = match (kucoin, &policy.passphrase_header, passphrase) {
+        (true, _, _) => (Some(reference("passphrase")), None),
+        (false, Some(_), Some(value)) => {
             if value.len() > 8192
                 || value
                     .bytes()
@@ -130,19 +133,44 @@ pub fn remote_account(
             {
                 return Err(SetupError("Invalid passphrase"));
             }
-            Some((reference("passphrase"), value.into_bytes()))
+            (Some(reference("passphrase")), Some(value.into_bytes()))
         }
-        _ => None,
+        _ => (None, None),
+    };
+    let broker = if kucoin {
+        options
+            .get_mut("extra")
+            .and_then(|extra| extra.get_mut("kucoinBroker"))
+            .and_then(Value::as_object_mut)
+            .and_then(|broker| {
+                broker.remove("brokerKey");
+                ["partner", "brokerName"]
+                    .iter()
+                    .all(|field| {
+                        broker
+                            .get(*field)
+                            .and_then(Value::as_str)
+                            .is_some_and(|value| !value.trim().is_empty())
+                    })
+                    .then(|| reference("broker"))
+            })
+    } else {
+        None
     };
     let primary = Owned {
         credential: reference("credential"),
         signing: reference("signing"),
         public: key.into_bytes(),
         passphrase,
+        passphrase_value,
+        broker,
     };
     let mut identity = json!({ "credential": primary.credential.0, "signing": primary.signing.0 });
-    if let Some((passphrase, _)) = &primary.passphrase {
+    if let Some(passphrase) = &primary.passphrase {
         identity["passphrase"] = passphrase.0.clone().into();
+    }
+    if let Some(broker) = &primary.broker {
+        identity["extra"] = json!({ "kucoinBroker": broker.0 });
     }
     let api_key_index_present = options
         .get("apiKeyIndex")
