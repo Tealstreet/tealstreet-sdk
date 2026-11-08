@@ -1,0 +1,248 @@
+import type { StoreWorkerPayload } from './StoreWorkerPayload';
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+type Context = { postMessage: (message: unknown) => void };
+const fixture = vi.hoisted(() => ({
+  workers: [] as {
+    owner: string;
+    context: Context;
+    handlePayload: ReturnType<typeof vi.fn>;
+    sendSnapshot: ReturnType<typeof vi.fn>;
+    exchange: { isDisposed: boolean };
+  }[],
+  starts: new Map<string, Promise<boolean>>(),
+  telegram: vi.fn(),
+}));
+
+vi.mock('./ExchangeWorker', () => ({
+  ExchangeWorker: class {
+    exchange = { isDisposed: false };
+    isRecovering = false;
+    store = { update: vi.fn() };
+    owner: string;
+    start = vi.fn(() => fixture.starts.get(this.owner) ?? Promise.resolve(true));
+    retryTimedOutStart = vi.fn(() => false);
+    dispose = vi.fn(() => {
+      this.exchange.isDisposed = true;
+    });
+    handlePayload = vi.fn((payload: StoreWorkerPayload) => {
+      if (payload.op === 'dispose') this.dispose();
+    });
+    sendSnapshot = vi.fn(() => this.context.postMessage({ op: 'store', data: { owner: this.owner } }));
+    constructor(
+      readonly context: Context,
+      _accountName: string,
+      _exchangeName: string,
+      options: { key: string },
+      _settings: unknown,
+      _metadata: unknown,
+      _sessionKey: unknown,
+      readonly instanceId?: string,
+    ) {
+      this.owner = options.key;
+      fixture.workers.push(this);
+    }
+  },
+}));
+vi.mock('./TelgramWorker', () => ({
+  TelegramWorker: class {
+    constructor(getExchange: () => unknown, token: string) {
+      fixture.telegram(getExchange(), token);
+    }
+    start() {}
+  },
+}));
+
+function port(start: typeof import('./store.webworker').default) {
+  let listener: (event: { data: unknown }) => unknown = () => undefined;
+  const context = {
+    postMessage: vi.fn(),
+    addEventListener: (_event: string, callback: typeof listener) => {
+      listener = callback;
+    },
+  };
+  start(context as unknown as Worker, true);
+  return {
+    context,
+    send: async (data: StoreWorkerPayload) => {
+      await listener({ data });
+    },
+  };
+}
+function init(owner: string, accountName = 'primary', sessionKey: unknown = `session-${owner}`): StoreWorkerPayload {
+  return {
+    op: 'init',
+    instanceId: owner,
+    data: { accountName, exchangeName: 'binance', options: { key: owner }, settings: {}, metadata: {}, sessionKey },
+  };
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+beforeEach(() => {
+  vi.resetModules();
+  fixture.workers.length = 0;
+  fixture.starts.clear();
+});
+
+describe('SharedWorker session ownership', () => {
+  it('retires A when its last port switches to B before A startup settles', async () => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const pendingStart = deferred<boolean>();
+    fixture.starts.set('A', pendingStart.promise);
+    const pendingInit = a.send(init('A'));
+    await a.send(init('B'));
+    pendingStart.resolve(true);
+    await pendingInit;
+    expect(fixture.workers).toHaveLength(2);
+    expect(fixture.workers[0].exchange.isDisposed).toBe(true);
+    const late: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'A', data: { id: 'late-A' } };
+    await a.send(late);
+    expect(fixture.workers[1].handlePayload).not.toHaveBeenCalledWith(late);
+    const current: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'B', data: { id: 'B-chase' } };
+    await a.send(current);
+    expect(fixture.workers[1].handlePayload).toHaveBeenCalledWith(current);
+  });
+
+  it('keeps failed-start A ports out of B session until they detach', async () => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const otherA = port(start);
+    const b = port(start);
+    const pendingStart = deferred<boolean>();
+    fixture.starts.set('A', pendingStart.promise);
+    const pendingInit = a.send(init('A'));
+    await otherA.send(init('A'));
+    pendingStart.resolve(false);
+    await pendingInit;
+    await b.send(init('B'));
+    expect(fixture.workers).toHaveLength(1);
+    expect(b.context.postMessage).toHaveBeenCalledWith({ op: 'start-status', data: false });
+    await a.send({ op: 'dispose', instanceId: 'A' });
+    await otherA.send({ op: 'dispose', instanceId: 'A' });
+    await b.send(init('B'));
+    expect(fixture.workers).toHaveLength(2);
+    a.context.postMessage.mockClear();
+    otherA.context.postMessage.mockClear();
+    fixture.workers[1].context.postMessage({ op: 'store', data: { owner: 'B' } });
+    expect(a.context.postMessage).not.toHaveBeenCalled();
+    expect(otherA.context.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('shares one live worker across two ports of the same session', async () => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const otherA = port(start);
+    await a.send(init('A'));
+    await otherA.send({ ...init('A'), instanceId: 'other-A' });
+    const command: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'other-A', data: { id: 'A-chase' } };
+    await otherA.send(command);
+    expect(fixture.workers).toHaveLength(1);
+    expect(fixture.workers[0].sendSnapshot).toHaveBeenCalledOnce();
+    expect(fixture.workers[0].handlePayload).toHaveBeenCalledWith(command);
+  });
+
+  it('drops B commands and snapshots when B replaces A during A pending chase', async () => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const otherA = port(start);
+    await a.send(init('A'));
+    await otherA.send(init('A'));
+    const workerA = fixture.workers[0];
+    const completion = deferred<void>();
+    const pending = completion.promise.then(() =>
+      workerA.context.postMessage({ op: 'chaser:complete', data: { id: 'A-chase', filled: 7 } }),
+    );
+    await a.send({ op: 'chaser:start', instanceId: 'A', data: { id: 'A-chase' } });
+    a.context.postMessage.mockClear();
+    otherA.context.postMessage.mockClear();
+    await a.send(init('B'));
+    const bCommands: StoreWorkerPayload[] = [
+      { op: 'chaser:start', instanceId: 'B', data: { id: 'B-chase' } },
+      { op: 'chaser:terminate', instanceId: 'B', data: { id: 'A-chase' } },
+    ];
+    for (const command of bCommands) await a.send(command);
+    completion.resolve();
+    await pending;
+    expect(fixture.workers).toHaveLength(1);
+    for (const command of bCommands) expect(workerA.handlePayload).not.toHaveBeenCalledWith(command);
+    expect(a.context.postMessage).toHaveBeenCalledWith({ op: 'start-status', data: false });
+    expect(
+      a.context.postMessage.mock.calls.some(([message]) => ['store', 'chaser:complete'].includes(message.op)),
+    ).toBe(false);
+    expect(otherA.context.postMessage).toHaveBeenCalledWith({
+      op: 'chaser:complete',
+      data: { id: 'A-chase', filled: 7 },
+    });
+    expect(workerA.exchange.isDisposed).toBe(false);
+  });
+
+  it.each([undefined, '', null, 42])('refuses reuse without a verifiable session: %s', async (sessionKey) => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const b = port(start);
+    await a.send(init('A'));
+    const payload = init('B');
+    payload.data.sessionKey = sessionKey;
+    await b.send(payload);
+    await b.send({ op: 'chaser:start', instanceId: 'B', data: { id: 'B-chase' } });
+    expect(fixture.workers[0].handlePayload).not.toHaveBeenCalled();
+    expect(b.context.postMessage).toHaveBeenCalledWith({ op: 'start-status', data: false });
+    expect(fixture.workers[0].sendSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('does not let a refused B attachment reinit or dispose A', async () => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const b = port(start);
+    await a.send(init('A'));
+    await b.send(init('B'));
+    await b.send({ op: 'reinit', instanceId: 'B' });
+    await b.send({ op: 'dispose', instanceId: 'B' });
+    expect(fixture.workers[0].exchange.isDisposed).toBe(false);
+    const command: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'A', data: { id: 'A-chase' } };
+    await a.send(command);
+    expect(fixture.workers[0].handlePayload).toHaveBeenCalledExactlyOnceWith(command);
+  });
+
+  it('drops A stale messages after B replaces a disposed same-name worker', async () => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const b = port(start);
+    await a.send(init('A'));
+    await a.send({ op: 'dispose', instanceId: 'A' });
+    await b.send(init('B'));
+    expect(fixture.workers).toHaveLength(2);
+    await a.send({ op: 'chaser:start', instanceId: 'A', data: { id: 'late-A' } });
+    await a.send({ op: 'reinit', instanceId: 'A' });
+    expect(fixture.workers[1].handlePayload).not.toHaveBeenCalled();
+    expect(fixture.workers[1].exchange.isDisposed).toBe(false);
+    const command: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'B', data: { id: 'B-chase' } };
+    await b.send(command);
+    expect(fixture.workers[1].handlePayload).toHaveBeenCalledWith(command);
+  });
+
+  it('drops an old init continuation rather than starting A integration on B', async () => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const pendingStart = deferred<boolean>();
+    fixture.starts.set('A', pendingStart.promise);
+    const payload = init('A');
+    payload.data.telegramBotToken = 'synthetic-A-token';
+    const pendingInit = a.send(payload);
+    await a.send(init('B', 'B:primary'));
+    pendingStart.resolve(true);
+    await pendingInit;
+    expect(fixture.telegram).not.toHaveBeenCalled();
+    const command: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'B', data: { id: 'B-chase' } };
+    await a.send(command);
+    expect(fixture.workers[1].handlePayload).toHaveBeenCalledWith(command);
+  });
+});
