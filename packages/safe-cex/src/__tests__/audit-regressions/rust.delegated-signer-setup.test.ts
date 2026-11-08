@@ -38,6 +38,58 @@ const expectInvalid = (invoke: () => unknown) => {
 };
 
 describe('trusted delegated signer setup capsule', () => {
+  it('captures remote method getters once and preserves their original receiver', async () => {
+    const reads = { sign: 0, isAvailable: 0, onAvailabilityChange: 0, accountName: 0 };
+    const original = remote();
+    const source: RemoteSigner = {
+      get sign() {
+        if (++reads.sign > 1) throw new Error('callback member read twice');
+        return function (this: RemoteSigner, request: Parameters<RemoteSigner['sign']>[0]) {
+          expect(this).toBe(source); return original.sign(request);
+        };
+      },
+      get isAvailable() {
+        if (++reads.isAvailable > 1) throw new Error('callback member read twice');
+        return function (this: RemoteSigner) { expect(this).toBe(source); return true; };
+      },
+      get onAvailabilityChange() {
+        if (++reads.onAvailabilityChange > 1) throw new Error('callback member read twice');
+        return function (this: RemoteSigner) { expect(this).toBe(source); return () => {}; };
+      },
+      get accountName() {
+        if (++reads.accountName > 1) throw new Error('callback member read twice');
+        return 'owned-account';
+      },
+    };
+    const setup = new DelegatedSignerSetup('binance', options({ remoteSigner: source }));
+    try {
+      expect(reads).toEqual({ sign: 1, isAvailable: 1, onAvailabilityChange: 1, accountName: 1 });
+      const { config } = construct(setup);
+      await expect(setup.signer(request(config.signing), callContext())).resolves.toHaveProperty('values');
+      expect(reads).toEqual({ sign: 1, isAvailable: 1, onAvailabilityChange: 1, accountName: 1 });
+      expect(original.sign).toHaveBeenCalledOnce();
+    } finally { setup.dispose(); }
+  });
+
+  it('captures PayloadSigner call once and keeps its private metadata receiver', async () => {
+    const callback = payloadSigner();
+    let reads = 0;
+    Object.defineProperty(callback, 'call', { get() {
+      if (++reads > 1) throw new Error('callback member read twice');
+      return Function.prototype.call;
+    } });
+    const setup = new DelegatedSignerSetup('binance', options({ payloadSigner: callback }));
+    try {
+      expect(reads).toBe(1);
+      const { config } = construct(setup);
+      await expect(setup.signer(request(config.signing), callContext())).resolves.toHaveProperty('values');
+      expect(reads).toBe(1);
+      expect(callback).toHaveBeenCalledOnce();
+      expect(callback.mock.contexts[0]).toMatchObject({ key: 'public-primary' });
+      expect(callback.mock.contexts[0]).not.toHaveProperty('secret');
+    } finally { setup.dispose(); }
+  });
+
   it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'] as const)(
     '%s constructs through opaque refs with exactly two arguments, no local setup blob or key material', async (venue) => {
       const input = options();

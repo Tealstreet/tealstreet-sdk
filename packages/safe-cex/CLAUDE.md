@@ -215,6 +215,9 @@ Explicit `publicDataOnly: true` in delegated setup preserves raw mode-intent
 flags but ignores signing callbacks, credentials and setup metadata. It installs
 no provider or identity, advertises no algorithms, and cannot sign. Private-mode
 callback validation, primary/secondary selection and mode refusals remain strict.
+Callback inspection captures methods once under a guarded read and preserves their
+receivers. Throwing getters or Proxy traps refuse with a fixed, redacted
+`invalidInput` / `notSent` error before transport; caller errors are never retained.
 
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.

@@ -1,5 +1,5 @@
 import type { SignAlgorithm, Signer, SigningIdentities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeName, ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
 import type { CredentialPresence } from './construction';
 
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
@@ -26,13 +26,40 @@ export const selectDelegatedSigningMode = (
 ): 'remote' | 'payload' | undefined => options.remoteSigner !== undefined ? 'remote'
   : options.payloadSigner !== undefined ? 'payload' : undefined;
 
-/** Every configured callback (any value but undefined) has the shape its mode requires. */
-export const delegatedCallbacksWellFormed = (options: Pick<ExchangeOptions, 'remoteSigner' | 'payloadSigner'>): boolean => {
-  const { remoteSigner, payloadSigner } = options;
-  if (remoteSigner !== undefined && (!remoteSigner || typeof remoteSigner.sign !== 'function'
-    || typeof remoteSigner.isAvailable !== 'function' || typeof remoteSigner.onAvailabilityChange !== 'function')) return false;
-  return payloadSigner === undefined || typeof payloadSigner === 'function';
+type DelegatedCallbacks = Pick<ExchangeOptions, 'remoteSigner' | 'payloadSigner'>;
+
+// Inspect caller-owned accessors and traps only here. Providers retain captured
+// methods with their original receiver, never a second view of those members.
+const captureDelegatedCallbacks = (options: DelegatedCallbacks): DelegatedCallbacks | undefined => {
+  try {
+    const { remoteSigner, payloadSigner } = options;
+    let remote: RemoteSigner | undefined;
+    if (remoteSigner !== undefined) {
+      if (!remoteSigner || (typeof remoteSigner !== 'object' && typeof remoteSigner !== 'function')
+        || !('sign' in remoteSigner) || !('isAvailable' in remoteSigner) || !('onAvailabilityChange' in remoteSigner)) return undefined;
+      const { sign, isAvailable, onAvailabilityChange, accountName } = remoteSigner;
+      if (typeof sign !== 'function' || typeof isAvailable !== 'function' || typeof onAvailabilityChange !== 'function') return undefined;
+      remote = {
+        sign: (request) => Reflect.apply(sign, remoteSigner, [request]),
+        isAvailable: () => Reflect.apply(isAvailable, remoteSigner, []),
+        onAvailabilityChange: (callback) => Reflect.apply(onAvailabilityChange, remoteSigner, [callback]),
+        accountName,
+      };
+    }
+    let payload: PayloadSigner | undefined;
+    if (payloadSigner !== undefined) {
+      if (typeof payloadSigner !== 'function' || !('call' in payloadSigner)) return undefined;
+      const call = payloadSigner.call;
+      if (typeof call !== 'function') return undefined;
+      payload = function (this: unknown, request) { return Reflect.apply(call, payloadSigner, [this, request]); };
+    }
+    return { remoteSigner: remote, payloadSigner: payload };
+  } catch { return invalid(); }
 };
+
+/** Every configured callback (any value but undefined) has the shape its mode requires. */
+export const delegatedCallbacksWellFormed = (options: DelegatedCallbacks): boolean =>
+  captureDelegatedCallbacks(options) !== undefined;
 
 /** Trusted setup for aliases admitted by the shared caller policy. This capsule
  * does not enable a venue or retain a local signing secret. Remote authority
@@ -84,10 +111,10 @@ export class DelegatedSignerSetup {
       const message = 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    const remoteSigner = options.remoteSigner;
-    const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
+    const callbacks = captureDelegatedCallbacks(options) ?? invalid();
+    const remoteSigner = callbacks.remoteSigner;
+    const payloadSigner = this.usesPayloadSigner ? callbacks.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');
-    if (!delegatedCallbacksWellFormed(options)) invalid();
     const primary = publicCredential(options.key, primaryMetadata?.trimCredential === true);
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined

@@ -1,5 +1,5 @@
 import type { SignRequest, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeName, ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
 
 import { expect, it, vi } from 'vitest';
 
@@ -324,4 +324,65 @@ it('keeps the review controls for configured callbacks', () => {
   try { expect(exchange.isPublicDataOnly).toBe(true); }
   finally { exchange.dispose(); }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
+});
+
+const inspectionMarker = 'SYNTHETIC_PRIVATE_CALLBACK_MARKER';
+const hostileCallbacks: Array<{
+  field: 'remoteSigner' | 'payloadSigner'; shape: string; create: () => unknown;
+}> = callbackFields.flatMap((field): Array<{
+  field: 'remoteSigner' | 'payloadSigner'; shape: string; create: () => unknown;
+}> => {
+  const target = (): RemoteSigner | PayloadSigner => field === 'remoteSigner'
+    ? unusedSigners().remoteSigner : unusedSigners().payloadSigner;
+  const fail = () => { throw new Error(inspectionMarker); };
+  return [
+    { field, shape: 'throwing getter', create: () => Object.defineProperty(target(),
+      field === 'remoteSigner' ? 'sign' : 'call', { get: fail }) },
+    { field, shape: 'revoked Proxy', create: () => {
+      const proxy = Proxy.revocable(target(), {});
+      proxy.revoke();
+      return proxy.proxy;
+    } },
+    { field, shape: 'throwing has trap', create: () => new Proxy(target(), { has: fail }) },
+    { field, shape: 'throwing get trap', create: () => new Proxy(target(), { get: fail }) },
+  ];
+});
+
+it.each(hostileCallbacks)('redacts $field inspection failures from a $shape before transport', ({ field, create }) => {
+  const request = vi.fn();
+  const connect = vi.fn();
+  const names: ExchangeName[] = ['kraken', 'binance'];
+  for (const name of names) {
+    const options: ExchangeOptions = { key: 'fixture-key', secret: '',
+      transport: { name: 'callback-inspection-probe', rest: () => { request(); return { proxied: false }; },
+        restAdapter: () => undefined, proxyPrefix: () => '', publicCorsProxy: () => undefined,
+        privateProxy: () => undefined, serverProxyUrl: () => undefined, requireProxy: (value) => value,
+        wsRouting: () => ({ restProxyHost: '', howEgress: 'sg', wsPublic: { tunnelled: false },
+          wsPrivate: { tunnelled: false }, wsBusiness: { tunnelled: false } }),
+        wsConnection: () => { connect(); return undefined; } } };
+    Reflect.set(options, field, create());
+    let error: unknown;
+    let exchange: RustEngineExchange | undefined;
+    try { exchange = new RustEngineExchange(name, options, new DefaultStore()); }
+    catch (caught) { error = caught; }
+    try {
+      expect.soft(error, `${name} ${field}`).toMatchObject({ kind: 'invalidInput', outcome: 'notSent',
+        message: 'Invalid delegated signer setup' });
+      expect.soft(String(error)).not.toContain(inspectionMarker);
+      expect.soft(JSON.stringify(error, Object.getOwnPropertyNames(error ?? {}))).not.toContain(inspectionMarker);
+      expect.soft(error).not.toHaveProperty('cause');
+      expect.soft(exchange?.privateWebsocket).toBeUndefined();
+    } finally { exchange?.dispose(); }
+    for (const publicOptions of [{ key: '', secret: '' }, { key: 'fixture-key', secret: '', publicDataOnly: true }]) {
+      Reflect.set(publicOptions, field, create());
+      const publicExchange = new RustEngineExchange(name, publicOptions, new DefaultStore());
+      try {
+        expect(publicExchange.isPublicDataOnly).toBe(true);
+        expect(publicExchange.privateWebsocket).toBeUndefined();
+      } finally { publicExchange.dispose(); }
+    }
+  }
+  expect(request).not.toHaveBeenCalled();
+  expect(connect).not.toHaveBeenCalled();
+  expect(global.fetch).not.toHaveBeenCalled();
 });
