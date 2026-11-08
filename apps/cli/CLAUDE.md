@@ -416,6 +416,8 @@ subject and profile. Do not cache a path at module import. `cli.log` appends
 across starts, and `logs --clear` only clears the active user's log. Login
 changes must discard old in-memory state and fence pending work by session
 epoch; never copy accounts or credentials from the previous user's config.
+Exchange output listeners capture that epoch when attached and drop old-session
+events before classification, logging, auditing or watch delivery.
 Every command-producing queue in `repl.ts` uses `enqueueSessionWork` at enqueue
 time, including initial/recreated readline, hosted webhooks and armed triggers.
 Do not rely on starting a scope only when a pending command is dispatched.

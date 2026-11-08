@@ -42,6 +42,10 @@ expose the same kind to web clients.
 | `warn`    | yellow  | `warn`         | terminal only     |
 | `error`   | red     | `error`        | terminal only     |
 
+Exchange output belongs to the login that connected the exchange. After switching
+users, delayed output and disposal notices from the previous login are discarded.
+Disabling an account within the same login still reports interrupted chases.
+
 Where each stream goes:
 
 - `logger.info / warn / error / debug` → `~/.tealstreet/cli.log` only — never

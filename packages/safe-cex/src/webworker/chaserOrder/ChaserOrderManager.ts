@@ -136,6 +136,7 @@ export class ChaserOrderManager {
       }
 
       await sleep(BYBIT_DEMO_PRIVATE_WS_STARTUP_GRACE_INTERVAL_MS);
+      if (exchange.isDisposed) return undefined;
       reason = this.getBybitDemoDeadPrivateWsReason(exchange);
     }
 
@@ -349,6 +350,7 @@ export class ChaserOrderManager {
     if (instance.isStopped && orderIds.length > 0) {
       this.log(`isStopped after placeOrder; cancelling just-placed ${JSON.stringify(orderIds)}`, instance);
       for (const orderId of orderIds) {
+        if (exchange.isDisposed) break;
         try {
           await exchange.cancelOrders([{ id: orderId, symbol: instance.options.symbol } as Order]);
         } catch {
@@ -401,6 +403,7 @@ export class ChaserOrderManager {
       }
     };
     for (const delayMs of delaysMs) {
+      if (instance.exchange.isDisposed) return undefined;
       if (instance.isStopped) return lookup();
       if (delayMs > 0) await sleep(delayMs);
       const order = await lookup();
@@ -514,6 +517,7 @@ export class ChaserOrderManager {
       };
 
       const updateOrders = async (orders: Order[]) => {
+        if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
         if (instance.pendingOrdersUpdate) {
           queuedOrdersCheck = true;
           await applyOrderFillState(orders);
@@ -545,6 +549,7 @@ export class ChaserOrderManager {
           }
 
           const isFilledOrStopped = await applyOrderFillState(orders);
+          if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
 
           if (instance.freshOrder) {
             instance.freshOrder = false;
@@ -586,7 +591,9 @@ export class ChaserOrderManager {
               this.log('cancelling orders', instance);
               try {
                 await exchange?.cancelOrders(ordersToCancel);
+                if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
               } catch (cancelError: any) {
+                if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
                 // For Hyperliquid: "already canceled, or filled" is expected when order was filled
                 // before we could cancel it - check fills via REST to confirm
                 const errorMsg = String(cancelError?.message || cancelError || '');
@@ -612,11 +619,13 @@ export class ChaserOrderManager {
             // replacement. Cancellation can have won even when its response is
             // ambiguous, so an unavailable or failed REST read is unsafe.
             if (useFillBasedTracking) {
+              if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
               try {
                 if (typeof (exchange as any).fetchFillsForOrderIds !== 'function') {
                   throw new Error('fill reconciliation is unavailable');
                 }
                 const fillsMap = await (exchange as any).fetchFillsForOrderIds(instance.currentOrderIds);
+                if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
                 for (const [orderId, filledAmount] of fillsMap) {
                   // Only update if we got more filled than we knew about
                   this.log(`REST fills check: orderId=${orderId}, filledAmount=${filledAmount}`, instance);
@@ -630,6 +639,7 @@ export class ChaserOrderManager {
                   return;
                 }
               } catch (e) {
+                if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
                 const message = `Chaser reconciliation failed after cancellation; stopped before replacement: ${e}`;
                 this.log(message, instance);
                 instance.markComplete('Failed to reconcile fills after cancellation');
@@ -643,14 +653,17 @@ export class ChaserOrderManager {
               return;
             }
 
-            instance.currentOrderIds = await this.tryPlaceOrders(instance);
+            const orderIds = await this.tryPlaceOrders(instance);
+            if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
+            instance.currentOrderIds = orderIds;
             hasSeenOrders = false;
             await sleep(1000);
+            if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
             this.log('created new orders', instance);
           }
         } finally {
           instance.pendingOrdersUpdate = false;
-          if (queuedOrdersCheck && !isCleanedUp && !instance.isStopped) {
+          if (queuedOrdersCheck && !exchange.isDisposed && !isCleanedUp && !instance.isStopped) {
             queuedOrdersCheck = false;
             scheduleQueuedOrdersCheck?.();
           }
@@ -666,6 +679,7 @@ export class ChaserOrderManager {
           hasSeenOrders = true;
           consecutiveMissingOrderUpdates = 0;
           await updateOrders(orders);
+          if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
         }
 
         // A wholesale REST snapshot can have been fetched before the chaser's
@@ -694,6 +708,7 @@ export class ChaserOrderManager {
         orders.filter((order) => instance.currentOrderIds.includes(order.id));
 
       runPriceCheck = async (orders: Order[], confirmMissingOrders = false) => {
+        if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
         lastPriceCheckAt = Date.now();
 
         // `chase ... to <length>` termination — evaluate before any

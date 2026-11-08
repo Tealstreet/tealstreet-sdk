@@ -5,6 +5,7 @@ import type { recordFill } from './audit-log';
 import { classifyForCLI, criticalErrorKey, errorEventClassification } from './error-classifier';
 import { U } from './console-glyphs';
 import type { logger } from './logger';
+import { getStorageEpoch, isStorageSessionCurrent } from './storage-context';
 
 export interface ExchangeListenerContext {
   adapter: Pick<CLIPlatformAdapter, 'printSuccess' | 'printError'>;
@@ -38,6 +39,7 @@ export function setupExchangeListeners(
   context: ExchangeListenerContext,
   accountName?: string,
 ): void {
+  const ownerEpoch = getStorageEpoch();
   if (wiredEmitters.has(exchange.emitter)) return;
   wiredEmitters.add(exchange.emitter);
 
@@ -47,6 +49,7 @@ export function setupExchangeListeners(
   // `(...args: unknown[]) => void` shape, so per-event payload types are
   // narrowed locally at each handler entry.
   exchange.emitter.on('exec-log', (...args: unknown[]) => {
+    if (!isStorageSessionCurrent(ownerEpoch)) return;
     const { message } = args[0] as { message: string };
     if (context.isMonitorMode()) {
       // Buffer messages during watch mode so they don't get wiped
@@ -58,6 +61,7 @@ export function setupExchangeListeners(
 
   // Listen for fills
   exchange.emitter.on('fill', (...args: unknown[]) => {
+    if (!isStorageSessionCurrent(ownerEpoch)) return;
     const fill = args[0] as OrderFillEvent;
     const fillMsg = formatFill(fill);
     logger.info(`Fill: ${fillMsg}`, fill);
@@ -75,6 +79,7 @@ export function setupExchangeListeners(
 
   // Listen for errors — classify via health monitor before displaying
   exchange.emitter.on('error', (...args: unknown[]) => {
+    if (!isStorageSessionCurrent(ownerEpoch)) return;
     const error = args[0] as string;
     const acctName = accountName || context.getCurrentAccountName() || 'unknown';
     const monitor = context.getHealthMonitor(acctName);
@@ -128,6 +133,7 @@ export function setupExchangeListeners(
 
   // Listen for warnings — classify via health monitor before displaying
   exchange.emitter.on('warning', (...args: unknown[]) => {
+    if (!isStorageSessionCurrent(ownerEpoch)) return;
     const warning = args[0] as string;
     const acctName = accountName || context.getCurrentAccountName() || 'unknown';
     const monitor = context.getHealthMonitor(acctName);
