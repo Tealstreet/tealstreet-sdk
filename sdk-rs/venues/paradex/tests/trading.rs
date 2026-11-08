@@ -397,6 +397,8 @@ fn logged_child_rejection(h: &Harness, expected: &str) -> bool {
 }
 #[test]
 fn partial_bracket_failure_skips_the_remaining_child_and_does_not_replay_entry() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     bracket_entry(&mut h, 10, None);
     let tp = h.take("/orders");
@@ -411,6 +413,8 @@ fn partial_bracket_failure_skips_the_remaining_child_and_does_not_replay_entry()
 }
 #[test]
 fn a_rejected_stop_loss_keeps_the_take_profit_and_the_next_order() {
+    // Legacy TS: paradex.exchange.ts:1817-1896,1949-1965 keeps TP and continues entries.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     let mut next = opts(OrderType::Market);
     next.client_order_id = Some("next".into());
@@ -555,6 +559,8 @@ fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
 
 #[test]
 fn a_child_leg_lost_in_transport_makes_the_command_unknown_with_accepted_ids() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     bracket_entry(&mut h, 12, None);
     let tp = h.take("/orders");
@@ -3201,6 +3207,8 @@ fn parity_ack_batch(h: &mut Harness, request: safe_cex_engine::HttpRequest, pref
 
 #[test]
 fn parity_later_native_rule_violations_reach_the_venue_after_the_first_batch() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1574-1593,1683-1713,1949-1965.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
     for (amount, price) in [
         (0.5, 100.0),
         (1.05, 100.0),
@@ -3258,6 +3266,8 @@ fn parity_later_native_rule_violations_reach_the_venue_after_the_first_batch() {
 
 #[test]
 fn parity_an_off_tick_child_is_submitted_after_its_parent() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1414-1422,1856-1875.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     parity_market_limits(&mut h, 1.0);
     h.receipt_trace.clear();
@@ -3293,6 +3303,8 @@ fn parity_an_off_tick_child_is_submitted_after_its_parent() {
 
 #[test]
 fn parity_replacement_and_exact_put_back_have_no_new_native_minimum_gate() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:2067-2106; historical 31d7fda4:1394-1438.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:1785/protective-amend-and-put-back-gating
     let mut h = with_untriggered_stop();
     parity_market_limits(&mut h, 3.0);
     h.command(Command::AmendOrder {
@@ -3330,6 +3342,8 @@ fn parity_replacement_and_exact_put_back_have_no_new_native_minimum_gate() {
 
 #[test]
 fn parity_all_valid_batches_still_submit_each_row_once() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1949-1965.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
     let mut h = private();
     h.receipt_trace.clear();
     let mut order = opts(OrderType::Limit);
@@ -3384,6 +3398,8 @@ fn after_failure_refuse(h: &mut Harness, request: safe_cex_engine::HttpRequest, 
 
 #[test]
 fn after_failure_native_batch_stops_later_chunks_and_serial_entries() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1942-1958.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
     // TS paradex.exchange.ts:1942-1958 awaits flush outside the per-entry catch.
     for lost in [false, true] {
         let mut h = private();
@@ -3412,6 +3428,8 @@ fn after_failure_native_batch_stops_later_chunks_and_serial_entries() {
 
 #[test]
 fn after_failure_serial_entry_continues_without_sending_its_children() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1958-1965.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
     // TS paradex.exchange.ts:1414-1431,1958-1965 catches one entry, then continues the loop.
     for lost in [false, true] {
         let mut h = private();
@@ -3435,6 +3453,8 @@ fn after_failure_serial_entry_continues_without_sending_its_children() {
 
 #[test]
 fn after_failure_take_profit_skips_stop_loss_but_continues_the_next_entry() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     // TS paradex.exchange.ts:1817-1896 has one try for TP+SL; 1949-1965 continues entries.
     for lost in [false, true] {
         let mut h = private();
@@ -3456,7 +3476,8 @@ fn after_failure_take_profit_skips_stop_loss_but_continues_the_next_entry() {
 
 #[test]
 fn after_failure_protective_cancel_or_exact_restore_is_terminal() {
-    // Historical TS 31d7fda4:paradex.exchange.ts:1427-1438 stops cancel-replace on failure.
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:2105-2113; historical 31d7fda4:1427-1438.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:1785/protective-amend-and-put-back-gating
     // Keep the existing Rust exact put-back per the lead's explicit no-removal instruction.
     for cancel_failure in [true, false] {
         let mut h = with_untriggered_stop();
@@ -3478,4 +3499,51 @@ fn after_failure_protective_cancel_or_exact_restore_is_terminal() {
         assert!(h.result(91).is_err());
         after_failure_no_more_writes(&h);
     }
+}
+
+#[test]
+fn pin_native_batch_row_refusal_keeps_accepted_rows_but_stops_the_next_chunk() {
+    // Legacy TS: paradex.exchange.ts:1772-1780,1942-1958 throws on a per-row batch error.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    let mut h = private();
+    h.receipt_trace.clear();
+    let mut order = opts(OrderType::Limit);
+    order.client_order_id = None;
+    place(&mut h, 91, vec![order; 11]);
+    let batch = h.take("/orders/batch");
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(batch.body.as_deref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 10);
+    let accepted: Vec<_> = rows[..9].iter().enumerate().map(|(i,row)| serde_json::json!({"id":format!("accepted-{i}"),"client_id":row["client_id"]})).collect();
+    h.respond(batch, 200, &serde_json::json!({"orders":accepted,"errors":[{"error":"INVALID_PRICE","message":"last row refused"}]}).to_string());
+    let ids: Vec<String> = serde_json::from_str(h.result(91).unwrap()).unwrap();
+    assert_eq!(ids.len(), 9);
+    after_failure_no_more_writes(&h);
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|r| matches!(r, ReceiptTrace::Http(_)))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn pin_native_amend_refusal_stops_without_replacing_or_restoring() {
+    // Legacy TS: paradex.exchange.ts:2099-2113 PUT failure is rethrown without a fallback.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:1785/protective-amend-and-put-back-gating
+    let (mut h, _) = amendment_account(AMEND_ROW);
+    h.receipt_trace.clear();
+    amend(&mut h, 91, Some(101.), Some(3.));
+    let request = take_method(&mut h, Method::Put, "/orders/123");
+    after_failure_refuse(&mut h, request, false);
+    assert!(h.result(91).is_err());
+    after_failure_no_more_writes(&h);
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|r| matches!(r, ReceiptTrace::Http(_)))
+            .count(),
+        1
+    );
 }

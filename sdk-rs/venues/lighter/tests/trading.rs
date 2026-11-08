@@ -317,8 +317,8 @@ fn generated_client_order_indices_are_receipted_before_the_signed_batch() {
 
 #[test]
 fn bracket_waits_for_each_ack_and_gives_siblings_their_own_indexes() {
-    // Market entries keep separate protective transactions; a limit entry with
-    // protections is one grouped transaction (tests/grouped_tpsl.rs).
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2663-2683; base.ts:1456-1481.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
     let (mut e, _) = ready_unattributed();
     let mut opts = limit();
     opts.kind = OrderType::Market;
@@ -1559,6 +1559,7 @@ fn a_maker_only_key_refusal_says_what_the_key_allows() {
 
 #[test]
 fn parity_grouped_children_use_parent_fill_without_child_minimums() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2514-2562.
     let metadata = META.replace("\"min_quote_amount\":\"1\"", "\"min_quote_amount\":\"100\"");
     let mut opts = options();
     opts.testnet = true;
@@ -1642,6 +1643,11 @@ fn parity_serial_sizes(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) -> V
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
         {
             assert_eq!(sizes.len(), ids.len());
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx")))
+            );
             return sizes;
         }
         let (timer, at) = actions
@@ -1660,6 +1666,8 @@ fn parity_serial_sizes(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) -> V
 
 #[test]
 fn parity_market_orders_keep_the_legacy_minimum_exemption() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2433-2442.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-market-minima
     for (min, quote) in [(3.0, 1.0), (1.0, 400.0)] {
         assert_eq!(
             parity_serial_sizes(
@@ -1673,6 +1681,8 @@ fn parity_market_orders_keep_the_legacy_minimum_exemption() {
 
 #[test]
 fn parity_mixed_placements_keep_the_market_minimum_exemption() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2433-2442,2711-2716.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
     assert_eq!(
         parity_serial_sizes(
             parity_engine_with_limits(3.0, 5.0, 1.0),
@@ -1687,6 +1697,8 @@ fn parity_mixed_placements_keep_the_market_minimum_exemption() {
 
 #[test]
 fn parity_limit_lots_keep_legacy_remainder_allocation_and_tail_merge() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2483-2507.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-allocation-and-tail
     assert_eq!(
         parity_serial_sizes(
             parity_engine_with_limits(1.0, 5.0, 1.0),
@@ -1705,6 +1717,7 @@ fn parity_limit_lots_keep_legacy_remainder_allocation_and_tail_merge() {
 
 #[test]
 fn parity_all_non_market_lots_validate_minimums_before_the_first_request() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2491-2507.
     parity_refuses(
         parity_engine_with_limits(4.0, 5.0, 1.0),
         vec![parity_order(OrderType::Limit, 8.0)],
@@ -1713,6 +1726,7 @@ fn parity_all_non_market_lots_validate_minimums_before_the_first_request() {
 
 #[test]
 fn parity_same_symbol_limit_batch_validates_the_last_row_before_transport() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2752-2799.
     parity_refuses(
         parity_engine_with_limits(3.0, 5.0, 1.0),
         vec![
@@ -1765,6 +1779,8 @@ fn after_failure_stops(e: &mut Engine<Lighter>, request: &HttpRequest) {
 
 #[test]
 fn after_failure_market_lot_refusal_stops_later_exempt_lots() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2627-2655.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-market-minima
     // TS lighter.exchange.ts:2433-2442,2627-2655 exempts minima but throws on a lot failure.
     let mut e = parity_engine_with_limits(4., 5., 1000.);
     let first = begin(&mut e, vec![parity_order(OrderType::Market, 8.)]);
@@ -1776,6 +1792,8 @@ fn after_failure_market_lot_refusal_stops_later_exempt_lots() {
 
 #[test]
 fn after_failure_allocation_refusal_stops_the_legacy_oversized_tail() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2627-2655.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-allocation-and-tail
     // TS lighter.exchange.ts:2483-2499,2627-2655: [4,4,4,6], abort before the tail.
     let mut e = parity_engine_with_limits(3., 5., 1.);
     let first = begin(&mut e, vec![parity_order(OrderType::Limit, 17.)]);
@@ -1796,6 +1814,8 @@ fn after_failure_valid_non_market_lots_stop_after_a_venue_refusal() {
 
 #[test]
 fn after_failure_serial_entry_refusal_stops_the_next_entry() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2711-2716.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
     // TS lighter.exchange.ts:2711-2716 awaits each order without catching failures.
     let mut e = parity_engine_with_limits(1., 5., 1.);
     let first = begin(
@@ -1810,6 +1830,8 @@ fn after_failure_serial_entry_refusal_stops_the_next_entry() {
 
 #[test]
 fn after_failure_market_child_refusal_skips_its_sibling_and_next_entry() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2673-2683.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
     // TS lighter.exchange.ts:2673-2683 throws from the sibling loop; 2711-2716 stops entries.
     let mut e = parity_engine_with_limits(1., 5., 1.);
     let mut parent = parity_order(OrderType::Market, 1.);
@@ -1842,4 +1864,14 @@ fn after_failure_group_refusal_stops_the_next_entry_without_fallback() {
     let group = begin(&mut e, vec![parent, parity_order(OrderType::Market, 1.)]);
     assert_eq!(param(&group, "tx_type"), "28");
     after_failure_stops(&mut e, &group);
+}
+
+#[test]
+fn pin_grouped_parent_minimum_trigger_and_split_refuse_before_any_io() {
+    // Legacy TS: lighter.exchange.ts:2491-2507,2514-2525 validates before grouped submit.
+    for (amount, trigger) in [(1., 90.), (3., 0.), (6., 90.)] {
+        let mut parent = parity_order(OrderType::Limit, amount);
+        parent.stop_loss = Some(trigger);
+        parity_refuses(parity_engine_with_limits(3., 5., 1.), vec![parent]);
+    }
 }
