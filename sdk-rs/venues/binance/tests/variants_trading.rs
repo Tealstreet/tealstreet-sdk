@@ -228,7 +228,9 @@ struct NativeQuantity {
 }
 
 #[test]
-fn spot_and_inverse_splits_preserve_entry_and_both_bracket_totals() {
+// TS: reference/binance/binancespot.exchange.ts:535-547,550-571 and
+// binanceinverse.exchange.ts:871-897,919-924. Each 11-unit leg emits 3,3,3,1.
+fn spot_and_inverse_splits_keep_ts_entry_and_bracket_rounding() {
     for variant in [Variant::Spot, Variant::CoinM] {
         let mut h = ready(variant);
         let mut o = order(variant, r#""stopLoss":90,"takeProfit":110"#);
@@ -265,10 +267,10 @@ fn spot_and_inverse_splits_preserve_entry_and_both_bracket_totals() {
             };
             h.reply(r.id, 200, "", &body);
         }
-        assert_eq!(native_orders, 9, "{variant:?}");
+        assert_eq!(native_orders, 12, "{variant:?}");
         assert_eq!(totals.len(), 3, "{variant:?}");
         assert!(
-            totals.values().all(|total| *total == 11.0),
+            totals.values().all(|total| *total == 10.0),
             "{variant:?} {totals:?}"
         );
         assert!(h.result(77).unwrap().is_ok());

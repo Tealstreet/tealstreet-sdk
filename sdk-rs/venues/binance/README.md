@@ -41,6 +41,13 @@ Native lot rebalancing, whole-plan filter refusals and new fail-stop rules are
 outside this parity change. Engine-owned transport classification remains in
 place. Binance does not adopt `WritePlan` as a dispatch gate.
 
+Maximum-size splitting copies the reference allocator exactly: it emits
+`ceil(amount / max)` equal rounded lots followed by a separately rounded remainder.
+It does not correct rounding loss or a remainder below the native minimum.
+`legacy_lot_allocation` records all four profiles' wire quantities for 26/5/1
+(`4,4,4,4,4,4,1`), 22/10/2 (`6,6,6,2`), and a below-minimum remainder
+12/5/1 (`3,3,3,2`), where the inputs are amount/maximum/step.
+
 After a definite native batch item refusal in a successful HTTP response, USD-M
 and COIN-M continue later chunks and attached children, matching the reference's
 per-item logging loop. Returned signature-error rows also continue without

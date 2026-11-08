@@ -1,5 +1,5 @@
 //! USD-M trailing stops: a dragged level becomes a callback rate inside Binance's range,
-//! one-way trailing stops only reduce, and a refused replacement ends without compensation.
+//! one-way trailing stops only reduce, and a refused replacement puts back the native rate.
 use support::Options;
 mod support;
 
@@ -147,29 +147,20 @@ fn an_out_of_range_amend_refuses_before_the_cancel() {
 }
 
 #[test]
-fn an_amend_without_the_native_rate_still_places_the_requested_replacement() {
+fn an_amend_without_the_native_rate_refuses_before_the_cancel() {
     let row = TRAILING_ROW.replace(r#""callbackRate":"1.5","#, "");
     let mut h = ready_with(false, &format!("[{row}]"));
     amend(&mut h, 4, "5550", 98.0);
-    let cancel = h.take("/fapi/v1/algoOrder");
-    h.reply(
-        cancel.id,
-        200,
-        "",
-        r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+    assert!(no_writes(&h), "{:?}", h.paths());
+    let message = h.result(4).unwrap().as_ref().unwrap_err();
+    assert!(
+        message.contains("native callback rate is not known"),
+        "{message}"
     );
-    let replacement = h.take("/fapi/v1/algoOrder");
-    assert_eq!(
-        param(&replacement.url, "callbackRate").as_deref(),
-        Some("2")
-    );
-    h.reply(replacement.id, 200, "", r#"{"algoId":777}"#);
-    assert!(h.result(4).unwrap().is_ok());
-    assert!(no_writes(&h));
 }
 
 #[test]
-fn a_refused_trailing_replacement_stops_without_put_back() {
+fn a_refused_replacement_puts_back_the_native_rate_and_activation_price() {
     let mut h = ready();
     amend(&mut h, 5, "5550", 97.0);
     let cancel = h.take("/fapi/v1/algoOrder");
@@ -197,9 +188,18 @@ fn a_refused_trailing_replacement_stops_without_put_back() {
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
-    assert!(no_writes(&h));
-    assert!(h.done.last().unwrap().1.is_err());
-    assert_eq!(h.failures.last().unwrap().1.protection, None);
+    let put_back = h.take("/fapi/v1/algoOrder");
+    assert_eq!(put_back.method, Method::Post);
+    assert_eq!(
+        param(&put_back.url, "type").as_deref(),
+        Some("TRAILING_STOP_MARKET")
+    );
+    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+    assert_eq!(
+        param(&put_back.url, "activatePrice").as_deref(),
+        Some("103")
+    );
+    assert_eq!(param(&put_back.url, "reduceOnly").as_deref(), Some("true"));
 }
 
 /// Master's bytes for an ordinary limit amend: cancel, then the same order at the new price.
@@ -225,9 +225,10 @@ fn an_ordinary_limit_amend_is_unchanged() {
     );
 }
 
-/// A refresh during cancellation does not authorize a compensating placement.
+/// The native rate is captured when the amend is admitted: an open-orders refresh that
+/// lands while the cancel is in flight cannot change what the put-back restores.
 #[test]
-fn a_refresh_during_cancel_does_not_add_a_put_back_after_refusal() {
+fn a_refresh_during_the_cancel_cannot_change_the_put_back() {
     let mut h = ready();
     amend(&mut h, 75, "5550", 97.0);
     let cancel = h.take("/fapi/v1/algoOrder");
@@ -250,9 +251,12 @@ fn a_refresh_during_cancel_does_not_add_a_put_back_after_refusal() {
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
-    assert!(no_writes(&h));
-    assert!(h.done.last().unwrap().1.is_err());
-    assert_eq!(h.failures.last().unwrap().1.protection, None);
+    let put_back = h.take("/fapi/v1/algoOrder");
+    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+    assert_eq!(
+        param(&put_back.url, "activatePrice").as_deref(),
+        Some("103")
+    );
 }
 
 fn legacy_without_reduce_only() -> Harness {
@@ -265,9 +269,10 @@ fn legacy_without_reduce_only() -> Harness {
     h
 }
 
-/// A one-way trailing stop placed without reduceOnly only reduces when amended.
+/// A one-way trailing stop placed without reduceOnly (the old shape) only reduces once
+/// amended: on the replacement and on the put-back.
 #[test]
-fn a_legacy_trailing_replacement_is_reduce_only_and_refusal_stops() {
+fn a_legacy_trailing_stops_replacement_and_put_back_are_reduce_only() {
     let mut h = legacy_without_reduce_only();
     amend(&mut h, 80, "5550", 97.0);
     let cancel = h.take("/fapi/v1/algoOrder");
@@ -288,9 +293,9 @@ fn a_legacy_trailing_replacement_is_reduce_only_and_refusal_stops() {
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
-    assert!(no_writes(&h));
-    assert!(h.done.last().unwrap().1.is_err());
-    assert_eq!(h.failures.last().unwrap().1.protection, None);
+    let put_back = h.take("/fapi/v1/algoOrder");
+    assert_eq!(param(&put_back.url, "reduceOnly").as_deref(), Some("true"));
+    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
 }
 
 /// A new one-way trailing stop reduces unless the caller explicitly says it must not.
@@ -476,6 +481,44 @@ fn ambiguous_trailing_cancel_cannot_resend_or_replace() {
 }
 
 #[test]
+fn ambiguous_put_back_has_no_protection_claim_or_further_write() {
+    for (status, code) in [(429, -1003), (200, -1015), (429, -1022)] {
+        let mut h = ready();
+        amend(&mut h, 907, "5550", 97.0);
+        let cancel = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            cancel.id,
+            200,
+            "",
+            r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+        );
+        let replacement = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            replacement.id,
+            400,
+            "",
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let restore = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            restore.id,
+            status,
+            "",
+            &format!(r#"{{"code":{code},"msg":"uncertain write"}}"#),
+        );
+        assert!(no_writes(&h), "{status}/{code}: {:?}", h.paths());
+        let error = &h.failures.iter().find(|(id, _)| *id == 907).unwrap().1;
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}/{code}: {error:?}"
+        );
+        assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
+        assert!(error.message.contains("unknown"), "{error:?}");
+    }
+}
+
+#[test]
 fn engine_ambiguity_ordinary_429_is_unknown() {
     let mut h = ready();
     let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":90.0})).unwrap();
@@ -564,5 +607,50 @@ fn engine_ambiguity_408_503_replacement_controls_do_not_put_back() {
             r#"{"code":-1003,"msg":"Too many requests"}"#,
         );
         assert!(no_writes(&h), "{status}: {:?}", h.paths());
+    }
+}
+
+#[test]
+fn engine_ambiguity_put_back_replaces_stale_definitive_refusal_words() {
+    for (status, code) in [(429, -1003), (200, -1015), (429, -1022)] {
+        let mut h = ready();
+        amend(&mut h, 907, "5550", 97.0);
+        let cancel = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            cancel.id,
+            200,
+            "",
+            r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+        );
+        let replacement = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            replacement.id,
+            400,
+            "",
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let restore = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            restore.id,
+            status,
+            "",
+            &format!(r#"{{"code":{code},"msg":"uncertain write"}}"#),
+        );
+        assert!(no_writes(&h), "{status}/{code}: {:?}", h.paths());
+        let error = &h.failures.iter().find(|(id, _)| *id == 907).unwrap().1;
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}/{code}: {error:?}"
+        );
+        assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
+        assert!(
+            error.message.contains("unknown"),
+            "{status}/{code}: {error:?}"
+        );
+        assert!(
+            error.message.contains("Check Open Orders"),
+            "{status}/{code}: {error:?}"
+        );
     }
 }

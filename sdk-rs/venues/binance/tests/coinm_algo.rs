@@ -494,9 +494,10 @@ fn a_frame_fed_cancel_all_cancels_its_algo_stops_by_algo_id() {
     );
 }
 
-/// A refused COIN-M trailing replacement terminates without a second placement.
+/// A COIN-M algo trailing stop's refused replacement is put back on the algo endpoint
+/// with its native callbackRate and activatePrice (the algo name, never activationPrice).
 #[test]
-fn a_refused_coin_m_algo_trailing_replacement_stops_without_put_back() {
+fn an_algo_trailing_stops_put_back_restores_its_native_rate_on_the_algo_endpoint() {
     let trailing = ALGO_ROW
         .replace(r#""algoId":5550"#, r#""algoId":5560"#)
         .replace(
@@ -535,11 +536,17 @@ fn a_refused_coin_m_algo_trailing_replacement_stops_without_put_back() {
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
-    assert!(
-        h.requests
-            .iter()
-            .all(|request| request.method == Method::Get)
+    let put_back = h.take("/dapi/v1/algoOrder");
+    assert_eq!(put_back.method, Method::Post);
+    assert!(!h.has_request("/dapi/v1/order?"), "{:?}", h.paths());
+    assert_eq!(
+        param(&put_back.url, "type").as_deref(),
+        Some("TRAILING_STOP_MARKET")
     );
-    assert!(h.result(50).unwrap().is_err());
-    assert_eq!(h.failures.last().unwrap().1.protection, None);
+    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+    assert_eq!(
+        param(&put_back.url, "activatePrice").as_deref(),
+        Some("10300")
+    );
+    assert_eq!(param(&put_back.url, "activationPrice"), None);
 }
