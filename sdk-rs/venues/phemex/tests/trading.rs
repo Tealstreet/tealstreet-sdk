@@ -527,19 +527,19 @@ fn assert_legacy_equal_lots(amount: f64, max: f64, step: f64, expected: &[&str],
 
 #[test]
 fn legacy_equal_lots_26_step_1() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
     assert_legacy_equal_lots(26., 5., 1., &["4", "4", "4", "4", "4", "4", "1"], 25.);
 }
 
 #[test]
 fn legacy_equal_lots_11_step_1() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
     assert_legacy_equal_lots(11., 5., 1., &["3", "3", "3", "1"], 10.);
 }
 
 #[test]
 fn legacy_equal_lots_12_step_1() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
     assert_legacy_equal_lots(12., 5., 1., &["3", "3", "3", "2"], 11.);
 }
 
@@ -562,6 +562,179 @@ fn legacy_equal_lots_normalize_to_thousandth_step() {
         &["0.225", "0.225", "0.225", "0.225", "0.101"],
         1.001,
     );
+}
+
+#[test]
+fn split_native_unknown_reports_first_middle_and_last_lots() {
+    for index in [0, 1, 3] {
+        assert_split_unknown(index, json!({"code":10500,"msg":"internal","data":null}));
+    }
+}
+
+#[test]
+fn split_malformed_ack_reports_unknown_with_same_contract() {
+    assert_split_unknown(1, json!({"code":0,"data":null}));
+}
+
+#[test]
+fn split_definite_refusal_keeps_its_native_error_and_suppressed_suffix() {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut e = engine();
+    let mut order = opts("");
+    order.amount = 2.123;
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 94,
+            orders: vec![order],
+        },
+    );
+    let first = writes(&actions).remove(0);
+    let actions = respond(&mut e, &first, ack(&first, "accepted-prefix"));
+    let second = writes(&actions).remove(0);
+    let actions = respond(
+        &mut e,
+        &second,
+        json!({"code":11001,"msg":"refused","data":null}),
+    );
+    assert!(writes(&actions).is_empty());
+    let error = failure(&actions);
+    assert_eq!(
+        error.outcome, None,
+        "known accepted prefix plus a definite refusal"
+    );
+    assert_eq!(error.message, "Phemex 11001 refused");
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["accepted-prefix"]
+    );
+    let rows = error.elements.as_ref().unwrap();
+    assert_eq!(rows.len(), 4);
+    assert!(
+        matches!(&rows[0].result, ElementResult::Placed { order_ids } if order_ids == &["accepted-prefix"])
+    );
+    assert!(
+        matches!(&rows[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+    );
+    assert!(
+        rows[2..]
+            .iter()
+            .all(|row| row.result == ElementResult::NotSent { error: None })
+    );
+    assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")));
+}
+
+fn assert_split_unknown(unknown: usize, body: Value) {
+    use safe_cex_engine::write_plan::ElementResult;
+    const GUIDANCE: &str = "The outcome is unknown. Check Open Orders";
+    let mut e = engine();
+    let mut order = opts("");
+    order.amount = 2.123;
+    let mut actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 93,
+            orders: vec![order],
+        },
+    );
+    let mut client_ids = Vec::new();
+    let mut accepted = Vec::new();
+    for (index, quantity) in ["0.667", "0.667", "0.667", "0.123"]
+        .iter()
+        .enumerate()
+        .take(unknown + 1)
+    {
+        let sent = writes(&actions);
+        assert_eq!(sent.len(), 1);
+        let request = &sent[0];
+        assert!(request.url.contains("/g-orders/create?"));
+        assert_eq!(p(request, "orderQtyRq").as_deref(), Some(*quantity));
+        let client_id = p(request, "clOrdID").unwrap();
+        assert!(!client_ids.contains(&client_id));
+        client_ids.push(client_id);
+        if index == unknown {
+            actions = respond(&mut e, request, body.clone());
+        } else {
+            let id = format!("accepted-{index}");
+            actions = respond(&mut e, request, ack(request, &id));
+            accepted.push(id);
+        }
+    }
+    assert!(writes(&actions).is_empty(), "no suffix after Unknown");
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.message, GUIDANCE);
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.as_slice())
+            .unwrap_or_default(),
+        accepted
+    );
+    let rows = error.elements.as_ref().expect("indexed placement outcomes");
+    assert_eq!(rows.len(), 4);
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row.element.index, index);
+        assert!(
+            row.element
+                .client_order_id
+                .as_ref()
+                .is_some_and(|id| id.starts_with("Tealstreet_"))
+        );
+        if index <= unknown {
+            assert_eq!(
+                row.element.client_order_id.as_ref(),
+                Some(&client_ids[index])
+            );
+        }
+        if index < unknown {
+            assert!(
+                matches!(&row.result, ElementResult::Placed { order_ids } if order_ids == &[accepted[index].clone()])
+            );
+        } else if index == unknown {
+            assert!(
+                matches!(&row.result, ElementResult::Unknown { error } if error.message == GUIDANCE && error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+            );
+        } else {
+            assert_eq!(row.result, ElementResult::NotSent { error: None });
+        }
+    }
+    assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandError { command: 93, message }) if message == GUIDANCE)).count(), 1);
+    let events: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].level, safe_cex_engine::Level::Warn);
+    assert_eq!(events[0].message, GUIDANCE);
+    assert!(
+        events[0]
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    );
+    assert!(
+        events[0].fields.iter().any(
+            |(key, value)| *key == "command" && *value == safe_cex_engine::log::Value::Num(93.)
+        )
+    );
+    for (timer, at_ms) in actions.iter().filter_map(|a| match a {
+        Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+        _ => None,
+    }) {
+        e.handle(at_ms, Event::TimerFired { timer });
+        let later: Vec<_> = e.drain_actions().collect();
+        assert!(
+            writes(&later).is_empty(),
+            "no timer may resume an uncertain split"
+        );
+    }
 }
 
 #[test]

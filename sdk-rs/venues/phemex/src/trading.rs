@@ -18,6 +18,7 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
 pub(crate) use safe_cex_engine::url::encode;
+use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
 use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Response, VenueError, num};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -54,6 +55,7 @@ struct Job {
     identity: safe_cex_engine::signing::Identity,
     steps: VecDeque<Step>,
     ids: Vec<String>,
+    placement_report: Option<WritePlan>,
     settings: bool,
     /// Symbols a `PlaceOrders` job may leave with an unknown outcome.
     placing: Vec<String>,
@@ -1914,6 +1916,21 @@ impl PhemexPerpetuals {
                         placing.push(order.symbol.clone());
                     }
                 }
+                let placement_report = (placement && steps.len() > 1).then(|| {
+                    WritePlan::new(
+                        steps
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, step)| match &step.call {
+                                Call::Place { order, .. } => Some(Element {
+                                    index,
+                                    client_order_id: order.client_order_id.clone(),
+                                }),
+                                _ => None,
+                            })
+                            .collect(),
+                    )
+                });
                 self.trading.jobs.insert(
                     id,
                     Job {
@@ -1922,6 +1939,7 @@ impl PhemexPerpetuals {
                         identity: identity.clone(),
                         steps,
                         ids: Vec::new(),
+                        placement_report,
                         settings: is_settings,
                         placing,
                         effective: false,
@@ -2462,12 +2480,19 @@ impl PhemexPerpetuals {
                     self.trading
                         .brackets
                         .insert(identity.order_id.clone(), *brackets);
-                    request
+                    let job = request
                         .command
                         .and_then(|command| self.trading.jobs.get_mut(&command))
-                        .ok_or("Phemex missing write job")?
-                        .ids
-                        .push(identity.order_id);
+                        .ok_or("Phemex missing write job")?;
+                    if let Some(report) = &mut job.placement_report {
+                        let _ = report.record(
+                            job.ids.len(),
+                            ElementResult::Placed {
+                                order_ids: vec![identity.order_id.clone()],
+                            },
+                        );
+                    }
+                    job.ids.push(identity.order_id);
                 }
                 Call::Cancel { before, ids } => {
                     // A socket frame may beat this ack: apply_cancel_ack only moves
@@ -2908,11 +2933,48 @@ impl PhemexPerpetuals {
         let Some(command) = request.command else {
             return;
         };
-        let job = self.trading.jobs.remove(&command);
+        let mut job = self.trading.jobs.remove(&command);
         self.account_refresh(cx);
         let gone = job.as_ref().and_then(|job| {
             job.gone_note(uncertain || error.outcome == Some(safe_cex_engine::Outcome::Unknown))
         });
+        if let Some(job) = &mut job
+            && let Some(report) = &mut job.placement_report
+        {
+            let unknown = error.outcome == Some(safe_cex_engine::Outcome::Unknown);
+            if unknown {
+                error.message = "The outcome is unknown. Check Open Orders".into();
+                error.presents = true;
+                cx.event(
+                    Level::Warn,
+                    "order.outcome_unknown",
+                    &error.message,
+                    vec![
+                        ("command", (command as f64).into()),
+                        ("outcome", "unknown".into()),
+                    ],
+                );
+            }
+            // Observe the submitted identity; this journal has no dispatch authority.
+            if let Call::Place { order, .. } = &request.call
+                && let Some(row) = report.outcomes().iter().find(|row| {
+                    row.element.client_order_id == order.client_order_id
+                        && !matches!(row.result, ElementResult::Placed { .. })
+                })
+            {
+                let result = if unknown {
+                    ElementResult::Unknown {
+                        error: Box::new(error.clone()),
+                    }
+                } else {
+                    ElementResult::NotSent {
+                        error: Some(Box::new(error.clone())),
+                    }
+                };
+                let _ = report.record(row.element.index, result);
+            }
+            error = report.attach(error);
+        }
         if let Some(job) = &job {
             if !uncertain && (job.effective || !job.ids.is_empty()) {
                 error.outcome = None;
@@ -3053,6 +3115,7 @@ mod tests {
                         replacement: None,
                     }]),
                     ids: vec![],
+                    placement_report: None,
                     settings: false,
                     placing: vec![],
                     effective: false,
