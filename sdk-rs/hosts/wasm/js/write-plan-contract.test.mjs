@@ -43,6 +43,8 @@ test('Rust error detail retains indexed outcomes on the actual host error', asyn
   assert.notEqual(error.elements, detail.elements);
   assert.notEqual(error.elements[0].orderIds, detail.elements[0].orderIds);
   assert.deepEqual(error.partialOrderIds, ['native-0']);
+  assert.equal(error.totalOrderCount, 3);
+  assert.equal(error.failedOrderIndex, 1);
 });
 
 test('malformed logical rows discard the array without leaking arbitrary fields', async () => {
@@ -59,8 +61,8 @@ test('malformed logical rows discard the array without leaking arbitrary fields'
   assert.deepEqual(writePlanElementsOf([{ index: 0, status: 'notSent', request: 'excluded', error: {
     message: 'rejected', outcome: 'rejected', kind: 'rejected', venueCode: '-1', request: 'excluded',
     partial: { orderIds: ['native'], total: 2, failedIndex: 1, request: 'excluded' },
-  } }]), [{ index: 0, status: 'notSent', error: {
-    message: 'rejected', outcome: 'rejected', kind: 'rejected', venueCode: '-1',
+  } }]), [{ index: 0, status: 'unknown', error: {
+    message: 'rejected', outcome: 'unknown', kind: 'rejected', venueCode: '-1',
     partial: { orderIds: ['native'], total: 2, failedIndex: 1 },
   } }]);
 });
@@ -70,6 +72,27 @@ test('recursive outcome errors reject cycles and clone valid nested details', as
   const elements = [{ index: 0, status: 'unknown', error: { message: 'unknown' } }];
   elements[0].error.elements = elements;
   assert.equal(writePlanElementsOf(elements), undefined);
-  const nested = [{ index: 0, status: 'unknown', error: { message: 'unknown', elements: [] } }];
+  const nested = [{ index: 0, status: 'unknown', error: { message: 'unknown', outcome: 'unknown', elements: [] } }];
   assert.deepEqual(writePlanElementsOf(nested), nested);
+});
+
+
+test('applied effects retain known targets without claiming created order IDs', async () => {
+  const { writePlanElementsOf } = await import('./host.mjs');
+  for (const effect of ['cancel', 'amend', 'tradingStop', 'settings', 'deferredChild', 'positionTrigger']) {
+    const rows = [{ index: 0, status: 'applied', effect, targetOrderId: 'existing', positionKey: 'BTCUSD:long' }];
+    assert.deepEqual(writePlanElementsOf(rows), rows);
+    for (const invalid of [
+      { ...rows[0], effect: 'bogus' }, { ...rows[0], targetOrderId: '' },
+      { ...rows[0], positionKey: '' }, { ...rows[0], orderIds: ['invented'] },
+      { ...rows[0], orderIds: [] }, { ...rows[0], orderId: 'invented' },
+    ]) assert.equal(writePlanElementsOf([invalid]), undefined);
+  }
+});
+
+test('placed identities must be nonempty dense arrays of nonempty strings', async () => {
+  const { writePlanElementsOf } = await import('./host.mjs');
+  for (const orderIds of [[], [''], Array(1), [7]]) {
+    assert.equal(writePlanElementsOf([{ index: 0, status: 'placed', orderIds }]), undefined);
+  }
 });
