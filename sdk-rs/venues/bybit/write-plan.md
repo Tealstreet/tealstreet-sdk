@@ -11,8 +11,9 @@ Applied, the classified failure and untouched NotSent rows. Typed envelopes reta
 native effect scopes without untyped JSON trees or invented order IDs. Read-only
 partial-stop confirmation requests consume no mutation index.
 
-Spot retains its distinct native-rejection stop and caught-provider-failure
-continuation. Placement there uses existing engine aggregate reporting, since a
+Spot runs all lots of the current order before throwing its collected native
+refusal, then stops before the next caller order. Caught provider failures retain
+their separate continuation behavior. Placement there uses existing engine aggregate reporting, since a
 permanently stopping journal would change the latter behavior.
 
 Linear/Inverse batch placement retains the pre-adoption native batch-to-single
@@ -33,7 +34,9 @@ Partial TP/SL edits cancel then replace, as TS does. Replacement payloads use th
 native default Market execution and omit conditional Limit execution fields for
 both Full and Partial modes. A failed replacement does not automatically restore
 the old stop: TS has no such catch/restore branch. Protection warnings and native
-reconciliation remain. Existing declared batch fallbacks are retained.
+reconciliation remain. Existing declared batch fallbacks are retained. A refused
+cancel family stops the remaining family requests, matching TS cancellation
+failure semantics.
 
 Known legacy issue: ordinary missing/zero prices, below-minimum notionals and
 other later native refusals may follow accepted rows. Batch rows/chunks may
@@ -41,3 +44,14 @@ continue after earlier failures. This PR does not add an atomic-admission policy
 
 The earlier [split-plan invariant](https://github.com/Tealstreet/tealstreet-sdk/blob/docs/split-plan-invariant/docs/plans/SPLIT_PLAN_INVARIANT.md)
 is superseded for this PR by the owner's legacy-parity scope.
+
+The journal never rewrites a native payload. Failed journal construction, a
+missing journal entry or a refused journal settlement emits a reporting diagnostic
+and disables that optional journal; the TS dispatch path remains in control.
+These diagnostics do not refuse admission or terminate a native mutation plan.
+
+After-failure coverage follows the TS nesting: Linear/Inverse native rows,
+chunks, fallback singles and special/option orders continue; Hyro serial writes,
+later caller orders after a Spot native refusal, cancellation suffixes and single
+settings commands stop. Partial-stop cancel failures prevent replacement; failed
+replacements have no automatic put-back.

@@ -1600,6 +1600,9 @@ fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
                 }
             };
             h.reply(request.id, 200, reply);
+            if failed == Some(filter) {
+                break;
+            }
         }
         for (id, filter) in [
             ("ordinary", "Order"),
@@ -1609,7 +1612,11 @@ fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
         ] {
             assert_eq!(
                 h.engine.store().order(id).unwrap().status,
-                if failed == Some(filter) {
+                if failed.is_some_and(|failed| {
+                    let filters = ["Order", "StopOrder", "tpslOrder"];
+                    filters.iter().position(|item| *item == filter)
+                        >= filters.iter().position(|item| *item == failed)
+                }) {
                     safe_cex_engine::model::OrderStatus::Open
                 } else {
                     safe_cex_engine::model::OrderStatus::Canceled
@@ -4189,7 +4196,7 @@ fn a_position_stop_quantity_rounding_to_zero_is_refused() {
 
 // B3: one coin refusing leaves the other coins to be tried.
 #[test]
-fn legacy_position_mode_refusal_does_not_release_a_second_coin() {
+fn after_failure_settings_refusal_does_not_release_a_second_coin() {
     let mut h = ready(Variant::Inverse);
     h.command(Command::SetPositionMode {
         command: 1,
@@ -5418,17 +5425,17 @@ fn engine_ambiguity_429_clock_code_cannot_replay() {
 }
 
 #[test]
-fn legacy_serial_runtime_refusal_stops_and_reports_each_serial_row() {
+fn after_failure_hyro_native_refusal_stops_and_reports_each_serial_row() {
     assert_serial_plan_failure(Some(200));
 }
 
 #[test]
-fn legacy_serial_lost_reply_stops_and_reports_unknown_serial_row() {
+fn after_failure_hyro_lost_reply_stops_and_reports_unknown_serial_row() {
     assert_serial_plan_failure(None);
 }
 
 #[test]
-fn legacy_serial_server_error_keeps_prefix_pending_and_unsent_rows() {
+fn after_failure_hyro_server_error_keeps_prefix_pending_and_unsent_rows() {
     assert_serial_plan_failure(Some(503));
 }
 
@@ -5617,7 +5624,7 @@ fn seed_applied_cancel_orders(h: &mut Harness) {
 }
 
 #[test]
-fn applied_cancel_prefix_is_reported_with_targets_and_stops_the_suffix() {
+fn after_failure_cancel_prefix_is_reported_with_targets_and_stops_the_suffix() {
     let mut h = ready(Variant::Spot);
     seed_applied_cancel_orders(&mut h);
     h.command(Command::CancelOrders {
@@ -5853,4 +5860,142 @@ fn legacy_non_option_price_and_notional_do_not_gain_a_whole_plan_gate() {
             }
         }
     }
+}
+
+#[test]
+fn after_failure_spot_finishes_the_current_orders_lots_then_stops() {
+    for (failed, code) in [(0, 110007), (1, 110007), (1, 10016)] {
+        let mut h = spot_split_plan_market("0.001", "1");
+        let first = order("BTCUSDT", 3.0);
+        let mut later = order("BTCUSDT", 1.0);
+        later.client_order_id = Some("untouched-next-order".into());
+        place(&mut h, 160, vec![first, later]);
+        for index in 0..3 {
+            let request = h.take("/v5/order/create");
+            assert!(!body(&request).contains("untouched-next-order"));
+            if index == failed {
+                h.reply(
+                    request.id,
+                    200,
+                    &serde_json::json!({"retCode":code,"retMsg":"lot refused"}).to_string(),
+                );
+            } else {
+                h.reply(
+                    request.id,
+                    200,
+                    &serde_json::json!({"retCode":0,"result":{"orderId":format!("lot-{index}")}})
+                        .to_string(),
+                );
+            }
+        }
+        h.advance(1_201.0);
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(matches!(h.result(160), Some(Err(_))));
+    }
+}
+
+#[test]
+fn after_failure_spot_cancel_all_does_not_release_another_family() {
+    let mut h = ready(Variant::Spot);
+    seed_applied_cancel_orders(&mut h);
+    h.command(Command::CancelSymbolOrders {
+        command: 161,
+        symbol: "BTCUSDT".into(),
+    });
+    let request = h.take("/v5/order/cancel-all");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"cancel refused"}"#,
+    );
+    h.advance(1_201.0);
+    assert!(!h.has_request("/v5/order/cancel-all"));
+    assert!(matches!(h.result(161), Some(Err(_))));
+}
+
+#[test]
+fn after_failure_native_batch_row_refusal_keeps_the_later_chunk() {
+    for code in [110007, 10016] {
+        let mut h = ready(Variant::Demo);
+        place(
+            &mut h,
+            162,
+            (0..12).map(|_| order("BTCUSDT", 1.0)).collect(),
+        );
+        resolve_mode(&mut h, "BTCUSDT");
+        let first = h.take("/v5/order/create-batch");
+        let rows: Vec<_> = (0..10)
+            .map(|index| serde_json::json!({"orderId":format!("batch-{index}")}))
+            .collect();
+        let statuses: Vec<_> = (0..10)
+        .map(|index| serde_json::json!({"code":if index == 1 {code} else {0},"msg":"native row"}))
+        .collect();
+        h.reply(
+            first.id,
+            200,
+            &serde_json::json!({"retCode":0,"result":{"list":rows},"retExtInfo":{"list":statuses}})
+                .to_string(),
+        );
+        h.advance(1_201.0);
+        let next = h.take("/v5/order/create-batch");
+        let wire: serde_json::Value = serde_json::from_str(body(&next)).unwrap();
+        assert_eq!(wire["request"].as_array().unwrap().len(), 2);
+        h.reply(next.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"last-0"},{"orderId":"last-1"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#);
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(!h.has_request("/v5/order/create-batch"));
+    }
+}
+
+#[test]
+fn after_failure_batch_fallback_continues_past_a_refused_single() {
+    for code in [10001, 110007] {
+        let mut h = ready(Variant::Demo);
+        place(
+            &mut h,
+            163,
+            vec![order("BTCUSDT", 1.0), order("BTCUSDT", 1.0)],
+        );
+        resolve_mode(&mut h, "BTCUSDT");
+        let batch = h.take("/v5/order/create-batch");
+        h.reply(
+            batch.id,
+            200,
+            &serde_json::json!({"retCode":code,"retMsg":"batch refused"}).to_string(),
+        );
+        let first = h.take("/v5/order/create");
+        h.reply(
+            first.id,
+            200,
+            r#"{"retCode":110007,"retMsg":"first refused"}"#,
+        );
+        let second = h.take("/v5/order/create");
+        h.reply(
+            second.id,
+            200,
+            r#"{"retCode":0,"result":{"orderId":"fallback-last"}}"#,
+        );
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(matches!(h.result(163), Some(Err(_))));
+    }
+}
+
+#[test]
+fn after_failure_special_tpsl_keeps_the_regular_order_batch() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", r#"{"topic":"position","data":[{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"1","avgPrice":"100","markPrice":"100","positionValue":"100","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}]}"#);
+    let mut stop = order("BTCUSDT", 0.0);
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = Some(90.0);
+    place(&mut h, 164, vec![stop, order("BTCUSDT", 1.0)]);
+    let request = h.take("/v5/position/trading-stop");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"stop refused"}"#,
+    );
+    let batch = h.take("/v5/order/create-batch");
+    h.reply(batch.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"regular-last"}]},"retExtInfo":{"list":[{"code":0}]}}"#);
+    assert!(!h.has_request("/v5/position/trading-stop"));
+    assert!(matches!(h.result(164), Some(Err(_))));
 }

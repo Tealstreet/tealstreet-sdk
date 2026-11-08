@@ -14,6 +14,35 @@ const OPTIONS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":
 const QUOTE: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTC-25DEC26-100000-C-USDT","bid1Price":"1000","ask1Price":"1010","markPrice":"1005","lastPrice":"1000","markIv":"0.5","bid1Iv":"0.49","ask1Iv":"0.51","underlyingPrice":"99000","delta":"0.4","gamma":"0.01","vega":"12","theta":"-8"}]}}"#;
 
 #[test]
+fn after_failure_option_rejection_keeps_the_later_option() {
+    let mut h = ready(true);
+    let mut first = order(OPTION, 0.1);
+    first.client_order_id = Some("refused-option".into());
+    let mut second = order(OPTION, 0.1);
+    second.client_order_id = Some("later-option".into());
+    h.command(Command::PlaceOrders {
+        command: 170,
+        orders: vec![first, second],
+    });
+    let first = h.take("/v5/order/create");
+    assert!(first.body.as_deref().unwrap().contains("refused-option"));
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"option refused"}"#,
+    );
+    let second = h.take("/v5/order/create");
+    assert!(second.body.as_deref().unwrap().contains("later-option"));
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"accepted-option","orderLinkId":"later-option"}}"#,
+    );
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(h.result(170).is_some());
+}
+
+#[test]
 fn option_seed_envelope_limit_preserves_reset_headers_and_retries_after_reset() {
     let mut h = Harness::started(options(false));
     respond(&mut h, "instruments-info", "option", None, OPTIONS);

@@ -466,8 +466,8 @@ impl BybitLinear {
         let writes = match super::write_plan::build(&legs) {
             Ok(writes) => writes,
             Err(error) => {
-                let _ = cx.fail_preflight(&entry.preflight, error);
-                return;
+                cx.command_error(id, format!("Bybit outcome reporting unavailable: {error}"));
+                None
             }
         };
         let Some(digest) = entry
@@ -518,6 +518,7 @@ impl BybitLinear {
             queue: legs,
             active: None,
             continue_on_error: false,
+            stop_after_spot_order: false,
             unlisted: Vec::new(),
             unlisted_read: None,
             unlisted_landed: None,

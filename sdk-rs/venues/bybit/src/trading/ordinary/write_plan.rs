@@ -6,7 +6,6 @@ use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, Planned
 use std::collections::VecDeque;
 
 pub(super) struct NativeWrite {
-    pub body: String,
     pub effects: Vec<EffectTarget>,
 }
 
@@ -50,7 +49,7 @@ fn effects(leg: &Leg, wire: &MutationWire) -> Result<Vec<EffectTarget>, VenueErr
             .ok_or_else(|| not_sent("Bybit planned amend is missing its native target"))
     };
     Ok(match &leg.planned.call {
-        Call::PlaceOne | Call::PlaceBatch { .. } => Vec::new(),
+        Call::PlaceOne | Call::PlaceLot { .. } | Call::PlaceBatch { .. } => Vec::new(),
         Call::Cancel { ids } => ids
             .iter()
             .cloned()
@@ -113,7 +112,7 @@ pub(super) fn build(legs: &VecDeque<Leg>) -> Result<Option<WritePlan<NativeWrite
         let own = fields(&leg.planned.body);
         let links = match &leg.planned.call {
             Call::PlaceBatch { .. } => own.items.into_iter().map(|row| row.order_link_id).collect(),
-            Call::PlaceOne => vec![own.order_link_id],
+            Call::PlaceOne | Call::PlaceLot { .. } => vec![own.order_link_id],
             _ => vec![None; effects.len()],
         };
         let elements = links
@@ -128,10 +127,7 @@ pub(super) fn build(legs: &VecDeque<Leg>) -> Result<Option<WritePlan<NativeWrite
             })
             .collect();
         writes.push(PlannedWrite {
-            payload: NativeWrite {
-                body: leg.planned.body.clone(),
-                effects,
-            },
+            payload: NativeWrite { effects },
             elements,
         });
     }

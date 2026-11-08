@@ -42,6 +42,9 @@ struct LocalWrite {
 /// What a response means for its job.
 enum Call {
     PlaceOne,
+    PlaceLot {
+        last: bool,
+    },
     PlaceBatch {
         fallback: Vec<(String, Vec<OrderIdentityReceipt>)>,
     },
@@ -470,10 +473,7 @@ impl BybitLinear {
                     return Some(Ok(self.plan_cancel(&orders)));
                 }
                 if self.variant.is_spot() {
-                    let mut job = Job {
-                        continue_on_error: true,
-                        ..Job::default()
-                    };
+                    let mut job = Job::default();
                     // Spot defaults to ordinary orders; every trigger family
                     // needs its own cancel, even when absent from our snapshot.
                     for filter in ["Order", "StopOrder", "tpslOrder"] {
@@ -631,6 +631,24 @@ impl BybitLinear {
             let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
             if self.variant.is_spot() && opts.kind == OrderType::TrailingStopLoss {
                 return Err("Bybit spot has no trailing-position stops".into());
+            }
+            if self.variant.is_spot() {
+                let order_lots = self.format_lots(cx, opts)?;
+                let count = order_lots.len();
+                for (index, lot) in order_lots.into_iter().enumerate() {
+                    job.steps.push_back(Step {
+                        delay_ms: 0.0,
+                        requests: vec![Planned {
+                            receipts: lot.receipts,
+                            path: "/v5/order/create",
+                            body: lot.single.finish(),
+                            call: Call::PlaceLot {
+                                last: index + 1 == count,
+                            },
+                        }],
+                    });
+                }
+                continue;
             }
             if !self.variant.is_spot() && stop && self.full_position_opposite(cx, opts) {
                 let body = self.position_stop(cx, opts)?;

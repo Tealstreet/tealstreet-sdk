@@ -92,6 +92,8 @@ struct Run {
     queue: VecDeque<Leg>,
     active: Option<Active>,
     continue_on_error: bool,
+    /// Spot throws a native lot refusal after the current caller order finishes.
+    stop_after_spot_order: bool,
     ids: Vec<String>,
     error: Option<VenueError>,
     /// Live rows a cancel-all did not list. The stream can lag a venue-side
@@ -514,8 +516,13 @@ impl BybitLinear {
             match write_plan::build(&legs) {
                 Ok(writes) => writes,
                 Err(error) => {
-                    let _ = cx.fail_preflight(&entry.preflight, error);
-                    return None;
+                    if let Some(id) = trade_command_id(&entry.command) {
+                        cx.command_error(
+                            id,
+                            format!("Bybit outcome reporting unavailable: {error}"),
+                        );
+                    }
+                    None
                 }
             }
         };
@@ -584,6 +591,7 @@ impl BybitLinear {
             queue: legs,
             active: None,
             continue_on_error: job.continue_on_error,
+            stop_after_spot_order: false,
             ids: Vec::new(),
             error: None,
             unlisted: Vec::new(),
@@ -718,8 +726,7 @@ impl BybitLinear {
             self.park(id, entry);
             return;
         }
-        let (Ok([slot]), Some(mut leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front())
-        else {
+        let (Ok([slot]), Some(leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front()) else {
             run.finish_failure(cx, internal("Bybit trading plan is not serial"));
             return;
         };
@@ -743,15 +750,17 @@ impl BybitLinear {
         let mut effects = Vec::new();
         let write_index =
             if run.writes.is_some() && !matches!(leg.planned.call, Call::PartialProof(_)) {
-                let next = run.writes.as_mut().and_then(WritePlan::next_write);
-                let Some((index, write)) = next else {
-                    let error = run.failure(internal("Bybit write plan refused its next mutation"));
-                    let _ = cx.fail_plan(&run.plan, error);
-                    return;
-                };
-                leg.planned.body.clone_from(&write.payload.body);
-                effects.clone_from(&write.payload.effects);
-                Some(index)
+                match run.writes.as_mut().and_then(WritePlan::next_write) {
+                    Some((index, write)) => {
+                        effects.clone_from(&write.payload.effects);
+                        Some(index)
+                    }
+                    None => {
+                        run.writes = None;
+                        cx.command_error(id, "Bybit outcome reporting has no pending entry");
+                        None
+                    }
+                }
             } else {
                 None
             };
@@ -1172,12 +1181,9 @@ impl BybitLinear {
                     ),
                 }
             };
-            if settled.is_err() {
-                let error = run.failure(
-                    internal("Bybit write-plan settlement was refused").outcome(Outcome::Unknown),
-                );
-                let _ = cx.fail_plan(&plan, error);
-                return;
+            if let Err(error) = settled {
+                run.writes = None;
+                cx.command_error(id, format!("Bybit outcome settlement unavailable: {error}"));
             }
         }
         match decision {
@@ -1234,6 +1240,16 @@ impl BybitLinear {
                     run.finish_failure(cx, internal("Bybit trading plan lost its call"));
                     return;
                 }
+                if matches!(active.leg.planned.call, Call::PlaceLot { last: true })
+                    && run.stop_after_spot_order
+                {
+                    let error = match run.error.take() {
+                        Some(error) => error,
+                        None => internal("Bybit split order lost its refusal"),
+                    };
+                    run.finish_failure(cx, error);
+                    return;
+                }
             }
             Decision::Unlisted(unlisted) => {
                 run.unlisted.extend(unlisted);
@@ -1273,8 +1289,13 @@ impl BybitLinear {
                 if entry.hyro.is_none() {
                     cx.command_error(id, error.message.clone());
                 }
-                let stop_serial_order =
+                let spot_order =
                     self.variant.is_spot() && matches!(entry.command, Command::PlaceOrders { .. });
+                let more_lots = matches!(active.leg.planned.call, Call::PlaceLot { last: false });
+                if spot_order && more_lots {
+                    run.stop_after_spot_order = true;
+                }
+                let stop_serial_order = spot_order && !more_lots;
                 if run.continue_on_error && !stop_serial_order {
                     run.error.get_or_insert(error);
                     if cx
@@ -1467,6 +1488,13 @@ impl BybitLinear {
         }
         if let (Some(writes), Some(index)) = (&mut run.writes, active.write_index) {
             let _ = write_plan::settle_failure(writes, index, error.clone());
+        }
+        if matches!(active.leg.planned.call, Call::PlaceLot { last: true })
+            && run.stop_after_spot_order
+        {
+            let error = run.error.take().unwrap_or(error);
+            run.finish_failure(cx, error);
+            return;
         }
         if run.continue_on_error {
             let Some(active) = run.active.take() else {
@@ -1784,9 +1812,7 @@ impl BybitLinear {
             (Verdict::RefusedResend(_), _) if grant.is_some() => {
                 Decision::Resend(grant.expect("checked above"))
             }
-            (Verdict::Refused(_), Call::PlaceBatch { fallback })
-                if code == 10001 && !fallback.is_empty() =>
-            {
+            (Verdict::Refused(_), Call::PlaceBatch { fallback }) if !fallback.is_empty() => {
                 cx.command_error(
                     id,
                     format!("Failed to place batch orders: {}", error.message),
@@ -1929,7 +1955,7 @@ impl BybitLinear {
         let planned = &active.leg.planned;
         let local = self.local_order_lifecycle();
         match &planned.call {
-            Call::PlaceOne => {
+            Call::PlaceOne | Call::PlaceLot { .. } => {
                 let link = fields(&planned.body).order_link_id;
                 let Ok(id) = ack::created(result, link.as_deref()) else {
                     let evidence = ack::evidence_ids(result);

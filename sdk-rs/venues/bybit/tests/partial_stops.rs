@@ -551,7 +551,7 @@ fn partial_amount_only_replaces_shared_family_but_inverse_refuses() {
 }
 
 #[test]
-fn cancel_rejection_or_unknown_transport_outcome_never_recreates_a_partial_stop() {
+fn after_failure_cancel_rejection_or_unknown_never_recreates_a_partial_stop() {
     for profile in PROFILES {
         for outcome in ["top", "row", "transport", "unknown"] {
             let mut h = ready(profile);
@@ -1205,7 +1205,7 @@ fn a_partial_drag_that_stands_as_neither_kind_is_refused_before_its_cancel() {
 }
 
 #[test]
-fn a_refused_partial_replacement_reports_cancel_applied_without_rollback() {
+fn after_failure_refused_partial_replacement_reports_cancel_applied_without_rollback() {
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -1362,7 +1362,7 @@ fn review_3018_gone_cancel_does_not_replay_a_refused_replacement() {
 }
 #[test]
 fn review_3018_partial_refusal_without_rollback_control() {
-    a_refused_partial_replacement_reports_cancel_applied_without_rollback();
+    after_failure_refused_partial_replacement_reports_cancel_applied_without_rollback();
 }
 
 #[test]
