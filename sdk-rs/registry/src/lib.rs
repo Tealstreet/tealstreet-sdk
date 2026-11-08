@@ -1999,6 +1999,7 @@ pub fn build_with_signer<T: Visit>(
             }
             let mut engine = Engine::new(
                 MexcFutures::new(MexcOptions {
+                    signing_policy: remote_signing_policy("mexc"),
                     recv_window: tighter_recv_window(options.recv_window),
                     public_data_only: options.public_data_only,
                     read_credentials_valid: identities.secondary.as_ref().map(|_| true),

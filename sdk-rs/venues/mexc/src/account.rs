@@ -1682,7 +1682,8 @@ impl MexcFutures {
             path.into(),
             payload.clone(),
             self.options.recv_window,
-        );
+        )
+        .with_header_policy(self.options.signing_policy.header_policy());
         let url = step.url();
         let headers = vec![("Content-Type", "application/json".into())];
         let request = cx.request(
