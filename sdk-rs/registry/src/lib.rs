@@ -259,11 +259,18 @@ fn hex_of(value: &str, digits: usize) -> bool {
     value.len() == digits && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-#[cfg(feature = "polymarket")]
-fn polymarket_signing_rules(options: &EngineOptions) -> Result<(), VenueError> {
-    if !construction::signer_setup_public_data_only(options)
-        && (options.remote_signing || options.payload_signer)
-    {
+fn resolved_public_data_only(venue: &str, options: &EngineOptions) -> bool {
+    construction::resolve(venue, options)
+        .map_or(options.public_data_only, |mode| mode.public_data_only)
+}
+
+fn private_custody_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
+    // Unused signing flags cannot turn a resolved public account into private custody.
+    if resolved_public_data_only(venue, options) {
+        return Ok(());
+    }
+    #[cfg(feature = "polymarket")]
+    if venue == "polymarket" && (options.remote_signing || options.payload_signer) {
         return Err(VenueError::new("Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply")
             .kind(ErrorKind::Unsupported)
             .outcome(safe_cex_engine::Outcome::NotSent));
@@ -1202,8 +1209,7 @@ fn payload_signing_rules(
     options: &EngineOptions,
     provider_ready: bool,
 ) -> Result<(), VenueError> {
-    let public = construction::resolve(venue, options)
-        .map_or(options.public_data_only, |mode| mode.public_data_only);
+    let public = resolved_public_data_only(venue, options);
     payload_signing_rules_in_mode(venue, options, provider_ready, public)
 }
 
@@ -1258,10 +1264,7 @@ pub fn build<T: Visit>(
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    #[cfg(feature = "polymarket")]
-    if venue == "polymarket" {
-        polymarket_signing_rules(&options)?;
-    }
+    private_custody_rules(venue, &options)?;
     payload_signing_rules(venue, &options, false)?;
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
@@ -1407,10 +1410,7 @@ pub fn build_with_signer<T: Visit>(
     signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    #[cfg(feature = "polymarket")]
-    if venue == "polymarket" {
-        polymarket_signing_rules(&options)?;
-    }
+    private_custody_rules(venue, &options)?;
     let _ = &signer;
     if !supported(venue) {
         return Err(unsupported_venue(venue));
