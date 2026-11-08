@@ -106,8 +106,14 @@ fn legacy_split_preserves_attachments_and_distinct_ids() {
     intent["reduceOnly"] = json!(true);
     place(&mut h, json!([intent]));
     let rows = accept_batch(&mut h, 100);
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
     // TS:2199-2220 rounds each of three lots to 3, then appends remainder 2.
     assert_eq!(rows.len(), 4);
+    let allocated = rows
+        .iter()
+        .map(|row| row["size"].as_str().unwrap().parse::<u64>().unwrap())
+        .sum::<u64>();
+    assert_eq!(allocated, 11);
     let mut ids = std::collections::HashSet::new();
     for (row, size) in rows.into_iter().zip(["3", "3", "3", "2"]) {
         assert_eq!(row["size"], size);
@@ -487,7 +493,7 @@ fn forty_one_rows_keep_global_outcomes_after_partial_or_ambiguous_second_batch()
 #[test]
 fn legacy_native_bounds_are_left_to_the_venue() {
     // TS:2188-2220/2240 sends without a minimum gate (amount 3 is unchanged).
-    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: blofin | trading.rs:830 max-qty-splitting
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
     for amount in [3.0, 11.0] {
         let mut h = harness(4.0, 5.0, 1.0);
         place(&mut h, json!([order(amount)]));
@@ -501,6 +507,11 @@ fn legacy_native_bounds_are_left_to_the_venue() {
                 vec![json!("3"), json!("3"), json!("3"), json!("1")]
             }
         );
+        let allocated = rows
+            .iter()
+            .map(|row| row["size"].as_str().unwrap().parse::<u64>().unwrap())
+            .sum::<u64>();
+        assert_eq!(allocated, if amount == 3.0 { 3 } else { 10 });
         assert_eq!(h.requests.len(), 1);
         assert!(h.failures.is_empty());
     }

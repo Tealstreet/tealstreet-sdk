@@ -1104,7 +1104,7 @@ fn settings_rejections_preserve_known_leverage() {
 }
 #[test]
 fn legacy_split_sizing_uses_rounded_equal_lots_and_native_remainder() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 1000.9 of requested 1001); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 1000.9 of requested 1001); kept for exact TS parity per Sam's decision
     // TS:2199-2220 yields 333.3 * 3 + 1.
     let mut h = Harness::new();
     h.seed();
