@@ -213,7 +213,7 @@ function retireLoggingOwner() {
     sameLoggingOwner(token, owner) &&
     token.expiresAt > Date.now() &&
     origin &&
-    isPageReadyForLogging()
+    isPageReadyForLogging(true)
   ) {
     void sendToGrafana({ owner, entries }, { token, origin });
   }
@@ -273,10 +273,10 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
   };
 };
 
-const isPageReadyForLogging = () => {
+const isPageReadyForLogging = (includeHidden = false) => {
   const isVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
   const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
-  return isVisible && isOnline;
+  return (includeHidden || isVisible) && isOnline;
 };
 
 const getLogIngestOrigin = () => {
@@ -379,7 +379,7 @@ const sendToGrafana = async (
   const maxRetries = retiring ? 0 : MAX_RETRIES;
   for (let retries = 0; retries <= maxRetries; retries++) {
     if (!isAuthorized()) return true;
-    if (!isPageReadyForLogging()) return false;
+    if (!isPageReadyForLogging(Boolean(retiring))) return false;
     const reportMetrics = Date.now() - lastMetricsReportAt >= METRICS_REPORT_INTERVAL_MS;
     const metricsSnapshot = reportMetrics ? { ...loggingMetrics } : undefined;
     const nr = {

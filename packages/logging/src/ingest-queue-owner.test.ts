@@ -179,6 +179,19 @@ describe('queued ingest ownership', () => {
     expect(minted).toEqual([A, B]);
   });
 
+  it('attempts the final held-token flush even when the page becomes hidden', async () => {
+    const stop = start(A);
+    flush('warm-A');
+    await vi.waitFor(() => expect(event('warm-A')?.owner).toBe(A));
+    vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'hidden' }));
+    vi.stubGlobal('window', new EventTarget());
+    utils.logInfo('hidden-final-A');
+    stop();
+    await vi.waitFor(() => expect(event('hidden-final-A')?.owner).toBe(A));
+    expect(minted).toEqual([A]);
+    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('hidden-final-A')))).toHaveLength(1);
+  });
+
   it('drops offline leftovers even when A has a held token', async () => {
     const stop = start(A);
     flush('warm-A');
