@@ -135,8 +135,9 @@ wire extension is outside this proof, which supplies custom engine options.
 The ambiguous-write matrix covers single/batch placement, cancellation,
 cancel-all, protective amend cancellation/replacement/proof/put-back and child
 legs, including late acknowledgements and prior IDs. A newly exposed transport
-loss on an optional child now stops the serial plan with `Unknown` and preserves
-accepted entry IDs; it cannot advance to the next child. Definite optional
+loss or native error envelope (including HTTP 200) on an optional child keeps
+the engine's classified `Unknown` outcome and stops the serial plan, preserving
+accepted entry IDs. It cannot advance to the next child. Definite optional
 refusals keep their existing handling. Pre-transport refusal remains `NotSent`.
 Private PayloadSigner, native secondary custody and undeclared remote venues
 stay refused; public accounts open no private socket or signing channel.

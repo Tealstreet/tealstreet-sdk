@@ -111,40 +111,40 @@ fn pair(missing: bool) {
 }
 
 #[test]
-fn p0_write_optional_child_failure_keeps_both_ids_and_fails_once() {
+fn p0_write_optional_child_failure_keeps_both_ids_and_fails_once()
+-> Result<(), Box<dyn std::error::Error>> {
     let (mut e, _) = ready();
     e.handle(2000.0, Event::Command(Command::PlaceOrders {
         command: 713,
-        orders: serde_json::from_str(r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}]"#).unwrap(),
+        orders: serde_json::from_str(r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}]"#)?,
     }));
-    let entry = requests(&mut e).pop().unwrap();
-    assert!(!entry.body.as_deref().unwrap().contains("TriggerPrice"));
+    let entry = requests(&mut e).pop().ok_or("entry missing")?;
+    assert!(
+        !entry
+            .body
+            .as_deref()
+            .ok_or("entry body missing")?
+            .contains("TriggerPrice")
+    );
     reply(&mut e, &entry, 200, r#"{"id":"entry"}"#);
-    let tp = requests(&mut e).pop().unwrap();
-    let body = tp.body.as_deref().unwrap();
+    let tp = requests(&mut e).pop().ok_or("TP missing")?;
+    let body = tp.body.as_deref().ok_or("TP body missing")?;
     assert!(body.contains("\"side\":\"Ask\""));
     assert!(body.contains("\"triggerPrice\":\"150.00\""));
     assert!(body.contains("\"triggerBy\":\"MarkPrice\""));
-    reply(&mut e, &tp, 400, r#"{"message":"rejected"}"#);
-    let after_failure = actions(&mut e);
-    assert!(after_failure.iter().any(|action| matches!(action,
-        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
-    )));
-    let sl = after_failure
-        .into_iter()
-        .find_map(|action| match action {
-            Action::Http(request) => Some(request),
-            _ => None,
-        })
-        .expect("native optional continuation still sends SL");
+    reply(&mut e, &tp, 200, r#"{"id":"take-profit"}"#);
+    let sl = requests(&mut e).pop().ok_or("SL missing")?;
     assert!(
         sl.body
             .as_deref()
-            .unwrap()
+            .ok_or("SL body missing")?
             .contains("\"triggerPrice\":\"130.00\"")
     );
-    reply(&mut e, &sl, 200, r#"{"id":"stop"}"#);
-    let out: Vec<_> = e.drain_actions().collect();
+    reply(&mut e, &sl, 400, r#"{"message":"rejected"}"#);
+    let out = actions(&mut e);
+    assert!(out.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
+    )));
     let failures: Vec<_> = out
         .iter()
         .filter_map(|action| match action {
@@ -156,12 +156,18 @@ fn p0_write_optional_child_failure_keeps_both_ids_and_fails_once() {
         })
         .collect();
     assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(Outcome::Unknown));
     assert_eq!(
-        failures[0].partial.as_ref().unwrap().order_ids,
-        ["entry", "stop"]
+        failures[0]
+            .partial
+            .as_ref()
+            .ok_or("accepted IDs missing")?
+            .order_ids,
+        ["entry", "take-profit"]
     );
     assert!(!out.iter().any(|action| matches!(
         action,
         Action::Notice(Notice::CommandDone { command: 713, .. }) | Action::Http(_)
     )));
+    Ok(())
 }

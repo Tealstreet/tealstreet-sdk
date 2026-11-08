@@ -1576,6 +1576,7 @@ impl Backpack {
                             .is_some_and(|job| job.protect.is_some() && job.ids.is_empty());
                     let fact = if unproven {
                         cx.http_write_unproven(&managed.context, &e)
+                            .map(|()| VenueError::new(e).outcome(Outcome::Unknown))
                     } else {
                         let table = if amend_refusal {
                             &AMEND_REFUSAL
@@ -1584,24 +1585,22 @@ impl Backpack {
                         };
                         native_failure(cx, &managed.context, table, response.body, &e)
                     };
-                    if let Err(error) = fact {
-                        // A trigger amend's write that cannot be journaled is unknown.
-                        if request.step.places()
-                            && self
-                                .trading
-                                .jobs
-                                .get(&request.command)
-                                .is_some_and(|job| job.protect.is_some())
-                        {
-                            return self.guarded_failed(cx, request, error.venue_error(), true);
+                    let error = match fact {
+                        Ok(error) => error,
+                        Err(error) => {
+                            // A trigger amend's write that cannot be journaled is unknown.
+                            if request.step.places()
+                                && self
+                                    .trading
+                                    .jobs
+                                    .get(&request.command)
+                                    .is_some_and(|job| job.protect.is_some())
+                            {
+                                return self.guarded_failed(cx, request, error.venue_error(), true);
+                            }
+                            let _ = cx.fail_plan(&managed.plan, error.venue_error());
+                            return;
                         }
-                        let _ = cx.fail_plan(&managed.plan, error.venue_error());
-                        return;
-                    }
-                    let error = if unproven {
-                        VenueError::new(e).outcome(Outcome::Unknown)
-                    } else {
-                        VenueError::new(e)
                     };
                     if let Step::Place { order, .. } = &request.step
                         && amend_refusal
@@ -1936,8 +1935,11 @@ impl Backpack {
         {
             return self.guarded_failed(cx, request, error, data);
         }
-        // An optional leg may still be resting after transport loss. Preserve
+        // An optional leg may still be resting after an uncertain reply. Preserve
         // that uncertainty and prior IDs instead of advancing the serial plan.
+        if optional {
+            cx.notice(Level::Error, code::CHILD_LEG_FAILED, &error.message);
+        }
         if !optional || error.outcome == Some(Outcome::Unknown) {
             // The amend's cancel landed and nothing replaced it.
             let gone = match &request.step {
@@ -1971,7 +1973,6 @@ impl Backpack {
         if let Some(job) = self.trading.jobs.get_mut(&request.command) {
             job.waiting = false;
         }
-        cx.notice(Level::Error, code::CHILD_LEG_FAILED, &error.message);
         self.run_trade(cx, request.command);
     }
 
@@ -2147,7 +2148,7 @@ fn native_failure(
     table: &CodeTable,
     body: &str,
     message: &str,
-) -> Result<(), safe_cex_engine::request_context::Error> {
+) -> Result<VenueError, safe_cex_engine::request_context::Error> {
     #[derive(Deserialize)]
     struct Failure<'a> {
         #[serde(borrow)]
@@ -2170,8 +2171,17 @@ fn native_failure(
             .and_then(|failure| failure.message)
             .unwrap_or(""),
     };
-    cx.http_write_failure(context, table, Some(&native), message, None)
-        .map(|_| ())
+    let fact = cx.classify_write(context, table, Some(&native), message)?;
+    let error = fact.error().clone();
+    cx.http_write_fact(
+        context,
+        WriteFact::Failed {
+            fact,
+            known_effects: false,
+        },
+        None,
+    )?;
+    Ok(error)
 }
 
 #[derive(Deserialize)]
