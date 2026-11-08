@@ -98,13 +98,23 @@ any write. Caller IDs are preserved verbatim and must match `[A-Za-z0-9_]{1,40}`
 placement uses `newClientOrderId`, lookup uses `clientOrderID`. Native order and
 trade IDs never pass through floating point.
 
-Batches are completely preflighted before serial dispatch. Every row must satisfy
-native quantity bounds, quantity steps, notional bounds and, for LIMIT orders,
-price ticks. Invalid rows refuse the entire batch as InvalidInput/NotSent before
-any request. Quantities and limit prices are never resized or split to make an
-invalid intent fit; only floating-point noise is normalized. Market SELL needs
-a caller price or a positive bid to validate notional; market BUY retains its
-caller conversion reference without applying a limit-price tick.
+Sean's parity decision uses the legacy BingX perp formatting and dispatch policy
+for Spot's supported ordinary orders; there is no historical Spot TS adapter.
+All inputs are formatted before dispatch, so missing markets, unsupported
+capabilities and unusable native encodings still refuse before any write.
+Amounts and limit prices use TS precision rounding. Orders above native maxQty
+use the TS lot/remainder layout with distinct generated client IDs; a caller ID
+requires one native order. Quantity minima, per-lot notional and exact raw-intent
+conservation are left to the venue, so a below-minimum lot or a later invalid row
+can follow accepted writes. MARKET SELL needs no notional price reference;
+MARKET BUY retains its explicit quote-conversion reference.
+
+A definite native refusal is recorded and the next distinct lot, batch row or
+cancellation still sends. Native engine write journals retain accepted IDs and
+refusals, delivered in the structured CommandFailed event. A genuine Unknown
+halts the action under the recorded stop-after-UNKNOWN parity exception, with
+"The outcome is unknown. Check Open Orders". No engine fence is bypassed and
+there is no per-venue outcome store or dependency on the draft WritePlan API.
 
 Released HTTP 408/429/5xx, transport failures, malformed or contradictory
 acknowledgements and unlisted errors remain **Unknown**. There is no write resend or fallback-domain

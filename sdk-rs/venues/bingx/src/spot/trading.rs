@@ -1,4 +1,4 @@
-//! Fully preflighted serial writes. The engine classifies every released outcome.
+//! Perp-TS formatting/continuation policy on native Spot wire routes.
 use super::*;
 use safe_cex_engine::{
     Outcome,
@@ -8,6 +8,7 @@ use safe_cex_engine::{
         plan::{CallAuth, SerialCall, SerialPolicy, Slot},
     },
 };
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 const ORDER: &str = "/openApi/spot/v1/trade/order";
 const CANCEL: &str = "/openApi/spot/v1/trade/cancel";
 const CANCEL_ALL: &str = "/openApi/spot/v1/trade/cancelOpenOrders";
@@ -89,6 +90,7 @@ pub(super) struct Run {
     next: Option<Slot>,
     steps: VecDeque<Step>,
     ids: Vec<String>,
+    error: Option<VenueError>,
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -150,7 +152,11 @@ fn not_sent(msg: impl Into<String>) -> VenueError {
         .kind(ErrorKind::InvalidInput)
 }
 impl BingxSpot {
-    fn prepare_place(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Step, VenueError> {
+    fn prepare_place(
+        &self,
+        cx: &Cx<'_, Pending>,
+        o: &PlaceOrderOpts,
+    ) -> Result<Vec<Step>, VenueError> {
         if !matches!(o.kind, OrderType::Limit | OrderType::Market)
             || o.stop_loss.is_some()
             || o.take_profit.is_some()
@@ -185,132 +191,119 @@ impl BingxSpot {
         } {
             return Err(not_sent("BingX Spot market disables this side"));
         }
-        if !o.amount.is_finite()
-            || o.amount <= 0.
-            || o.price.is_some_and(|v| !v.is_finite() || v <= 0.)
-        {
-            return Err(not_sent("Invalid Spot amount or price"));
+        if !o.amount.is_finite() || o.price.is_some_and(|price| !price.is_finite()) {
+            return Err(not_sent("Spot amount and supplied price must be finite"));
         }
         let amount = safe_cex_engine::num::adjust(o.amount, m.precision.amount);
-        // Only floating-point noise may be normalized; caller intent cannot be resized.
-        if !m.precision.amount.is_finite()
-            || m.precision.amount <= 0.
-            || !amount.is_finite()
-            || amount <= 0.
-            || (amount - o.amount).abs() > m.precision.amount * 1e-8
-        {
-            return Err(not_sent(
-                "Spot amount must be a positive native step multiple",
-            ));
-        }
-        if amount < m.limits.amount.min || amount > m.limits.amount.max {
-            return Err(not_sent("Spot amount exceeds native quantity limits"));
-        }
-        let needs_price =
-            o.kind == OrderType::Limit || (o.kind == OrderType::Market && o.side == OrderSide::Buy);
-        let reference = if needs_price {
-            o.price.ok_or_else(||not_sent("Spot limit orders and market buys require a price (market buy quote conversion)"))?
-        } else {
-            o.price
-                .or_else(|| cx.store.ticker(&o.symbol).map(|t| t.bid))
-                .unwrap_or(0.)
+        let price = match (o.kind, o.side) {
+            (OrderType::Limit, _) => o
+                .price
+                .map(|price| safe_cex_engine::num::adjust(price, m.precision.price)),
+            (OrderType::Market, OrderSide::Buy) => Some(o.price.ok_or_else(|| {
+                not_sent("Spot market buy requires a price for quote conversion")
+            })?),
+            _ => None,
         };
-        let price = if o.kind == OrderType::Limit {
-            safe_cex_engine::num::adjust(reference, m.precision.price)
-        } else {
-            reference
-        };
-        if !price.is_finite() || price <= 0. {
-            return Err(not_sent(
-                "Positive Spot price reference required for notional limits",
-            ));
-        }
-        if o.kind == OrderType::Limit
-            && (!m.precision.price.is_finite()
-                || m.precision.price <= 0.
-                || (price - reference).abs() > m.precision.price * 1e-8)
-        {
-            return Err(not_sent("Spot limit price must be a native tick multiple"));
-        }
-        let cost = amount * price;
-        if !cost.is_finite() {
-            return Err(not_sent("Spot order notional overflow"));
-        }
-        let max = if o.kind == OrderType::Market && rules.max_market_notional > 0. {
-            rules.max_market_notional
-        } else {
-            rules.max_notional
-        };
-        if cost < rules.min_notional || cost > max {
-            return Err(not_sent("Spot order exceeds native notional limits"));
-        }
-        let client = if let Some(id) = &o.client_order_id {
-            if !(1..=40).contains(&id.len())
-                || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-            {
-                return Err(not_sent(
-                    "BingX Spot clientOrderId requires 1-40 letters, digits or '_'",
-                ));
+        let mut quantities = vec![amount];
+        if amount > m.limits.amount.max {
+            let lots = (amount / m.limits.amount.max).ceil();
+            let count = lots
+                .to_string()
+                .parse::<usize>()
+                .map_err(|_| not_sent("Spot lot count exceeds addressable storage"))?;
+            let rest =
+                safe_cex_engine::num::adjust(amount % m.limits.amount.max, m.precision.amount);
+            let lot = safe_cex_engine::num::adjust((amount - rest) / lots, m.precision.amount);
+            quantities = vec![lot; count];
+            if rest != 0. {
+                quantities.push(rest);
             }
-            id.clone()
-        } else {
-            safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
-                .map_err(not_sent)?
-                .replace('-', "")
-        };
-        let mut params = Params::new()
-            .str("symbol", &m.id)
-            .str(
-                "side",
-                if o.side == OrderSide::Buy {
-                    "BUY"
-                } else {
-                    "SELL"
-                },
-            )
-            .str(
-                "type",
-                if o.kind == OrderType::Limit {
-                    "LIMIT"
-                } else {
-                    "MARKET"
-                },
-            )
-            .str("newClientOrderId", &client);
-        if o.kind == OrderType::Market && o.side == OrderSide::Buy {
-            params = params.num("quoteOrderQty", cost);
-        } else {
-            params = params.num("quantity", amount);
         }
-        if o.kind == OrderType::Limit {
-            params = params.num("price", price).str(
-                "timeInForce",
-                match o.time_in_force {
-                    Some(TimeInForce::ImmediateOrCancel) => "IOC",
-                    Some(TimeInForce::FillOrKill) => "FOK",
-                    Some(TimeInForce::PostOnly) => "PostOnly",
-                    _ => "GTC",
-                },
-            );
-        } else if o
-            .time_in_force
-            .is_some_and(|t| t != TimeInForce::GoodTillCancel)
-        {
-            return Err(not_sent("Spot market order cannot honor this timeInForce"));
+        if o.client_order_id.is_some() && quantities.len() != 1 {
+            return Err(not_sent(
+                "Spot caller clientOrderId requires one native order",
+            ));
         }
-        Ok(Step {
-            params,
-            native: m.id.clone(),
-            kind: Call::Place {
-                side: o.side,
-                kind: o.kind,
-            },
-            receipt: Some(OrderIdentityReceipt {
-                symbol: o.symbol.clone(),
-                kind: OrderIdentityKind::ClientOrderId,
-                identity: client,
-            }),
-        })
+        let mut steps = Vec::new();
+        for quantity in quantities {
+            let client = if let Some(id) = &o.client_order_id {
+                if !(1..=40).contains(&id.len())
+                    || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                {
+                    return Err(not_sent(
+                        "BingX Spot clientOrderId requires 1-40 letters, digits or '_'",
+                    ));
+                }
+                id.clone()
+            } else {
+                safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
+                    .map_err(not_sent)?
+                    .replace('-', "")
+            };
+            let mut params = Params::new()
+                .str("symbol", &m.id)
+                .str(
+                    "side",
+                    if o.side == OrderSide::Buy {
+                        "BUY"
+                    } else {
+                        "SELL"
+                    },
+                )
+                .str(
+                    "type",
+                    if o.kind == OrderType::Limit {
+                        "LIMIT"
+                    } else {
+                        "MARKET"
+                    },
+                )
+                .str("newClientOrderId", &client);
+            if o.kind == OrderType::Market && o.side == OrderSide::Buy {
+                let reference = price
+                    .ok_or_else(|| not_sent("Spot market buy conversion reference missing"))?;
+                let cost = quantity * reference;
+                if !cost.is_finite() {
+                    return Err(not_sent("Spot quote conversion overflow"));
+                }
+                params = params.num("quoteOrderQty", cost);
+            } else {
+                params = params.num("quantity", quantity);
+            }
+            if o.kind == OrderType::Limit {
+                if let Some(price) = price {
+                    params = params.num("price", price);
+                }
+                params = params.str(
+                    "timeInForce",
+                    match o.time_in_force {
+                        Some(TimeInForce::ImmediateOrCancel) => "IOC",
+                        Some(TimeInForce::FillOrKill) => "FOK",
+                        Some(TimeInForce::PostOnly) => "PostOnly",
+                        _ => "GTC",
+                    },
+                );
+            } else if o
+                .time_in_force
+                .is_some_and(|t| t != TimeInForce::GoodTillCancel)
+            {
+                return Err(not_sent("Spot market order cannot honor this timeInForce"));
+            }
+            steps.push(Step {
+                params,
+                native: m.id.clone(),
+                kind: Call::Place {
+                    side: o.side,
+                    kind: o.kind,
+                },
+                receipt: Some(OrderIdentityReceipt {
+                    symbol: o.symbol.clone(),
+                    kind: OrderIdentityKind::ClientOrderId,
+                    identity: client,
+                }),
+            });
+        }
+        Ok(steps)
     }
     fn prepare_cancel(
         &self,
@@ -369,7 +362,7 @@ impl BingxSpot {
                         {
                             return Err(not_sent("Duplicate Spot caller clientOrderId"));
                         }
-                        steps.push_back(self.prepare_place(cx, &o)?);
+                        steps.extend(self.prepare_place(cx, &o)?);
                     }
                     Ok((command, steps))
                 }
@@ -438,6 +431,7 @@ impl BingxSpot {
                         next: Some(slot),
                         steps,
                         ids: vec![],
+                        error: None,
                     },
                 );
                 self.advance(cx, command);
@@ -453,6 +447,11 @@ impl BingxSpot {
         };
         let Some(step) = run.steps.pop_front() else {
             let plan = run.plan.clone();
+            if let Some(mut error) = run.error.take() {
+                error.presents = true;
+                let _ = cx.fail_plan(&plan, error);
+                return;
+            }
             let Ok(value) = serde_json::to_string(&run.ids) else {
                 let _ = cx.fail_plan(&plan, not_sent("Unable to encode Spot order IDs"));
                 return;
@@ -477,6 +476,7 @@ impl BingxSpot {
                 return;
             }
         };
+        let _ = cx.present_plan_failure(&plan, UNKNOWN_TEXT);
         if let Some(r) = &step.receipt {
             cx.command_progress(command, vec![r.clone()]);
         }
@@ -510,8 +510,33 @@ impl BingxSpot {
             self.write_failed(cx, *r, error.venue_error());
         }
     }
-    pub(super) fn write_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: VenueError) {
+    pub(super) fn write_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        r: Request,
+        mut error: VenueError,
+    ) {
+        if !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
+            error.message = UNKNOWN_TEXT.into();
+        }
+        error.presents = true;
         let _ = cx.fail_plan(&r.plan, error);
+    }
+    fn finish_step(&mut self, cx: &mut Cx<'_, Pending>, r: &Request) -> bool {
+        if let Some(run) = self.jobs.get_mut(&r.command) {
+            let result = if run.steps.is_empty() {
+                cx.finish_plan_call(&r.plan, &r.slot, &r.context)
+            } else {
+                cx.continue_serial_plan(&r.plan, &r.slot, &r.context, SERIAL)
+                    .map(|slot| run.next = Some(slot))
+            };
+            if let Err(e) = result {
+                let _ = cx.fail_plan(&r.plan, e.venue_error());
+                return false;
+            }
+        }
+        self.advance(cx, r.command);
+        true
     }
     pub(super) fn write_response(
         &mut self,
@@ -552,19 +577,11 @@ impl BingxSpot {
             }
             if let Some(run) = self.jobs.get_mut(&r.command) {
                 run.ids.extend(ids);
-                let result = if run.steps.is_empty() {
-                    cx.finish_plan_call(&r.plan, &r.slot, &r.context)
-                } else {
-                    cx.continue_serial_plan(&r.plan, &r.slot, &r.context, SERIAL)
-                        .map(|slot| run.next = Some(slot))
-                };
-                if let Err(e) = result {
-                    let _ = cx.fail_plan(&r.plan, e.venue_error());
-                    return;
-                }
             }
             self.balance_revision = self.balance_revision.saturating_add(1);
-            self.advance(cx, r.command);
+            if !self.finish_step(cx, &r) {
+                return;
+            }
             self.orders(cx, true);
             self.balances(cx);
         } else {
@@ -587,7 +604,7 @@ impl BingxSpot {
             if envelope.as_ref().is_some_and(|e| e.data.is_some()) {
                 fact = fact.unproven();
             }
-            let error = fact.error().clone();
+            let mut error = fact.error().clone();
             if let Err(e) = cx.http_write_fact(
                 &r.context,
                 WriteFact::Failed {
@@ -599,7 +616,16 @@ impl BingxSpot {
                 let _ = cx.fail_plan(&r.plan, e.venue_error());
                 return;
             }
-            let _ = cx.fail_plan(&r.plan, error);
+            if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
+                if let Some(run) = self.jobs.get_mut(&r.command) {
+                    run.error.get_or_insert(error);
+                }
+                self.finish_step(cx, &r);
+            } else {
+                error.message = UNKNOWN_TEXT.into();
+                error.presents = true;
+                let _ = cx.fail_plan(&r.plan, error);
+            }
         }
     }
 }

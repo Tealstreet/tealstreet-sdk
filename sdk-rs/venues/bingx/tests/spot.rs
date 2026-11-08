@@ -5,6 +5,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_bingx::{Options, spot::BingxSpot};
 use serde_json::{Value, json};
+#[path = "spot/parity.rs"]
+mod parity;
+
 const NOW: f64 = 1_702_720_824_000.;
 const MARKETS: &str = include_str!("fixtures/spot/markets.json");
 const TICKERS: &str = include_str!("fixtures/spot/tickers.json");
@@ -614,7 +617,7 @@ fn capped_history_is_explicitly_incomplete() {
     assert!(a.iter().any(|a|matches!(a,Action::Notice(Notice::Event(e))if e.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
 }
 #[test]
-fn complete_batch_validation_prevents_partial_dispatch() {
+fn unsupported_spot_capability_refuses_the_batch_before_io() {
     let (mut e, _) = seed(true);
     let orders=serde_json::from_value(json!([
         {"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.002,"price":41000,"clientOrderId":"spot_1"},
@@ -649,145 +652,6 @@ fn submit_batch(e: &mut Engine<BingxSpot>, orders: Vec<Value>) -> Vec<Action> {
         }),
     );
     collect(e)
-}
-
-fn assert_batch_not_sent(e: &mut Engine<BingxSpot>, orders: Vec<Value>) {
-    let mut actions = submit_batch(e, orders);
-    for _ in 0..3 {
-        actions.extend(collect(e));
-    }
-    assert!(
-        actions.iter().all(|a| !matches!(a, Action::Http(_))),
-        "invalid batch reached the transport"
-    );
-    assert!(
-        actions.iter().any(|a| matches!(a,
-            Action::Notice(Notice::CommandFailed {command:70,error})
-                if error.kind == Some(safe_cex_engine::ErrorKind::InvalidInput)
-                    && error.outcome == Some(Outcome::NotSent)
-        )),
-        "invalid batch must fail InvalidInput/NotSent"
-    );
-}
-
-#[test]
-fn spot_batch_later_quantity_below_native_minimum_prevents_every_write() {
-    let (mut e, _) = seed(true);
-    assert_batch_not_sent(
-        &mut e,
-        vec![
-            batch_order(0.002, 41000., "valid_first"),
-            batch_order(0.00013, 41000., "invalid_second"),
-        ],
-    );
-}
-
-#[test]
-fn spot_batch_later_quantity_above_native_maximum_prevents_every_write() {
-    let (mut e, _) = seed(true);
-    assert_batch_not_sent(
-        &mut e,
-        vec![
-            batch_order(0.002, 41000., "valid_first"),
-            batch_order(20., 1., "invalid_second"),
-        ],
-    );
-}
-
-#[test]
-fn spot_batch_invalid_first_quantity_prevents_every_write() {
-    let (mut e, _) = seed(true);
-    assert_batch_not_sent(
-        &mut e,
-        vec![
-            batch_order(0.00013, 41000., "invalid_first"),
-            batch_order(0.002, 41000., "valid_second"),
-        ],
-    );
-}
-
-#[test]
-fn spot_batch_invalid_last_of_many_prevents_every_write() {
-    let (mut e, _) = seed(true);
-    let mut orders: Vec<_> = (0..5)
-        .map(|i| batch_order(0.002, 41000., &format!("valid_{i}")))
-        .collect();
-    orders.push(batch_order(20., 1., "invalid_last"));
-    assert_batch_not_sent(&mut e, orders);
-}
-
-#[test]
-fn spot_batch_below_step_quantity_is_not_rounded_up() {
-    let markets = MARKETS.replace("0.0001826", "0");
-    let (mut e, _) = seed_with_fixtures(true, &markets, TICKERS);
-    assert_batch_not_sent(
-        &mut e,
-        vec![
-            batch_order(0.002, 41000., "valid_first"),
-            batch_order(0.000006, 1_000_000., "below_step"),
-        ],
-    );
-}
-
-#[test]
-fn spot_batch_misaligned_quantity_is_not_rebalanced() {
-    let (mut e, _) = seed(true);
-    assert_batch_not_sent(
-        &mut e,
-        vec![
-            batch_order(0.002, 41000., "valid_first"),
-            batch_order(0.002004, 41000., "off_step"),
-        ],
-    );
-}
-
-#[test]
-fn spot_batch_below_notional_intent_is_not_rounded_up_to_the_minimum() {
-    let (mut e, _) = seed(true);
-    assert_batch_not_sent(
-        &mut e,
-        vec![
-            batch_order(0.002, 41000., "valid_first"),
-            batch_order(0.002, 2499.999, "below_notional"),
-        ],
-    );
-}
-
-#[test]
-fn spot_batch_aligned_below_notional_prevents_every_write() {
-    let (mut e, _) = seed(true);
-    assert_batch_not_sent(
-        &mut e,
-        vec![
-            batch_order(0.002, 41000., "valid_first"),
-            batch_order(0.002, 2000., "below_notional"),
-        ],
-    );
-}
-
-#[test]
-fn spot_batch_off_tick_limit_price_is_not_changed() {
-    let (mut e, _) = seed(true);
-    assert_batch_not_sent(
-        &mut e,
-        vec![
-            batch_order(0.002, 41000., "valid_first"),
-            batch_order(0.002, 41000.005, "off_tick"),
-        ],
-    );
-}
-
-#[test]
-fn spot_batch_market_sell_without_notional_reference_prevents_every_write() {
-    let (mut e, _) = seed_with_fixtures(true, MARKETS, r#"{"code":0,"data":[]}"#);
-    assert_batch_not_sent(
-        &mut e,
-        vec![
-            batch_order(0.002, 41000., "valid_first"),
-            json!({"symbol":"BTCUSDT","type":"market","side":"sell",
-            "amount":0.002,"clientOrderId":"unpriced_sell"}),
-        ],
-    );
 }
 
 #[test]

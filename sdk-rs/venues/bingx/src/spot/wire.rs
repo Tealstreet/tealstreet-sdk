@@ -74,8 +74,6 @@ pub struct SpotMarket {
     pub min_notional: f64,
     #[serde(deserialize_with = "number")]
     pub max_notional: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub max_market_notional: f64,
     pub api_state_buy: Option<bool>,
     pub api_state_sell: Option<bool>,
 }
