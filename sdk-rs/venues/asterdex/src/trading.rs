@@ -15,7 +15,9 @@ use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
 };
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, PlannedWrite, WritePlan};
+use safe_cex_engine::write_plan::{
+    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult,
+};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -195,7 +197,8 @@ pub(crate) const ASTER: CodeTable = CodeTable {
     status: ASTER_STATUS,
 };
 
-/// A stop's replacement: an undocumented code may have placed the order.
+/// A stop's replacement or put-back: an undocumented code may have placed the
+/// order, so it is unknown, never a refusal that earns a put-back or a resend.
 pub(crate) const ASTER_PROTECTIVE: CodeTable = CodeTable {
     rows: ASTER.rows,
     success: ASTER.success,
@@ -232,7 +235,6 @@ pub(crate) const ASTER_RESEND: CodeTable = CodeTable {
     unlisted: Verdict::Refused(ErrorKind::Rejected),
     status: ASTER_STATUS,
 };
-#[derive(Clone)]
 enum Call {
     Place {
         symbol: String,
@@ -260,27 +262,11 @@ impl Call {
         }
     }
 }
-#[derive(Clone)]
 struct Planned {
     method: Method,
     endpoint: &'static str,
     query: Query,
     call: Call,
-    order_rules: Option<OrderRules>,
-}
-
-#[derive(Clone, Copy)]
-struct OrderRules {
-    step: f64,
-    minimum: f64,
-    maximum: f64,
-    tick: f64,
-    min_notional: f64,
-    mark: Option<f64>,
-    notional_exempt: bool,
-    existing_algos: usize,
-    planned_algos: usize,
-    max_algos: usize,
 }
 #[derive(Default)]
 struct Job {
@@ -289,11 +275,17 @@ struct Job {
     slot: Option<Slot>,
     reserved_places: usize,
     guard: Option<StopGuard>,
+    restore: Option<Planned>,
+    restoring: bool,
     steps: VecDeque<Planned>,
-    writes: Option<WritePlan<Planned>>,
-    write_count: usize,
+    elements: Vec<ElementOutcome>,
+    next_element: usize,
     ids: Vec<String>,
+    successes: usize,
     error: Option<VenueError>,
+    continue_on_error: bool,
+    /// The cancel-all sweep was refused: orders may rest whatever the row cancels did.
+    sweep_failed: bool,
     result: Option<String>,
     /// A refused replacement here leaves the position without its stop.
     replacing_stop: Option<(String, OrderSide, OrderType)>,
@@ -301,11 +293,11 @@ struct Job {
     replacing_order: Option<String>,
 }
 impl Job {
-    fn failure(&mut self, error: VenueError) -> VenueError {
-        match &mut self.writes {
-            Some(writes) => writes.failure(error),
-            None => error,
+    fn failure(&self, mut error: VenueError) -> VenueError {
+        if !self.elements.is_empty() {
+            error.elements = Some(Box::new(ElementOutcomes(self.elements.clone())));
         }
+        error
     }
     /// What a failed replacement cost, once its cancel has landed.
     fn gone_text(&self, unknown: bool) -> Option<String> {
@@ -521,13 +513,8 @@ impl AsterDex {
         let Pending::Trade(request) = &signed.pending else {
             return;
         };
-        if let Some(writes) = self
-            .trading
-            .jobs
-            .get(&request.command)
-            .and_then(|job| job.writes.as_ref())
-        {
-            evidence.write_plan(writes);
+        if let Some(job) = self.trading.jobs.get(&request.command) {
+            evidence.write_plan_outcomes(job.elements.clone());
         }
     }
 
@@ -617,7 +604,6 @@ impl AsterDex {
                         endpoint: "allOpenOrders",
                         query: Query::new().str("symbol", &symbol),
                         call: Call::CancelSymbol(symbol.clone()),
-                        order_rules: None,
                     });
                 }
                 (command, job)
@@ -754,19 +740,19 @@ impl AsterDex {
                 (VenueError::new(error).kind(ErrorKind::InvalidInput), prune_on_refusal)
             })
             .and_then(|mut job| {
-                if operation == Operation::Mutation {
-                    job.write_count = job.steps.len();
-                    let writes = job.steps.iter().cloned().enumerate().map(|(index, payload)| {
-                        let client_order_id = payload.query.value("newClientOrderId").map(str::to_owned);
-                        PlannedWrite { payload, elements: vec![Element { index, client_order_id }] }
-                    }).collect();
-                    job.writes = Some(WritePlan::validate(writes, validate_write).map_err(|mut error| {
-                        if job.replacing_stop.is_some() || job.replacing_order.is_some() {
-                            error.message.push_str("; the order is unchanged");
-                        }
-                        (error, prune_on_refusal)
-                    })?);
-                }
+                job.elements = job
+                    .steps
+                    .iter()
+                    .chain(job.restore.iter())
+                    .enumerate()
+                    .map(|(index, step)| ElementOutcome {
+                        element: Element {
+                            index,
+                            client_order_id: step.query.value("newClientOrderId").map(str::to_owned),
+                        },
+                        result: ElementResult::NotSent { error: None },
+                    })
+                    .collect();
                 // Validate the shared auth shape before reserving any split step.
                 if let Some(step) = job.steps.front()
                     && let Err((error, kind)) = self.check_signing(step.call.role())
@@ -777,7 +763,7 @@ impl AsterDex {
                     .steps
                     .iter()
                     .filter(|step| matches!(step.call, Call::Place { .. }))
-                    .count();
+                    .count() + usize::from(job.restore.is_some());
                 if job.reserved_places > 0 {
                     let reserved = self
                         .trading
@@ -790,17 +776,13 @@ impl AsterDex {
                     }).count();
                     if acknowledged + reserved + job.reserved_places > MAX_ACKNOWLEDGED_ORDERS
                     {
-                        return Err((job.failure(not_sent("Aster placement routing capacity reached; wait for order reconciliation or cancel existing acknowledged orders")), true));
+                        return Err((VenueError::new("Aster placement routing capacity reached; wait for order reconciliation or cancel existing acknowledged orders"), true));
                     }
-                }
-                job.steps.clear();
-                if let Some(error) = job.error.take() {
-                    return Err((job.failure(error), prune_on_refusal));
                 }
                 Ok(job)
             });
         // A local refusal owns its command Context before any diagnostic.
-        let mut job = match job {
+        let job = match job {
             Ok(job) => job,
             Err((mut error, prune)) => {
                 let Ok(context) = cx.admit_http_command(Policy {
@@ -885,7 +867,7 @@ impl AsterDex {
             .ok()
             .map(|(selection, identity)| selection.credential(identity.credential.clone()));
         // A job with no native step sends nothing: it ends on its preflight.
-        if job.write_count == 0 {
+        if job.steps.is_empty() {
             let _ = match job.error {
                 Some(error) => {
                     cx.command_error(id, error.message.clone());
@@ -936,28 +918,41 @@ impl AsterDex {
         let Some(job) = self.trading.jobs.get_mut(&id) else {
             return;
         };
-        let next = if job.error.is_some() {
+        let next = if job.error.is_some()
+            && !job.continue_on_error
+            && !(job.restoring && !job.steps.is_empty())
+        {
             None
         } else {
-            job.writes
-                .as_mut()
-                .and_then(WritePlan::next_write)
-                .map(|(index, write)| (index, write.payload.clone()))
+            job.steps.pop_front()
         };
         let Some(plan) = job.plan.clone() else {
             return;
         };
-        if let Some((write, step)) = next {
+        if let Some(step) = next {
             let Some(slot) = job.slot.take() else {
-                let error =
-                    not_sent("Aster write has no live serial slot").kind(ErrorKind::Internal);
-                if let Some(writes) = &mut job.writes {
-                    let _ = writes.fail(write, error.clone());
-                }
-                job.error = Some(error);
-                self.advance_trade(cx, id);
                 return;
             };
+            // A 408 or 5xx on a put-back is sealed before this venue sees it:
+            // say what is unknown rather than repeat the replacement's refusal.
+            if job.restoring
+                && let Some((symbol, ..)) = &job.replacing_stop
+            {
+                let words = format!(
+                    "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                );
+                let _ = cx.present_plan_failure(&plan, words);
+            }
+            let write = job.next_element;
+            job.next_element += 1;
+            if let Some(element) = job.elements.get_mut(write) {
+                element.result = ElementResult::Unknown {
+                    error: Box::new(
+                        VenueError::new("Write dispatched; awaiting outcome")
+                            .outcome(Outcome::Unknown),
+                    ),
+                };
+            }
             let path = self.path(step.endpoint);
             // The request layer consumes the pending request and reports any
             // signing failure through on_trade_response, including synchronous
@@ -982,8 +977,14 @@ impl AsterDex {
             return;
         };
         let _ = match job.error.take() {
-            Some(error) => cx.fail_plan(&plan, job.failure(error)),
-            None => cx.done_plan(
+            Some(mut error) if !job.continue_on_error || job.sweep_failed || job.successes == 0 => {
+                // A later rejection after a step took effect cannot mean nothing happened.
+                if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
+                    error.outcome = None;
+                }
+                cx.fail_plan(&plan, job.failure(error))
+            }
+            _ => cx.done_plan(
                 &plan,
                 job.result
                     .unwrap_or_else(|| serde_json::to_string(&job.ids).unwrap_or_default()),
@@ -1005,6 +1006,14 @@ impl AsterDex {
         let plan = request.plan.clone();
         let call = &request.call;
         let was_place = matches!(call, Call::Place { .. });
+        let was_cancel = matches!(call, Call::Cancel { .. });
+        let was_sweep = matches!(call, Call::CancelSymbol(_));
+        let cancelled = match &request.call {
+            Call::Cancel { id, .. } => vec![id.clone()],
+            _ => vec![],
+        };
+        let transport_error = response.as_ref().err().cloned();
+        let transport = transport_error.is_some();
         let applied = match &request.call {
             Call::Cancel { id, .. } => Some((AppliedEffect::Cancel, Some(id.clone()), None)),
             Call::CancelSymbol(symbol) => Some((AppliedEffect::Cancel, None, Some(symbol.clone()))),
@@ -1015,8 +1024,6 @@ impl AsterDex {
             _ => None,
         };
         let mut cancel_applied = false;
-        let transport_error = response.as_ref().err().cloned();
-        let transport = transport_error.is_some();
         // A gateway failure is unproven whatever body it carries.
         let unproven = response
             .as_ref()
@@ -1216,13 +1223,18 @@ impl AsterDex {
                     .is_some_and(|e| e.outcome == Some(Outcome::NotSent))
         }) {
             let _ = match &outcome {
-                _ if outcome.is_ok() || cancel_applied => cx.http_write_fact(
-                    leg,
-                    WriteFact::Accepted {
-                        order_ids: placed.iter().cloned().collect(),
-                    },
-                    None,
-                ),
+                _ if replied
+                    && !(was_place && placed.is_none())
+                    && !(was_sweep && outcome.is_err()) =>
+                {
+                    cx.http_write_fact(
+                        leg,
+                        WriteFact::Accepted {
+                            order_ids: placed.iter().cloned().chain(cancelled).collect(),
+                        },
+                        None,
+                    )
+                }
                 Err((code, message)) if !transport && !unproven && !replied => {
                     let native = Native {
                         code: NativeCode::Int(*code),
@@ -1254,7 +1266,9 @@ impl AsterDex {
                     };
                     match cx.classify_write(leg, table, native, told) {
                         Ok(fact) => {
-                            status_error = Some(fact.error().clone());
+                            if native.is_none() {
+                                status_error = Some(fact.error().clone());
+                            }
                             cx.http_write_fact(
                                 leg,
                                 WriteFact::Failed {
@@ -1273,8 +1287,59 @@ impl AsterDex {
                     .map(|_| None),
             };
         }
+        if was_place && let Some(job) = self.trading.jobs.get_mut(&command) {
+            if outcome.is_err() && !job.restoring && !transport && !unproven && !replied {
+                let definitive = outcome.as_ref().err().is_some_and(|(code, message)| {
+                    matches!(
+                        protective_failure(*code, message.clone()).outcome,
+                        Some(Outcome::Rejected)
+                    )
+                });
+                if definitive
+                    && !rate_limited
+                    && let Some(restore) = job.restore.take()
+                {
+                    job.steps.clear();
+                    job.steps.push_back(restore);
+                    job.restoring = true;
+                }
+            } else if outcome.is_ok()
+                && job.restoring
+                && let Some(error) = &mut job.error
+            {
+                error.protection = Some(safe_cex_engine::error::Protection::Restored);
+                error.presents = true;
+                error.message = format!(
+                    "Your {} stop is unchanged: its replacement was refused, so the old stop was put back as a new order",
+                    job.replacing_stop.as_ref().map_or("", |(s, _, _)| s)
+                );
+            }
+        }
         // The fact is recorded: continue the serial plan into the next native
         // step, or settle this last call before the terminal.
+        if let (Some(leg), Some((plan, slot))) = (leg, &plan) {
+            let continues = self.trading.jobs.get(&command).is_some_and(|job| {
+                !job.steps.is_empty() && (job.continue_on_error || outcome.is_ok() || job.restoring)
+            });
+            if continues {
+                match cx.continue_serial_plan(plan, slot, leg, serial()) {
+                    Ok(next) => {
+                        if let Some(job) = self.trading.jobs.get_mut(&command) {
+                            job.slot = Some(next);
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(job) = self.trading.jobs.get_mut(&command) {
+                            job.steps.clear();
+                            job.error
+                                .get_or_insert(VenueError::new(error.venue_error().message));
+                        }
+                    }
+                }
+            } else {
+                let _ = cx.finish_plan_call(plan, slot, leg);
+            }
+        }
         if was_place && outcome.is_err() {
             self.account.order_revision = self.account.order_revision.wrapping_add(1);
         }
@@ -1282,20 +1347,19 @@ impl AsterDex {
             if was_place {
                 job.reserved_places = job.reserved_places.saturating_sub(1);
             }
+            let mut element_error = None;
             match &outcome {
-                Ok(()) => {}
+                Ok(()) if was_cancel && job.replacing_order.is_some() => {
+                    // TS cancels first, then runs its continuing placement batch.
+                    job.continue_on_error = true;
+                }
+                Ok(()) => job.successes += 1,
                 Err((code, message)) => {
                     cx.command_error(command, message.clone());
                     let mut error = transport_error
                         .or(status_error)
                         .unwrap_or_else(|| failure(*code, message.clone()));
-                    // An earlier leg that may have executed keeps the command unknown.
-                    if unproven
-                        || job
-                            .error
-                            .as_ref()
-                            .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
-                    {
+                    if unproven {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     let guarded = was_place && job.gone_text(true).is_some();
@@ -1307,7 +1371,17 @@ impl AsterDex {
                     {
                         error.outcome = Some(Outcome::Unknown);
                     }
+                    element_error = Some(error.clone());
+                    // Earlier ambiguity belongs to the aggregate, not this row.
+                    if job
+                        .error
+                        .as_ref()
+                        .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
+                    {
+                        error.outcome = Some(Outcome::Unknown);
+                    }
                     let unknown = error.outcome == Some(Outcome::Unknown);
+                    job.sweep_failed |= was_sweep;
                     if was_place && let Some(gone) = job.gone_text(unknown) {
                         error.protection =
                             (!unknown).then_some(safe_cex_engine::error::Protection::Unprotected);
@@ -1318,15 +1392,13 @@ impl AsterDex {
                         } else {
                             &error.message
                         };
-                        if !detail.starts_with(&gone) {
-                            error.message = format!("{gone}: {detail}");
-                        }
+                        error.message = format!("{gone}: {detail}");
                     }
                     job.error = Some(error);
                 }
             }
-            if let (Some(writes), Some(index)) = (&mut job.writes, request.write) {
-                let result = if outcome.is_ok() || cancel_applied {
+            if let Some(row) = request.write.and_then(|index| job.elements.get_mut(index)) {
+                row.result = if outcome.is_ok() || cancel_applied {
                     if let Some(id) = &placed {
                         ElementResult::Placed {
                             order_ids: vec![id.clone()],
@@ -1338,57 +1410,20 @@ impl AsterDex {
                             position_key,
                         }
                     } else {
-                        ElementResult::Unknown {
-                            error: Box::new(
-                                VenueError::new("Aster write has no acceptance evidence")
-                                    .outcome(Outcome::Unknown),
-                            ),
-                        }
+                        ElementResult::failed(VenueError::new("Aster write acceptance is unproven"))
                     }
                 } else {
-                    ElementResult::NotSent {
-                        error: job.error.clone().map(Box::new),
-                    }
+                    ElementResult::failed(
+                        element_error
+                            .unwrap_or_else(|| VenueError::new("Aster write outcome is unknown")),
+                    )
                 };
-                if let Err(error) = writes.settle(index, vec![result]) {
-                    job.error = Some(
-                        VenueError::new(error.to_string())
-                            .kind(ErrorKind::Internal)
-                            .outcome(Outcome::Unknown),
-                    );
-                }
             }
             if let Some(id) = placed {
                 job.ids.push(id);
             }
             if let Some(result) = result {
                 job.result = Some(result);
-            }
-        }
-        if let (Some(leg), Some((plan, slot))) = (leg, &plan) {
-            let continues = self.trading.jobs.get(&command).is_some_and(|job| {
-                request
-                    .write
-                    .is_some_and(|index| index + 1 < job.write_count)
-                    && outcome.is_ok()
-                    && job.error.is_none()
-            });
-            if continues {
-                match cx.continue_serial_plan(plan, slot, leg, serial()) {
-                    Ok(next) => {
-                        if let Some(job) = self.trading.jobs.get_mut(&command) {
-                            job.slot = Some(next);
-                        }
-                    }
-                    Err(error) => {
-                        if let Some(job) = self.trading.jobs.get_mut(&command) {
-                            job.error
-                                .get_or_insert(VenueError::new(error.venue_error().message));
-                        }
-                    }
-                }
-            } else {
-                let _ = cx.finish_plan_call(plan, slot, leg);
             }
         }
         self.advance_trade(cx, command);
@@ -1414,13 +1449,13 @@ impl AsterDex {
                         id: order.id.clone(),
                         filled_at_amend: None,
                     },
-                    order_rules: None,
                 })
                 .collect(),
+            continue_on_error: true,
             ..Job::default()
         })
     }
-    fn plan_cancel(&self, orders: &[Order]) -> Job {
+    fn plan_cancel(&self, orders: &[Order], continue_on_error: bool) -> Job {
         Job {
             steps: orders
                 .iter()
@@ -1432,11 +1467,11 @@ impl AsterDex {
                         .str("orderId", &order.id),
                     call: Call::Cancel {
                         id: order.id.clone(),
-                        filled_at_amend: Some(order.filled),
+                        filled_at_amend: (!continue_on_error).then_some(order.filled),
                     },
-                    order_rules: None,
                 })
                 .collect(),
+            continue_on_error,
             ..Job::default()
         }
     }
@@ -1511,6 +1546,17 @@ impl AsterDex {
             Some(total) => total - order.filled,
             None => order.remaining,
         };
+        // A replacement below the value minimum would be refused after the old order is gone.
+        let value = size * price.unwrap_or(order.price);
+        let minimum = self
+            .market_rules
+            .get(&order.symbol)
+            .map_or(0.0, |r| r.min_notional);
+        if !conditional && !order.reduce_only && value > 0.0 && value < minimum {
+            return Err(format!(
+                "Aster replacement worth {value} is below the {minimum} minimum; the order is unchanged"
+            ));
+        }
         let replacement = PlaceOrderOpts {
             symbol: order.symbol.clone(),
             kind: order.kind,
@@ -1524,17 +1570,12 @@ impl AsterDex {
             ..empty_order()
         };
         // Format and validate before canceling the live order.
-        let mut place = self
-            .plan_place_inner(cx, &[replacement], Some(id), position_side)
-            .map_err(|error| format!("{error}; the order is unchanged"))?;
-        let mut job = self.plan_cancel(std::slice::from_ref(order));
+        let mut place = self.plan_place_inner(cx, &[replacement], Some(id), position_side)?;
+        if let Some(error) = place.error {
+            return Err(error.message);
+        }
+        let mut job = self.plan_cancel(std::slice::from_ref(order), false);
         if conditional {
-            if place.steps.len() != 1 {
-                return Err(
-                    "Aster stop amendment requires one native replacement; the stop is unchanged"
-                        .into(),
-                );
-            }
             let native = self.trading.protections.get(id)
                 .filter(|native| native.order == *order)
                 .ok_or_else(|| format!("Your {} stop was not changed: its exact native parameters must be refreshed before cancellation", order.symbol))?;
@@ -1567,7 +1608,7 @@ impl AsterDex {
                 reference: native.reference,
             };
             guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
-            // The replacement keeps the original's price protection.
+            // The replacement keeps the original's price protection, as its put-back does.
             if let Some(step) = place.steps.front_mut() {
                 step.query = std::mem::replace(&mut step.query, Query::new()).str(
                     "priceProtect",
@@ -1579,6 +1620,15 @@ impl AsterDex {
                 );
             }
             job.guard = Some(guard);
+            job.restore = Some(Planned {
+                method: Method::Post,
+                endpoint: "order",
+                query: native.query.clone(),
+                call: Call::Place {
+                    symbol: order.symbol.clone(),
+                    position_side,
+                },
+            });
         }
         job.steps.extend(place.steps);
         job.replacing_stop = conditional.then(|| (order.symbol.clone(), order.side, order.kind));
@@ -1611,14 +1661,21 @@ impl AsterDex {
         } else {
             None
         };
-        let mut job = Job::default();
-        let mut planned_algos = HashMap::<String, usize>::new();
+        let mut job = Job {
+            continue_on_error: true,
+            ..Job::default()
+        };
         for opts in orders {
             if opts.kind == OrderType::TrailingStopLoss {
-                return Err("AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable".into());
+                job.error = Some(not_sent("AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable").kind(ErrorKind::Unsupported));
+                continue;
             }
             if opts.stp_mode.is_some() && self.version != Version::V3 {
-                return Err("Aster per-order self-trade prevention requires V3".into());
+                job.error = Some(
+                    not_sent("Aster per-order self-trade prevention requires V3")
+                        .kind(ErrorKind::Unsupported),
+                );
+                continue;
             }
             let mut children = vec![opts.clone()];
             children[0].stop_loss = None;
@@ -1647,44 +1704,58 @@ impl AsterDex {
                     }
                 }
             }
+            let count = children
+                .iter()
+                .filter(|o| matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit))
+                .count();
+            let max = usize::try_from(
+                self.market_rules
+                    .get(&opts.symbol)
+                    .and_then(|r| r.max_algo_orders)
+                    .unwrap_or(0),
+            )
+            .unwrap_or(usize::MAX);
+            let existing = cx
+                .store
+                .orders()
+                .iter()
+                .filter(|o| {
+                    o.symbol == opts.symbol
+                        && Some(o.id.as_str()) != replacing
+                        && o.status == OrderStatus::Open
+                        && matches!(
+                            o.kind,
+                            OrderType::StopLoss
+                                | OrderType::TakeProfit
+                                | OrderType::TrailingStopLoss
+                        )
+                })
+                .count();
+            if max > 0 && existing + count > max {
+                job.error = Some(not_sent(format!(
+                    "AsterDEX max algo order limit reached for {}: {existing}/{max} open, {count} new requested",
+                    opts.symbol
+                )));
+                continue;
+            }
             for child in children {
                 let position_side = hedge_position_side(cx, &child, position_side);
-                let queries = self.format_order(cx, &child, builder.as_ref(), position_side)?;
-                if matches!(child.kind, OrderType::StopLoss | OrderType::TakeProfit) {
-                    let count = planned_algos.entry(child.symbol.clone()).or_default();
-                    *count += queries.len();
+                match self.format_order(cx, &child, builder.as_ref(), position_side) {
+                    Ok(queries) => {
+                        for query in queries {
+                            job.steps.push_back(Planned {
+                                method: Method::Post,
+                                endpoint: "order",
+                                query,
+                                call: Call::Place {
+                                    symbol: child.symbol.clone(),
+                                    position_side,
+                                },
+                            });
+                        }
+                    }
+                    Err(error) => job.error = Some(not_sent(error).kind(ErrorKind::InvalidInput)),
                 }
-                for (query, rules) in queries {
-                    job.steps.push_back(Planned {
-                        method: Method::Post,
-                        endpoint: "order",
-                        query,
-                        call: Call::Place {
-                            symbol: child.symbol.clone(),
-                            position_side,
-                        },
-                        order_rules: Some(rules),
-                    });
-                }
-            }
-        }
-        let mut existing_algos = HashMap::<&str, usize>::new();
-        for order in cx.store.orders().iter().filter(|o| {
-            Some(o.id.as_str()) != replacing
-                && o.status == OrderStatus::Open
-                && matches!(
-                    o.kind,
-                    OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
-                )
-        }) {
-            *existing_algos.entry(&order.symbol).or_default() += 1;
-        }
-        for step in &mut job.steps {
-            if let Call::Place { symbol, .. } = &step.call
-                && let Some(rules) = &mut step.order_rules
-            {
-                rules.planned_algos = planned_algos.get(symbol).copied().unwrap_or(0);
-                rules.existing_algos = existing_algos.get(symbol.as_str()).copied().unwrap_or(0);
             }
         }
         Ok(job)
@@ -1695,7 +1766,7 @@ impl AsterDex {
         opts: &PlaceOrderOpts,
         builder: Option<&Builder>,
         position_side: Option<PositionSide>,
-    ) -> Result<Vec<(Query, OrderRules)>, String> {
+    ) -> Result<Vec<Query>, String> {
         let market = cx
             .store
             .market(&opts.symbol)
@@ -1752,79 +1823,42 @@ impl AsterDex {
             .map(|rule| &rule.market_lot)
             .filter(|_| opts.kind == OrderType::Market);
         let step = market_lot.map_or(market.precision.amount, |lot| lot.step);
+        let amount = num::adjust(opts.amount, step);
+        if opts.amount > 0.0 && amount <= 0.0 {
+            return Err("Aster order amount rounds to zero".into());
+        }
         let close = conditional && opts.amount == 0.0;
         let max = market_lot
             .map(|lot| lot.max)
-            .filter(|max| *max != 0.0)
+            .filter(|max| *max > 0.0)
             .unwrap_or(market.limits.amount.max);
-        let min = market_lot
-            .map(|lot| lot.min)
-            .filter(|min| *min != 0.0)
-            .unwrap_or(market.limits.amount.min);
+        let max = num::adjust(max, step);
+        let min = market_lot.map_or(0.0, |lot| lot.min);
+        let mut quantities = Vec::new();
+        let mut remaining = amount;
+        if !conditional && max > 0.0 && remaining > max {
+            // Bound planning rather than allowing an unbounded allocation.
+            if remaining / max > 10000.0 {
+                return Err("Aster order requires too many split requests".into());
+            }
+            while remaining > max {
+                quantities.push(max);
+                remaining = num::adjust(remaining - max, step);
+            }
+            // A remainder under the minimum borrows it from the chunk before.
+            if remaining < min
+                && let Some(last) = quantities.last_mut()
+            {
+                let short = num::adjust(min - remaining, step);
+                *last = num::adjust(*last - short, step);
+                remaining = num::adjust(remaining + short, step);
+            }
+        }
+        quantities.push(remaining);
         let tick = self
             .market_rules
             .get(&opts.symbol)
             .map_or(market.precision.price, |rule| rule.tick_size);
-        if !tick.is_finite() || tick <= 0.0 {
-            return Err("Invalid Aster price tick".into());
-        }
-        let price = if opts.kind == OrderType::Limit {
-            Some(wire_price(opts.price, tick, "limit")?)
-        } else {
-            None
-        };
-        let trigger = if conditional {
-            Some(wire_price(
-                opts.trigger_price.or(opts.price),
-                tick,
-                "trigger",
-            )?)
-        } else {
-            None
-        };
-        let notional = self
-            .market_rules
-            .get(&opts.symbol)
-            .map_or(0.0, |r| r.min_notional);
-        if !notional.is_finite() || notional < 0.0 {
-            return Err("Invalid Aster minimum notional".into());
-        }
-        // Native reduce-only and full-position closes are exempt from MIN_NOTIONAL.
-        // Opening market orders use the current mark, never their trigger price.
-        let reference = if notional > 0.0 && !close && opts.reduce_only != Some(true) {
-            Some(
-                price
-                    .or_else(|| cx.store.ticker(&opts.symbol).map(|t| t.mark))
-                    .filter(|p| p.is_finite() && *p > 0.0)
-                    .ok_or("Aster minimum notional requires a positive current mark price")?,
-            )
-        } else {
-            None
-        };
-        let minimum = reference.map_or(min, |p| min.max(notional / p));
-        let quantities = if close {
-            vec![0.0]
-        } else {
-            split_quantities(opts.amount, step, minimum, max)?
-        };
-        let rules = OrderRules {
-            step,
-            minimum: min,
-            maximum: max,
-            tick,
-            min_notional: notional,
-            mark: cx.store.ticker(&opts.symbol).map(|t| t.mark),
-            notional_exempt: opts.reduce_only == Some(true),
-            existing_algos: 0,
-            planned_algos: 0,
-            max_algos: usize::try_from(
-                self.market_rules
-                    .get(&opts.symbol)
-                    .and_then(|r| r.max_algo_orders)
-                    .unwrap_or(0),
-            )
-            .map_err(|_| "Aster algo order limit cannot be represented")?,
-        };
         quantities
             .into_iter()
             .map(|quantity| {
@@ -1837,7 +1871,15 @@ impl AsterDex {
                         query = query.str("reduceOnly", "true");
                     }
                 }
-                if let Some(price) = price {
+                if opts.kind == OrderType::Limit {
+                    let price = opts
+                        .price
+                        .filter(|p| p.is_finite() && *p > 0.0)
+                        .ok_or("Aster limit order needs a positive price")?;
+                    let price = num::adjust(price, tick);
+                    if price <= 0.0 {
+                        return Err("Aster limit price rounds to zero".into());
+                    }
                     query = query
                         .str(
                             "timeInForce",
@@ -1845,222 +1887,25 @@ impl AsterDex {
                         )
                         .str("price", &num::format(price));
                 }
-                if let Some(trigger) = trigger {
+                if conditional {
+                    let trigger = opts
+                        .trigger_price
+                        .or(opts.price)
+                        .filter(|p| p.is_finite() && *p > 0.0)
+                        .ok_or("Aster conditional order needs a positive trigger price")?;
+                    let trigger = num::adjust(trigger, tick);
+                    if trigger <= 0.0 {
+                        return Err("Aster trigger price rounds to zero".into());
+                    }
                     query = query
                         .str("stopPrice", &num::format(trigger))
                         .str("workingType", working_type(opts));
                 }
-                Ok((query, rules))
+                Ok(query)
             })
             .collect()
     }
 }
-
-fn validate_write(write: &Planned) -> Result<(), VenueError> {
-    let invalid = |message: &str| not_sent(message).kind(ErrorKind::InvalidInput);
-    let Some(rules) = write.order_rules else {
-        return if matches!(write.call, Call::Place { .. }) {
-            Err(invalid(
-                "Aster planned order has no native validation rules",
-            ))
-        } else {
-            Ok(())
-        };
-    };
-    if !rules.step.is_finite()
-        || rules.step <= 0.0
-        || !rules.minimum.is_finite()
-        || rules.minimum < 0.0
-        || !rules.maximum.is_finite()
-        || rules.maximum < 0.0
-        || !rules.tick.is_finite()
-        || rules.tick <= 0.0
-        || !rules.min_notional.is_finite()
-        || rules.min_notional < 0.0
-    {
-        return Err(invalid("Invalid Aster native order rules"));
-    }
-    if rules.max_algos > 0
-        && rules.existing_algos.saturating_add(rules.planned_algos) > rules.max_algos
-    {
-        return Err(invalid(
-            "AsterDEX max algo order limit reached for the complete write plan",
-        ));
-    }
-    let positive = |name| {
-        write
-            .query
-            .value(name)
-            .and_then(num::parse_decimal)
-            .filter(|value| *value > 0.0)
-            .ok_or_else(|| invalid("Aster native order has a missing or nonpositive wire value"))
-    };
-    let kind = write.query.value("type");
-    let conditional = matches!(kind, Some("STOP_MARKET" | "TAKE_PROFIT_MARKET"));
-    if !matches!(
-        kind,
-        Some("LIMIT" | "MARKET" | "STOP_MARKET" | "TAKE_PROFIT_MARKET")
-    ) {
-        return Err(invalid("Unsupported Aster native order type"));
-    }
-    let price = if kind == Some("LIMIT") {
-        Some(positive("price")?)
-    } else {
-        None
-    };
-    let trigger = if conditional {
-        Some(positive("stopPrice")?)
-    } else {
-        None
-    };
-    if price
-        .into_iter()
-        .chain(trigger)
-        .any(|value| num::adjust(value, rules.tick) != value)
-    {
-        return Err(invalid("Aster native order price is off tick"));
-    }
-    let close = matches!(write.query.value("closePosition"), Some("true" | "TRUE"));
-    if close {
-        if !conditional || write.query.value("quantity").is_some() {
-            return Err(invalid(
-                "Aster full-position close must be a conditional order without quantity",
-            ));
-        }
-        return Ok(());
-    }
-    let quantity = positive("quantity")?;
-    let units = (quantity / rules.step).round();
-    if !(1.0..=MAX_QUANTITY_UNITS).contains(&units)
-        || num::adjust(quantity, rules.step) != quantity
-        || quantity < rules.minimum
-        || (rules.maximum > 0.0 && quantity > rules.maximum)
-    {
-        return Err(invalid(
-            "Aster native order quantity is outside lot bounds or off step",
-        ));
-    }
-    if !rules.notional_exempt && rules.min_notional > 0.0 {
-        let reference = price
-            .or(rules.mark)
-            .filter(|p| p.is_finite() && *p > 0.0)
-            .ok_or_else(|| {
-                invalid("Aster minimum notional requires a positive current mark price")
-            })?;
-        let value = quantity * reference;
-        if !value.is_finite() || value < rules.min_notional {
-            return Err(invalid("Aster native lot is below the minimum notional"));
-        }
-    }
-    Ok(())
-}
-
-fn wire_price(price: Option<f64>, tick: f64, label: &str) -> Result<f64, String> {
-    let price = price
-        .filter(|p| p.is_finite() && *p > 0.0)
-        .ok_or_else(|| format!("Aster {label} price must be positive"))?;
-    num::parse_decimal(&num::format(num::adjust(price, tick)))
-        .filter(|p| *p > 0.0 && num::adjust(*p, tick) == *p)
-        .ok_or_else(|| format!("Aster {label} price rounds to zero or off tick"))
-}
-
-const MAX_QUANTITY_UNITS: f64 = 9_007_199_254_740_991.0;
-
-fn wire_quantity(units: f64, step: f64) -> Result<f64, String> {
-    if !(1.0..=MAX_QUANTITY_UNITS).contains(&units) {
-        return Err("Aster quantity cannot be represented in native units".into());
-    }
-    num::parse_decimal(&num::format(num::adjust(units * step, step)))
-        .filter(|quantity| *quantity > 0.0 && (*quantity / step).round() == units)
-        .ok_or_else(|| "Aster quantity rounds to zero or off step".into())
-}
-
-fn split_quantities(
-    amount: f64,
-    step: f64,
-    minimum: f64,
-    maximum: f64,
-) -> Result<Vec<f64>, String> {
-    if !step.is_finite()
-        || step <= 0.0
-        || !minimum.is_finite()
-        || minimum < 0.0
-        || !maximum.is_finite()
-        || maximum < 0.0
-    {
-        return Err("Invalid Aster native lot limits".into());
-    }
-    // Integral f64 units stay exact inside this bound, without lossy integer casts.
-    let total = (num::adjust(amount, step) / step).round();
-    if !(1.0..=MAX_QUANTITY_UNITS).contains(&total) {
-        return Err("Aster quantity rounds to zero or exceeds native unit precision".into());
-    }
-    let mut max = if maximum == 0.0 {
-        total
-    } else {
-        (maximum / step).floor().min(MAX_QUANTITY_UNITS)
-    };
-    // Decimal division can undershoot an integral cap; only its wire value may
-    // admit the next unit. An off-step maximum must never round upward.
-    if maximum > 0.0
-        && max < MAX_QUANTITY_UNITS
-        && wire_quantity(max + 1.0, step).is_ok_and(|q| q <= maximum)
-    {
-        max += 1.0;
-    }
-    if max < 1.0 || (total / max).ceil() > 10_000.0 {
-        return Err(
-            "Aster order requires too many split requests or has no valid native lot".into(),
-        );
-    }
-    let mut min = (minimum / step).floor().max(1.0);
-    if wire_quantity(min, step)? < minimum {
-        min += 1.0;
-    }
-    if min > max {
-        return Err("Aster native lot minimum exceeds its maximum".into());
-    }
-    let mut units = Vec::new();
-    let mut remaining = total;
-    while remaining > max {
-        units.push(max);
-        remaining -= max;
-    }
-    if remaining < min {
-        let mut short = min - remaining;
-        for donor in units.iter_mut().rev() {
-            let borrowed = (*donor - min).min(short);
-            *donor -= borrowed;
-            remaining += borrowed;
-            short -= borrowed;
-            if short == 0.0 {
-                break;
-            }
-        }
-        if short > 0.0 {
-            return Err("Aster split quantity cannot satisfy every native lot minimum".into());
-        }
-    }
-    units.push(remaining);
-    if units.iter().sum::<f64>() != total {
-        return Err("Aster split quantities do not preserve the normalized amount".into());
-    }
-    units
-        .into_iter()
-        .map(|units| {
-            let quantity = wire_quantity(units, step)?;
-            if units < min
-                || units > max
-                || quantity < minimum
-                || (maximum > 0.0 && quantity > maximum)
-            {
-                return Err("Aster split quantity is outside native lot limits".into());
-            }
-            Ok(quantity)
-        })
-        .collect()
-}
-
 /// The hedge leg an order targets; an amend passes the replaced order's leg.
 fn hedge_position_side(
     cx: &Cx<'_, Pending>,
@@ -2119,7 +1964,6 @@ fn single(method: Method, endpoint: &'static str, query: Query, call: Call) -> J
             endpoint,
             query,
             call,
-            order_rules: None,
         }]),
         ..Job::default()
     }
@@ -2151,7 +1995,7 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
     }
 }
 
-/// `failure` for a stop's replacement: a code `ASTER` does not list as a
+/// `failure` for a stop's replacement or put-back: a code `ASTER` does not list as a
 /// refusal leaves the write unknown, as `ASTER_PROTECTIVE` classifies it.
 fn protective_failure(code: i64, message: String) -> VenueError {
     let listed = {
@@ -2208,75 +2052,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Call, OrderRules, Planned, Query, fee_rate, validate_write};
-    use safe_cex_engine::{ErrorKind, Method, Outcome};
-
-    fn planned_order() -> Planned {
-        Planned {
-            method: Method::Post,
-            endpoint: "order",
-            query: Query::new()
-                .str("type", "LIMIT")
-                .str("quantity", "4")
-                .str("price", "1"),
-            call: Call::Place {
-                symbol: "BTCUSDT".into(),
-                position_side: None,
-            },
-            order_rules: Some(OrderRules {
-                step: 1.0,
-                minimum: 3.0,
-                maximum: 5.0,
-                tick: 0.1,
-                min_notional: 3.0,
-                mark: Some(1.0),
-                notional_exempt: false,
-                existing_algos: 0,
-                planned_algos: 0,
-                max_algos: 2,
-            }),
-        }
-    }
-
-    #[test]
-    fn pure_validator_refuses_invalid_wire_values_without_dispatch() {
-        let validate_fn: fn(&Planned) -> Result<(), safe_cex_engine::VenueError> = validate_write;
-        assert!(validate_fn(&planned_order()).is_ok());
-        for (field, value) in [
-            ("quantity", "0"),
-            ("quantity", "2"),
-            ("quantity", "6"),
-            ("quantity", "4.1"),
-            ("quantity", "NaN"),
-            ("price", "0"),
-            ("price", "1.04"),
-            ("price", "0.5"),
-        ] {
-            let mut write = planned_order();
-            write.query = write.query.str(field, value);
-            let error = validate_fn(&write).expect_err("invalid wire");
-            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
-            assert_eq!(error.outcome, Some(Outcome::NotSent));
-        }
-        let mut write = planned_order();
-        if let Some(rules) = &mut write.order_rules {
-            rules.planned_algos = 3;
-        }
-        assert!(validate_fn(&write).is_err());
-        write = planned_order();
-        write.query = write
-            .query
-            .str("type", "STOP_MARKET")
-            .str("stopPrice", "0.04");
-        assert!(validate_fn(&write).is_err());
-        write = planned_order();
-        write.query = write.query.str("type", "MARKET");
-        if let Some(rules) = &mut write.order_rules {
-            rules.mark = None;
-        }
-        assert!(validate_fn(&write).is_err());
-    }
-
+    use super::fee_rate;
     #[test]
     fn builder_decimals_preserve_exact_signed_strings() {
         for (input, expected) in [

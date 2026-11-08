@@ -115,7 +115,12 @@ impl UnprovenEvidence {
     /// Preserve a validated plan's logical facts when the engine seals an
     /// unproven response before the venue decoder runs. Pending rows stay Unknown.
     pub fn write_plan<T>(&mut self, plan: &crate::write_plan::WritePlan<T>) {
-        let mut elements = plan.outcomes();
+        self.write_plan_outcomes(plan.outcomes());
+    }
+
+    /// Retain reporting-only outcomes from drivers whose continuation policy
+    /// stays venue-owned. This cannot dispatch or complete a write.
+    pub fn write_plan_outcomes(&mut self, mut elements: Vec<crate::write_plan::ElementOutcome>) {
         let mut failure = self.error.clone();
         failure.elements = None;
         failure.partial = None;
@@ -359,5 +364,50 @@ mod write_plan_tests {
         );
         assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
         assert!(plan.next_write().is_none());
+    }
+    #[test]
+    fn reporting_snapshot_preserves_continued_writes_and_applied_effects() {
+        use crate::write_plan::{AppliedEffect, ElementOutcome};
+        let results = [
+            ElementResult::NotSent {
+                error: Some(Box::new(
+                    VenueError::new("refused").outcome(Outcome::Rejected),
+                )),
+            },
+            ElementResult::Applied {
+                effect: AppliedEffect::Cancel,
+                target_order_id: Some("old-stop".into()),
+                position_key: None,
+            },
+            ElementResult::Placed {
+                order_ids: vec!["later-write".into()],
+            },
+            ElementResult::Unknown {
+                error: Box::new(VenueError::new("pending")),
+            },
+            ElementResult::NotSent { error: None },
+        ];
+        let rows: Vec<_> = results
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, result)| ElementOutcome {
+                element: Element {
+                    index,
+                    client_order_id: None,
+                },
+                result,
+            })
+            .collect();
+        let snapshot = rows.clone();
+        let mut evidence = UnprovenEvidence::new(EvidenceBudget::default(), 503).unwrap();
+        evidence.write_plan_outcomes(rows);
+        let (_, error, _) = evidence.finish();
+        let rows = error.elements.unwrap();
+        for index in [0, 1, 2, 4] {
+            assert_eq!(rows[index], snapshot[index]);
+        }
+        assert!(matches!(&rows[3].result, ElementResult::Unknown { error }
+            if error.outcome == Some(Outcome::Unknown) && error.kind == Some(ErrorKind::VenueUnavailable)));
     }
 }

@@ -11,34 +11,29 @@ Private recovery obtains a new listen key. Retiring a session cancels its
 session epoch, so an old failure cannot close a replacement socket. Account
 reconciliation and retained public subscriptions keep their existing ownership.
 
-# Write-plan validation
+# Legacy write parity
 
-Placement builds and validates the whole batch, including every split entry and
-attached TP/SL lot, before requesting the write clock or submitting an order.
-Any unsupported row, malformed price/trigger, invalid native lot, or cumulative
-algo-count overflow refuses the entire intent with `notSent` and no requests.
-Cancellation batches use the same fail-stop journal; an invalid reference refuses the whole batch before dispatch.
+Split lots, batch rows and separate entry/SL/TP children retain the legacy
+TypeScript driver's partial placement behavior. Rejected elements do not stop
+later writes. Caller client IDs are checked across the batch before I/O, while
+algo capacity is checked per intent without a cumulative batch reservation.
+Cancellation batches continue after a refusal; a refused single cancel in an
+amend prevents its replacement. Accepted placement IDs survive partial failures.
 
-Quantities retain nearest-step normalization; maximum quantities are floored to
-native units. A short tail borrows only from lots that remain above their own
-minimum. Every serialized lot must satisfy its quantity bounds and step, plus
-opening `MIN_NOTIONAL` at the rounded limit price or current mark for market
-orders. Market orders use `MARKET_LOT_SIZE`; other orders use `LOT_SIZE`.
-Reduce-only and full-position closes retain the native notional exemption.
-Attached protection is split when necessary, in entry/SL/TP order, and every
-resulting protection counts toward the symbol's algo limit across the batch.
+The shared write-plan types report indexed placed, applied, refused and uncertain
+outcomes on terminal failures. They do not gate payloads or decide continuation.
+Engine-owned transport ambiguity still seals writes under its existing custody
+rules. No new validation or retry policy is introduced here.
 
-Replacement planning completes before cancellation. Protective amendments retain
-one native replacement and the final live stop guard. The shared engine
-`WritePlan` validates the exact immutable payloads before the first request and
-journals every dispatched write. A runtime refusal or ambiguity stops the suffix;
-there is no automatic resend, protective put-back, cancel or rollback after failure.
-Engine-granted signature/clock correction for a proven refusal keeps its existing
-custody and the same pending logical element.
+Known legacy limitations remain: a split tail or later row can be refused after
+an earlier write takes effect, and an entry can succeed without both protective
+children. A replacement can fail after its original order was canceled.
 
-Terminal failures carry every planned element's indexed `placed`, `applied`,
-`notSent` or `unknown` outcome. Successful cancel/settings effects are `applied`
-with existing-target references, never invented placement IDs. A successful cancel
-followed by a refused replacement leaves the original order gone and reports both
-facts for the user to act on. Lost replies and engine-sealed HTTP ambiguity retain
-the placed prefix, unknown pending write and untouched notSent suffix.
+The class-A restore kept pending policy is the inherited Rust exception: after
+a confirmed protective cancel and a definite replacement refusal, its existing
+single put-back is unchanged. Legacy TS `updateOrder` has no corresponding
+restore; this exception follows the lead's explicit HOLD/no-removal instruction.
+
+Evidence: `packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts`
+lines 742–867 (per-intent checks and splitting), 955–997 (placement and batch
+continuation), and 1000–1081 (cancel-replace and cancellation fan-out).

@@ -32,3 +32,13 @@ This JSON is exposed by the wasm host's `ActionOut::Done.detail` and native host
 The engine's terminal failure projection preserves the complete plan's `elements` while retaining its existing authoritative physical aggregate classification and native failure text. This matters because its native-error selection otherwise replaces the fallback carrying the plan journal.
 
 For engine-owned unproven HTTP seals (including 5xx), call `UnprovenEvidence::write_plan(&plan)` from the venue's existing read-only `unproven_http_evidence` hook. It copies earlier placed and unissued rows and gives pending Unknown rows the engine's classified failure. It grants no send or completion authority; normal engine retirement still discards the venue job.
+
+## Reporting without dispatch policy
+
+Legacy dispatchers that continue after a refusal can record the shared
+`ElementOutcome`/`ElementResult` values directly. `ElementResult::failed` applies
+shared conservative failure classification without releasing or stopping a
+write. `UnprovenEvidence::write_plan_outcomes` accepts such a snapshot and applies
+the same engine-owned HTTP classification to pending Unknown rows. Neither API
+validates payloads or changes continuation. AsterDEX uses these reporting APIs;
+its existing venue/engine dispatch rules remain authoritative.

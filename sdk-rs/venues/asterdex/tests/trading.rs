@@ -249,21 +249,15 @@ fn bracket_splits_regular_first_then_sequential_conditional_children() {
         assert!(request.url.contains("type=LIMIT"));
         h.reply(request, &format!(r#"{{"orderId":{}}}"#, index + 1));
     }
-    let mut id = 4;
-    for (kind, trigger, working) in [
-        ("STOP_MARKET", "9000.1", "MARK_PRICE"),
-        ("TAKE_PROFIT_MARKET", "9500.1", "CONTRACT_PRICE"),
-    ] {
-        for amount in ["2", "2", "1.001"] {
-            let child = h.take(Method::Post);
-            assert!(child.url.contains(&format!("side=SELL&type={kind}&quantity={amount}&reduceOnly=true&stopPrice={trigger}&workingType={working}")), "{}", child.url);
-            h.reply(child, &format!(r#"{{"orderId":{id}}}"#));
-            id += 1;
-        }
-    }
+    let sl = h.take(Method::Post);
+    assert!(sl.url.contains("side=SELL&type=STOP_MARKET&quantity=5.001&reduceOnly=true&stopPrice=9000.1&workingType=MARK_PRICE"),"{}",sl.url);
+    h.reply(sl, r#"{"orderId":4}"#);
+    let tp = h.take(Method::Post);
+    assert!(tp.url.contains("type=TAKE_PROFIT_MARKET&quantity=5.001&reduceOnly=true&stopPrice=9500.1&workingType=CONTRACT_PRICE"),"{}",tp.url);
+    h.reply(tp, r#"{"orderId":5}"#);
     assert_eq!(
         h.result(1).as_ref().unwrap(),
-        "[\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"]"
+        "[\"1\",\"2\",\"3\",\"4\",\"5\"]"
     );
 }
 #[test]
@@ -356,7 +350,7 @@ fn trailing_and_v1_stp_fail_before_write() {
     assert!(h.result(2).is_err());
 }
 #[test]
-fn a_refused_order_fails_the_command_and_names_the_placed_one() {
+fn a_refused_order_returns_the_accepted_ids_like_legacy_ts() {
     let mut h = Harness::new();
     h.command(Command::PlaceOrders {
         command: 1,
@@ -366,12 +360,10 @@ fn a_refused_order_fails_the_command_and_names_the_placed_one() {
         ],
     });
     let first = h.take(Method::Post);
-    h.reply(first, r#"{"orderId":22542179}"#);
+    h.reply(first, r#"{"code":-2010,"msg":"insufficient margin"}"#);
     let second = h.take(Method::Post);
-    h.reply(second, r#"{"code":-2010,"msg":"insufficient margin"}"#);
-    assert!(h.result(1).is_err());
-    let error = &h.failures.last().unwrap().1;
-    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["22542179"]);
+    h.reply(second, r#"{"orderId":22542179}"#);
+    assert_eq!(h.result(1).as_ref().unwrap(), "[\"22542179\"]");
 }
 #[test]
 fn cancel_unknown_is_idempotent_and_does_not_replace_filled_status() {
@@ -606,7 +598,7 @@ fn malformed_ack_is_not_success_and_ambiguous_write_is_never_retried() {
 }
 
 #[test]
-fn a_locally_invalid_order_refuses_the_whole_batch() {
+fn a_locally_invalid_order_returns_the_valid_ids_like_legacy_ts() {
     let mut h = Harness::new();
     let mut invalid = limit();
     invalid["symbol"] = json!("UNKNOWN");
@@ -617,11 +609,9 @@ fn a_locally_invalid_order_refuses_the_whole_batch() {
             serde_json::from_value(limit()).unwrap(),
         ],
     });
-    assert!(h.requests.is_empty());
-    assert!(h.result(1).is_err());
-    let error = &h.failures.last().unwrap().1;
-    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
-    assert!(error.partial.is_none());
+    let valid = h.take(Method::Post);
+    h.reply(valid, r#"{"orderId":22542179}"#);
+    assert_eq!(h.result(1).as_ref().unwrap(), "[\"22542179\"]");
 }
 
 #[test]
@@ -1046,7 +1036,7 @@ fn ack_routing_capacity_rejects_oversized_and_concurrent_jobs_before_new_writes(
 }
 
 #[test]
-fn unknown_id_refuses_the_complete_cancellation_batch_before_writes() {
+fn unknown_id_does_not_prevent_other_cancellations_in_the_batch() {
     let mut h = Harness::new();
     h.engine
         .store_mut()
@@ -1055,15 +1045,13 @@ fn unknown_id_refuses_the_complete_cancellation_batch_before_writes() {
         command: 1,
         ids: vec!["unknown".into(), "known".into()],
     });
-    assert!(!h.requests.iter().any(|r| r.method != Method::Get));
-    assert!(h.result(1).is_err());
-    assert_eq!(
-        h.failures[0].1.outcome,
-        Some(safe_cex_engine::Outcome::NotSent)
-    );
+    let cancel = h.take(Method::Delete);
+    assert!(cancel.url.contains("orderId=known&"));
+    h.reply(cancel, r#"{"status":"CANCELED"}"#);
+    assert!(h.result(1).is_ok());
     assert_eq!(
         h.engine.store().order("known").unwrap().status,
-        OrderStatus::Open
+        OrderStatus::Canceled
     );
 }
 
@@ -1203,7 +1191,7 @@ fn an_amend_size_at_or_below_the_filled_amount_is_refused_before_any_write() {
 }
 
 #[test]
-fn a_refused_stop_replacement_reports_the_stop_is_gone_without_restoring() {
+fn a_refused_stop_replacement_restores_or_says_the_stop_is_gone() {
     let mut h = Harness::new();
     h.native_stop();
     h.command(Command::AmendOrder {
@@ -1219,10 +1207,11 @@ fn a_refused_stop_replacement_reports_the_stop_is_gone_without_restoring() {
         place,
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
-    assert!(
-        !h.requests
-            .iter()
-            .any(|r| r.method == Method::Post && r.url.contains("/order?"))
+    let restore = h.take(Method::Post);
+    assert!(restore.url.contains("stopPrice=9300"));
+    h.reply(
+        restore,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
     let message = h.result(1).as_ref().unwrap_err();
     assert!(message.contains("no stop"), "{message}");
@@ -1417,11 +1406,6 @@ fn market_orders_split_at_the_market_lot_maximum_and_limits_at_the_lot_maximum()
                 Harness::new()
             };
             h.load(BTC_INFO);
-            h.engine.store_mut().set_tickers(vec![Ticker {
-                symbol: "BTCUSDT".into(),
-                mark: 70000.0,
-                ..Ticker::default()
-            }]);
             h.place(json!({"symbol":"BTCUSDT","type":"market","side":"sell","amount":250.0,"reduceOnly":reduce_only}));
             assert_eq!(
                 quantities(&mut h),
@@ -1447,11 +1431,6 @@ fn a_market_split_keeps_every_chunk_on_the_market_lot_step_and_minimum() {
     );
     let mut h = Harness::new();
     h.load(&info);
-    h.engine.store_mut().set_tickers(vec![Ticker {
-        symbol: "BTCUSDT".into(),
-        mark: 70000.0,
-        ..Ticker::default()
-    }]);
     h.place(json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":240.024}));
     assert_eq!(quantities(&mut h), ["120", "119.97", "0.05"]);
     h.place(
@@ -1573,5 +1552,5 @@ fn engine_ambiguity_429_timestamp_cannot_resend() {
     }
 }
 
-#[path = "support/split_preflight.rs"]
-mod split_preflight;
+#[path = "support/legacy_parity.rs"]
+mod legacy_parity;
