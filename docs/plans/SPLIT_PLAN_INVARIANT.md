@@ -13,13 +13,23 @@ The legacy TypeScript adapters define the correct behaviour. It has been tuned o
 
 ## Exception: stop after an unknown outcome
 
-One recorded exception to TypeScript parity: when an element's outcome cannot be known (an ambiguous venue reply, a timeout, a lost transport after a possible send), Rust halts further writes for that action, even where the TypeScript continued. In that case it:
+The first recorded exception to TypeScript parity: when an element's outcome cannot be known (an ambiguous venue reply, a timeout, a lost transport after a possible send), Rust halts further writes for that action, even where the TypeScript continued. In that case it:
 
 - returns a clear outcome naming what was placed and what is unknown, with "check Open Orders, then try again";
 - records the event in the outcome journal and telemetry;
 - never retries or continues automatically, and leaves any retry to the user.
 
 The reason: a missed order is recoverable, while an accidental double position is not. After a definite refusal, TypeScript parity applies as above. Every path that takes this exception is listed with its TypeScript reference.
+
+## Exception: keep the protective put-back
+
+The second recorded exception, decided by Sam: where Rust already restores a protective order (stop or TP/SL) after its replacement was definitely refused, that put-back stays, even where the TypeScript left the position without the old protective order. The rules:
+
+- The old protective order is restored only after a definite refusal of its replacement. After an unknown outcome, the stop-after-unknown exception applies instead, and nothing is restored automatically.
+- A venue that requires refusal proof before the put-back (for example BloFin) keeps that requirement.
+- A parity change neither removes an existing put-back nor adds one to a venue that lacks it.
+
+The reason: a position left without its stop after a refusal is a worse failure than the extra write. Every path that keeps this exception is listed with its TypeScript reference.
 
 ## Outcome reporting
 
