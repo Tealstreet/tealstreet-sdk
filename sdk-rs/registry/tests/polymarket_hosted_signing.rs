@@ -14,7 +14,7 @@ struct PublicOnly;
 impl Visit for PublicOnly {
     type Output = ();
     fn visit<V: Venue + 'static>(self, engine: Engine<V>) {
-        assert_eq!(engine.account_startup(), false);
+        assert!(!engine.account_startup());
     }
 }
 
