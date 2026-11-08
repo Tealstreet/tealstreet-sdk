@@ -1113,10 +1113,11 @@ fn a_text_only_gone_row_is_classified_by_its_code_and_stops() {
     let error = failure(&h, 7);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error.message.contains("cancellation rejected"),
+        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
         "{}",
         error.message
     );
+    assert!(!error.message.contains("rejected"));
     assert!(
         h.e.store().order(&ids[3]).is_some(),
         "an unproven row is not removed"
