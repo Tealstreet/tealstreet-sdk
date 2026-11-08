@@ -207,6 +207,8 @@ struct Job {
     fallback: Option<VecDeque<Planned>>,
     rollback: Option<Planned>,
     error: Option<VenueError>,
+    /// A Classic batch refusal TS continues past, retained for reporting.
+    batch_error: Option<VenueError>,
     ids: Vec<String>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
@@ -738,6 +740,7 @@ impl BitgetFutures {
             fallback: None,
             rollback: None,
             error: None,
+            batch_error: None,
             ids: vec![],
             effective: false,
             replaces_stop: None,
@@ -1132,7 +1135,7 @@ impl BitgetFutures {
         mut job: Job,
         current: Option<(&Slot, &Context)>,
     ) {
-        if let Some(error) = job.error.take() {
+        if let Some(error) = job.error.take().or_else(|| job.batch_error.take()) {
             return self.end(cx, job, current, error);
         }
         let ids = serde_json::to_string(&job.ids).expect("order ids");
@@ -3470,6 +3473,21 @@ impl BitgetFutures {
                 job.error = Some(error);
                 job.calls.clear();
                 job.calls.push_back(rollback);
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            // TS Classic batches throw on failureList or HTTP failure, but
+            // continue after a bare HTTP-200 business refusal. Keep its fact.
+            if status == 200
+                && explicit_rejection
+                && request.call.path == paths::BATCH_PLACE
+                && parsed.as_ref().is_ok_and(|reply| {
+                    reply
+                        .data
+                        .as_ref()
+                        .is_none_or(|data| data.failure_list.is_empty())
+                })
+            {
+                job.batch_error.get_or_insert(error);
                 return self.drive(cx, job, At::Data(&request.slot, &request.context));
             }
             if (native_unknown || error.outcome == Some(Outcome::Unknown))

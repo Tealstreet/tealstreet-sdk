@@ -45,6 +45,16 @@ the original native `loss_plan` or `pos_loss` identity. Ambiguous writes are
 never retried. History reads page executions, orders, income and public trades
 into the engine query shapes and reject incomplete financial results.
 
+After a placement refusal, dispatch follows the legacy TS path: Classic
+`failureList` rows and HTTP failures stop later batches and standalone TP/SL;
+UTA normal and strategy refusals stop subsequent writes. Classic batch HTTP-200
+business refusals without a `failureList` continue to later batches and TP/SL,
+while the final command retains the refusal and acknowledged partial identities.
+Native amend rejection still releases its cancel/replace fallback. A rejected
+UTA protective replacement still attempts the original stop once; a refused
+restore ends the sequence. Zero-rounded anonymous rows remain omitted before
+dispatch. These rules add no whole-plan sizing gate or tail rebalancing.
+
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
 
