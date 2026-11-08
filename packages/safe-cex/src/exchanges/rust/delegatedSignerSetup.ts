@@ -186,14 +186,9 @@ export class DelegatedSignerSetup {
       const {
         remoteSigner: _remote, payloadSigner: _payload, signing: _signing, readCredentials: _readCredentials, ...safe
       } = withoutSigningCredentials(parsed as ExchangeOptions) as ExchangeOptions & { signing?: unknown; readCredentials?: unknown };
-<<<<<<< HEAD
-      return new Constructor(venue, JSON.stringify({ ...safe, signing: this.#identities,
-        ...(this.#coinbaseSigning && { coinbaseSigning: this.#coinbaseSigning }),
-        remoteSigning: true, payloadSigner: this.usesPayloadSigner, publicMode: this.#publicMode }));
-=======
       return new Constructor(venue, JSON.stringify({ ...safe, ...(this.#publicOnly ? { publicDataOnly: true } : {}), signing: this.#identities,
+        ...(this.#coinbaseSigning && { coinbaseSigning: this.#coinbaseSigning }),
         remoteSigning: !this.#publicOnly, payloadSigner: this.usesPayloadSigner, publicMode: this.#publicMode }));
->>>>>>> origin/master
     } catch (error) {
       this.dispose();
       throw error;

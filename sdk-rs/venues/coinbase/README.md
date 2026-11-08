@@ -138,5 +138,9 @@ canonical JWS bytes and returns a 64-byte signature in unpadded base64url;
 private WS auth requires RemoteSigner. Wallet/agent and OAuth credentials are
 separate protocols, not CDP JWT substitutes. The signing-only DRB codec accepts
 CDP issuer claims without changing the S2/S3 session transport under development.
+Engine-owned signer slots select by request purpose: account/history reads can
+use the read key; catalogue, permission checks, amend proofs and private socket
+authentication use the primary key. A refused read key pins subsequent reads to
+the primary signer and egress through the same selection boundary.
 See `docs/plans/callers/coinbase-hosted-signing.md` at the repository root for
 wire formats, typed refusals, algorithm selection and NX integration.

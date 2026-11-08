@@ -16,6 +16,19 @@ pub struct Request {
     command: CommandId,
     step: Step,
 }
+impl Request {
+    pub(crate) fn signing_role(&self) -> safe_cex_engine::credential_selection::CredentialRole {
+        use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
+        if matches!(self.step, Step::Confirm { .. }) {
+            CredentialRole::PrimaryRead {
+                reason: PrimaryReason::ClientOrderLookup,
+                scope: None,
+            }
+        } else {
+            CredentialRole::Mutation
+        }
+    }
+}
 enum Step {
     Place {
         payload: Create,
@@ -1154,7 +1167,7 @@ impl Coinbase {
             }
             _ => {}
         }
-        if self.credentials.is_none()
+        if !self.signers.has_primary()
             || self.options.public_data_only
             || self.account.kind.is_none()
             || !cx.store.loaded().markets

@@ -12,6 +12,7 @@ mod trading;
 mod wire;
 
 use safe_cex_engine::book::Book;
+use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason, SlotPolicy, Slots};
 use safe_cex_engine::{
     Command, Cx, ErrorKind, Level, Response, SocketId, TimerId, Venue, VenueError,
 };
@@ -62,10 +63,9 @@ pub struct Coinbase {
     pub drb: drb::Transport,
     pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) public: public::Public,
-    pub(crate) credentials: Option<sign::Credentials>,
-    pub(crate) read_credentials: Option<sign::Credentials>,
-    /// The host routes GETs through the read key's egress unless told otherwise.
-    pub(crate) read_supplied: bool,
+    pub(crate) signers: Slots<sign::Credentials>,
+    // Keep the supplied-slot routing fact when a rejected read key is disabled.
+    pub(crate) read_disabled: bool,
     rest: rest::Rest,
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
@@ -80,17 +80,16 @@ impl Coinbase {
     ) -> Result<Self, String> {
         let mut venue = Self::new(options)?;
         if !venue.options.public_data_only {
-            venue.credentials = primary
+            let primary = primary
                 .map(|(binding, identity)| sign::Credentials::external(binding, identity))
                 .transpose()?;
-            venue.read_credentials = secondary
+            let secondary = secondary
                 .map(|(binding, identity)| sign::Credentials::external(binding, identity))
                 .transpose()?;
-            venue.read_supplied = venue.read_credentials.is_some();
-            venue.options.key = venue
-                .credentials
+            venue.options.key = primary
                 .as_ref()
                 .map_or_else(String::new, |c| c.key().to_owned());
+            venue.signers = Slots::new(primary, secondary, Self::slot_policy());
         }
         Ok(venue)
     }
@@ -120,15 +119,35 @@ impl Coinbase {
             drb: drb::Transport::default(),
             options,
             public: public::Public::new(),
-            credentials,
-            read_supplied: read_credentials.is_some(),
-            read_credentials,
+            signers: Slots::new(credentials, read_credentials, Self::slot_policy()),
+            read_disabled: false,
             rest: rest::Rest::default(),
             account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
             intx_startup_failed: false,
         })
+    }
+
+    fn slot_policy() -> SlotPolicy {
+        SlotPolicy {
+            secondary_requires_primary: true,
+        }
+    }
+
+    pub(crate) fn has_read_key(&self) -> bool {
+        self.signers.secondary_supplied() && !self.read_disabled
+    }
+
+    pub(crate) fn read_role(&self) -> CredentialRole {
+        if self.read_disabled {
+            CredentialRole::PrimaryRead {
+                reason: PrimaryReason::DegradedRead,
+                scope: None,
+            }
+        } else {
+            CredentialRole::Read { scope: None }
+        }
     }
 }
 impl Coinbase {
@@ -157,7 +176,7 @@ impl Coinbase {
     fn fail_moved_intx_startup(&mut self, cx: &mut Cx<'_, Pending>, intx: bool) -> bool {
         let loaded = cx.store.loaded();
         let ready = loaded.markets
-            && if self.credentials.is_some() {
+            && if self.signers.has_primary() {
                 loaded.balance && loaded.orders && loaded.positions
             } else {
                 loaded.tickers
@@ -238,7 +257,7 @@ impl Venue for Coinbase {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_some() {
+        if self.signers.has_primary() {
             self.private_start(cx);
         } else {
             self.public_start(cx);

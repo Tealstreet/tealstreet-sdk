@@ -2328,7 +2328,7 @@ fn saved_read_only_key_signs_reads_while_writes_keep_the_trading_key() {
             "{}",
             read.url
         );
-        assert_eq!(read.route, None);
+        assert_eq!(read.route, Some(safe_cex_engine::RequestRoute::Secondary));
     }
 }
 
