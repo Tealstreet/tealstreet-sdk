@@ -209,7 +209,14 @@ fn runtime_failure_orders(
     second_reply: &str,
     expected: &str,
 ) {
-    runtime_failure_suffix(orders, status, second_reply, expected, false, false);
+    runtime_failure_suffix(
+        orders,
+        status,
+        second_reply,
+        expected,
+        false,
+        expected == "unknown",
+    );
 }
 
 fn runtime_failure_suffix(
