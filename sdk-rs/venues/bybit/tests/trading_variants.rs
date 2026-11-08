@@ -4378,6 +4378,11 @@ fn applied_batch_cancel_unknown_row_records_only_confirmed_cancellations() {
         "cancellation targets are existing orders, never newly created IDs: {:?}",
         errors[0]
     );
+    assert_eq!(
+        serde_json::to_value(errors[0]).unwrap()["partial"],
+        serde_json::json!({ "orderIds": [], "total": 2, "failedIndex": 1 }),
+        "the JS boundary still needs the attempted count and Unknown target index"
+    );
 }
 
 #[test]
