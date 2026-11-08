@@ -100,7 +100,7 @@ impl KucoinSpot {
             return Err("invalid KuCoin Spot order amount or price".into());
         }
         let amount = adjust(o.amount, m.precision.amount);
-        if amount <= 0.0 || amount > m.limits.amount.max {
+        if amount <= 0.0 {
             return Err("KuCoin Spot order exceeds native size limits".into());
         }
         let client_oid = client_oid(o.client_order_id.as_deref(), || {

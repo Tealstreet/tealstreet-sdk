@@ -2917,3 +2917,99 @@ fn parity_spot_batch_sends_below_minimum_zero_rounded_price_tail() {
         2
     );
 }
+
+// Legacy one-payload path: packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts:426-445.
+fn assert_ts_oversized_write(amount: f64, maximum: f64, step: f64, expected: &str) {
+    let mut h = H::new(true);
+    let mut markets = h.e.store().markets().to_vec();
+    let market = markets.iter_mut().find(|m| m.symbol == "BTC-USDT").unwrap();
+    market.precision.amount = step;
+    market.limits.amount.min = step;
+    market.limits.amount.max = maximum;
+    h.e.store_mut().set_markets(markets);
+    let mut opts = place(None);
+    opts.client_order_id = None;
+    opts.amount = amount;
+    h.command(Command::PlaceOrders {
+        command: 1201,
+        orders: vec![opts],
+    });
+    let request = h.http("/hf/orders");
+    let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["size"], expected);
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|r| r.method == Method::Post && r.url.ends_with("/hf/orders"))
+            .count(),
+        1
+    );
+    let actual_sum: f64 = h
+        .requests
+        .iter()
+        .filter(|r| r.method == Method::Post && r.url.ends_with("/hf/orders"))
+        .map(|r| {
+            let payload: Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+            payload["size"].as_str().unwrap().parse::<f64>().unwrap()
+        })
+        .sum();
+    assert_eq!(
+        actual_sum,
+        expected.parse::<f64>().unwrap(),
+        "one-payload TS sum"
+    );
+    h.respond(
+        &request,
+        400,
+        r#"{"code":"100001","msg":"size exceeds maxOrderQty"}"#,
+    );
+    let error = h
+        .failures
+        .last()
+        .expect("venue refusal is surfaced after HTTP");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert!(error.message.contains("size exceeds maxOrderQty"));
+    assert!(
+        h.done(1201)
+            .unwrap_err()
+            .contains("size exceeds maxOrderQty")
+    );
+    assert!(!h.actions.iter().any(
+        |a| matches!(a,Action::Http(r) if r.method==Method::Post && r.url.ends_with("/hf/orders"))
+    ));
+}
+
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_26_5_1() {
+    assert_ts_oversized_write(26.0, 5.0, 1.0, "26");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_11_5_1() {
+    assert_ts_oversized_write(11.0, 5.0, 1.0, "11");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_12_5_1() {
+    assert_ts_oversized_write(12.0, 5.0, 1.0, "12");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_10_5_1() {
+    assert_ts_oversized_write(10.0, 5.0, 1.0, "10");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_7_3_half_step() {
+    assert_ts_oversized_write(7.0, 3.0, 0.5, "7");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_fractional_thousandth_step() {
+    assert_ts_oversized_write(1.0005, 0.3, 0.001, "1.001");
+}
+#[test]
+fn alloc_ts_at_maximum_control() {
+    assert_ts_oversized_write(5.0, 5.0, 1.0, "5");
+}
