@@ -824,9 +824,46 @@ export class DefaultStore implements Store {
     this.notify();
   };
 
-  /** Replace the authoritative native snapshot, including an empty snapshot. */
+  /** Preserve closed-symbol settings while clearing exposure and native sizing evidence. */
+  createEmptyPositionFrom = (position: Position) => {
+    return {
+      ...position,
+      entryPrice: 0,
+      notional: 0,
+      unrealizedPnl: 0,
+      contracts: 0,
+      liquidationPrice: null,
+      marginSize: 0,
+      info: undefined,
+      extra: undefined,
+    };
+  };
+
+  /** Merge full refreshes, retaining omitted symbols with zero exposure. */
   addOrUpdatePositionsFull = (positions: Position[]) => {
-    this.update({ positions });
+    const usedIds = new Set<string>();
+    const positionIndexById =
+      positions.length > 1 && this.state.positions.length > 1 ? this.buildIdIndexMap(this.state.positions) : undefined;
+    positions.forEach((position) => {
+      usedIds.add(position.id);
+      const idx = this.findIndexById(this.state.positions, position.id, positionIndexById);
+      if (idx > -1) {
+        this.updateInArray('positions', idx, position);
+      } else {
+        if (positionIndexById) {
+          positionIndexById[position.id] = this.state.positions.length;
+        }
+        this.state.positions.push({ ...position });
+      }
+    });
+    Object.assign(this.state, {
+      positions: this.state.positions.map((position) =>
+        usedIds.has(position.id) ? position : this.createEmptyPositionFrom(position),
+      ),
+    });
+
+    this.state.updateIds.positions += 1;
+    this.notify();
   };
 
   /**

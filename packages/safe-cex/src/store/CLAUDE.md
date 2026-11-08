@@ -453,3 +453,11 @@ from public declarations; book levels remain mutable and candle fields readonly.
 The separate Store publisher applies the same filter after choosing field
 modifiers, so mutable leverage fields and update counters retain their shape
 without exposing the internal tags.
+
+### Full position refreshes retain closed-symbol settings
+
+`addOrUpdatePositionsFull` merges supplied rows into existing objects, retaining
+omitted optional settings. Omitted rows remain with zero exposure and null
+liquidation, preserving leverage/margin/mode metadata for later operations. An
+empty full refresh closes retained rows rather than removing them. Native frame
+application through `update({ positions })` remains a separate replacement path.

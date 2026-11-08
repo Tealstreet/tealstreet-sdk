@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Market, Order, OrderSide, OrderStatus, OrderType, Position, PositionSide, Ticker } from '../types';
+import {
+  MarginType,
+  Market,
+  Order,
+  OrderSide,
+  OrderStatus,
+  OrderType,
+  Position,
+  PositionMode,
+  PositionSide,
+  Ticker,
+} from '../types';
 import { DefaultStore, defaultStore } from './store.base';
 import { stubStore } from './store.stub';
 
@@ -465,19 +476,69 @@ describe('DefaultStore', () => {
     });
 
     describe('addOrUpdatePositionsFull', () => {
-      it('replaces an authoritative snapshot without synthesizing closed positions', () => {
-        store.addOrUpdatePosition(createPosition({ id: 'closed', liquidationPrice: null }));
+      it('retains closed-symbol settings with zero exposure after an empty full refresh', () => {
+        store.addOrUpdatePosition(
+          createPosition({
+            id: 'closed',
+            leverage: 20,
+            marginType: MarginType.Isolated,
+            positionMode: PositionMode.Hedged,
+            liquidationPrice: 45000,
+          }),
+        );
+        const version = store.updateIds.positions;
         store.addOrUpdatePositionsFull([]);
-        expect(store.positions).toEqual([]);
-        expect(store.serialize().positions).toEqual([]);
+        expect(store.positions).toEqual([
+          createPosition({
+            id: 'closed',
+            leverage: 20,
+            marginType: MarginType.Isolated,
+            positionMode: PositionMode.Hedged,
+            entryPrice: 0,
+            notional: 0,
+            unrealizedPnl: 0,
+            contracts: 0,
+            liquidationPrice: null,
+            marginSize: 0,
+            info: undefined,
+            extra: undefined,
+          }),
+        ]);
+        expect(store.updateIds.positions).toBe(version + 1);
+        expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
       });
 
-      it('uses only the producer rows and preserves unknown liquidation', () => {
+      it('merges matching rows in place and retains their omitted optional settings', () => {
+        store.addOrUpdatePosition(
+          createPosition({ marginType: MarginType.Isolated, positionMode: PositionMode.Hedged }),
+        );
+        const retained = store.positions[0];
+        store.addOrUpdatePositionsFull([createPosition({ contracts: 5, liquidationPrice: null })]);
+        expect(store.positions[0]).toBe(retained);
+        expect(retained).toEqual(
+          createPosition({
+            contracts: 5,
+            liquidationPrice: null,
+            marginType: MarginType.Isolated,
+            positionMode: PositionMode.Hedged,
+          }),
+        );
+      });
+
+      it('adds producer rows while retaining omitted rows with unknown liquidation', () => {
         store.addOrUpdatePosition(createPosition({ id: 'old' }));
         const row = createPosition({ id: 'current', contracts: 5, liquidationPrice: null });
         store.addOrUpdatePositionsFull([row]);
-        expect(store.positions).toEqual([row]);
-        expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
+        expect(store.positions.map((position) => position.id)).toEqual(['old', 'current']);
+        expect(store.positions[0].contracts).toBe(0);
+        expect(store.positions[0].leverage).toBe(10);
+        expect(store.positions[1]).toEqual(row);
+        expect(store.positions[1]).not.toBe(row);
+        expect(
+          JSON.parse(JSON.stringify(store.serialize())).positions.every(
+            (position: Position) => position.liquidationPrice === null,
+          ),
+        ).toBe(true);
       });
     });
   });
