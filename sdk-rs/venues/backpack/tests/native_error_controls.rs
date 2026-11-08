@@ -101,7 +101,26 @@ fn unknown_child_stops(body: &str, expected_code: Option<&str>) -> Result {
     assert_eq!(failures.len(), 1);
     let error = failures.first().ok_or("missing native failure")?;
     assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        error.message,
+        "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+    );
+    let warning = out
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .ok_or("missing child failure warning")?;
+    assert_eq!(warning.message, error.message);
     assert_eq!(error.venue_code.as_deref(), expected_code);
+    if expected_code.is_some() {
+        assert_eq!(error.venue_message.as_deref(), Some("synthetic detail"));
+    }
     assert_eq!(
         error
             .partial
@@ -142,6 +161,69 @@ fn http200_code_envelope_keeps_unknown_and_stops_children() -> Result {
 #[test]
 fn http200_error_envelope_keeps_unknown_and_stops_children() -> Result {
     unknown_child_stops(r#"{"error":"synthetic unavailable"}"#, None)
+}
+
+#[test]
+fn definitive_trigger_replacement_refusal_keeps_rejection_wording() -> Result {
+    let stop = ORDER
+        .replace("\"orderType\":\"Limit\"", "\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\",\"reduceOnly\":true")
+        .replace("\"side\":\"Bid\"", "\"side\":\"Ask\"")
+        .replace("\"executedQuantity\":\"0\"", "\"executedQuantity\":\"1\"");
+    let (mut engine, _) = ready_orders(&format!("[{stop}]"));
+    engine.store_mut().update_ticker(SYMBOL, |ticker| {
+        ticker.last = 140.;
+        ticker.mark = 140.;
+        ticker.index = 140.;
+    });
+    engine.handle(
+        2000.,
+        Event::Command(Command::AmendOrder {
+            command: 905,
+            id: "123".into(),
+            price: Some(125.),
+            amount: None,
+        }),
+    );
+    let cancel = requests(&mut engine).pop().ok_or("missing cancel")?;
+    assert_eq!(cancel.method, Method::Delete);
+    reply(
+        &mut engine,
+        &cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"1"}"#,
+    );
+    let replacement = requests(&mut engine).pop().ok_or("missing replacement")?;
+    assert_eq!(replacement.method, Method::Post);
+    reply(
+        &mut engine,
+        &replacement,
+        400,
+        r#"{"code":"INVALID_ORDER","message":"synthetic refusal"}"#,
+    );
+    let out = actions(&mut engine);
+    let error = out
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 905,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .ok_or("missing definitive refusal")?;
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
+    assert_ne!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert!(error.message.contains("replacement was refused"));
+    assert!(!error.message.contains("outcome is unknown"));
+    assert_eq!(error.venue_code.as_deref(), Some("INVALID_ORDER"));
+    assert_eq!(error.venue_message.as_deref(), Some("synthetic refusal"));
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    assert!(requests(&mut engine).is_empty());
+    Ok(())
 }
 
 #[test]
