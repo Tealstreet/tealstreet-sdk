@@ -424,3 +424,14 @@ Market decoding lives in `marketFrames.ts`, using the generated Market contract.
 The native `market_output` module owns optional numeric display policy and
 contract-count labels. NaN encodes absence; zero limits and zero option terms
 remain published values. The frame reader refuses invalid optional infinities.
+
+## NX Position nullability gate
+
+`yarn check:nx-position` compiles the actual FrameApplier dependency graph with
+NX web's strict language options and the SDK workspace's module resolution.
+It also rejects the old reader's five unsafe nullable/optional numeric uses.
+The normal package typecheck includes this gate. Import reader implementations
+with their declarations: a declarations-only overlay onto the old NX reader
+is not a valid Position cutover. Native null liquidation prices remain unknown
+through apply and serialization; optional numeric columns are narrowed before
+use, preserving absence and reported zero.

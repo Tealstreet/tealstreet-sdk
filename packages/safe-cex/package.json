@@ -17,8 +17,9 @@
     "test-unit": "vitest run",
     "test-unit-watch": "vitest watch --ui",
     "test-wasm": "SAFE_CEX_WASM_TESTS=1 vitest run",
-    "typecheck": "node ../../scripts/tsc-ts6.mjs --project ./tsconfig.json --noEmit && node --test ../../sdk-rs/safe-cex-types/tests/position-contract.cjs ../../sdk-rs/safe-cex-types/tests/order-contract.cjs ../../sdk-rs/safe-cex-types/tests/balance-contract.cjs ../../sdk-rs/safe-cex-types/tests/market-contract.cjs ../../sdk-rs/safe-cex-types/tests/ticker-contract.cjs ../../sdk-rs/safe-cex-types/tests/execution-contract.cjs ../../sdk-rs/safe-cex-types/tests/history-contract.cjs ../../sdk-rs/safe-cex-types/tests/options-contract.cjs && node --test ../../sdk-rs/safe-cex-types/tests/store-contract.cjs",
-    "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --project ./tsconfig.json --noEmit"
+    "typecheck": "node ../../scripts/tsc-ts6.mjs --project ./tsconfig.json --noEmit && node --test ../../sdk-rs/safe-cex-types/tests/position-contract.cjs ../../sdk-rs/safe-cex-types/tests/order-contract.cjs ../../sdk-rs/safe-cex-types/tests/balance-contract.cjs ../../sdk-rs/safe-cex-types/tests/market-contract.cjs ../../sdk-rs/safe-cex-types/tests/ticker-contract.cjs ../../sdk-rs/safe-cex-types/tests/execution-contract.cjs ../../sdk-rs/safe-cex-types/tests/history-contract.cjs ../../sdk-rs/safe-cex-types/tests/options-contract.cjs && node --test ../../sdk-rs/safe-cex-types/tests/store-contract.cjs && node --test ../../sdk-rs/safe-cex-types/tests/nx-position-contract.cjs",
+    "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --project ./tsconfig.json --noEmit",
+    "check:nx-position": "node --test ../../sdk-rs/safe-cex-types/tests/nx-position-contract.cjs"
   },
   "dependencies": {
     "@tealstreet/logging": "*",

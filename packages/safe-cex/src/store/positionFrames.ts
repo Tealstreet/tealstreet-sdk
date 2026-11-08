@@ -44,6 +44,11 @@ export function readPositionFrame(frame: Frame, store: Store, markets?: readonly
       const id = positions.id(i);
       const contractsNative = positions.contractsNative[i];
       const unrealizedPnlNative = positions.unrealizedPnlNative[i];
+      // Native null means unknown. Preserve it without a numeric fallback.
+      const liquidationPrice = positions.liquidationPrice[i];
+      const realizedPnl = positions.realizedPnl[i];
+      const marginSize = positions.marginSize[i];
+      const lastUpdate = positions.lastUpdate[i];
       rows.push({
         id,
         ...(greeksById.has(id) && { option: greeksById.get(id) }),
@@ -68,12 +73,12 @@ export function readPositionFrame(frame: Frame, store: Store, markets?: readonly
             ...(unrealizedPnlNative !== undefined && { unrealizedPnlNative }),
           },
         }),
-        liquidationPrice: positions.liquidationPrice[i],
+        liquidationPrice,
         ...(mode !== undefined && { positionMode: mode }),
         ...(enums.marginType !== undefined && { marginType: margins[enums.marginType] }),
-        ...(positions.realizedPnl[i] !== undefined && { realizedPnl: positions.realizedPnl[i] }),
-        ...(positions.marginSize[i] !== undefined && { marginSize: positions.marginSize[i] }),
-        ...(positions.lastUpdate[i] !== undefined && { lastUpdate: positions.lastUpdate[i] }),
+        ...(realizedPnl !== undefined && { realizedPnl }),
+        ...(marginSize !== undefined && { marginSize }),
+        ...(lastUpdate !== undefined && { lastUpdate }),
       });
     }
     return rows;
