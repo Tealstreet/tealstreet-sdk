@@ -18,3 +18,26 @@ assert that the ticker and depth book agree on the venue's best prices.
 The PM replay adapter in `sdk-rs/harness/binance-protocol.mjs` derives the same
 real-time subscriptions from the TypeScript reference's own market catalogue.
 Every per-symbol topic remains visible to strict replay comparison.
+
+# Legacy TypeScript placement policy
+
+Placement retains the existing venue behavior. Formatting a batch before I/O
+does not validate every lot against native minimum quantities or notionals.
+A venue refusal can therefore follow an accepted order. Separate attached algo
+orders retain their whole intent quantity, and USD-M can continue later batches
+after a definite per-row refusal. These are known legacy partial-placement paths.
+
+| Audit path | Legacy reference evidence | Verdict |
+| --- | --- | --- |
+| Maximum-quantity splitting | `binancespot.exchange.ts:535`, `binance.exchange.ts:1830`, `binanceinverse.exchange.ts:915`, `binancepm.exchange.ts:902` | TS-partial |
+| Batch chunks | `binance.exchange.ts:1970`, `binanceinverse.exchange.ts:928`, `binancespot.exchange.ts:576`, `binancepm.exchange.ts:1005` | TS-partial |
+| Separate TP/SL children | `binance.exchange.ts:1851`, `binanceinverse.exchange.ts:887`, `binancespot.exchange.ts:550`, `binancepm.exchange.ts:916` | TS-partial |
+| Cancel-replace | `binance.exchange.ts:1597`, `binanceinverse.exchange.ts:794`, `binancespot.exchange.ts:445`, `binancepm.exchange.ts:817` | TS-partial |
+
+Reference files live under `packages/safe-cex/src/__tests__/reference/binance/`.
+The PM Algo Service migration at `274a20d5e` changes its conditional route while
+preserving its allocation and regular-before-conditional dispatch policy.
+Native lot rebalancing, whole-plan filter refusals and new fail-stop rules are
+outside this parity change. Existing protective replacement/put-back behavior
+and engine-owned transport classification remain in place. Binance does not
+adopt `WritePlan` as a dispatch gate.
