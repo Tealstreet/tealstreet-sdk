@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 mod support;
+#[path = "support/unknown_exceptions.rs"]
+mod unknown_exceptions;
 use crate::support::*;
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{Action, Command, Engine, Event, Notice};

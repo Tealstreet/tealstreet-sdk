@@ -158,6 +158,8 @@ struct Step {
     expected: usize,
     collect_ids: bool,
     write_index: Option<usize>,
+    /// Reporting only: the row whose native acknowledgement is unproven.
+    unknown_row: Option<usize>,
 }
 #[derive(Default)]
 pub struct TradingState {
@@ -1688,7 +1690,17 @@ impl Okx {
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
             return;
         };
-        let step = job.steps.front().expect("inflight step");
+        let step = job.steps.front_mut().expect("inflight step");
+        step.unknown_row = acks.iter().position(|ack| {
+            (!matches!(ack.s_code, "" | "0")
+                && matches!(
+                    CODES.verdict(&native(ack.s_code, ack.s_msg), Intent::Place),
+                    Verdict::Unknown(_)
+                ))
+                || (matches!(ack.s_code, "" | "0")
+                    && ack.ord_id.is_empty()
+                    && ack.algo_id.is_empty())
+        });
         if let (Some(writes), Some(index)) = (&mut job.writes, job.pending_write)
             && acks.len() == step.expected
         {
@@ -1762,6 +1774,39 @@ impl Okx {
             }
         }
         if acks.iter().any(|ack| ack.s_code == "50004") {
+            // Preserve proven siblings in this same unproven batch. Recording
+            // only an empty Unknown fact loses them in the engine projection.
+            // Keep the existing Internal/Unknown classification and halt.
+            if step.collect_ids && matches!(envelope.code, "0" | "2") {
+                let ids: Vec<String> = acks
+                    .iter()
+                    .filter(|ack| matches!(ack.s_code, "" | "0"))
+                    .map(|ack| {
+                        if ack.algo_id.is_empty() {
+                            ack.ord_id
+                        } else {
+                            ack.algo_id
+                        }
+                    })
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                if !ids.is_empty() {
+                    let message = "OKX 50004: write execution status is unknown";
+                    let fact =
+                        safe_cex_engine::classify::unproven_reply(message).with_order_ids(&ids);
+                    let _ = cx.http_write_fact(
+                        &request.context,
+                        WriteFact::Failed {
+                            fact,
+                            known_effects: true,
+                        },
+                        None,
+                    );
+                    let error = VenueError::new(message).outcome(Outcome::Unknown);
+                    return self.end(cx, request.command, Some(&request), error, true);
+                }
+            }
             return self.unproven(cx, request, "OKX 50004: write execution status is unknown");
         }
         // Placement success needs its new native ID. Cancel identities are
@@ -2161,7 +2206,7 @@ impl Okx {
             error.outcome = None;
         }
         // The old stop's cancel landed and nothing replaced it: its row must not read Open.
-        let note = job
+        let mut note = job
             .replacing_stop
             .as_ref()
             .filter(|_| job.effective && job.ids.is_empty() && job.trailing.is_none())
@@ -2169,6 +2214,35 @@ impl Okx {
                 safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
             });
         let stop_gone = note.is_some();
+        if uncertain && let Some(step) = job.steps.front().filter(|step| step.query.is_none()) {
+            let unknown = format!("{UNKNOWN_OUTCOME_TEXT}; unconfirmed request {}", step.body);
+            note = Some(match note {
+                Some(note) => format!("{note}; {unknown}"),
+                None => unknown,
+            });
+            cx.event(
+                safe_cex_engine::Level::Warn,
+                "order.outcome_unknown",
+                UNKNOWN_OUTCOME_TEXT,
+                vec![
+                    ("command", command.into()),
+                    (
+                        "placedCount",
+                        job.ids.iter().map(|_| 1.0).sum::<f64>().into(),
+                    ),
+                    // Put the unconfirmed identity before the body so the
+                    // engine's 512-byte log cap cannot hide a later batch row.
+                    (
+                        "unknownRequest",
+                        match reporting_identity(step) {
+                            Some(identity) => format!("{identity}; {}", step.body),
+                            None => step.body.clone(),
+                        }
+                        .into(),
+                    ),
+                ],
+            );
+        }
         // A sibling rests: the caller must be told even though this call failed.
         if !job.ids.is_empty() {
             error = error.partial_ids(&job.ids);
@@ -2393,7 +2467,20 @@ fn step<T: Serialize + ?Sized>(
         expected,
         collect_ids,
         write_index: None,
+        unknown_row: None,
     })
+}
+
+/// Presentation metadata only; never a dispatch, validation or retry decision.
+fn reporting_identity(step: &Step) -> Option<String> {
+    let payload: serde_json::Value = serde_json::from_str(&step.body).ok()?;
+    let row = match &payload {
+        serde_json::Value::Array(rows) => rows.get(step.unknown_row.unwrap_or(0))?,
+        row => row,
+    };
+    ["clOrdId", "algoClOrdId", "ordId", "algoId"]
+        .into_iter()
+        .find_map(|field| row.get(field)?.as_str().map(str::to_owned))
 }
 fn next_call(job: &Job) -> SerialCall {
     if job.lookup.is_some() {

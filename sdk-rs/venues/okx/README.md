@@ -47,3 +47,27 @@ Inherited Rust behavior sends native `sz` and a distance from the last price;
 this remains a documented deviation, covered separately as a native control.
 
 This PR remains stacked on #3348; re-merge master after that dependency lands.
+
+Stop-after-Unknown is a recorded parity exception (Sean/daxx, 2026-11-08).
+When a native response leaves a write unproven, the rest of that action stays
+unsent, including signature-looking replies and protective replacements. The
+terminal preserves accepted IDs and indexed placement facts, identifies the
+unconfirmed request, and says `The outcome is unknown. Check Open Orders`.
+The venue emits one `order.outcome_unknown` event with the command, accepted
+count and unconfirmed request. Late acknowledgements cannot restart the action
+or emit another terminal/event. Proven signature refusals and definite native
+cancel-row refusals retain their existing resend/continuation behavior.
+
+The nine path pins live in `tests/support/unknown_exceptions.rs` and
+`tests/protective_amend.rs`, covering
+split tails, later ordinary batches, TP/SL children, standalone algos, valid
+ordinary and conditional runtime writes, normal/algo cancellations,
+signature-looking ambiguous replies, and protective cancel/re-place. Their
+comments cite the legacy TS continuation each exception overrides. Placement
+pins check placed, Unknown and unsent journal elements; cancellations retain
+the deliberate optional-placement-journal omission and the engine's call facts.
+
+KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
+408/429/5xx pins still assert the stop, Unknown outcome and the engine's canonical
+text; only their telemetry assertion is deferred. No shared engine code is
+changed to add this venue companion event.
