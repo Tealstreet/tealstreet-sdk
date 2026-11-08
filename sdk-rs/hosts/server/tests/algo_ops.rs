@@ -452,6 +452,75 @@ async fn twap_pause_resume_stop_and_cleanup_take_the_bare_id() {
 }
 
 #[tokio::test]
+async fn bound_twap_host_resumes_only_matching_persisted_ownership() {
+    LocalSet::new()
+        .run_until(async {
+            for case in ["same", "foreign", "stale", "untagged"] {
+                let mut algos = Algos::start().await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as f64;
+                let mut row = json!({"id":"saved", "ownerId":"u", "ownerGeneration":1,
+                "options":web_twap(), "state":{
+                    "accountName":"acct", "activeMarket":web_market(), "size":0.1,
+                    "ordersSizes":[0.01], "side":"buy", "status":"running", "ordersCount":10,
+                    "ordersExecuted":9, "nextOrderAt":now + 100.0
+                }});
+                if case == "foreign" {
+                    row["ownerId"] = json!("other-user");
+                }
+                if case == "stale" {
+                    row["ownerGeneration"] = json!(2);
+                }
+                if case == "untagged" {
+                    row.as_object_mut().unwrap().remove("ownerId");
+                    row.as_object_mut().unwrap().remove("ownerGeneration");
+                }
+                algos.op("twap:state", json!([row]));
+                if case == "same" {
+                    algos
+                        .next("store", |data| !active_twaps(data).is_empty())
+                        .await;
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    assert!(
+                        algos
+                            .commands
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .any(|command| command.contains("PlaceOrders"))
+                    );
+                } else {
+                    let refusal = tokio::time::timeout(Duration::from_secs(2), async {
+                        loop {
+                            let message: Value =
+                                serde_json::from_str(&algos.out.recv().await.unwrap()).unwrap();
+                            if message["d"]["op"] == "error" {
+                                break message["d"]["data"].clone();
+                            }
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    assert!(
+                        refusal
+                            .to_string()
+                            .contains("persisted TWAP owner or generation does not match"),
+                        "{case}: {refusal}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    assert!(
+                        algos.commands.lock().unwrap().is_empty(),
+                        "{case} placed a stale slice"
+                    );
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn twap_state_restores_the_rows_its_own_state_updates_persisted() {
     LocalSet::new()
         .run_until(async {
