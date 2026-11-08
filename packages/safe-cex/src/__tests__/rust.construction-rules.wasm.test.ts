@@ -182,7 +182,7 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot',
     setRustEngineTransport(() => transport);
     let signatures = 0;
     // A venue with hosted remote signing but no payload signing refuses in the bridge, at construction.
-    const bridgeRefuses = deriveRemoteSigningPolicy(name)?.payloadSupported === false;
+    const bridgeRefuses = deriveRemoteSigningPolicy(name)?.enabled === true && deriveRemoteSigningPolicy(name)?.payloadSupported === false;
     for (const secret of name.startsWith('lighter') || name === 'hyperliquidspot' ? ['local'] : ['', 'local']) {
       const options = {
         key: 'key', secret, apiKeyIndex: '2', testnet: true,
@@ -202,7 +202,9 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot',
       }
       const exchange = new RustEngineExchange(name, options, new DefaultStore());
       running.push(exchange);
-      const message = `Rust ${name} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
+      const message = name === 'polymarket'
+        ? 'Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply'
+        : `Rust ${name} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
       await expect(exchange.start()).rejects.toMatchObject({ message, kind: 'unsupported', outcome: 'notSent' });
       await expect(exchange.validateAccount()).resolves.toMatchObject({ kind: 'unsupported', error: message });
     }
