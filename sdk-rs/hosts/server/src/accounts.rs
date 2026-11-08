@@ -526,6 +526,12 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
             options.insert(field.into(), value.clone().into());
         }
     }
+    if init.exchange_name == "grvt"
+        && !public_only
+        && let Some(address) = init.grvt_signer_address.as_ref().filter(|v| !v.is_empty())
+    {
+        options.insert("grvtSignerAddress".into(), address.clone().into());
+    }
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
     }
