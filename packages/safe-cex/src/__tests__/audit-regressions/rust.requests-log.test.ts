@@ -95,6 +95,180 @@ const leaked = (events: Array<[RequestsLogEvent, string]>) =>
 /** Logging runs off the caller's path, one timer tick later. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+it.each([false, true])('withholds Kraken signed-challenge subscriptions with diagnostics=%s', async (optIn) => {
+  setWsDiagnosticsEnabled(optIn);
+  const { transport, sockets, diagnostics, events } = harness(undefined, 'kraken');
+  const challenge = '00000000-0000-0000-0000-000000000001';
+  const signature = Buffer.alloc(64, 7).toString('base64');
+  const subscribe = JSON.stringify({
+    event: 'subscribe',
+    feed: 'open_orders',
+    api_key: 'fixture-kraken-key',
+    original_challenge: challenge,
+    signed_challenge: signature,
+  });
+  const received: string[] = [];
+  const socket = transport.connect('wss://fixture.invalid/ws/v1', {
+    channel: 'private',
+    onOpen() {},
+    onMessage: (message) => received.push(message),
+    onClose() {},
+  });
+  socket.send(subscribe);
+  sockets[0].handlers.onMessage(subscribe);
+  await tick();
+  expect(sockets[0].sent).toEqual([subscribe]);
+  expect(received).toEqual([subscribe]);
+  if (optIn) {
+    expect(diagnostics.map(({ direction }) => direction)).toEqual(['send', 'receive']);
+    expect(events.map(([event]) => event)).toEqual(['grafana-pws-sub', 'grafana-pws']);
+    expect(diagnostics.every(({ message }) => message.includes('[redacted]'))).toBe(true);
+    for (const message of [...diagnostics.map((event) => event.message), ...events.map((event) => event[1])]) {
+      expect(message).not.toContain(challenge);
+      expect(message).not.toContain(signature);
+      expect(message).not.toContain('open_orders');
+      expect(message).not.toContain('fixture-kraken-key');
+    }
+  } else {
+    expect(diagnostics).toEqual([]);
+    expect(events).toEqual([]);
+  }
+});
+
+const authMaterials = {
+  key: 'fixture-socket-key',
+  signature: Buffer.alloc(64, 11).toString('base64'),
+  challenge: '00000000-0000-0000-0000-000000000002',
+  token: 'fixture-socket-token',
+};
+
+const subscriptionAuthCases: Array<{ venue: string; frame: unknown }> = [
+  { venue: 'kraken-challenge', frame: { event: 'challenge', message: authMaterials.challenge } },
+  { venue: 'kraken-signature-field', frame: { event: 'subscribe', signed_challenge: authMaterials.signature } },
+  { venue: 'kraken-challenge-field', frame: { event: 'subscribe', original_challenge: authMaterials.challenge } },
+  {
+    venue: 'krakenspot',
+    frame: { method: 'subscribe', params: { channel: 'executions', token: authMaterials.token } },
+  },
+  {
+    venue: 'backpack',
+    frame: {
+      method: 'SUBSCRIBE',
+      params: ['account.orderUpdate'],
+      signature: [authMaterials.key, authMaterials.signature, '1000', '5000'],
+    },
+  },
+  { venue: 'coinbase', frame: { type: 'subscribe', channel: 'user', jwt: authMaterials.token } },
+  { venue: 'coinbasespot', frame: { type: 'subscribe', channel: 'user', jwt: authMaterials.token } },
+  { venue: 'lighter', frame: { type: 'subscribe', channel: 'account_all_orders/1', auth: authMaterials.token } },
+  {
+    venue: 'lighter-robinhood',
+    frame: { type: 'subscribe', channel: 'account_all_positions/1', auth: authMaterials.token },
+  },
+  {
+    venue: 'polymarket',
+    frame: {
+      type: 'user',
+      auth: { apiKey: authMaterials.key, secret: authMaterials.token, passphrase: authMaterials.signature },
+    },
+  },
+  {
+    venue: 'grvt',
+    frame: { type: 'auth', session_cookie: authMaterials.token, account_id: 'fixture-account', testnet: true },
+  },
+  { venue: 'paradex', frame: { jsonrpc: '2.0', method: 'auth', params: { bearer: authMaterials.token }, id: 1 } },
+  {
+    venue: 'binancespot',
+    frame: {
+      method: 'userDataStream.subscribe.signature',
+      params: { apiKey: authMaterials.key, timestamp: 1000, signature: authMaterials.signature },
+    },
+  },
+];
+
+it.each(subscriptionAuthCases)(
+  'withholds $venue authentication material in both event paths',
+  async ({ venue, frame }) => {
+    const { transport, sockets, diagnostics, events } = harness(undefined, venue);
+    const socket = transport.connect('wss://fixture.invalid/', {
+      channel: 'private',
+      onOpen() {},
+      onMessage() {},
+      onClose() {},
+    });
+    const wire = JSON.stringify(frame);
+    socket.send(wire);
+    sockets[0].handlers.onMessage(wire);
+    await tick();
+    expect(diagnostics).toEqual([]);
+    expect(events).toEqual([]);
+    setWsDiagnosticsEnabled(true);
+    socket.send(wire);
+    sockets[0].handlers.onMessage(wire);
+    await tick();
+    expect(diagnostics).toHaveLength(2);
+    expect(events).toHaveLength(2);
+    for (const entry of [...diagnostics.map(({ message }) => message), ...events.map((event) => event[1])]) {
+      expect(entry).toContain('[redacted]');
+      for (const material of Object.values(authMaterials)) expect(entry).not.toContain(material);
+    }
+    expect(sockets[0].sent).toEqual([wire, wire]);
+  },
+);
+
+const privateSocketLocations: Array<{ venue: string; path: string; tokenInHeaders?: boolean }> = [
+  { venue: 'binance', path: '/private/ws?listenKey=' },
+  { venue: 'binanceinverse', path: '/ws/' },
+  { venue: 'binancepm', path: '/pm/ws/' },
+  { venue: 'asterdex', path: '/ws/' },
+  { venue: 'bingx', path: '/swap-market?listenKey=' },
+  { venue: 'bitrue', path: '/stream?listenKey=' },
+  { venue: 'kucoin', path: '/endpoint?token=' },
+  { venue: 'kucoinspot', path: '/endpoint?token=' },
+  { venue: 'grvt', path: '/ws', tokenInHeaders: true },
+  { venue: 'weex', path: '/v3/ws/private', tokenInHeaders: true },
+];
+
+it.each(privateSocketLocations)(
+  'omits $venue authenticated socket locations and headers from both event paths',
+  async ({ venue, path, tokenInHeaders }) => {
+    const { transport, sockets, diagnostics, events } = harness(undefined, venue);
+    const endpoint = `wss://fixture.invalid${path}${tokenInHeaders ? '' : authMaterials.token}`;
+    const headers = {
+      Cookie: authMaterials.token,
+      Authorization: authMaterials.signature,
+      'ACCESS-KEY': authMaterials.key,
+      'ACCESS-PASSPHRASE': authMaterials.token,
+      'ACCESS-SIGN': authMaterials.signature,
+    };
+    const wire = JSON.stringify({ topic: 'orders', data: { orderId: 'fixture-order', endpoint } });
+    const socket = transport.connect(endpoint, {
+      channel: 'private',
+      headers,
+      onOpen() {},
+      onMessage() {},
+      onClose() {},
+    });
+    socket.send(wire);
+    sockets[0].handlers.onMessage(wire);
+    await tick();
+    expect(diagnostics).toEqual([]);
+    expect(events).toEqual([]);
+    setWsDiagnosticsEnabled(true);
+    socket.send(wire);
+    sockets[0].handlers.onMessage(wire);
+    await tick();
+    expect(diagnostics).toHaveLength(2);
+    expect(events).toHaveLength(2);
+    const logged = JSON.stringify({ diagnostics, events });
+    for (const value of [endpoint, ...Object.values(authMaterials), ...Object.keys(headers)])
+      expect(logged).not.toContain(value);
+    expect(logged).toContain('fixture-order');
+    expect(sockets[0].sent).toEqual([wire, wire]);
+    expect(sockets[0].handlers.headers).toEqual(headers);
+  },
+);
+
 it('logs nothing and builds nothing while the Requests Log toggle is off', async () => {
   const { inner, transport, events, sockets, diagnostics } = harness();
   const schedule = vi.spyOn(inner, 'setTimeout');

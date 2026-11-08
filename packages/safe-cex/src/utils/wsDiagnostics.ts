@@ -50,6 +50,8 @@ const SECRET_KEY_PARTS = [
   'authorization',
   'credential',
   'cookie',
+  'challenge',
+  'bearer',
 ];
 
 const isSecretKey = (key: string): boolean => {
@@ -65,7 +67,7 @@ const JSON_KEY_VALUE_RE = /("((?:\\.|[^"\\])*)"\s*:\s*)("(?:\\.|[^"])*"|[^,}\]\s
 const QUERY_KEY_VALUE_RE = /((?:^|[?&\s])([A-Za-z0-9_.-]+)=)([^&\s]+)/g;
 /** A JWT, whatever key or position carries it. */
 const JWT_RE = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
-const AUTH_OPERATION_RE = /auth|login|logon|signature|jwt/i;
+const AUTH_OPERATION_RE = /auth|login|logon|signature|jwt|challenge/i;
 
 export const setWsDiagnosticsEnabled = (enabled: boolean): void => {
   wsDiagnosticsEnabled = enabled === true;
@@ -142,6 +144,7 @@ export const stringifyWsDiagnosticPayload = (data: unknown): string => {
 const normalizeSecretKey = (key: string): string => key.replace(/[^a-z0-9_]/gi, '').toLowerCase();
 
 const isAuthOperationObject = (value: Record<string, unknown>): boolean =>
+  Object.keys(value).some((key) => normalizeSecretKey(key).includes('challenge')) ||
   ['op', 'method', 'type', 'event', 'action'].some((key) => {
     const field = value[key];
     return typeof field === 'string' && AUTH_OPERATION_RE.test(field);

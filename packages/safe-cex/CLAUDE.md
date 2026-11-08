@@ -1773,7 +1773,9 @@ realm; worker hosts use the existing `__workerConfig.wsDiagnosticsEnabled` flag.
 controllers must handle that op and re-emit it before rendering Requests Log rows.
 
 Diagnostics run after socket I/O, redact complete auth frames and sensitive
-fields, and never include connection URLs/headers or binary contents. Opaque,
+fields, and never include connection URLs/headers or binary contents.
+Challenge fields withhold the containing object even when its operation is
+`subscribe`; incoming challenge replies are also withheld. Opaque,
 malformed, oversized and excessive-depth content is withheld. Heartbeats are
 omitted, output is capped and frames are sampled per socket. Disabling the
 switch drops queued entries too. Existing private grafana events remain available
