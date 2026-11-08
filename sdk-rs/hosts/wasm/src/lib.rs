@@ -90,6 +90,8 @@ trait AnyEngine {
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         (now, 0)
     }
+    /// Whether registry construction retained both a provider and credential refs.
+    fn has_signing_authority(&self) -> bool;
     /// `None` leaves host capability undeclared (unknown), so admission fails closed.
     fn external_signer(
         &mut self,
@@ -243,6 +245,11 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
     fn failed(&self) -> bool {
         Engine::failed(self)
+    }
+    fn has_signing_authority(&self) -> bool {
+        let identities = Engine::identities(self);
+        Engine::signer(self).is_some()
+            && (identities.primary.is_some() || identities.secondary.is_some())
     }
     fn external_signer(
         &mut self,
@@ -997,7 +1004,7 @@ impl WasmEngine {
         let dispatch_signing = options.construction(venue).bridge.dispatch_signing;
         // A false read-key result outranks any provider setup failure, as natively.
         safe_cex_venues::read_key_preflight(venue, &options).map_err(construction_error)?;
-        let external_signer = options.signing.is_some() && signer_setup_json.is_none();
+        let external_setup = options.signing.is_some() && signer_setup_json.is_none();
         #[cfg(feature = "dispatch-signing")]
         let signer = if let Some(mut input) = signer_setup_json {
             if !dispatch_signing {
@@ -1013,7 +1020,7 @@ impl WasmEngine {
             .map_err(construction_error)?;
             options.signing = Some(identities);
             Some(signer)
-        } else if external_signer {
+        } else if external_setup {
             Some(std::sync::Arc::new(ExternalSigner) as safe_cex_engine::signing::Provider)
         } else if dispatch_signing {
             let (signer, identities) =
@@ -1077,6 +1084,9 @@ impl WasmEngine {
             Boxed,
         )
         .map_err(construction_error)?;
+        // Public-mode normalization may discard the requested provider and refs.
+        // Only retained authority requires a host callback, including PublicRead.
+        let external_signer = external_setup && inner.has_signing_authority();
         Ok(Self {
             inner,
             construction,
@@ -1643,6 +1653,9 @@ impl WasmEngine {
 fn is_false(value: &bool) -> bool {
     !*value
 }
+
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "txflow"))]
+mod public_custody_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2710,6 +2723,9 @@ mod tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
+            fn has_signing_authority(&self) -> bool {
+                false
+            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -2925,6 +2941,9 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
+        fn has_signing_authority(&self) -> bool {
+            false
+        }
         fn external_signer(
             &mut self,
             _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -3006,6 +3025,9 @@ mod tests {
 
         struct Counted;
         impl AnyEngine for Counted {
+            fn has_signing_authority(&self) -> bool {
+                false
+            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
