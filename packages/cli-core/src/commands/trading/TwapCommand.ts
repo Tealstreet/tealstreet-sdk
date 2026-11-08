@@ -5,6 +5,9 @@ import { twapManager } from '@tealstreet/safe-cex/src/webworker/twap/TwapManager
 import { TwapStatus } from '@tealstreet/safe-cex/src/webworker/twap/TwapStatus';
 import { GREEN, RED, YELLOW, CYAN, RESET, DIM, BOLD } from './colors';
 import { formatPrice } from '@tealstreet/utils/src/formatting/formatPrice';
+import type { TwapTaskParams } from '../../types';
+
+type TwapChasePolicy = Pick<TwapTaskParams, 'useChaserOrders' | 'timeoutPct' | 'timeoutAction' | 'failAction'>;
 
 /**
  * Parse duration string to milliseconds
@@ -192,23 +195,12 @@ export class TwapCommand extends TradingBaseCommand {
       args: { ...ctx.args, _: reframed },
     };
 
-    const innerResult = this.handleBuySell(innerCtx, side);
-
-    if (!innerResult.success) return innerResult;
-
-    // Patch the produced taskAction with the chaser policy fields. The
-    // 'chaser' flag is forced on because twap chase always uses
-    // chasers per slice.
-    if (innerResult.taskAction?.type === 'twap' && innerResult.taskAction.params) {
-      const params = innerResult.taskAction.params as { params?: Record<string, unknown> };
-      if (params.params) {
-        params.params.useChaserOrders = true;
-        params.params.timeoutPct = finalTimeoutPct;
-        params.params.timeoutAction = finalTimeoutAction;
-        params.params.failAction = finalFailAction;
-      }
-    }
-    return innerResult;
+    return this.handleBuySell(innerCtx, side, {
+      useChaserOrders: true,
+      timeoutPct: finalTimeoutPct,
+      timeoutAction: finalTimeoutAction,
+      failAction: finalFailAction,
+    });
   }
 
   /**
@@ -321,7 +313,7 @@ export class TwapCommand extends TradingBaseCommand {
   /**
    * Handle twap buy/sell command
    */
-  private handleBuySell(ctx: CommandContext, side: OrderSide): CommandResult {
+  private handleBuySell(ctx: CommandContext, side: OrderSide, chasePolicy?: TwapChasePolicy): CommandResult {
     const exchange = ctx.exchange;
     if (!exchange) {
       return this.error('Not connected to exchange');
@@ -467,6 +459,7 @@ export class TwapCommand extends TradingBaseCommand {
             ordersExecuted: 0,
             useChaserOrders,
             reduceOnly,
+            ...chasePolicy,
           },
         },
       },
