@@ -2569,7 +2569,7 @@ impl BitunixFutures {
         } else {
             message.join_with("; ")
         };
-        match cx.http_write_batch(
+        match cx.http_write_applied_batch(
             &request.context,
             &codes::BITUNIX,
             expected,

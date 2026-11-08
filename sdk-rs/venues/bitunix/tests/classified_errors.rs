@@ -243,6 +243,88 @@ fn an_unknown_batch_leg_ends_the_job_before_later_chunks() {
 }
 
 #[test]
+fn cancel_batch_with_an_unknown_row_journals_no_unconfirmed_cancellations() {
+    use safe_cex_engine::Outcome;
+    let (mut e, socket) = startup();
+    for id in ["confirmed", "uncertain"] {
+        event(
+            &mut e,
+            socket,
+            &format!(
+                r#"{{"ch":"order","data":{{"event":"CREATE","symbol":"BTCUSDT","orderId":"{id}","orderType":"LIMIT","side":"SELL","qty":"3","price":"100","dealAmount":"0"}}}}"#
+            ),
+        );
+        assert_eq!(e.store().order(id).unwrap().status, OrderStatus::Open);
+    }
+    e.handle(
+        101.0,
+        Event::Command(Command::CancelOrders {
+            command: 1013,
+            ids: vec!["confirmed".into(), "uncertain".into()],
+        }),
+    );
+    let sent = requests(&mut e);
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].url.ends_with("trade/cancel_orders"));
+    let body: serde_json::Value = serde_json::from_str(sent[0].body.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        body["orderList"],
+        serde_json::json!([{"orderId":"confirmed"}, {"orderId":"uncertain"}])
+    );
+    reply(
+        &mut e,
+        sent[0].id,
+        r#"{"code":0,"data":{"successList":[{"orderId":"confirmed"}],"failureList":[{"orderId":"uncertain","errorCode":10001,"errorMsg":"Network Error"}]}}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e);
+    assert!(
+        !actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 1013, .. })
+        )),
+        "unexpected action: {actions:?}"
+    );
+    for action in &actions {
+        if let Action::Http(request) = action {
+            assert_eq!(request.method, safe_cex_engine::Method::Get);
+        }
+    }
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 1013,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "one failure completion: {actions:?}");
+    let error = failures[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        e.store().order("confirmed").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        e.store().order("uncertain").unwrap().status,
+        OrderStatus::Open
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty()),
+        "cancellation targets must not enter created-order evidence: {error:?}"
+    );
+    assert!(
+        requests(&mut e)
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+}
+
+#[test]
 fn partial_cancel_is_effective_before_its_rejection_is_reported() {
     let (mut e, _) = startup();
     e.handle(
