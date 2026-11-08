@@ -269,3 +269,57 @@ it.each(malformedCallbacks)('a keyed account with a configured malformed $field 
   try { expect(exchange.isPublicDataOnly).toBe(true); }
   finally { exchange.dispose(); }
 });
+
+// Venues whose delegated signing is disabled never reach DelegatedSignerSetup, so beta
+// admission itself must refuse a configured-but-malformed callback on a keyed account.
+const disabledDelegation = matrixVenues.filter(({ name }) => deriveRemoteSigningPolicy(name)?.enabled !== true);
+const callbackFields: Array<'remoteSigner' | 'payloadSigner'> = ['remoteSigner', 'payloadSigner'];
+const falsyCallbacks = callbackFields.flatMap((field) => [null, false, ''].map((value) => ({ field, value })));
+
+it('covers every disabled-delegation beta venue', () => {
+  expect(disabledDelegation.map(({ label }) => label).sort()).toEqual([
+    'apexomni', 'asterdex-v1', 'asterdex-v3', 'coinbase', 'coinbasespot', 'cryptocom', 'kodiakfi', 'kraken', 'krakenspot',
+    'mexc', 'mode', 'what', 'woofi',
+  ].sort());
+});
+
+it.each(disabledDelegation)('$label refuses a keyed account with a configured falsy callback as invalid input', ({ name, version }) => {
+  for (const { field, value } of falsyCallbacks) {
+    const label = `${name} ${version ?? ''} ${field}=${JSON.stringify(value)}`;
+    const keyed: ExchangeOptions = { key: 'fixture-key', secret: '', extra: { asterdexApiVersion: version } };
+    Reflect.set(keyed, field, value);
+    let outcome: unknown;
+    try {
+      const exchange = new RustEngineExchange(name, keyed, new DefaultStore());
+      outcome = exchange.isPublicDataOnly ? 'public' : 'private';
+      exchange.dispose();
+    } catch (error) { outcome = error; }
+    // Declared rules (TS and native): Aster V3 needs RemoteSigner or a V3 wallet context, so a
+    // keyed V3 account with only a PayloadSigner field and no wallet addresses is public.
+    const declaredPublic = version === 'v3' && field === 'payloadSigner';
+    expect.soft(outcome, label).toEqual(declaredPublic ? 'public'
+      : expect.objectContaining({ kind: 'invalidInput', outcome: 'notSent' }));
+    const keyless: ExchangeOptions = { key: '', secret: '', extra: { asterdexApiVersion: version } };
+    Reflect.set(keyless, field, value);
+    const exchange = new RustEngineExchange(name, keyless, new DefaultStore());
+    try { expect.soft(exchange.isPublicDataOnly, `${label} keyless`).toBe(true); }
+    finally { exchange.dispose(); }
+  }
+});
+
+it('keeps the review controls for configured callbacks', () => {
+  const { remoteSigner } = unusedSigners();
+  const binance: ExchangeOptions = { key: 'fixture-key', secret: '' };
+  Reflect.set(binance, 'remoteSigner', null);
+  expect(() => new RustEngineExchange('binance', binance, new DefaultStore()))
+    .toThrowError(expect.objectContaining({ kind: 'invalidInput', outcome: 'notSent' }));
+  expect(() => new RustEngineExchange('kraken', { key: 'fixture-key', secret: '', remoteSigner }, new DefaultStore()))
+    .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
+      message: `${exchangeMetadata.kraken.prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser` }));
+  const keylessKraken: ExchangeOptions = { key: '', secret: '' };
+  Reflect.set(keylessKraken, 'remoteSigner', null);
+  const exchange = new RustEngineExchange('kraken', keylessKraken, new DefaultStore());
+  try { expect(exchange.isPublicDataOnly).toBe(true); }
+  finally { exchange.dispose(); }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+});

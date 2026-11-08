@@ -5,6 +5,7 @@ import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { unsupportedVenueError } from '../../unsupportedVenue';
 import { deriveRemoteSigningPolicy } from './construction';
+import { delegatedCallbacksWellFormed } from './delegatedSignerSetup';
 import { resolveEffectivePublicDataOnly } from './localSignerSetup';
 
 /** The Rust-only beta build's complete venue policy, including saved aliases. */
@@ -68,18 +69,21 @@ export const assertBetaVenue = (name: string): void => {
 export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeOptions>): void => {
   // Effective public first: unused callbacks on a public account are not custody.
   const publicDataOnly = resolveEffectivePublicDataOnly(name, options);
-  if (name === 'polymarket' && !publicDataOnly && (options.remoteSigner || options.payloadSigner)) {
+  // Configured means present, whatever its value: the same predicate as the resolver and setup.
+  const delegated = !publicDataOnly && (options.remoteSigner !== undefined || options.payloadSigner !== undefined);
+  if (name === 'polymarket' && delegated) {
     const message = 'Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply';
     throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
   }
   assertBetaVenue(name);
-  if (
-    !publicDataOnly &&
-    (options.remoteSigner || options.payloadSigner) &&
-    deriveRemoteSigningPolicy(name)?.enabled !== true
-  ) {
+  // Enabled families validate callbacks in DelegatedSignerSetup; disabled ones never reach it.
+  if (delegated && deriveRemoteSigningPolicy(name)?.enabled !== true) {
+    if (!delegatedCallbacksWellFormed(options)) {
+      const message = 'Invalid delegated signer setup';
+      throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+    }
     const prettyName = exchangeMetadata[name].prettyName;
-    const message = options.remoteSigner
+    const message = options.remoteSigner !== undefined
       ? `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
       : `${prettyName} delegated signing is unsupported in this build`;
     throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });

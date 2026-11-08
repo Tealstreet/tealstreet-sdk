@@ -75,9 +75,13 @@ export const resolveEffectivePublicDataOnly = (name: ExchangeName, options: Part
     if (options.key !== undefined && options.key !== '') return false;
   }
   const key = credentialPresent(options.key, primary?.trimCredential === true);
-  const callback = options.remoteSigner !== undefined || options.payloadSigner !== undefined;
-  const secret = credentialPresent(options.secret, primary?.trimSigning === true) || (key && callback);
-  return derivePublicMode(name, { key: '', secret: '', ...options }, undefined, { key, secret }).publicDataOnly;
+  const remoteSigner = options.remoteSigner !== undefined;
+  const payloadSigner = options.payloadSigner !== undefined;
+  const secret = credentialPresent(options.secret, primary?.trimSigning === true) || (key && (remoteSigner || payloadSigner));
+  // Keyed: a configured callback is present even if malformed, so admission/setup refuse it.
+  // Keyless: unused callbacks keep raw truthiness and never make the account private.
+  const callbacks = key ? { remoteSigner, payloadSigner } : {};
+  return derivePublicMode(name, { key: '', secret: '', ...options }, undefined, { key, secret, ...callbacks }).publicDataOnly;
 };
 
 /** One required-field/fallback policy for trusted local and callback setup.

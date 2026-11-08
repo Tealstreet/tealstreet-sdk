@@ -26,6 +26,14 @@ export const selectDelegatedSigningMode = (
 ): 'remote' | 'payload' | undefined => options.remoteSigner !== undefined ? 'remote'
   : options.payloadSigner !== undefined ? 'payload' : undefined;
 
+/** Every configured callback (any value but undefined) has the shape its mode requires. */
+export const delegatedCallbacksWellFormed = (options: Pick<ExchangeOptions, 'remoteSigner' | 'payloadSigner'>): boolean => {
+  const { remoteSigner, payloadSigner } = options;
+  if (remoteSigner !== undefined && (!remoteSigner || typeof remoteSigner.sign !== 'function'
+    || typeof remoteSigner.isAvailable !== 'function' || typeof remoteSigner.onAvailabilityChange !== 'function')) return false;
+  return payloadSigner === undefined || typeof payloadSigner === 'function';
+};
+
 /** Trusted setup for aliases admitted by the shared caller policy. This capsule
  * does not enable a venue or retain a local signing secret. Remote authority
  * precedes PayloadSigner; neither can fall back to a local secret.
@@ -79,9 +87,7 @@ export class DelegatedSignerSetup {
     const remoteSigner = options.remoteSigner;
     const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');
-    if ((this.intent.remoteSigner && (!remoteSigner || typeof remoteSigner.sign !== 'function'
-      || typeof remoteSigner.isAvailable !== 'function' || typeof remoteSigner.onAvailabilityChange !== 'function'))
-      || (this.intent.payloadSigner && typeof options.payloadSigner !== 'function')) invalid();
+    if (!delegatedCallbacksWellFormed(options)) invalid();
     const primary = publicCredential(options.key, primaryMetadata?.trimCredential === true);
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
