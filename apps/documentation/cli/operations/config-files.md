@@ -28,7 +28,9 @@ scripts cannot make further adapter calls after their starting session ends. A n
 browser approval is specific to that user.
 
 Pending account starts, retries, script captures, recorder completions and
-background update checks also stay bound to their starting login. A switch
+background update checks also stay bound to their starting login. Cross-trade
+startup stops its remaining account list on cancellation and disposes old
+connections without changing the new login's account activation flags. A switch
 discards their stale results, including when you switch back to the same user.
 The status bar clears, and the footer reloads the new user's saved settings.
 

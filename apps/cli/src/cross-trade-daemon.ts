@@ -214,6 +214,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
   }
 
   for (const accountName of accountsToBoot) {
+    ownerSession.assertCurrent();
     const account = liveAccounts.get(accountName);
     if (!account) {
       console.log(chalk.red(`  ${G.error} Account "${accountName}" not found in config — skipped`));
@@ -221,8 +222,10 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
     }
     try {
       console.log(chalk.gray(`  Booting ${accountName} (${account.exchange})…`));
-      await exchangeManager.enable(account);
+      await ownerSession.run(() => exchangeManager.enable(account));
+      ownerSession.assertCurrent();
     } catch (err) {
+      ownerSession.assertCurrent();
       console.log(
         chalk.red(`  ${G.error} Failed to boot ${accountName}: ${err instanceof Error ? err.message : String(err)}`),
       );

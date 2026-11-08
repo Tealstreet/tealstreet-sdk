@@ -800,6 +800,9 @@ Detailed in [Operations → Listener](../operations/listener.md) and
 
 ## Cross-trade &nbsp; _(standalone-only)_ {#cross-trade}
 
+Changing login during account startup cancels the remaining boots and disposes
+the old connections. It cannot activate the new login's same-named accounts.
+
 Detailed in [Operations → Cross-trade](../operations/cross-trade.md). Top-level
 binary surface:
 
