@@ -105,11 +105,13 @@ impl Venue for TestVenue {
     }
     fn unproven_http_evidence(
         &self,
-        _: &Pending,
+        pending: &Pending,
         response: Response<'_>,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
-        trading::evidence(response.body, evidence);
+        let Pending::Trade(request) = pending;
+        self.trading
+            .unproven_evidence(request, response.body, evidence);
     }
     fn capture_http_reconciliation(
         &self,
@@ -807,6 +809,301 @@ fn legacy_parity_serial_batch_has_no_new_combined_native_write_limit() {
         h.failures[0].outcome,
         Some(safe_cex_engine::Outcome::Rejected)
     );
+}
+
+fn writeplan_split() -> Harness {
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        amount: 21.,
+        price: Some(2.),
+        ..opts()
+    }]);
+    accept_parity_payload(&mut h, "accepted-first-lot");
+    h
+}
+
+fn assert_writeplan_middle_failure(h: &Harness, unknown: bool) {
+    use safe_cex_engine::write_plan::ElementResult;
+    assert!(
+        h.requests.is_empty(),
+        "failed lot replayed or suffix dispatched"
+    );
+    assert_eq!(h.done.len(), 1);
+    let elements = h.failures[0].elements.as_ref().expect("per-lot outcomes");
+    assert_eq!(elements.len(), 3);
+    for (index, element) in elements.iter().enumerate() {
+        assert_eq!(element.element.index, index);
+        assert!(element.element.client_order_id.is_some());
+    }
+    assert!(matches!(&elements[0].result,
+        ElementResult::Placed { order_ids } if order_ids == &["accepted-first-lot"]));
+    if unknown {
+        assert!(matches!(&elements[1].result,
+            ElementResult::Unknown { error } if error.outcome == Some(safe_cex_engine::Outcome::Unknown)));
+    } else {
+        assert!(matches!(&elements[1].result,
+            ElementResult::NotSent { error: Some(error) }
+                if error.outcome == Some(safe_cex_engine::Outcome::Rejected)));
+    }
+    assert!(matches!(
+        &elements[2].result,
+        ElementResult::NotSent { error: None }
+    ));
+}
+
+#[test]
+fn writeplan_rejected_middle_lot_reports_every_element() {
+    let mut h = writeplan_split();
+    h.reply(r#"{"code":100400,"msg":"bad quantity"}"#);
+    assert_writeplan_middle_failure(&h, false);
+}
+
+#[test]
+fn writeplan_lost_middle_lot_reports_unknown_without_a_replay() {
+    let mut h = writeplan_split();
+    h.failed();
+    assert_writeplan_middle_failure(&h, true);
+}
+
+#[test]
+fn writeplan_gateway_middle_lot_keeps_prefix_and_unsent_suffix() {
+    let mut h = writeplan_split();
+    h.reply_status(
+        500,
+        r#"{"code":100001,"msg":"Signature verification failed"}"#,
+    );
+    assert_writeplan_middle_failure(&h, true);
+}
+
+#[test]
+fn writeplan_signature_refusal_after_accepted_prefix_never_resends() {
+    let mut h = writeplan_split();
+    h.reply(r#"{"code":100001,"msg":"Signature verification failed"}"#);
+    assert_writeplan_middle_failure(&h, false);
+}
+
+#[test]
+fn writeplan_all_valid_control_places_every_lot_once() {
+    let mut h = writeplan_split();
+    assert_eq!(
+        accept_parity_payload(&mut h, "accepted-second-lot")["quantity"],
+        10.
+    );
+    assert_eq!(
+        accept_parity_payload(&mut h, "accepted-last-lot")["quantity"],
+        1.
+    );
+    assert!(h.requests.is_empty());
+    assert!(h.failures.is_empty());
+    let ids: Vec<String> =
+        serde_json::from_str(h.done[0].as_ref().expect("all lots placed")).expect("native IDs");
+    assert_eq!(
+        ids,
+        [
+            "accepted-first-lot",
+            "accepted-second-lot",
+            "accepted-last-lot"
+        ]
+    );
+}
+
+#[test]
+fn writeplan_invalid_final_row_retains_legacy_zero_write_refusal() {
+    let mut h = Harness::new(None);
+    h.place(vec![
+        opts(),
+        PlaceOrderOpts {
+            price: Some(0.),
+            ..opts()
+        },
+    ]);
+    for _ in 0..3 {
+        h.collect();
+    }
+    assert!(h.requests.is_empty());
+    assert_eq!(
+        h.failures[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+}
+
+#[test]
+fn writeplan_independent_cancels_keep_native_continuation_and_applied_targets() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut second = order();
+    second.id = "second".into();
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_orders(vec![order(), second]);
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec![order().id, "second".into()],
+    });
+    h.reply(r#"{"code":100400,"msg":"scripted refusal"}"#);
+    assert_eq!(h.requests.len(), 1);
+    h.reply(r#"{"code":0,"data":{"orderId":"second"}}"#);
+    assert!(h.requests.is_empty());
+    let elements = h.failures[0]
+        .elements
+        .as_ref()
+        .expect("both cancel outcomes");
+    assert_eq!(elements.len(), 2);
+    assert_eq!(elements[1].element.index, 1);
+    assert!(
+        matches!(&elements[0].result, ElementResult::NotSent { error: Some(error) }
+        if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+    );
+    assert!(matches!(&elements[1].result, ElementResult::Applied {
+        effect: AppliedEffect::Cancel, target_order_id: Some(id), ..
+    } if id == "second"));
+    assert!(
+        h.failures[0]
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+}
+
+#[test]
+fn writeplan_independent_cancel_keeps_its_initial_proven_refusal_resend() {
+    let mut second = order();
+    second.id = "second".into();
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_orders(vec![order(), second]);
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec![order().id, "second".into()],
+    });
+    h.reply(r#"{"code":100400,"msg":"first cancel refused"}"#);
+    h.reply(r#"{"code":100001,"msg":"Signature verification failed"}"#);
+    assert_eq!(
+        h.requests.len(),
+        1,
+        "independent cancel retains its native attempt budget"
+    );
+    assert_eq!(h.requests[0].method, safe_cex_engine::Method::Delete);
+    h.reply(r#"{"code":0,"data":{"orderId":"second"}}"#);
+    assert!(h.requests.is_empty());
+    let elements = h.failures[0]
+        .elements
+        .as_ref()
+        .expect("both independent cancels");
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(&elements[1].result,
+        safe_cex_engine::write_plan::ElementResult::Applied { target_order_id: Some(id), .. }
+        if id == "second"));
+}
+
+#[test]
+fn writeplan_settings_prefix_is_applied_without_a_fake_created_order_id() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut h = shared_hedged_leverage();
+    h.reply(r#"{"code":0,"data":{}}"#);
+    h.reply(r#"{"code":100400,"msg":"scripted short-side refusal"}"#);
+    assert!(h.requests.is_empty());
+    let elements = h.failures[0]
+        .elements
+        .as_ref()
+        .expect("both setting outcomes");
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(&elements[0].result, ElementResult::Applied {
+        effect: AppliedEffect::Settings, target_order_id: None, position_key: Some(key)
+    } if key.starts_with("BTCUSDT:")));
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) }
+        if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+    );
+    assert!(
+        h.failures[0]
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+}
+
+#[test]
+fn writeplan_local_release_veto_settles_pending_cancel_replace_not_sent() {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut h = guarded_stop(true);
+    h.engine.handle(
+        h.now,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price: Some(91.),
+            amount: None,
+        }),
+    );
+    h.now += 6_000.;
+    h.collect();
+    assert!(h.requests.is_empty());
+    let elements = h.failures[0]
+        .elements
+        .as_ref()
+        .expect("both native effects were locally vetoed");
+    assert_eq!(elements.len(), 2);
+    for element in elements.iter() {
+        assert!(
+            matches!(&element.result, ElementResult::NotSent { error: Some(error) }
+            if error.outcome == Some(safe_cex_engine::Outcome::NotSent))
+        );
+    }
+}
+
+#[test]
+fn writeplan_held_restore_journals_the_cancel_refusal_and_restore_attempt() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    for gateway in [false, true] {
+        let mut h = guarded_stop(true);
+        edit_stop(&mut h);
+        half_refusal(&mut h);
+        assert_eq!(h.requests.len(), 1, "class-A restore is held unchanged");
+        if gateway {
+            h.reply_status(503, r#"{"msg":"upstream unavailable"}"#);
+        } else {
+            h.reply(r#"{"code":0,"data":{"orderId":"restored","status":"NEW"}}"#);
+        }
+        assert!(h.requests.is_empty());
+        let elements = h.failures[0].elements.as_ref().unwrap_or_else(|| {
+            panic!(
+                "all held-restore effects, gateway={gateway}: {:?}",
+                h.failures
+            )
+        });
+        assert_eq!(elements.len(), 3);
+        assert_eq!(
+            elements
+                .iter()
+                .map(|row| row.element.index)
+                .collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        assert!(matches!(&elements[0].result, ElementResult::Applied {
+            effect: AppliedEffect::Cancel, target_order_id: Some(id), ..
+        } if id == &order().id));
+        assert!(
+            matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) }
+            if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+        );
+        if gateway {
+            assert!(
+                matches!(&elements[2].result, ElementResult::Unknown { error }
+                if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+            );
+        } else {
+            assert!(
+                matches!(&elements[2].result, ElementResult::Placed { order_ids }
+                if order_ids == &["restored"])
+            );
+            assert_eq!(
+                h.failures[0].protection,
+                Some(safe_cex_engine::error::Protection::Restored)
+            );
+        }
+    }
 }
 #[test]
 fn cancel_continues_after_failure_and_marks_only_successes() {
@@ -2006,30 +2303,21 @@ fn native_maximum_split_streams_every_lot_and_returns_every_accepted_id() {
 }
 
 #[test]
-fn mid_split_signature_resend_and_refusal_keep_every_accepted_id() {
+fn mid_split_signature_refusal_keeps_accepted_ids_without_resending() {
     use safe_cex_engine::ErrorKind;
     let mut h = Harness::new(None);
     h.place(vec![split_order(30.)]);
     h.reply(r#"{"code":0,"data":{"orderId":"lot-0"}}"#);
-    let first = h.body().to_owned();
     h.reply(r#"{"code":100001,"msg":"Signature verification failed"}"#);
-    let resent: serde_json::Value = serde_json::from_str(h.body()).unwrap();
-    let first: serde_json::Value = serde_json::from_str(&first).unwrap();
-    assert_eq!(resent["clientOrderId"], first["clientOrderId"]);
-    h.reply(r#"{"code":0,"data":{"orderId":"lot-1"}}"#);
-    h.reply(r#"{"code":101204,"msg":"Insufficient margin"}"#);
     assert!(h.requests.is_empty());
     let [error] = h.failures.as_slice() else {
         panic!("{:?}", h.failures);
     };
     assert_eq!(
         (error.kind, error.outcome),
-        (Some(ErrorKind::Rejected), None)
+        (Some(ErrorKind::AuthInvalid), None)
     );
-    assert_eq!(
-        error.partial.as_ref().unwrap().order_ids,
-        ["lot-0", "lot-1"]
-    );
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["lot-0"]);
 }
 
 /// cancelReplace runs STOP_ON_FAILURE, so a refusal may follow the cancel: native

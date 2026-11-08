@@ -304,7 +304,19 @@ fn first_write_provider_refusal_is_typed_not_sent() {
     let mut h = Harness::new();
     h.place(1);
     h.refuse(SignError::Refused);
-    assert_eq!(h.error(), &SignError::Refused.venue_error());
+    assert_unsent_write_refusal(h.error());
+}
+
+fn assert_unsent_write_refusal(error: &VenueError) {
+    let mut actual = error.clone();
+    let expected = SignError::Refused.venue_error();
+    let elements = actual.elements.take().expect("unsent write outcome");
+    assert_eq!(elements.len(), 1);
+    assert_eq!(elements[0].element.index, 0);
+    assert!(matches!(&elements[0].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) }
+        if error.as_ref() == &expected));
+    assert_eq!(actual, expected);
 }
 #[test]
 fn signature_retry_provider_refusal_keeps_prior_sent_unknown() {
@@ -472,7 +484,7 @@ fn refused_setting_releases_publication_fence_for_the_next_metadata_read() {
         side: None,
     });
     h.refuse(SignError::Refused);
-    assert_eq!(h.error(), &SignError::Refused.venue_error());
+    assert_unsent_write_refusal(h.error());
     h.errors.clear();
     h.command(Command::FetchLeverage {
         command: 42,

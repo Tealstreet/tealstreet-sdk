@@ -22,7 +22,8 @@ documented public protocol and remains a deployment dependency for TS parity.
 
 Writes are sequenced and never retried after transport failures. A refusal
 BingX makes before processing, a bad signature (100001) or a stale timestamp
-(109400 naming it), is re-signed and resent once; a timestamp refusal also reads
+(109400 naming it), is re-signed and resent once on the initial write; later
+ordered writes never resend after an accepted prefix. A timestamp resend reads
 BingX server time and recalibrates this account's signing clock. A batch is
 fully preflighted before any order is sent. Caller IDs are honored verbatim on
 one ordinary order or rejected before writes. Leverage changes without a side
@@ -35,6 +36,14 @@ checks normalized quantity bounds; atomic price replacement leaves its new
 notional and quantity rules to the venue. These known partial-placement cases
 retain the pre-existing behavior rather than adding a new validation gate.
 Protective put-back, restore and replacement behavior is unchanged.
+
+Prepared native writes use the shared `WritePlan` journal. Failures expose an
+ordered `elements` array covering each placed, refused, unknown and unsent lot
+or child, with exact client/native identities. Accepted cancellation, amendment
+and settings effects use `Applied`, without claiming newly created order IDs.
+Native independent cancel continuation and the held confirmed-cancel/definite-
+replacement-refusal restore each retain their existing decisions; separate
+shared journals report those branches with consecutive element indices.
 
 An ordinary cancel answered `109400` with exactly `order not exist`, or `109421`,
 uses the same satisfied-cancel path as `80016`: the command completes, but its

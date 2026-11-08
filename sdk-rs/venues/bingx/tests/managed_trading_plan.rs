@@ -224,27 +224,35 @@ fn eight_serial_calls_keep_each_native_twenty_second_attempt() {
 }
 
 #[test]
-fn each_proven_signature_resend_has_a_fresh_window_within_the_complete_plan() {
+fn first_signature_resend_and_later_single_attempt_calls_keep_native_windows() {
     let mut engine = engine();
     place(&mut engine, 8);
     let mut now = START;
     let mut actions = collect(&mut engine, now);
     for index in 0..8 {
         let first = packet(&actions);
-        now += 19_000.;
-        actions = signature_refusal(&mut engine, &first, now);
-        let second = packet(&actions);
-        assert_eq!(second.timeout_ms, Some(20_000), "fresh attempt {index}");
+        let request = if index == 0 {
+            now += 19_000.;
+            actions = signature_refusal(&mut engine, &first, now);
+            let second = packet(&actions);
+            assert_eq!(
+                without_physical_signature(body(&first)),
+                without_physical_signature(body(&second))
+            );
+            assert_ne!(body(&first)["timestamp"], body(&second)["timestamp"]);
+            second
+        } else {
+            first
+        };
         assert_eq!(
-            without_physical_signature(body(&first)),
-            without_physical_signature(body(&second))
+            request.timeout_ms,
+            Some(20_000),
+            "fresh native window {index}"
         );
-        assert_ne!(body(&first)["timestamp"], body(&second)["timestamp"]);
         now += 19_000.;
-        actions = acknowledge(&mut engine, &second, now, 9_000 + index);
+        actions = acknowledge(&mut engine, &request, now, 9_000 + index);
     }
-    assert_eq!(now - START, 304_000.);
-    assert!(now - START < 320_000.);
+    assert_eq!(now - START, 171_000.);
     assert_eq!(
         ids(&actions),
         (9_000..9_008).map(|id| id.to_string()).collect::<Vec<_>>()
