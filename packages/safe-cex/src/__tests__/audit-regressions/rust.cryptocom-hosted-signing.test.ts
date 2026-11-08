@@ -198,7 +198,7 @@ it('signs the private WS authentication preimage with the same HMAC as local cus
   });
   expect(result).toEqual({
     id: 'auth',
-    wsAuthSignature: '57a5207e795bd876080625ee876fa750cd0134c3916bcdc346d4efe1b6f0218f',
+    wsAuthSignature: createHmac('sha256', 'replay-secret').update('public/auth1610000000000replay-key1610000000000').digest('hex'),
   });
   expect(hostedSigning).toHaveBeenCalledWith({ kind: 'wsAuth', toSign: payload, outputFormat: 'hex' });
 });

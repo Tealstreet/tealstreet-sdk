@@ -129,3 +129,8 @@ c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-r
 # Public reviewer names in historical Lighter plan prose; no credential material.
 # Exact commit/path/rule/line only.
 94f58d0d64773c6c915a6da1ada5d756442f8871:docs/plans/RUST_LIGHTER_REMAINING_FUNNEL.md:generic-api-key:7
+
+# Crypto.com WS synthetic replay HMAC output, independently recomputed from
+# the literal replay inputs. Current tests compute it at runtime instead.
+# Exact historical signature fingerprint only; no path or rule exemption.
+e2df6efb8bc2ee3299f4ed473cf8ed93b686a3cc:packages/safe-cex/src/__tests__/audit-regressions/rust.cryptocom-hosted-signing.test.ts:generic-api-key:175
