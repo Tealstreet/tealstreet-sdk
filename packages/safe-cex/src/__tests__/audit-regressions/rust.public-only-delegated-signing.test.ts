@@ -294,11 +294,13 @@ it.each(disabledDelegation)('$label refuses a keyed account with a configured fa
       outcome = exchange.isPublicDataOnly ? 'public' : 'private';
       exchange.dispose();
     } catch (error) { outcome = error; }
-    // Declared rules (TS and native): Aster V3 needs RemoteSigner or a V3 wallet context, so a
-    // keyed V3 account with only a PayloadSigner field and no wallet addresses is public.
-    const declaredPublic = version === 'v3' && field === 'payloadSigner';
-    expect.soft(outcome, label).toEqual(declaredPublic ? 'public'
-      : expect.objectContaining({ kind: 'invalidInput', outcome: 'notSent' }));
+    // A present-but-invalid callback on a keyed account refuses before mode resolution, even
+    // where the rules would resolve public (Aster V3 without RemoteSigner or wallet context).
+    expect.soft(outcome, label).toEqual(expect.objectContaining({ kind: 'invalidInput', outcome: 'notSent' }));
+    const explicit: ExchangeOptions = { ...keyed, publicDataOnly: true };
+    const publicExchange = new RustEngineExchange(name, explicit, new DefaultStore());
+    try { expect.soft(publicExchange.isPublicDataOnly, `${label} explicit`).toBe(true); }
+    finally { publicExchange.dispose(); }
     const keyless: ExchangeOptions = { key: '', secret: '', extra: { asterdexApiVersion: version } };
     Reflect.set(keyless, field, value);
     const exchange = new RustEngineExchange(name, keyless, new DefaultStore());

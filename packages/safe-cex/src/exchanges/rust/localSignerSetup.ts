@@ -58,6 +58,25 @@ export const effectiveIdentityMetadata = (
   return effective;
 };
 
+/** Primary key presence exactly as signer setup normalizes it (effective metadata, Rust trim).
+ * A non-string key, or unparseable metadata beside a nonempty key, is keyed and malformed. */
+const primaryKeyPresence = (name: ExchangeName, options: Partial<ExchangeOptions>):
+  { key: boolean; primary?: LocalIdentityMetadata; malformed: boolean } => {
+  const rawKey: unknown = options.key;
+  if (rawKey !== undefined && typeof rawKey !== 'string') return { key: true, malformed: true };
+  try {
+    const primary = effectiveIdentityMetadata(parseLocalSignerMetadata(options.localSigner).primary, deriveSignerSetupPolicy(name).primary);
+    return { key: credentialPresent(options.key, primary?.trimCredential === true), primary, malformed: false };
+  } catch {
+    const keyed = options.key !== undefined && options.key !== '';
+    return { key: keyed, malformed: keyed };
+  }
+};
+
+/** Whether the account carries a primary key, normalized as signer setup does. */
+export const hasPrimaryKey = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean =>
+  primaryKeyPresence(name, options).key;
+
 /** Public mode resolved before any custody, callback or admission check, from the same
  * normalized credential presence signer setup gives derivePublicMode. A configured callback
  * (any value but undefined) stands in for the secret only beside a nonempty primary key, as
@@ -65,16 +84,9 @@ export const effectiveIdentityMetadata = (
  * resolves private so setup reports its typed invalidInput refusal. */
 export const resolveEffectivePublicDataOnly = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean => {
   if (options.publicDataOnly === true) return true;
-  const rawKey: unknown = options.key;
-  if (rawKey !== undefined && typeof rawKey !== 'string') return false;
-  let primary: LocalIdentityMetadata | undefined;
-  try {
-    primary = effectiveIdentityMetadata(parseLocalSignerMetadata(options.localSigner).primary, deriveSignerSetupPolicy(name).primary);
-  } catch {
-    // Unparseable metadata: a keyed account stays private and takes setup's typed refusal.
-    if (options.key !== undefined && options.key !== '') return false;
-  }
-  const key = credentialPresent(options.key, primary?.trimCredential === true);
+  const { key, primary, malformed } = primaryKeyPresence(name, options);
+  // A malformed key or unparseable metadata keeps a keyed account private for setup's typed refusal.
+  if (malformed) return false;
   const remoteSigner = options.remoteSigner !== undefined;
   const payloadSigner = options.payloadSigner !== undefined;
   const secret = credentialPresent(options.secret, primary?.trimSigning === true) || (key && (remoteSigner || payloadSigner));

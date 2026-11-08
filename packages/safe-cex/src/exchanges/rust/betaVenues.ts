@@ -6,7 +6,7 @@ import { exchangeMetadata } from '../../exchangeMetadata';
 import { unsupportedVenueError } from '../../unsupportedVenue';
 import { deriveRemoteSigningPolicy } from './construction';
 import { delegatedCallbacksWellFormed } from './delegatedSignerSetup';
-import { resolveEffectivePublicDataOnly } from './localSignerSetup';
+import { hasPrimaryKey, resolveEffectivePublicDataOnly } from './localSignerSetup';
 
 /** The Rust-only beta build's complete venue policy, including saved aliases. */
 export const BETA_VENUES = Object.freeze([
@@ -76,12 +76,17 @@ export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeO
     throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
   }
   assertBetaVenue(name);
-  // Enabled families validate callbacks in DelegatedSignerSetup; disabled ones never reach it.
-  if (delegated && deriveRemoteSigningPolicy(name)?.enabled !== true) {
-    if (!delegatedCallbacksWellFormed(options)) {
-      const message = 'Invalid delegated signer setup';
-      throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
-    }
+  const disabled = deriveRemoteSigningPolicy(name)?.enabled !== true;
+  // A keyed caller's present-but-invalid callback refuses whatever mode the rules resolve; only
+  // an explicit public request ignores unused callback contents. DelegatedSignerSetup validates
+  // private accounts of enabled families itself; admission covers what it never sees.
+  const configured = options.remoteSigner !== undefined || options.payloadSigner !== undefined;
+  const keyedPublic = !delegated && configured && options.publicDataOnly !== true && hasPrimaryKey(name, options);
+  if (((delegated && disabled) || keyedPublic) && !delegatedCallbacksWellFormed(options)) {
+    const message = 'Invalid delegated signer setup';
+    throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+  }
+  if (delegated && disabled) {
     const prettyName = exchangeMetadata[name].prettyName;
     const message = options.remoteSigner !== undefined
       ? `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
