@@ -79,6 +79,7 @@ fn validate(write: &PlacementWrite<'_>) -> Result<(), String> {
             }
             Ok(())
         };
+        reference(payload.trigger_price_type.as_deref())?;
         for value in [&payload.price, &payload.trigger_price]
             .into_iter()
             .flatten()
@@ -89,6 +90,8 @@ fn validate(write: &PlacementWrite<'_>) -> Result<(), String> {
             price(value, true)?;
         }
         for protection in std::iter::once(&payload.protection).chain(&payload.attach_algo_orders) {
+            reference(protection.tp_trigger_price_type.as_deref())?;
+            reference(protection.sl_trigger_price_type.as_deref())?;
             for value in [&protection.tp_trigger_price, &protection.sl_trigger_price]
                 .into_iter()
                 .flatten()
@@ -102,6 +105,13 @@ fn validate(write: &PlacementWrite<'_>) -> Result<(), String> {
                 price(value, true)?;
             }
         }
+    }
+    Ok(())
+}
+
+fn reference(value: Option<&str>) -> Result<(), String> {
+    if value.is_some_and(|value| !matches!(value, "last" | "mark" | "index")) {
+        return Err("BloFin trigger reference must be last, mark or index".into());
     }
     Ok(())
 }

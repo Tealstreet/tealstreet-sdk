@@ -835,6 +835,7 @@ impl Venue for Blofin {
                         || [
                             m.contract_value.0,
                             m.min_size.0,
+                            m.lot_size.0,
                             m.tick_size.0,
                             m.max_limit_size.0,
                             m.max_market_size.0,
@@ -865,11 +866,7 @@ impl Venue for Blofin {
                         quote: m.quote_currency.into_owned(),
                         active: m.state == "live",
                         precision: Precision {
-                            amount: if m.lot_size.0 > 0.0 {
-                                m.lot_size.0
-                            } else {
-                                m.min_size.0
-                            },
+                            amount: m.lot_size.0,
                             price: m.tick_size.0,
                         },
                         limits: Limits {

@@ -611,3 +611,163 @@ fn native_amend_invalid_wire_size_is_refused_before_transport() {
         );
     }
 }
+
+#[test]
+fn malformed_native_lot_size_never_invents_a_step_or_sends() {
+    for step in ["garbage", "-1", "0", "NaN", "inf"] {
+        let mut instruments: Value = serde_json::from_str(INSTRUMENT).unwrap();
+        let mut neighbor = instruments["data"][0].clone();
+        neighbor["instId"] = json!("ETH-USDT");
+        neighbor["baseCurrency"] = json!("ETH");
+        let row = &mut instruments["data"][0];
+        row["minSize"] = json!("4");
+        row["maxLimitSize"] = json!("5");
+        row["maxMarketSize"] = json!("5");
+        row["lotSize"] = json!(step);
+        instruments["data"].as_array_mut().unwrap().push(neighbor);
+        let mut h = Harness::with_instruments(&instruments.to_string());
+        h.modes();
+        h.reply("account/positions", r#"{"code":"0","data":[]}"#);
+        h.reply("balances", r#"{"code":"0","data":[{"currency":"USDT","balance":"1000","available":"1000","frozen":"0"}]}"#);
+        for path in [
+            "orders-pending",
+            "orders-tpsl-pending",
+            "orders-algo-pending",
+        ] {
+            h.reply(path, r#"{"code":"0","data":[]}"#);
+        }
+        h.requests.clear();
+        place(&mut h, json!([order(4.0)]));
+        not_sent(&h);
+        assert!(h.e.store().market("ETHUSDT").is_some());
+        assert!(h.e.store().market("BTCUSDT").is_none(), "{step}");
+    }
+}
+
+fn amend_conditional_with_reference(reference: &str, field: &str) -> Harness {
+    let mut h = harness(1.0, 20.0, 1.0);
+    let mut protection = json!({"tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"mark","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"index"});
+    protection[field] = json!(reference);
+    h.ws(&json!({"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","algoId":"500","orderType":"trigger","side":"buy","marginMode":"cross","positionSide":"net","size":"4","orderPrice":"-1","triggerPrice":"61000","triggerPriceType":"last","state":"live","attachAlgoOrders":[protection]}]}).to_string());
+    assert!(h.e.store().order("500").is_some());
+    h.e.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 60000.0;
+        ticker.index = 60000.0;
+        ticker.last = 60000.0;
+    });
+    h.requests.clear();
+    h.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id: "500".into(),
+            price: Some(62000.0),
+            amount: None,
+        }),
+    );
+    h.collect();
+    h
+}
+
+#[test]
+fn invalid_nested_protection_reference_refuses_before_cancel_replace() {
+    for field in ["tpTriggerPriceType", "slTriggerPriceType"] {
+        let h = amend_conditional_with_reference("garbage", field);
+        not_sent(&h);
+        assert!(h.e.store().order("500").is_some());
+    }
+}
+
+#[test]
+fn supported_nested_protection_references_allow_the_planned_cancel() {
+    for reference in ["last", "mark", "index"] {
+        for field in ["tpTriggerPriceType", "slTriggerPriceType"] {
+            let h = amend_conditional_with_reference(reference, field);
+            assert!(h.failures.is_empty(), "{reference}: {:?}", h.failures);
+            assert_eq!(h.requests.len(), 1);
+            assert!(h.requests[0].1.contains("cancel-algo"));
+        }
+    }
+}
+
+#[test]
+fn forty_one_rows_keep_global_outcomes_after_partial_or_ambiguous_second_batch() {
+    use safe_cex_engine::write_plan::ElementResult;
+    for ambiguous in [false, true] {
+        let mut h = harness(4.0, 5.0, 1.0);
+        let intents: Vec<_> = (0..41)
+            .map(|index| {
+                let mut row = order(4.0);
+                row["clientOrderId"] = json!(format!("caller{index}"));
+                row
+            })
+            .collect();
+        place(&mut h, json!(intents));
+        accept_batch(&mut h, 100);
+        next_batch(&mut h);
+        let request = h.take("batch-orders");
+        if ambiguous {
+            h.respond_status(request, 500, "{}");
+        } else {
+            let rows: Vec<Value> = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            let replies: Vec<_> = rows.iter().zip(120..).map(|(row, id)| {
+                if id == 139 {
+                    json!({"orderId":"0","clientOrderId":row["clientOrderId"],"code":"103003","msg":"refused"})
+                } else {
+                    json!({"orderId":id.to_string(),"clientOrderId":row["clientOrderId"],"code":"0"})
+                }
+            }).collect();
+            h.respond(request, &json!({"code":"2","data":replies}).to_string());
+        }
+        let error = h.failures.last().expect("second batch failed");
+        let elements = error.elements.as_ref().expect("complete caller plan");
+        assert_eq!(elements.len(), 41);
+        for (index, element) in elements.iter().enumerate() {
+            assert_eq!(element.element.index, index);
+            assert_eq!(
+                element.element.client_order_id,
+                Some(format!("caller{index}"))
+            );
+            if index < 20 || (!ambiguous && index < 39) {
+                assert_eq!(
+                    element.result,
+                    ElementResult::Placed {
+                        order_ids: vec![(100 + index).to_string()]
+                    }
+                );
+            } else if index == 40 {
+                assert_eq!(element.result, ElementResult::NotSent { error: None });
+            } else if ambiguous {
+                assert!(
+                    matches!(&element.result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown))
+                );
+            } else {
+                assert!(
+                    matches!(&element.result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected) && error.venue_code.as_deref() == Some("103003"))
+                );
+            }
+        }
+        assert_eq!(
+            error
+                .partial
+                .as_ref()
+                .expect("accepted IDs")
+                .order_ids
+                .len(),
+            if ambiguous { 20 } else { 39 }
+        );
+        assert_eq!(
+            h.requests
+                .iter()
+                .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+                .count(),
+            2,
+            "no retry, cancel, rollback or tail write"
+        );
+        assert!(
+            h.pending
+                .iter()
+                .all(|request| request.method == safe_cex_engine::Method::Get)
+        );
+    }
+}

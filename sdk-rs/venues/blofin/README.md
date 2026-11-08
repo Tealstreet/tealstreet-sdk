@@ -28,8 +28,11 @@ grouped batches and cancel-replace legs, before any write. Ordinary
 orders retain their conservative split cap; off-step maxima are floored before
 balanced allocation. Invalid plans return `NotSent` with zero transport requests.
 Final entry and protection prices must be positive and tick-aligned; explicit
-full-position TP/SL retains its native `size=-1` sentinel. BloFin discovery does
-not expose a separate minimum-notional rule to this adapter.
+full-position TP/SL retains its native `size=-1` sentinel. Discovery rejects
+missing, malformed or nonpositive `lotSize` instead of substituting `minSize`.
+The gate accepts only `last`, `mark` or `index` trigger references, including
+nested protection copied from an existing order before cancellation. BloFin
+discovery does not expose a separate minimum-notional rule to this adapter.
 
 Mutation writes retain owned wire bodies and native rule snapshots in the shared
 `WritePlan`. Failures report each placement as placed, not sent or unknown,
