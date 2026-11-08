@@ -974,6 +974,268 @@ fn split_quantities_conserve_the_original_amount() {
     assert!((total - 25.001).abs() < 1e-10);
     assert!(h.done[0].is_ok());
 }
+
+fn assert_split_plan_not_sent(h: &mut Harness, orders: Vec<PlaceOrderOpts>) {
+    h.place(orders);
+    for _ in 0..3 {
+        h.collect();
+    }
+    assert!(
+        h.requests.is_empty(),
+        "invalid split plan reached the transport"
+    );
+    assert_eq!(h.failures.len(), 1);
+    assert_eq!(
+        h.failures[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+}
+
+#[test]
+fn split_plan_below_notional_tail_refuses_the_entire_batch() {
+    let mut h = Harness::new(None);
+    let tail = PlaceOrderOpts {
+        amount: 11.,
+        price: Some(1.),
+        ..opts()
+    };
+    assert_split_plan_not_sent(&mut h, vec![opts(), tail]);
+}
+
+#[test]
+fn split_plan_impossible_notional_partition_refuses_without_writes() {
+    let mut h = Harness::new(None);
+    // At price 0.3, two lots of at least 6.667 cannot fit an intent of 11.
+    let impossible = PlaceOrderOpts {
+        amount: 11.,
+        price: Some(0.3),
+        ..opts()
+    };
+    assert_split_plan_not_sent(&mut h, vec![opts(), impossible]);
+}
+
+#[test]
+fn split_plan_uses_the_submitted_limit_price_for_every_lot() {
+    let mut h = Harness::new(None);
+    // The native 0.1 tick changes 1.04 to 1.0; the ticker's last remains 100.
+    let tail = PlaceOrderOpts {
+        amount: 11.,
+        price: Some(1.04),
+        ..opts()
+    };
+    assert_split_plan_not_sent(&mut h, vec![tail]);
+}
+
+#[test]
+fn split_plan_market_notional_uses_last_instead_of_an_unused_caller_price() {
+    let mut h = Harness::new(None);
+    h.quote(Some(1.), None);
+    let tail = PlaceOrderOpts {
+        amount: 11.,
+        kind: OrderType::Market,
+        price: Some(100.),
+        ..opts()
+    };
+    assert_split_plan_not_sent(&mut h, vec![opts(), tail]);
+}
+
+#[test]
+fn split_plan_market_without_a_positive_last_refuses_without_writes() {
+    let mut h = Harness::new(None);
+    h.quote(Some(0.), None);
+    let tail = PlaceOrderOpts {
+        amount: 11.,
+        kind: OrderType::Market,
+        ..opts()
+    };
+    assert_split_plan_not_sent(&mut h, vec![tail]);
+}
+
+#[test]
+fn split_plan_cannot_round_away_part_of_the_intent() {
+    let mut h = Harness::new(None);
+    let off_step = PlaceOrderOpts {
+        amount: 11.0004,
+        ..opts()
+    };
+    assert_split_plan_not_sent(&mut h, vec![opts(), off_step]);
+}
+
+#[test]
+fn split_plan_reduce_only_tail_is_validated_before_any_write() {
+    let mut h = Harness::new(None);
+    let tail = PlaceOrderOpts {
+        amount: 11.,
+        price: Some(1.),
+        reduce_only: Some(true),
+        ..opts()
+    };
+    assert_split_plan_not_sent(&mut h, vec![tail]);
+}
+
+#[test]
+fn split_plan_exact_minimum_quantity_and_notional_are_inclusive() {
+    let mut h = Harness::new(None);
+    let mut native = market();
+    native.limits.amount.min = 1.;
+    native.precision.amount = 1.;
+    h.engine.store_mut().set_markets(vec![native]);
+    h.place(vec![PlaceOrderOpts {
+        amount: 11.,
+        price: Some(2.),
+        ..opts()
+    }]);
+    for (id, quantity) in [("boundary_max", 10.), ("boundary_min", 1.)] {
+        assert_eq!(h.requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_str(h.body()).expect("order body");
+        assert_eq!(body["quantity"], quantity);
+        assert_eq!(body["price"], 2.);
+        h.reply(&serde_json::json!({"code":0,"data":{"orderId":id}}).to_string());
+    }
+    assert!(h.requests.is_empty());
+    assert!(h.failures.is_empty());
+    assert_eq!(h.done.len(), 1);
+    let ids: Vec<String> =
+        serde_json::from_str(h.done[0].as_ref().expect("successful batch")).expect("native IDs");
+    assert_eq!(ids, ["boundary_max", "boundary_min"]);
+}
+
+#[test]
+fn split_plan_valid_lots_place_once_with_their_original_attributes() {
+    for reduce_only in [false, true] {
+        let mut h = Harness::new(None);
+        h.place(vec![PlaceOrderOpts {
+            amount: 21.,
+            price: Some(2.),
+            reduce_only: Some(reduce_only),
+            time_in_force: Some(TimeInForce::PostOnly),
+            ..opts()
+        }]);
+        let mut actual = Vec::new();
+        for (i, quantity) in [10., 10., 1.].into_iter().enumerate() {
+            assert_eq!(h.requests.len(), 1);
+            let body: serde_json::Value = serde_json::from_str(h.body()).expect("order body");
+            assert_eq!(body["quantity"], quantity);
+            assert_eq!(body["price"], 2.);
+            assert_eq!(body["type"], "LIMIT");
+            assert_eq!(body["side"], "BUY");
+            assert_eq!(body["positionSide"], "BOTH");
+            assert_eq!(body["timeInForce"], "PostOnly");
+            if reduce_only {
+                assert_eq!(body["reduceOnly"], true);
+            }
+            actual.push(quantity);
+            h.reply(
+                &serde_json::json!({"code":0,"data":{"orderId":format!("valid_{i}")}}).to_string(),
+            );
+        }
+        assert_eq!(actual.iter().sum::<f64>(), 21.);
+        assert!(h.requests.is_empty());
+        assert!(h.failures.is_empty());
+        assert_eq!(h.done.len(), 1);
+        let ids: Vec<String> = serde_json::from_str(h.done[0].as_ref().expect("successful batch"))
+            .expect("native IDs");
+        assert_eq!(ids, ["valid_0", "valid_1", "valid_2"]);
+    }
+}
+
+#[test]
+fn split_plan_preserves_attached_take_profit_and_stop_loss_per_lot() {
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        amount: 21.,
+        price: Some(2.),
+        stop_loss: Some(1.),
+        take_profit: Some(3.),
+        sl_trigger_type: Some(StopTriggerType::LastPrice),
+        tp_trigger_type: Some(StopTriggerType::MarkPrice),
+        ..opts()
+    }]);
+    for family in 0..3 {
+        for (i, quantity) in [10., 10., 1.].into_iter().enumerate() {
+            assert_eq!(h.requests.len(), 1);
+            let body: serde_json::Value = serde_json::from_str(h.body()).expect("order body");
+            assert_eq!(body["quantity"], quantity);
+            if family == 0 {
+                assert_eq!(body["type"], "LIMIT");
+                assert_eq!(body["price"], 2.);
+            } else {
+                assert_eq!(body["type"], "TRIGGER_MARKET");
+                assert_eq!(body["side"], "SELL");
+                assert_eq!(body["reduceOnly"], true);
+                assert_eq!(body["stopPrice"], if family == 1 { 1. } else { 3. });
+                assert_eq!(
+                    body["workingType"],
+                    if family == 1 {
+                        "CONTRACT_PRICE"
+                    } else {
+                        "MARK_PRICE"
+                    }
+                );
+            }
+            h.reply(
+                &serde_json::json!({"code":0,"data":{"orderId":format!("family_{family}_{i}")}})
+                    .to_string(),
+            );
+        }
+    }
+    assert!(h.requests.is_empty());
+    assert!(h.failures.is_empty());
+    assert_eq!(h.done.len(), 1);
+}
+
+#[test]
+fn split_plan_conserves_decimal_steps_without_binary_sum_drift() {
+    for (amount, step, max, expected) in [
+        (0.3, 0.1, 0.1, vec![0.1, 0.1, 0.1]),
+        (0.15, 0.03, 0.1, vec![0.09, 0.06]),
+    ] {
+        let mut h = Harness::new(None);
+        let mut native = market();
+        native.limits.amount.min = step;
+        native.limits.amount.max = max;
+        native.precision.amount = step;
+        h.engine.store_mut().set_markets(vec![native]);
+        h.place(vec![PlaceOrderOpts {
+            amount,
+            price: Some(100.),
+            ..opts()
+        }]);
+        for (i, quantity) in expected.iter().enumerate() {
+            assert_eq!(h.requests.len(), 1, "{:?}", h.failures);
+            let body: serde_json::Value = serde_json::from_str(h.body()).expect("native body");
+            assert_eq!(body["quantity"], *quantity);
+            h.reply(
+                &serde_json::json!({"code":0,"data":{"orderId":format!("decimal_{i}")}})
+                    .to_string(),
+            );
+        }
+        assert!(h.requests.is_empty());
+        assert!(h.failures.is_empty());
+        assert_eq!(h.done.len(), 1);
+        let ids: Vec<String> = serde_json::from_str(h.done[0].as_ref().expect("successful batch"))
+            .expect("native IDs");
+        assert_eq!(ids.len(), expected.len());
+    }
+}
+
+#[test]
+fn split_plan_unbounded_native_maximum_keeps_single_order_placement() {
+    let mut h = Harness::new(None);
+    let mut native = market();
+    native.limits.amount.max = f64::INFINITY;
+    h.engine.store_mut().set_markets(vec![native]);
+    h.place(vec![opts()]);
+    assert_eq!(h.requests.len(), 1, "{:?}", h.failures);
+    h.reply(r#"{"code":0,"data":{"orderId":"uncapped"}}"#);
+    assert!(h.requests.is_empty());
+    assert!(h.failures.is_empty());
+    assert_eq!(h.done.len(), 1);
+}
 #[test]
 fn every_split_entry_is_receipted_but_trigger_children_still_omit_identity() {
     let mut h = Harness::new(None);
@@ -1894,7 +2156,7 @@ fn cheap_limit(reduce_only: bool) -> PlaceOrderOpts {
 }
 
 #[test]
-fn an_order_below_the_venue_minimum_value_is_refused_here_but_a_close_is_not() {
+fn explicit_order_quantities_below_the_minimum_value_are_not_sent() {
     let mut h = Harness::new(None);
     h.place(vec![cheap_limit(false)]);
     assert!(h.requests.is_empty());
@@ -1906,7 +2168,11 @@ fn an_order_below_the_venue_minimum_value_is_refused_here_but_a_close_is_not() {
 
     let mut h = Harness::new(None);
     h.place(vec![cheap_limit(true)]);
-    assert_eq!(h.requests.len(), 1, "{:?}", h.failures);
+    assert!(h.requests.is_empty(), "{:?}", h.failures);
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
 }
 
 #[test]
@@ -1982,7 +2248,7 @@ fn a_refused_bracket_says_the_entry_was_placed() {
 }
 
 #[test]
-fn a_close_below_the_market_minimum_is_sent_but_an_open_is_not() {
+fn explicit_close_and_open_quantities_below_the_minimum_are_not_sent() {
     let dust = |reduce_only: bool| -> PlaceOrderOpts {
         serde_json::from_value(serde_json::json!({
             "symbol": "BTCUSDT", "type": "limit", "side": "sell", "amount": 0.005,
@@ -2002,7 +2268,11 @@ fn a_close_below_the_market_minimum_is_sent_but_an_open_is_not() {
     assert!(h.requests.is_empty(), "{:?}", h.requests.len());
     let mut h = harness();
     h.place(vec![dust(true)]);
-    assert_eq!(h.requests.len(), 1, "{:?}", (&h.failures, &h.done));
+    assert!(h.requests.is_empty(), "{:?}", (&h.failures, &h.done));
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
 }
 
 #[test]

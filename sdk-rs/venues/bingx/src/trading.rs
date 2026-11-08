@@ -6,6 +6,8 @@ use crate::Pending;
 mod context;
 #[path = "trading/protection.rs"]
 pub(crate) mod protection;
+#[path = "trading/split_plan.rs"]
+mod split_plan;
 #[path = "trading/venue_state.rs"]
 mod venue_state;
 
@@ -1366,7 +1368,6 @@ impl Trading {
         if full && position.is_none() {
             return Err("Full-position stop requires an opposite-side position".into());
         }
-        // A close stays out, as below: dust left by a partial close must still be closable.
         if !full && (amount <= 0.0 || (!closing && amount < market.limits.amount.min)) {
             return Err("Order quantity is below the market minimum".into());
         }
@@ -1381,14 +1382,8 @@ impl Trading {
         if price.is_some_and(|p| !p.is_finite() || p <= 0.0) {
             return Err("Order price rounds to zero".into());
         }
-        // Closes stay out: nothing says the venue holds a reduce to this, and a stuck close is worse.
         let min_value = self.min_order_value.get(&market.id).copied().unwrap_or(0.0);
         let reference = price.or_else(|| cx.store.ticker(&o.symbol).map(|t| t.last));
-        if !closing && reference.is_some_and(|p| p > 0.0 && amount * p < min_value) {
-            return Err(format!(
-                "Order value is below the BingX minimum of {min_value} USDT"
-            ));
-        }
         let kind = match o.kind {
             OrderType::Market => "MARKET",
             OrderType::Limit => "LIMIT",
@@ -1424,8 +1419,8 @@ impl Trading {
         } else {
             split(size, market.limits.amount.max, market.precision.amount)?
         };
-        if !full && !closing && lots.iter().any(|lot| *lot < market.limits.amount.min) {
-            return Err("Split order lot is below the market minimum".into());
+        if !full {
+            split_plan::validate(o.amount, &lots, market, min_value, reference)?;
         }
         if o.client_order_id.is_some() && lots.len() != 1 {
             return Err("Client order id requires exactly one native order".into());

@@ -28,6 +28,17 @@ fully preflighted before any order is sent. Caller IDs are honored verbatim on
 one ordinary order or rejected before writes. Leverage changes without a side
 update both hedge sides sequentially, matching the engine's symbol-level API.
 
+Every split lot must satisfy native min/max quantity, step and minimum notional
+before the first write in the batch. Notional uses the actual rounded LIMIT
+price, or the ticker's last price for MARKET orders; a required missing or
+nonpositive reference refuses the plan. Checked decimal arithmetic verifies
+inclusive notional bounds and exact quantity conservation. Invalid layouts are
+refused as InvalidInput/NotSent with zero requests, without resizing or
+rebalancing. TP/SL, time-in-force and reduce-only fields keep their existing
+per-lot values. Explicit reduce-only quantities also obey these minima, so a
+below-minimum dust intent refuses locally. The separate native full-position
+close path keeps its existing position-derived quantity and close flag.
+
 An ordinary cancel answered `109400` with exactly `order not exist`, or `109421`,
 uses the same satisfied-cancel path as `80016`: the command completes, but its
 symbols remain fenced until a fresh primary-key order snapshot reconciles them.
