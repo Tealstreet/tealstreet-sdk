@@ -1306,6 +1306,25 @@ impl BybitLinear {
         if self.variant.is_hyro() {
             mapped.position.id = row.symbol.to_string();
             mapped.position.position_mode = Some(PositionMode::Oneway);
+            if mapped.position.contracts == 0.0
+                && (!mapped.position.leverage.is_finite() || mapped.position.leverage <= 0.0)
+            {
+                // Legacy Hyro carries leverage across flat rows. REST drops flat
+                // positions, so the committed setting retains that same value.
+                mapped.position.leverage = store
+                    .positions()
+                    .iter()
+                    .find(|position| position.symbol == row.symbol.as_ref())
+                    .map(|position| position.leverage)
+                    .filter(|leverage| leverage.is_finite() && *leverage > 0.0)
+                    .or_else(|| {
+                        store
+                            .setting(&row.symbol)
+                            .map(|setting| setting.leverage)
+                            .filter(|leverage| leverage.is_finite() && *leverage > 0.0)
+                    })
+                    .unwrap_or(1.0);
+            }
         }
         mapped
     }

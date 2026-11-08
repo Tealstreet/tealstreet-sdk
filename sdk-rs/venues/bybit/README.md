@@ -47,7 +47,9 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
   with Hyro before a large beta workload.
 - Flat position clears can omit side/leverage. Live positions still require a
   valid side and positive leverage, and accept `entryPrice` when `avgPrice` is
-  absent/empty. Other supplied financial numbers retain their validation.
+  absent/empty. Flat rows with missing, empty or nonpositive leverage retain the
+  known position/setting leverage, defaulting to 1 when unknown, so unchanged
+  leverage requests remain local. Supplied non-finite numbers still refuse.
 - A native `110001` cancel answer satisfies the cancellation intent without a
   resend. Existing fresh-read, fill-retention and unknown-outcome protections
   remain authoritative; it does not invent a cancellation or fill event.

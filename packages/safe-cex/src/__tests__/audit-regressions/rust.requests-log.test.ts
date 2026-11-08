@@ -74,7 +74,7 @@ const harness = (
       bind: () => ({ ready: () => true, dispatch: async () => response() }),
     }),
     connect: (_url, handlers) => {
-      const socket = { handlers, sent: [] as string[] };
+      const socket: (typeof sockets)[number] = { handlers, sent: [] };
       sockets.push(socket);
       return { send: (text) => socket.sent.push(text), close: () => {} };
     },
@@ -494,7 +494,8 @@ it('logs private socket frames redacted after delivering them and skips heartbea
 
 it.each(['hyrotrader', 'binance', 'okx'])('opts %s into diagnostics for every socket channel', async (label) => {
   const { transport, sockets, diagnostics } = harness(undefined, label);
-  for (const channel of ['public', 'private', 'business'] as const) {
+  const channels: WsDiagnosticEvent['channel'][] = ['public', 'private', 'business'];
+  for (const channel of channels) {
     const received = vi.fn();
     const socket = transport.connect('wss://fixture.invalid/', {
       channel,
@@ -502,11 +503,13 @@ it.each(['hyrotrader', 'binance', 'okx'])('opts %s into diagnostics for every so
       onMessage: received,
       onClose() {},
     });
+    const connected = sockets.at(-1);
+    if (!connected) throw new Error('transport did not create a socket');
     const wire = '{"op":"subscribe","args":["tickers.BTCUSDT"]}';
     socket.send(wire);
-    sockets.at(-1)!.handlers.onMessage('{"topic":"tickers.BTCUSDT","data":{"lastPrice":"50000"}}');
+    connected.handlers.onMessage('{"topic":"tickers.BTCUSDT","data":{"lastPrice":"50000"}}');
     expect(received).toHaveBeenCalledOnce();
-    expect(sockets.at(-1)!.sent).toEqual([wire]);
+    expect(connected.sent).toEqual([wire]);
   }
   await tick();
   expect(diagnostics).toEqual([]);
@@ -603,7 +606,9 @@ it('withholds malformed, oversized, binary and deeply nested frame contents and 
   ])
     socket.send(frame);
   const bytes = new TextEncoder().encode('FIXTURE_BINARY_SECRET');
-  sockets[0].handlers.onBinary!(bytes);
+  const onBinary = sockets[0].handlers.onBinary;
+  if (!onBinary) throw new Error('transport did not install a binary handler');
+  onBinary(bytes);
   expect(binary).toHaveBeenCalledWith(bytes);
   await tick();
   expect(diagnostics).toHaveLength(7);
