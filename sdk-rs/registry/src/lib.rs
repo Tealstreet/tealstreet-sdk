@@ -275,6 +275,17 @@ fn unused_public_custody(venue: &str, options: &EngineOptions) -> bool {
             != construction::ReadCredentialsPolicy::PublicRead
 }
 
+// A capsule carries credentials separately from the stripped outer options.
+// Only bypass it if it cannot affect public/private resolution. Otherwise the
+// family setup reads its facts first, and build_with_signer resolves the mode
+// from the installed identities before discarding any unused private custody.
+#[cfg(feature = "dispatch-signing")]
+fn unused_local_capsule(venue: &str, options: &EngineOptions) -> bool {
+    construction::public_regardless_of_local_setup(venue, options)
+        && construction::read_credentials_policy(venue)
+            != construction::ReadCredentialsPolicy::PublicRead
+}
+
 #[cfg(feature = "dispatch-signing")]
 fn empty_local_signer() -> (
     safe_cex_engine::signing::Provider,
@@ -1133,7 +1144,7 @@ pub fn local_signer_from_capsule(
     ),
     VenueError,
 > {
-    if unused_public_custody(venue, options) {
+    if unused_local_capsule(venue, options) {
         drop(zeroize::Zeroizing::new(input));
         return Ok(empty_local_signer());
     }
@@ -1160,7 +1171,7 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
-    if unused_public_custody(venue, options) {
+    if unused_local_capsule(venue, options) {
         drop(zeroize::Zeroizing::new(input));
         return Ok(empty_local_signer());
     }
