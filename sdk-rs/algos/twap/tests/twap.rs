@@ -1584,12 +1584,10 @@ fn last_slice_notional_refuses_the_complete_plan_at_the_native_reference() {
         rules: Some(safe_cex_algo_twap::plan::OrderRules {
             minimum_amount: 1.0,
             maximum_amount: 10.0,
-            notional: safe_cex_algo_twap::plan::NotionalCheck::Required(
-                safe_cex_algo_twap::plan::NotionalRule {
-                    minimum: 20.0,
-                    per_unit: 10.0,
-                },
-            ),
+            notional: Some(safe_cex_algo_twap::plan::NotionalRule {
+                minimum: 20.0,
+                per_unit: 10.0,
+            }),
             ..Default::default()
         }),
         ..Default::default()
@@ -1607,21 +1605,4 @@ fn last_slice_notional_refuses_the_complete_plan_at_the_native_reference() {
     );
     assert!(error.message.contains("notional"));
     assert!(placements(&effects).is_empty());
-}
-
-#[test]
-fn missing_notional_is_explicit_in_every_admitted_child_plan() {
-    let mut env = Env::new();
-    let view = View::default();
-    let mut book = TwapBook::new("test-account");
-    let options = serde_json::from_value(options(json!({}))).unwrap();
-    let (started, _) = book.start(options, &mut env, &view);
-    let id = started.unwrap();
-    let plan = book.get(&id).unwrap().planned_writes();
-    assert_eq!(plan.len(), 5);
-    assert!(
-        plan.iter()
-            .all(|child| child.rules.notional == safe_cex_algo_twap::plan::NotionalCheck::Unknown),
-        "notional unknown must be visible, including the released first child"
-    );
 }

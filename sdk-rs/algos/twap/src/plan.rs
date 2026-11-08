@@ -11,20 +11,8 @@ pub struct OrderRules {
     pub maximum_amount: f64,
     pub amount_step: Option<f64>,
     pub price_tick: Option<f64>,
-    /// Execution price of a native marketable limit behind a market intent.
-    pub wire_price: Option<f64>,
     /// Supplied by the native adapter, including contract units and close exemptions.
-    pub notional: NotionalCheck,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum NotionalCheck {
-    /// Notional unknown: the native adapter supplied no minimum.
-    #[default]
-    Unknown,
-    /// An explicit native exemption, never inferred from missing data.
-    Exempt,
-    Required(NotionalRule),
+    pub notional: Option<NotionalRule>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,26 +62,18 @@ pub fn validate_write(write: &PlannedOrder) -> Result<(), VenueError> {
     {
         return Err(invalid("slice amount is off the native step"));
     }
-    let price = if request.kind == OrderKind::Limit {
-        Some(
-            request
-                .price
-                .ok_or_else(|| invalid("slice limit price is unavailable"))?,
-        )
-    } else {
-        rules.wire_price
-    };
-    if let Some(price) = price {
-        if !(price.is_finite() && price > 0.0) {
-            return Err(invalid("slice execution price must be finite and positive"));
-        }
+    if request.kind == OrderKind::Limit {
+        let price = request
+            .price
+            .filter(|price| price.is_finite() && *price > 0.0)
+            .ok_or_else(|| invalid("slice limit price must be finite and positive"))?;
         if let Some(tick) = rules.price_tick
             && (!(tick.is_finite() && tick > 0.0) || !on_grid(price, tick))
         {
             return Err(invalid("slice price is off the native tick"));
         }
     }
-    if let NotionalCheck::Required(notional) = rules.notional {
+    if let Some(notional) = rules.notional {
         let value = amount * notional.per_unit;
         if !(notional.minimum.is_finite()
             && notional.minimum >= 0.0

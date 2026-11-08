@@ -1329,27 +1329,6 @@ impl Venue for Bingx {
                 };
                 rows.shrink_to_fit();
                 cx.store.set_markets(rows);
-                let facts = cx
-                    .store
-                    .markets()
-                    .iter()
-                    .map(|market| {
-                        (
-                            market.symbol.clone(),
-                            safe_cex_engine::market_facts::MarketOrderFacts {
-                                min_notional: self
-                                    .trading
-                                    .min_order_value
-                                    .get(&market.id)
-                                    .copied()
-                                    .filter(|value| *value != 0.0),
-                                reduce_only_exempt: true,
-                                ..Default::default()
-                            },
-                        )
-                    })
-                    .collect();
-                cx.store.set_market_order_facts(facts);
                 let (before, after) = self
                     .account
                     .set_skipped_markets(cx.store, skipped.iter().map(|id| id.replace('-', "")));

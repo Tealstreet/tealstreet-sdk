@@ -47,7 +47,6 @@ pub struct TwapInstance {
     next_token: u64,
     state_changed: bool,
     prepared: bool,
-    planned_writes: Vec<crate::plan::PlannedOrder>,
 }
 
 impl TwapInstance {
@@ -70,7 +69,6 @@ impl TwapInstance {
             next_token: 0,
             state_changed: false,
             prepared: false,
-            planned_writes: Vec::new(),
         }
     }
 
@@ -81,11 +79,6 @@ impl TwapInstance {
 
     pub fn tracked_chaser_ids(&self) -> &[String] {
         &self.tracked_chaser_ids
-    }
-
-    /// Every admitted child, including explicit unknown notional facts.
-    pub fn planned_writes(&self) -> &[crate::plan::PlannedOrder] {
-        &self.planned_writes
     }
 
     /// The earliest timer deadline, if any timer is armed.
@@ -114,8 +107,7 @@ impl TwapInstance {
     pub(crate) fn prepare(&mut self, view: &dyn TwapMarketView) -> Result<(), VenueError> {
         let mut sizes = self.state.orders_sizes.clone();
         let step = view
-            .order_rules(&self.request(sizes.first().copied().unwrap_or(0.0), view))
-            .and_then(|rules| rules.amount_step)
+            .amount_step(self.options.symbol())
             .filter(|step| step.is_finite() && *step > 0.0);
         if !self.prepared
             && let Some(step) = step
@@ -134,15 +126,13 @@ impl TwapInstance {
                 ));
             }
         }
-        let mut writes = Vec::with_capacity(sizes.len());
         for size in &sizes {
-            let write = view.prepare_order(self.request(*size, view))?;
-            crate::plan::validate_write(&write)?;
-            writes.push(write);
+            let request = self.request(*size, view);
+            let rules = view
+                .order_rules(&request)
+                .ok_or_else(|| crate::plan::invalid("TWAP native market rules are unavailable"))?;
+            crate::plan::validate_write(&crate::plan::PlannedOrder { request, rules })?;
         }
-        let released = self.planned_writes.len().saturating_sub(writes.len());
-        self.planned_writes.truncate(released);
-        self.planned_writes.extend(writes);
         self.state.orders_sizes = sizes;
         self.prepared = true;
         Ok(())
@@ -202,14 +192,6 @@ impl TwapInstance {
             self.terminate();
             return;
         }
-        let planned_index = self
-            .planned_writes
-            .len()
-            .saturating_sub(self.state.orders_sizes.len());
-        let prepared_request = self
-            .planned_writes
-            .get(planned_index)
-            .map(|write| write.request.clone());
         let order_size =
             (!self.state.orders_sizes.is_empty()).then(|| self.state.orders_sizes.remove(0));
         let randomness = self.options.randomness_percentage;
@@ -247,13 +229,7 @@ impl TwapInstance {
             return;
         }
 
-        let Some(mut request) = prepared_request else {
-            effects.push(TwapEffect::Log {
-                message: "TWAP has no validated write for its next slice".to_owned(),
-            });
-            self.terminate();
-            return;
-        };
+        let mut request = self.request(order_size, view);
         let priced = request.kind == OrderKind::Limit;
         let token = self.next_token;
         self.next_token += 1;
@@ -265,9 +241,6 @@ impl TwapInstance {
             wait_ms,
         });
         request.client_order_id = view.client_order_id(&request);
-        if let Some(write) = self.planned_writes.get_mut(planned_index) {
-            write.request.client_order_id = request.client_order_id.clone();
-        }
         // Persisted before the order goes out: a host that dies before the slice
         // is counted leaves a restore something to look up instead of re-placing.
         self.state.in_flight = Some(InFlightSlice {

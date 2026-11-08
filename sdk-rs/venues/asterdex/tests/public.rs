@@ -949,32 +949,3 @@ fn unsupported_candle_intervals_are_rejected_not_served_as_one_hour() {
         "AsterDEX does not support 8h candles"
     );
 }
-
-#[test]
-fn native_notional_facts_keep_filter_tick_instead_of_display_precision() {
-    let mut h = Harness::start(Options {
-        public_data_only: true,
-        ..Default::default()
-    });
-    if h.requests
-        .iter()
-        .any(|request| request.url.ends_with("/time"))
-    {
-        h.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
-    }
-    let catalogue = MARKETS.replacen(
-        "\"filters\":[",
-        "\"filters\":[{\"filterType\":\"MIN_NOTIONAL\",\"notional\":\"5\"},",
-        1,
-    );
-    h.reply("/exchangeInfo", 200, &catalogue);
-    let facts = h.engine.store().market_order_facts()["BTCUSDT"];
-    assert_eq!(facts.min_notional, Some(5.0));
-    assert_eq!(facts.price_tick, Some(0.10));
-    assert_eq!(
-        facts.market_amount.expect("native market-lot facts").step,
-        Some(0.001)
-    );
-    assert_eq!(h.engine.store().markets()[0].precision.price, 0.01);
-    assert!(facts.reduce_only_exempt);
-}

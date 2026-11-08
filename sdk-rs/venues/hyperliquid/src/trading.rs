@@ -176,7 +176,7 @@ const BUILDER_RECHECK_MS: f64 = 60_000.0;
 const AMEND_READ_MS: f64 = 5_000.0;
 const AMEND_RETRY_MS: f64 = 1_000.0;
 /// Hyperliquid refuses an order worth less than this.
-pub(crate) const MIN_ORDER_VALUE: f64 = 10.0;
+const MIN_ORDER_VALUE: f64 = 10.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OrderReply {
     Rows,

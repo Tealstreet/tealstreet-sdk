@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 #[derive(Default)]
 pub struct Store {
     markets: Vec<Market>,
-    market_order_facts: HashMap<String, crate::market_facts::MarketOrderFacts>,
     quantity_units: u32,
     #[cfg(any(test, feature = "product-semantics"))]
     instrument_classifications: Option<Vec<InstrumentClassification>>,
@@ -169,21 +168,6 @@ impl Store {
         &self.markets
     }
 
-    pub fn market_order_facts(&self) -> &HashMap<String, crate::market_facts::MarketOrderFacts> {
-        &self.market_order_facts
-    }
-
-    /// Replace native facts after committing their market catalogue. Never serialized.
-    pub fn set_market_order_facts(
-        &mut self,
-        facts: HashMap<String, crate::market_facts::MarketOrderFacts>,
-    ) {
-        self.market_order_facts = facts
-            .into_iter()
-            .filter(|(symbol, _)| self.market_by_symbol.contains_key(symbol.as_str()))
-            .collect();
-    }
-
     pub fn market(&self, symbol: &str) -> Option<&Market> {
         self.market_by_symbol
             .get(symbol)
@@ -230,7 +214,6 @@ impl Store {
             .map(|(index, market)| (market.id.clone().into_boxed_str(), index as u32))
             .collect();
         self.markets = markets;
-        self.market_order_facts.clear();
         #[cfg(any(test, feature = "product-semantics"))]
         {
             self.instrument_classifications = None;
