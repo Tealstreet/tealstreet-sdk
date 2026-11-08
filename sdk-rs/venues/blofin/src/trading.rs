@@ -14,6 +14,7 @@ use safe_cex_engine::request_context::{
     HttpOwnerRetirement, Plan, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
 use safe_cex_engine::{CommandWait, ErrorKind, Outcome, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -21,6 +22,7 @@ const BROKER: &str = "b3cdedc0a20880ba";
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
 
+#[derive(Clone)]
 pub struct SizeRules {
     pub min: f64,
     pub max_limit: f64,
@@ -149,13 +151,7 @@ pub(crate) struct Trading {
     /// A job whose Plan the engine sealed itself: restore its Store rows and
     /// reconcile at the next callback that holds Cx.
     retired: Option<Job>,
-    /// Orders put back under new ids after a refused replacement: (original
-    /// native id, new native ids, symbol). A later cancel of the original or its
-    /// market reaches them.
-    restored: VecDeque<(String, Vec<String>, String)>,
 }
-/// How many put-back orders are remembered for a later cancel to follow.
-const RESTORED_KEPT: usize = 64;
 struct Queued {
     preflight: Preflight,
     command: Command,
@@ -172,6 +168,7 @@ pub struct Request {
     slot: Slot,
     context: Context,
     step: Step,
+    write_index: Option<usize>,
 }
 /// Where the active job is driven from: entry custody, the current call's
 /// DATA, or a Plan-ready callback holding the next slot.
@@ -184,6 +181,8 @@ struct Job {
     command: CommandId,
     intent: Intent,
     steps: VecDeque<Step>,
+    writes: Option<WritePlan<PlannedPlacement>>,
+    pending_write: Option<usize>,
     ids: Vec<String>,
     /// Store rows issued so far, restored on every terminal.
     creating: Vec<String>,
@@ -196,16 +195,10 @@ struct Job {
     replacing_stop: Option<(String, String, OrderSide, OrderType)>,
     /// The same for any other order: its id and symbol.
     replacing_order: Option<(String, String)>,
-    /// Cancel then re-place, sent only if BloFin definitely refuses an amend-tpsl.
-    amend_fallback: VecDeque<Step>,
     /// The read-back that must show the kept leg after an accepted amend-tpsl.
     amend_verify: Option<Step>,
     /// An amend's replaced original, re-checked when its cancel is finally sent.
     guard: Option<StopGuard>,
-    /// The original placed again, unchanged, once its replacement is refused.
-    restore: VecDeque<Step>,
-    /// The put-back is under way: the replacement was refused.
-    restoring: bool,
 }
 /// The amended order (and the entry it is attached to) as planned, and the
 /// replacement trigger's reference: the cancel goes only while all still hold.
@@ -262,6 +255,7 @@ impl StopGuard {
     }
 }
 struct Step {
+    placement: Option<PlannedPlacement>,
     receipts: Vec<OrderIdentityReceipt>,
     /// Creating rows this placement call adds.
     orders: Vec<Order>,
@@ -269,6 +263,24 @@ struct Step {
     body: String,
     effect: Effect,
     delay: f64,
+}
+#[derive(Clone)]
+struct PlannedPlacement {
+    payloads: Vec<Placement>,
+    family: u8,
+    rules: SizeRules,
+    market: Market,
+    body: String,
+}
+impl PlannedPlacement {
+    fn validate(&self) -> Result<(), VenueError> {
+        validate_placement_write(&PlacementWrite {
+            payloads: &self.payloads,
+            family: self.family,
+            rules: &self.rules,
+            market: &self.market,
+        })
+    }
 }
 enum Effect {
     Place {
@@ -426,6 +438,8 @@ struct Cancel<'a> {
 #[serde(rename_all = "camelCase")]
 struct ResultRow<'a> {
     #[serde(borrow, default, deserialize_with = "nullable_text")]
+    client_order_id: Str<'a>,
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     order_id: Str<'a>,
     #[serde(borrow, default, deserialize_with = "nullable_text")]
     tpsl_id: Str<'a>,
@@ -518,11 +532,71 @@ fn positive(value: f64, label: &str) -> Result<(), String> {
     }
 }
 impl Job {
+    fn prepare_writes(&mut self) -> Result<(), VenueError> {
+        let mut index = 0;
+        let mut writes = Vec::new();
+        for step in &self.steps {
+            if let Some(payload) = &step.placement {
+                let elements = payload
+                    .payloads
+                    .iter()
+                    .map(|row| {
+                        let element = Element {
+                            index,
+                            client_order_id: Some(row.client_order_id.clone()),
+                        };
+                        index += 1;
+                        element
+                    })
+                    .collect();
+                writes.push(PlannedWrite {
+                    payload: payload.clone(),
+                    elements,
+                });
+            }
+        }
+        if !writes.is_empty() {
+            self.writes = Some(WritePlan::validate(writes, PlannedPlacement::validate)?);
+        }
+        Ok(())
+    }
+
+    fn settle_write(
+        &mut self,
+        index: Option<usize>,
+        results: Vec<ElementResult>,
+    ) -> Result<(), VenueError> {
+        let (Some(writes), Some(index)) = (&mut self.writes, index) else {
+            return Err(unknown("BloFin placement has no pending write-plan entry")
+                .kind(ErrorKind::Internal));
+        };
+        writes
+            .settle(index, results)
+            .map_err(|error| unknown(error.to_string()).kind(ErrorKind::Internal))?;
+        self.pending_write = None;
+        Ok(())
+    }
+
+    fn failure(&mut self, error: VenueError) -> VenueError {
+        if let Some(writes) = &mut self.writes {
+            if let Some(index) = self.pending_write.take()
+                && let Err(reason) = writes.fail(index, error.clone())
+            {
+                return writes.failure(unknown(reason.to_string()).kind(ErrorKind::Internal));
+            }
+            writes.failure(error)
+        } else {
+            error
+        }
+    }
+
     fn new(command: CommandId, intent: Intent) -> Self {
         Self {
             command,
             intent,
             steps: VecDeque::new(),
+            writes: None,
+            pending_write: None,
             ids: vec![],
             creating: vec![],
             canceling: vec![],
@@ -531,11 +605,8 @@ impl Job {
             join: false,
             replacing_stop: None,
             replacing_order: None,
-            amend_fallback: VecDeque::new(),
             amend_verify: None,
             guard: None,
-            restore: VecDeque::new(),
-            restoring: false,
         }
     }
 }
@@ -560,6 +631,19 @@ impl Step {
     }
 }
 impl Blofin {
+    pub(crate) fn capture_trade_write_plan(
+        &self,
+        request: &Request,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Some(active) = self.trading.active.as_ref()
+            && active.job.command == request.command
+            && let Some(writes) = active.job.writes.as_ref()
+        {
+            evidence.write_plan(writes);
+        }
+    }
+
     fn placement(
         &self,
         cx: &Cx<'_, Pending>,
@@ -958,7 +1042,7 @@ impl Blofin {
         cx: &Cx<'_, Pending>,
         family: u8,
         payloads: &[Placement],
-    ) -> Result<(), String> {
+    ) -> Result<PlannedPlacement, String> {
         let first = payloads.first().ok_or("Empty BloFin placement write")?;
         let market = cx
             .store
@@ -974,7 +1058,20 @@ impl Blofin {
             rules,
             market,
         })
-        .map_err(|error| error.message)
+        .map_err(|error| error.message)?;
+        let body = if family == 0 {
+            serde_json::to_string(payloads)
+        } else {
+            serde_json::to_string(first)
+        }
+        .map_err(|error| error.to_string())?;
+        Ok(PlannedPlacement {
+            payloads: payloads.to_vec(),
+            family,
+            rules: rules.clone(),
+            market: market.clone(),
+            body,
+        })
     }
     fn add_placements(
         &self,
@@ -997,6 +1094,7 @@ impl Blofin {
                 .collect();
             for target in job.replacement_targets.iter().filter(|t| t.family == 0) {
                 job.steps.push_back(Step {
+                    placement: None,
                     receipts: Vec::new(),
                     orders: Vec::new(),
                     path: "/api/v1/trade/order-detail",
@@ -1034,15 +1132,16 @@ impl Blofin {
                 .take_while(|p| p.inst_id == first.inst_id && p.margin_mode == first.margin_mode)
                 .count();
             let batch = &normal[start..start + count];
-            self.validate_placement_batch(cx, 0, batch)?;
+            let placement = self.validate_placement_batch(cx, 0, batch)?;
             let receipts = normal_receipts[start..start + count].to_vec();
             let orders = normal_orders[start..start + count].to_vec();
             start += count;
             job.steps.push_back(Step {
+                placement: Some(placement.clone()),
                 receipts,
                 orders,
                 path: "/api/v1/trade/batch-orders",
-                body: serde_json::to_string(batch).map_err(|e| e.to_string())?,
+                body: placement.body.clone(),
                 effect: Effect::Place {
                     family: 0,
                     count: batch.len(),
@@ -1052,8 +1151,10 @@ impl Blofin {
             });
         }
         for (family, payload, receipt, order) in special {
-            self.validate_placement_batch(cx, family, std::slice::from_ref(&payload))?;
+            let placement =
+                self.validate_placement_batch(cx, family, std::slice::from_ref(&payload))?;
             job.steps.push_back(Step {
+                placement: Some(placement.clone()),
                 receipts: vec![receipt],
                 orders: vec![order],
                 path: if family == 1 {
@@ -1061,7 +1162,7 @@ impl Blofin {
                 } else {
                     "/api/v1/trade/order-algo"
                 },
-                body: serde_json::to_string(&payload).map_err(|e| e.to_string())?,
+                body: placement.body.clone(),
                 effect: Effect::Place {
                     family,
                     count: 1,
@@ -1104,7 +1205,7 @@ impl Blofin {
             if family == 2 && source.is_none_or(|s| s.algo_id != *id || s.inst_id != m.id) {
                 return Err("BloFin conditional cancel requires authoritative provenance".into());
             }
-            // Inline fallback legs share the normal parent's native cancel target.
+            // Inline attached legs share the normal parent's native cancel target.
             let family = if family == 1
                 && source.is_some_and(|s| s.tpsl_id.is_empty() && !s.order_id.is_empty())
             {
@@ -1158,7 +1259,6 @@ impl Blofin {
             .filter(|s| leg && s.tpsl_id.is_empty() && !s.order_id.is_empty())
             .and_then(|s| cx.store.order(&s.order_id))
             .cloned();
-        let original = parent.as_ref().unwrap_or(order);
         let m = cx
             .store
             .market(&order.symbol)
@@ -1189,14 +1289,7 @@ impl Blofin {
         guard
             .validate(cx.store, cx.now)
             .map_err(|error| error.message)?;
-        let mut restore = Job::new(job.command, Intent::Place);
-        self.add_placements(
-            cx,
-            &mut restore,
-            self.replacement(cx, original, None, None)?,
-        )?;
         job.guard = Some(guard);
-        job.restore = restore.steps;
         Ok(())
     }
     /// The final-claim re-check of an amend's destructive cancel.
@@ -1216,7 +1309,7 @@ impl Blofin {
             .trading
             .active
             .as_ref()
-            .filter(|active| active.job.command == request.command && !active.job.restoring)
+            .filter(|active| active.job.command == request.command)
             .and_then(|active| active.job.guard.as_ref())
         else {
             return Ok(());
@@ -1407,6 +1500,7 @@ impl Blofin {
             return Err("BloFin amend has nothing to change".into());
         }
         let amend = Step {
+            placement: None,
             receipts: Vec::new(),
             orders: Vec::new(),
             path,
@@ -1425,6 +1519,7 @@ impl Blofin {
             delay: 0.0,
         };
         let verify = Step {
+            placement: None,
             receipts: Vec::new(),
             orders: Vec::new(),
             path: read,
@@ -1480,6 +1575,7 @@ impl Blofin {
             new_sl_trigger_price: (!removing_tp).then_some("0"),
         };
         let amend = Step {
+            placement: None,
             receipts: Vec::new(),
             orders: Vec::new(),
             path: "/api/v1/trade/amend-tpsl",
@@ -1488,6 +1584,7 @@ impl Blofin {
             delay: 0.0,
         };
         let verify = Step {
+            placement: None,
             receipts: Vec::new(),
             orders: Vec::new(),
             path: "/api/v1/trade/orders-tpsl-pending",
@@ -1529,6 +1626,7 @@ impl Blofin {
                     })
                     .collect();
                 job.steps.push_back(Step {
+                    placement: None,
                     receipts: Vec::new(),
                     orders: Vec::new(),
                     path: match family {
@@ -1780,20 +1878,7 @@ impl Blofin {
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &cancel_ids)?);
                     self.add_placements(cx, &mut job, rows)?;
                 }
-                Command::CancelOrders { mut ids, .. } => {
-                    for (old, new, _) in &self.trading.restored {
-                        if ids
-                            .iter()
-                            .any(|id| id.split("__").next() == Some(old.as_str()))
-                        {
-                            ids.extend(
-                                new.iter()
-                                    .filter(|n| !ids.contains(n))
-                                    .cloned()
-                                    .collect::<Vec<_>>(),
-                            );
-                        }
-                    }
+                Command::CancelOrders { ids, .. } => {
                     let mut preserved = Vec::new();
                     let mut seen = HashSet::new();
                     for id in &ids {
@@ -1838,10 +1923,10 @@ impl Blofin {
                     let amend = Self::single_leg_amend(cx, &ids, &targets, !preserved.is_empty());
                     Self::add_cancels(&mut job, targets);
                     self.add_placements(cx, &mut job, preserved)?;
-                    // Ruled: one amend drops the leg, so the other never leaves the venue; the
-                    // cancel and re-place go only if BloFin refuses the amend outright.
+                    // Native amend preserves the sibling without a cancel. A refusal
+                    // or failed read-back ends the intent without repair.
                     if let Some((step, verify)) = amend {
-                        job.amend_fallback = std::mem::take(&mut job.steps);
+                        job.steps.clear();
                         job.replacing_stop = None;
                         job.amend_verify = Some(verify);
                         job.steps.push_back(step);
@@ -1961,6 +2046,7 @@ impl Blofin {
                     job.join = sides.len() == 2;
                     for side in sides {
                         job.steps.push_back(Step {
+                            placement: None,
                             receipts: Vec::new(),
                             orders: Vec::new(),
                             path: "/api/v1/account/set-leverage",
@@ -1984,6 +2070,7 @@ impl Blofin {
                         MarginType::Cross
                     };
                     job.steps.push_back(Step {
+                        placement: None,
                         receipts: Vec::new(),
                         orders: Vec::new(),
                         path: "/api/v1/account/set-margin-mode",
@@ -1995,6 +2082,7 @@ impl Blofin {
                 }
                 Command::SetPositionMode { hedged, .. } => {
                     job.steps.push_back(Step {
+                        placement: None,
                         receipts: Vec::new(),
                         orders: Vec::new(),
                         path: "/api/v1/account/set-position-mode",
@@ -2019,7 +2107,7 @@ impl Blofin {
     }
     /// Plans against the current Store, then admits the first call.
     fn start_job(&mut self, cx: &mut Cx<'_, Pending>, preflight: Preflight, command: Command) {
-        let job = match self.plan_trade(cx, command).1 {
+        let mut job = match self.plan_trade(cx, command).1 {
             Ok(job) => job,
             Err(error) => {
                 let _ =
@@ -2027,6 +2115,10 @@ impl Blofin {
                 return self.next_job(cx);
             }
         };
+        if let Err(error) = job.prepare_writes() {
+            let _ = cx.fail_preflight(&preflight, error);
+            return self.next_job(cx);
+        }
         if matches!(job.commit, Commit::Margin(_))
             && (cx.store.positions().iter().any(|p| p.contracts > 0.0)
                 || cx
@@ -2117,6 +2209,41 @@ impl Blofin {
     /// Queues one Plan call, applying native optimistic status after admission
     /// and before release.
     fn issue(&mut self, cx: &mut Cx<'_, Pending>, mut active: Active, slot: Slot, step: Step) {
+        let write_index = if step.is_place() {
+            if let Some(writes) = active.job.writes.as_mut() {
+                match writes.next_write() {
+                    Some((index, write)) => {
+                        active.job.pending_write = Some(index);
+                        if write.payload.body != step.body {
+                            return self.end(
+                                cx,
+                                active,
+                                None,
+                                not_sent("BloFin placement differs from its validated wire body"),
+                            );
+                        }
+                        Some(index)
+                    }
+                    _ => {
+                        return self.end(
+                            cx,
+                            active,
+                            None,
+                            not_sent("BloFin validated placement plan cannot advance"),
+                        );
+                    }
+                }
+            } else {
+                return self.end(
+                    cx,
+                    active,
+                    None,
+                    not_sent("BloFin placement has no validated write plan"),
+                );
+            }
+        } else {
+            None
+        };
         let plan = active.plan.clone().expect("admitted Plan");
         let narrowed = matches!(
             (active.job.intent, step.intent()),
@@ -2130,7 +2257,7 @@ impl Blofin {
         let context = match context {
             Ok(context) => context,
             Err(reason) => {
-                let error = VenueError::new(reason.venue_error().message);
+                let error = not_sent(reason.venue_error().message);
                 return self.end(cx, active, None, error);
             }
         };
@@ -2147,27 +2274,6 @@ impl Blofin {
                 not_sent("BloFin requires API credentials"),
             );
         };
-        // A 408 or 5xx on a put-back is sealed before this venue sees it:
-        // say what is unknown rather than repeat the replacement's refusal.
-        if active.job.restoring && matches!(step.effect, Effect::Place { .. }) {
-            let what = active
-                .job
-                .replacing_stop
-                .as_ref()
-                .map(|(_, symbol, ..)| format!("{symbol} stop"))
-                .or_else(|| {
-                    active
-                        .job
-                        .replacing_order
-                        .as_ref()
-                        .map(|(_, symbol)| format!("{symbol} order"))
-                })
-                .unwrap_or_else(|| "order".into());
-            let words = format!(
-                "Your {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
-            );
-            let _ = cx.present_plan_failure(&plan, words);
-        }
         match &step.effect {
             Effect::Place { .. } => {
                 cx.store.invalidate_order_snapshots();
@@ -2232,6 +2338,7 @@ impl Blofin {
             slot,
             context: context.clone(),
             step,
+            write_index,
         };
         self.trading.active = Some(active);
         if let Err((pending, reason)) = cx.request_signed_managed(
@@ -2266,10 +2373,11 @@ impl Blofin {
     fn end(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        active: Active,
+        mut active: Active,
         current: Option<(&Slot, &Context)>,
         error: VenueError,
     ) {
+        let error = active.job.failure(error);
         self.cleanup_job(cx, &active.job);
         match &active.plan {
             None => {
@@ -2283,12 +2391,6 @@ impl Blofin {
                 }
                 // Its row ended only because the cancel landed: nothing replaced it.
                 let unknown = !definite_refusal(&error);
-                let mut error = error;
-                if active.job.restoring {
-                    error.protection =
-                        (!unknown).then_some(safe_cex_engine::error::Protection::Unprotected);
-                    error.presents = true;
-                }
                 let order_gone = active
                     .job
                     .replacing_order
@@ -2331,7 +2433,7 @@ impl Blofin {
     fn finish(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        active: Active,
+        mut active: Active,
         current: Option<(&Slot, &Context)>,
     ) {
         self.cleanup_job(cx, &active.job);
@@ -2340,45 +2442,14 @@ impl Blofin {
             let finished = cx.finish_plan_call(plan, slot, context);
             debug_assert!(finished.is_ok(), "Plan call seal stranded");
         }
-        if active.job.restoring {
-            let what = active
-                .job
-                .replacing_stop
-                .as_ref()
-                .map(|(_, symbol, ..)| format!("{symbol} stop"))
-                .or_else(|| {
-                    active
-                        .job
-                        .replacing_order
-                        .as_ref()
-                        .map(|(_, symbol)| format!("{symbol} order"))
-                })
-                .unwrap_or_else(|| "order".into());
-            let mut error = VenueError::new(format!(
-                "Your {what} is unchanged: its replacement was refused, so the original was put back as a new order"
-            ));
-            error.protection = Some(safe_cex_engine::error::Protection::Restored);
-            error.presents = true;
-            if let Some(guard) = &active.job.guard {
-                let old = guard.parent.as_ref().unwrap_or(&guard.order).id.clone();
-                if self.trading.restored.len() >= RESTORED_KEPT {
-                    self.trading.restored.pop_front();
-                }
-                self.trading.restored.push_back((
-                    old.split("__").next().unwrap_or(&old).to_owned(),
-                    active.job.ids.clone(),
-                    guard.order.symbol.clone(),
-                ));
-            }
-            let failed = cx.fail_plan(plan, error.partial_ids(&active.job.ids));
-            debug_assert!(failed.is_ok(), "Plan terminal stranded");
-            return self.next_job(cx);
-        }
         let ids = serde_json::to_string(&active.job.ids).expect("order ids");
         if cx.done_plan(plan, ids).is_ok() {
             self.commit(cx, &active.job.commit);
         } else {
-            let failed = cx.fail_plan(plan, VenueError::new("BloFin job ended without its call"));
+            let error = active
+                .job
+                .failure(VenueError::new("BloFin job ended without its call"));
+            let failed = cx.fail_plan(plan, error);
             debug_assert!(failed.is_ok(), "Plan terminal stranded");
         }
         self.next_job(cx);
@@ -2562,6 +2633,9 @@ impl Blofin {
             return;
         };
         if !request.step.read() {
+            if !released {
+                error.outcome = Some(Outcome::NotSent);
+            }
             if released {
                 error.outcome = Some(Outcome::Unknown);
                 if request.step.is_place() {
@@ -2646,28 +2720,14 @@ impl Blofin {
         }
         if let Effect::VerifyTpsl { tpsl_id, kept, .. } = &request.step.effect {
             if !tpsl_keeps_leg(&response, tpsl_id, *kept) {
-                // The kept leg is not there: the cancel and re-place put it back.
-                let fallback = std::mem::take(&mut active.job.amend_fallback);
-                for step in fallback.into_iter().rev() {
-                    active.job.steps.push_front(step);
-                }
+                let error = VenueError::new("BloFin accepted the TP/SL edit but the kept leg could not be verified. Check Open Orders").kind(ErrorKind::Internal);
+                return self.end(cx, active, current, error);
             }
-            active.job.amend_fallback.clear();
             return self.drive(cx, active, At::Data(&request.slot, &request.context));
         }
         if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
             if request.step.is_place() {
                 cx.store.invalidate_order_snapshots();
-            }
-            // Only a definite refusal proves no replacement exists: put the original back once.
-            if request.step.is_place()
-                && !active.job.restoring
-                && !active.job.restore.is_empty()
-                && definite_refusal(&error)
-            {
-                active.job.steps = std::mem::take(&mut active.job.restore);
-                active.job.restoring = true;
-                return self.drive(cx, active, At::Data(&request.slot, &request.context));
             }
             return self.end(cx, active, current, error);
         }
@@ -2724,8 +2784,8 @@ impl Blofin {
             } else {
                 http_failure(response.status, response.body)
             };
-            record_failed(cx, context, native, &error.message);
-            return Err(error);
+            let classified = record_failed(cx, context, native, &error.message);
+            return Err(classified);
         }
         let reply = match parsed {
             Ok(reply) => reply,
@@ -2751,18 +2811,19 @@ impl Blofin {
                 };
                 if rows.len() != *count {
                     if reply.code != "0" && rows.is_empty() {
-                        record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
-                        return Err(if outcome_unknown(&reply.code, &reply.msg) {
-                            unknown(message)
-                        } else {
-                            VenueError::new(message)
-                        });
+                        return Err(record_failed(
+                            cx,
+                            context,
+                            Some(native(&reply.code, &reply.msg)),
+                            &message,
+                        ));
                     }
                     let _ = cx.http_write_unproven(context, message.clone());
                     return Err(unknown(message));
                 }
                 let mut maybe_live = false;
                 let mut items = Vec::with_capacity(rows.len());
+                let mut results = Vec::with_capacity(rows.len());
                 let mut seen = HashSet::new();
                 let mut error = None;
                 let mut unproven = false;
@@ -2790,9 +2851,21 @@ impl Blofin {
                             code: NativeCode::Text(NONE_PLACED),
                             message: &row.msg,
                         }));
+                        let mut result =
+                            failed_element(cx, context, native(NONE_PLACED, &row.msg), &row.msg);
+                        if let ElementResult::NotSent { error: Some(error) } = &mut result {
+                            error.venue_code = Some(row.code.to_string());
+                        }
+                        results.push(result);
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else if refused && !gone {
                         items.push(BatchItem::Native(native(&row.code, &row.msg)));
+                        results.push(failed_element(
+                            cx,
+                            context,
+                            native(&row.code, &row.msg),
+                            &row.msg,
+                        ));
                         maybe_live |= outcome_unknown(&row.code, &row.msg);
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else if refused
@@ -2802,12 +2875,21 @@ impl Blofin {
                         || odd
                     {
                         unproven = true;
+                        results.push(ElementResult::Unknown {
+                            error: Box::new(unknown(format!(
+                                "BloFin placement acknowledgement is unproven: {}",
+                                row.msg
+                            ))),
+                        });
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else {
                         items.push(BatchItem::Accepted(id));
+                        results.push(ElementResult::Placed {
+                            order_ids: vec![id.to_string()],
+                        });
                     }
                 }
-                let accepted: Vec<String> = items
+                let mut accepted: Vec<String> = items
                     .iter()
                     .filter_map(|item| match item {
                         BatchItem::Accepted(id) => Some((*id).to_owned()),
@@ -2815,8 +2897,61 @@ impl Blofin {
                     })
                     .collect();
                 let refused = items.len() != accepted.len();
+                if *count > 1 && rows.iter().any(|row| !row.client_order_id.is_empty()) {
+                    let mut aligned = vec![None; *count];
+                    for (row, result) in rows.iter().zip(results) {
+                        let index = request
+                            .step
+                            .receipts
+                            .iter()
+                            .position(|receipt| receipt.identity == row.client_order_id);
+                        if let Some(index) = index {
+                            if aligned[index].is_some() {
+                                aligned[index] = Some(ElementResult::Unknown {
+                                    error: Box::new(unknown(
+                                        "BloFin returned duplicate caller identities",
+                                    )),
+                                });
+                                unproven = true;
+                            } else {
+                                aligned[index] = Some(result);
+                            }
+                        } else {
+                            unproven = true;
+                        }
+                    }
+                    results = aligned
+                        .into_iter()
+                        .map(|result| {
+                            result.unwrap_or_else(|| {
+                                unproven = true;
+                                ElementResult::Unknown {
+                                    error: Box::new(unknown(
+                                        "BloFin did not correlate this placement acknowledgement",
+                                    )),
+                                }
+                            })
+                        })
+                        .collect();
+                    accepted = results
+                        .iter()
+                        .filter_map(|result| match result {
+                            ElementResult::Placed { order_ids } => order_ids.first().cloned(),
+                            _ => None,
+                        })
+                        .collect();
+                }
                 // A failed envelope over all-accepted rows is a contradiction.
-                unproven |= reply.code != "0" && !refused;
+                let contradiction = reply.code != "0" && !refused;
+                unproven |= contradiction;
+                if contradiction {
+                    for result in &mut results {
+                        *result = ElementResult::Unknown {
+                            error: Box::new(unknown(message.clone())),
+                        };
+                    }
+                }
+                job.settle_write(request.write_index, results)?;
                 if multi_position {
                     error = Some(MULTI_POSITION_MESSAGE.to_owned());
                 }
@@ -3017,11 +3152,7 @@ impl Blofin {
                         "{message}; whether the leg was removed is unknown. Check Open Orders"
                     )));
                 }
-                let fallback = std::mem::take(&mut job.amend_fallback);
-                for step in fallback.into_iter().rev() {
-                    job.steps.push_front(step);
-                }
-                Ok(())
+                Err(VenueError::new(message).outcome(Outcome::Rejected))
             }
             Effect::NativeAmend { symbol } => {
                 let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
@@ -3244,13 +3375,34 @@ fn native<'a>(code: &'a str, message: &'a str) -> Native<'a> {
     }
 }
 
+fn failed_element(
+    cx: &mut Cx<'_, Pending>,
+    context: &Context,
+    native: Native<'_>,
+    message: &str,
+) -> ElementResult {
+    let error = cx
+        .classify_write(context, &CODES, Some(&native), message.to_owned())
+        .map(|fact| fact.error().clone())
+        .unwrap_or_else(|_| unknown(message));
+    if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
+        ElementResult::NotSent {
+            error: Some(Box::new(error)),
+        }
+    } else {
+        ElementResult::Unknown {
+            error: Box::new(error.outcome(Outcome::Unknown)),
+        }
+    }
+}
+
 /// Records one whole failed answer for the delivered write.
 fn record_failed(
     cx: &mut Cx<'_, Pending>,
     context: &Context,
     native: Option<Native<'_>>,
     message: &str,
-) {
+) -> VenueError {
     // A native rate response can arrive inside HTTP 200. Keep its diagnostic
     // evidence, but do not present the unknown write as a definitive refusal.
     let message = if native
@@ -3263,15 +3415,18 @@ fn record_failed(
     };
     match cx.classify_write(context, &CODES, native.as_ref(), message.to_owned()) {
         Ok(fact) => {
+            let error = fact.error().clone();
             let failed = WriteFact::Failed {
                 fact,
                 known_effects: false,
             };
             let _ = cx.http_write_fact(context, failed, None);
+            error
         }
         // A released write never ends factless.
         Err(_) => {
             let _ = cx.http_write_unproven(context, message.to_owned());
+            unknown(message)
         }
     }
 }

@@ -524,6 +524,16 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        _: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Pending::Trade(request) = pending {
+            self.capture_trade_write_plan(request, evidence);
+        }
+    }
     fn managed_sockets() -> bool {
         true
     }

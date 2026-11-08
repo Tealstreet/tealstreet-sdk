@@ -24,9 +24,17 @@ Reads and documented definitive refusal codes on other statuses are unchanged.
 
 Placement plans validate every serialized contract quantity against native
 `minSize`, the applicable maximum and `lotSize`, including all split lots,
-grouped batches and cancel-replace/restore legs, before any write. Ordinary
+grouped batches and cancel-replace legs, before any write. Ordinary
 orders retain their conservative split cap; off-step maxima are floored before
 balanced allocation. Invalid plans return `NotSent` with zero transport requests.
 Final entry and protection prices must be positive and tick-aligned; explicit
 full-position TP/SL retains its native `size=-1` sentinel. BloFin discovery does
 not expose a separate minimum-notional rule to this adapter.
+
+Placement writes retain owned wire bodies and native rule snapshots in the shared
+`WritePlan`. Failures report each placement as placed, not sent or unknown,
+including mixed native batches and the untouched suffix. A rejected or ambiguous
+write stops dispatch without resend, restore or rollback. Signing refusals before
+release remain not sent; lost replies and engine-sealed HTTP ambiguity remain unknown.
+Accepted cancels, settings and native amendments currently stay outside this journal
+until the shared API can represent an applied effect without a new native order ID.

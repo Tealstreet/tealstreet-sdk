@@ -343,3 +343,244 @@ fn valid_grouped_chunks_preserve_each_caller_id_exactly_once() {
     assert_eq!(h.pending.len(), 0);
     assert_eq!(h.requests.len(), 2);
 }
+
+fn three_write_plan() -> Harness {
+    let mut instruments: Value = serde_json::from_str(INSTRUMENT).unwrap();
+    let mut eth = instruments["data"][0].clone();
+    eth["instId"] = json!("ETH-USDT");
+    eth["baseCurrency"] = json!("ETH");
+    instruments["data"].as_array_mut().unwrap().push(eth);
+    let mut h = Harness::with_instruments(&instruments.to_string());
+    h.seed();
+    h.requests.clear();
+    let mut intents = vec![order(4.0); 3];
+    for (index, intent) in intents.iter_mut().enumerate() {
+        intent["clientOrderId"] = json!(format!("element{index}"));
+    }
+    intents[1]["symbol"] = json!("ETHUSDT");
+    place(&mut h, json!(intents));
+    accept_batch(&mut h, 100);
+    next_batch(&mut h);
+    h
+}
+
+fn assert_outcomes(h: &Harness, ambiguous: bool) {
+    use safe_cex_engine::write_plan::ElementResult;
+    let error = h.failures.last().expect("terminal failure");
+    assert_eq!(
+        error.outcome,
+        if ambiguous {
+            Some(Outcome::Unknown)
+        } else {
+            None
+        }
+    );
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .expect("accepted prefix IDs")
+            .order_ids,
+        ["100"]
+    );
+    let outcomes = error.elements.as_ref().expect("complete element outcomes");
+    assert_eq!(outcomes.len(), 3);
+    for (index, element) in outcomes.iter().enumerate() {
+        assert_eq!(element.element.index, index);
+        assert_eq!(
+            element.element.client_order_id,
+            Some(format!("element{index}"))
+        );
+    }
+    assert_eq!(
+        outcomes[0].result,
+        ElementResult::Placed {
+            order_ids: vec!["100".into()]
+        }
+    );
+    if ambiguous {
+        assert!(
+            matches!(&outcomes[1].result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown))
+        );
+    } else {
+        assert!(
+            matches!(&outcomes[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected) && error.venue_code.as_deref() == Some("103003"))
+        );
+    }
+    assert_eq!(outcomes[2].result, ElementResult::NotSent { error: None });
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+            .count(),
+        2,
+        "no resend, suffix, cancel or rollback"
+    );
+    assert!(
+        h.pending
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+}
+
+#[test]
+fn runtime_rejection_reports_placed_failed_and_unsent_elements() {
+    let mut h = three_write_plan();
+    h.reply(
+        "batch-orders",
+        r#"{"code":"1","data":[{"orderId":"0","code":"103003","msg":"Insufficient balance"}]}"#,
+    );
+    assert_outcomes(&h, false);
+}
+
+#[test]
+fn ambiguous_http_reply_keeps_pending_element_unknown_and_suffix_unsent() {
+    let mut h = three_write_plan();
+    let request = h.take("batch-orders");
+    h.respond_status(request, 503, "{}");
+    assert_outcomes(&h, true);
+}
+
+#[test]
+fn lost_reply_keeps_pending_element_unknown_and_suffix_unsent() {
+    let mut h = three_write_plan();
+    let request = h.take("batch-orders");
+    h.handle(
+        h.now,
+        Event::HttpFailed {
+            request: request.id,
+            error: "reply lost",
+        },
+    );
+    h.collect();
+    assert_outcomes(&h, true);
+}
+
+#[test]
+fn mixed_batch_preserves_each_classified_row_and_stops_the_next_write() {
+    use safe_cex_engine::write_plan::ElementResult;
+    for code in ["103003", "777777"] {
+        let mut h = harness(4.0, 5.0, 1.0);
+        place(
+            &mut h,
+            json!([order(4.0), order(4.0), order(4.0), {
+                "symbol":"BTCUSDT", "type":"stop_market", "side":"sell", "amount":4, "price":55000
+            }]),
+        );
+        h.reply(
+            "batch-orders",
+            &json!({"code":"2", "data":[
+                {"orderId":"100", "code":"0"},
+                {"orderId":"0", "code":code, "msg":"row refused"},
+                {"orderId":"102", "code":"0"}
+            ]})
+            .to_string(),
+        );
+        let outcomes = h.failures[0]
+            .elements
+            .as_ref()
+            .expect("complete mixed batch outcomes");
+        assert_eq!(outcomes.len(), 4);
+        assert_eq!(
+            outcomes[0].result,
+            ElementResult::Placed {
+                order_ids: vec!["100".into()]
+            }
+        );
+        assert_eq!(
+            outcomes[2].result,
+            ElementResult::Placed {
+                order_ids: vec!["102".into()]
+            }
+        );
+        if code == "103003" {
+            assert!(
+                matches!(&outcomes[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+            );
+        } else {
+            assert!(
+                matches!(&outcomes[1].result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown))
+            );
+        }
+        assert_eq!(outcomes[3].result, ElementResult::NotSent { error: None });
+        assert_eq!(
+            h.requests
+                .iter()
+                .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+                .count(),
+            1
+        );
+        assert!(
+            h.pending
+                .iter()
+                .all(|request| request.method == safe_cex_engine::Method::Get)
+        );
+    }
+}
+
+#[test]
+fn local_signing_veto_marks_pending_elements_not_sent_with_zero_requests() {
+    use safe_cex_engine::write_plan::ElementResult;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let refuse = Arc::new(AtomicBool::new(false));
+    let gate = refuse.clone();
+    let mut h = Harness::with_signing_entropy(Box::new(move |bytes| {
+        if gate.load(Ordering::SeqCst) {
+            return Err("fixture entropy unavailable".into());
+        }
+        bytes.fill(7);
+        Ok(())
+    }));
+    h.seed();
+    h.requests.clear();
+    refuse.store(true, Ordering::SeqCst);
+    let mut first = order(4.0);
+    first["clientOrderId"] = json!("pending0");
+    let mut second = order(4.0);
+    second["clientOrderId"] = json!("pending1");
+    place(&mut h, json!([first, second]));
+    not_sent(&h);
+    let outcomes = h.failures[0]
+        .elements
+        .as_ref()
+        .expect("pending write was settled");
+    assert_eq!(outcomes.len(), 2);
+    assert!(outcomes.iter().all(|element| matches!(&element.result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::NotSent))));
+}
+
+#[test]
+fn shuffled_batch_acknowledgements_keep_their_caller_element_indices() {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut h = harness(4.0, 5.0, 1.0);
+    place(&mut h, json!([order(4.0), order(4.0), order(4.0)]));
+    let request = h.take("batch-orders");
+    let rows: Vec<Value> = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    h.respond(request, &json!({"code":"2", "data":[
+        {"clientOrderId":rows[2]["clientOrderId"], "orderId":"102", "code":"0"},
+        {"clientOrderId":rows[0]["clientOrderId"], "orderId":"100", "code":"0"},
+        {"clientOrderId":rows[1]["clientOrderId"], "orderId":"0", "code":"103003", "msg":"Insufficient balance"}
+    ]}).to_string());
+    let outcomes = h.failures[0]
+        .elements
+        .as_ref()
+        .expect("caller-correlated outcomes");
+    assert_eq!(
+        outcomes[0].result,
+        ElementResult::Placed {
+            order_ids: vec!["100".into()]
+        }
+    );
+    assert!(
+        matches!(&outcomes[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert_eq!(
+        outcomes[2].result,
+        ElementResult::Placed {
+            order_ids: vec!["102".into()]
+        }
+    );
+    assert_eq!(h.requests.len(), 1);
+}
