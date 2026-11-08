@@ -82,10 +82,14 @@ fn split_lots_continue_after_a_definite_batch_item_refusal() {
     for variant in [Variant::UsdM, Variant::CoinM] {
         let mut h = ready(variant);
         place(&mut h, vec![order(variant, 30.0)]);
+        let mut sizes = support::quantities(&h.requests[0]);
         refuse_first_batch_row(&mut h, variant);
         let next = h.take(&format!("{}/order", root(variant)));
         assert_eq!(next.method, Method::Post);
         assert!(next.url.contains("quantity=5&"));
+        sizes.extend(support::quantities(&next));
+        assert_eq!(sizes, [5.0; 6]);
+        assert_eq!(sizes.iter().sum::<f64>(), 30.0);
         h.reply(next.id, 200, "", r#"{"orderId":6}"#);
         assert!(h.requests.is_empty());
         assert_accepted_ids_survive_the_failure(&h);

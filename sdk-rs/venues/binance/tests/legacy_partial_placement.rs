@@ -71,9 +71,15 @@ fn attached_algo_keeps_legacy_whole_quantity_after_split_parent() {
         orders: serde_json::from_str(r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":10,"price":100,"stopLoss":90}]"#).unwrap(),
     }));
     let parent = h.take("/fapi/v1/batchOrders");
+    let parent_sizes = support::quantities(&parent);
+    assert_eq!(parent_sizes, [5.0, 5.0]);
+    assert_eq!(parent_sizes.iter().sum::<f64>(), 10.0);
     h.reply(parent.id, 200, "", r#"[{"orderId":1},{"orderId":2}]"#);
     let child = h.take("/fapi/v1/algoOrder");
     assert!(child.url.contains("quantity=10&"));
+    let child_sizes = support::quantities(&child);
+    assert_eq!(child_sizes, [10.0]);
+    assert_eq!(child_sizes.iter().sum::<f64>(), 10.0);
     h.reply(child.id, 200, "", r#"{"algoId":3}"#);
     assert!(h.result(77).unwrap().is_ok());
     assert!(
@@ -104,6 +110,12 @@ fn spot_split_lots_keep_the_legacy_partial_write_sequence() {
     let last = h.take("/api/v3/order");
     assert_eq!(last.method, Method::Post);
     assert!(last.url.contains("quantity=5&"));
+    let sizes: Vec<_> = support::quantities(&first)
+        .into_iter()
+        .chain(support::quantities(&last))
+        .collect();
+    assert_eq!(sizes, [5.0, 5.0]);
+    assert_eq!(sizes.iter().sum::<f64>(), 10.0);
     assert!(h.requests.is_empty());
     h.reply(
         last.id,

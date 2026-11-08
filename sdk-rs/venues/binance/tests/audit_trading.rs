@@ -993,6 +993,14 @@ fn a_quantity_rounding_to_zero_is_refused_and_a_split_uses_ts_lots() {
         );
     }
     assert_eq!(sizes, ["2.7", "2.7", "2.7", "2.5"]);
+    assert_eq!(
+        sizes
+            .iter()
+            .map(|value| value.parse::<f64>().unwrap() * 10.0)
+            .sum::<f64>()
+            / 10.0,
+        10.6
+    );
     assert!(h.result(71).unwrap().is_ok());
 }
 

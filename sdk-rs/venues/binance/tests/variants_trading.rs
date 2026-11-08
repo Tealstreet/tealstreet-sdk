@@ -230,6 +230,7 @@ struct NativeQuantity {
 #[test]
 // TS: reference/binance/binancespot.exchange.ts:535-547,550-571 and
 // binanceinverse.exchange.ts:871-897,919-924. Each 11-unit leg emits 3,3,3,1.
+// KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
 fn spot_and_inverse_splits_keep_ts_entry_and_bracket_rounding() {
     for variant in [Variant::Spot, Variant::CoinM] {
         let mut h = ready(variant);
@@ -237,6 +238,7 @@ fn spot_and_inverse_splits_keep_ts_entry_and_bracket_rounding() {
         o.amount = 11.0;
         place(&mut h, vec![o]);
         let mut totals = std::collections::BTreeMap::<String, f64>::new();
+        let mut lots = std::collections::BTreeMap::<String, Vec<String>>::new();
         let mut native_orders = 0;
         while let Some(r) = h.requests.pop() {
             let rows = if let Some(batch) = param(&r.url, "batchOrders") {
@@ -251,6 +253,7 @@ fn spot_and_inverse_splits_keep_ts_entry_and_bracket_rounding() {
             for row in rows {
                 let qty = row.quantity.parse::<f64>().unwrap();
                 assert!(qty > 0.0 && qty <= 5.0, "{variant:?} {qty}");
+                lots.entry(row.kind.clone()).or_default().push(row.quantity);
                 *totals.entry(row.kind).or_default() += qty;
                 native_orders += 1;
             }
@@ -269,6 +272,9 @@ fn spot_and_inverse_splits_keep_ts_entry_and_bracket_rounding() {
         }
         assert_eq!(native_orders, 12, "{variant:?}");
         assert_eq!(totals.len(), 3, "{variant:?}");
+        for sequence in lots.values() {
+            assert_eq!(sequence, &["3", "3", "3", "1"], "{variant:?}");
+        }
         assert!(
             totals.values().all(|total| *total == 10.0),
             "{variant:?} {totals:?}"
@@ -593,6 +599,7 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
         o.take_profit = Some(110.0);
         place(&mut h, vec![o]);
         let mut ids = std::collections::HashSet::new();
+        let mut lots = std::collections::BTreeMap::<String, Vec<String>>::new();
         let mut writes = 0;
         while let Some(request) = h.requests.first() {
             let request_id = request.id;
@@ -622,6 +629,17 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
                 assert!(ids.insert(receipt.identity.clone()));
             }
             let request = h.requests.remove(0);
+            let rows = if let Some(batch) = param(&request.url, "batchOrders") {
+                serde_json::from_str::<Vec<NativeQuantity>>(&batch).unwrap()
+            } else {
+                vec![NativeQuantity {
+                    kind: param(&request.url, "type").unwrap(),
+                    quantity: param(&request.url, "quantity").unwrap(),
+                }]
+            };
+            for row in rows {
+                lots.entry(row.kind).or_default().push(row.quantity);
+            }
             writes += 1;
             let response = if request.url.contains("batchOrders") {
                 r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5}]"#
@@ -648,6 +666,17 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
             "every split entry and SL/TP has its actual identity"
         );
         assert!(writes > 0);
+        assert_eq!(lots.len(), 3);
+        for sequence in lots.values() {
+            assert_eq!(sequence, &["3", "3", "2"]);
+            assert_eq!(
+                sequence
+                    .iter()
+                    .map(|value| value.parse::<f64>().unwrap())
+                    .sum::<f64>(),
+                8.0
+            );
+        }
         assert!(h.result(77).unwrap().is_ok());
     }
 }
