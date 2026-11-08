@@ -6,7 +6,8 @@ use ts_rs::TS;
 #[derive(Debug, Clone, PartialEq, TS)]
 #[ts(optional_fields, rename_all = "camelCase")]
 pub struct Ticker {
-    /// Source engine receipt times for last, mark and index; null is unobserved.
+    /// [last, mark, index] source receipt-clock milliseconds; not seconds; not snapshot receipt time.
+    /// Null is unobserved; zero is valid.
     pub observed_at: Option<[Option<f64>; 3]>,
     pub id: String,
     pub symbol: String,
