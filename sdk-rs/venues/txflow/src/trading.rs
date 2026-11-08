@@ -276,23 +276,25 @@ impl TxFlow {
                     #[serde(skip_serializing_if = "Option::is_none")]
                     margin_type: Option<MarginType>,
                 }
-                let result =
-                    self.confirmed_setting(cx, &symbol)
-                        .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
-                        .and_then(|s| {
-                            let buy = s.buy_leverage.unwrap_or(s.leverage);
-                            let sell = s.sell_leverage.unwrap_or(s.leverage);
-                            (buy.is_finite() && buy > 0.0 && sell.is_finite() && sell > 0.0)
-                                .then_some(Leverage {
-                                    buy_leverage: buy,
-                                    sell_leverage: sell,
-                                    margin_type: s.margin_type,
-                                })
-                        })
-                        .map(|leverage| serde_json::to_string(&leverage).unwrap())
-                        .ok_or_else(|| {
-                            format!("TxFlow account leverage is not confirmed for {symbol}")
-                        });
+                let result = self
+                    .confirmed_setting(cx, &symbol)
+                    .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
+                    .and_then(|s| {
+                        let buy = s.buy_leverage.unwrap_or(s.leverage);
+                        let sell = s.sell_leverage.unwrap_or(s.leverage);
+                        (buy.is_finite() && buy > 0.0 && sell.is_finite() && sell > 0.0).then_some(
+                            Leverage {
+                                buy_leverage: buy,
+                                sell_leverage: sell,
+                                margin_type: s.margin_type,
+                            },
+                        )
+                    })
+                    .ok_or_else(|| format!("TxFlow account leverage is not confirmed for {symbol}"))
+                    .and_then(|leverage| {
+                        serde_json::to_string(&leverage)
+                            .map_err(|_| "Invalid TxFlow leverage response".to_owned())
+                    });
                 crate::local_context::complete(
                     cx,
                     safe_cex_engine::request_context::Operation::Read,
@@ -665,12 +667,14 @@ impl TxFlow {
         if !self.trade_ready(cx) {
             return;
         }
-        let job = self.trading.active.as_mut().unwrap();
-        if job.steps.is_empty() {
+        let Some(job) = self.trading.active.as_mut() else {
+            self.finish_trade(cx, Err(not_sent("TxFlow active trade is missing")));
+            return;
+        };
+        let Some(mut step) = job.steps.pop_front() else {
             self.finish_trade(cx, Ok(()));
             return;
-        }
-        let mut step = job.steps.pop_front().unwrap();
+        };
         if let Effect::Amend { id, price, amount } = &step.effect {
             step = match self.amend_step(cx, id, *price, *amount) {
                 Ok(step) => step,
@@ -711,27 +715,36 @@ impl TxFlow {
             return;
         }
         let (_, response_type) = action.kind();
-        let command = self.trading.active.as_ref().unwrap().command;
+        let Some(job) = self.trading.active.as_mut() else {
+            self.finish_trade(cx, Err(not_sent("TxFlow active trade is missing")));
+            return;
+        };
+        let command = job.command;
         if let Effect::Place(ids) = &effect {
-            self.trading.active.as_mut().unwrap().waiting = ids.clone();
+            job.waiting = ids.clone();
         }
         self.trading.inflight = true;
         if let Action::Order { orders, .. } = &action {
-            cx.command_progress(
-                command,
-                orders
-                    .iter()
-                    .map(|order| OrderIdentityReceipt {
-                        // Active market validation above already established this asset.
-                        symbol: self
-                            .symbol(order.a)
-                            .expect("validated order asset")
-                            .to_owned(),
+            let receipts = orders
+                .iter()
+                .map(|order| {
+                    let symbol = self
+                        .symbol(order.a)
+                        .ok_or_else(|| not_sent("TxFlow order asset is missing"))?;
+                    Ok(OrderIdentityReceipt {
+                        symbol: symbol.to_owned(),
                         kind: OrderIdentityKind::ClientOrderId,
                         identity: order.c.clone(),
                     })
-                    .collect(),
-            );
+                })
+                .collect::<Result<Vec<_>, VenueError>>();
+            match receipts {
+                Ok(receipts) => cx.command_progress(command, receipts),
+                Err(error) => {
+                    self.finish_trade(cx, Err(error));
+                    return;
+                }
+            }
         }
         if let Err(error) = self.submit_trade(cx, &action, effect, response_type) {
             self.finish_trade(cx, Err(error));
@@ -801,6 +814,10 @@ impl TxFlow {
             self.finish_trade(cx, Err(error));
             return;
         }
+        let Some(job) = self.trading.active.as_mut() else {
+            self.finish_trade(cx, Err(unknown("TxFlow active trade is missing")));
+            return;
+        };
         let pending_place = matches!(&request.effect, Effect::Place(_));
         if pending_place {
             let receipt = match cx.http_pending_placement(&request.context) {
@@ -810,12 +827,7 @@ impl TxFlow {
                     return;
                 }
             };
-            self.trading
-                .active
-                .as_mut()
-                .unwrap()
-                .custody
-                .pending_identity = Some(receipt);
+            job.custody.pending_identity = Some(receipt);
         } else if cx
             .http_write_fact(
                 &request.context,
@@ -826,9 +838,8 @@ impl TxFlow {
         {
             return;
         }
-        self.trading.active.as_mut().unwrap().effective = true;
-        if self.trading.active.as_ref().unwrap().steps.is_empty() {
-            let job = self.trading.active.as_mut().unwrap();
+        job.effective = true;
+        if job.steps.is_empty() {
             if let (Some(plan), Some(slot)) = (&job.custody.plan, &job.custody.slot) {
                 if pending_place {
                     match cx.serial_plan_settle_wait(plan, slot, &request.context, 5_000) {
@@ -845,10 +856,13 @@ impl TxFlow {
                 job.custody.context = None;
             }
         } else {
-            let job = self.trading.active.as_mut().unwrap();
+            let Some(slot) = job.custody.slot.as_ref() else {
+                self.finish_trade(cx, Err(unknown("TxFlow trade slot is missing")));
+                return;
+            };
             let wait = cx.serial_plan_condition_wait(
                 &request.plan,
-                job.custody.slot.as_ref().unwrap(),
+                slot,
                 &request.context,
                 custody::call(),
                 Some(20_000),
@@ -865,8 +879,8 @@ impl TxFlow {
             }
         }
         match request.effect {
-            Effect::Place(cloids) => self.trading.active.as_mut().unwrap().waiting = cloids,
-            Effect::Amend { id, .. } => self.trading.active.as_mut().unwrap().ids.push(id),
+            Effect::Place(cloids) => job.waiting = cloids,
+            Effect::Amend { id, .. } => job.ids.push(id),
             Effect::PositionMode(hedged) => cx.store.set_hedged(hedged),
             Effect::Setting {
                 symbol,
@@ -971,9 +985,12 @@ impl TxFlow {
                     }
                     self.finish_trade_owner(cx, &job, Err(error));
                 }
-                Ok(()) => {
-                    self.finish_trade_owner(cx, &job, Ok(serde_json::to_string(&job.ids).unwrap()))
-                }
+                Ok(()) => self.finish_trade_owner(
+                    cx,
+                    &job,
+                    serde_json::to_string(&job.ids)
+                        .map_err(|_| unknown("Invalid TxFlow order identity response")),
+                ),
             }
         }
         self.pump_trades(cx);
@@ -1050,9 +1067,9 @@ fn parse_reply(response: Response<'_>, expected: &str) -> Result<(), VenueError>
     if data.r#type != expected || data.data.statuses.len() != 1 {
         return Err(unknown("Invalid TxFlow whole-action acknowledgement"));
     }
-    match data.data.statuses.into_iter().next().unwrap() {
-        Status::Text(s) if s == "success" => Ok(()),
-        Status::Error { error } => Err(rejected(error)),
+    match data.data.statuses.into_iter().next() {
+        Some(Status::Text(s)) if s == "success" => Ok(()),
+        Some(Status::Error { error }) => Err(rejected(error)),
         _ => Err(unknown("Unknown TxFlow execution status")),
     }
 }

@@ -109,6 +109,15 @@ NX must add the wallet-agent AccountForm branch, preserve the HL browser storage
 path, and enable the new hosted signing formats before this SDK change lands.
 Wallet-connect/embedded-wallet UX, rotation and export/recovery UX remain NX work.
 
+### Signing parity fixtures
+
+`agent-action-parity.json` in the shared test fixtures covers every supported
+agent action with and without a vault. Its unvaulted order is the published
+Signing-page vector; the remaining cases are independent MessagePack/ethers
+reference vectors, with their exact action-schema URLs recorded in the file.
+The registry test compares canonical preimages, fixed testnet digests, local
+signatures and hosted signatures for each case.
+
 ### Browser call sequence
 
 1. Connect the owner wallet and obtain its public address.

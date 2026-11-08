@@ -76,3 +76,20 @@ it('a disposed public-only setup cannot construct an engine', () => {
     .toThrow('disposed');
   expect(Engine).not.toHaveBeenCalled();
 });
+
+it('TxFlow inferred and explicit public setup ignores unused PayloadSigner and metadata', () => {
+  const payloadSigner = vi.fn();
+  for (const publicDataOnly of [undefined, true]) {
+    const setup = new DelegatedSignerSetup('txflow', {
+      key: '', secret: '', testnet: true, publicDataOnly, payloadSigner,
+      applicationId: publicDataOnly ? '0x1111111111111111111111111111111111111111' : undefined,
+      localSigner: { primary: { stableId: '' } },
+    });
+    try {
+      expect(setup.usesPayloadSigner).toBe(false);
+      expect(setup.primaryComplete).toBe(false);
+      expect(setup.signerAlgorithms).toEqual([]);
+    } finally { setup.dispose(); }
+  }
+  expect(payloadSigner).not.toHaveBeenCalled();
+});

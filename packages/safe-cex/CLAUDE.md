@@ -10,6 +10,10 @@ and test-only replay/reference implementations remain independent dependencies.
 Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
+Resolved public-only delegated accounts discard unused callback and private setup
+configuration before validating custody. Native registry construction applies the
+same ordering before local capsule parsing and injected provider validation;
+declared PublicRead credentials retain their separate read-only policy.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),

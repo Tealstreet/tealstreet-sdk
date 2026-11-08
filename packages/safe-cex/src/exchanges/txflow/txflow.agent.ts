@@ -34,6 +34,21 @@ export interface TxflowAgentApproval {
   agentName: string;
   nonce: number;
 }
+interface SignedAgentApproval {
+  action: TxflowAgentApproval;
+  signature: { r: string; s: string; v: number };
+  nonce: number;
+  signatureChainId?: number;
+  confirm: 'executed';
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function array(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 export type TxflowAgentAuthorization = { approved: false } | { approved: true; agentName: string };
 
 function testnetOnly(testnet: boolean): void {
@@ -53,7 +68,7 @@ export function buildTxflowAgentApproval(
 
 export async function signTxflowAgentApproval(
   signer: ethers.Signer, action: TxflowAgentApproval, signatureChainId = 2511,
-) {
+): Promise<SignedAgentApproval> {
   if (!Number.isInteger(signatureChainId) || signatureChainId < 1 || signatureChainId > 0xffffffff) {
     throw new Error('Invalid TxFlow signature chain');
   }
@@ -62,10 +77,10 @@ export async function signTxflowAgentApproval(
   const { type: _type, ...message } = checked;
   const signed = ethers.Signature.from(await signer.signTypedData({ ...TXFLOW_AGENT_DOMAIN, chainId: signatureChainId }, TXFLOW_APPROVE_AGENT_TYPES, message));
   return { action: checked, signature: { r: signed.r, s: signed.s, v: signed.v },
-    nonce: checked.nonce, ...(signatureChainId === 2511 ? {} : { signatureChainId }), confirm: 'executed' as const };
+    nonce: checked.nonce, ...(signatureChainId === 2511 ? {} : { signatureChainId }), confirm: 'executed' };
 }
 
-async function post(path: '/info' | '/exchange', body: unknown, options: TxflowAgentOptions): Promise<any> {
+async function post(path: '/info' | '/exchange', body: unknown, options: TxflowAgentOptions): Promise<unknown> {
   testnetOnly(options.testnet);
   const response = await (options.fetch ?? fetch)(`${API}${path}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-version': '2026-08-16' },
@@ -84,13 +99,13 @@ export async function getTxflowAgentAuthorization(
   const user = ethers.getAddress(owner);
   const address = ethers.getAddress(agent);
   const response = await post('/info', { type: 'approvedAgents', user }, options);
-  if (response?.success !== true || response.code !== 0 || !Array.isArray(response.data?.agents)
-    || typeof response.data.user !== 'string' || ethers.getAddress(response.data.user) !== user) {
+  if (!record(response) || response.success !== true || response.code !== 0 || !record(response.data)
+    || !array(response.data.agents) || typeof response.data.user !== 'string' || ethers.getAddress(response.data.user) !== user) {
     throw new Error('Invalid TxFlow agent authorization response');
   }
   let found: string | undefined;
   for (const row of response.data.agents) {
-    if (typeof row?.agentName !== 'string' || typeof row.agentAddress !== 'string') {
+    if (!record(row) || typeof row.agentName !== 'string' || typeof row.agentAddress !== 'string') {
       throw new Error('Invalid TxFlow agent authorization row');
     }
     if (ethers.getAddress(row.agentAddress) === address) found = row.agentName;
@@ -103,9 +118,9 @@ async function approve(signer: ethers.Signer, action: TxflowAgentApproval, optio
   // that enforce their connected EVM chain. The action stays TxFlow testnet.
   const chainId = Number((await signer.provider?.getNetwork())?.chainId ?? 2511n);
   const response = await post('/exchange', await signTxflowAgentApproval(signer, action, chainId), options);
-  const statuses = response?.data?.data?.statuses;
-  if (response?.status !== 'ok' || response.confirm !== 'executed' || response.code !== 0 || response.data?.type !== 'ApproveAgent'
-    || !Array.isArray(statuses) || statuses.length !== 1 || statuses[0] !== 'success') {
+  if (!record(response) || response.status !== 'ok' || response.confirm !== 'executed' || response.code !== 0
+    || !record(response.data) || response.data.type !== 'ApproveAgent' || !record(response.data.data)
+    || !array(response.data.data.statuses) || response.data.data.statuses.length !== 1 || response.data.data.statuses[0] !== 'success') {
     throw new Error('TxFlow agent approval was not executed');
   }
 }

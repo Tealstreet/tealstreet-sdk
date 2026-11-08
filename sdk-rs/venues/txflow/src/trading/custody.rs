@@ -100,7 +100,11 @@ impl TxFlow {
         })
     }
     pub(super) fn trade_ready(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
-        let custody = &mut self.trading.active.as_mut().unwrap().custody;
+        let Some(job) = self.trading.active.as_mut() else {
+            self.finish_trade(cx, Err(not_sent("TxFlow active trade is missing")));
+            return false;
+        };
+        let custody = &mut job.custody;
         if custody.wait.is_some() {
             return false;
         }
@@ -238,17 +242,32 @@ impl TxFlow {
                 body: action,
             },
             self.options.vault.clone(),
-            self.options.application_id.clone().unwrap(),
+            self.options
+                .application_id
+                .clone()
+                .ok_or_else(|| not_sent("TxFlow owner address is missing"))?,
         )
         .map_err(|e| e.venue_error())?;
         let authority = selection.authority(identity);
-        let job = self.trading.active.as_mut().unwrap();
+        let job = self
+            .trading
+            .active
+            .as_mut()
+            .ok_or_else(|| not_sent("TxFlow active trade is missing"))?;
         let custody = &mut job.custody;
         if let Some(plan) = &custody.plan {
             if let Some(context) = custody.context.take() {
                 custody.slot = Some(
-                    cx.continue_serial_plan(plan, custody.slot.as_ref().unwrap(), &context, call())
-                        .map_err(|e| e.venue_error())?,
+                    cx.continue_serial_plan(
+                        plan,
+                        custody
+                            .slot
+                            .as_ref()
+                            .ok_or_else(|| unknown("TxFlow trade slot is missing"))?,
+                        &context,
+                        call(),
+                    )
+                    .map_err(|e| e.venue_error())?,
                 );
             }
         } else {
@@ -266,9 +285,19 @@ impl TxFlow {
             custody.plan = Some(plan);
             custody.slot = Some(slot);
         }
-        let plan = custody.plan.as_ref().unwrap().clone();
+        let plan = custody
+            .plan
+            .as_ref()
+            .ok_or_else(|| unknown("TxFlow trade plan is missing"))?
+            .clone();
         let context = cx
-            .plan_leg_context(&plan, custody.slot.as_ref().unwrap())
+            .plan_leg_context(
+                &plan,
+                custody
+                    .slot
+                    .as_ref()
+                    .ok_or_else(|| unknown("TxFlow trade slot is missing"))?,
+            )
             .map_err(|e| e.venue_error())?;
         custody.context = Some(context.clone());
         cx.request_signed_managed(

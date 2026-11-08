@@ -4,6 +4,8 @@ import { expect, it, vi } from 'vitest';
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
 import { deriveBridgeConstruction, deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 
+const unusedEngineMethod = (): never => { throw new Error('Unexpected engine call'); };
+
 it('TxFlow hosted construction passes references and public addresses, never the agent scalar', () => {
   const remoteSigner: RemoteSigner = {
     sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {},
@@ -13,10 +15,24 @@ it('TxFlow hosted construction passes references and public addresses, never the
     secret: 'audit-secret-sentinel', remoteSigner };
   const setup = new DelegatedSignerSetup('txflow', input);
   let captured = '';
-  class Host {
+  class Host implements WasmEngineLike {
+    capabilities = unusedEngineMethod;
+    start = unusedEngineMethod;
+    command = unusedEngineMethod;
+    takeFrame = unusedEngineMethod;
+    snapshotFrame = unusedEngineMethod;
+    wsOpen = unusedEngineMethod;
+    wsMessage = unusedEngineMethod;
+    wsClose = unusedEngineMethod;
+    wsRouteExhausted = unusedEngineMethod;
+    httpStart = unusedEngineMethod;
+    httpChunk = unusedEngineMethod;
+    httpEnd = unusedEngineMethod;
+    httpFailed = unusedEngineMethod;
+    timer = unusedEngineMethod;
     constructor(_venue: string, json: string) { captured = json; }
   }
-  setup.construct(Host as unknown as new (venue: string, options: string, setup?: string) => WasmEngineLike, 'txflow', JSON.stringify(input));
+  setup.construct(Host, 'txflow', JSON.stringify(input));
   expect(captured).not.toContain('audit-secret-sentinel');
   expect(JSON.parse(captured)).not.toHaveProperty('secret');
   expect(JSON.parse(captured)).toMatchObject({ testnet: true, applicationId: input.applicationId,

@@ -174,12 +174,12 @@ describe('trusted delegated signer setup capsule', () => {
     const input = options({ key, payloadSigner: callback, secondary_key: undefined, secondary_secret: undefined, secondary_passphrase: undefined });
     const setup = new DelegatedSignerSetup('binance', input);
     expect(setup.primaryComplete).toBe(false);
-    expect(setup.credentialPresence).toEqual({ key: false, secret: true });
+    expect(setup.credentialPresence).toEqual({ key: false, secret: false });
     expect(derivePublicMode('binance', input, undefined, setup.credentialPresence).publicDataOnly).toBe(true);
     const { config } = construct(setup);
     expect(config.signing).toEqual({});
     const foreign = { primary: { credential: 'unowned', signing: 'unowned-signing' } };
-    await expect(setup.signer(request(foreign), callContext())).rejects.toThrow('Remote signing request refused');
+    await expect(setup.signer(request(foreign), callContext())).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
     expect(callback).not.toHaveBeenCalled();
     setup.dispose();
   });

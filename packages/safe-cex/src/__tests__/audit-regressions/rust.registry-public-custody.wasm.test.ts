@@ -59,3 +59,25 @@ it.each(modes)('native private construction retains the typed custody refusal: %
     message: expect.stringContaining('user WebSocket requires the API secret'),
   });
 });
+
+// TxFlow joins #3317's public-before-custody matrix; no venue-specific setup bypass.
+it.each(modes)('TxFlow public construction ignores unused private custody: %j', (mode) => {
+  for (const publicOptions of [
+    { ...mode },
+    { ...mode, applicationId: '0x1111111111111111111111111111111111111111', publicMode: { ...mode.publicMode, requested: true } },
+    { ...mode, applicationId: '0x1111111111111111111111111111111111111111', publicMode: undefined, publicDataOnly: true },
+  ]) {
+    for (const unused of [
+      { secret: 'stale-invalid-scalar' },
+      { readCredentials: { key: 'unused', secret: 'unused' } },
+      { signing: { primary: { credential: 'unused', signing: 'unused' } } },
+    ]) {
+      const engine = new wasm.WasmEngine('txflow', JSON.stringify({ testnet: true, accountStartup: true, ...publicOptions, ...unused }));
+      try {
+        if (typeof engine.construction !== 'function') throw new Error('Missing construction record');
+        const construction: unknown = JSON.parse(engine.construction());
+        if (publicOptions.publicMode) expect(construction).toMatchObject({ publicDataOnly: true });
+      } finally { engine.free?.(); }
+    }
+  }
+});

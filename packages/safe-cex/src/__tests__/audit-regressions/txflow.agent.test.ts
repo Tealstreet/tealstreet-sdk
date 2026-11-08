@@ -8,6 +8,7 @@ import {
   signTxflowAgentApproval,
   TXFLOW_AGENT_DOMAIN,
   TXFLOW_APPROVE_AGENT_TYPES,
+  type TxflowAgentApproval,
 } from '../../exchanges/txflow/txflow.agent';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -77,7 +78,7 @@ describe('TxFlow client custody boundary', () => {
   it('returns a browser-created approved key to its caller without persistence or key disclosure', async () => {
     // Published signing-vector key; never a real account credential.
     const owner = new ethers.Wallet(`0x${'ab'.repeat(32)}`);
-    let submitted: Record<string, unknown> | undefined;
+    let submitted: { action: TxflowAgentApproval } | undefined;
     const request = vi.fn(async ({ method, params }: { method: string; params?: unknown[] }) => {
       if (method === 'eth_chainId') return '0x9cf';
       if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [owner.address];
@@ -91,19 +92,28 @@ describe('TxFlow client custody boundary', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
     vi.stubGlobal('window', { ethereum: { request } });
     const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body));
-      if (body.action) {
-        submitted = body;
+      const body: unknown = JSON.parse(String(init?.body));
+      if (typeof body !== 'object' || body === null) throw new Error('Invalid request body');
+      if ('action' in body) {
+        const action = body.action;
+        if (typeof action !== 'object' || action === null || !('agentAddress' in action)
+          || typeof action.agentAddress !== 'string' || !('agentName' in action)
+          || typeof action.agentName !== 'string' || !('nonce' in action) || typeof action.nonce !== 'number') {
+          throw new Error('Invalid approval action');
+        }
+        submitted = { action: buildTxflowAgentApproval(action.agentAddress, action.agentName, action.nonce, true) };
         return new Response(JSON.stringify({ status: 'ok', code: 0, confirm: 'executed',
           data: { type: 'ApproveAgent', data: { statuses: ['success'] } } }));
       }
-      const approval = submitted?.action as { agentAddress: string; agentName: string };
+      const approval = submitted?.action;
+      if (!approval) throw new Error('Approval must precede authorization lookup');
       return new Response(JSON.stringify({ success: true, code: 0,
         data: { user: owner.address, agents: [approval] } }));
     });
     const result = await createTxflowAgentWithBrowserWallet(owner.address, { testnet: true, fetch: fetcher });
     expect(result.success).toBe(true);
-    expect(new ethers.Wallet(result.agentPrivateKey!).address).toBe(result.agentAddress);
+    if (!result.agentPrivateKey) throw new Error('Missing approved agent key');
+    expect(new ethers.Wallet(result.agentPrivateKey).address).toBe(result.agentAddress);
     expect(JSON.stringify(fetcher.mock.calls)).not.toContain(result.agentPrivateKey);
     expect(JSON.stringify(submitted)).not.toContain('privateKey');
     expect(setItem).not.toHaveBeenCalled();

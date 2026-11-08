@@ -266,6 +266,37 @@ fn resolved_public_data_only(venue: &str, options: &EngineOptions) -> bool {
         .map_or(options.public_data_only, |mode| mode.public_data_only)
 }
 
+// Public-only accounts with no declared public read credentials have no use for
+// private provider state. Resolve this before any family setup or validation.
+#[cfg(feature = "dispatch-signing")]
+fn unused_public_custody(venue: &str, options: &EngineOptions) -> bool {
+    resolved_public_data_only(venue, options)
+        && construction::read_credentials_policy(venue)
+            != construction::ReadCredentialsPolicy::PublicRead
+}
+
+#[cfg(feature = "dispatch-signing")]
+fn empty_local_signer() -> (
+    safe_cex_engine::signing::Provider,
+    safe_cex_engine::signing::Identities,
+) {
+    (
+        std::sync::Arc::new(safe_cex_crypto::signer::LocalSigner::new()),
+        Default::default(),
+    )
+}
+
+#[cfg(feature = "dispatch-signing")]
+fn discard_private_custody(options: &mut EngineOptions) {
+    for value in [&mut options.secret, &mut options.passphrase] {
+        safe_cex_crypto::secrets::erase(value);
+    }
+    if let Some(mut read) = options.read_credentials.take() {
+        read.erase_secrets();
+    }
+    options.signing = None;
+}
+
 fn private_custody_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
     // Unused signing flags cannot turn a resolved public account into private custody.
     if resolved_public_data_only(venue, options) {
@@ -701,6 +732,10 @@ pub fn prepare_local_signer_for(
     ),
     VenueError,
 > {
+    if unused_public_custody(venue, options) {
+        discard_private_custody(options);
+        return Ok(empty_local_signer());
+    }
     let public_data_only = construction::signer_setup_public_data_only(options);
     #[cfg(feature = "txflow")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Txflow) {
@@ -1098,6 +1133,10 @@ pub fn local_signer_from_capsule(
     ),
     VenueError,
 > {
+    if unused_public_custody(venue, options) {
+        drop(zeroize::Zeroizing::new(input));
+        return Ok(empty_local_signer());
+    }
     #[cfg(feature = "paradex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
         let policy = signer_setup_policy_for(venue, options);
@@ -1121,6 +1160,10 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    if unused_public_custody(venue, options) {
+        drop(zeroize::Zeroizing::new(input));
+        return Ok(empty_local_signer());
+    }
     // Paradex records its key form on the options: `local_signer_from_capsule`.
     #[cfg(feature = "paradex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
@@ -1288,6 +1331,7 @@ pub fn build<T: Visit>(
     let (options, signer) = {
         let mut options = options;
         let signer = if construction::bridge(venue, &options).dispatch_signing
+            && !unused_public_custody(venue, &options)
             && options.signing.is_none()
         {
             let (provider, identities) = prepare_local_signer_for(venue, &mut options)?;
@@ -1426,6 +1470,17 @@ pub fn build_with_signer<T: Visit>(
     signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
+    let mode = construction::resolve(venue, &options).filter(|mode| mode.public_data_only);
+    if resolved_public_data_only(venue, &options) {
+        options.account_startup = false;
+    }
+    #[cfg(feature = "dispatch-signing")]
+    let signer = if unused_public_custody(venue, &options) {
+        discard_private_custody(&mut options);
+        None
+    } else {
+        signer
+    };
     private_custody_rules(venue, &options)?;
     let _ = &signer;
     if !supported(venue) {
@@ -1446,7 +1501,7 @@ pub fn build_with_signer<T: Visit>(
                 .map_err(|_| invalid("Invalid local signer setup"))?;
         }
     }
-    if let Some(mode) = construction::resolve(venue, &options) {
+    if let Some(mode) = mode.or_else(|| construction::resolve(venue, &options)) {
         if let Some(error) = mode.explicit_private_error {
             return Err(invalid(error));
         }
