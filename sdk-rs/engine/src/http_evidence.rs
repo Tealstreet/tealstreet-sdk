@@ -108,7 +108,7 @@ impl UnprovenEvidence {
 
     pub fn venue_message(&mut self, message: &str) {
         if self.error.venue_message.is_none() {
-            self.error.venue_message = Some(self.budget.text(message));
+            self.error.venue_message = Some(self.budget.text(message).into_boxed_str());
         }
     }
 
@@ -268,7 +268,10 @@ impl EvidenceBudget {
     fn error_text(&mut self, error: &mut VenueError) {
         error.message = self.text(&error.message);
         error.venue_code = error.venue_code.as_ref().map(|value| self.text(value));
-        error.venue_message = error.venue_message.as_ref().map(|value| self.text(value));
+        error.venue_message = error
+            .venue_message
+            .as_ref()
+            .map(|value| self.text(value).into_boxed_str());
     }
 
     fn text(&mut self, source: &str) -> String {

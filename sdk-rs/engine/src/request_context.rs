@@ -2523,7 +2523,7 @@ impl CommandWrites {
                             stream.refused += 1;
                             let bytes = error.message.len()
                                 + error.venue_code.as_ref().map_or(0, String::len)
-                                + error.venue_message.as_ref().map_or(0, String::len);
+                                + error.venue_message.as_deref().map_or(0, str::len);
                             if stream.retained_bytes + bytes <= evidence::RETAINED_TEXT_BYTES {
                                 stream.retained_bytes += bytes;
                                 stream.retained.push((
