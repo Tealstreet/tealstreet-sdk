@@ -1442,34 +1442,12 @@ impl Store {
             self.write_prediction_holdings(w);
         }
         if changes.balance {
-            let b = &self.balance;
-            w.begin(section::BALANCE);
-            w.f64s([b.used, b.free, b.total, b.upnl]);
-            if self.coin_balances.is_some() || self.currency_balances.is_some() {
-                let coins = self.coin_balances.as_deref().unwrap_or_default();
-                w.u32(coins.len() as u32);
-                for coin in coins {
-                    let base = w.string(&coin.base);
-                    w.u32(base);
-                }
-                w.pad();
-                w.f64s(coins.iter().map(|coin| coin.amount));
-                w.f64s(coins.iter().map(|coin| coin.notional));
-                if let Some(currencies) = &self.currency_balances {
-                    w.u32(currencies.len() as u32);
-                    w.u32(u32::from(self.coin_balances.is_none()));
-                    for currency in currencies {
-                        let name = w.string(&currency.currency);
-                        w.u32(name);
-                    }
-                    w.pad();
-                    w.f64s(currencies.iter().map(|row| row.balance.total));
-                    w.f64s(currencies.iter().map(|row| row.balance.free));
-                    w.f64s(currencies.iter().map(|row| row.balance.used));
-                    w.f64s(currencies.iter().map(|row| row.balance.upnl));
-                }
-            }
-            w.end();
+            crate::balance_output::write(
+                w,
+                &self.balance,
+                self.coin_balances.as_deref(),
+                self.currency_balances.as_deref(),
+            );
         }
         if changes.settings {
             self.write_settings(w);

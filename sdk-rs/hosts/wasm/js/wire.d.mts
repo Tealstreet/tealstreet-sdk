@@ -1,3 +1,5 @@
+import type { Balance } from '../../../../packages/safe-cex/src/types';
+export type { Balance, CoinBalance } from '../../../../packages/safe-cex/src/types';
 /** Reader for the engine's flush frame. See wire.mjs and docs/plans/RUST_REWRITE.md. */
 export const SECTION: {
   STRINGS: 1;
@@ -234,17 +236,7 @@ export type PositionTable = {
   contractsNative: Array<number | undefined>;
   unrealizedPnlNative: Array<number | undefined>;
 } & Columns<'entryPrice' | 'notional' | 'leverage' | 'unrealizedPnl' | 'contracts'>;
-export interface CoinBalance { base: string; amount: number; notional: number }
-export interface CurrencyBalance {
-  used: number;
-  free: number;
-  total: number;
-  upnl: number;
-}
-export interface Balance extends CurrencyBalance {
-  coins?: Record<string, CoinBalance>;
-  currencies?: Record<string, CurrencyBalance>;
-}
+export type CurrencyBalance = { -readonly [K in 'used' | 'free' | 'total' | 'upnl']: Balance[K] };
 export interface Status {
   loaded: number;
   hedged: boolean;

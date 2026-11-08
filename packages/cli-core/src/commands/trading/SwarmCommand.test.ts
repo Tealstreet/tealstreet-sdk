@@ -35,7 +35,7 @@ function bal(p: Partial<Balance> = {}): Balance {
     free: p.free ?? 1000,
     total: p.total ?? 1000,
     upnl: p.upnl ?? 0,
-  } as Balance;
+  };
 }
 
 function makeExchange(opts: { positions?: Position[]; balance?: Balance } = {}): ExchangeLike {

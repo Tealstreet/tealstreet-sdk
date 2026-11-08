@@ -356,58 +356,8 @@ pub struct Market {
     pub runtime: MarketRuntime,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct CoinBalance {
-    /// @ts-mutable
-    pub base: String,
-    /// @ts-mutable
-    pub amount: f64,
-    /// @ts-mutable
-    pub notional: f64,
-}
-
-/// A currency row preserves the shape returned by its source venue. Crypto.com
-/// REST returns available/locked rather than the statically declared Balance.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(untagged)]
-pub enum CurrencyBalance {
-    Declared(Balance),
-    AvailableLocked { available: f64, locked: f64 },
-}
-
-impl CurrencyBalance {
-    /// Read a declared Balance row without normalizing other source shapes.
-    pub fn as_balance(&self) -> Option<&Balance> {
-        match self {
-            Self::Declared(balance) => Some(balance),
-            Self::AvailableLocked { .. } => None,
-        }
-    }
-}
-impl From<Balance> for CurrencyBalance {
-    fn from(balance: Balance) -> Self {
-        Self::Declared(balance)
-    }
-}
-#[derive(Debug, Clone, PartialEq, TS)]
-#[ts(optional_fields, rename_all = "camelCase")]
-pub struct Balance {
-    pub used: f64,
-    pub free: f64,
-    pub total: f64,
-    pub upnl: f64,
-
-    #[ts(type = "any", optional)]
-    pub info: Option<crate::retained_json::RetainedJsonInput>,
-
-    #[ts(type = "{ [currency: string]: Balance }", optional)]
-    pub currencies: Option<crate::object_map::JsObjectMap<crate::CurrencyBalance>>,
-
-    #[ts(type = "{ [coin: string]: CoinBalance }", optional)]
-    pub coins: Option<crate::object_map::JsObjectMap<CoinBalance>>,
-}
+pub mod balance;
+pub use balance::{Balance, CoinBalance, CurrencyBalance};
 
 #[derive(Debug, Clone, PartialEq, TS)]
 #[ts(optional_fields, rename_all = "camelCase")]
@@ -2793,6 +2743,8 @@ pub mod strict_decode;
 // Private wire companions keep serde metadata without exposing permissive decoders.
 mod strict_codecs {
     #[cfg(test)]
+    use super::CoinBalance;
+    #[cfg(test)]
     use super::{
         AccountGreeks, BothPositionSide, Candle, ClosedPnlEntry, DisplayedMargin, ExchangeAccount,
         ExchangeAccountConfig, ExchangeOptions, ExchangeOptionsExternalPublicDataVariant0,
@@ -2807,7 +2759,7 @@ mod strict_codecs {
     use super::{
         AccountValidationError, AnyTimeframe, Balance, ClosedPnlEntryContracts,
         ClosedPnlEntryEntryPrice, ClosedPnlEntryExitPrice, ClosedPnlEntryFees,
-        ClosedPnlEntryLeverage, ClosedPnlEntryNotional, ClosedPnlEntryUnrealizedPnl, CoinBalance,
+        ClosedPnlEntryLeverage, ClosedPnlEntryNotional, ClosedPnlEntryUnrealizedPnl,
         DataProvenance, ExchangeAccountConfigBybitSiteId, ExchangeAccountConfigHealthStatus,
         ExchangeName, ExchangeOptionsAuth, ExchangeOptionsBybitSiteId,
         ExchangeOptionsExternalPublicData, ExchangeOptionsExternalPublicDataVariant0Type,
@@ -3234,95 +3186,6 @@ mod strict_codecs {
                     d: D,
                 ) -> Result<Self::Value, D::Error> {
                     WireMarket::deserialize(crate::strict_decode::object(d))
-                }
-            }
-            deserializer.deserialize_newtype_struct(crate::model_field::INFO_RECORD, InfoVisitor)
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::CoinBalance")]
-    #[serde(rename_all = "camelCase")]
-    struct WireCoinBalance {
-        base: String,
-        amount: f64,
-        notional: f64,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::CoinBalance {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireCoinBalance::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    struct AvailableLockedBalance {
-        available: f64,
-        locked: f64,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::CurrencyBalance {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let input = crate::retained_json::RetainedJsonInput::deserialize(deserializer)?;
-            if !input.is_object() {
-                return Err(serde::de::Error::custom(
-                    "CurrencyBalance must be an object",
-                ));
-            }
-            if let Ok(balance) = input.clone().decode_native::<super::Balance>(false) {
-                return Ok(Self::Declared(balance));
-            }
-            let value = input
-                .decode_native::<AvailableLockedBalance>(false)
-                .map_err(serde::de::Error::custom)?;
-            Ok(Self::AvailableLocked {
-                available: value.available,
-                locked: value.locked,
-            })
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::Balance")]
-    #[serde(rename_all = "camelCase")]
-    struct WireBalance {
-        used: f64,
-        free: f64,
-        total: f64,
-        upnl: f64,
-        #[serde(
-            default,
-            deserialize_with = "crate::retained_json::deserialize_present_retained_info",
-            skip_serializing_if = "Option::is_none"
-        )]
-        info: Option<crate::retained_json::RetainedJsonInput>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        currencies: Option<crate::object_map::JsObjectMap<crate::CurrencyBalance>>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        coins: Option<crate::object_map::JsObjectMap<CoinBalance>>,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::Balance {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            struct InfoVisitor;
-            impl<'de> serde::de::Visitor<'de> for InfoVisitor {
-                type Value = super::Balance;
-                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    f.write_str("a Balance record")
-                }
-                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
-                    self,
-                    d: D,
-                ) -> Result<Self::Value, D::Error> {
-                    WireBalance::deserialize(crate::strict_decode::object(d))
                 }
             }
             deserializer.deserialize_newtype_struct(crate::model_field::INFO_RECORD, InfoVisitor)

@@ -18,6 +18,7 @@ pub mod fresh_positions;
 pub mod history;
 mod id_map;
 pub(crate) use id_map::IdMap;
+mod balance_output;
 pub mod json;
 pub mod log;
 #[cfg(feature = "metadata-freshness")]

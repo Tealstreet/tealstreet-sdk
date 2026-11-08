@@ -74,28 +74,6 @@ impl serde::Serialize for crate::Market {
     }
 }
 
-impl serde::Serialize for crate::Balance {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct(crate::model_field::INFO_RECORD, 7)?;
-        state.serialize_field("used", &self.used)?;
-        state.serialize_field("free", &self.free)?;
-        state.serialize_field("total", &self.total)?;
-        state.serialize_field("upnl", &self.upnl)?;
-        match &self.info {
-            None => {}
-            Some(Input::Undefined) => state.skip_field("info")?,
-            Some(value) => state.serialize_field("info", value)?,
-        }
-        if let Some(value) = &self.currencies {
-            state.serialize_field("currencies", value)?;
-        }
-        if let Some(value) = &self.coins {
-            state.serialize_field("coins", value)?;
-        }
-        state.end()
-    }
-}
-
 impl serde::Serialize for crate::Ticker {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut state = serializer.serialize_struct(crate::model_field::INFO_RECORD, 16)?;

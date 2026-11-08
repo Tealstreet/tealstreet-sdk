@@ -109,8 +109,10 @@ function publishModels() {
   for (const name of ['Position', 'Order', 'PlaceOrderOpts', 'UpdateOrderOpts']) copy(name);
 }
 
+module.exports = { transform, stringLiterals };
+
 if (require.main === module) {
   generate(path.join(__dirname, 'bindings'));
   publishModels();
+  require('./generate-balance.cjs').generate();
 }
-module.exports = { transform, stringLiterals };

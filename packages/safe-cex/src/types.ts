@@ -440,21 +440,9 @@ export type PublicExchangeOptions = Omit<ExchangeOptions, 'key' | 'secret'> & {
   readonly forceAllProxiesOff?: boolean;
 };
 
-export type CoinBalance = {
-  base: string;
-  amount: number;
-  notional: number;
-};
-
-export type Balance = {
-  readonly used: number;
-  readonly free: number;
-  readonly total: number;
-  readonly upnl: number;
-  readonly info?: any;
-  readonly currencies?: { [currency: string]: Balance };
-  readonly coins?: { [coin: string]: CoinBalance };
-};
+import type { Balance } from './generated/Balance';
+export type { Balance } from './generated/Balance';
+export type { CoinBalance } from './generated/CoinBalance';
 
 export type OptionRight = 'call' | 'put';
 

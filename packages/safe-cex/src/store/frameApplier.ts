@@ -9,6 +9,7 @@ import {
   TICKER_FIELDS,
 } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, OrderSide, PositionMode } from '../types';
+import { readBalanceFrame } from './balanceFrames';
 import { readOrderFrame } from './orderFrames';
 import { readPositionFrame } from './positionFrames';
 
@@ -297,8 +298,11 @@ export class FrameApplier {
     }, LOADED_FLAG.POSITIONS);
 
     attempt(() => {
-      const balance = frame.balance();
-      if (balance) update.balance = { ...this.store.balance, ...balance };
+      const balance = readBalanceFrame(frame);
+      if (balance) {
+        // Account info is fetched separately; frame aggregates and maps replace prior state.
+        update.balance = 'info' in this.store.balance ? { ...balance, info: this.store.balance.info } : balance;
+      }
     }, LOADED_FLAG.BALANCE);
 
     attempt(() => {

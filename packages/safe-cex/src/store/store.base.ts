@@ -1,6 +1,7 @@
 import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import uniqBy from 'lodash/uniqBy';
+import { emptyBalance } from '../generated/Balance';
 
 import { Market, Order, OrderStatus, Position, RequestOutcome, StoreData, Ticker, Writable } from '../types';
 import { clone } from '../utils/clone';
@@ -30,7 +31,7 @@ type PackedTickerField = (typeof PACKED_TICKER_FIELDS)[number];
 
 export const defaultStore: StoreData = {
   latency: null,
-  balance: { used: 0, free: 0, total: 0, upnl: 0 },
+  balance: emptyBalance,
   markets: [],
   tickers: [],
   positions: [],
