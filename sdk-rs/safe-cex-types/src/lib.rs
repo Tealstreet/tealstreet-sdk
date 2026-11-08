@@ -2,6 +2,14 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod history;
+pub use history::{
+    ClosedPnlEntry, ClosedPnlEntryContracts, ClosedPnlEntryEntryPrice, ClosedPnlEntryExitPrice,
+    ClosedPnlEntryFees, ClosedPnlEntryLeverage, ClosedPnlEntryNotional,
+    ClosedPnlEntryUnrealizedPnl, DataProvenance, HistoricalOrder, HistoricalTrade, IncomeCategory,
+    IncomeRecord,
+};
+
 pub mod order;
 pub use order::{
     Order, OrderExtra, OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType,
@@ -448,62 +456,6 @@ pub struct OrderBook {
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
-pub struct HistoricalTrade {
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub id: Option<String>,
-    pub symbol: String,
-    pub order_id: String,
-    pub price: f64,
-    pub qty: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub quote_qty: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub realized_pnl: Option<f64>,
-    #[ts(inline)]
-    pub position_side: ExecutionPositionSide,
-    pub side: OrderSide,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub buyer: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub maker: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub commission: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub commission_asset: Option<String>,
-    pub time: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
 pub struct HistoricalTradeOptions {
     pub symbol: String,
     #[serde(
@@ -674,81 +626,6 @@ pub struct OrderHistoryOptions {
         skip_serializing_if = "Option::is_none"
     )]
     pub status: Option<Vec<OrderStatus>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct HistoricalOrder {
-    pub id: String,
-    pub symbol: String,
-    pub side: OrderSide,
-    pub r#type: OrderType,
-    pub status: OrderStatus,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub price: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub average_price: Option<f64>,
-    pub amount: f64,
-    pub filled: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub reduce_only: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[ts(inline)]
-    pub position_side: Option<ExecutionPositionSide>,
-    pub created_time: f64,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub updated_time: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub realized_pnl: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub fees: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub fee_asset: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub rebate: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub rebate_asset: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -1930,180 +1807,6 @@ pub struct ExchangeAccount {
 
 /// @ts-union
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
-pub enum DataProvenance {
-    #[serde(rename = "venue")]
-    Venue,
-    #[serde(rename = "derived")]
-    Derived,
-}
-
-/// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(untagged)]
-pub enum ClosedPnlEntryNotional {
-    Variant0(String),
-    Variant1(f64),
-}
-
-/// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(untagged)]
-pub enum ClosedPnlEntryEntryPrice {
-    Variant0(String),
-    Variant1(f64),
-}
-
-/// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(untagged)]
-pub enum ClosedPnlEntryExitPrice {
-    Variant0(String),
-    Variant1(f64),
-}
-
-/// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(untagged)]
-pub enum ClosedPnlEntryUnrealizedPnl {
-    Variant0(String),
-    Variant1(f64),
-}
-
-/// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(untagged)]
-pub enum ClosedPnlEntryFees {
-    Variant0(String),
-    Variant1(f64),
-}
-
-/// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(untagged)]
-pub enum ClosedPnlEntryContracts {
-    Variant0(String),
-    Variant1(f64),
-}
-
-/// @ts-shape
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(untagged)]
-pub enum ClosedPnlEntryLeverage {
-    Variant0(f64),
-    Variant1(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[ts(optional_fields)]
-pub struct ClosedPnlEntry {
-    /// @ts-mutable
-    #[serde(rename = "provenance")]
-    pub provenance: DataProvenance,
-    /// @ts-mutable
-    #[serde(rename = "symbol")]
-    pub symbol: String,
-    /// @ts-mutable
-    #[serde(rename = "notional")]
-    #[ts(inline)]
-    pub notional: ClosedPnlEntryNotional,
-    /// @ts-mutable
-    #[serde(rename = "entryPrice")]
-    #[ts(inline)]
-    pub entry_price: ClosedPnlEntryEntryPrice,
-    /// @ts-mutable
-    #[serde(rename = "exitPrice")]
-    #[ts(inline)]
-    pub exit_price: ClosedPnlEntryExitPrice,
-    /// @ts-mutable
-    #[serde(rename = "unrealizedPnl")]
-    #[ts(inline)]
-    pub unrealized_pnl: ClosedPnlEntryUnrealizedPnl,
-    /// @ts-mutable
-    #[serde(rename = "side")]
-    pub side: String,
-    /// @ts-mutable
-    #[serde(rename = "fees")]
-    #[ts(inline)]
-    pub fees: ClosedPnlEntryFees,
-    /// @ts-mutable
-    #[serde(rename = "time")]
-    pub time: f64,
-    /// @ts-mutable
-    #[serde(rename = "closedTime")]
-    pub closed_time: f64,
-    /// @ts-mutable
-    #[serde(rename = "account")]
-    pub account: String,
-    /// @ts-mutable
-    #[serde(rename = "contracts")]
-    #[ts(inline)]
-    pub contracts: ClosedPnlEntryContracts,
-    /// @ts-mutable
-    #[serde(rename = "leverage")]
-    #[ts(inline)]
-    pub leverage: ClosedPnlEntryLeverage,
-}
-
-/// @ts-union
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-pub enum IncomeCategory {
-    #[serde(rename = "realized_pnl")]
-    RealizedPnl,
-    #[serde(rename = "funding")]
-    Funding,
-    #[serde(rename = "commission")]
-    Commission,
-    #[serde(rename = "rebate")]
-    Rebate,
-    #[serde(rename = "transfer")]
-    Transfer,
-    #[serde(rename = "liquidation")]
-    Liquidation,
-    #[serde(rename = "other")]
-    Other,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[ts(optional_fields)]
-pub struct IncomeRecord {
-    /// @ts-mutable
-    #[serde(rename = "symbol")]
-    pub symbol: String,
-    /// @ts-mutable
-    #[serde(rename = "incomeType")]
-    pub income_type: String,
-    /// @ts-mutable
-    #[serde(rename = "income")]
-    pub income: f64,
-    /// @ts-mutable
-    #[serde(rename = "asset")]
-    pub asset: String,
-    /// @ts-mutable
-    #[serde(rename = "timestamp")]
-    pub timestamp: f64,
-    /// @ts-mutable
-    #[serde(rename = "tranId")]
-    pub tran_id: String,
-    /// @ts-mutable
-    #[serde(rename = "tradeId")]
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub trade_id: Option<String>,
-    /// @ts-mutable
-    #[serde(rename = "category")]
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub category: Option<IncomeCategory>,
-}
-
-/// @ts-union
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 pub enum RequestOutcome {
     #[serde(rename = "ok")]
     Ok,
@@ -2614,21 +2317,19 @@ mod strict_codecs {
         Ticker, ValidateAccountResult,
     };
     use super::{
-        AccountValidationError, AnyTimeframe, Balance, ClosedPnlEntryContracts,
-        ClosedPnlEntryEntryPrice, ClosedPnlEntryExitPrice, ClosedPnlEntryFees,
-        ClosedPnlEntryLeverage, ClosedPnlEntryNotional, ClosedPnlEntryUnrealizedPnl,
-        DataProvenance, ExchangeAccountConfigBybitSiteId, ExchangeAccountConfigHealthStatus,
-        ExchangeName, ExchangeOptionsAuth, ExchangeOptionsBybitSiteId,
-        ExchangeOptionsExternalPublicData, ExchangeOptionsExternalPublicDataVariant0Type,
+        AccountValidationError, AnyTimeframe, Balance, ExchangeAccountConfigBybitSiteId,
+        ExchangeAccountConfigHealthStatus, ExchangeName, ExchangeOptionsAuth,
+        ExchangeOptionsBybitSiteId, ExchangeOptionsExternalPublicData,
+        ExchangeOptionsExternalPublicDataVariant0Type,
         ExchangeOptionsExternalPublicDataVariant1Type, ExchangeOptionsExtra,
         ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraHyrotraderMode,
         ExchangeOptionsExtraKucoinBroker, ExchangeOptionsExtraLighterBuilderFeeMode,
-        ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, ExecutionPositionSide,
-        IncomeCategory, MarginType, Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage,
-        MarketLimitsPrice, MarketPrecision, ModelField, OptionRight, OptionTerms,
-        OptionTermsSettlement, OptionTermsStyle, OrderBookOrders, OrderSide, OrderStatus,
-        OrderType, PayloadSignerCapability, PositionMode, PositionSide, PublicDataSourceCapability,
-        RemoteSignerCapability, Timeframe, TransportCapability, True, deserialize_present,
+        ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, MarginType, Market, MarketLimits,
+        MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice, MarketPrecision, ModelField,
+        OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, OrderBookOrders,
+        OrderSide, OrderStatus, PayloadSignerCapability, PositionMode, PositionSide,
+        PublicDataSourceCapability, RemoteSignerCapability, Timeframe, TransportCapability, True,
+        deserialize_present,
     };
 
     #[derive(serde::Deserialize)]
@@ -3204,67 +2905,6 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
-    #[serde(remote = "super::HistoricalTrade")]
-    #[serde(rename_all = "camelCase")]
-    struct WireHistoricalTrade {
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        id: Option<String>,
-        symbol: String,
-        order_id: String,
-        price: f64,
-        qty: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        quote_qty: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        realized_pnl: Option<f64>,
-        position_side: ExecutionPositionSide,
-        side: OrderSide,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        buyer: Option<bool>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        maker: Option<bool>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        commission: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        commission_asset: Option<String>,
-        time: f64,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::HistoricalTrade {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireHistoricalTrade::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
     #[serde(remote = "super::HistoricalTradeOptions")]
     #[serde(rename_all = "camelCase")]
     struct WireHistoricalTradeOptions {
@@ -3464,86 +3104,6 @@ mod strict_codecs {
     impl<'de> serde::Deserialize<'de> for super::OrderHistoryOptions {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             WireOrderHistoryOptions::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::HistoricalOrder")]
-    #[serde(rename_all = "camelCase")]
-    struct WireHistoricalOrder {
-        id: String,
-        symbol: String,
-        side: OrderSide,
-        r#type: OrderType,
-        status: OrderStatus,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        price: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        average_price: Option<f64>,
-        amount: f64,
-        filled: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        reduce_only: Option<bool>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        position_side: Option<ExecutionPositionSide>,
-        created_time: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        updated_time: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        realized_pnl: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        fees: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        fee_asset: Option<String>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        rebate: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        rebate_asset: Option<String>,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::HistoricalOrder {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireHistoricalOrder::deserialize(crate::strict_decode::object(deserializer))
         }
     }
 
@@ -4853,126 +4413,6 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
-    #[serde(remote = "super::DataProvenance")]
-    enum WireDataProvenance {
-        #[serde(rename = "venue")]
-        Venue,
-        #[serde(rename = "derived")]
-        Derived,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::DataProvenance {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let value = String::deserialize(deserializer)?;
-            WireDataProvenance::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
-                value,
-            ))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::ClosedPnlEntry")]
-    struct WireClosedPnlEntry {
-        #[serde(rename = "provenance")]
-        provenance: DataProvenance,
-        #[serde(rename = "symbol")]
-        symbol: String,
-        #[serde(rename = "notional")]
-        notional: ClosedPnlEntryNotional,
-        #[serde(rename = "entryPrice")]
-        entry_price: ClosedPnlEntryEntryPrice,
-        #[serde(rename = "exitPrice")]
-        exit_price: ClosedPnlEntryExitPrice,
-        #[serde(rename = "unrealizedPnl")]
-        unrealized_pnl: ClosedPnlEntryUnrealizedPnl,
-        #[serde(rename = "side")]
-        side: String,
-        #[serde(rename = "fees")]
-        fees: ClosedPnlEntryFees,
-        #[serde(rename = "time")]
-        time: f64,
-        #[serde(rename = "closedTime")]
-        closed_time: f64,
-        #[serde(rename = "account")]
-        account: String,
-        #[serde(rename = "contracts")]
-        contracts: ClosedPnlEntryContracts,
-        #[serde(rename = "leverage")]
-        leverage: ClosedPnlEntryLeverage,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::ClosedPnlEntry {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireClosedPnlEntry::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::IncomeCategory")]
-    enum WireIncomeCategory {
-        #[serde(rename = "realized_pnl")]
-        RealizedPnl,
-        #[serde(rename = "funding")]
-        Funding,
-        #[serde(rename = "commission")]
-        Commission,
-        #[serde(rename = "rebate")]
-        Rebate,
-        #[serde(rename = "transfer")]
-        Transfer,
-        #[serde(rename = "liquidation")]
-        Liquidation,
-        #[serde(rename = "other")]
-        Other,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::IncomeCategory {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let value = String::deserialize(deserializer)?;
-            WireIncomeCategory::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
-                value,
-            ))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::IncomeRecord")]
-    struct WireIncomeRecord {
-        #[serde(rename = "symbol")]
-        symbol: String,
-        #[serde(rename = "incomeType")]
-        income_type: String,
-        #[serde(rename = "income")]
-        income: f64,
-        #[serde(rename = "asset")]
-        asset: String,
-        #[serde(rename = "timestamp")]
-        timestamp: f64,
-        #[serde(rename = "tranId")]
-        tran_id: String,
-        #[serde(rename = "tradeId")]
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        trade_id: Option<String>,
-        #[serde(rename = "category")]
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        category: Option<IncomeCategory>,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::IncomeRecord {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireIncomeRecord::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
     #[serde(remote = "super::RequestOutcome")]
     enum WireRequestOutcome {
         #[serde(rename = "ok")]
@@ -5945,78 +5385,9 @@ mod strict_codecs {
             crate::strict_decode::tests::record::<ValidateAccountResult>("ValidateAccountResult");
 
             crate::strict_decode::tests::record::<ExchangeAccount>("ExchangeAccount");
-            crate::strict_decode::tests::string_union::<DataProvenance>(
-                "DataProvenance",
-                WireDataProvenance::deserialize(serde::de::value::StringDeserializer::<
-                    crate::strict_decode::tests::Inventory,
-                >::new(
-                    "__unknown_inventory__".into()
-                ))
-                .err()
-                .unwrap()
-                .0,
-                vec![
-                    serde_json::to_value(DataProvenance::Venue)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(DataProvenance::Derived)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                ],
-            );
+
             crate::strict_decode::tests::record::<ClosedPnlEntry>("ClosedPnlEntry");
-            crate::strict_decode::tests::string_union::<IncomeCategory>(
-                "IncomeCategory",
-                WireIncomeCategory::deserialize(serde::de::value::StringDeserializer::<
-                    crate::strict_decode::tests::Inventory,
-                >::new(
-                    "__unknown_inventory__".into()
-                ))
-                .err()
-                .unwrap()
-                .0,
-                vec![
-                    serde_json::to_value(IncomeCategory::RealizedPnl)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(IncomeCategory::Funding)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(IncomeCategory::Commission)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(IncomeCategory::Rebate)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(IncomeCategory::Transfer)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(IncomeCategory::Liquidation)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(IncomeCategory::Other)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                ],
-            );
+
             crate::strict_decode::tests::record::<IncomeRecord>("IncomeRecord");
             crate::strict_decode::tests::string_union::<RequestOutcome>(
                 "RequestOutcome",

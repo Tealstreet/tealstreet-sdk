@@ -1,5 +1,11 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+export type { HistoricalOrder } from './generated/HistoricalOrder';
+export type { HistoricalTrade } from './generated/HistoricalTrade';
+export type { ClosedPnlEntry } from './generated/ClosedPnlEntry';
+export type { IncomeRecord } from './generated/IncomeRecord';
+export type { DataProvenance } from './generated/DataProvenance';
+export type { IncomeCategory } from './generated/IncomeCategory';
 import { OrderStatus } from './generated/OrderStatus';
 import { OrderSide } from './generated/OrderSide';
 import { OrderType } from './generated/OrderType';
@@ -516,23 +522,6 @@ export type DisplayedPosition = Position & {
   readonly hasFullTP?: boolean;
 };
 
-export type HistoricalTrade = {
-  readonly id?: string;
-  readonly symbol: string;
-  readonly orderId: string;
-  readonly price: number;
-  readonly qty: number;
-  readonly quoteQty?: number;
-  readonly realizedPnl?: number;
-  readonly positionSide: PositionSide | 'both';
-  readonly side: OrderSide;
-  readonly buyer?: boolean;
-  readonly maker?: boolean;
-  readonly commission?: number;
-  readonly commissionAsset?: string;
-  readonly time: number;
-};
-
 export type HistoricalTradeOptions = {
   readonly symbol: string;
   readonly orderId?: string;
@@ -681,45 +670,6 @@ export type FetchedLeverage = {
 };
 
 /**
- * Where a number came from, and therefore what it can be used for.
- *
- * This rides ON the data rather than living in a capability table, because derived data
- * is INDISTINGUISHABLE from reported data at the call site — a fold of fills does not
- * look derived, it looks like a closed position. A lookup table someone has to remember
- * to consult is the same shape as `supportsTradesHistory`, which advertises `true` on
- * three venues that always return empty and has no production consumer at all.
- *
- * - `venue`   — the exchange reported this directly. Low multiplicity, error is local to
- *               the row, and it can serve as an INDEPENDENT check on another axis.
- * - `derived` — folded client-side from another axis (e.g. closed positions from fills).
- *               Error is PATH-DEPENDENT: one bad fill corrupts every position after it,
- *               and it cannot validate the axis it was folded from — comparing them just
- *               compares data to itself.
- */
-export type DataProvenance = 'venue' | 'derived';
-
-export type ClosedPnlEntry = {
-  /**
-   * REQUIRED, deliberately. Optional would mean a new producer that forgets it gets the
-   * benefit of the doubt — and the whole lesson of this axis is that silent absence reads
-   * as data rather than as an error. Make the compiler ask.
-   */
-  provenance: DataProvenance;
-  symbol: string;
-  notional: string | number;
-  entryPrice: string | number;
-  exitPrice: string | number;
-  unrealizedPnl: string | number;
-  side: string;
-  fees: string | number;
-  time: number;
-  closedTime: number;
-  account: string;
-  contracts: string | number;
-  leverage: number | string;
-};
-
-/**
  * A historical order, including ones that never filled. Distinct from `Order` (open
  * orders) and from fills: it is the only record of intent, so it carries what was
  * asked for alongside what happened — the basis for slippage and unfilled-plan
@@ -739,55 +689,6 @@ export type OrderHistoryOptions = {
   readonly limit?: number;
   /** Restrict to terminal states; omit for everything the venue returns. */
   readonly status?: OrderStatus[];
-};
-
-export type HistoricalOrder = {
-  readonly id: string;
-  readonly symbol: string;
-  readonly side: OrderSide;
-  readonly type: OrderType;
-  readonly status: OrderStatus;
-  /** Requested price; absent for market orders. */
-  readonly price?: number;
-  /** Average fill price actually achieved, when the venue reports one. */
-  readonly averagePrice?: number;
-  readonly amount: number;
-  readonly filled: number;
-  readonly reduceOnly?: boolean;
-  readonly positionSide?: PositionSide | 'both';
-  readonly createdTime: number;
-  readonly updatedTime?: number;
-
-  /**
-   * Venue-reported realized PnL for this order, **GROSS of fees** where the venue reports
-   * it that way — which is every venue populating it today.
-   *
-   * **Absent means NOT MAPPED OR not reported — the two are not distinguishable here, and
-   * saying otherwise would be false today.** Only woo populates it. okx (`pnl`), blofin
-   * (`pnl`) and bitunix (`realizedPNL`) all RECEIVE the value in rows their own mappers
-   * document and drop it on the floor; bybit, binance, paradex and hyperliquid genuinely
-   * cannot report it on this axis. So a consumer must not read absence as "this order
-   * realized nothing".
-   *
-   * A sign trap waits for whoever maps the other three: okx and blofin report the paired
-   * fee **negative when charged**, woo reports it **positive**. See `fees` below.
-   *
-   * Never `Number(null)` this field into existence. That coercion yields `0`, and it is
-   * exactly how woo's v3 fills route — which returns `realizedPnl: null` on all 534 rows —
-   * made "this account has no PnL" indistinguishable from "this route carries no PnL", and
-   * got the venue written off as unsupportable for a week.
-   *
-   * On woo it requires `realized_pnl=true` on the request; the field is simply absent
-   * otherwise.
-   */
-  readonly realizedPnl?: number;
-
-  /** Positive = cost to the trader, matching `PositionRecord.fees`. */
-  readonly fees?: number;
-  readonly feeAsset?: string;
-  /** Positive = received by the trader. Kept separate from `fees`, never netted into it. */
-  readonly rebate?: number;
-  readonly rebateAsset?: string;
 };
 
 export type MessageHandlerStatsType = 'public' | 'private' | 'futures' | 'business';
@@ -948,32 +849,6 @@ export const readOnlyOrderStatuses: OrderStatus[] = [
   OrderStatus.Updating,
   OrderStatus.Canceling,
 ] as const;
-
-// Generic income record for journal sync
-/**
- * Venue-neutral ledger category. `IncomeRecord.incomeType` stays the venue's own raw
- * string — it is part of the custom-module surface (`apps/module-frame`) and must not
- * change shape — so normalisation is added alongside it rather than replacing it.
- *
- * These are the terms of the reconciliation identity a journal is validated against:
- *   delta equity == realized + funding - fees +/- delta unrealized +/- transfers
- * Without `transfer` you cannot tell a losing trade from a withdrawal.
- */
-export type IncomeCategory =
-  'realized_pnl' | 'funding' | 'commission' | 'rebate' | 'transfer' | 'liquidation' | 'other';
-
-export type IncomeRecord = {
-  symbol: string;
-  /** The venue's own raw type string. Unchanged — consumed by user modules. */
-  incomeType: string;
-  income: number;
-  asset: string;
-  timestamp: number;
-  tranId: string;
-  tradeId?: string;
-  /** Normalised category. Optional so existing producers stay valid. */
-  category?: IncomeCategory;
-};
 
 export type IncomeHistoryOptions = {
   symbol?: string;

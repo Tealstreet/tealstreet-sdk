@@ -2,7 +2,7 @@ import type { Market } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
-import { mapOkxClosedPosition } from '../../exchanges/okx/okx.closed-pnl';
+import { mapOkxClosedPosition } from '../reference/okx/okx.closed-pnl';
 import { PositionSide } from '../../types';
 
 /** Row shape captured live from `/api/v5/account/positions-history` (sheet row 13). */

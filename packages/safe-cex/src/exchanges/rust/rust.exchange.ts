@@ -96,11 +96,7 @@ import {
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
-import { mapBitunixClosedPosition } from '../bitunix/bitunix.income';
-import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
-import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
-import { isBybitInverseSymbol } from '../bybit/bybit.inverse';
 import {
   HYROTRADER_PROD_URL,
   HYROTRADER_PROD_WS_URL,
@@ -116,7 +112,6 @@ import {
 import { isKeylessRemoteSigned } from '../hostedSigningVenues';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
-import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
@@ -1902,7 +1897,7 @@ export class RustEngineExchange extends BaseExchange {
     // Native account reads start an engine, so a mirror asks the worker's instead.
     // Journals are not forwarded: a mirror folds them itself from forwarded raw reads,
     // so the hosted server, which has no TS mappers, only serves those reads.
-    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS, ...RUST_FORWARDED_METHODS];
+    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS, ...RUST_FORWARDED_METHODS, 'fetchClosedPnl'];
     const members = this as unknown as Record<string, unknown>;
     for (const method of methods) {
       // A capability-defined method this venue lacks stays absent, never a forwarder.
@@ -3604,31 +3599,9 @@ export class RustEngineExchange extends BaseExchange {
     const format = capabilities.closedPositionFormat;
     // OKX/Blofin treat an empty symbol as account-wide; Bybit and Bitunix send it as given.
     const symbol = format === 'okx' || format === 'blofin' ? opts.symbol || undefined : opts.symbol;
-    const rows = await this.fetchClosedPositionRows({ ...opts, symbol });
-    const account = opts.accountName || '';
-    const entries: ClosedPnlEntry[] = [];
-    for (const row of rows) {
-      let entry: ClosedPnlEntry | null;
-      if (format === 'okx') {
-        const market = this.store.marketsBySymbol[opts.symbol] ?? this.store.marketsById[String(row.instId ?? '')];
-        entry = mapOkxClosedPosition(row, market, this.okxContractsToBase, account);
-      } else if (format === 'blofin') {
-        entry = mapBlofinClosedPosition(row, (instId) => this.store.marketsById[instId]?.symbol, account);
-      } else if (format === 'bitunix') {
-        entry = mapBitunixClosedPosition(row, account);
-      } else {
-        entry = mapBybitClosedPnl(
-          row,
-          account,
-          capabilities.inverseClosedPositions || isBybitInverseSymbol(row.symbol),
-        );
-      }
-      if (entry) entries.push(entry);
-    }
-    return copyHistoryCompleteness(
-      rows,
-      entries.sort((a, b) => b.closedTime - a.closedTime),
-    );
+    return this.command<ClosedPnlEntry[]>({
+      op: 'fetchClosedPnl', symbol, from: opts.from, to: opts.to, account: opts.accountName || '',
+    });
   };
 
   /**

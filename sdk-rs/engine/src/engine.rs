@@ -622,6 +622,13 @@ pub enum VenueAction {
         from_ms: Option<f64>,
         to_ms: Option<f64>,
     },
+    /// Generated reported closed-PnL rows; raw journal reads use FetchClosedPositions.
+    FetchClosedPnl {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        account: String,
+    },
     /// The venue's raw account balance payload as JSON, or `null` before one
     /// is read, for hosts that expose it as `balance.info`.
     FetchBalanceInfo,

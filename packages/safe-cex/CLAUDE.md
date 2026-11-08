@@ -602,6 +602,17 @@ Use it instead of class identity or text. Unknown/pending/network/malformed
 checks stay ordinary failures. The command error allowlist retains only validated
 approval fields; the old class export stays available without prototype repair.
 
+## Native reported closed-PnL output
+
+`fetchClosedPnl` returns generated `ClosedPnlEntry` rows directly from Rust
+`history_output`. Bybit inverse sizes, OKX contract conversion, fee signs,
+account labels and newest-close ordering are native output policy. The four TS
+closed-PnL mappers live only under test references. `fetchClosedPositions`
+remains the raw journal contract; it is never a fallback for reported PnL.
+The Bitunix/Blofin income helpers and Bybit inverse helpers also live only in
+`__tests__/reference`; their remaining callers are replay oracles and tests.
+The production venue-file inventory removes them with the runtime imports.
+
 ## Reported closed-PnL read failures
 
 Rust `fetchClosedPnl` propagates the engine's typed read error, including through
