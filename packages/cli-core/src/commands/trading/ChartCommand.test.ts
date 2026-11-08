@@ -41,9 +41,13 @@ describe.each(sizeCases)('$name order annotations', (size) => {
 
   it('passes market precision through the chart command', async () => {
     const store = new DefaultStore();
+    const ticker: Ticker = {
+      id: market.id, symbol: market.symbol, last: 100, bid: 0, ask: 0, mark: 0, index: 0,
+      percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
+    };
     store.update({
       markets: [market], orders: [{ ...order, type: OrderType.Limit }],
-      tickers: [{ symbol: market.symbol, last: 100 } as Ticker],
+      tickers: [ticker],
     });
     const exchange = {
       store,

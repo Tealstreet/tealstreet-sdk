@@ -322,34 +322,8 @@ pub use market::Market;
 pub mod balance;
 pub use balance::{Balance, CoinBalance, CurrencyBalance};
 
-#[derive(Debug, Clone, PartialEq, TS)]
-#[ts(optional_fields, rename_all = "camelCase")]
-pub struct Ticker {
-    pub id: String,
-    pub symbol: String,
-    pub bid: f64,
-    pub ask: f64,
-    pub last: f64,
-    pub mark: f64,
-    // WOO publishes null for a real market with no index price.
-    #[ts(as = "f64")]
-    pub index: Option<f64>,
-
-    pub mid_price: Option<f64>,
-    pub percentage: f64,
-    pub open_interest: f64,
-    pub funding_rate: f64,
-    pub funding_time: f64,
-    pub volume: f64,
-    pub quote_volume: f64,
-    // Runtime extra emitted by Paradex fetchTickers from virtualClock.getCurrentTimeMs().
-    // The generated TypeScript remains the source declaration projection.
-    #[ts(skip)]
-    pub timestamp: Option<f64>,
-
-    #[ts(type = "any", optional)]
-    pub info: Option<crate::retained_json::RetainedJsonInput>,
-}
+pub mod ticker;
+pub use ticker::Ticker;
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -3149,63 +3123,6 @@ mod strict_codecs {
                     d: D,
                 ) -> Result<Self::Value, D::Error> {
                     WireMarket::deserialize(crate::strict_decode::object(d))
-                }
-            }
-            deserializer.deserialize_newtype_struct(crate::model_field::INFO_RECORD, InfoVisitor)
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::Ticker")]
-    #[serde(rename_all = "camelCase")]
-    struct WireTicker {
-        id: String,
-        symbol: String,
-        bid: f64,
-        ask: f64,
-        last: f64,
-        mark: f64,
-        #[serde(deserialize_with = "Option::<f64>::deserialize")]
-        index: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        mid_price: Option<f64>,
-        percentage: f64,
-        open_interest: f64,
-        funding_rate: f64,
-        funding_time: f64,
-        volume: f64,
-        quote_volume: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        timestamp: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "crate::retained_json::deserialize_present_retained_info",
-            skip_serializing_if = "Option::is_none"
-        )]
-        info: Option<crate::retained_json::RetainedJsonInput>,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::Ticker {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            struct InfoVisitor;
-            impl<'de> serde::de::Visitor<'de> for InfoVisitor {
-                type Value = super::Ticker;
-                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    f.write_str("a Ticker record")
-                }
-                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
-                    self,
-                    d: D,
-                ) -> Result<Self::Value, D::Error> {
-                    WireTicker::deserialize(crate::strict_decode::object(d))
                 }
             }
             deserializer.deserialize_newtype_struct(crate::model_field::INFO_RECORD, InfoVisitor)

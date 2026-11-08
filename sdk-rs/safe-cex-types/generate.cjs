@@ -106,7 +106,7 @@ function publishModels() {
     }
     fs.writeFileSync(path.join(destination, filename), source);
   };
-  for (const name of ['Position', 'Order', 'PlaceOrderOpts', 'UpdateOrderOpts', 'Market']) copy(name);
+  for (const name of ['Position', 'Order', 'PlaceOrderOpts', 'UpdateOrderOpts', 'Market', 'Ticker']) copy(name);
 }
 
 module.exports = { transform, stringLiterals };

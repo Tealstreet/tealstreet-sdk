@@ -13,6 +13,7 @@ import type { OptionRight } from './generated/OptionRight';
 import type { OptionTerms } from './generated/OptionTerms';
 import type { OptionGreeks } from './generated/OptionGreeks';
 import type { Position } from './generated/Position';
+import type { Ticker } from './generated/Ticker';
 import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
 import type { TwapInstance } from './webworker/twap/TwapInstance';
@@ -24,7 +25,7 @@ import { MarginType } from './generated/MarginType';
 import { PositionMode } from './generated/PositionMode';
 import { PositionSide } from './generated/PositionSide';
 
-export type { Position, OptionGreeks, Market, OptionRight, OptionTerms };
+export type { Position, OptionGreeks, Market, OptionRight, OptionTerms, Ticker };
 export { PositionSide, PositionMode, MarginType };
 
 export type ExchangeName =
@@ -483,41 +484,8 @@ export type AccountGreeks = {
   readonly units: string;
 };
 
-/** Source engine receipt times for last, mark and index; null is unobserved. */
-export type TickerObservedAt = [number | null, number | null, number | null];
-
-export type Ticker = {
-  readonly observedAt?: TickerObservedAt;
-  readonly id: string;
-  readonly symbol: string;
-  readonly bid: number;
-  readonly ask: number;
-  readonly last: number;
-  /**
-   * Derivatives metadata uses `0` when the venue does not publish the field,
-   * including spot venues where the concept does not apply. Consumers must
-   * not interpret zero as proof of a real zero funding rate, mark/index price,
-   * funding time, or open-interest value.
-   */
-  readonly mark: number;
-  readonly index: number;
-  /**
-   * Exchange-published midpoint when the venue exposes one separately
-   * from `(bid + ask) / 2`. Hyperliquid publishes `midPx` directly
-   * (and their `bid`/`ask` are impact-weighted, not L1 quotes), so
-   * consumers who want the canonical mid should prefer this when
-   * set and fall back to `(bid + ask) / 2` otherwise. Most exchanges
-   * leave this unset.
-   */
-  readonly midPrice?: number;
-  readonly percentage: number;
-  readonly openInterest: number;
-  readonly fundingRate: number;
-  readonly fundingTime: number;
-  readonly volume: number;
-  readonly quoteVolume: number;
-  readonly info?: any;
-};
+/** [last, mark, index] source receipt-clock milliseconds; not seconds; not snapshot receipt time. Null is unobserved; zero is valid. */
+export type TickerObservedAt = NonNullable<Ticker['observedAt']>;
 
 export type PublicTrade = {
   readonly id: string;

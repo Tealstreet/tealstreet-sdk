@@ -1,6 +1,7 @@
 import type { Exchange } from '../../exchanges/base';
 import type { CrossTradeConfig, CrossTradeCopier } from '../../crossTrade/types';
-import type { Ticker } from '../../types';
+import type { Ticker } from '../../generated/Ticker';
+import type { ExchangeName } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -22,7 +23,9 @@ describe('Rust frames preserve inverse native units', () => {
       positionPnl: 100,
       orders: [{ id: 'inverse-okx', amount: 7, filled: 0.004321, remaining: 0.008765, native: 5, filledNative: 2 }],
     });
-    expect(value.orders()!.filledInPlacementUnits![0]).toBe(2);
+    const orderTable = value.orders();
+    if (!orderTable?.filledInPlacementUnits) throw new Error('Native fixture is missing its placement fills');
+    expect(orderTable.filledInPlacementUnits[0]).toBe(2);
     const worker = new DefaultStore();
     new FrameApplier(worker).apply(value);
     const main = new DefaultStore();
@@ -78,7 +81,9 @@ describe('Rust frames preserve inverse native units', () => {
 
   it('decodes legacy seven-column frames and leaves unknown native quantities absent', () => {
     const frame = fixture({ orders: [{ id: 'full-stop', amount: 0, filled: 0, remaining: 0.00013 }] });
-    expect(frame.orders()!.remainingNative).toBeUndefined();
+    const orderTable = frame.orders();
+    if (!orderTable) throw new Error('Legacy fixture is missing its orders table');
+    expect(orderTable.remainingNative).toBeUndefined();
     const store = new DefaultStore();
     new FrameApplier(store).apply(frame);
     expect(store.orders[0]).toMatchObject({ id: 'full-stop', amount: 0, remaining: 0.00013 });
@@ -93,7 +98,9 @@ describe('Rust frames preserve inverse native units', () => {
       { id: 'full-stop', amount: 0, filled: 0, remaining: 0.0002, native: 11, enums: 3 << 8 },
       { id: 'unknown', amount: 0, filled: 0, remaining: 0.0002 },
     ] });
-    expect(Array.from(frame.orders()!.remainingNative!)).toEqual([7, 7, 11, NaN]);
+    const orderTable = frame.orders();
+    if (!orderTable?.remainingNative) throw new Error('Native fixture is missing its remaining quantities');
+    expect(Array.from(orderTable.remainingNative)).toEqual([7, 7, 11, NaN]);
     const store = new DefaultStore();
     new FrameApplier(store).apply(frame);
     expect(store.orders[0].extra).toEqual({ remainingNative: 7, remainingNotional: 7, rejectReason: 'PostOnly' });
@@ -109,7 +116,10 @@ describe('Rust frames preserve inverse native units', () => {
     applier.apply(fixture());
     applier.apply(fixture({ markets: false, positions: true }));
     expect(store.positions[0]).toMatchObject({ contracts: 0.02, extra: { contractsNative: 1000, unrealizedPnlNative: 0.002 } });
-    const ticker = { id: 'BTCUSD', symbol: 'BTCUSD', last: 50000 } as Ticker;
+    const ticker: Ticker = {
+      id: 'BTCUSD', symbol: 'BTCUSD', last: 50000, bid: 0, ask: 0, mark: 0, index: 0,
+      percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
+    };
     store.update({ tickers: [ticker] });
     const masterStore = new DefaultStore();
     masterStore.update({ markets: store.markets, tickers: [ticker], positions: [] });
@@ -137,7 +147,8 @@ describe('Rust frames preserve inverse native units', () => {
   });
 
   it('keeps venue-specific legacy inverse sizing and exact native tails through the main-thread bridge', () => {
-    for (const venue of ['bybitinverse', 'bitgetinverse'] as const) {
+    const venues: ExchangeName[] = ['bybitinverse', 'bitgetinverse'];
+    for (const venue of venues) {
       for (const native of [false, true]) {
         const store = new DefaultStore();
         const exchange = new BaseExchange(venue, { key: '', secret: '' }, store);
@@ -155,7 +166,8 @@ describe('Rust frames preserve inverse native units', () => {
 });
 
 describe('OKX native contract count bridge', () => {
-  it.each(['okx', 'okxeu', 'okxdemo', 'okxeudemo'] as const)('%s preserves native copier and chaser counts through worker frames', (name) => {
+  const venues: ExchangeName[] = ['okx', 'okxeu', 'okxdemo', 'okxeudemo'];
+  it.each(venues)('%s preserves native copier and chaser counts through worker frames', (name) => {
     const store = new DefaultStore();
     const exchange = new BaseExchange(name, { key: '', secret: '' }, store);
     const workerStore = new DefaultStore();
@@ -165,7 +177,9 @@ describe('OKX native contract count bridge', () => {
       { id: 'full-stop', amount: 0, filled: 0, remaining: 0.02, native: 10, filledNative: 2, enums: 3 << 8 },
     ] });
     exchange.applyWorkerFrame(frame.buffer);
-    (worker as unknown as { applier: FrameApplier }).applier.apply(frame);
+    const workerApplier: unknown = Reflect.get(worker, 'applier');
+    if (!(workerApplier instanceof FrameApplier)) throw new Error('Expected the worker frame applier');
+    workerApplier.apply(frame);
     for (const receiver of [store, workerStore]) {
       expect(receiver.orders[0]).toMatchObject({ amount: 10, filled: 0.004, remaining: 0.016, extra: { remainingNative: 8, filledInPlacementUnits: 2 } });
       expect(receiver.orders[0].extra?.remainingNotional).toBe(800);

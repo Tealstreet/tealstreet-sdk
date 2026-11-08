@@ -1,16 +1,14 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import type { Candle, FetchedLeverage, OrderBook, OrderFillEvent, Ticker, Writable } from '../types';
-import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
+import type { Candle, FetchedLeverage, OrderBook, OrderFillEvent, Writable } from '../types';
+import type { Store, StoreUpdate } from './store.interface';
 
-import {
-  LOADED_FLAG,
-  TICKER_FIELDS,
-} from '@tealstreet/safe-cex-wasm/wire';
+import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, OrderSide, PositionMode } from '../types';
 import { readBalanceFrame } from './balanceFrames';
 import { readMarketFrame } from './marketFrames';
 import { readOrderFrame } from './orderFrames';
 import { readPositionFrame } from './positionFrames';
+import { readTickerFrame, readTickerDeltaFrame, readTickerObservationFrame } from './tickerFrames';
 
 export type FrameBook = { symbol: string; orderbook: OrderBook };
 type BookLevels = Map<number, number> | Float64Array;
@@ -94,74 +92,23 @@ export class FrameApplier {
     attempt(() => {
       if (marketsFailed) return;
       tickers = frame.tickers();
-      if (tickers) {
-        const rows: Ticker[] = [];
-        for (let i = 0; i < tickers.count; i++) {
-          const market = update.markets
-            ? update.markets[tickers.market[i]]
-            : this.store.marketsBySymbol[resolveSymbol(tickers.market[i])];
-          const identity = tickers.identity?.(i);
-          const ticker: Record<string, number | string> = {
-            id: market?.id ?? identity?.id ?? '',
-            symbol: market?.symbol ?? identity?.symbol ?? '',
-          };
-          for (const field of TICKER_FIELDS) {
-            const value = tickers[field]?.[i];
-            if (value !== undefined && (field !== 'midPrice' || !Number.isNaN(value))) ticker[field] = value;
-          }
-          rows.push(ticker as unknown as Ticker);
-        }
-        update.tickers = rows;
-      }
+      const rows = readTickerFrame(tickers, (index) => update.markets
+        ? update.markets[index]
+        : this.store.marketsBySymbol[resolveSymbol(index)]);
+      if (rows) update.tickers = rows;
     }, LOADED_FLAG.TICKERS);
 
     attempt(() => {
       if (marketsFailed) return;
-      const deltas = frame.tickerDeltas();
-      if (deltas && !tickers) {
-        // The engine's ticker field order is the store's packed delta order.
-        const packed: PackedTickerDelta[] = [];
-        for (let i = 0; i < deltas.length;) {
-          const mask = deltas[i + 1];
-          if (
-            !Number.isInteger(deltas[i]) ||
-            deltas[i] < 0 ||
-            deltas[i] >= (update.tickers ?? this.store.tickers).length ||
-            !Number.isInteger(mask) ||
-            mask <= 0 ||
-            mask >= 1 << TICKER_FIELDS.length
-          ) {
-            throw new Error('Invalid ticker delta row or mask');
-          }
-          let width = 0;
-          for (let field = 0; field < TICKER_FIELDS.length; field++) if (mask & (1 << field)) width++;
-          if (i + 2 + width > deltas.length) throw new Error('Truncated ticker delta');
-          packed.push(Array.from(deltas.subarray(i, i + 2 + width)) as PackedTickerDelta);
-          i += 2 + width;
-        }
-        update.tickerDeltas = packed;
-      }
+      const deltas = readTickerDeltaFrame(frame,
+        (update.tickers ?? this.store.tickers).length, Boolean(tickers));
+      if (deltas) update.tickerDeltas = deltas;
     }, LOADED_FLAG.TICKERS);
 
     attempt(() => {
       if (marketsFailed) return;
-      const observations = frame.tickerObservations?.();
-      if (!observations) return;
-      const rows = update.tickers ?? this.store.tickers;
-      const times: NonNullable<StoreUpdate['tickerObservations']> = [];
-      for (let i = 0; i < observations.length; i += 4) {
-        const row = observations[i];
-        if (!rows[row]) throw new Error('Invalid ticker observation row');
-        times.push([
-          row,
-          [
-            finite(observations[i + 1]) ?? null,
-            finite(observations[i + 2]) ?? null,
-            finite(observations[i + 3]) ?? null,
-          ],
-        ]);
-      }
-      update.tickerObservations = times;
+      const observations = readTickerObservationFrame(frame, update.tickers ?? this.store.tickers);
+      if (observations) update.tickerObservations = observations;
     }, LOADED_FLAG.TICKERS);
 
     attempt(() => {

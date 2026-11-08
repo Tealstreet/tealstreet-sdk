@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { inverseUnitsFrame } from '@tealstreet/safe-cex/src/__tests__/fixtures/scxfFrame';
 import { FrameApplier } from '@tealstreet/safe-cex/src/store/frameApplier';
 import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
-import { OrderSide, OrderType, type Ticker } from '@tealstreet/safe-cex/src/types';
+import { OrderSide, OrderType } from '@tealstreet/safe-cex/src/types';
+import type { Ticker } from '@tealstreet/safe-cex/src/generated/Ticker';
 import type { ChaserOrderInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderInstance';
 import type { CLIPlatformAdapter, ExchangeLike } from '../../types';
 import { ChartCommand, formatOrderLine } from './ChartCommand';
@@ -29,19 +30,21 @@ describe.each([
   { name: 'OKX inverse', units: 3, contractSize: 100, remaining: 0.01, native: 5 },
   { name: 'Bybit inverse', units: 2, contractSize: 1, remaining: 0.01, native: 500 },
 ])('$name order display', (profile) => {
-  function fixture() {
+  function fixture(): ExchangeLike & { store: DefaultStore } {
     const frame = inverseUnitsFrame({
       units: profile.units,
       contractSize: profile.contractSize,
       native: true,
       orders: [{ id: 'partial', amount: 7, filled: 2, remaining: profile.remaining, native: profile.native }],
     });
-    frame.orders()!.price[0] = 50_000;
+    const orders = frame.orders();
+    if (!orders) throw new Error('Inverse fixture is missing its orders table');
+    orders.price[0] = 50_000;
     const store = new DefaultStore();
     new FrameApplier(store).apply(frame);
     expect(store.orders[0].remaining).toBe(profile.remaining);
     expect(store.orders[0].extra?.remainingNotional).toBe(500);
-    return { name: profile.name, store } as ExchangeLike & { store: DefaultStore };
+    return { name: profile.name, store, emitter: { on: vi.fn(), off: vi.fn(), emit: vi.fn() } };
   }
 
   it('converts the decoded remainder in single and multi-account tables', () => {
@@ -78,7 +81,11 @@ describe.each([
 
   it('converts the decoded remainder in rendered charts', async () => {
     const exchange = fixture();
-    exchange.store.update({ tickers: [{ symbol: 'BTCUSD', last: 50_000 } as Ticker] });
+    const ticker: Ticker = {
+      id: 'BTCUSD', symbol: 'BTCUSD', last: 50_000, bid: 0, ask: 0, mark: 0, index: 0,
+      percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
+    };
+    exchange.store.update({ tickers: [ticker] });
     exchange.fetchOHLCV = vi
       .fn()
       .mockResolvedValue([

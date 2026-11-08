@@ -404,7 +404,7 @@ impl JsNumberOutput for safe_cex_types::Position {
 
 impl JsNumberOutput for safe_cex_types::Ticker {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { id, symbol, bid, ask, last, mark, index, mid_price, percentage, open_interest, funding_rate, funding_time, volume, quote_volume, timestamp } passthrough { info });
+        crate::js_number_output!(self, struct { observed_at, id, symbol, bid, ask, last, mark, index, mid_price, percentage, open_interest, funding_rate, funding_time, volume, quote_volume, timestamp } passthrough { info });
     }
 }
 

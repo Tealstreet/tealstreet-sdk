@@ -14,8 +14,9 @@ import { DefaultStore } from '../../store/store.base';
 
 const market = (symbol: string) =>
   ({ id: symbol, symbol, contractSize: 1, isSpot: false, isPerpetual: true }) as Market;
-const ticker = (symbol: string, last: number) =>
-  ({ id: symbol, symbol, bid: last - 1, ask: last + 1, last, mark: last, index: last }) as Ticker;
+const ticker = (symbol: string, last: number): Ticker =>
+  ({ id: symbol, symbol, bid: last - 1, ask: last + 1, last, mark: last, index: last,
+    percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0 });
 
 /** exchange-server's shared source: a live view over whichever public exchange is current. */
 function restartableSource() {

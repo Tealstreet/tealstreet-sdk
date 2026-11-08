@@ -288,12 +288,12 @@ export class DefaultStore implements Store {
     return { packed };
   }
 
-  consumeTickerDeltas() {
+  consumeTickerDeltas(): Array<[number, Partial<Ticker>]> {
     if (this.pendingTickerDeltas.size === 0) {
-      return [] as Array<[number, Partial<Ticker>]>;
+      return [];
     }
     const deltas = Array.from(this.pendingTickerDeltas.entries()).map(
-      ([index, changes]) => [index, changes] as [number, Partial<Ticker>],
+      ([index, changes]): [number, Partial<Ticker>] => [index, changes],
     );
     this.pendingTickerDeltas.clear();
     return deltas;
@@ -302,7 +302,7 @@ export class DefaultStore implements Store {
   private stripTickerInfo = (ticker: Ticker): Ticker => {
     if (!ticker.info) return ticker;
     const { info: _info, ...tickerWithoutInfo } = ticker;
-    return tickerWithoutInfo as Ticker;
+    return tickerWithoutInfo;
   };
 
   private stripTickerInfoFromChanges = (changes: Partial<Ticker>): Partial<Ticker> => {
