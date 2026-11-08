@@ -545,7 +545,7 @@ async fn a_twap_queued_before_rebind_is_dropped_instead_of_adopted() {
                 // No yield between enqueue and rebind: the op carries the old snapshot.
                 algos.op("twap:start", web_twap());
                 if rebind {
-                    algos.owner.rebind();
+                    algos.owner.rebind_owner("other-user");
                     let refusal = tokio::time::timeout(Duration::from_secs(2), async {
                         loop {
                             let message: Value = serde_json::from_str(&algos.out.recv().await.unwrap()).unwrap();
@@ -565,6 +565,29 @@ async fn a_twap_queued_before_rebind_is_dropped_instead_of_adopted() {
                 assert_eq!(algos.commands.lock().unwrap().len(), 1);
             }
         }).await;
+}
+
+#[tokio::test]
+async fn a_same_user_resume_keeps_a_running_twap() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("twap:start", web_twap());
+            // A same-user reconnect/resume inside the 60-second window is not an owner change.
+            assert!(!algos.owner.rebind_owner("u"));
+            algos
+                .next("store", |data| !active_twaps(data).is_empty())
+                .await;
+            assert_eq!(algos.commands.lock().unwrap().len(), 1);
+            assert!(
+                !algos
+                    .seen
+                    .iter()
+                    .any(|event| event.to_string().contains("cancelled-for-owner-change")),
+                "a same-user resume cancelled the TWAP"
+            );
+        })
+        .await;
 }
 
 #[tokio::test]
@@ -640,7 +663,7 @@ async fn an_exec_sleep_cannot_start_a_twap_after_its_binding_is_retired() {
                     .next("exec-log", |data| first(data)["message"] == "checkpoint")
                     .await;
                 if rebind {
-                    algos.owner.rebind();
+                    algos.owner.rebind_owner("other-user");
                 }
                 let result = algos
                     .next("exec-result", |data| {

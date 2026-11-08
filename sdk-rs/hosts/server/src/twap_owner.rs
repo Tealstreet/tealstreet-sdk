@@ -36,9 +36,19 @@ impl Binding {
         self.current.lock().unwrap().clone()
     }
 
-    /// Every authenticated attachment is a new generation, even on the same socket.
-    pub fn rebind(&self) {
-        self.current.lock().unwrap().generation = next_generation();
+    /// Bump the generation only when the authenticated owner changes. A same-user
+    /// reconnect, resume or signing handover keeps it, so the approved 60-second
+    /// COSIGNED resume window keeps the account's TWAPs. Returns whether it changed.
+    pub fn rebind_owner(&self, authenticated_user: &str) -> bool {
+        let mut current = self.current.lock().unwrap();
+        if current.owner_id == authenticated_user {
+            return false;
+        }
+        *current = TwapOwner {
+            owner_id: authenticated_user.into(),
+            generation: next_generation(),
+        };
+        true
     }
 }
 
@@ -47,14 +57,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn repeated_attach_and_return_to_a_never_reuse_a_generation() {
+    fn same_user_rebind_keeps_the_generation_and_an_owner_change_never_reuses_one() {
         let binding = Binding::new("tenant:A");
         let a = binding.snapshot();
-        binding.rebind();
+        assert!(!binding.rebind_owner("tenant:A"));
+        assert_eq!(binding.snapshot(), a);
+        assert!(binding.rebind_owner("tenant:B"));
         let b = binding.snapshot();
-        assert_eq!(b.owner_id, a.owner_id);
+        assert_eq!(b.owner_id, "tenant:B");
         assert!(b.generation > a.generation);
-        binding.rebind();
+        assert!(binding.rebind_owner("tenant:A"));
         assert!(binding.snapshot().generation > b.generation);
         assert_ne!(Binding::new("tenant:A").snapshot().generation, a.generation);
     }

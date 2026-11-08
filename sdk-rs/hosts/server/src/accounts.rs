@@ -268,7 +268,7 @@ impl Account {
 
     /// Signing and the proxy token follow `id` (the newest init or resume).
     fn sign_through(&self, holders: &mut Holders, id: u64, live: &Live) {
-        self.twap_owner.rebind();
+        self.twap_owner.rebind_owner(&self.user);
         holders.signing = Some(id);
         self.held.store(true, Ordering::Relaxed);
         self.token.set(live.token.clone());
@@ -3970,12 +3970,12 @@ pub(crate) mod tests {
                 let second = account.twap_owner.snapshot();
                 assert_eq!(first.owner_id, "u");
                 assert_eq!(second.owner_id, first.owner_id);
-                assert!(second.generation > first.generation);
+                // Same-user handovers stay inside the COSIGNED resume window's generation.
+                assert_eq!(second.generation, first.generation);
                 account.sign_through_socket(2, Arc::new(|_| true), token("refreshed"));
-                let refreshed = account.twap_owner.snapshot();
-                assert!(refreshed.generation > second.generation);
+                assert_eq!(account.twap_owner.snapshot(), first);
                 account.sign_through_socket(1, Arc::new(|_| true), token("returned"));
-                assert!(account.twap_owner.snapshot().generation > refreshed.generation);
+                assert_eq!(account.twap_owner.snapshot(), first);
                 registry.dispose(&account, Disposal::SettingsChanged);
             })
             .await;
