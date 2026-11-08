@@ -16,7 +16,7 @@ tokio = { version = "1.53.3", features = ["sync", "time"] }
 
 [dev-dependencies]
 safe-cex-crypto = { workspace = true, features = ["ed25519"] }
-safe-cex-venues = { workspace = true, features = ["backpack"] }
+safe-cex-venues = { workspace = true, features = ["kucoin", "kucoinspot", "hosted-signing", "backpack"] }
 tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }
 
 [lints]
