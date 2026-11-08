@@ -504,15 +504,81 @@ fn amount_only_below_minimum_never_cancels_or_modifies_the_original() {
     for size in ["0", "1"] {
         let row = order("Stop Market", "80", size);
         let (mut e, _) = setup(&row);
-        let read = amend(&mut e, 80., Some(0.01));
-        let a = size_reply(&mut e, &read, &row);
-        assert!(
-            !a.iter()
-                .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange")))
+        e.handle(
+            2000.,
+            Event::Command(Command::AmendOrder {
+                command: 90,
+                id: "9".into(),
+                price: Some(80.),
+                amount: Some(0.01),
+            }),
+        );
+        let a = prepared_now(&mut e);
+        assert_eq!(
+            a.iter()
+                .filter(|action| matches!(action, Action::Http(_)))
+                .count(),
+            0
         );
         assert!(a.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:90,error})if error.outcome==Some(Outcome::NotSent))));
         assert_eq!(e.store().order("9").unwrap().status, OrderStatus::Open);
     }
+}
+#[test]
+fn protective_plan_validates_preserved_execution_value_before_cancel() {
+    for (price, size, valid) in [("120", "0.1", true), ("70", "0.12", false)] {
+        let mut row = order("Take Profit Market", "120", size);
+        row["limitPx"] = json!(price);
+        let (mut e, _) = setup(&row);
+        let read = amend(&mut e, 125., None);
+        if valid {
+            let replacement = replace_after_read(&mut e, &read, &row);
+            let wire = &action(&replacement)["orders"][0];
+            assert_eq!(wire["p"], price);
+            assert_eq!(wire["s"], size);
+        } else {
+            let actions = size_reply(&mut e, &read, &row);
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Http(_)))
+                    .count(),
+                0,
+                "{actions:?}"
+            );
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 90, error }) if error.outcome == Some(Outcome::NotSent))), "{actions:?}");
+            assert_eq!(
+                e.store().order("9").expect("original order").status,
+                OrderStatus::Open
+            );
+        }
+    }
+}
+
+#[test]
+fn fresh_protective_size_above_maximum_never_cancels() {
+    let row = order("Stop Market", "80", "1");
+    let (mut e, _) = setup(&row);
+    e.store_mut()
+        .update_markets(|market| market.limits.amount.max = 2.5);
+    let read = amend(&mut e, 75., None);
+    let mut fresh = row.clone();
+    fresh["origSz"] = json!("3");
+    fresh["sz"] = json!("3");
+    let actions = size_reply(&mut e, &read, &fresh);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(_)))
+            .count(),
+        0,
+        "{actions:?}"
+    );
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 90, error }) if error.outcome == Some(Outcome::NotSent))), "{actions:?}");
+    assert_eq!(
+        e.store().order("9").expect("original order").status,
+        OrderStatus::Open
+    );
 }
 #[test]
 fn partial_kind_conversion_remains_available_without_unproven_restore() {

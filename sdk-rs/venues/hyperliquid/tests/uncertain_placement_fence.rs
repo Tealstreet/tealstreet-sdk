@@ -74,7 +74,7 @@ fn boot(spot: bool) -> (Engine<Hyperliquid>, HttpRequest) {
 fn place(engine: &mut Engine<Hyperliquid>, now: f64, command: u32, spot: bool) -> Vec<Action> {
     let symbol = if spot { "HFUN/USDC" } else { "BTC-PERP" };
     let order: PlaceOrderOpts = serde_json::from_str(&format!(
-        r#"{{"symbol":"{symbol}","type":"limit","side":"buy","price":1,"amount":1}}"#
+        r#"{{"symbol":"{symbol}","type":"limit","side":"buy","price":1,"amount":10}}"#
     ))
     .unwrap();
     engine.handle(

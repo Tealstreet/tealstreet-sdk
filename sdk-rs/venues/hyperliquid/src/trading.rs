@@ -68,11 +68,40 @@ struct Job {
     stop_note: Option<String>,
     protection: Option<Box<protective::Amend>>,
 }
+struct PlacementPlan {
+    opts: PlaceOrderOpts,
+    native: NativePlacement,
+}
+struct NativePlacement {
+    wires: Vec<OrderWire>,
+    grouping: &'static str,
+    rules: WireRules,
+}
+struct WireRules {
+    step: f64,
+    minimum: f64,
+    maximum: f64,
+    spot: bool,
+}
+impl NativePlacement {
+    fn new(market: &Market, wires: Vec<OrderWire>, grouping: &'static str) -> Self {
+        Self {
+            wires,
+            grouping,
+            rules: WireRules {
+                step: market.precision.amount,
+                minimum: market.limits.amount.min,
+                maximum: market.limits.amount.max,
+                spot: market.is_spot == Some(true),
+            },
+        }
+    }
+}
 enum Step {
     ScheduleCancel {
         time_ms: Option<u64>,
     },
-    Place(PlaceOrderOpts),
+    Place(Box<PlacementPlan>),
     Restore,
     Cancel(Vec<Order>),
     Leverage {
@@ -114,8 +143,8 @@ impl Job {
         self.replacing_stop.is_some()
             || self.steps.iter().any(|step| match step {
                 Step::Cancel(_) => self.amend_source.is_none(),
-                Step::Place(order) => {
-                    matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                Step::Place(plan) => {
+                    matches!(plan.opts.kind, OrderType::StopLoss | OrderType::TakeProfit)
                 }
                 _ => false,
             })
@@ -123,7 +152,7 @@ impl Job {
     fn touches(&self, symbol: &str) -> bool {
         self.steps.iter().any(|step| match step {
             Step::ScheduleCancel { .. } | Step::Restore => true,
-            Step::Place(order) => order.symbol == symbol,
+            Step::Place(plan) => plan.opts.symbol == symbol,
             Step::Cancel(orders) => orders.iter().any(|order| order.symbol == symbol),
             Step::Leverage { symbol: market, .. } => market == symbol,
         })
@@ -131,7 +160,7 @@ impl Job {
     fn references(&self, id: &str) -> bool {
         self.amend_source.as_deref() == Some(id)
             || self.steps.iter().any(|step| match step {
-                Step::Place(order) => order.client_order_id.as_deref() == Some(id),
+                Step::Place(plan) => plan.opts.client_order_id.as_deref() == Some(id),
                 Step::Cancel(orders) => orders
                     .iter()
                     .any(|order| order.id == id || order.client_order_id.as_deref() == Some(id)),
@@ -152,7 +181,8 @@ impl Job {
         }
         self.steps.iter().all(|step| match step {
             Step::ScheduleCancel { .. } | Step::Restore => false,
-            Step::Place(order) => {
+            Step::Place(plan) => {
+                let order = &plan.opts;
                 !older.touches(&order.symbol)
                     && order
                         .client_order_id
@@ -363,11 +393,17 @@ impl Hyperliquid {
         let mut amend_size = None;
         let (command, steps) = match command {
             Command::PlaceOrders { command, orders } => {
-                if let Err(error) = self.preflight(cx, &orders) {
-                    cx.refuse_command(Operation::Mutation, not_sent(error));
-                    return;
-                }
-                (command, orders.into_iter().map(Step::Place).collect())
+                let steps = match self.preflight(cx, &orders, true) {
+                    Ok(steps) => steps,
+                    Err(error) => {
+                        cx.refuse_command(
+                            Operation::Mutation,
+                            not_sent(error).kind(ErrorKind::InvalidInput),
+                        );
+                        return;
+                    }
+                };
+                (command, steps)
             }
             Command::CancelOrders { command, ids } => {
                 let orders = ids
@@ -502,12 +538,23 @@ impl Hyperliquid {
                 };
                 opts.client_order_id = cloid.clone();
                 replacement = cloid;
-                if let Err(error) = self.preflight(cx, std::slice::from_ref(&opts)) {
-                    cx.refuse_command(Operation::Mutation, not_sent(error));
-                    return;
-                }
+                // A protective source read supplies the preserved execution price.
+                // Validate that notional after the read, still before cancellation.
+                let preserve_execution =
+                    matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit);
+                let mut steps =
+                    match self.preflight(cx, std::slice::from_ref(&opts), !preserve_execution) {
+                        Ok(steps) => steps,
+                        Err(error) => {
+                            cx.refuse_command(
+                                Operation::Mutation,
+                                not_sent(error).kind(ErrorKind::InvalidInput),
+                            );
+                            return;
+                        }
+                    };
                 amend_source = Some(id);
-                let steps = VecDeque::from([Step::Cancel(vec![old]), Step::Place(opts)]);
+                steps.push_front(Step::Cancel(vec![old]));
                 (command, steps)
             }
             Command::SetLeverage {
@@ -572,8 +619,15 @@ impl Hyperliquid {
             },
         );
     }
-    fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
+    // Build every parent/child wire before admitting any placement or cancellation.
+    fn preflight(
+        &self,
+        cx: &Cx<'_, Pending>,
+        orders: &[PlaceOrderOpts],
+        validate_notional: bool,
+    ) -> Result<VecDeque<Step>, String> {
         let mut seen = HashSet::new();
+        let mut steps = VecDeque::new();
         for o in orders {
             if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
                 return Err(
@@ -622,10 +676,59 @@ impl Hyperliquid {
             {
                 return Err("Invalid bracket trigger price".into());
             }
-            if o.kind != OrderType::Limit {
-                self.base_price(cx, &o.symbol)?;
+            let native = self.wires(cx, o, &[], validate_notional)?;
+            if !validate_notional && o.amount > 0. {
+                let value = num::adjust(o.amount, m.precision.amount)
+                    * num::parse(&price_wire(
+                        o.price.unwrap_or(0.),
+                        m.precision.amount,
+                        false,
+                    )?);
+                if !value.is_finite() || value < MIN_ORDER_VALUE {
+                    return Err("Hyperliquid protective replacement is below the minimum".into());
+                }
             }
+            steps.push_back(Step::Place(Box::new(PlacementPlan {
+                opts: o.clone(),
+                native,
+            })));
         }
+        Ok(steps)
+    }
+    fn refresh_amend_plan(&mut self, cx: &Cx<'_, Pending>) -> Result<(), String> {
+        let placement = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| {
+                job.steps.iter().find_map(|step| match step {
+                    Step::Place(plan) => Some(plan),
+                    _ => None,
+                })
+            })
+            .ok_or("Hyperliquid amendment has no replacement")?;
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| job.protection.is_some())
+        {
+            self.prepare_protective_replace(cx, placement.opts.clone())?;
+            return Ok(());
+        }
+        let native = self.wires(cx, &placement.opts, &placement.native.wires, true)?;
+        let placement = self
+            .trading
+            .active
+            .as_mut()
+            .and_then(|job| {
+                job.steps.iter_mut().find_map(|step| match step {
+                    Step::Place(plan) => Some(plan),
+                    _ => None,
+                })
+            })
+            .ok_or("Hyperliquid amendment has no replacement")?;
+        placement.native = native;
         Ok(())
     }
     /// A spot pair, in the standalone spot venue or merged into the perp account.
@@ -661,7 +764,9 @@ impl Hyperliquid {
         &self,
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
-    ) -> Result<(Vec<OrderWire>, &'static str), String> {
+        prepared: &[OrderWire],
+        validate_notional: bool,
+    ) -> Result<NativePlacement, String> {
         let m = cx.store.market(&opts.symbol).ok_or("Market not found")?;
         let asset = *self
             .assets
@@ -691,10 +796,11 @@ impl Hyperliquid {
         };
         let spot = self.spot || m.is_spot == Some(true);
         let price = price_wire(p, m.precision.amount, spot)?;
-        let cloid = match &opts.client_order_id {
-            Some(c) => c.clone(),
-            None => mint_cloid(cx)?,
-        };
+        let cloid = prepared
+            .first()
+            .map(|wire| wire.c.clone())
+            .or_else(|| opts.client_order_id.clone())
+            .map_or_else(|| mint_cloid(cx), Ok)?;
         let t = if trigger {
             WireType::Trigger {
                 trigger: TriggerWire {
@@ -747,7 +853,10 @@ impl Hyperliquid {
                                 tpsl: kind,
                             },
                         },
-                        c: mint_cloid(cx)?,
+                        c: prepared
+                            .get(wires.len())
+                            .map(|wire| wire.c.clone())
+                            .map_or_else(|| mint_cloid(cx), Ok)?,
                     });
                 }
             }
@@ -759,7 +868,15 @@ impl Hyperliquid {
         } else {
             "na"
         };
-        Ok((wires, grouping))
+        let native = NativePlacement::new(m, wires, grouping);
+        if validate_notional {
+            validate_placement(&native).map_err(|error| error.message)?;
+        } else {
+            for wire in &native.wires {
+                validate_wire(&native.rules, wire, grouping, false)?;
+            }
+        }
+        Ok(native)
     }
     pub(crate) fn pump_trades(&mut self, cx: &mut Cx<'_, Pending>) {
         self.clear_retired_intent_timers(cx);
@@ -980,7 +1097,11 @@ impl Hyperliquid {
                 Ok((Action::ScheduleCancel { time }, Effect::ScheduleCancel))
             }
 
-            Step::Place(opts) => {
+            Step::Place(plan) => {
+                let PlacementPlan {
+                    opts,
+                    native: prepared,
+                } = *plan;
                 if self
                     .trading
                     .active
@@ -989,7 +1110,10 @@ impl Hyperliquid {
                 {
                     return self.prepare_protective_replace(cx, opts);
                 }
-                let (wires, grouping) = self.wires(cx, &opts)?;
+                // Recheck live price/position state while retaining every planned client ID.
+                let NativePlacement {
+                    wires, grouping, ..
+                } = self.wires(cx, &opts, &prepared.wires, true)?;
                 let records = wires
                     .iter()
                     .map(|wire| {
@@ -1657,7 +1781,7 @@ impl Hyperliquid {
             if total > 0. && left <= 0. { return Err("Hyperliquid amendment source was filled; order unchanged".into()); }
             let filled = (total - left).max(0.0);
             let Some(opts) = job.steps.iter_mut().find_map(|step| match step {
-                Step::Place(opts) => Some(opts),
+                Step::Place(plan) => Some(&mut plan.opts),
                 _ => None,
             }) else {
                 return Err("Hyperliquid amendment has no replacement".into());
@@ -1682,6 +1806,10 @@ impl Hyperliquid {
         });
         match sized {
             Ok((total, filled, left)) => {
+                if let Err(error) = self.refresh_amend_plan(cx) {
+                    self.finish_trade(cx, Err(not_sent(error).kind(ErrorKind::InvalidInput)));
+                    return;
+                }
                 cx.store.update_order(id, |order| {
                     order.amount = total;
                     order.filled = filled;
@@ -1836,12 +1964,85 @@ fn mint_cloid(cx: &Cx<'_, Pending>) -> Result<String, String> {
     cx.fill_entropy(&mut bytes)?;
     Ok(format!("0x{}", safe_cex_crypto::hex(&bytes)))
 }
+fn validate_placement(write: &NativePlacement) -> Result<(), VenueError> {
+    let count = write.wires.len();
+    let valid_count = match write.grouping {
+        "na" | "positionTpsl" => count == 1,
+        "normalTpsl" => (2..=3).contains(&count),
+        _ => false,
+    };
+    if !valid_count {
+        return Err(
+            not_sent("Invalid Hyperliquid placement group size").kind(ErrorKind::InvalidInput)
+        );
+    }
+    for wire in &write.wires {
+        validate_wire(&write.rules, wire, write.grouping, true)
+            .map_err(|error| not_sent(error).kind(ErrorKind::InvalidInput))?;
+    }
+    Ok(())
+}
+fn validate_wire(
+    rules: &WireRules,
+    wire: &OrderWire,
+    grouping: &str,
+    validate_notional: bool,
+) -> Result<(), String> {
+    let size = num::parse_decimal(&wire.s).ok_or("Invalid Hyperliquid wire size")?;
+    let price = num::parse_decimal(&wire.p)
+        .filter(|value| *value > 0.)
+        .ok_or("Invalid Hyperliquid wire price")?;
+    if price_wire(price, rules.step, rules.spot)? != wire.p {
+        return Err("Hyperliquid wire price is off tick".into());
+    }
+    if let WireType::Trigger { trigger } = &wire.t {
+        let price = num::parse_decimal(&trigger.trigger_px)
+            .filter(|value| *value > 0.)
+            .ok_or("Invalid Hyperliquid wire trigger price")?;
+        if price_wire(price, rules.step, rules.spot)? != trigger.trigger_px {
+            return Err("Hyperliquid wire trigger price is off tick".into());
+        }
+    }
+    if grouping == "positionTpsl"
+        && wire.r
+        && size == 0.
+        && matches!(wire.t, WireType::Trigger { .. })
+    {
+        return Ok(());
+    }
+    let step = rules.step;
+    if !step.is_finite()
+        || step <= 0.
+        || !rules.minimum.is_finite()
+        || rules.minimum < 0.
+        || !rules.maximum.is_finite()
+        || rules.maximum <= 0.
+        || rules.minimum > rules.maximum
+    {
+        return Err("Invalid Hyperliquid market size limits".into());
+    }
+    if size <= 0.
+        || size < rules.minimum
+        || size > rules.maximum
+        || (num::adjust(size, step) - size).abs() > step * 1e-7
+    {
+        return Err("Hyperliquid wire size is outside the market lot limits".into());
+    }
+    let value = size * price;
+    if validate_notional && (!value.is_finite() || value < MIN_ORDER_VALUE) {
+        return Err(format!(
+            "Hyperliquid wire value is below the minimum {MIN_ORDER_VALUE}"
+        ));
+    }
+    Ok(())
+}
 fn float_wire(value: f64) -> Result<String, String> {
     if !value.is_finite() {
         return Err("Nonfinite order number".into());
     }
     let text = format!("{value:.8}");
-    if (text.parse::<f64>().unwrap() - value).abs() >= 1e-9 {
+    let rounded = text.parse::<f64>().map_err(|_| "Invalid wire number")?;
+    if (rounded - value).abs() >= 1e-9 {
         return Err("Order number exceeds wire precision".into());
     }
     let text = text.trim_end_matches('0').trim_end_matches('.');
@@ -1884,6 +2085,97 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 /// A 2xx answer that does not prove what happened.
 fn unproven(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    fn placement() -> NativePlacement {
+        NativePlacement {
+            wires: vec![OrderWire {
+                a: 0,
+                b: true,
+                p: "100".into(),
+                s: "3".into(),
+                r: false,
+                t: WireType::Limit {
+                    limit: LimitWire { tif: "Gtc" },
+                },
+                c: "0x00000000000000000000000000000001".into(),
+            }],
+            grouping: "na",
+            rules: WireRules {
+                step: 0.1,
+                minimum: 0.2,
+                maximum: 5.,
+                spot: false,
+            },
+        }
+    }
+
+    #[test]
+    fn pure_validator_checks_final_size_price_notional_and_group_count() {
+        assert!(validate_placement(&placement()).is_ok());
+        for (size, price) in [
+            ("0", "100"),
+            ("0.1", "100"),
+            ("5.1", "100"),
+            ("3.05", "100"),
+            ("3", "0"),
+            ("3", "0.123456"),
+            ("3", "2"),
+        ] {
+            let mut write = placement();
+            write.wires[0].s = size.into();
+            write.wires[0].p = price.into();
+            let error = validate_placement(&write).expect_err("invalid final wire");
+            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+            assert_eq!(error.outcome, Some(Outcome::NotSent));
+        }
+        let mut write = placement();
+        write.wires.clear();
+        assert!(validate_placement(&write).is_err());
+        write = placement();
+        write.wires.push(write.wires[0].clone());
+        assert!(validate_placement(&write).is_err());
+        write.grouping = "normalTpsl";
+        write.wires[1].b = false;
+        write.wires[1].r = true;
+        write.wires[1].t = WireType::Trigger {
+            trigger: TriggerWire {
+                is_market: true,
+                trigger_px: "80".into(),
+                tpsl: "sl",
+            },
+        };
+        assert!(validate_placement(&write).is_ok());
+        write.wires[1].s = "0.1".into();
+        assert_eq!(
+            validate_placement(&write)
+                .expect_err("invalid last child")
+                .outcome,
+            Some(Outcome::NotSent)
+        );
+    }
+
+    #[test]
+    fn pure_validator_checks_trigger_tick_but_preserves_positional_zero() {
+        let mut write = placement();
+        write.grouping = "positionTpsl";
+        write.wires[0].s = "0".into();
+        write.wires[0].r = true;
+        for trigger_price in ["80", "0", "80.000001"] {
+            write.wires[0].t = WireType::Trigger {
+                trigger: TriggerWire {
+                    is_market: true,
+                    trigger_px: trigger_price.into(),
+                    tpsl: "sl",
+                },
+            };
+            assert_eq!(validate_placement(&write).is_ok(), trigger_price == "80");
+        }
+    }
 }
 
 #[cfg(test)]

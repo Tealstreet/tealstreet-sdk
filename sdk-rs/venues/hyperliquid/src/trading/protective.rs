@@ -75,7 +75,7 @@ impl Hyperliquid {
             .steps
             .iter()
             .find_map(|s| match s {
-                Step::Place(o) => Some(o),
+                Step::Place(plan) => Some(&plan.opts),
                 _ => None,
             })
             .ok_or("Hyperliquid replacement is unavailable")?;
@@ -203,6 +203,9 @@ impl Hyperliquid {
         after.last_update = cx.now;
         after.client_order_id = (!wire.c.is_empty()).then(|| wire.c.clone());
         let grouping = if keep_full { "positionTpsl" } else { "na" };
+        let market = cx.store.market(&opts.symbol).ok_or("Market not found")?;
+        let native = NativePlacement::new(market, vec![wire], grouping);
+        validate_placement(&native).map_err(|error| error.message)?;
         let builder = self
             .trading
             .active
@@ -211,7 +214,7 @@ impl Hyperliquid {
             .filter(|_| self.account.builder_approved == Some(true));
         Ok((
             Action::Order {
-                orders: vec![wire],
+                orders: native.wires,
                 grouping,
                 builder,
             },
