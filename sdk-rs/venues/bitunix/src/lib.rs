@@ -1139,6 +1139,16 @@ impl Venue for BitunixFutures {
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         self.public_typed_failed(cx, pending, error);
     }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if matches!(pending, Pending::Trade(_)) {
+            error::unproven_evidence(response, evidence);
+        }
+    }
     /// A provider refusal never released the request: a write is NotSent,
     /// and a read keeps its native failure path.
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {

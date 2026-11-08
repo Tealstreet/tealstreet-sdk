@@ -674,6 +674,8 @@ pub enum ExchangeName {
     Binancepm,
     #[serde(rename = "bingx")]
     Bingx,
+    #[serde(rename = "bingxspot")]
+    Bingxspot,
     #[serde(rename = "bitget")]
     Bitget,
     #[serde(rename = "bitgetinverse")]
@@ -2179,6 +2181,8 @@ mod strict_codecs {
         Binancepm,
         #[serde(rename = "bingx")]
         Bingx,
+        #[serde(rename = "bingxspot")]
+        Bingxspot,
         #[serde(rename = "bitget")]
         Bitget,
         #[serde(rename = "bitgetinverse")]
@@ -3065,6 +3069,11 @@ mod strict_codecs {
                         .unwrap()
                         .to_owned(),
                     serde_json::to_value(ExchangeName::Bingx)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(ExchangeName::Bingxspot)
                         .unwrap()
                         .as_str()
                         .unwrap()

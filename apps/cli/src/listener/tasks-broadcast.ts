@@ -17,8 +17,8 @@ const DEBOUNCE_MS = 250;
 
 // File path mirrored here to avoid importing the runtime path from
 // tasks-store (which doesn't export it directly). Kept in sync with
-// tasks-store.ts:TASKS_FILE.
-import { TASKS_FILE } from '../tasks-store';
+// tasks-store.ts:getTasksFilePath().
+import { getTasksFilePath } from '../tasks-store';
 
 type ServerLike = { publish(topic: string, data: string): number };
 
@@ -34,7 +34,7 @@ export function sendTasksSnapshot(ws: ServerWebSocket<WsSessionData>): void {
   try {
     ws.send(snapshotFrame());
   } catch (err) {
-    logger.warn(`state:tasks send failed: ${(err as Error).message}`);
+    logger.warn(`state:tasks send failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -63,18 +63,18 @@ export function startTasksBroadcast(server: ServerLike): TasksBroadcastHandle {
       try {
         broadcast();
       } catch (err) {
-        logger.warn(`state:tasks broadcast failed: ${(err as Error).message}`);
+        logger.warn(`state:tasks broadcast failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }, DEBOUNCE_MS);
   };
 
   try {
-    watcher = watch(TASKS_FILE, { persistent: false }, onChange);
+    watcher = watch(getTasksFilePath(), { persistent: false }, onChange);
   } catch (err) {
     // fs.watch can fail (e.g. file doesn't exist yet). Logged + continue —
     // subsequent file creation won't be caught until next restart, but the
     // snapshot send on welcome still works.
-    logger.warn(`tasks watcher failed to start: ${(err as Error).message}`);
+    logger.warn(`tasks watcher failed to start: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return {

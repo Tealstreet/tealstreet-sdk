@@ -1,3 +1,10 @@
+import {
+  getStorageDir,
+  onStorageOwnerChange,
+  getStorageEpoch,
+  assertStorageSession,
+  runInStorageSession,
+} from './storage-context';
 /**
  * File-based script loader for the standalone CLI. See SPEC §5.1 (Phase 3).
  *
@@ -19,7 +26,6 @@
  * Phase 10. Keep this module small.
  */
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 
@@ -27,13 +33,12 @@ import type { ScriptFn, ScriptMeta, ScriptRecord } from '@tealstreet/script-api-
 
 import { logger } from './logger';
 import { HELLO_TEMPLATE, TSCONFIG_TEMPLATE, TYPES_TEMPLATE } from '@tealstreet/script-authoring/src/scripts-templates';
-import { BRAND } from './brand';
 
-const CONFIG_DIR = path.join(os.homedir(), BRAND.configDirName);
-export const SCRIPTS_DIR = path.join(CONFIG_DIR, 'scripts');
-const TYPES_FILE = path.join(SCRIPTS_DIR, 'types.d.ts');
-const TSCONFIG_FILE = path.join(SCRIPTS_DIR, 'tsconfig.json');
-const HELLO_FILE = path.join(SCRIPTS_DIR, 'hello.ts');
+const CONFIG_DIR = () => getStorageDir();
+export const getScriptsDir = () => path.join(CONFIG_DIR(), 'scripts');
+const TYPES_FILE = () => path.join(getScriptsDir(), 'types.d.ts');
+const TSCONFIG_FILE = () => path.join(getScriptsDir(), 'tsconfig.json');
+const HELLO_FILE = () => path.join(getScriptsDir(), 'hello.ts');
 
 /**
  * Letters, digits, underscores, hyphens. Must start with a letter or
@@ -75,18 +80,18 @@ let reloadCounter = 0;
  * survive.
  */
 export function ensureScriptsDir(): void {
-  if (!fs.existsSync(SCRIPTS_DIR)) {
-    fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
+  if (!fs.existsSync(getScriptsDir())) {
+    fs.mkdirSync(getScriptsDir(), { recursive: true });
   }
   // Always refresh the ambient types — they're tied to the running
   // CLI's script-API surface, so stale types would silently mislead
   // the user's editor.
-  fs.writeFileSync(TYPES_FILE, TYPES_TEMPLATE);
-  if (!fs.existsSync(TSCONFIG_FILE)) {
-    fs.writeFileSync(TSCONFIG_FILE, TSCONFIG_TEMPLATE);
+  fs.writeFileSync(TYPES_FILE(), TYPES_TEMPLATE);
+  if (!fs.existsSync(TSCONFIG_FILE())) {
+    fs.writeFileSync(TSCONFIG_FILE(), TSCONFIG_TEMPLATE);
   }
-  if (!fs.existsSync(HELLO_FILE)) {
-    fs.writeFileSync(HELLO_FILE, HELLO_TEMPLATE);
+  if (!fs.existsSync(HELLO_FILE())) {
+    fs.writeFileSync(HELLO_FILE(), HELLO_TEMPLATE);
   }
 }
 
@@ -102,7 +107,7 @@ interface ScannableEntry {
  * hidden. Subdirectories are ignored.
  */
 function scanEntries(): ScannableEntry[] {
-  const entries = fs.readdirSync(SCRIPTS_DIR, { withFileTypes: true });
+  const entries = fs.readdirSync(getScriptsDir(), { withFileTypes: true });
   const out: ScannableEntry[] = [];
   for (const entry of entries) {
     if (!entry.isFile()) continue;
@@ -115,7 +120,7 @@ function scanEntries(): ScannableEntry[] {
       logger.warn(`scripts: skipping '${file}' — name must match /^[a-zA-Z_][a-zA-Z0-9_-]*$/`);
       continue;
     }
-    out.push({ name, file, absPath: path.join(SCRIPTS_DIR, file) });
+    out.push({ name, file, absPath: path.join(getScriptsDir(), file) });
   }
   return out;
 }
@@ -183,18 +188,20 @@ export function loadScripts(): Promise<LoadedScript[]> {
   // Publish the in-flight promise SYNCHRONOUSLY so a concurrent
   // `awaitScriptsLoaded()` caller (Phase 5's dispatcher arm at cold
   // REPL) sees it before the body's first `await`.
-  const promise = doLoadScripts();
+  const promise = runInStorageSession(doLoadScripts);
   loadInFlight = promise;
   return promise;
 }
 
 async function doLoadScripts(): Promise<LoadedScript[]> {
+  const ownerEpoch = getStorageEpoch();
   ensureScriptsDir();
   const entries = scanEntries();
   reloadCounter += 1;
   const reloadToken = reloadCounter.toString(36);
   const results: LoadedScript[] = [];
   for (const entry of entries) {
+    assertStorageSession(ownerEpoch);
     try {
       const url = `${pathToFileURL(entry.absPath).href}?t=${reloadToken}`;
       const mod = (await import(url)) as Record<string, unknown>;
@@ -216,6 +223,7 @@ async function doLoadScripts(): Promise<LoadedScript[]> {
       logger.warn(`scripts: failed to load '${entry.file}' — ${message}`);
     }
   }
+  assertStorageSession(ownerEpoch);
   cache = results;
   return results;
 }
@@ -245,3 +253,5 @@ export function clearScriptsCache(): void {
   cache = [];
   loadInFlight = null;
 }
+
+onStorageOwnerChange(clearScriptsCache);

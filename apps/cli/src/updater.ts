@@ -12,7 +12,7 @@ const PUBLIC_REPO = BRAND.releaseRepo;
 const GITHUB_API_URL = `https://api.github.com/repos/${PUBLIC_REPO}/releases/latest`;
 const GITHUB_RELEASES_URL = `https://github.com/${PUBLIC_REPO}/releases/download`;
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const UPDATE_CHECK_FILE = join(getConfigDir(), 'update-check.json');
+const UPDATE_CHECK_FILE = () => join(getConfigDir(), 'update-check.json');
 
 interface UpdateCheckState {
   lastCheck: number;
@@ -23,8 +23,8 @@ interface UpdateCheckState {
 
 function getUpdateState(): UpdateCheckState {
   try {
-    if (existsSync(UPDATE_CHECK_FILE)) {
-      return JSON.parse(readFileSync(UPDATE_CHECK_FILE, 'utf-8'));
+    if (existsSync(UPDATE_CHECK_FILE())) {
+      return JSON.parse(readFileSync(UPDATE_CHECK_FILE(), 'utf-8'));
     }
   } catch {}
   return { lastCheck: 0, latestVersion: null, notifiedVersion: null, releaseNotes: null };
@@ -36,7 +36,7 @@ function saveUpdateState(state: UpdateCheckState): void {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(UPDATE_CHECK_FILE, JSON.stringify(state, null, 2));
+    writeFileSync(UPDATE_CHECK_FILE(), JSON.stringify(state, null, 2));
   } catch {}
 }
 

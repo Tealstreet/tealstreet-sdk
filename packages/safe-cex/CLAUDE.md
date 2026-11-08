@@ -608,6 +608,9 @@ bridge-fixes plan; caller IDs alone do not establish complete attribution.
 Native rejections retain known partial-order results. SDK worker and outer CLI
 executor error boundaries copy an explicit allowlist of command fields, including IDs and
 partial counts, instead of flattening them or copying arbitrary error objects.
+Partial information with empty order IDs still exposes the attempted total and failed
+index when supplied, plus `partialOrderIds: []` and `partialOrderCount: 0`.
+That zero counts created IDs; applied cancellation effects remain in `elements`.
 Recorded `elements` retain each logical row's index, optional client order ID,
 placed IDs, applied effects with existing-target references, refusal or unknown
 detail through host errors and worker/CLI clones. Applied effects create no IDs;

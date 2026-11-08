@@ -57,6 +57,7 @@ export type ExchangeName =
   | 'binancespot'
   | 'binancepm'
   | 'bingx'
+  | 'bingxspot'
   | 'bitget'
   | 'bitgetinverse'
   | 'bitgetusdc'

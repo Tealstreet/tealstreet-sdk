@@ -2,6 +2,148 @@ mod support;
 use safe_cex_engine::model::{BybitBbo, OrderSide, OrderType, PlaceOrderOpts, StopTriggerType};
 use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
+
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+fn assert_unknown(h: &Harness, command: u32, placed: &[&str]) {
+    let errors: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1, "one journal terminal");
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        errors[0].message.contains(ENGINE_UNKNOWN_TEXT),
+        "{}",
+        errors[0].message
+    );
+    let ids = errors[0]
+        .partial
+        .as_ref()
+        .map(|p| p.order_ids.iter().map(String::as_str).collect::<Vec<_>>())
+        .unwrap_or_default();
+    assert_eq!(ids, placed);
+}
+
+fn assert_unknown_inventory(actions: &[Action], command: u32, expected: &[(&str, &str, &str)]) {
+    let inventory: Vec<_> = actions
+        .iter()
+        .filter_map(|action| {
+            let Action::Notice(Notice::Event(event)) = action else {
+                return None;
+            };
+            if event.code != "command.unknown_inventory" {
+                return None;
+            }
+            assert_eq!(event.level, safe_cex_engine::Level::Warn);
+            assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert!(event.fields.iter().any(|(key, value)| *key == "commandId"
+                && *value == safe_cex_engine::Value::from(command)));
+            let field = |name| {
+                event
+                    .fields
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .and_then(|(_, value)| value.as_str())
+                    .unwrap_or("")
+            };
+            if field("scope") != "accepted" {
+                assert!(!field("requestPath").is_empty());
+            }
+            let (kind, identity) = ["orderId", "clientOrderId", "targetOrderId"]
+                .into_iter()
+                .find_map(|key| (!field(key).is_empty()).then_some((key, field(key))))
+                .unwrap_or(("", ""));
+            Some((field("scope"), kind, identity))
+        })
+        .collect();
+    assert_eq!(
+        inventory, expected,
+        "passive identity inventory, separate from the journal terminal"
+    );
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/cryptocom/cryptocom.exchange.ts:630-636
+fn after_failure_middle_row_refusal_continues_but_unknown_stops_last_trigger() {
+    for lost in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        let first = order();
+        let mut second = order();
+        second.client_order_id = Some("middle".into());
+        let mut last = order();
+        last.client_order_id = None;
+        last.kind = OrderType::StopLoss;
+        last.price = Some(80.0);
+        command(
+            &mut h,
+            Command::PlaceOrders {
+                command: 995,
+                orders: vec![first, second, last],
+            },
+        );
+        let first = h.http("private/create-order");
+        h.respond(&first, r#"{"code":0,"result":{"order_id":"101"}}"#);
+        pace(&mut h);
+        let middle = h.http("private/create-order");
+        if lost {
+            h.event(Event::HttpFailed {
+                request: middle.id,
+                error: "middle row response lost",
+            });
+        } else {
+            h.respond(
+                &middle,
+                r#"{"code":213,"message":"INSUFFICIENT_AVAILABLE_BALANCE"}"#,
+            );
+        }
+        pace(&mut h);
+        if lost {
+            assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(request)
+                if request.url.ends_with("private/create-order") || request.url.ends_with("private/advanced/create-order"))));
+            assert_unknown(&h, 995, &["101"]);
+            continue;
+        }
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Http(request) if request.url.ends_with("private/advanced/create-order"))), "definite refusal allows the last trigger");
+        let last = h.http("private/advanced/create-order");
+        assert_ne!(last.id, middle.id);
+        assert_ne!(last.id, first.id);
+        h.respond(&last, r#"{"code":0,"result":{"order_id":"103"}}"#);
+        pace(&mut h);
+        assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(request)
+            if request.url.ends_with("private/create-order") || request.url.ends_with("private/advanced/create-order"))));
+        let failures: Vec<_> = h
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed {
+                    command: 995,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(
+            failures[0].outcome,
+            lost.then_some(safe_cex_engine::Outcome::Unknown)
+        );
+        assert_eq!(
+            failures[0]
+                .partial
+                .as_ref()
+                .expect("accepted prefix and last trigger remain reported")
+                .order_ids,
+            ["101", "103"]
+        );
+    }
+}
 fn order() -> PlaceOrderOpts {
     serde_json::from_str(r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.0021,"price":90.04,"clientOrderId":"caller-123"}"#).unwrap()
 }
@@ -203,7 +345,8 @@ fn reduce_only_market_sell_uses_quantity_and_advanced_stop_uses_reference_price(
     assert!(!body.contains(r#""price":"#));
 }
 #[test]
-fn ambiguous_write_failure_is_not_retried_and_batch_continues() {
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/cryptocom/cryptocom.exchange.ts:630-636
+fn unknown_first_row_is_not_retried_and_batch_stops() {
     let mut h = Harness::new();
     h.load();
     let mut second = order();
@@ -220,15 +363,17 @@ fn ambiguous_write_failure_is_not_retried_and_batch_continues() {
         request: r.id,
         error: "response lost after acceptance",
     });
-    assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
-    pace(&mut h);
     assert!(
-        h.http("private/create-order")
-            .body
-            .unwrap()
-            .contains("second")
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("private/create-order") || r.url.ends_with("private/advanced/create-order")))
     );
+    pace(&mut h);
+    assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(request)
+        if request.url.ends_with("private/create-order"))));
+    assert_unknown(&h, 1, &[]);
 }
+
 #[test]
 fn native_amend_backfills_quantity_and_never_rewrites_client_id() {
     let mut h = Harness::new();
@@ -531,4 +676,85 @@ fn write_failures_are_classified_without_changing_their_text() {
         (h.failures[1].kind, h.failures[1].outcome),
         (Some(ErrorKind::Unsupported), Some(Outcome::NotSent))
     );
+}
+
+#[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: cryptocom | serial-placement-batch
+// TS packages/safe-cex/src/__tests__/reference/cryptocom/cryptocom.exchange.ts:501-511,630-636.
+fn parity_batch_sends_off_step_below_minimum_tail_verbatim() {
+    let mut h = Harness::new();
+    h.load();
+    let mut first = order();
+    first.amount = 0.002;
+    first.price = Some(90.0);
+    let mut tail = order();
+    tail.client_order_id = Some("tail".into());
+    tail.amount = 0.0001;
+    command(
+        &mut h,
+        Command::PlaceOrders {
+            command: 1104,
+            orders: vec![first, tail],
+        },
+    );
+    for (qty, price, id) in [("0.002", "90", "1"), ("0.0001", "90.04", "2")] {
+        let write = h.http("private/create-order");
+        let body: serde_json::Value = serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["params"]["quantity"], qty);
+        assert_eq!(body["params"]["price"], price);
+        h.respond(
+            &write,
+            &format!(r#"{{"code":0,"result":{{"order_id":"{id}"}}}}"#),
+        );
+        pace(&mut h);
+    }
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1104, .. })))
+    );
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/cryptocom/cryptocom.exchange.ts:630-636
+fn unknown_middle_native_error_or_malformed_ack_stops_after_accepted_prefix() {
+    for body in [
+        r#"{"code":50001,"message":"internal"}"#,
+        r#"{"code":0,"result":{}}"#,
+    ] {
+        let mut h = Harness::new();
+        h.load();
+        let mut middle = order();
+        middle.client_order_id = Some("middle".into());
+        let mut last = order();
+        last.client_order_id = Some("last".into());
+        command(
+            &mut h,
+            Command::PlaceOrders {
+                command: 1106,
+                orders: vec![order(), middle, last],
+            },
+        );
+        let first = h.http("private/create-order");
+        h.respond(&first, r#"{"code":0,"result":{"order_id":"101"}}"#);
+        pace(&mut h);
+        let middle = h.http("private/create-order");
+        h.respond(&middle, body);
+        pace(&mut h);
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("private/create-order")))
+        );
+        assert_unknown(&h, 1106, &["101"]);
+        assert_unknown_inventory(
+            &h.actions,
+            1106,
+            &[
+                ("accepted", "orderId", "101"),
+                ("currentRequest", "clientOrderId", "middle"),
+                ("withheld", "clientOrderId", "last"),
+            ],
+        );
+    }
 }
