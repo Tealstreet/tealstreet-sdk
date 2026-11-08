@@ -57,7 +57,7 @@ describe('GRVT builder authorization response', () => {
     { name: 'lite fields', body: { r: [{ ba: builder, mfr: '0.03' }] }, expected: approved },
     { name: 'falsy full address falls back to lite', body: { results: [{ ...fullRow, builder_account_id: '', ba: builder }] }, expected: approved },
     { name: 'empty full results wins over lite', body: { results: [], r: [fullRow] }, expected: { authorized: false } },
-    { name: 'falsy full results falls back to lite', body: { results: false, r: [fullRow] }, expected: approved },
+    { name: 'malformed full results cannot fall back to lite', body: { results: false, r: [fullRow] }, expected: { authorized: false } },
     { name: 'missing envelope fields', body: {}, expected: { authorized: false } },
     { name: 'null envelope', body: null, expected: { authorized: false } },
     { name: 'primitive envelope', body: 7, expected: { authorized: false } },
@@ -68,8 +68,8 @@ describe('GRVT builder authorization response', () => {
     { name: 'null row aborts before a later match', body: { results: [null, fullRow] }, expected: { authorized: false } },
     { name: 'invalid address aborts before a later match', body: { results: [{ builder_account_id: 7 }, fullRow] }, expected: { authorized: false } },
     { name: 'invalid full address does not fall back to valid lite', body: { results: [{ builder_account_id: {}, ba: builder }, fullRow] }, expected: { authorized: false } },
-    { name: 'primitive and array rows without addresses are ignored', body: { results: [7, true, '', [], fullRow] }, expected: approved },
-    { name: 'first match returns before a later malformed row', body: { results: [fullRow, null] }, expected: approved },
+    { name: 'primitive and array rows refuse before a later match', body: { results: [7, true, '', [], fullRow] }, expected: { authorized: false } },
+    { name: 'malformed row refuses after an earlier match', body: { results: [fullRow, null] }, expected: { authorized: false } },
     { name: 'zero fee is present and beats alternate fields', body: { results: [{ ...fullRow, max_futures_fee_rate: 0, max_fee_rate: '1' }] }, expected: { authorized: true, maxFeeRate: '0.0000%', maxFeeRateRaw: 0 } },
     { name: 'null fee falls through to alternate field', body: { results: [{ ...fullRow, max_futures_fee_rate: null, max_fee_rate: '0.03' }] }, expected: approved },
     { name: 'fee rounding preserves percentage units', body: { results: [{ ...fullRow, max_futures_fee_rate: '0.03006' }] }, expected: { authorized: true, maxFeeRate: '0.0301%', maxFeeRateRaw: 301 } },
@@ -83,11 +83,39 @@ describe('GRVT builder authorization response', () => {
     expect(await checkGrvtBuilderAuthorized('test-api-key', 'unused-subaccount')).toEqual(expected);
   });
 
-  it('preserves iterable strings and an explicitly empty builder address', async () => {
-    respond({ results: 'legacy' });
-    expect(await checkGrvtBuilderAuthorized('test-api-key', '', '')).toEqual({
-      authorized: true, maxFeeRate: undefined, maxFeeRateRaw: undefined,
-    });
+  const malformedCases: Array<{ name: string; body: unknown; requestedBuilder?: string }> = [
+    { name: 'number array with an empty requested address', body: { results: [7] }, requestedBuilder: '' },
+    { name: 'number row before a matching row', body: { results: [7, fullRow] } },
+    { name: 'string results with an empty requested address', body: { results: 'legacy' }, requestedBuilder: '' },
+    { name: 'null results', body: { results: null } },
+    { name: 'null results with a matching lite fallback', body: { results: null, r: [fullRow] } },
+    { name: 'object results', body: { results: {} } },
+    { name: 'object results with a matching lite fallback', body: { results: {}, r: [fullRow] } },
+    { name: 'missing row address with an empty requested address', body: { results: [{}] }, requestedBuilder: '' },
+    { name: 'missing row address before a matching row', body: { results: [{}, fullRow] } },
+    { name: 'missing row address after a matching row', body: { results: [fullRow, {}] } },
+    { name: 'boolean row before a matching row', body: { results: [false, fullRow] } },
+    { name: 'string row before a matching row', body: { results: ['legacy', fullRow] } },
+    { name: 'array row before a matching row', body: { results: [[], fullRow] } },
+    { name: 'null row before a matching row', body: { results: [null, fullRow] } },
+    { name: 'null address before a matching row', body: { results: [{ builder_account_id: null }, fullRow] } },
+    { name: 'numeric address before a matching row', body: { results: [{ builder_account_id: 0 }, fullRow] } },
+    { name: 'boolean address before a matching row', body: { results: [{ builder_account_id: false }, fullRow] } },
+    { name: 'object address before a matching row', body: { results: [{ builder_account_id: {} }, fullRow] } },
+    { name: 'mistyped lite address before a matching row', body: { r: [{ ba: 0 }, fullRow] } },
+    { name: 'mistyped address after a matching row', body: { results: [fullRow, { ba: 7 }] } },
+    { name: 'empty requested and returned addresses', body: { results: [{ builder_account_id: '', ba: '' }] }, requestedBuilder: '' },
+    { name: 'empty requested address with a valid row', body: { results: [fullRow] }, requestedBuilder: '' },
+  ];
+
+  it.each(malformedCases)('refuses $name', async ({ body, requestedBuilder }) => {
+    respond(body);
+    expect(await checkGrvtBuilderAuthorized('test-api-key', '', requestedBuilder)).toEqual({ authorized: false });
+  });
+
+  it('keeps the first of two valid matching rows', async () => {
+    respond({ results: [fullRow, { ...fullRow, max_futures_fee_rate: '0.05' }] });
+    expect(await checkGrvtBuilderAuthorized('test-api-key', '')).toEqual(approved);
   });
 
   it('keeps testnet selection, authentication order, session headers and empty main-account request', async () => {
