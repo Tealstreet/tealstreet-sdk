@@ -133,7 +133,7 @@ impl Journals {
     pub(super) fn begin(&mut self, step: &Step) -> usize {
         let start = self.next;
         self.next += count(&step.call);
-        self.fail(start, &step.call, unknown(UNKNOWN_WORDS));
+        self.record_failure(start, &step.call, unknown(UNKNOWN_WORDS));
         start
     }
 
@@ -164,7 +164,7 @@ impl Journals {
         }
     }
 
-    pub(super) fn fail(&mut self, start: usize, call: &Call, mut error: VenueError) {
+    pub(super) fn record_failure(&mut self, start: usize, call: &Call, mut error: VenueError) {
         error.elements = None;
         for index in start..start + count(call) {
             let _ = self.plan.record(index, failed(&error));

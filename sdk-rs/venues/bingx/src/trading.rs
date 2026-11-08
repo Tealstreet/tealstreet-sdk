@@ -679,7 +679,7 @@ impl Trading {
                 Ok(slot) => slot,
                 Err(error) => {
                     let error = error.venue_error().outcome(Outcome::NotSent);
-                    run.writes.fail(write, &step.call, error.clone());
+                    run.writes.record_failure(write, &step.call, error.clone());
                     let error = run.writes.failure(error);
                     let _ = cx.fail_plan(&plan, error);
                     return;
@@ -700,7 +700,7 @@ impl Trading {
                 Ok(context) => context,
                 Err(error) => {
                     let error = error.venue_error().outcome(Outcome::NotSent);
-                    run.writes.fail(write, &step.call, error.clone());
+                    run.writes.record_failure(write, &step.call, error.clone());
                     let error = run.writes.failure(error);
                     let _ = cx.fail_plan(&plan, error);
                     return;
@@ -718,7 +718,7 @@ impl Trading {
                 };
                 if let Err(error) = cx.store.metadata_write_started(command, scope) {
                     let error = error.outcome(Outcome::NotSent);
-                    run.writes.fail(write, &step.call, error.clone());
+                    run.writes.record_failure(write, &step.call, error.clone());
                     let error = run.writes.failure(error);
                     let _ = cx.fail_plan(&plan, error);
                     return;
@@ -773,7 +773,8 @@ impl Trading {
             let plan = request.plan.clone();
             let error = not_sent("BingX credentials unavailable").kind(ErrorKind::AuthInvalid);
             let error = if let Some(run) = self.jobs.get_mut(&request.command) {
-                run.writes.fail(request.write, &request.call, error.clone());
+                run.writes
+                    .record_failure(request.write, &request.call, error.clone());
                 run.writes.failure(error)
             } else {
                 error
@@ -833,7 +834,8 @@ impl Trading {
         } else {
             error
         };
-        run.writes.fail(request.write, &request.call, error.clone());
+        run.writes
+            .record_failure(request.write, &request.call, error.clone());
         let _ = run.error.get_or_insert(error.clone());
         if run.job.continue_on_error
             && error.outcome == Some(Outcome::NotSent)
@@ -859,7 +861,8 @@ impl Trading {
         else {
             return error;
         };
-        run.writes.fail(request.write, &request.call, error.clone());
+        run.writes
+            .record_failure(request.write, &request.call, error.clone());
         run.writes.failure(error)
     }
     pub fn on_failed(
