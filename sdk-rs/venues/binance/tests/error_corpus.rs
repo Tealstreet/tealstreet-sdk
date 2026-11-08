@@ -217,7 +217,7 @@ fn a_rejected_key_on_an_order_is_a_rejected_auth_failure() {
             symbol: "BTCUSDT".into(),
             kind: OrderType::Limit,
             side: OrderSide::Buy,
-            amount: 0.01,
+            amount: 0.001,
             price: Some(1000.0),
             trigger_price: None,
             stop_loss: None,

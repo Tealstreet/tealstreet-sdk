@@ -39,7 +39,7 @@ fn ready_with(hedged: bool, algo: &str) -> Harness {
     h.respond(
         "/fapi/v3/positionRisk",
         200,
-        &format!(r#"[{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"0.100","entryPrice":"95","breakEvenPrice":"95","markPrice":"100","unRealizedProfit":"0.05","liquidationPrice":"50","isolatedMargin":"0","notional":"10","marginAsset":"USDT","isolatedWallet":"0","initialMargin":"0.05","maintMargin":"0.01","positionInitialMargin":"0.05","openOrderInitialMargin":"0","adl":1,"bidNotional":"0","askNotional":"0","updateTime":1}}]"#),
+        &format!(r#"[{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"0.010","entryPrice":"95","breakEvenPrice":"95","markPrice":"100","unRealizedProfit":"0.05","liquidationPrice":"50","isolatedMargin":"0","notional":"1","marginAsset":"USDT","isolatedWallet":"0","initialMargin":"0.05","maintMargin":"0.01","positionInitialMargin":"0.05","openOrderInitialMargin":"0","adl":1,"bidNotional":"0","askNotional":"0","updateTime":1}}]"#),
     );
     h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
     h.respond("/fapi/v3/account", 200, ACCOUNT);
@@ -63,7 +63,7 @@ fn trailing(price: f64) -> PlaceOrderOpts {
         "symbol": "BTCUSDT",
         "type": "trailing_stop_market",
         "side": "sell",
-        "amount": 0.1,
+        "amount": 0.01,
         "price": price,
         "reduceOnly": true,
     }))
@@ -263,8 +263,9 @@ fn legacy_without_reduce_only() -> Harness {
     let row = TRAILING_ROW
         .replace(r#""reduceOnly":true"#, r#""reduceOnly":false"#)
         .replace(r#""quantity":"0.010""#, r#""quantity":"0.100""#);
-    let h = ready_with(false, &format!("[{row}]"));
+    let mut h = ready_with(false, &format!("[{row}]"));
     assert!(!h.engine.store().order("5550").unwrap().reduce_only);
+    h.engine.store_mut().update_positions(|p| p.contracts = 0.1);
     h
 }
 
@@ -317,7 +318,7 @@ fn a_new_trailing_stop_reduces_by_default_and_honours_an_explicit_false() {
 #[test]
 fn ambiguous_ordinary_rate_limit_is_unknown() {
     let mut h = ready();
-    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.1,"price":90.0})).unwrap();
+    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":90.0})).unwrap();
     place(&mut h, 901, order);
     let sent = h.take("/fapi/v1/order");
     h.reply(
@@ -375,7 +376,7 @@ fn ambiguous_replacement_cannot_put_back() {
 #[test]
 fn ambiguous_signature_body_cannot_resend() {
     let mut h = ready();
-    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.1,"price":90.0})).unwrap();
+    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":90.0})).unwrap();
     place(&mut h, 903, order);
     let sent = h.take("/fapi/v1/order");
     h.reply(
@@ -520,7 +521,7 @@ fn ambiguous_put_back_has_no_protection_claim_or_further_write() {
 #[test]
 fn engine_ambiguity_ordinary_429_is_unknown() {
     let mut h = ready();
-    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.1,"price":90.0})).unwrap();
+    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":90.0})).unwrap();
     place(&mut h, 901, order);
     let sent = h.take("/fapi/v1/order");
     h.reply(
@@ -570,7 +571,7 @@ fn engine_ambiguity_429_replacement_cannot_put_back() {
 #[test]
 fn engine_ambiguity_429_signature_body_cannot_resend() {
     let mut h = ready();
-    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.1,"price":90.0})).unwrap();
+    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":90.0})).unwrap();
     place(&mut h, 903, order);
     let sent = h.take("/fapi/v1/order");
     h.reply(

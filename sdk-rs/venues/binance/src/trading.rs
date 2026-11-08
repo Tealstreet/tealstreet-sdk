@@ -1,12 +1,10 @@
 //! Order entry. Each command becomes a job of sequential steps; a step's
 //! requests go out together and the next step starts when they all answer.
 //! Stops, take-profits and trailing stops use the Algo Order API.
-mod preflight;
 use crate::account::{PmOrderSource, venue_error};
 use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
-pub(crate) use preflight::NativeRules;
 use safe_cex_engine::Level;
 use safe_cex_engine::classify::{
     CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
@@ -23,7 +21,6 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, PlannedWrite, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -36,19 +33,6 @@ const BROKER_PREFIX: &str = "x-s3vFFRQp";
 /// Errors callers handle themselves; they are not shown to the user.
 const SILENT_CODES: [i64; 4] = [-2011, -2013, -4059, -5022];
 const UNKNOWN_ORDER: i64 = -2011;
-
-fn native_placed_id(body: &str, algo: bool) -> Option<u64> {
-    if !body.trim_start().starts_with('{') {
-        return None;
-    }
-    let placed: PlacedOrder = serde_json::from_str(body).ok()?;
-    let id = if algo {
-        placed.algo_id
-    } else {
-        placed.order_id
-    };
-    id.filter(|id| *id > 0)
-}
 
 fn stop_name(kind: OrderType) -> &'static str {
     if kind == OrderType::TakeProfit {
@@ -157,9 +141,7 @@ impl<'a> UnprovenOrder<'a> {
     }
 }
 
-#[derive(Clone)]
 struct Planned {
-    parameters: Vec<Params>,
     receipts: Vec<OrderIdentityReceipt>,
     method: Method,
     path: &'static str,
@@ -171,8 +153,6 @@ struct Planned {
 struct Job {
     context: Option<Context>,
     steps: VecDeque<Vec<Planned>>,
-    write_plan: Option<WritePlan<Planned>>,
-    active_write: Option<usize>,
     outstanding: usize,
     /// Run every step even after a failure (cancel-all's two families).
     continue_on_error: bool,
@@ -252,7 +232,8 @@ enum CancelProof {
 
 #[derive(Default)]
 pub struct TradingState {
-    pub(crate) native_rules: HashMap<String, Result<NativeRules, String>>,
+    /// MIN_NOTIONAL by symbol. Market limits carry no value minimum.
+    pub(crate) min_notional: HashMap<String, f64>,
     jobs: HashMap<CommandId, Job>,
     /// While an amendment plans its replacement: the original row's hedge side.
     amended_position_side: Option<&'static str>,
@@ -463,7 +444,6 @@ impl BinanceFutures {
                 let ids = |orders: Vec<&Order>| orders.iter().map(|o| o.id.clone()).collect();
                 let mut step = vec![
                     Planned {
-                        parameters: Vec::new(),
                         receipts: Vec::new(),
                         method: Method::Delete,
                         path: self.paths.cancel_all,
@@ -480,7 +460,6 @@ impl BinanceFutures {
                         },
                     },
                     Planned {
-                        parameters: Vec::new(),
                         receipts: Vec::new(),
                         method: Method::Delete,
                         path: self.paths.cancel_all_conditional,
@@ -708,13 +687,10 @@ impl BinanceFutures {
             return;
         }
         let Some(step) = step.filter(|step| !step.is_empty()) else {
-            let mut job = self.trading.jobs.remove(&command).expect("present");
+            let job = self.trading.jobs.remove(&command).expect("present");
             let context = job.context.expect("managed job has an authority");
             match job.planning_error {
-                Some(mut error) => {
-                    if let Some(plan) = &mut job.write_plan {
-                        error = plan.failure(error);
-                    }
+                Some(error) => {
                     let _ = cx.fail_context(&context, error);
                 }
                 None => {
@@ -731,23 +707,8 @@ impl BinanceFutures {
         // A placement's conflicting-order cancel is a cancel leg; an
         // amendment's cancel stays part of the amend.
         let amending = job.amendment.is_some();
-        for mut planned in step {
+        for planned in step {
             let verifying_pm_cancel = matches!(planned.call, Call::VerifyPmAlgo { .. });
-            if !verifying_pm_cancel
-                && let Some(job) = self.trading.jobs.get_mut(&command)
-                && let Some(plan) = &mut job.write_plan
-            {
-                let Some((index, write)) = plan.next_write() else {
-                    self.fail_trade_job(
-                        cx,
-                        command,
-                        VenueError::new("Binance write plan stopped").outcome(Outcome::Unknown),
-                    );
-                    return;
-                };
-                job.active_write = Some(index);
-                planned = write.payload.clone();
-            }
             if verifying_pm_cancel && root.deadline() <= cx.now + 20_000.0 {
                 let _ = cx.inherit_http_uncertainty(&root);
                 self.trading.jobs.remove(&command);
@@ -771,13 +732,7 @@ impl BinanceFutures {
                     timeout_ms: 20_000,
                     pacing: None,
                     // A -1022 signature rejection is re-signed and sent once more.
-                    retry: if verifying_pm_cancel
-                        || self
-                            .trading
-                            .jobs
-                            .get(&command)
-                            .is_some_and(|job| job.write_plan.is_some())
-                    {
+                    retry: if verifying_pm_cancel {
                         RetryPolicy::Never
                     } else {
                         RetryPolicy::DefinitiveRefusal
@@ -794,10 +749,10 @@ impl BinanceFutures {
                 if verifying_pm_cancel {
                     let _ = cx.inherit_http_uncertainty(&root);
                 }
-                self.fail_trade_job(
-                    cx,
-                    command,
-                    not_sent("Binance HTTP lifecycle refused the next leg"),
+                self.trading.jobs.remove(&command);
+                let _ = cx.fail_context(
+                    &root,
+                    VenueError::new("Binance HTTP lifecycle refused the next leg"),
                 );
                 return;
             };
@@ -811,45 +766,13 @@ impl BinanceFutures {
                 if verifying_pm_cancel {
                     let _ = cx.inherit_http_uncertainty(&root);
                 }
-                self.fail_trade_job(
-                    cx,
-                    command,
-                    not_sent("Binance HTTP lifecycle refused the next leg"),
+                self.trading.jobs.remove(&command);
+                let _ = cx.fail_context(
+                    &root,
+                    VenueError::new("Binance HTTP lifecycle refused the next leg"),
                 );
                 return;
             }
-        }
-    }
-
-    fn fail_trade_job(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        mut error: VenueError,
-    ) {
-        let Some(mut job) = self.trading.jobs.remove(&command) else {
-            return;
-        };
-        if let Some(plan) = &mut job.write_plan {
-            if let Some(index) = job.active_write.take() {
-                let _ = plan.fail(index, error.clone());
-            }
-            error = plan.failure(error);
-        }
-        if let Some(context) = job.context {
-            let _ = cx.fail_context(&context, error);
-        }
-    }
-
-    pub(crate) fn capture_unproven_plan(&self, request: &Request, evidence: &mut UnprovenEvidence) {
-        if let Some(job) = self.trading.jobs.get(&request.command)
-            && job
-                .context
-                .as_ref()
-                .is_some_and(|root| root.owner() == request.context.owner())
-            && let Some(plan) = &job.write_plan
-        {
-            evidence.write_plan(plan);
         }
     }
 
@@ -984,7 +907,7 @@ impl BinanceFutures {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
-        self.on_trade_result(cx, request, response, None);
+        self.on_trade_result(cx, request, response);
     }
     pub(crate) fn on_trade_sign_failed(
         &mut self,
@@ -992,15 +915,13 @@ impl BinanceFutures {
         request: Request,
         error: VenueError,
     ) {
-        let message = error.message.clone();
-        self.on_trade_result(cx, request, Err(&message), Some(error));
+        self.on_trade_result(cx, request, Err(&error.message));
     }
     fn on_trade_result(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         response: Result<Response<'_>, &str>,
-        local_error: Option<VenueError>,
     ) {
         if let Call::VerifyPmAlgo { target } = &request.call {
             return self.pm_cancel_readback(cx, &request, target.clone(), response);
@@ -1013,13 +934,6 @@ impl BinanceFutures {
         } = request;
         let native_response = response.is_ok();
         let resend_call = call.clone();
-        let journaled = self
-            .trading
-            .jobs
-            .get(&command)
-            .is_some_and(|job| job.write_plan.is_some());
-        let mut row_results = None;
-        let mut failure_detail = local_error;
         let stopped = self.trading.jobs.get(&command).is_some_and(|job| job.stop);
 
         let mut reports = Vec::new();
@@ -1061,10 +975,7 @@ impl BinanceFutures {
                 },
                 Ok(body),
             ) if self.is_spot() => match serde_json::from_str::<PlacedOrder>(body) {
-                Ok(placed)
-                    if placed.order_id.is_some_and(|id| id > 0)
-                        && body.trim_start().starts_with('{') =>
-                {
+                Ok(placed) if placed.order_id.is_some() => {
                     ids.push(id);
                     None
                 }
@@ -1077,36 +988,30 @@ impl BinanceFutures {
                 Call::PlaceOne {
                     client_id: Some(id),
                 },
-                Ok(body),
+                Ok(_),
             )
             | (
                 Call::PlaceAlgo {
                     client_id: Some(id),
                 },
-                Ok(body),
+                Ok(_),
             ) => {
-                if native_placed_id(body, matches!(&resend_call, Call::PlaceAlgo { .. })).is_some()
-                {
-                    ids.push(id);
-                    None
-                } else {
-                    Some((
-                        0,
-                        "Binance placement response has no valid native order ID".into(),
-                    ))
-                }
+                ids.push(id);
+                None
             }
             (Call::PlaceOne { .. }, Ok(body)) | (Call::PlaceAlgo { .. }, Ok(body)) => {
-                if let Some(id) =
-                    native_placed_id(body, matches!(&resend_call, Call::PlaceAlgo { .. }))
-                {
-                    ids.push(id.to_string());
-                    None
-                } else {
-                    Some((
-                        0,
-                        "Binance placement response has no valid native order ID".into(),
-                    ))
+                match serde_json::from_str::<PlacedOrder>(body) {
+                    Ok(placed) => match placed.order_id.or(placed.algo_id) {
+                        Some(id) => {
+                            ids.push(id.to_string());
+                            None
+                        }
+                        None => Some((
+                            0,
+                            "Binance placement response has no native order ID".into(),
+                        )),
+                    },
+                    Err(error) => Some((0, error.to_string())),
                 }
             }
             (Call::PlaceBatch { expected, strict }, Ok(body)) => {
@@ -1127,49 +1032,12 @@ impl BinanceFutures {
                             0,
                             "Binance batch response count does not match the request".into(),
                         ));
-                    } else if let Some(items) = rows
-                        .iter()
-                        .all(|row| row.get().trim_start().starts_with('{'))
-                        .then(|| serde_json::from_str::<Vec<BatchItem>>(body).ok())
-                        .flatten()
-                    {
-                        let mut results = Vec::new();
+                    } else if let Ok(items) = serde_json::from_str::<Vec<BatchItem>>(body) {
                         for item in items {
                             match (item.order_id, item.code) {
-                                (Some(id), None) if id > 0 => {
-                                    ids.push(id.to_string());
-                                    results.push(ElementResult::Placed {
-                                        order_ids: vec![id.to_string()],
-                                    });
-                                }
+                                (Some(id), None) => ids.push(id.to_string()),
                                 (_, code) => {
                                     let code = code.unwrap_or(0);
-                                    let message = item
-                                        .msg
-                                        .as_deref()
-                                        .unwrap_or("Binance batch order rejected");
-                                    let native = (code != 0).then_some(Native {
-                                        code: NativeCode::Int(code),
-                                        message,
-                                    });
-                                    if let Ok(fact) = cx.classify_write(
-                                        &context,
-                                        &BINANCE,
-                                        native.as_ref(),
-                                        message,
-                                    ) {
-                                        let error = Box::new(fact.error().clone());
-                                        results.push(
-                                            if matches!(
-                                                fact.verdict(),
-                                                Verdict::Refused(_) | Verdict::RefusedResend(_)
-                                            ) {
-                                                ElementResult::NotSent { error: Some(error) }
-                                            } else {
-                                                ElementResult::Unknown { error }
-                                            },
-                                        );
-                                    }
                                     unproven |= item_unknown(code);
                                     rejection.get_or_insert((
                                         code,
@@ -1189,14 +1057,11 @@ impl BinanceFutures {
                                 }
                             }
                         }
-                        if results.len() == expected {
-                            row_results = Some(results);
-                        }
                     } else {
                         unproven = true;
                         rejection = Some((0, "Binance batch response malformed".into()));
                     }
-                    continue_after_item_refusal = !journaled && !strict && !unproven;
+                    continue_after_item_refusal = !strict && !unproven;
                 } else {
                     unproven = true;
                     rejection = Some((0, "Binance batch response malformed".into()));
@@ -1351,7 +1216,7 @@ impl BinanceFutures {
                 };
                 // Only a proven refusal of a stop's replacement puts the old stop back, once;
                 // an unknown one may have landed, and a second protective order is never added.
-                if gone.is_some() && refused && !journaled {
+                if gone.is_some() && refused {
                     match restoring {
                         Some(_) => self.fail_unprotected(command, &told),
                         None => restore_planned = self.plan_restore(cx, command, &gone, &message),
@@ -1369,9 +1234,7 @@ impl BinanceFutures {
                 let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &told) else {
                     return;
                 };
-                let fact = if unproven { fact.unproven() } else { fact };
-                failure_detail = Some(fact.error().clone());
-                native_fact = Some(fact);
+                native_fact = Some(if unproven { fact.unproven() } else { fact });
             }
             if let Some(job) = self.trading.jobs.get_mut(&command)
                 && !continue_after_item_refusal
@@ -1413,8 +1276,7 @@ impl BinanceFutures {
                 // journal refuses a second, which then fails as recorded.
                 // A job already stopping, or ended, never sends again.
                 Ok(Some(grant))
-                    if !journaled
-                        && may_resend(stopped, self.trading.jobs.contains_key(&command)) =>
+                    if may_resend(stopped, self.trading.jobs.contains_key(&command)) =>
                 {
                     // Undo the stop this refusal just set: the leg is resent, not failed.
                     if let Some(job) = self.trading.jobs.get_mut(&command) {
@@ -1448,61 +1310,6 @@ impl BinanceFutures {
                     "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was put back as a new order: {refusal}"
                 ))
             });
-        }
-        if let Some(plan) = &mut job.write_plan
-            && let Some(index) = job.active_write.take()
-        {
-            let failure = failure_detail.or_else(|| {
-                (!native_response).then(|| {
-                    VenueError::new("Binance write failed without acknowledgement")
-                        .outcome(Outcome::Unknown)
-                })
-            });
-            let result = if let Some(results) = row_results {
-                job.stop |= results.iter().any(|r| {
-                    !matches!(
-                        r,
-                        ElementResult::Placed { .. } | ElementResult::Applied { .. }
-                    )
-                });
-                plan.settle(index, results)
-            } else if let Some(error) = &failure {
-                let evidence: Vec<_> = ids.iter().chain(&evidence_ids).cloned().collect();
-                plan.fail(index, error.clone().partial_ids(&evidence))
-            } else if !ids.is_empty() {
-                plan.settle(
-                    index,
-                    vec![ElementResult::Placed {
-                        order_ids: ids.clone(),
-                    }],
-                )
-            } else {
-                let target_order_id = match &resend_call {
-                    Call::Cancel { ids, .. } if ids.len() == 1 => ids.first().cloned(),
-                    _ => None,
-                };
-                plan.settle(
-                    index,
-                    vec![ElementResult::Applied {
-                        effect: AppliedEffect::Cancel,
-                        target_order_id,
-                        position_key: None,
-                    }],
-                )
-            };
-            if let Some(error) = failure {
-                job.planning_error = Some(error);
-                job.stop = true;
-            }
-            if let Err(error) = result {
-                job.stop = true;
-                job.planning_error = Some(
-                    VenueError::new(format!(
-                        "Binance acknowledgement could not settle its write plan: {error}"
-                    ))
-                    .outcome(Outcome::Unknown),
-                );
-            }
         }
         job.ids.extend(ids);
         job.outstanding = job.outstanding.saturating_sub(1);
@@ -1718,49 +1525,7 @@ impl BinanceFutures {
                 self.format_order(cx, opts)?
             };
             regular.extend(r);
-            for params in a {
-                if params.get("closePosition").as_deref() == Some("true") {
-                    self.validate_params(cx, &params)?;
-                    algo.push(params);
-                    continue;
-                }
-                let symbol = params.get("symbol").ok_or("Binance algo has no symbol")?;
-                let market = cx
-                    .store
-                    .market(&symbol)
-                    .ok_or("Binance market is not loaded")?;
-                let quantity = params
-                    .get("quantity")
-                    .and_then(|q| num::parse_decimal(&q))
-                    .ok_or("Binance algo requires an explicit quantity")?;
-                let quantity_at = params
-                    .0
-                    .iter()
-                    .position(|(name, _)| *name == "quantity")
-                    .ok_or("Binance algo has no quantity field")?;
-                let parts = self.sized_payloads_at(
-                    cx,
-                    &params,
-                    quantity_at,
-                    quantity,
-                    market.limits.amount.max,
-                    market.precision.amount,
-                )?;
-                for (index, mut part) in parts.into_iter().enumerate() {
-                    if index > 0 {
-                        let id = self.generated_id(cx)?;
-                        if let Some((_, value)) =
-                            part.0.iter_mut().find(|(name, _)| *name == "clientAlgoId")
-                        {
-                            *value = id;
-                        }
-                    }
-                    algo.push(part);
-                }
-            }
-        }
-        for params in &regular {
-            self.validate_params(cx, params)?;
+            algo.extend(a);
         }
         if !replaced.is_empty() {
             cx.notice(
@@ -1781,7 +1546,6 @@ impl BinanceFutures {
         for lot in regular.chunks(lot_size) {
             let step = match (lot, self.paths.batch_orders) {
                 ([only], _) => Planned {
-                    parameters: vec![only.clone()],
                     receipts: identities(only),
                     method: Method::Post,
                     path: self.paths.order,
@@ -1795,7 +1559,6 @@ impl BinanceFutures {
                 (_, Some(path)) => {
                     let batch: Vec<String> = lot.iter().map(Params::json).collect();
                     Planned {
-                        parameters: lot.to_vec(),
                         receipts: lot.iter().flat_map(identities).collect(),
                         method: Method::Post,
                         path,
@@ -1813,7 +1576,6 @@ impl BinanceFutures {
         }
         for params in algo {
             job.steps.push_back(vec![Planned {
-                parameters: vec![params.clone()],
                 receipts: identities(&params),
                 method: Method::Post,
                 path: self.paths.conditional_order,
@@ -1823,60 +1585,6 @@ impl BinanceFutures {
                 },
             }]);
         }
-        let mut writes = Vec::new();
-        let mut next_element = 0;
-        for planned in job
-            .steps
-            .iter()
-            .flatten()
-            .filter(|p| !matches!(p.call, Call::VerifyPmAlgo { .. }))
-        {
-            let rows = planned.parameters.len().max(1);
-            let elements = (0..rows)
-                .map(|row| {
-                    let client_order_id = planned.parameters.get(row).and_then(|params| {
-                        params
-                            .get("newClientOrderId")
-                            .or_else(|| params.get("clientAlgoId"))
-                    });
-                    let element = Element {
-                        index: next_element,
-                        client_order_id,
-                    };
-                    next_element += 1;
-                    element
-                })
-                .collect();
-            writes.push(PlannedWrite {
-                payload: planned.clone(),
-                elements,
-            });
-        }
-        job.write_plan = Some(
-            WritePlan::validate(writes, |planned| {
-                let expected = match planned.call {
-                    Call::PlaceBatch { expected, .. } if (1..=5).contains(&expected) => expected,
-                    Call::PlaceOne { .. } | Call::PlaceAlgo { .. } => 1,
-                    Call::Cancel { .. } => 0,
-                    _ => return Err(not_sent("Invalid Binance write-plan route")),
-                };
-                if planned.parameters.len() != expected {
-                    return Err(not_sent("Invalid Binance native batch count"));
-                }
-                for params in &planned.parameters {
-                    self.validate_params(cx, params)
-                        .map_err(|e| not_sent(e).kind(ErrorKind::InvalidInput))?;
-                }
-                Ok(())
-            })
-            .map_err(|e| e.message)?,
-        );
-        job.steps = job
-            .steps
-            .into_iter()
-            .flatten()
-            .map(|planned| vec![planned])
-            .collect();
         Ok(job)
     }
 
@@ -1924,7 +1632,6 @@ impl BinanceFutures {
         if self.is_options() {
             for order in orders {
                 job.steps.push_back(vec![Planned {
-                    parameters: Vec::new(),
                     receipts: Vec::new(),
                     method: Method::Delete,
                     path: self.paths.order,
@@ -1963,7 +1670,6 @@ impl BinanceFutures {
                     order.id.clone()
                 };
                 job.steps.push_back(vec![Planned {
-                    parameters: Vec::new(),
                     receipts: Vec::new(),
                     method: Method::Delete,
                     path,
@@ -1985,7 +1691,6 @@ impl BinanceFutures {
                 }]);
                 if strategy {
                     job.steps.push_back(vec![Planned {
-                        parameters: Vec::new(),
                         receipts: Vec::new(),
                         method: Method::Get,
                         path: crate::paths::PM_ALGO_QUERY,
@@ -2011,7 +1716,6 @@ impl BinanceFutures {
             if let [id] = ids.as_slice() {
                 let query = Query::new().str("symbol", &symbol).str("orderId", id);
                 job.steps.push_back(vec![Planned {
-                    parameters: Vec::new(),
                     receipts: Vec::new(),
                     method: Method::Delete,
                     path: self.paths.order,
@@ -2035,7 +1739,6 @@ impl BinanceFutures {
                     .str("symbol", &symbol)
                     .str("orderIdList", &format!("[{}]", lot.join_with(",")));
                 job.steps.push_back(vec![Planned {
-                    parameters: Vec::new(),
                     receipts: Vec::new(),
                     method: Method::Delete,
                     path: batch,
@@ -2072,7 +1775,6 @@ impl BinanceFutures {
         orders
             .iter()
             .map(|order| Planned {
-                parameters: Vec::new(),
                 receipts: Vec::new(),
                 method: Method::Delete,
                 path: self.paths.conditional_order,
@@ -2143,64 +1845,6 @@ impl BinanceFutures {
         Ok(vec![params])
     }
 
-    fn rules_for(&self, symbol: &str) -> Result<NativeRules, String> {
-        if self.is_options() {
-            return Ok(NativeRules::default());
-        }
-        self.trading
-            .native_rules
-            .get(symbol)
-            .cloned()
-            .ok_or_else(|| format!("Native Binance filters for {symbol} are not loaded"))?
-    }
-
-    fn validate_params(&self, cx: &Cx<'_, Pending>, params: &Params) -> Result<(), String> {
-        let symbol = params.get("symbol").ok_or("Binance order has no symbol")?;
-        let market = cx
-            .store
-            .market(&symbol)
-            .ok_or("Binance market is not loaded")?;
-        self.rules_for(&symbol)?
-            .validate(params, market, cx.store.ticker(&symbol))
-    }
-
-    fn sized_payloads(
-        &self,
-        cx: &Cx<'_, Pending>,
-        params: Params,
-        amount: f64,
-        max: f64,
-        step: f64,
-    ) -> Result<Vec<Params>, String> {
-        let at = params.0.len();
-        self.sized_payloads_at(cx, &params, at, amount, max, step)
-    }
-
-    fn sized_payloads_at(
-        &self,
-        cx: &Cx<'_, Pending>,
-        params: &Params,
-        at: usize,
-        amount: f64,
-        max: f64,
-        step: f64,
-    ) -> Result<Vec<Params>, String> {
-        let symbol = params.get("symbol").ok_or("Binance order has no symbol")?;
-        let market = cx
-            .store
-            .market(&symbol)
-            .ok_or("Binance market is not loaded")?;
-        let rules = self.rules_for(&symbol)?;
-        let lots = rules.quantities(params, market, cx.store.ticker(&symbol), amount, max, step)?;
-        let mut out = Vec::with_capacity(lots.len());
-        for quantity in lots {
-            let payload = with_quantity(params, at, quantity);
-            rules.validate(&payload, market, cx.store.ticker(&symbol))?;
-            out.push(payload);
-        }
-        Ok(out)
-    }
-
     fn format_spot(
         &self,
         cx: &Cx<'_, Pending>,
@@ -2260,8 +1904,7 @@ impl BinanceFutures {
         } else if opts.trigger_price.is_some() {
             return Err("Binance Spot plain orders cannot carry triggerPrice".into());
         }
-        let mut out = self.sized_payloads(
-            cx,
+        let mut out = sized_payloads(
             params,
             amount,
             market.limits.amount.max,
@@ -2296,13 +1939,9 @@ impl BinanceFutures {
                     "stopPrice",
                     number(positive_price(Some(trigger), market.precision.price)?),
                 );
-                for mut part in self.sized_payloads(
-                    cx,
-                    p,
-                    amount,
-                    market.limits.amount.max,
-                    market.precision.amount,
-                )? {
+                for mut part in
+                    sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
+                {
                     part.set("newClientOrderId", self.generated_id(cx)?);
                     out.push(part);
                 }
@@ -2414,13 +2053,7 @@ impl BinanceFutures {
         let mut out = if close {
             vec![p]
         } else {
-            self.sized_payloads(
-                cx,
-                p,
-                amount,
-                market.limits.amount.max,
-                market.precision.amount,
-            )?
+            sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
         };
         for p in &mut out {
             p.set("newClientOrderId", self.generated_id(cx)?);
@@ -2527,27 +2160,28 @@ impl BinanceFutures {
             close: Some(order.close.unwrap_or(false)),
             stp_mode: None,
         };
+        // A replacement below the value minimum would be refused after the old order is gone.
+        let left = (replacement.amount - order.filled).max(0.0);
+        let value = left * replacement.price.unwrap_or(0.0);
+        let minimum = self
+            .trading
+            .min_notional
+            .get(&order.symbol)
+            .copied()
+            .unwrap_or(0.0);
+        if !order.reduce_only && value > 0.0 && value < minimum {
+            return Err(format!(
+                "Replacement worth {value} is below the {minimum} minimum; the order is unchanged"
+            ));
+        }
+        // Validate before canceling; build the final payload after its cumulative fill is known.
+        self.plan_place(cx, std::slice::from_ref(&replacement))?;
+        let mut job = self.plan_cancel(std::slice::from_ref(&order));
         let step = cx
             .store
             .market(&order.symbol)
             .map_or(1.0, |market| market.precision.amount);
         let target_total = num::adjust(replacement.amount, step);
-        if !target_total.is_finite() || target_total < 0.0 {
-            return Err("Replacement size is invalid; the order is unchanged".into());
-        }
-        let full_close = target_total == 0.0 && replacement.close == Some(true);
-        let left = if full_close {
-            0.0
-        } else {
-            num::left_of_total(target_total, order.filled)?
-        };
-        let preview = PlaceOrderOpts {
-            amount: left,
-            ..replacement.clone()
-        };
-        self.plan_place(cx, std::slice::from_ref(&preview))
-            .map_err(|error| format!("{error}; the order is unchanged"))?;
-        let mut job = self.plan_cancel(std::slice::from_ref(&order));
         let original = PlaceOrderOpts {
             amount: order.amount,
             price: Some(order.price),
@@ -2792,8 +2426,7 @@ impl BinanceFutures {
             if opts.kind == OrderType::Limit && price.is_none_or(|p| p <= 0.0) {
                 return Err("Binance order price rounds to zero".into());
             }
-            let payloads = self.sized_payloads_at(
-                cx,
+            let payloads = sized_payloads_at(
                 &params,
                 quantity_at,
                 amount,
@@ -3104,7 +2737,6 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 fn single(method: Method, path: &'static str, query: Query, call: Call) -> Job {
     Job {
         steps: VecDeque::from([vec![Planned {
-            parameters: Vec::new(),
             receipts: Vec::new(),
             method,
             path,
@@ -3189,6 +2821,41 @@ fn coin_algo_params(params: Params) -> Params {
         }
     }
     out
+}
+
+fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Vec<Params>, String> {
+    let at = params.0.len();
+    sized_payloads_at(&params, at, amount, max, step)
+}
+
+fn sized_payloads_at(
+    params: &Params,
+    at: usize,
+    amount: f64,
+    max: f64,
+    step: f64,
+) -> Result<Vec<Params>, String> {
+    let max = if max.is_finite() && max > 0.0 {
+        num::adjust(max, step)
+    } else {
+        amount
+    };
+    if !max.is_finite() || max <= 0.0 {
+        return Err("Binance quantity limit must permit a positive lot".into());
+    }
+    let count = (amount / max).floor();
+    if count > 10000.0 {
+        return Err("Binance order requires too many native lots".into());
+    }
+    let mut out = Vec::new();
+    for _ in 0..count as usize {
+        out.push(with_quantity(params, at, max));
+    }
+    let rest = num::adjust(amount - count * max, step);
+    if rest > 0.0 {
+        out.push(with_quantity(params, at, rest));
+    }
+    Ok(out)
 }
 
 #[derive(serde::Deserialize)]
@@ -3747,7 +3414,7 @@ fn identities(params: &Params) -> Vec<OrderIdentityReceipt> {
 
 #[cfg(test)]
 mod audit_tests {
-    use super::{NativeRules, generated_id_with};
+    use super::generated_id_with;
     use crate::{BinanceFutures, Variant, market_from_wire, wire::SymbolInfo};
     use safe_cex_engine::model::{
         OrderSide, OrderType, PlaceOrderOpts, Position, PositionSide, Ticker,
@@ -3801,13 +3468,9 @@ mod audit_tests {
         let (mut venue, signer) =
             crate::test_config::keyed(variant, "api-key", "fixture-seed").build();
         venue.trading.id_generator = Some(injected_uuid);
-        let info: SymbolInfo<'_> = serde_json::from_str(r#"{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"},{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}]}"#).unwrap();
-        venue
-            .trading
-            .native_rules
-            .insert("BTCUSDT".into(), NativeRules::from_wire(&info.filters));
         let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         engine.set_signer(Some(signer)).unwrap();
+        let info: SymbolInfo<'_> = serde_json::from_str(r#"{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"},{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}]}"#).unwrap();
         engine
             .store_mut()
             .set_markets(vec![market_from_wire(&info, variant)]);

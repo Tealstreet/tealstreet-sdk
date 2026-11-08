@@ -204,9 +204,6 @@ fn close_flag_with_explicit_amount_preserves_pm_stop_size() {
         for hedged in [false, true] {
             for has_position in [false, true] {
                 let mut h = ready();
-                h.engine
-                    .store_mut()
-                    .update_ticker("BTCUSDT", |t| t.mark = 96000.0);
                 h.engine.store_mut().set_orders(vec![]);
                 h.engine.store_mut().set_hedged(hedged);
                 if !has_position {
@@ -245,9 +242,6 @@ fn close_flag_with_explicit_amount_preserves_pm_stop_size() {
 #[test]
 fn explicit_pm_stop_size_does_not_cancel_an_existing_full_stop() {
     let mut h = ready();
-    h.engine
-        .store_mut()
-        .update_ticker("BTCUSDT", |t| t.mark = 96000.0);
     let mut existing = h.engine.store().orders()[1].clone();
     existing.kind = OrderType::StopLoss;
     existing.amount = 0.0;

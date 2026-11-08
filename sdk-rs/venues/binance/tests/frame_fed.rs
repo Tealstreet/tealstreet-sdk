@@ -147,12 +147,12 @@ fn same_writes(local: &mut Harness, fed: &mut Harness, command: Command, replies
 
 fn limit() -> PlaceOrderOpts {
     serde_json::from_str(
-        r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.1,"price":99}"#,
+        r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":99}"#,
     )
     .unwrap()
 }
 
-const PLACED: &str = r#"{"symbol":"BTCUSDT","orderId":77,"clientOrderId":"x","origQty":"0.1","executedQty":"0","price":"99","type":"LIMIT","side":"BUY","status":"NEW"}"#;
+const PLACED: &str = r#"{"symbol":"BTCUSDT","orderId":77,"clientOrderId":"x","origQty":"0.01","executedQty":"0","price":"99","type":"LIMIT","side":"BUY","status":"NEW"}"#;
 
 fn canceled(filled: u32) -> String {
     format!(

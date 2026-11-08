@@ -414,7 +414,7 @@ fn duplicate_command_event_cannot_replace_a_live_managed_owner() {
 }
 
 #[test]
-fn unproven_first_batch_stops_later_lots() {
+fn unproven_first_batch_stops_later_lots_but_item_refusals_do_not() {
     for transport in [true, false] {
         let mut h = ready();
         let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_str(
@@ -994,7 +994,7 @@ fn rate_limits_are_unknown_while_definitive_status_refusals_stay_rejected() {
 }
 
 #[test]
-fn a_native_batch_refusal_stops_the_remaining_lots() {
+fn a_later_native_batch_rate_limit_stops_the_remaining_lots() {
     for rate_limited in [true, false] {
         let mut h = ready();
         h.requests.clear();
@@ -1016,6 +1016,15 @@ fn a_native_batch_refusal_stops_the_remaining_lots() {
             {"code":-2019,"msg":"insufficient margin"}
         ]);
         h.reply(batch.id, 200, "", &rows.to_string());
+        if !rate_limited {
+            let last = h.take("/fapi/v1/order");
+            h.reply(
+                last.id,
+                400,
+                "",
+                r#"{"code":-2019,"msg":"insufficient margin"}"#,
+            );
+        }
         assert!(
             h.requests
                 .iter()

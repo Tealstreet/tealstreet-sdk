@@ -165,7 +165,7 @@ fn ready(variant: Variant) -> Harness {
 
 fn place(h: &mut Harness, variant: Variant, command: u32) {
     let (amount, price) = match variant {
-        Variant::UsdM | Variant::PortfolioMargin => (0.1, 99.0),
+        Variant::UsdM | Variant::PortfolioMargin => (0.01, 99.0),
         _ => (1.0, 9000.0),
     };
     let opts: PlaceOrderOpts = serde_json::from_str(&format!(
