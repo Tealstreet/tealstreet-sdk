@@ -2215,6 +2215,7 @@ impl Okx {
             });
         let stop_gone = note.is_some();
         if uncertain && let Some(step) = job.steps.front().filter(|step| step.query.is_none()) {
+            cx.command_error(command, UNKNOWN_OUTCOME_TEXT);
             let unknown = format!("{UNKNOWN_OUTCOME_TEXT}; unconfirmed request {}", step.body);
             note = Some(match note {
                 Some(note) => format!("{note}; {unknown}"),

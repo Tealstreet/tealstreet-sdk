@@ -52,6 +52,14 @@ fn pin(
         placed
     );
     if telemetry {
+        assert_eq!(
+            out.iter()
+                .filter(|action| matches!(action,
+                Action::Notice(Notice::CommandError { command: id, .. }) if *id == command))
+                .count(),
+            1,
+            "one attributed Unknown diagnostic"
+        );
         assert!(
             error.message.contains(identity),
             "unconfirmed identity {identity}: {}",
@@ -259,6 +267,77 @@ fn unknown_exception_conditional_runtime() {
 #[test]
 fn lost_reply_preserves_prefix_journal_and_one_companion_without_retry() {
     placement("lost");
+}
+
+#[test]
+fn native_50004_emits_one_diagnostic_and_companion_without_changing_its_journal() {
+    for body in [
+        r#"{"code":"50004","msg":"Endpoint request timeout","data":[]}"#,
+        r#"{"code":"0","data":[{"ordId":"uncertain","sCode":"50004","sMsg":"Operation timeout"}]}"#,
+    ] {
+        let mut e = trading_engine();
+        let out = place(
+            &mut e,
+            vec![order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000,"stopLoss":36000}"#,
+            )],
+        );
+        let request = mutation(&out);
+        reply(&mut e, &Action::Http(request.clone()), body, 6.);
+        let mut out = prepared(&mut e, 6.);
+        let diagnostics = out
+            .iter()
+            .filter(|action| {
+                matches!(
+                    action,
+                    Action::Notice(Notice::CommandError { command: 1, .. })
+                )
+            })
+            .count();
+        let telemetry = out
+            .iter()
+            .filter(|action| {
+                matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")
+            })
+            .count();
+        let payload: Vec<Value> = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        let identity = payload[0]["clOrdId"].as_str().unwrap();
+        let error = pin(&out, 1, &[], identity, true, 0);
+        assert_eq!(
+            error.message,
+            format!(
+                "{ENGINE_UNKNOWN_TEXT}; {ENGINE_UNKNOWN_TEXT}; unconfirmed request {}",
+                request.body.as_deref().unwrap()
+            )
+        );
+        let elements = error.elements.as_ref().expect("placement journal");
+        assert_eq!(elements.len(), 2);
+        assert!(
+            matches!(&elements[0].result, ElementResult::Unknown { error }
+            if error.message == ENGINE_UNKNOWN_TEXT)
+        );
+        assert_eq!(elements[1].result, ElementResult::NotSent { error: None });
+        assert_eq!((diagnostics, telemetry), (1, 1), "{out:?}");
+        reply(
+            &mut e,
+            &Action::Http(request),
+            &envelope(r#"{"ordId":"late","sCode":"0"}"#),
+            7.,
+        );
+        out.extend(prepared(&mut e, 7.));
+        out.extend(fire_armed(&mut e, &out.clone(), 30_000.));
+        assert_eq!(pin(&out, 1, &[], identity, true, 0), error);
+        assert_eq!(
+            out.iter()
+                .filter(|action| matches!(
+                    action,
+                    Action::Notice(Notice::CommandError { command: 1, .. })
+                ))
+                .count(),
+            1
+        );
+    }
 }
 
 #[test]
