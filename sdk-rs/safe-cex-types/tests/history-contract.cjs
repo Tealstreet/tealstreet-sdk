@@ -93,8 +93,11 @@ const missingProvenance: GeneratedClosedPnlEntry = { symbol: 'BTC' };
   const referenceStart = integrated.indexOf(reference);
   assert.notEqual(referenceStart, -1, 'public environment reference must exist');
   const referenceEnd = referenceStart + reference.length;
-  integrated = integrated.slice(0, referenceEnd) + '\n' +
-    names.map((name) => `export type { ${name} } from './generated/${name}';`).join('\n') + integrated.slice(referenceEnd);
+  const replacementExports = declarations
+    .map((node) => node.name.text)
+    .map((name) => `export type { ${name} } from './generated/${name}';`)
+    .join('\n');
+  integrated = integrated.slice(0, referenceEnd) + '\n' + replacementExports + integrated.slice(referenceEnd);
   const integratedAst = ts.createSourceFile(publicPath, integrated, ts.ScriptTarget.Latest, true);
   assert.deepEqual(integratedAst.referencedFiles.map((file) => file.fileName), ['./env.d.ts']);
   const beforeIntegration = host.getSourceFile.bind(host);
