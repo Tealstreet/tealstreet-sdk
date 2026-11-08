@@ -240,7 +240,7 @@ function wsMetadata(wire: RemoteSigningPolicy['wire'], payload: string, key: str
 export function createRemoteSignerProvider(options: RemoteSignerProviderOptions): Signer {
   const { exchangeName, remoteSigner, payloadSigner } = options;
   if (exchangeName === 'grvt' && !remoteSigner) throw refused();
-  const kucoin = exchangeName === 'kucoin';
+  const kucoin = exchangeName === 'kucoin' || exchangeName === 'kucoinspot';
   const declaration = deriveRemoteSigningPolicy(exchangeName)?.wire;
   const wire = declaration && { ...declaration,
     ...(declaration.secondsSuffix && { secondsSuffix: { ...declaration.secondsSuffix } }) };
