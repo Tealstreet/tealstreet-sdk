@@ -11,16 +11,14 @@ import { OrderSide } from './generated/OrderSide';
 import { OrderType } from './generated/OrderType';
 import type { Order } from './generated/Order';
 import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
-import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from './commandOutcome';
-import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 import type { Market } from './generated/Market';
 import type { OptionRight } from './generated/OptionRight';
 import type { OptionTerms } from './generated/OptionTerms';
 import type { OptionGreeks } from './generated/OptionGreeks';
 import type { Position } from './generated/Position';
+import type { ExchangeOptions } from './generated/ExchangeOptions';
 import type { Ticker } from './generated/Ticker';
-import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
 import type { TwapInstance } from './webworker/twap/TwapInstance';
 import type { TwapOptions } from './webworker/twap/TwapOptions';
@@ -86,224 +84,6 @@ export type ExchangeName =
   | 'kraken'
   | 'krakenspot';
 
-export type ExchangeOptions = {
-  readonly key: string;
-  readonly secret: string;
-  readonly passphrase?: string;
-  /** Rust local-provider setup only; consumed before generic options are retained.
-   * Stable IDs are caller-assigned, never derived from credential material. */
-  readonly localSigner?: LocalSignerMetadata;
-
-  readonly secondary_key?: string;
-  readonly secondary_secret?: string;
-  readonly secondary_passphrase?: string;
-
-  // Proxy URL for the secondary (read-only) key's transport. Lets reads route
-  // through a separate cheap fleet while writes stay on the primary transport.
-  // Undefined = secondary client keeps the primary/default transport.
-  readonly secondaryProxyUrl?: string;
-
-  // AsterDEX Web3 authentication
-  readonly auth?: {
-    userAddress?: string;
-    signerAddress?: string;
-    privateKey?: string;
-  };
-
-  // Paradex Ethereum authentication (private key stored in key field)
-  readonly paradexAddress?: string;
-  readonly subkeyAddress?: string;
-
-  // GRVT authentication (Ethereum address for order signing, must be tagged to API key)
-  readonly grvtSignerAddress?: string;
-  readonly grvtTradingAccountId?: string;
-
-  /** Polymarket CLOB V2; `key` is the local signing wallet's private key. */
-  readonly polymarket?: {
-    /** Discover only these Gamma market slugs; omitted means the full universe. */
-    readonly marketSlugs?: string[];
-    /** Supply all three L2 credentials together, or derive them with L1 auth. */
-    readonly apiKey?: string;
-    readonly apiSecret?: string;
-    readonly apiPassphrase?: string;
-    /** EOA, proxy, Safe, or ERC-1271 deposit wallet signing. Defaults to EOA. */
-    readonly signerType?: 0 | 1 | 2 | 3;
-    /** Deposit wallet/maker address; required for non-EOA signature types. */
-    readonly funderAddress?: string;
-  };
-
-  readonly starkPrivateKey?: string;
-  readonly vault?: string;
-  readonly applicationId?: string;
-  readonly apiKeyIndex?: string;
-  /**
-   * Which Hyperliquid builder wallet this account routes through, and the rate
-   * it charges — `feeTenthsBps` is tenths of a basis point, so 10 is 1bp.
-   *
-   * Absent means the historical default (`getBuilderAddress` +
-   * `TEALSTREET_BUILDER_FEE`), which is what every caller took before this
-   * existed. Resolve it through `resolveHyperliquidBuilder` rather than reading
-   * the field, so the fallback is defined in exactly one place.
-   *
-   * **The address and the rate travel together and must never be mixed.** A
-   * user approves a specific (builder, max rate) pair, so sending one builder's
-   * address with another's rate is an order Hyperliquid rejects.
-   */
-  readonly hyperliquidBuilder?: {
-    readonly address: string;
-    readonly feeTenthsBps: number;
-  };
-  /** Extra fast HL perp depth topic per book. Default off; budget all sockets against the per-IP cap. */
-  readonly hyperliquidFastBook?: boolean;
-  readonly testnet?: boolean;
-  /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
-  readonly enableSpotMarkets?: boolean;
-  /** See `ExchangeAccountConfig.enableOptionMarkets`. Default off. */
-  readonly enableOptionMarkets?: boolean;
-  /** See `ExchangeAccountConfig.enableInverseMarkets`. Default off. */
-  readonly enableInverseMarkets?: boolean;
-  /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
-  readonly bybitSiteId?: 'BRA_BTL';
-  readonly publicDataOnly?: boolean;
-  /** The host names a refused placement itself, so the exchange does not also report it. */
-  readonly callerReportsPlacementFailures?: boolean;
-  /**
-   * A main-thread instance paired with a worker that owns the account. Its reads
-   * and trading go to the worker, waiting for the bridge; it never runs an engine.
-   */
-  readonly workerMirror?: boolean;
-  /** Retained input compatibility; this build always uses Rust for beta venues. */
-  readonly engine?: 'rust';
-  readonly privateOnly?: boolean;
-  /** Rust live public-feed ownership. Shared ports must be explicitly transferred to workers. */
-  readonly publicFeed?: RustPublicFeedPolicy;
-  readonly tealstreetProxy?: boolean;
-  // tunnel (http over websocket)
-  readonly tealstreetTunnel?: boolean;
-  readonly tealstreetWsRoute?: boolean;
-  readonly overrideProxyUrl?: string;
-  readonly proxyRegion?: string;
-  readonly omniKeySeed?: string;
-  readonly subaccount?: string;
-  readonly orderlyExchangeId?: string;
-  readonly tuning?: {
-    readonly activeTickerSymbols?: string[];
-    readonly calculateUpnlFromRealtimeLastPrice?: boolean;
-    readonly dataUpdateThrottleMultiplier?: number;
-    readonly skipRendersWhenWindowIsHidden?: boolean;
-    readonly consoleLogging?: boolean;
-  };
-  readonly extra?: {
-    /** `Infinity` turns periodic REST polling off, for callers that fetch on demand. */
-    tickInterval?: number;
-    /** Rust command waiting deadline in ms (default 120000); expiry never retries or cancels a write. */
-    rustCommandTimeoutMs?: number;
-    recvWindow?: number;
-    // Optional AsterDEX REST API version override.
-    asterdexApiVersion?: 'v1' | 'v3';
-    // Optional Aster Code builder attribution overrides.
-    // Aster accepts one feeRate per order; maker/taker fields are Tealstreet placement policy.
-    asterBuilderAddress?: string;
-    asterBuilderFeeRateMaker?: string;
-    asterBuilderFeeRateTaker?: string;
-    // Lighter builder/integrator fee mode.
-    lighterBuilderFeeMode?: 'dynamic' | 'static';
-    // Optional override for Lighter integrator account index.
-    lighterIntegratorAccountIndex?: string;
-    // Lighter TP/SL allowed execution slippage, as a percentage from trigger price.
-    lighterStopSlippagePct?: number;
-    // HyroTrader uses the same connector for the shared simulator demo and real user-pasted challenge keys.
-    hyrotraderMode?: 'demo' | 'production';
-    /**
-     * KuCoin broker attribution config.
-     *
-     * Browser builds may supply this from NEXT_PUBLIC_KUCOIN_FUTURES_BROKER_*
-     * or NEXT_PUBLIC_KUCOIN_SPOT_BROKER_* env vars when product policy permits
-     * sending signed broker attribution from the client runtime.
-     */
-    kucoinBroker?: {
-      readonly partner: string;
-      readonly brokerKey: string;
-      readonly brokerName: string;
-      readonly verify?: boolean;
-    };
-  };
-
-  /** Delegates request signing to a signer outside this exchange runtime. */
-  readonly remoteSigner?: RemoteSigner;
-
-  /**
-   * Overrides the runtime's registered transport (`setDefaultTransport`) for this
-   * in-process instance. Never set it where options cross a worker or wire boundary:
-   * a function does not survive structuredClone, and exchange-server drops it.
-   */
-  readonly transport?: TransportProvider;
-
-  /**
-   * Stands in for `secret`: receives the exact bytes the exchange would HMAC and
-   * returns the signature value, plus any headers to add to the same request.
-   * Bybit and Binance: REST only, so the private websocket is not connected.
-   * Paradex: signs the auth and order typed data, and `key` is the subkey public key.
-   */
-  readonly payloadSigner?: PayloadSigner;
-
-  /**
-   * When true, exchange-independent post-processors run client-side instead of server-side.
-   * Only exchange-dependent post-processors (MessageHandlerStats, ChaserOrder) run on the server.
-   */
-  readonly hostedMode?: boolean;
-
-  /**
-   * External public data provider configuration.
-   * When set, the exchange does not create its own public WebSocket connection.
-   * Instead, it receives public data from a gateway or another in-process exchange.
-   * When undefined, the exchange uses its direct public-data connection.
-   */
-  readonly externalPublicData?:
-    | {
-        /**
-         * Type of external data provider
-         * - 'websocket': Connect to a WebSocket gateway that fans out public data
-         */
-        type: 'websocket';
-
-        /**
-         * WebSocket URL of the public data gateway
-         * Example: 'ws://public-data-gateway:8080'
-         */
-        url: string;
-
-        /**
-         * Exchange identifier used by the gateway to route messages
-         * Example: 'bybit', 'binance'
-         */
-        exchangeId: string;
-
-        /**
-         * Optional authentication token for the gateway connection
-         */
-        authToken?: string;
-      }
-    | {
-        /**
-         * Type of external data provider
-         * - 'in-process': Use another Exchange instance in the same process as the data source.
-         *   The source exchange's store updates (tickers/markets) are forwarded to this exchange.
-         *   Orderbook and candle subscriptions are delegated to the source's listen* methods.
-         *
-         * This enables sharing a single public-data exchange connection across N authenticated
-         * instances (e.g., 100 Bybit accounts sharing one public WS connection).
-         */
-        type: 'in-process';
-
-        /**
-         * A running Exchange instance that provides public data.
-         * Typically created via createPublicExchange() and started before being passed here.
-         */
-        source: PublicDataSource;
-      };
-};
-
 /**
  * Exchange account configuration - used across web, CLI, telegram, etc.
  * This represents a user's saved exchange account with credentials.
@@ -326,118 +106,6 @@ export interface ValidateAccountResult {
   balance?: Balance;
   /** Typed reason when the engine classified the failure (Rust venues), e.g. 'authInvalid'. */
   kind?: ExchangeErrorKind;
-}
-
-export interface ExchangeAccountConfig {
-  exchange: ExchangeName;
-  name: string;
-  testnet?: boolean;
-
-  // API credentials (also used for private keys on wallet-based exchanges)
-  apiKey: string;
-  apiSecret: string;
-  passphrase?: string;
-
-  // Secondary API keys (for exchanges that support multiple keys)
-  secondary_apiKey?: string;
-  secondary_apiSecret?: string;
-  secondary_passphrase?: string;
-
-  /**
-   * Opt this account into the exchange's spot markets, for venues that serve
-   * spot and derivatives from one connection (`supportsSpotToggle` metadata).
-   *
-   * Default-off is deliberate: a perp trader's market list and request volume
-   * must be unchanged unless they explicitly ask for spot.
-   */
-  enableSpotMarkets?: boolean;
-
-  /**
-   * Opt this account into the exchange's option markets, for venues that trade options
-   * in the same account as their derivatives (`supportsOptionsToggle` metadata).
-   *
-   * Default off, for the same reason as `enableSpotMarkets`: a perp trader's market list
-   * and request volume must be unchanged unless they ask for options.
-   */
-  enableOptionMarkets?: boolean;
-
-  /**
-   * Opt this account into the exchange's inverse (coin-margined) markets, for venues that trade them in the same
-   * account as their linear derivatives (`supportsInverseToggle` metadata). Default off, as for options.
-   */
-  enableInverseMarkets?: boolean;
-
-  /**
-   * Bybit Brazil accounts use the global Bybit hosts but require
-   * `x-site-id: BRA_BTL` on REST and WebSocket connection requests.
-   */
-  bybitSiteId?: 'BRA_BTL';
-
-  // Exchange-specific authentication fields
-  applicationId?: string;
-  apiKeyIndex?: string;
-  vault?: string;
-  omniKeySeed?: string;
-  subaccount?: string;
-  orderlyExchangeId?: string;
-
-  // Paradex Ethereum authentication (private key stored in apiKey field)
-  paradexAddress?: string;
-  subkeyAddress?: string;
-
-  // GRVT authentication (Ethereum address for order signing, must be tagged to API key)
-  grvtSignerAddress?: string;
-  grvtTradingAccountId?: string;
-
-  // Proxy settings
-  tealstreetProxy?: boolean;
-  tealstreetTunnel?: boolean;
-  tealstreetWsRoute?: boolean;
-  proxyRegion?: string;
-
-  /**
-   * True only for the bundled shared /hyrotrader-demo account. Real HyroTrader
-   * accounts use user-pasted challenge API keys and should behave as live
-   * accounts even though the connector reuses simulator-compatible endpoints.
-   */
-  hyrotraderDemo?: boolean;
-
-  /** When set, and the Tealstreet browser extension is present, this account
-   *  connects directly to the exchange (no proxy/tunnel) — the extension's
-   *  declarativeNetRequest rules handle CORS/header injection. Resolved
-   *  web-side only; ignored when the extension is absent (proxy stays the
-   *  fallback). */
-  useExtensionDirect?: boolean;
-
-  // UI/metadata fields (optional, not used for trading)
-  user?: string;
-  color?: string;
-  active?: boolean;
-  pinned?: boolean;
-  telegramBotToken?: string;
-  lastSymbol?: string;
-
-  /** Runtime health status — set by error classification, auto-clears on successful connect */
-  /**
-   * `startup_failed` is not an auth verdict: the exchange's `start()` threw, so
-   * the account is alive with no sockets and the topic watchdog reloads it on a
-   * loop. It exists so that failure has a visible name instead of a silent
-   * reconnect spinner. Device-local (see `DEVICE_LOCAL_ACCOUNT_FIELDS`).
-   */
-  healthStatus?: 'ok' | 'auth_error' | 'auth_expired' | 'permissions_error' | 'startup_failed';
-
-  /** Last write timestamp (ms since epoch). Used for last-write-wins
-   *  across CLI ↔ web account sync. Missing → treated as 0 for LWW. */
-  updatedAt?: number;
-  /** Tombstone marker for sync deletes. Live accounts have undefined. */
-  deletedAt?: number;
-  /** Stable identity minted at creation, carried across renames and key
-   *  rotations. Merge still keys on `name`; this is what tells a rotated
-   *  key (same id, plain last-write-wins) from two devices that
-   *  independently created different accounts under one name (different
-   *  id, both worth keeping). Missing on pre-sync rows — see
-   *  `apps/web/src/utils/accountSync/accountFields.ts`. */
-  syncId?: string;
 }
 
 export type PublicExchangeOptions = Omit<ExchangeOptions, 'key' | 'secret'> & {
@@ -838,12 +506,6 @@ export type WritableStoreData = {
   fetchedLeverage: Record<string, FetchedLeverage>;
 };
 
-export type ExchangeAccount = {
-  readonly userId: string;
-  readonly subId?: string | null;
-  readonly affiliateId?: string | null;
-};
-
 export const readOnlyOrderStatuses: OrderStatus[] = [
   OrderStatus.Creating,
   OrderStatus.Updating,
@@ -958,3 +620,7 @@ export interface RemoteSigner {
   /** Account name for multi-account matching (e.g., "bear2") */
   accountName?: string;
 }
+
+export type { ExchangeOptions };
+export type { ExchangeAccount } from './generated/ExchangeAccount';
+export type { ExchangeAccountConfig } from './generated/ExchangeAccountConfig';

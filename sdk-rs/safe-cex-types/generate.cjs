@@ -4,7 +4,7 @@ const path = require('node:path');
 const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
 
 // In-process capabilities retain TS ownership until the IO/FFI implementation phase.
-const runtimeBoundaries = ['RemoteSigner', 'PayloadSigner', 'TransportProvider', 'PublicDataSource'];
+const runtimeBoundaries = ['RemoteSigner', 'PayloadSigner', 'TransportProvider', 'PublicDataSource', 'LocalSignerMetadata', 'RustPublicFeedPolicy'];
 
 function stringLiterals(type) {
   const types = ts.isUnionTypeNode(type) ? type.types : [type];
@@ -83,7 +83,7 @@ function generate(bindings) {
     const imports = missing.map(n => `import type { ${n} } from './${n}';`).join('\n');
     fs.writeFileSync(path.join(bindings, name), boundaryImport + (imports ? `${imports}\n${output.source}` : output.source));
   }
-  fs.writeFileSync(path.join(bindings, 'runtime-boundaries.ts'), `// Runtime capabilities deliberately retain TypeScript ownership; see TYPE_PARITY.md.\nexport type { RemoteSigner, PayloadSigner, PublicDataSource } from '../../../packages/safe-cex/src/types';\nexport type { TransportProvider } from '../../../packages/safe-cex/src/transport/types';\n`);
+  fs.writeFileSync(path.join(bindings, 'runtime-boundaries.ts'), `// Runtime capabilities deliberately retain TypeScript ownership; see TYPE_PARITY.md.\nexport type { RemoteSigner, PayloadSigner, PublicDataSource } from '../../../packages/safe-cex/src/types';\nexport type { TransportProvider } from '../../../packages/safe-cex/src/transport/types';\nexport type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';\nexport type { RustPublicFeedPolicy } from '../../../packages/safe-cex/src/exchanges/rust/publicFeed';\n`);
   assert.deepEqual(seen.sort(), Object.keys(metadata).sort(), 'every exported Rust enum must be rendered exactly once');
 }
 
@@ -126,4 +126,9 @@ if (require.main === module) {
   publishModels();
   publishExecution();
   require('./generate-balance.cjs').generate();
+  const { renderOptions } = require('./tests/options-render.cjs');
+  for (const name of ['ExchangeOptions', 'ExchangeAccount', 'ExchangeAccountConfig']) {
+    fs.writeFileSync(path.resolve(__dirname, `../../packages/safe-cex/src/generated/${name}.ts`),
+      renderOptions(name, fs.readFileSync(path.join(__dirname, 'bindings/raw', `${name}.ts`), 'utf8'), transform));
+  }
 }

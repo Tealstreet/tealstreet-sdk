@@ -44,6 +44,7 @@ fn private_companions_cannot_drift_from_canonical_definitions() {
         "src/execution.rs",
         "src/position.rs",
         "src/history.rs",
+        "src/options.rs",
         "src/order.rs",
         "src/store_model.rs",
         "src/extra_model.rs",
