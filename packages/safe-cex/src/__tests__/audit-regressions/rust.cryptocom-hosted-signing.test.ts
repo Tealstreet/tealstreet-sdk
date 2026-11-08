@@ -29,6 +29,32 @@ const owned = (now = stamp) => {
 };
 afterEach(() => vi.restoreAllMocks());
 
+it.each(vectors)('Crypto.com $method: HTTP metadata preserves the local JSON signature bytes', async (v) => {
+  const host = {
+    hostedSigningClock: () => ({ stampMs: stamp, revision: '1' }),
+    hostedSigning: async (input: { kind: string; payload?: string }) =>
+      input.kind === 'credential'
+        ? { credential: 'replay-key' }
+        : { credential: 'replay-key', signature: mac(input.payload!), headers: [['X-Trace', 'keep']] },
+  } as unknown as EngineHost;
+  const result = await signHostedHttp('cryptocom', {} as ExchangeOptions, true, host, {
+    id: 'metadata',
+    type: 'http',
+    exchangeName: 'cryptocom',
+    config: {
+      method: 'POST',
+      baseURL: 'https://api.crypto.com/exchange/v1',
+      url: `/${v.method}`,
+      data: v.params,
+      headers: {},
+    },
+  });
+  expect(result.error).toBeUndefined();
+  expect(result.config?.headers['X-Trace']).toBe('keep');
+  expect(JSON.parse(result.config!.data as string).sig).toBe(v.signature);
+  expect(result.config?.headers).not.toHaveProperty('sig');
+});
+
 it('re-signs a serialized envelope using only its original params and a fresh protocol timestamp', async () => {
   const v = vectors.find((v) => v.method === 'private/create-order')!;
   const params = v.params;

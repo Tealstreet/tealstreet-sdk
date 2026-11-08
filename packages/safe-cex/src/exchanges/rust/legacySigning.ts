@@ -276,7 +276,7 @@ export const signHostedHttp = async (
     const prepared = prepareCryptocomRequest(config, credential, now());
     const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
     if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
-    return finishCryptocomRequest(config, prepared, credential, output.signature);
+    return finishCryptocomRequest(config, prepared, credential, output.signature, output.headers);
   } : woo ? async (config) => {
     if (config.url?.includes('/public/') || !credential) return config;
     const prepared = prepareWooRequest(config, now(), options.testnet);

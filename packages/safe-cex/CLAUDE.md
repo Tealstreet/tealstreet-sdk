@@ -206,6 +206,9 @@ Crypto.com admits RemoteSigner and canonical HMAC PayloadSigner. Every signed
 REST envelope and `public/auth` uses provider custody; the hosted wire carries
 only `method + id + api_key + canonical params + nonce`. PayloadSigner keeps
 private REST reconciliation and writes but opens no private user socket.
+Crypto.com HTTP callback metadata follows its declared header policy in native
+dispatch and hosted capture; the HMAC remains in JSON `sig`. WS auth refuses
+callback result headers.
 Crypto.com Hosted secondary credentials refuse with `unsupported` / `notSent`;
 all native private POSTs retain primary selection. Subaccounts use their own
 API key/secret, with no separate wallet or cosigning protocol.

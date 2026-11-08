@@ -19,6 +19,9 @@ PayloadSigner can sign the same canonical HMAC payload for private REST reads
 and writes. It uses the REST-only private-feed policy: reconciliation continues,
 but private user sockets, authentication and reconnect upkeep are suppressed.
 Public feeds are unchanged. RemoteSigner keeps private streaming.
+Bounded callback metadata follows the declared HTTP header policy in both
+native dispatch and hosted HTTP capture. The HMAC stays in the JSON `sig` field;
+HTTP headers never replace it. WebSocket authentication refuses result headers.
 
 Crypto.com subaccounts authenticate with their own API key/secret; this SDK
 adds no wallet/agent signing or threshold-cosigning protocol. Hosted secondary

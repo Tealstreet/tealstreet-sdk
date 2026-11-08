@@ -8,6 +8,8 @@ import vectors from '../../../../../sdk-rs/venues/cryptocom/tests/fixtures/hoste
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { OrderSide, OrderType } from '../../types';
+import { generateSignature } from '../reference/cryptocom/cryptocom.signing';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
 let stamp = 1_610_000_000_000;
@@ -115,6 +117,7 @@ it('actual WASM WS authentication uses the remote provider and a matching receip
 it('actual WASM PayloadSigner receives only canonical HMAC input', async () => {
   const payloadSigner = vi.fn(async ({ payload }: { payload: string }) => ({
     signature: createHmac('sha256', 'replay-secret').update(payload).digest('hex'),
+    headers: { 'X-Trace': 'keep' },
   }));
   const origin = fixture({ secret: '', payloadSigner });
   const result = await origin.exchange.signHttpRequest({
@@ -130,6 +133,7 @@ it('actual WASM PayloadSigner receives only canonical HMAC input', async () => {
     },
   });
   expect(result.error).toBeUndefined();
+  expect(result.config?.headers['X-Trace']).toBe('keep');
   expect(payloadSigner).toHaveBeenCalledWith({
     exchangeName: 'cryptocom',
     key: 'replay-key',
@@ -153,16 +157,18 @@ it.each(['remote', 'payload'] as const)(
     const { sign, remoteSigner } = remote(device.exchange);
     const payloadSigner = vi.fn(async ({ payload }: { payload: string }) => ({
       signature: createHmac('sha256', 'replay-secret').update(payload).digest('hex'),
+      headers: { 'X-Trace': 'keep' },
     }));
-    const requests: { url: string; body?: string }[] = [];
+    const requests: { url: string; body?: string; headers: Record<string, string> }[] = [];
     const sockets: string[] = [];
     const logins: string[] = [];
+    let placementStatus = 200;
     const began = Date.now();
     setRustEngineTransport(() => ({
       prepareHttp: prepareRecordedHttp,
       now: () => stamp + Date.now() - began,
-      request: async ({ url, body }) => {
-        requests.push({ url, body: typeof body === 'string' ? body : undefined });
+      request: async ({ url, body, headers }) => {
+        requests.push({ url, body: typeof body === 'string' ? body : undefined, headers });
         let data: unknown = { code: 0, result: { data: [] } };
         if (url.endsWith('/public/get-instruments'))
           data = {
@@ -204,6 +210,12 @@ it.each(['remote', 'payload'] as const)(
               ],
             },
           };
+        if (url.endsWith('/private/create-order')) {
+          return {
+            status: placementStatus,
+            body: new TextEncoder().encode(JSON.stringify({ code: 0, result: { order_id: '12345' } })),
+          };
+        }
         return { status: 200, body: new TextEncoder().encode(JSON.stringify(data)) };
       },
       connect: (url, handlers) => {
@@ -249,15 +261,29 @@ it.each(['remote', 'payload'] as const)(
       );
       expect(sign.mock.calls.some(([request]) => request.wsAuth?.toSign.startsWith('public/auth'))).toBe(true);
     }
+    const order = {
+      symbol: 'BTCUSD-PERP',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 0.01,
+      price: 100,
+      clientOrderId: 'metadata-order',
+    };
+    expect(await exchange.placeOrder(order)).toEqual(['12345']);
+    placementStatus = 503;
+    await expect(exchange.placeOrder({ ...order, clientOrderId: 'metadata-unknown' })).rejects.toMatchObject({
+      outcome: 'unknown',
+      message: expect.stringContaining('unknown'),
+    });
+    expect(requests.filter((r) => r.url.endsWith('/private/create-order'))).toHaveLength(2);
     for (const request of requests.filter((r) => r.url.includes('/private/'))) {
       const envelope = JSON.parse(request.body!);
       expect(envelope.api_key).toBe('replay-key');
-      expect(envelope.params).toEqual({});
       expect(envelope.sig).toBe(
-        createHmac('sha256', 'replay-secret')
-          .update(`${envelope.method}${envelope.id}replay-key${envelope.nonce}`)
-          .digest('hex'),
+        generateSignature(envelope.method, envelope.id, 'replay-key', 'replay-secret', envelope.params, envelope.nonce),
       );
+      if (mode === 'payload') expect(request.headers['X-Trace']).toBe('keep');
+      expect(request.headers).not.toHaveProperty('sig');
     }
     expect(errors).toEqual([]);
   },

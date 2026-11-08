@@ -1,5 +1,7 @@
 import type { InternalAxiosRequestConfig } from 'axios';
 
+import { AxiosHeaders } from 'axios';
+
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -29,9 +31,15 @@ export const finishCryptocomRequest = (
   prepared: ReturnType<typeof prepareCryptocomRequest>,
   key: string,
   signature: string,
-): InternalAxiosRequestConfig => ({
-  ...config,
-  method: 'POST',
-  data: JSON.stringify({ id: prepared.stampMs, method: prepared.method, api_key: key,
-    params: prepared.params, sig: signature, nonce: prepared.stampMs }),
-});
+  metadata: [string, string][] = [],
+): InternalAxiosRequestConfig => {
+  const headers = new AxiosHeaders(config.headers);
+  for (const [name, value] of metadata) headers.set(name, value);
+  return {
+    ...config,
+    headers,
+    method: 'POST',
+    data: JSON.stringify({ id: prepared.stampMs, method: prepared.method, api_key: key,
+      params: prepared.params, sig: signature, nonce: prepared.stampMs }),
+  };
+};
