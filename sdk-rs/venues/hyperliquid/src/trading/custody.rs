@@ -792,24 +792,23 @@ impl Hyperliquid {
             message
         };
         // Cancellation targets are existing orders, never created-order evidence.
-        if matches!(&request.effect, Effect::Cancel(_)) {
-            cx.http_write_applied_batch(
+        match &request.effect {
+            Effect::Cancel(_) => cx.http_write_applied_batch(
                 &request.context,
                 table,
                 statuses.len(),
                 &items,
                 message,
                 None,
-            )
-        } else {
-            cx.http_write_batch(
+            ),
+            _ => cx.http_write_batch(
                 &request.context,
                 table,
                 statuses.len(),
                 &items,
                 message,
                 None,
-            )
+            ),
         }
         .map(drop)
     }
