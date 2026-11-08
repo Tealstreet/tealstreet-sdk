@@ -1,7 +1,16 @@
+import './session-tasks';
+import {
+  getStorageDir,
+  getStoragePath,
+  getStorageEpoch,
+  isStorageSessionCurrent,
+  assertStorageSession,
+  onStorageOwnerChange,
+  runInStorageSession,
+} from './storage-context';
 import * as readline from 'readline';
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+
 import chalk from 'chalk';
 import type { CLISession, PromptConfig } from '../../../packages/cli-core/src/index';
 import { accountsToStart } from './accountsToStart';
@@ -29,8 +38,9 @@ import {
   recordFill,
   newRunId,
   runWithAuditRunId,
-  AUDIT_LOG_PATH,
+  getAuditLogPath,
 } from './audit-log';
+// All commands now handled by cli-core
 // All commands now handled by cli-core
 import {
   formatPositionsTable,
@@ -61,7 +71,6 @@ import {
   CYAN,
   RESET,
   DIM,
-  CLEAR_SCREEN,
   CLEAR_LINE,
 } from '../../../packages/cli-core/src/commands/trading';
 
@@ -72,6 +81,7 @@ import { OrderSide, type Candle, type Timeframe, type Market } from '../../../pa
 import type { Exchange } from '../../../packages/safe-cex/src/exchanges/base';
 import { loadConfig, saveConfig, getAccount } from './config';
 import { G } from './console-glyphs';
+// TWAP support for taskAction handling
 // TWAP support for taskAction handling
 import { commandRegistry } from '../../../packages/cli-core/src/commands/CommandRegistry';
 import { ensureCommandsRegistered } from '../../../packages/cli-core/src/commands/CommandExecutor';
@@ -92,17 +102,9 @@ import { twapManager } from '../../../packages/safe-cex/src/webworker/twap/TwapM
 import { TwapInstance } from '../../../packages/safe-cex/src/webworker/twap/TwapInstance';
 import { createStandalonePlatformAdapter } from './platform-adapter';
 import { logger, originalConsoleLog, setConsoleTap, setPromptController } from './logger';
-import type { ExchangeLike, ExchangeAccountConfig } from '../../../packages/cli-core/src/types';
+import type { ExchangeLike } from '../../../packages/cli-core/src/types';
 import { formatBaseSize } from '../../../packages/cli-core/src/utils/formatBaseSize';
-import {
-  login,
-  logout,
-  showAuthStatus,
-  isLoggedIn,
-  checkAndRefreshToken,
-  tokenNeedsRefresh,
-  getTokenExpiryDays,
-} from './auth';
+import { login, logout, showAuthStatus, isLoggedIn, tokenNeedsRefresh, getTokenExpiryDays } from './auth';
 import { getCurrentVersion, performUpdate, forceCheckForUpdates } from './updater';
 import { ExchangeManager } from './exchange-manager';
 import { classifyConnectError } from './connect-error';
@@ -130,7 +132,7 @@ import type { Capabilities, CoreAdapter, RunScriptResult } from '@tealstreet/scr
 
 import { createStandaloneCoreAdapter } from './script-adapter';
 import { runScriptFromHost, runScriptFromHostWithAdapter } from './script-runner';
-import { awaitScriptsLoaded, loadScripts, lookupScript, SCRIPTS_DIR } from './scripts-store';
+import { awaitScriptsLoaded, loadScripts, lookupScript, getScriptsDir } from './scripts-store';
 import { getCliTranspile } from './bun-transpile';
 import { parseScriptInvocation } from './script-dispatcher';
 import { BRAND } from './brand';
@@ -262,8 +264,8 @@ function formatWatchMessages(): string {
 }
 
 // Command history persistence
-const HISTORY_DIR = path.join(os.homedir(), BRAND.configDirName);
-const HISTORY_FILE = path.join(HISTORY_DIR, 'cli_history');
+const HISTORY_DIR = () => getStorageDir();
+const HISTORY_FILE = () => getStoragePath('cli_history');
 const MAX_HISTORY_SIZE = 1000;
 
 /**
@@ -272,8 +274,8 @@ const MAX_HISTORY_SIZE = 1000;
  */
 function loadHistory(): string[] {
   try {
-    if (fs.existsSync(HISTORY_FILE)) {
-      const content = fs.readFileSync(HISTORY_FILE, 'utf-8');
+    if (fs.existsSync(HISTORY_FILE())) {
+      const content = fs.readFileSync(HISTORY_FILE(), 'utf-8');
       // Readline expects history in reverse order (most recent first)
       return content
         .split('\n')
@@ -291,12 +293,12 @@ function loadHistory(): string[] {
  */
 function saveHistory(history: string[]): void {
   try {
-    if (!fs.existsSync(HISTORY_DIR)) {
-      fs.mkdirSync(HISTORY_DIR, { recursive: true });
+    if (!fs.existsSync(HISTORY_DIR())) {
+      fs.mkdirSync(HISTORY_DIR(), { recursive: true });
     }
     // Keep only the last MAX_HISTORY_SIZE entries
     const trimmedHistory = history.slice(-MAX_HISTORY_SIZE);
-    fs.writeFileSync(HISTORY_FILE, trimmedHistory.join('\n') + '\n');
+    fs.writeFileSync(HISTORY_FILE(), trimmedHistory.join('\n') + '\n');
   } catch (error) {
     // Ignore errors
   }
@@ -307,10 +309,10 @@ function saveHistory(history: string[]): void {
  */
 function appendToHistory(command: string): void {
   try {
-    if (!fs.existsSync(HISTORY_DIR)) {
-      fs.mkdirSync(HISTORY_DIR, { recursive: true });
+    if (!fs.existsSync(HISTORY_DIR())) {
+      fs.mkdirSync(HISTORY_DIR(), { recursive: true });
     }
-    fs.appendFileSync(HISTORY_FILE, command + '\n');
+    fs.appendFileSync(HISTORY_FILE(), command + '\n');
   } catch (error) {
     // Ignore errors
   }
@@ -404,7 +406,13 @@ export function recreateReadline(): void {
     const trimmedLine = line.trim();
     if (trimmedLine) {
       appendToHistory(trimmedLine);
-      commandQueue = commandQueue.then(() => processCommand(trimmedLine)).catch(console.error);
+      const epoch = getStorageEpoch();
+      commandQueue = commandQueue
+        .then(() => {
+          assertStorageSession(epoch);
+          return processCommand(trimmedLine);
+        })
+        .catch(console.error);
     }
     commandQueue.then(() => {
       newRl.setPrompt(getPrompt());
@@ -499,7 +507,7 @@ async function startWatchChart(
       firstClose = candles[0].close;
     }
   } catch (error) {
-    originalConsoleLog(`Error fetching candles: ${(error as Error).message}`);
+    originalConsoleLog(`Error fetching candles: ${error instanceof Error ? error.message : String(error)}`);
     isMonitorMode = false;
     rl.resume();
     rl.prompt();
@@ -1046,6 +1054,7 @@ const FOOTER_READONLY_CAPS: Capabilities = {
 };
 
 async function runFooterScript(name: string): Promise<void> {
+  const epoch = getStorageEpoch();
   // In-flight guard: never stack runs for the same script. Held until the REAL
   // run settles (not the timeout), so a hung script can't spawn a fresh run
   // every tick — it stays in-flight and renders its provisional error token.
@@ -1060,7 +1069,7 @@ async function runFooterScript(name: string): Promise<void> {
   // Overrun → surface `!name` so the segment isn't blank; the run keeps going
   // and overwrites the cache if/when it lands.
   const slowTimer = setTimeout(() => {
-    if (!settled) footerScriptCache.set(name, `!${name}`);
+    if (isStorageSessionCurrent(epoch) && !settled) footerScriptCache.set(name, `!${name}`);
   }, FOOTER_SCRIPT_TIMEOUT_MS);
   slowTimer.unref?.();
   try {
@@ -1076,6 +1085,7 @@ async function runFooterScript(name: string): Promise<void> {
       { adapter: silent, transpile: getCliTranspile() },
       { record: roRecord, rawArgs: '', invokedFrom: 'inline' },
     );
+    if (!isStorageSessionCurrent(epoch)) return;
     if (result.ok) {
       const raw =
         typeof result.returnValue === 'string'
@@ -1088,7 +1098,7 @@ async function runFooterScript(name: string): Promise<void> {
       footerScriptCache.set(name, `!${name}`); // error token (incl. denied writes)
     }
   } catch {
-    footerScriptCache.set(name, `!${name}`);
+    if (isStorageSessionCurrent(epoch)) footerScriptCache.set(name, `!${name}`);
   } finally {
     settled = true;
     clearTimeout(slowTimer);
@@ -1226,12 +1236,12 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
     const sub = command.slice('audit'.length).trim().toLowerCase();
     if (sub === 'on') {
       setAuditEnabled(true);
-      adapter.printSuccess(`Audit log ON — write-ops append to ${AUDIT_LOG_PATH}`);
+      adapter.printSuccess(`Audit log ON — write-ops append to ${getAuditLogPath()}`);
     } else if (sub === 'off') {
       setAuditEnabled(false);
       adapter.printSuccess('Audit log OFF');
     } else if (sub === '' || sub === 'status') {
-      adapter.printInfo(`Audit log: ${isAuditEnabled() ? 'ON' : 'OFF'} (${AUDIT_LOG_PATH})`);
+      adapter.printInfo(`Audit log: ${isAuditEnabled() ? 'ON' : 'OFF'} (${getAuditLogPath()})`);
     } else if (sub === 'tail' || sub.startsWith('tail ')) {
       const n = parseInt(sub.slice('tail'.length).trim(), 10);
       const entries = readAuditTail(Number.isFinite(n) && n > 0 ? n : 20);
@@ -1375,7 +1385,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
     const loadPromise = loadScripts();
     try {
       const scripts = await loadPromise;
-      adapter.printSuccess(`Loaded ${scripts.length} script${scripts.length === 1 ? '' : 's'} from ${SCRIPTS_DIR}`);
+      adapter.printSuccess(`Loaded ${scripts.length} script${scripts.length === 1 ? '' : 's'} from ${getScriptsDir()}`);
       for (const s of scripts) {
         adapter.printInfo(`  - ${s.name}`);
       }
@@ -1784,7 +1794,9 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
             setupExchangeListeners(exchange, exchangeListenerContext, name);
             adapter.printSuccess(`Account "${name}" enabled`);
           } catch (error) {
-            adapter.printError(`Failed to enable account "${name}": ${(error as Error).message}`);
+            adapter.printError(
+              `Failed to enable account "${name}": ${error instanceof Error ? error.message : String(error)}`,
+            );
           }
         }
       } else if (action === 'disable') {
@@ -1801,7 +1813,9 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
             await exchangeManager.disable(name);
             adapter.printSuccess(`Account "${name}" disabled`);
           } catch (error) {
-            adapter.printError(`Failed to disable account "${name}": ${(error as Error).message}`);
+            adapter.printError(
+              `Failed to disable account "${name}": ${error instanceof Error ? error.message : String(error)}`,
+            );
           }
         }
       }
@@ -1881,7 +1895,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
             adapter.printSuccess(`TWAP started [${twapInstance.id.slice(0, 8)}]`);
           }
         } catch (error) {
-          adapter.printError(`Failed to start TWAP: ${(error as Error).message}`);
+          adapter.printError(`Failed to start TWAP: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     } else if (action === 'stop' && type === 'twap') {
@@ -1924,7 +1938,11 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
  * (stripped + one warning per invocation) for backwards compatibility;
  * users should migrate to `&`.
  */
-export async function processCommand(
+export function processCommand(commandString: string, options: { drainFinalInFlight?: boolean } = {}): Promise<void> {
+  return runInStorageSession(() => processCommandInSession(commandString, options));
+}
+
+async function processCommandInSession(
   commandString: string,
   options: { drainFinalInFlight?: boolean } = {},
 ): Promise<void> {
@@ -1959,7 +1977,7 @@ export async function processCommand(
       store: preprocessStore,
     });
   } catch (e) {
-    adapter.printError((e as Error).message);
+    adapter.printError(e instanceof Error ? e.message : String(e));
     return;
   }
 
@@ -2341,13 +2359,11 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     }
 
     // Start all accounts (including primary) in the background without blocking the CLI prompt
+    const startupEpoch = getStorageEpoch();
     const activeAccounts = adapter.getActiveAccounts();
     const primaryAccount = session.currentAccountName ? getAccount(session.currentAccountName) : null;
-    const accountsToEnable = accountsToStart(
-      primaryAccount,
-      Boolean(accountName),
-      activeAccounts,
-      (name) => exchangeManager.isConnected(name),
+    const accountsToEnable = accountsToStart(primaryAccount, Boolean(accountName), activeAccounts, (name) =>
+      exchangeManager.isConnected(name),
     );
 
     if (accountsToEnable.length > 0) {
@@ -2357,6 +2373,7 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
         exchangeManager
           .enable(activeAccount)
           .then((exchange) => {
+            if (!isStorageSessionCurrent(startupEpoch)) return;
             connectionStates.set(activeAccount.name, 'connected');
             setupExchangeListeners(exchange, exchangeListenerContext, activeAccount.name);
             // If this is the primary account, update session
@@ -2375,7 +2392,8 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
             }
           })
           .catch((error) => {
-            const errorMsg = (error as Error).message;
+            if (!isStorageSessionCurrent(startupEpoch)) return;
+            const errorMsg = error instanceof Error ? error.message : String(error);
             const kind = classifyConnectError(errorMsg);
             connectionStates.set(activeAccount.name, kind === 'auth' ? 'auth-failed' : 'failed');
             if (activeAccount.name === session.currentAccountName) {
@@ -2564,7 +2582,9 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     });
     // A command that throws must not leave the queue rejected: every later
     // typed command and webhook would then fail without running.
-    commandQueue = commandQueue.catch((err) => adapter.printError(`Error: ${(err as Error).message}`));
+    commandQueue = commandQueue.catch((err) =>
+      adapter.printError(`Error: ${err instanceof Error ? err.message : String(err)}`),
+    );
   });
 
   rl.on('close', async () => {
@@ -2617,7 +2637,7 @@ export async function executeCommandWithCapture(command: string): Promise<string
   try {
     await processSingleCommand(command);
   } catch (error) {
-    adapter.printError(`Error: ${(error as Error).message}`);
+    adapter.printError(`Error: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     // Restore console.log
     console.log = originalLog;
@@ -2683,7 +2703,7 @@ export async function runSingleCommand(
   try {
     session = await connectToAccount(account, session, adapter);
   } catch (error) {
-    const errorMsg = (error as Error).message;
+    const errorMsg = error instanceof Error ? error.message : String(error);
     const kind = classifyConnectError(errorMsg);
     if (kind === 'auth') {
       adapter.printError('Authentication failed. Your token may have expired.');
@@ -2772,7 +2792,7 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
         try {
           session = await connectToAccount(account, session, adapter);
         } catch (error) {
-          adapter.printError(`Failed to connect: ${(error as Error).message}`);
+          adapter.printError(`Failed to connect: ${error instanceof Error ? error.message : String(error)}`);
         }
         if (!session.currentExchange) {
           const errorLine = [...output].reverse().find((line) => line.kind === 'error')?.text;
@@ -2851,3 +2871,15 @@ async function waitForTwapsStartedByCommand(twapsBeforeCommand: Set<string>): Pr
     }, 250);
   });
 }
+
+onStorageOwnerChange(() => {
+  session.currentExchange = null;
+  session.currentAccountName = '';
+  session.currentSymbol = '';
+  connectionStates.clear();
+  stopMonitorFn?.();
+  connectionMonitor?.stop();
+  networkMonitor?.stop();
+  stopFooterScriptRefresh();
+  if (rlInstance && 'history' in rlInstance) rlInstance.history = loadHistory();
+});

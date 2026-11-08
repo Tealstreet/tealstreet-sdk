@@ -1,3 +1,4 @@
+import { onStorageOwnerChange, runInStorageSession } from '../storage-context';
 // The REPL's hosted-webhook listener: builds the shared cli-core client with
 // the CLI's identity, token and command runner. Started from `startRepl` only;
 // one-shot commands must never hold this socket open.
@@ -50,7 +51,7 @@ export function startWebhookRelay(opts: {
     getToken: getProxyTokenFromConfig,
     url: process.env.TEALSTREET_NEWS_WS_URL,
     createSocket: opts.createSocket,
-    runBody: opts.runBody,
+    runBody: (...args) => runInStorageSession(() => opts.runBody(...args)),
     notice: opts.notice,
     mirror: mirrorToTerminal,
   });
@@ -74,3 +75,5 @@ export function restartWebhookRelay(): void {
   stopWebhookRelay();
   startWebhookRelay(options);
 }
+
+onStorageOwnerChange(restartWebhookRelay);

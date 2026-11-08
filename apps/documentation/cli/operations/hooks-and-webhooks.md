@@ -5,6 +5,8 @@ sidebar_position: 2
 
 # Hooks & webhooks
 
+Hook secrets, commands and listener identity belong to the signed-in user. Switching users closes the old listener and hosted relay; pending work from the old login is cancelled. See [user profiles and migration](./config-files.md#login-logout-and-migration).
+
 There are two ways a webhook reaches the CLI:
 
 - **Hosted webhooks** — TradingView (or any sender) posts to your
