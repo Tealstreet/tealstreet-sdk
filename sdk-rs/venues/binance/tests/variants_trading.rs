@@ -644,7 +644,7 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
         }
         assert_eq!(
             ids.len(),
-            6,
+            9, // TS allocates 3,3,2 for each 7-unit entry/SL/TP at max=5, step=1.
             "every split entry and SL/TP has its actual identity"
         );
         assert!(writes > 0);
@@ -879,10 +879,10 @@ fn coin_m_trailing_stop_from_the_snapshot_can_be_amended() {
     assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
 }
 
-/// COIN-M may list a trailing stopPrice as zero. Its requested replacement still
-/// uses the new callback rate, then ends without compensation if refused.
+/// COIN-M ignores stopPrice for trailing stops, so a native row may list it as 0: after
+/// a refused replacement the put-back still restores the captured rate and activation.
 #[test]
-fn coin_m_zero_price_trailing_replacement_stops_on_refusal() {
+fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
     for stop in ["98", "0"] {
         let mut h = ready_keeping_reads(Variant::CoinM);
         h.respond(
@@ -908,7 +908,7 @@ fn coin_m_zero_price_trailing_replacement_stops_on_refusal() {
         assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
         h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":77,"clientOrderId":"coin-trail","status":"CANCELED","origQty":"2","executedQty":"0"}"#);
         // A stop placed before the algo migration is cancelled where it lives; its
-        // replacement is an algo order.
+        // replacement and put-back are algo orders.
         let replacement = h.take("/dapi/v1/algoOrder");
         assert_eq!(
             param(&replacement.url, "callbackRate").as_deref(),
@@ -920,11 +920,17 @@ fn coin_m_zero_price_trailing_replacement_stops_on_refusal() {
             "",
             r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
         );
-        assert!(
-            h.requests
-                .iter()
-                .all(|request| request.method == safe_cex_engine::Method::Get)
+        let put_back = h.take("/dapi/v1/algoOrder");
+        assert_eq!(
+            put_back.method,
+            safe_cex_engine::Method::Post,
+            "stopPrice {stop}"
         );
-        assert!(h.result(72).unwrap().is_err());
+        assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+        assert_eq!(
+            param(&put_back.url, "activatePrice").as_deref(),
+            Some("103")
+        );
+        assert_eq!(param(&put_back.url, "activationPrice"), None);
     }
 }

@@ -146,8 +146,9 @@ fn children_follow_a_parent_batch_item_refusal_but_stop_after_a_child_refusal() 
 #[test]
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: binance | cancel-replace/audit trading.rs:2093
 // TS: packages/safe-cex/src/__tests__/reference/binance/binance.exchange.ts:1597-1618.
-// Cancellation precedes replacement; replacement refusal ends the action without put-back.
-fn a_refused_stop_replacement_ends_without_a_ts_absent_put_back() {
+// TS cancels then places; it has no put-back. The putback-3356 brief explicitly
+// preserves master's Rust protection policy (6890877e6 trading.rs:1388-1438).
+fn a_refused_stop_replacement_preserves_masters_protective_put_back() {
     let mut h = ready(Variant::UsdM);
     h.engine.store_mut().upsert_order(Order {
         id: "12".into(),
@@ -192,12 +193,26 @@ fn a_refused_stop_replacement_ends_without_a_ts_absent_put_back() {
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
+    let put_back = h.take("/fapi/v1/algoOrder");
+    assert_eq!(put_back.method, Method::Post);
+    assert!(put_back.url.contains("triggerPrice=90&"));
+    assert!(put_back.url.contains("quantity=3&"));
+    h.reply(put_back.id, 200, "", r#"{"algoId":13}"#);
     assert!(
         h.requests
             .iter()
             .all(|request| request.method == Method::Get)
     );
     assert!(h.result(91).unwrap().is_err());
+    assert_eq!(
+        h.failures
+            .iter()
+            .find(|(id, _)| *id == 91)
+            .unwrap()
+            .1
+            .protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
 }
 
 #[test]

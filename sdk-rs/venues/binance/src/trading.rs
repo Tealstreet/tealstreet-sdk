@@ -50,6 +50,14 @@ pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
     }
 }
 
+fn stop_name(kind: OrderType) -> &'static str {
+    if kind == OrderType::TakeProfit {
+        "take profit"
+    } else {
+        "stop"
+    }
+}
+
 fn is_stop_kind(kind: OrderType) -> bool {
     matches!(
         kind,
