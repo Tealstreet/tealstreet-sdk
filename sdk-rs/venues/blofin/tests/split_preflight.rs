@@ -480,6 +480,8 @@ fn forty_one_rows_keep_global_outcomes_after_partial_or_ambiguous_second_batch()
 
 #[test]
 fn legacy_native_bounds_are_left_to_the_venue() {
+    // TS:2188-2220/2240 sends without a minimum gate (amount 3 is unchanged).
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: blofin | trading.rs:830 max-qty-splitting
     for amount in [3.0, 11.0] {
         let mut h = harness(4.0, 5.0, 1.0);
         place(&mut h, json!([order(amount)]));
@@ -500,6 +502,8 @@ fn legacy_native_bounds_are_left_to_the_venue() {
 
 #[test]
 fn legacy_grouped_late_native_refusal_keeps_the_accepted_prefix() {
+    // TS:2240-2250 sends the first chunk before a later native refusal.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: blofin | trading.rs:890 grouped-batch-chunking
     let mut h = harness(4.0, 5.0, 1.0);
     let mut rows = vec![order(4.0); 20];
     rows.push(order(3.0));
@@ -575,6 +579,8 @@ fn amend(h: &mut Harness, amount: f64) {
 
 #[test]
 fn legacy_unknown_protection_reference_normalizes_to_last() {
+    // TS:1292-1293/1959-1968/2006-2019 cancels then places with normalized references.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: blofin | nested-trigger-reference refusal
     for field in ["tpTriggerPriceType", "slTriggerPriceType"] {
         let mut h = amend_conditional_with_reference("garbage", field);
         assert!(h.failures.is_empty());
@@ -603,6 +609,8 @@ fn legacy_unknown_protection_reference_normalizes_to_last() {
 
 #[test]
 fn legacy_replacement_native_refusal_occurs_after_the_cancel() {
+    // TS:1355-1361 cancels before replacement and does not restore after refusal.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: blofin | trading.rs:1449 cancel-replace ordinary/protective
     use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
     let mut h = harness(4.0, 5.0, 1.0);
     seed_entry(&mut h);
@@ -639,4 +647,18 @@ fn legacy_replacement_native_refusal_occurs_after_the_cancel() {
             .count(),
         2
     );
+}
+
+#[test]
+fn legacy_negative_native_lot_metadata_still_sends_the_normal_order() {
+    // TS:281-310/2140-2141 has no positive-lot admission gate; adjust(4, -1) is 4.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: blofin | native-lot-metadata admission
+    let mut h = harness(1.0, 5.0, -1.0);
+    place(&mut h, json!([order(4.0)]));
+    let rows = accept_batch(&mut h, 100);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["size"], "4");
+    assert_eq!(h.requests.len(), 1);
+    assert!(h.requests[0].1.ends_with("/batch-orders"));
+    assert!(h.failures.is_empty());
 }
