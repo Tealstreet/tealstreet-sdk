@@ -244,8 +244,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   krakenspot: 2_147_328,
   kucoin: 1_838_080,
   kucoinspot: 2_405_376,
-  lighter: 2_093_056,
-  'lighter-robinhood': 2_093_056,
+  lighter: 2_104_320,
+  'lighter-robinhood': 2_104_320,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   mexc: 1_872_896,
   okx: 1_986_560,
