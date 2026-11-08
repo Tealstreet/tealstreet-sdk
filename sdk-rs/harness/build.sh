@@ -92,14 +92,15 @@ optimize() {
 # CommonJS inside an ESM package.
 bind() {
   wasm-bindgen --remove-name-section --remove-producers-section --target web --out-dir "$1" \
-    target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
+    "$target_dir/wasm32-unknown-unknown/release/safe_cex_wasm.wasm"
   wasm-bindgen --remove-name-section --remove-producers-section --target nodejs --out-dir "$2" \
-    target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
+    "$target_dir/wasm32-unknown-unknown/release/safe_cex_wasm.wasm"
   optimize "$1/safe_cex_wasm_bg.wasm"
   optimize "$2/safe_cex_wasm_bg.wasm"
   echo '{"type":"commonjs"}' > "$2/package.json"
 }
 cd "$(dirname "$0")/.."
+target_dir="${CARGO_TARGET_DIR:-target}"
 # macOS strips DYLD_* from inherited environments; rust-lld needs the toolchain's libLLVM.
 if [[ $(uname) == Darwin ]]; then
   export DYLD_LIBRARY_PATH="$(rustc --print sysroot)/lib"
