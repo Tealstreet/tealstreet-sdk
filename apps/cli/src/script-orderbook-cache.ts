@@ -1,3 +1,4 @@
+import { getStorageEpoch, assertStorageSession, onStorageOwnerChange } from './storage-context';
 import type { ExchangeLike } from '@tealstreet/cli-core';
 import type { OrderBook } from '@tealstreet/safe-cex/src/types';
 
@@ -29,7 +30,10 @@ const trimOrderbook = (orderbook: OrderBook, depth?: number): OrderBook => {
   };
 };
 
-const getOrderbookListener = (exchange: ExchangeLike, account: string): NonNullable<ExchangeLike['listenOrderBook']> => {
+const getOrderbookListener = (
+  exchange: ExchangeLike,
+  account: string,
+): NonNullable<ExchangeLike['listenOrderBook']> => {
   if (!exchange.listenOrderBook) {
     throw new Error(`getOrderbook: account '${account}' does not support orderbook subscriptions`);
   }
@@ -45,9 +49,12 @@ export class ScriptOrderbookCache {
       readonly firstSnapshotTimeoutMs?: number;
       readonly idleTtlMs?: number;
     } = {},
-  ) {}
+  ) {
+    onStorageOwnerChange(() => this.disposeAll());
+  }
 
   async get(symbol: string, opts: { account: string; depth?: number }): Promise<OrderBook | undefined> {
+    const epoch = getStorageEpoch();
     const exchange = this.exchangeManager.getExchange(opts.account);
     if (!exchange) return undefined;
 
@@ -58,6 +65,7 @@ export class ScriptOrderbookCache {
       await this.waitForFirstSnapshot(entry);
     }
 
+    assertStorageSession(epoch);
     return entry.orderbook ? trimOrderbook(entry.orderbook, opts.depth) : undefined;
   }
 

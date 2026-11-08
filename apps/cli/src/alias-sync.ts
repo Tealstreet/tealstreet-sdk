@@ -1,3 +1,4 @@
+import { getStorageEpoch, assertStorageSession, onStorageOwnerChange, runInStorageSession } from './storage-context';
 // Keeps this CLI's aliases in step with the server, so an alias defined in a
 // browser (or another machine) resolves here too — which is what makes a
 // webhook body's alias work on whichever listener runs it
@@ -27,7 +28,7 @@ let inFlight: Promise<boolean> | null = null;
 let lastAttemptAt = 0;
 
 const unref = (timer: ReturnType<typeof setTimeout>) => {
-  (timer as { unref?: () => void }).unref?.();
+  timer.unref?.();
   return timer;
 };
 
@@ -48,7 +49,7 @@ async function call(changes: AliasChange[], since: number): Promise<AliasSyncRes
     }
     return (await response.json()) as AliasSyncResponse;
   } catch (err) {
-    logger.warn(`alias sync: ${(err as Error).message}`);
+    logger.warn(`alias sync: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -60,23 +61,35 @@ export function syncAliasesNow(): Promise<boolean> {
   if (inFlight) return inFlight;
   const owner = getAuthState().userId;
   if (!owner) return Promise.resolve(false);
-  inFlight = syncAliases({
-    owner,
-    loadState: () => current.getAliasSyncState(),
-    saveState: (state) => current.setAliasSyncState(state),
-    getLocalAliases: () => current.getAliases(),
-    applyRemote: (entries) => current.applyRemoteAliases(entries),
-    call,
-    report: reportToUser,
-  })
+  const epoch = getStorageEpoch();
+  const pending = runInStorageSession(() =>
+    syncAliases({
+      owner,
+      loadState: () => current.getAliasSyncState(),
+      saveState: (state) => {
+        assertStorageSession(epoch);
+        current.setAliasSyncState(state);
+      },
+      getLocalAliases: () => current.getAliases(),
+      applyRemote: (entries) => {
+        assertStorageSession(epoch);
+        current.applyRemoteAliases(entries);
+      },
+      call,
+      report: reportToUser,
+    }),
+  )
     .then((ok) => {
+      assertStorageSession(epoch);
       lastAttemptAt = Date.now();
       return ok;
     })
+    .catch(() => false)
     .finally(() => {
-      inFlight = null;
+      if (inFlight === pending) inFlight = null;
     });
-  return inFlight;
+  inFlight = pending;
+  return pending;
 }
 
 /** Before a webhook runs, so an alias defined elsewhere moments ago resolves here. */
@@ -128,3 +141,8 @@ export function stopAliasSync(): void {
   if (periodicTimer) clearTimeout(periodicTimer);
   if (changeTimer) clearTimeout(changeTimer);
 }
+
+onStorageOwnerChange(() => {
+  inFlight = null;
+  lastAttemptAt = 0;
+});
