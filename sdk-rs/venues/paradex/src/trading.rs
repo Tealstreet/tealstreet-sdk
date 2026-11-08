@@ -166,6 +166,7 @@ struct Job {
     placement: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// A refused batch or protective child cannot resolve as a successful partial placement.
     leg_refused: bool,
     /// The cancelled stop placed again, unchanged, once its replacement is refused.
     restore: Option<Operation>,
@@ -1550,7 +1551,7 @@ impl Trading {
                             job.operations.pop_front();
                         }
                     }
-                    if leg.is_some() {
+                    if leg.is_some() || *batch {
                         job.leg_refused = true;
                     }
                     job.errors.push(error);

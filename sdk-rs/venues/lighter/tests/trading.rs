@@ -1728,20 +1728,21 @@ fn parity_mixed_placements_keep_the_market_minimum_exemption() {
 fn parity_limit_lots_keep_legacy_remainder_allocation_and_tail_merge() {
     // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2483-2507.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-allocation-and-tail
-    assert_eq!(
-        parity_serial_sizes(
-            parity_engine_with_limits(1.0, 5.0, 1.0),
-            vec![parity_order(OrderType::Limit, 8.0)]
-        ),
-        [3, 3, 3]
+    // KNOWN-ISSUE: legacy TS over-allocates (sum 9 of requested 8); kept for exact TS parity per Sam's decision.
+    let sizes = parity_serial_sizes(
+        parity_engine_with_limits(1.0, 5.0, 1.0),
+        vec![parity_order(OrderType::Limit, 8.0)],
     );
-    assert_eq!(
-        parity_serial_sizes(
-            parity_engine_with_limits(3.0, 5.0, 1.0),
-            vec![parity_order(OrderType::Limit, 17.0)]
-        ),
-        [4, 4, 4, 6]
+    assert_eq!(sizes, [3, 3, 3]);
+    assert_eq!(sizes.iter().sum::<u64>(), 9);
+
+    // KNOWN-ISSUE: legacy TS over-allocates (sum 18 of requested 17); kept for exact TS parity per Sam's decision.
+    let sizes = parity_serial_sizes(
+        parity_engine_with_limits(3.0, 5.0, 1.0),
+        vec![parity_order(OrderType::Limit, 17.0)],
     );
+    assert_eq!(sizes, [4, 4, 4, 6]);
+    assert_eq!(sizes.iter().sum::<u64>(), 18);
 }
 
 #[test]

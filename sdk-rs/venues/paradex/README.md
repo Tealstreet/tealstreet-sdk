@@ -32,7 +32,8 @@ Joined failures retain the first uncertain leg's structured diagnostics and
 classification alongside the public messages from every failed leg.
 Serial placement entries continue after a definite refusal, preserving accepted
 IDs and reporting failed client identities at Error level. A failed native batch
-stops remaining placement dispatch. Refused entries skip their attached children;
+stops remaining placement dispatch and fails the command, retaining accepted IDs
+in the failure's partial outcome. Refused entries skip their attached children;
 a refused TP skips its SL, while the next independent entry can still be sent.
 An Unknown placement halts all remaining writes for that action, the approved
 stop-after-UNKNOWN parity exception. Its failure includes

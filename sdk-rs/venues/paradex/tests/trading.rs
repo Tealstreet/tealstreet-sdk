@@ -603,7 +603,7 @@ fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
 }
 
 #[test]
-fn a_mixed_native_batch_returns_correlated_successes_and_reports_missing_clients() {
+fn a_mixed_native_batch_fails_with_correlated_successes_and_missing_clients() {
     let mut h = private();
     let orders = ["first", "second", "third"].map(|id| {
         let mut order = opts(OrderType::Limit);
@@ -612,7 +612,12 @@ fn a_mixed_native_batch_returns_correlated_successes_and_reports_missing_clients
     });
     place(&mut h, 72, orders.into());
     h.reply("/orders/batch", r#"{"orders":[{"id":"three","client_id":"third"},{"id":"one","client_id":"first"}],"errors":[{"error":"INVALID_PRICE","message":"outside price bands"}]}"#);
-    assert_eq!(h.result(72), Ok("[\"one\",\"three\"]"));
+    assert_batch_refusal(
+        &h,
+        72,
+        vec!["one".into(), "three".into()],
+        "outside price bands",
+    );
     assert!(h.actions.iter().any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
         if message.contains("second") && message.contains("outside price bands"))));
@@ -3211,6 +3216,46 @@ fn parity_ack_batch(h: &mut Harness, request: safe_cex_engine::HttpRequest, pref
     );
 }
 
+fn assert_batch_refusal(h: &Harness, command: u32, accepted: Vec<String>, message: &str) {
+    use safe_cex_engine::{Notice, Outcome};
+    let failures: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        failures.len(),
+        1,
+        "batch refusal must fail the command: {:?}",
+        h.result(command)
+    );
+    let error = failures[0];
+    assert!(error.message.contains(message), "{error:?}");
+    assert_eq!(
+        error.partial.as_ref().map(|partial| &partial.order_ids),
+        Some(&accepted)
+    );
+    assert_eq!(
+        error.outcome, None,
+        "accepted prefix plus definite refusal is a known partial failure"
+    );
+    assert!(!h.actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command
+    )));
+    assert!(!h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(Outcome::Unknown)
+    )));
+    assert!(!h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+    )));
+}
+
 #[test]
 fn parity_later_native_rule_violations_reach_the_venue_after_the_first_batch() {
     // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1574-1593,1683-1713,1949-1965.
@@ -3249,8 +3294,12 @@ fn parity_later_native_rule_violations_reach_the_venue_after_the_first_batch() {
             400,
             r#"{"error":"VALIDATION","message":"venue refused final row"}"#,
         );
-        let accepted: Vec<String> = serde_json::from_str(h.result(91).unwrap()).unwrap();
-        assert_eq!(accepted.len(), 10);
+        assert_batch_refusal(
+            &h,
+            91,
+            (0..10).map(|index| format!("accepted-{index}")).collect(),
+            "venue refused final row",
+        );
         assert!(h.actions.iter().any(|action| matches!(action,
             Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 level: safe_cex_engine::Level::Error, message, ..
@@ -3538,8 +3587,12 @@ fn pin_native_batch_row_refusal_keeps_accepted_rows_but_stops_the_next_chunk() {
     assert_eq!(rows.len(), 10);
     let accepted: Vec<_> = rows[..9].iter().enumerate().map(|(i,row)| serde_json::json!({"id":format!("accepted-{i}"),"client_id":row["client_id"]})).collect();
     h.respond(batch, 200, &serde_json::json!({"orders":accepted,"errors":[{"error":"INVALID_PRICE","message":"last row refused"}]}).to_string());
-    let ids: Vec<String> = serde_json::from_str(h.result(91).unwrap()).unwrap();
-    assert_eq!(ids.len(), 9);
+    assert_batch_refusal(
+        &h,
+        91,
+        (0..9).map(|index| format!("accepted-{index}")).collect(),
+        "INVALID_PRICE",
+    );
     after_failure_no_more_writes(&h);
     assert_eq!(
         h.receipt_trace
