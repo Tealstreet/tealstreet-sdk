@@ -115,14 +115,24 @@ impl UnprovenEvidence {
     /// Preserve a validated plan's logical facts when the engine seals an
     /// unproven response before the venue decoder runs. Pending rows stay Unknown.
     pub fn write_plan<T>(&mut self, plan: &crate::write_plan::WritePlan<T>) {
-        let mut elements = plan.outcomes();
+        self.write_plans(std::iter::once(plan));
+    }
+
+    /// Compose shared journals for independently continued calls or an explicitly
+    /// retained recovery branch. This copies facts and grants no dispatch authority.
+    pub fn write_plans<'a, T: 'a>(
+        &mut self,
+        plans: impl IntoIterator<Item = &'a crate::write_plan::WritePlan<T>>,
+    ) {
         let mut failure = self.error.clone();
         failure.elements = None;
         failure.partial = None;
-        for element in &mut elements {
-            if let crate::write_plan::ElementResult::Unknown { error } = &mut element.result {
-                **error = failure.clone();
-            }
+        let mut elements = plans
+            .into_iter()
+            .flat_map(|plan| plan.unproven_outcomes(&failure))
+            .collect::<Vec<_>>();
+        for (index, element) in elements.iter_mut().enumerate() {
+            element.element.index = index;
         }
         self.error.elements = Some(Box::new(crate::write_plan::ElementOutcomes(elements)));
     }
@@ -322,6 +332,107 @@ pub(super) fn mark_id_overflow(error: &mut VenueError) {
 mod write_plan_tests {
     use super::*;
     use crate::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
+
+    #[test]
+    fn composed_gateway_evidence_does_not_replace_an_earlier_settled_unknown() {
+        let single = || {
+            WritePlan::validate(
+                vec![PlannedWrite {
+                    payload: (),
+                    elements: vec![Element {
+                        index: 0,
+                        client_order_id: None,
+                    }],
+                }],
+                |_| Ok(()),
+            )
+            .unwrap()
+        };
+        let mut earlier = single();
+        earlier.next_write().unwrap();
+        earlier
+            .fail(
+                0,
+                VenueError::new("earlier socket lost")
+                    .kind(ErrorKind::Network)
+                    .outcome(Outcome::Unknown),
+            )
+            .unwrap();
+        let mut current = single();
+        current.next_write().unwrap();
+        let mut evidence = UnprovenEvidence::new(EvidenceBudget::default(), 503).unwrap();
+        evidence.write_plans([&earlier, &current]);
+        let (_, error, _) = evidence.finish();
+        let elements = error.elements.unwrap();
+        assert!(
+            matches!(&elements[0].result, ElementResult::Unknown { error }
+            if error.kind == Some(ErrorKind::Network) && error.message == "earlier socket lost")
+        );
+        assert!(
+            matches!(&elements[1].result, ElementResult::Unknown { error }
+            if error.kind == Some(ErrorKind::VenueUnavailable))
+        );
+    }
+
+    #[test]
+    fn unproven_recovery_keeps_earlier_journal_facts_and_global_indices() {
+        let writes = |count| {
+            (0..count)
+                .map(|index| PlannedWrite {
+                    payload: (),
+                    elements: vec![Element {
+                        index,
+                        client_order_id: None,
+                    }],
+                })
+                .collect()
+        };
+        let mut original = WritePlan::validate(writes(2), |_| Ok(())).unwrap();
+        original.next_write().unwrap();
+        original
+            .settle(
+                0,
+                vec![ElementResult::Applied {
+                    effect: crate::write_plan::AppliedEffect::Cancel,
+                    target_order_id: Some("old-stop".into()),
+                    position_key: None,
+                }],
+            )
+            .unwrap();
+        original.next_write().unwrap();
+        original
+            .fail(
+                1,
+                VenueError::new("replacement refused").outcome(Outcome::Rejected),
+            )
+            .unwrap();
+        let mut recovery = WritePlan::validate(writes(1), |_| Ok(())).unwrap();
+        recovery.next_write().unwrap();
+        let mut evidence = UnprovenEvidence::new(EvidenceBudget::default(), 503).unwrap();
+        evidence.write_plans([&original, &recovery]);
+        let (_, error, _) = evidence.finish();
+        let elements = error.elements.unwrap();
+        assert_eq!(elements.len(), 3);
+        assert_eq!(
+            elements
+                .iter()
+                .map(|row| row.element.index)
+                .collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        assert!(matches!(&elements[0].result, ElementResult::Applied {
+            effect: crate::write_plan::AppliedEffect::Cancel, target_order_id: Some(id), ..
+        } if id == "old-stop"));
+        assert!(
+            matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) }
+            if error.outcome == Some(Outcome::Rejected))
+        );
+        assert!(
+            matches!(&elements[2].result, ElementResult::Unknown { error }
+            if error.kind == Some(ErrorKind::VenueUnavailable)
+                && error.outcome == Some(Outcome::Unknown) && error.elements.is_none())
+        );
+    }
 
     #[test]
     fn unproven_http_seal_preserves_prefix_pending_and_unissued_rows() {

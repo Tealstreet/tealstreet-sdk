@@ -263,6 +263,18 @@ impl<T> WritePlan<T> {
         self.journal.clone()
     }
 
+    pub(crate) fn unproven_outcomes(&self, error: &VenueError) -> Vec<ElementOutcome> {
+        let mut outcomes = self.outcomes();
+        if let Some(pending) = self.pending {
+            for element in &self.writes[pending].elements {
+                outcomes[element.index].result = ElementResult::Unknown {
+                    error: Box::new(error.clone()),
+                };
+            }
+        }
+        outcomes
+    }
+
     /// Attach complete indexed facts and accepted IDs to a terminal failure.
     /// An accepted prefix or an unresolved dispatched write prevents an aggregate
     /// notSent/rejected classification from describing the whole command.

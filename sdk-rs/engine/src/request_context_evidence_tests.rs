@@ -9,6 +9,73 @@ fn released(writes: &mut CommandWrites, id: u64) {
 }
 
 #[test]
+fn later_unproven_elements_survive_earlier_native_error_selection() {
+    use crate::ErrorKind;
+    use crate::write_plan::{
+        AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult,
+    };
+    let mut writes = CommandWrites::new(2).unwrap();
+    released(&mut writes, 1);
+    writes
+        .result(
+            RequestId(1),
+            WriteResult::KnownPartial(
+                VenueError::new("replacement refused")
+                    .kind(ErrorKind::Rejected)
+                    .venue_code("FAILED"),
+            ),
+        )
+        .unwrap();
+    released(&mut writes, 2);
+    let mut late = VenueError::new("restore gateway failed")
+        .kind(ErrorKind::VenueUnavailable)
+        .outcome(Outcome::Unknown);
+    let rows = ElementOutcomes(vec![
+        ElementOutcome {
+            element: Element {
+                index: 0,
+                client_order_id: None,
+            },
+            result: ElementResult::Applied {
+                effect: AppliedEffect::Cancel,
+                target_order_id: Some("old-stop".into()),
+                position_key: None,
+            },
+        },
+        ElementOutcome {
+            element: Element {
+                index: 1,
+                client_order_id: None,
+            },
+            result: ElementResult::NotSent {
+                error: Some(Box::new(
+                    VenueError::new("replacement refused").outcome(Outcome::Rejected),
+                )),
+            },
+        },
+        ElementOutcome {
+            element: Element {
+                index: 2,
+                client_order_id: None,
+            },
+            result: ElementResult::Unknown {
+                error: Box::new(late.clone()),
+            },
+        },
+    ]);
+    late.elements = Some(Box::new(rows.clone()));
+    writes
+        .result(RequestId(2), WriteResult::Failed(late))
+        .unwrap();
+    let projected = writes
+        .fail(VenueError::new("presentation fallback"))
+        .unwrap();
+    assert_eq!(projected.venue_code.as_deref(), Some("FAILED"));
+    assert_eq!(projected.outcome, Some(Outcome::Unknown));
+    assert_eq!(projected.elements.as_deref(), Some(&rows));
+}
+
+#[test]
 fn id_count_overflow_preserves_exact_prefix_and_never_seals_success() {
     let mut writes = CommandWrites::new(2).unwrap();
     released(&mut writes, 1);

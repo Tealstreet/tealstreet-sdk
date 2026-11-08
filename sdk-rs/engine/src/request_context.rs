@@ -2162,6 +2162,15 @@ impl CommandWrites {
             ) => Some(error.clone()),
             _ => None,
         };
+        // A later unproven attempt can carry the complete logical journal even
+        // when an earlier retained refusal still supplies the native error text.
+        let elements = elements.or_else(|| {
+            self.attempts
+                .iter()
+                .rev()
+                .filter_map(error)
+                .find_map(|error| error.elements)
+        });
         // Choose the terminal physical attempt of the earliest logical leg,
         // preferring legs that reached the venue. Callback order is irrelevant.
         let select = |sent_only: bool| {
