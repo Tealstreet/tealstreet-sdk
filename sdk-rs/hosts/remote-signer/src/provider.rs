@@ -29,6 +29,7 @@ pub const FATAL_MIN_STREAK: std::time::Duration = std::time::Duration::from_mill
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Family {
     Hmac,
+    Backpack,
     DoubleSha256,
     Hyperliquid,
     Lighter,
@@ -37,6 +38,7 @@ pub(crate) enum Family {
 impl Family {
     pub(crate) fn of(venue: &str) -> Self {
         match venue {
+            "backpack" => Self::Backpack,
             "bitunix" => Self::DoubleSha256,
             "hyperliquid" | "hyperliquidspot" => Self::Hyperliquid,
             "lighter" | "lighter-robinhood" => Self::Lighter,
@@ -47,6 +49,7 @@ impl Family {
     fn algorithm(self) -> Algorithm {
         match self {
             Self::Hmac => Algorithm::HmacSha256,
+            Self::Backpack => Algorithm::Ed25519,
             Self::DoubleSha256 => Algorithm::Sha256SecretSuffix,
             Self::Hyperliquid => Algorithm::Secp256k1Digest,
             Self::Lighter => Algorithm::SchnorrDigest,
@@ -458,8 +461,65 @@ impl Inner {
             Family::Paradex => self.sign_stark(&operations).await?,
             Family::DoubleSha256 => self.sign_double_sha256(&operations).await?,
             Family::Hmac => self.sign_hmac(&operations, receipt).await?,
+            Family::Backpack => self.sign_backpack(&operations).await?,
         };
         Ok(SignResult::new(values, receipt))
+    }
+
+    async fn sign_backpack(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        let primary = &self.primary;
+        if let [Operation::Present { key }] = operations {
+            return if *key == primary.credential {
+                Ok(vec![primary.public.clone()])
+            } else {
+                refused()
+            };
+        }
+        let [
+            Operation::Present { key: credential },
+            Operation::Sign {
+                algorithm: Algorithm::Ed25519,
+                key: signing,
+                payload,
+            },
+        ] = operations
+        else {
+            return refused();
+        };
+        if *credential != primary.credential || !self.owns_signing(signing) {
+            return refused();
+        }
+        let payload = utf8(single_bytes(payload, MAX_PAYLOAD)?)?;
+        if payload.is_empty() {
+            return refused();
+        }
+        let descriptor = json!({ "slot": "primary", "payload": payload }).to_string();
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        self.device(descriptor, "backpack-ed25519", |value| {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Answer {
+                credential: String,
+                signature: String,
+            }
+            let output: Answer = serde_json::from_str(value.as_str().ok_or(SignError::Refused)?)
+                .map_err(|_| SignError::Refused)?;
+            if output.credential.as_bytes() != primary.public || output.signature.len() != 88 {
+                return refused();
+            }
+            let signature = base64::engine::general_purpose::STANDARD
+                .decode(&output.signature)
+                .map_err(|_| SignError::Refused)?;
+            if signature.len() != 64
+                || base64::engine::general_purpose::STANDARD.encode(&signature) != output.signature
+            {
+                return refused();
+            }
+            Ok(vec![primary.public.clone(), signature])
+        })
+        .await
     }
 
     /// Every keyed operation names the primary signing ref.
