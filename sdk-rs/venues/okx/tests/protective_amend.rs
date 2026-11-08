@@ -301,9 +301,21 @@ fn failed_replacement(out: &[Action]) -> &safe_cex_engine::VenueError {
         })
         .expect("replacement failure is terminal");
     let elements = error.elements.as_ref().expect("shared element journal");
-    assert_eq!(elements.len(), 1, "cancel awaits the shared Applied result");
+    assert_eq!(
+        elements.len(),
+        2,
+        "cancel and replacement must both be journaled"
+    );
+    assert_eq!(
+        elements[0].result,
+        safe_cex_engine::write_plan::ElementResult::Applied {
+            effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
+            target_order_id: Some("91".into()),
+            position_key: None,
+        }
+    );
     assert!(
-        matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+        matches!(&elements[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
     );
     assert_eq!(
         error.protection,
@@ -492,8 +504,14 @@ fn unknown_replacement_never_sends_another_stop_or_claims_protection() {
     assert!(error.protection.is_none());
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     let elements = error.elements.as_ref().expect("shared journal");
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(&elements[0].result,
+        safe_cex_engine::write_plan::ElementResult::Applied {
+            effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
+            target_order_id: Some(target), ..
+        } if target == "91"));
     assert!(matches!(
-        elements[0].result,
+        elements[1].result,
         safe_cex_engine::write_plan::ElementResult::Unknown { .. }
     ));
 }
