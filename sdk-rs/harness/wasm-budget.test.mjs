@@ -1095,3 +1095,16 @@ test('#3277 TxFlow public decode (run 42407352871, job 128508214838) retains CI 
   assert.equal(wasmBudgetError(current, 'venue', 'txflow'), undefined);
   assert.match(wasmBudgetError(current + 1, 'venue', 'txflow'), /exceeds/);
 });
+
+test('#3299 (run 42432952035 at 9e6863a2b86) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['bybit', 2_270_312, 2_281_472],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
