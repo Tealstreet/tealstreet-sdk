@@ -5,7 +5,7 @@ use safe_cex_engine::signing::{
     Algorithm, Capability, Identities, Identity, KeyRef, Provider, SignError, SignFuture,
     SignRequest, SignResult, Signer,
 };
-use safe_cex_engine::{Action, Command, Engine, Event, Outcome, Response, Venue};
+use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, Outcome, Response, Venue};
 use safe_cex_venues::{EngineOptions, Visit, build_with_signer};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -352,4 +352,150 @@ fn orderly_injection_requires_complete_owned_metadata_and_keeps_hosted_admission
         }
     }
     Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct StartupState {
+    account: bool,
+    pending_before: bool,
+    complete_before: bool,
+    pending_after: bool,
+    complete_after: bool,
+    signed_reads: usize,
+}
+
+struct Startup;
+impl Visit for Startup {
+    type Output = StartupState;
+    fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> StartupState {
+        let account = engine.account_startup();
+        engine.start(NOW);
+        let pending_before = engine.private_startup_pending();
+        let complete_before = engine.private_startup_complete();
+        let mut signed_reads = 0;
+        for _ in 0..12 {
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
+            if actions.is_empty() {
+                break;
+            }
+            for action in actions {
+                if let Action::Http(http) = action {
+                    if http.headers.iter().any(|(name, _)| *name == "orderly-signature") {
+                        signed_reads += 1;
+                    }
+                    engine.handle(
+                        NOW,
+                        Event::HttpResponse {
+                            request: http.id,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body: body(&http.url),
+                            },
+                        },
+                    );
+                }
+            }
+        }
+        StartupState {
+            account,
+            pending_before,
+            complete_before,
+            pending_after: engine.private_startup_pending(),
+            complete_after: engine.private_startup_complete(),
+            signed_reads,
+        }
+    }
+}
+
+fn captured_private_options(setup: &Setup) -> TestResult<EngineOptions> {
+    let mut options: EngineOptions = serde_json::from_value(json!({
+        "key": setup.key,
+        "applicationId": "account-1",
+        "publicDataOnly": false,
+        "publicMode": {"requested": false},
+    }))?;
+    options.signing = Some(setup.ids.clone());
+    Ok(options)
+}
+
+fn refuses_captured_private_payload_signer(venue: &str) -> TestResult {
+    let setup = setup()?;
+    let mut options = captured_private_options(&setup)?;
+    options.payload_signer = true;
+    let result = build_with_signer(
+        venue,
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Some(setup.provider),
+        Startup,
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => return Err("closed PayloadSigner admission constructed an engine".into()),
+    };
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert!(setup.seen.lock().map_err(|_| "poisoned record")?.is_empty());
+    Ok(())
+}
+
+fn injected_startup_matches_local(venue: &str) -> TestResult {
+    let setup = setup()?;
+    let local_options: EngineOptions = serde_json::from_value(json!({
+        "key": setup.key,
+        "secret": bs58::encode([7u8; 32]).into_string(),
+        "applicationId": "account-1",
+        "publicMode": {"requested": false},
+    }))?;
+    let local = safe_cex_venues::build(
+        venue,
+        local_options,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Startup,
+    )?;
+    assert!(local.account && local.pending_before && !local.complete_before);
+    assert!(!local.pending_after && local.complete_after && local.signed_reads >= 4);
+    let injected = build_with_signer(
+        venue,
+        captured_private_options(&setup)?,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Some(setup.provider),
+        Startup,
+    )?;
+    assert_eq!(injected, local);
+    Ok(())
+}
+
+#[test]
+fn kodiakfi_captured_private_payload_signer_refuses() -> TestResult {
+    refuses_captured_private_payload_signer("kodiakfi")
+}
+#[test]
+fn mode_captured_private_payload_signer_refuses() -> TestResult {
+    refuses_captured_private_payload_signer("mode")
+}
+#[test]
+fn what_captured_private_payload_signer_refuses() -> TestResult {
+    refuses_captured_private_payload_signer("what")
+}
+#[test]
+fn woofi_captured_private_payload_signer_refuses() -> TestResult {
+    refuses_captured_private_payload_signer("woofi")
+}
+#[test]
+fn kodiakfi_injected_private_startup_matches_local() -> TestResult {
+    injected_startup_matches_local("kodiakfi")
+}
+#[test]
+fn mode_injected_private_startup_matches_local() -> TestResult {
+    injected_startup_matches_local("mode")
+}
+#[test]
+fn what_injected_private_startup_matches_local() -> TestResult {
+    injected_startup_matches_local("what")
+}
+#[test]
+fn woofi_injected_private_startup_matches_local() -> TestResult {
+    injected_startup_matches_local("woofi")
 }
