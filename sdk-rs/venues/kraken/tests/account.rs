@@ -46,6 +46,64 @@ fn mapped_orders_keep_trigger_provenance_and_never_emit_cumulative_fills() {
     assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 0);
 }
 #[test]
+fn startup_fill_history_does_not_precede_the_first_live_execution() {
+    let (mut e, socket) = ready();
+    let history = r#"{"fill_id":"old-fill","order_id":"older","instrument":"PF_XBTUSD","qty":0.1,"price":90,"buy":true}"#;
+    let live = r#"{"fill_id":"fill-1","order_id":"100","instrument":"PF_XBTUSD","qty":0.5,"price":90,"buy":true}"#;
+    message(
+        &mut e,
+        socket,
+        NOW + 25.,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{history}]}}"#),
+    );
+    assert_eq!(
+        e.take_frame(NOW + 25.).map_or(0, fill_count),
+        0,
+        "startup history is not a live fill event"
+    );
+    message(
+        &mut e,
+        socket,
+        NOW + 100.,
+        &format!(r#"{{"feed":"fills","fills":[{live}]}}"#),
+    );
+    assert_eq!(e.take_frame(NOW + 100.).map_or(0, fill_count), 1);
+    message(
+        &mut e,
+        socket,
+        NOW + 110.,
+        &format!(r#"{{"feed":"fills","fills":[{live}]}}"#),
+    );
+    assert_eq!(e.take_frame(NOW + 110.).map_or(0, fill_count), 0);
+    let (next, _) = fresh_private(&mut e, socket);
+    message(
+        &mut e,
+        next,
+        NOW + 1001.,
+        r#"{"event":"challenge","message":"history-reconnect"}"#,
+    );
+    for feed in ["fills", "open_orders", "open_positions"] {
+        message(
+            &mut e,
+            next,
+            NOW + 1002.,
+            &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
+        );
+    }
+    message(
+        &mut e,
+        next,
+        NOW + 1003.,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{history},{live}]}}"#),
+    );
+    assert_eq!(
+        e.take_frame(NOW + 1003.).map_or(0, fill_count),
+        0,
+        "startup history and emitted executions stay quiet on reconnect"
+    );
+}
+
+#[test]
 fn only_emitted_execution_ids_deduplicate_live_replays_and_reconnects() {
     let (mut e, socket) = ready();
     let fill = r#"{"fill_id":"exec-1","order_id":"order-1","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":false}"#;
@@ -55,7 +113,7 @@ fn only_emitted_execution_ids_deduplicate_live_replays_and_reconnects() {
         NOW,
         &format!(r#"{{"feed":"fills_snapshot","fills":[{fill}]}}"#),
     );
-    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 1);
+    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 0);
     message(
         &mut e,
         socket,
@@ -67,8 +125,8 @@ fn only_emitted_execution_ids_deduplicate_live_replays_and_reconnects() {
     );
     assert_eq!(
         e.take_frame(NOW).map_or(0, fill_count),
-        1,
-        "only the execution already emitted from the snapshot is deduplicated"
+        2,
+        "startup history cannot suppress an execution's first live delivery"
     );
     message(
         &mut e,
@@ -135,7 +193,7 @@ fn execution_message(
 }
 
 #[test]
-fn startup_snapshot_emits_unseen_executions_regardless_of_timestamp() {
+fn startup_snapshot_history_does_not_poison_live_execution_ids() {
     let (mut e, socket) = ready();
     let history = execution("history", Some(NOW - 1.), "PF_XBTUSD");
     let unstamped = execution("unstamped", None, "PF_XBTUSD");
@@ -148,7 +206,7 @@ fn startup_snapshot_emits_unseen_executions_regardless_of_timestamp() {
             "fills_snapshot",
             &[history.clone(), unstamped.clone(), current.clone()]
         ),
-        3
+        0
     );
     assert_eq!(
         execution_message(
@@ -158,14 +216,18 @@ fn startup_snapshot_emits_unseen_executions_regardless_of_timestamp() {
             "fills",
             &[history, unstamped, current]
         ),
-        0,
-        "startup snapshot executions must not emit twice on live replay"
+        3,
+        "startup history is separate from emitted execution IDs"
     );
 }
 
 #[test]
 fn snapshot_recovery_uses_identity_and_accepts_unordered_same_time_rows() {
     let (mut e, socket) = ready();
+    assert_eq!(
+        execution_message(&mut e, socket, NOW, "fills_snapshot", &[]),
+        0
+    );
     let emitted = execution("emitted", Some(NOW + 10.), "PF_XBTUSD");
     assert_eq!(
         execution_message(
@@ -772,6 +834,7 @@ fn empty_positions_are_absent_and_default_settings_remain_available() {
 #[test]
 fn execution_remaining_updates_orders_without_counting_cumulative_progress_twice() {
     let (mut e, s) = ready();
+    message(&mut e, s, NOW, r#"{"feed":"fills_snapshot","fills":[]}"#);
     snapshot(&mut e, s);
     let execution = r#"{"feed":"fills","fills":[{"fill_id":"f1","order_id":"order-1","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":false,"remaining_order_qty":1,"time":1700000000001}]}"#;
     message(&mut e, s, NOW + 1.0, execution);

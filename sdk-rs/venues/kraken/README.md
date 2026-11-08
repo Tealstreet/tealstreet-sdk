@@ -57,14 +57,20 @@ Heartbeats prove socket liveness only. Separate venue-owned clocks watch data:
   maintain that connection; inactivity does not unsubscribe or reconnect it.
   Keep the live subscription uninterrupted while it is healthy.
 
-Both `fills` and `fills_snapshot` emit valid, mapped executions whose fill IDs
-are absent from the bounded emitted-ID cache, which survives reconnects.
-This includes unseen startup history and executions without timestamps.
-Equal or older execution timestamps cannot suppress a previously unseen fill;
-snapshot and live replays of a cached ID do not emit again. Only emitted fill
-IDs enter that cache, so invalid or unmapped executions cannot suppress a later
-valid delivery. Execution timestamps still guard order-progress updates against
-stale data; emitting an older fill cannot roll an order's progress backward.
+The first valid `fills_snapshot` establishes startup history without emitting
+live fills. Its valid, mapped IDs are retained in a separate bounded history
+cache, so repeating that history after a reconnect stays quiet. They do not
+enter the emitted-ID cache or block a later live delivery of the same execution.
+If the first socket closes before delivering that snapshot, the replacement
+snapshot recovers executions instead of treating them as startup history.
+
+Subsequent `fills_snapshot` messages recover valid, mapped executions absent
+from both caches. Live `fills` messages deduplicate only against the emitted-ID
+cache. Both caches survive reconnects; no timestamp cutoff can discard a
+previously unseen recovery execution, including one without a timestamp.
+Snapshot and live replays of an emitted ID do not emit again. Invalid or unmapped
+executions enter neither cache. Execution timestamps still guard order-progress
+updates against stale data; emitting an older fill cannot roll progress backward.
 
 The existing five-second venue timer checks these clocks independently of the
 scaled account REST poll. Ticker expiry is also checked before accepting late

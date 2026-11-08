@@ -161,6 +161,10 @@ pub struct Account {
     poll: Option<TimerId>,
     heal: Option<TimerId>,
     emitted_fills: RecentIds<8192>,
+    /// The first snapshot is history, not live executions. Keep it separate so
+    /// those identities never suppress a later live delivery.
+    startup_fill_history: RecentIds<8192>,
+    fill_history_initialized: bool,
     payloads: HashMap<String, f64>,
     snapshot_orders_revision: u64,
     snapshot_settings_revision: u64,
@@ -834,6 +838,9 @@ impl Kraken {
         if self.account.socket != Some(socket) {
             return false;
         }
+        // If startup's snapshot was lost, the replacement must recover fills
+        // instead of silently treating its executions as an initial baseline.
+        self.account.fill_history_initialized |= self.account.open;
         self.account.orders_revision += 1;
         self.account.positions_revision += 1;
         self.account.socket = None;
@@ -926,6 +933,9 @@ impl Kraken {
                     let decoded = json::each::<Execution<'_>>(raw.get(), |e| executions.push(e));
                     if decoded.is_ok() {
                         self.account.payloads.insert("fills".into(), cx.now);
+                        let snapshot = msg.feed == "fills_snapshot";
+                        let seed_history = snapshot && !self.account.fill_history_initialized;
+                        self.account.fill_history_initialized |= snapshot;
                         for e in executions {
                             if e.fill_id.is_empty()
                                 || e.order_id.is_empty()
@@ -939,7 +949,15 @@ impl Kraken {
                             // contain unseen executions at or before the last emitted fill.
                             if self.account.emitted_fills.contains(&e.fill_id)
                                 || cx.store.market(&e.instrument).is_none()
+                                || (snapshot
+                                    && self.account.startup_fill_history.contains(&e.fill_id))
                             {
+                                continue;
+                            }
+                            if seed_history {
+                                self.account
+                                    .startup_fill_history
+                                    .insert(e.fill_id.to_string());
                                 continue;
                             }
                             if let (Some(remaining), Some(time), Some(mut order)) = (

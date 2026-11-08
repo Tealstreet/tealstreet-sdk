@@ -590,6 +590,31 @@ fn review_reconnect_unseen_newer_timestamp_control() {
     assert_eq!(review_reconnect_boundary(1.), (1, 0));
 }
 
+#[test]
+fn futures_reconnect_recovers_if_the_initial_fill_snapshot_never_arrived() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let old = ready_socket(&mut h, authenticate);
+    // The socket dies before it can establish startup fill history.
+    h.wait(20_000.);
+    assert!(h.closed.contains(&old));
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(old, replacement);
+    authenticate(&mut h, replacement);
+    let _ = h.engine.take_frame(h.now);
+    let fill = r#"{"fill_id":"missed-startup","order_id":"new-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true}"#;
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{fill}]}}"#),
+    );
+    assert_eq!(h.engine.take_frame(h.now).map_or(0, support::fill_count), 1);
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills","fills":[{fill}]}}"#),
+    );
+    assert_eq!(h.engine.take_frame(h.now).map_or(0, support::fill_count), 0);
+}
+
 fn ticker(h: &mut H<Kraken>, socket: SocketId, symbol: &str) {
     h.message(
         socket,
