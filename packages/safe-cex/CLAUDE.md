@@ -225,6 +225,12 @@ Explicit `publicDataOnly: true` in delegated setup preserves raw mode-intent
 flags but ignores signing callbacks, credentials and setup metadata. It installs
 no provider or identity, advertises no algorithms, and cannot sign. Private-mode
 callback validation, primary/secondary selection and mode refusals remain strict.
+Construction snapshots outer signer fields and their methods together under one
+guard before mode resolution. Admission, asynchronous factories and signer setup
+share that immutable snapshot, preserving receivers without further caller reads.
+Its opaque construction token is stripped before generic options are retained.
+Throwing getters or Proxy traps refuse with a fixed, redacted `invalidInput` /
+`notSent` error before transport; caller errors are never retained.
 
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.
