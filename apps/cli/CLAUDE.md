@@ -416,6 +416,13 @@ subject and profile. Do not cache a path at module import. `cli.log` appends
 across starts, and `logs --clear` only clears the active user's log. Login
 changes must discard old in-memory state and fence pending work by session
 epoch; never copy accounts or credentials from the previous user's config.
+Every command-producing queue in `repl.ts` uses `enqueueSessionWork` at enqueue
+time, including initial/recreated readline, hosted webhooks and armed triggers.
+Do not rely on starting a scope only when a pending command is dispatched.
+Footer runs enter their starting session, and every script host binding checks
+the epoch captured at construction. Local-only state uses a stable separate
+profile. Shared legacy-file claims belong to the physical source directory,
+not individual `CONFIG_FILE` profiles; competing owners require re-entry.
 The storage inventory below is relative to the user directory described in
 `apps/documentation/cli/operations/config-files.md`.
 

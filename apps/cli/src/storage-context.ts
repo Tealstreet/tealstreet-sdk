@@ -12,6 +12,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
@@ -28,7 +29,8 @@ const profile = createHash('sha256')
 const profiles = join(root, 'profiles', profile);
 const selector = join(profiles, 'session.json');
 const claimFile = join(profiles, 'legacy-owner.json');
-const guestId = `guest-${randomUUID()}`;
+// Local-only state persists across invocations, but is never adopted by login.
+const guestId = 'local';
 let owner: string | null;
 let epoch = 0;
 const context = new AsyncLocalStorage<number>();
@@ -90,12 +92,61 @@ function legacyOwner(): string | null {
     const aliases = readJson(join(root, 'aliases-sync.json'));
     if (isRecord(aliases) && typeof aliases.owner === 'string' && aliases.owner !== candidate) candidate = null;
     privateDir(profiles);
-    writeExclusive(claimFile, (temp) => writeFileSync(temp, JSON.stringify({ owner: candidate }), { mode: 0o600 }));
+    writeExclusive(claimFile, (temp) =>
+      writeFileSync(
+        temp,
+        JSON.stringify({ owner: candidate, hadConfig: isRecord(config) && Array.isArray(config.accounts) }),
+        { mode: 0o600 },
+      ),
+    );
   }
   const claim = readJson(claimFile);
   return isRecord(claim) && typeof claim.owner === 'string' ? claim.owner : null;
 }
 const originalOwner = legacyOwner();
+
+// A config file proves ownership of that file, not every sibling file. Freeze
+// one claim for the physical shared source, across all config profiles/brands.
+// Conflicting or unknown config owners leave the shared files quarantined.
+function sharedLegacyOwner(): string | null {
+  if (root !== dirname(legacyConfig)) return null;
+  const physicalRoot = realpathSync(root);
+  const sharedClaim = join(physicalRoot, '.legacy-state-owner.json');
+  const authority = JSON.stringify([BRAND.id, process.env.TEALSTREET_API || 'http://localhost:3000']);
+  if (!existsSync(sharedClaim)) {
+    const owners = new Set<string>();
+    let ambiguous = false;
+    for (const entry of readdirSync(physicalRoot, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const value = readJson(join(physicalRoot, entry.name));
+      if (!isRecord(value) || !Array.isArray(value.accounts)) continue;
+      const id = authOwner(value.auth);
+      if (id) owners.add(id);
+      else ambiguous = true;
+    }
+    // Honor earlier releases' claims even if their config was since replaced.
+    const oldProfiles = join(physicalRoot, 'profiles');
+    if (existsSync(oldProfiles)) {
+      for (const entry of readdirSync(oldProfiles, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const prior = readJson(join(oldProfiles, entry.name, 'legacy-owner.json'));
+        if (!isRecord(prior)) continue;
+        if (typeof prior.owner === 'string') owners.add(prior.owner);
+        else if (prior.hadConfig !== false) ambiguous = true;
+      }
+    }
+    const aliases = readJson(join(physicalRoot, 'aliases-sync.json'));
+    if (isRecord(aliases) && typeof aliases.owner === 'string') owners.add(aliases.owner);
+    const onlyOwner = owners.size === 1 && !ambiguous ? [...owners][0] : null;
+    writeExclusive(sharedClaim, (temp) =>
+      writeFileSync(temp, JSON.stringify({ owner: onlyOwner, authority }), { mode: 0o600 }),
+    );
+  }
+  const claim = readJson(sharedClaim);
+  return isRecord(claim) && claim.authority === authority && typeof claim.owner === 'string' ? claim.owner : null;
+}
+const originalSharedOwner = sharedLegacyOwner();
+
 const selected = readJson(selector);
 owner = isRecord(selected) ? (typeof selected.owner === 'string' ? selected.owner : null) : originalOwner;
 
@@ -119,7 +170,7 @@ function migrate(subject: string | null) {
   const marker = join(target, '.legacy-migrated');
   if (existsSync(marker)) return;
   copyOwnedFile(legacyConfig, join(target, 'config.json'));
-  if (root !== dirname(legacyConfig)) {
+  if (root !== dirname(legacyConfig) || subject !== originalSharedOwner) {
     writeJson(marker, { owner: subject });
     return;
   }
@@ -179,7 +230,7 @@ export function getStoragePath(name: string): string {
   return join(getStorageDir(), name);
 }
 export function getOwnedLegacyDatabase(): string | null {
-  return owner && owner === originalOwner && root === dirname(legacyConfig) ? join(root, 'market-data.db') : null;
+  return owner && owner === originalSharedOwner && root === dirname(legacyConfig) ? join(root, 'market-data.db') : null;
 }
 export function onStorageOwnerChange(listener: () => void): () => void {
   listeners.add(listener);
@@ -215,5 +266,56 @@ export function selectStorageOwner(subject: string | null): void {
 }
 
 export function legacyDataRequiresReentry(): boolean {
-  return originalOwner === null && existsSync(legacyConfig);
+  return existsSync(legacyConfig) && (originalOwner === null || originalSharedOwner !== originalOwner);
+}
+
+export class QueuedSessionCancelledError extends Error {
+  constructor() {
+    super('Cancelled queued command because the CLI login changed.');
+    this.name = 'QueuedSessionCancelledError';
+  }
+}
+
+/** Capture authority when work is enqueued, before any wait behind another job. */
+export function enqueueSessionWork(
+  previous: Promise<void>,
+  run: () => Promise<void> | void,
+  reportCancellation: (message: string) => void,
+): Promise<void> {
+  const epoch = getStorageEpoch();
+  return new Promise<void>((resolve, reject) => {
+    let waiting = true;
+    const unsubscribe = onStorageOwnerChange(() => {
+      if (!waiting || isStorageSessionCurrent(epoch)) return;
+      waiting = false;
+      unsubscribe();
+      const error = new QueuedSessionCancelledError();
+      // Transition listeners run in the NEW session so the cancellation notice
+      // does not try to write a log through the invalidated old async context.
+      try {
+        reportCancellation(error.message);
+      } finally {
+        reject(error);
+      }
+    });
+    void previous.then(
+      () => {
+        if (!waiting) return;
+        waiting = false;
+        unsubscribe();
+        try {
+          assertStorageSession(epoch);
+          Promise.resolve(runInStorageSession(run)).then(resolve, reject);
+        } catch (error) {
+          reject(error);
+        }
+      },
+      (error: unknown) => {
+        if (!waiting) return;
+        waiting = false;
+        unsubscribe();
+        reject(error);
+      },
+    );
+  });
 }

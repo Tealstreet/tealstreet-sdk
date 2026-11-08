@@ -22,21 +22,26 @@ same operating-system account.
 Logging into B never relabels A's accounts, defaults, aliases, approvals,
 hooks or recording configuration. Returning to A restores A's profile.
 Logout removes the active profile's token, clears cached proxy tokens,
-disconnects exchanges and listeners, and cancels work started under the
-old login. A new login reconnects the listener with that user's identity;
+disconnects exchanges and listeners, and cancels pending commands from the
+old login with a message. This includes queued exit/quit commands. In-flight
+scripts cannot make further adapter calls after their starting session ends. A new login reconnects the listener with that user's identity;
 browser approval is specific to that user.
 
-Legacy files migrate once only when the old config identifies their owner.
-A conflicting alias-sync owner prevents migration. Files without ownership
+Each legacy config can identify the owner of its own accounts. Shared legacy
+files (hooks, browser approvals, vars, scripts and recordings) have one claim
+for their physical source directory across config profiles, brands and path
+aliases. They migrate only when the available ownership evidence is consistent;
+competing config owners or a conflicting alias-sync owner leave them unclaimed. Files without ownership
 evidence remain untouched and are never assigned to the next login: sign in
 and re-enter the accounts/settings you need. Original legacy files remain
 as backups; protect or remove those backups yourself when no longer needed.
 The CLI does not load them again after migration. SQLite migration uses a
 consistent snapshot, including committed WAL data.
 
-Signed-out work uses a temporary per-process profile. Sign in before saving
-settings you need to retain across restarts; signed-out state is not imported
-on the next login.
+Signed-out work uses a persistent local-only profile. Accounts, defaults,
+vars and aliases created there remain available to later signed-out invocations.
+That local profile is separate from authenticated profiles and is never imported
+on login. Pre-upgrade files with no ownership evidence still require re-entry.
 
 ---
 

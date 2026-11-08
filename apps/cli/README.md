@@ -61,7 +61,8 @@ ship CLI source; it downloads the matching binary from
 Config and runtime state are isolated by signed-in user and profile under
 `~/.tealstreet/profiles/<profile hash>/users/<user hash>/` (`~/.disrupt/` for Disrupt).
 Login changes clear live exchanges and approvals; unknown-owner legacy files
-require re-entry. See
+require re-entry. Signed-out local-only state persists separately and is never
+imported into an authenticated profile. See
 [`operations/config-files.md`](../documentation/cli/operations/config-files.md).
 
 ## Architecture

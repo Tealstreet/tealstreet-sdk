@@ -7,6 +7,8 @@ import {
   assertStorageSession,
   onStorageOwnerChange,
   runInStorageSession,
+  enqueueSessionWork,
+  QueuedSessionCancelledError,
 } from './storage-context';
 import * as readline from 'readline';
 import * as fs from 'fs';
@@ -406,13 +408,13 @@ export function recreateReadline(): void {
     const trimmedLine = line.trim();
     if (trimmedLine) {
       appendToHistory(trimmedLine);
-      const epoch = getStorageEpoch();
-      commandQueue = commandQueue
-        .then(() => {
-          assertStorageSession(epoch);
-          return processCommand(trimmedLine);
-        })
-        .catch(console.error);
+      commandQueue = enqueueSessionWork(
+        commandQueue,
+        () => processCommand(trimmedLine),
+        (message) => adapter.printInfo(message),
+      ).catch((error) => {
+        if (!(error instanceof QueuedSessionCancelledError)) console.error(error);
+      });
     }
     commandQueue.then(() => {
       newRl.setPrompt(getPrompt());
@@ -1079,11 +1081,13 @@ async function runFooterScript(name: string): Promise<void> {
     // return value is rendered.
     const silent: CoreAdapter = {
       ...createStandaloneCoreAdapter(exchangeManager, session, adapter),
-      print: () => {},
+      print: () => assertStorageSession(epoch),
     };
-    const result: RunScriptResult = await runScriptFromHostWithAdapter(
-      { adapter: silent, transpile: getCliTranspile() },
-      { record: roRecord, rawArgs: '', invokedFrom: 'inline' },
+    const result: RunScriptResult = await runInStorageSession(() =>
+      runScriptFromHostWithAdapter(
+        { adapter: silent, transpile: getCliTranspile() },
+        { record: roRecord, rawArgs: '', invokedFrom: 'inline' },
+      ),
     );
     if (!isStorageSessionCurrent(epoch)) return;
     if (result.ok) {
@@ -1102,7 +1106,7 @@ async function runFooterScript(name: string): Promise<void> {
   } finally {
     settled = true;
     clearTimeout(slowTimer);
-    footerScriptInflight.delete(name);
+    if (isStorageSessionCurrent(epoch)) footerScriptInflight.delete(name);
   }
 }
 
@@ -2272,7 +2276,7 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     // Onto the SAME queue typed input uses. A trigger fires from a timer, so
     // without this it would interleave with a chain the user is midway
     // through — two order-placing chains reading the same store at once.
-    const queued = commandQueue.then(run);
+    const queued = enqueueSessionWork(commandQueue, run, (message) => adapter.printInfo(message));
     // The queue must survive a failing trigger; the caller still sees the
     // rejection so the trigger can record it.
     commandQueue = queued.then(
@@ -2517,16 +2521,20 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
       // Drain the chain's last fire-and-forget step, or a one-step `buy` would
       // ack `done` before the order is even placed.
       // An alias in the body may have been defined on another listener moments ago.
-      const queued = commandQueue.then(async () => {
-        // It waited behind typed input; an alert past its expiry is stale.
-        if (ctx.expiresAt !== undefined && Date.now() > ctx.expiresAt) {
-          throw new Error('Not run: it waited behind your own commands past its expiry.');
-        }
-        await syncAliasesIfStale();
-        return runWithAdapterContext({ ...ctx, untrustedBody: true }, () =>
-          processCommand(body, { drainFinalInFlight: true }),
-        );
-      });
+      const queued = enqueueSessionWork(
+        commandQueue,
+        async () => {
+          // It waited behind typed input; an alert past its expiry is stale.
+          if (ctx.expiresAt !== undefined && Date.now() > ctx.expiresAt) {
+            throw new Error('Not run: it waited behind your own commands past its expiry.');
+          }
+          await syncAliasesIfStale();
+          return runWithAdapterContext({ ...ctx, untrustedBody: true }, () =>
+            processCommand(body, { drainFinalInFlight: true }),
+          );
+        },
+        (message) => adapter.printInfo(message),
+      );
       commandQueue = queued.then(
         () => undefined,
         () => undefined,
@@ -2551,40 +2559,46 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     appendToHistory(command);
 
     // Chain commands to ensure sequential processing
-    commandQueue = commandQueue.then(async () => {
-      if (command === 'exit' || command === 'quit') {
-        adapter.printInfo('Goodbye!');
-        if (connectionMonitor) {
-          connectionMonitor.stop();
-          connectionMonitor = null;
+    commandQueue = enqueueSessionWork(
+      commandQueue,
+      async () => {
+        if (command === 'exit' || command === 'quit') {
+          adapter.printInfo('Goodbye!');
+          if (connectionMonitor) {
+            connectionMonitor.stop();
+            connectionMonitor = null;
+          }
+          if (networkMonitor) {
+            networkMonitor.stop();
+            networkMonitor = null;
+          }
+          stopListener();
+          stopWebhookRelay();
+          stopAliasSync();
+          // Stop all exchanges (primary and enabled)
+          await exchangeManager.stopAll();
+          process.exit(0);
         }
-        if (networkMonitor) {
-          networkMonitor.stop();
-          networkMonitor = null;
+
+        // Process command
+        await processCommand(command);
+
+        // Update prompt with latest status (symbol, price, position, connection)
+        // But NOT if we're in monitor/serve mode - those handle their own display
+        if (!isMonitorMode) {
+          rl.setPrompt(getPrompt());
+          rl.prompt();
         }
-        stopListener();
-        stopWebhookRelay();
-        stopAliasSync();
-        // Stop all exchanges (primary and enabled)
-        await exchangeManager.stopAll();
-        process.exit(0);
-      }
-
-      // Process command
-      await processCommand(command);
-
-      // Update prompt with latest status (symbol, price, position, connection)
-      // But NOT if we're in monitor/serve mode - those handle their own display
-      if (!isMonitorMode) {
-        rl.setPrompt(getPrompt());
-        rl.prompt();
-      }
-    });
+      },
+      (message) => adapter.printInfo(message),
+    );
     // A command that throws must not leave the queue rejected: every later
     // typed command and webhook would then fail without running.
-    commandQueue = commandQueue.catch((err) =>
-      adapter.printError(`Error: ${err instanceof Error ? err.message : String(err)}`),
-    );
+    commandQueue = commandQueue.catch((err) => {
+      if (!(err instanceof QueuedSessionCancelledError)) {
+        adapter.printError(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
   });
 
   rl.on('close', async () => {
