@@ -12,6 +12,7 @@ import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandO
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
+import { snapshotDelegatedSigningOptions } from '../exchanges/rust/delegatedSigningSnapshot';
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { unsupportedVenueError } from '../unsupportedVenue';
@@ -179,6 +180,7 @@ export class ExchangeWorker {
     this._exchangeName = exchangeName;
     this._accountName = accountName;
     // The worker owns the account's engine; a forwarded mirror flag would stop it from running one.
+    options = snapshotDelegatedSigningOptions(exchangeName, options);
     const { workerMirror: _workerMirror, ...ownedOptions } = options;
     this._options = ownedOptions;
     this._ctx = ctx;
