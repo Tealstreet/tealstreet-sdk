@@ -40,3 +40,11 @@ its existing read-only `UnprovenEvidence::write_plan(&journal)` hook. It retains
 the recorded prefix and untouched suffix and projects the engine's failure into
 Unknown rows without changing the parent failure's classification or partial IDs.
 Neither this hook nor `attach` grants send, completion or retry authority.
+
+Terminal projection retains the caller's attached journal or, when absent, the
+latest journal captured on a failed physical attempt. Choosing an earlier native
+refusal for its error details does not replace that complete journal with an older
+snapshot. Existing aggregate outcome and error-message rules still apply.
+The latest captured journal follows a monotonic recording sequence assigned when
+each callback records its result, including unproven HTTP/native evidence; request
+registration order does not determine snapshot freshness.
