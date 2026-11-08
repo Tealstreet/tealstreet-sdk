@@ -47,7 +47,11 @@ fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
 }
 
 fn partial_row(row: Value, quantity: f64, price: Option<f64>) {
-    let (mut e, _) = seed(true);
+    let (mut e, _) = if row["type"] == "market" && row["side"] == "sell" {
+        seed_with_fixtures(true, MARKETS, r#"{"code":0,"data":[]}"#)
+    } else {
+        seed(true)
+    };
     let actions = submit_batch(
         &mut e,
         vec![
