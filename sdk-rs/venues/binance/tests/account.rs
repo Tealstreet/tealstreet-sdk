@@ -617,13 +617,10 @@ fn a_stop_whose_replacement_is_refused_says_the_stop_is_gone() {
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
-    // Putting the old stop back is refused too: nothing protects the position now.
-    let restore = h.take("/fapi/v1/algoOrder");
-    h.reply(
-        restore.id,
-        400,
-        "",
-        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == Method::Get)
     );
     let (_, error) = h
         .failures
@@ -2062,8 +2059,8 @@ fn a_stop_moved_to_another_symbols_price_is_refused_before_its_cancel() {
     );
 }
 
-/// On a stale ticker nothing is refused up front; a refused replacement puts the old order back.
-fn refused_after_cancel(restore: Option<&str>) -> Harness {
+/// On a stale ticker the replacement reaches the venue, then ends on refusal.
+fn refused_after_cancel() -> Harness {
     use safe_cex_engine::model::StopTriggerType::LastPrice;
     let mut h = ready();
     let id = protective(&mut h, OrderType::TakeProfit, LastPrice);
@@ -2088,64 +2085,26 @@ fn refused_after_cancel(restore: Option<&str>) -> Harness {
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
-    let restored = h.take("/fapi/v1/algoOrder");
-    assert_eq!(restored.method, Method::Post);
-    for (name, value) in [
-        ("triggerPrice", "99000"),
-        ("type", "TAKE_PROFIT_MARKET"),
-        ("side", "SELL"),
-        ("workingType", "CONTRACT_PRICE"),
-        ("closePosition", "true"),
-    ] {
-        assert_eq!(param(&restored.url, name).as_deref(), Some(value), "{name}");
-    }
-    match restore {
-        None => h.reply(
-            restored.id,
-            200,
-            "",
-            r#"{"algoId":2146799,"algoStatus":"NEW"}"#,
-        ),
-        Some(body) => h.reply(restored.id, 400, "", body),
-    }
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == Method::Get)
+    );
     h
 }
 
 #[test]
-fn a_refused_take_profit_replacement_puts_the_old_one_back() {
-    let h = refused_after_cancel(None);
+fn a_refused_take_profit_replacement_stops_without_put_back() {
+    let h = refused_after_cancel();
     let error = failure(&h);
-    assert_eq!(
-        error.protection,
-        Some(safe_cex_engine::error::Protection::Restored),
-        "{error:?} {:?}",
-        h.failures
-    );
-    assert!(error.message.contains("put back"), "{}", error.message);
-    assert!(
-        error.message.contains("Order would immediately trigger"),
-        "{}",
-        error.message
-    );
-    assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
-}
-
-#[test]
-fn a_take_profit_that_cannot_be_put_back_says_the_position_is_unprotected() {
-    let h = refused_after_cancel(Some(
-        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
-    ));
-    let error = failure(&h);
-    assert_eq!(
-        error.protection,
-        Some(safe_cex_engine::error::Protection::Unprotected)
-    );
+    assert_eq!(error.protection, None);
     assert!(
         error.message.contains("has no take profit"),
         "{}",
         error.message
     );
-    assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
+    assert!(error.message.contains("Order would immediately trigger"));
+    assert!(!h.has_request("/fapi/v1/algoOrder"));
 }
 
 /// codex-mxb4mq's P1: a replacement whose outcome is unknown (-1007) may have
@@ -2212,9 +2171,9 @@ fn review_3018_pending_replacement() -> (Harness, safe_cex_engine::HttpRequest) 
     (h, replacement)
 }
 /// A signature refusal (-1022) is proven: after the landed cancel it is not resent
-/// (its known effects suppress the resend), and the old take profit goes back once.
+/// (its known effects suppress the resend); no compensating order follows.
 #[test]
-fn review_3018_signature_refusal_puts_the_old_take_profit_back_once() {
+fn a_signature_refused_replacement_stops_without_put_back() {
     let (mut h, replacement) = review_3018_pending_replacement();
     h.reply(
         replacement.id,
@@ -2222,25 +2181,12 @@ fn review_3018_signature_refusal_puts_the_old_take_profit_back_once() {
         "",
         r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#,
     );
-    let restore = h.take("/fapi/v1/algoOrder");
-    assert_eq!(
-        param(&restore.url, "triggerPrice").as_deref(),
-        Some("99000")
-    );
-    h.reply(
-        restore.id,
-        200,
-        "",
-        r#"{"algoId":2146799,"algoStatus":"NEW"}"#,
-    );
     assert!(
         !h.has_request("/fapi/v1/algoOrder"),
-        "one put-back, no second protective order"
+        "no resend or compensating placement"
     );
-    assert_eq!(
-        failure(&h).protection,
-        Some(safe_cex_engine::error::Protection::Restored)
-    );
+    assert_eq!(failure(&h).protection, None);
+    assert!(h.result(12).unwrap().is_err());
 }
 #[test]
 fn review_3018_unknown_replacement_must_not_restore() {
@@ -2250,15 +2196,6 @@ fn review_3018_unknown_replacement_must_not_restore() {
         !h.has_request("/fapi/v1/algoOrder"),
         "unknown replacement must not add old protection"
     );
-}
-#[test]
-fn review_3018_refused_restore_working_control() {
-    let h = refused_after_cancel(None);
-    assert_eq!(
-        failure(&h).protection,
-        Some(safe_cex_engine::error::Protection::Restored)
-    );
-    assert!(!h.has_request("/fapi/v1/algoOrder"));
 }
 
 #[test]
@@ -2299,20 +2236,4 @@ fn review_3018_stale_mark_stream_working_control() {
     amend(&mut h, &id, 96000.);
     let cancel = h.take("/fapi/v1/algoOrder");
     assert_eq!(cancel.method, Method::Delete);
-}
-
-/// A put-back whose own outcome is unknown may have landed: neither restored nor unprotected.
-#[test]
-fn a_put_back_of_unknown_outcome_claims_no_protection() {
-    let h = refused_after_cancel(Some(
-        r#"{"code":-1007,"msg":"Timeout waiting for response from backend server. Send status unknown; execution status unknown."}"#,
-    ));
-    let error = failure(&h);
-    assert_eq!(error.protection, None, "{error:?}");
-    assert!(
-        error.message.contains("unknown outcome"),
-        "{}",
-        error.message
-    );
-    assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
 }

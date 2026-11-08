@@ -346,12 +346,6 @@ pub struct OpenOrder<'a> {
     pub client_order_id: Option<Str<'a>>,
     #[serde(borrow, default)]
     pub position_side: Option<Str<'a>>,
-    /// TRAILING_STOP_MARKET only (COIN-M): the callback rate in percent and its
-    /// activation price.
-    #[serde(borrow, default)]
-    pub price_rate: Option<Str<'a>>,
-    #[serde(borrow, default)]
-    pub activate_price: Option<Str<'a>>,
 }
 
 /// One `/fapi/v1/openAlgoOrders` row.
@@ -377,11 +371,6 @@ pub struct OpenAlgoOrder<'a> {
     pub close_position: bool,
     #[serde(borrow, default)]
     pub working_type: Option<Str<'a>>,
-    /// TRAILING_STOP_MARKET only: the callback rate in percent, and its activation price.
-    #[serde(borrow, default)]
-    pub callback_rate: Option<Str<'a>>,
-    #[serde(borrow, default)]
-    pub activate_price: Option<Str<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -686,11 +675,6 @@ pub struct PmAlgoOrder<'a> {
     pub close_position: bool,
     #[serde(borrow, default)]
     pub working_type: Option<Str<'a>>,
-    /// TRAILING_STOP_MARKET only: the callback rate in percent, and its activation price.
-    #[serde(borrow, default)]
-    pub callback_rate: Option<Str<'a>>,
-    #[serde(borrow, default)]
-    pub activate_price: Option<Str<'a>>,
 }
 
 #[derive(Deserialize)]

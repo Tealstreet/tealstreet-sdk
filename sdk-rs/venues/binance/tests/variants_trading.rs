@@ -877,10 +877,10 @@ fn coin_m_trailing_stop_from_the_snapshot_can_be_amended() {
     assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
 }
 
-/// COIN-M ignores stopPrice for trailing stops, so a native row may list it as 0: after
-/// a refused replacement the put-back still restores the captured rate and activation.
+/// COIN-M may list a trailing stopPrice as zero. Its requested replacement still
+/// uses the new callback rate, then ends without compensation if refused.
 #[test]
-fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
+fn coin_m_zero_price_trailing_replacement_stops_on_refusal() {
     for stop in ["98", "0"] {
         let mut h = ready_keeping_reads(Variant::CoinM);
         h.respond(
@@ -906,7 +906,7 @@ fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
         assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
         h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":77,"clientOrderId":"coin-trail","status":"CANCELED","origQty":"2","executedQty":"0"}"#);
         // A stop placed before the algo migration is cancelled where it lives; its
-        // replacement and put-back are algo orders.
+        // replacement is an algo order.
         let replacement = h.take("/dapi/v1/algoOrder");
         assert_eq!(
             param(&replacement.url, "callbackRate").as_deref(),
@@ -918,17 +918,11 @@ fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
             "",
             r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
         );
-        let put_back = h.take("/dapi/v1/algoOrder");
-        assert_eq!(
-            put_back.method,
-            safe_cex_engine::Method::Post,
-            "stopPrice {stop}"
+        assert!(
+            h.requests
+                .iter()
+                .all(|request| request.method == safe_cex_engine::Method::Get)
         );
-        assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
-        assert_eq!(
-            param(&put_back.url, "activatePrice").as_deref(),
-            Some("103")
-        );
-        assert_eq!(param(&put_back.url, "activationPrice"), None);
+        assert!(h.result(72).unwrap().is_err());
     }
 }

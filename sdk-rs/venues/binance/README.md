@@ -23,8 +23,8 @@ Every per-symbol topic remains visible to strict replay comparison.
 
 Placement retains the existing venue behavior. Formatting a batch before I/O
 does not validate every lot against native minimum quantities or notionals.
-A venue refusal can therefore follow an accepted order. Separate attached algo
-orders retain their whole intent quantity, and USD-M can continue later batches
+A venue refusal can therefore follow an accepted order. USD-M/PM attached algo
+orders retain their whole intent quantity, and derivatives can continue later batches
 after a definite per-row refusal. These are known legacy partial-placement paths.
 
 | Audit path | Legacy reference evidence | Verdict |
@@ -38,6 +38,24 @@ Reference files live under `packages/safe-cex/src/__tests__/reference/binance/`.
 The PM Algo Service migration at `274a20d5e` changes its conditional route while
 preserving its allocation and regular-before-conditional dispatch policy.
 Native lot rebalancing, whole-plan filter refusals and new fail-stop rules are
-outside this parity change. Existing protective replacement/put-back behavior
-and engine-owned transport classification remain in place. Binance does not
-adopt `WritePlan` as a dispatch gate.
+outside this parity change. Engine-owned transport classification remains in
+place. Binance does not adopt `WritePlan` as a dispatch gate.
+
+After a native batch item error in a successful HTTP response, USD-M and COIN-M continue later
+chunks and attached children, matching the reference's per-item logging loop.
+This includes an item timeout; its native outcome remains Unknown, and that row
+is never resent. Returned signature-error rows also continue without resending
+the batch; whole-request signature handling retains its existing policy.
+An HTTP request failure stops the serial placement path, including later algo
+children. After cancellation succeeds but its replacement is refused, the
+command ends without an automatic protective put-back: the reference's
+`updateOrder` propagates the placement error. Snapshot callback-rate caches used
+only for that put-back have been removed. The requested replacement still uses
+the venue's existing trailing-rate validation.
+
+| Failure path | Legacy behavior | Reference evidence |
+| --- | --- | --- |
+| Split lots / chunks: USD-M, COIN-M native batch row error | Continue later writes | `binance.exchange.ts:1997`, `binanceinverse.exchange.ts:937` |
+| Split lots / chunks: HTTP failure, including Spot and PM serial placement | Stop | `binance.exchange.ts:2012`, `binancespot.exchange.ts:586`, `binancepm.exchange.ts:1035` |
+| Attached TP/SL: HTTP failure | Stop later children | `binance.exchange.ts:2029`, `binancepm.exchange.ts:1068` |
+| Cancel-replace: cancel or replacement failure | Stop; no automatic put-back | `binance.exchange.ts:1617`, `binanceinverse.exchange.ts:808`, `binancespot.exchange.ts:459`, `binancepm.exchange.ts:834` |

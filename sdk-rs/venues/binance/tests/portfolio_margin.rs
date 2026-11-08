@@ -508,7 +508,7 @@ fn a_pm_trailing_stop_is_reduce_only_inside_the_10_percent_callback_range() {
 }
 
 #[test]
-fn a_refused_pm_trailing_replacement_puts_back_the_native_rate_and_activation_price() {
+fn a_refused_pm_trailing_replacement_stops_without_put_back() {
     let mut h = Harness::started(Options {
         key: Some("api-key".into()),
         secret: Some("secret".into()),
@@ -565,13 +565,11 @@ fn a_refused_pm_trailing_replacement_puts_back_the_native_rate_and_activation_pr
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
-    let put_back = h.take("/papi/v1/um/algo/order");
-    assert_eq!(put_back.method, Method::Post);
-    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
-    assert_eq!(
-        param(&put_back.url, "activatePrice").as_deref(),
-        Some("103")
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == Method::Get)
     );
-    assert_eq!(param(&put_back.url, "activationPrice"), None);
-    assert_eq!(param(&put_back.url, "reduceOnly").as_deref(), Some("true"));
+    assert!(h.result(33).unwrap().is_err());
+    assert_eq!(h.failures.last().unwrap().1.protection, None);
 }

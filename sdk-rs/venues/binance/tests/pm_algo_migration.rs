@@ -316,7 +316,7 @@ fn a_triggered_child_event_is_not_zero_execution_cancel_proof() {
 }
 
 #[test]
-fn pm_trailing_callback_rate_is_validated_before_cancel_and_can_be_put_back_exactly() {
+fn pm_trailing_requested_rate_is_validated_independently_of_the_original_rate() {
     for original_rate in ["1.5", "11"] {
         for target in [90.0, 89.0, 99.9] {
             let mut h = starting();
@@ -334,7 +334,7 @@ fn pm_trailing_callback_rate_is_validated_before_cancel_and_can_be_put_back_exac
                 price: Some(target),
                 amount: None,
             }));
-            let allowed = original_rate == "1.5" && target != 89.0;
+            let allowed = target != 89.0;
             assert_eq!(
                 h.requests.iter().any(|r| r.method == Method::Delete),
                 allowed,

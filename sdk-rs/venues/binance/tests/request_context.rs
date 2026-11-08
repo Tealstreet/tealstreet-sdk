@@ -994,7 +994,7 @@ fn rate_limits_are_unknown_while_definitive_status_refusals_stay_rejected() {
 }
 
 #[test]
-fn a_later_native_batch_rate_limit_stops_the_remaining_lots() {
+fn a_native_batch_item_rate_limit_continues_lots_and_retains_unknown() {
     for rate_limited in [true, false] {
         let mut h = ready();
         h.requests.clear();
@@ -1016,15 +1016,13 @@ fn a_later_native_batch_rate_limit_stops_the_remaining_lots() {
             {"code":-2019,"msg":"insufficient margin"}
         ]);
         h.reply(batch.id, 200, "", &rows.to_string());
-        if !rate_limited {
-            let last = h.take("/fapi/v1/order");
-            h.reply(
-                last.id,
-                400,
-                "",
-                r#"{"code":-2019,"msg":"insufficient margin"}"#,
-            );
-        }
+        let last = h.take("/fapi/v1/order");
+        h.reply(
+            last.id,
+            400,
+            "",
+            r#"{"code":-2019,"msg":"insufficient margin"}"#,
+        );
         assert!(
             h.requests
                 .iter()
