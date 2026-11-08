@@ -46,6 +46,8 @@ export class BumpCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
     let i = 1;
 
     // Optional leading symbol (only if there's at least one more token to consume)
@@ -53,9 +55,10 @@ export class BumpCommand extends TradingBaseCommand {
     if (
       args[i] &&
       args.length > i + 1 &&
-      this.validateSymbol(exchange, this.transformSymbol(exchange, args[i]))
+      !['buy', 'buys', 'sell', 'sells', 'top', 'bottom'].includes(args[i]) &&
+      this.validateSymbols(exchange, [args[i]]).length > 0
     ) {
-      symbol = this.transformSymbol(exchange, args[i]);
+      symbol = this.validateSymbols(exchange, [args[i]])[0];
       i++;
     }
 
@@ -75,8 +78,8 @@ export class BumpCommand extends TradingBaseCommand {
     if (args[i] === 'top' || args[i] === 'bottom') {
       selector = args[i] as 'top' | 'bottom';
       i++;
-      selectorCount = parseInt(args[i], 10);
-      if (!Number.isFinite(selectorCount) || selectorCount <= 0) {
+      selectorCount = this.parseOrderNumber(args[i]);
+      if (!Number.isSafeInteger(selectorCount) || selectorCount <= 0) {
         this.printError(ctx, `bump ${selector}: count must be a positive integer`);
         return this.error('Invalid count');
       }
@@ -92,7 +95,7 @@ export class BumpCommand extends TradingBaseCommand {
       );
       return this.error('Missing amount argument');
     }
-    const amount = parseFloat(amountArg);
+    const amount = this.parseOrderNumber(amountArg);
     if (!Number.isFinite(amount) || amount === 0) {
       this.printError(ctx, `Invalid amount: ${amountArg}`);
       return this.error('Invalid amount');
@@ -103,16 +106,27 @@ export class BumpCommand extends TradingBaseCommand {
     if (
       symbol === null &&
       args[i] &&
-      this.validateSymbol(exchange, this.transformSymbol(exchange, args[i]))
+      this.validateSymbols(exchange, [args[i]]).length > 0
     ) {
-      symbol = this.transformSymbol(exchange, args[i]);
+      symbol = this.validateSymbols(exchange, [args[i]])[0];
       i++;
     }
 
-    // Legacy flag fallback
+    const invalid = this.refuseUnknownArgs(ctx, Array.from({ length: i }, (_, index) => index));
+    if (invalid) return invalid;
+
+    const flagBuys = this.hasFlag(ctx, 'buys', 'b');
+    const flagSells = this.hasFlag(ctx, 'sells', 's');
+    if (
+      (flagBuys && flagSells) ||
+      (side === OrderSide.Buy && flagSells) ||
+      (side === OrderSide.Sell && flagBuys)
+    ) {
+      return this.error('Conflicting side selectors. Nothing was changed.');
+    }
     if (side === null) {
-      if (this.hasFlag(ctx, 'buys', 'b')) side = OrderSide.Buy;
-      else if (this.hasFlag(ctx, 'sells', 's')) side = OrderSide.Sell;
+      if (flagBuys) side = OrderSide.Buy;
+      else if (flagSells) side = OrderSide.Sell;
     }
 
     const targetSymbol = symbol ?? ctx.symbol;

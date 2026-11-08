@@ -1,11 +1,11 @@
 import { BaseCommand } from '../BaseCommand';
-import type { CommandContext } from '../Command';
+import type { CommandContext, CommandResult } from '../Command';
 import type { ExchangeLike } from '../../types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
 import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
 import { amountPrecisionOf } from '../../utils/marketPrecision';
-import { resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
+import { resolveCompleteMarketSymbol, resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
 import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
 
@@ -13,6 +13,39 @@ import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
  * Base class for trading commands with utility methods for size/price processing
  */
 export abstract class TradingBaseCommand extends BaseCommand {
+  // Resolve the leading symbol slot before scanning modifiers, so an alias
+  // such as REDUCE has only its symbol role in this position.
+  protected resolveLeadingSymbolSlot(ctx: CommandContext, index: number): CommandContext {
+    const token = ctx.args._[index];
+    if (!ctx.exchange || !token) return ctx;
+    const symbols = this.validateSymbols(ctx.exchange, token.split(','));
+    if (symbols.length === 0) return ctx;
+    const args = [...ctx.args._];
+    args[index] = symbols.join(',');
+    return { ...ctx, args: { ...ctx.args, _: args } };
+  }
+
+  protected refuseUnknownOrderArgs(
+    ctx: CommandContext,
+    consumed: number[],
+    { allowSymbol = true, symbolLists = false, symbolAfter = 0, allowAll = false, side }: {
+      allowSymbol?: boolean; symbolLists?: boolean; symbolAfter?: number; allowAll?: boolean; side?: PositionSide;
+    } = {},
+  ): CommandResult | undefined {
+    if (allowSymbol && ctx.exchange) {
+      for (let i = ctx.args._.length - 1; i > symbolAfter; i--) {
+        if (consumed.includes(i)) continue;
+        const parts = ctx.args._[i].split(',');
+        if (!symbolLists && parts.length > 1) continue;
+        if (this.validateSymbols(ctx.exchange, parts, allowAll, side).length > 0) {
+          consumed.push(i);
+          break;
+        }
+      }
+    }
+    return this.refuseUnknownArgs(ctx, consumed);
+  }
+
   /**
    * Check if a string looks like a price (e.g., "100", "100.5", "+100", "-50", "5%", "$100")
    */
@@ -253,15 +286,28 @@ export abstract class TradingBaseCommand extends BaseCommand {
     if (!Array.isArray(symbols)) {
       return [];
     }
-    if (allowAll && symbols.includes('%all%')) {
+    if (symbols.includes('%all%')) {
+      if (!allowAll || symbols.length !== 1) return [];
       return (exchange.store?.positions ?? [])
-        .filter((position) => position.side === side)
-        .map((position) => position.symbol);
+        .filter(position => position.side === side)
+        .map(position => position.symbol);
     }
-    return symbols
-      .filter((symbol) => !this.tokenLooksLikeNonSymbol(symbol))
-      .map((symbol) => this.transformSymbol(exchange, symbol))
-      .filter((symbol) => this.validateSymbol(exchange, symbol));
+    const resolved = symbols.map(symbol => {
+      if (this.tokenLooksLikeNonSymbol(symbol)) return undefined;
+      const complete = resolveCompleteMarketSymbol(exchange.store?.markets, symbol);
+      return complete !== undefined && this.validateSymbol(exchange, complete) ? complete : undefined;
+    });
+    if (!resolved.every((symbol): symbol is string => symbol !== undefined)) return [];
+    this.assertUniqueSymbols(resolved);
+    return resolved;
+  }
+
+  protected assertUniqueSymbols(symbols: string[]): void {
+    const seen = new Set<string>();
+    for (const symbol of symbols) {
+      if (seen.has(symbol)) throw new Error(`Duplicate market target "${symbol}". Nothing was sent.`);
+      seen.add(symbol);
+    }
   }
 
   /**

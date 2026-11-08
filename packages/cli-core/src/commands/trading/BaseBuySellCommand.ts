@@ -27,6 +27,10 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       return this.error('Exchange does not support placing orders');
     }
 
+    ctx = this.resolveLeadingSymbolSlot(ctx, 1);
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['reduce'], ['po'], ['best', 'at'], ['stop'], ['tp']]);
+    if (duplicate) return duplicate;
+
     // Fail closed on a typo'd explicit symbol. Without this, an
     // unresolved symbol token is silently dropped and the order routes
     // to the focused symbol — e.g. `buy $100 XBTUSD` on an exchange
@@ -36,11 +40,34 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     const unknownSymbol = this.findUnknownSymbolToken(ctx);
     if (unknownSymbol) {
       return this.error(
-        `Unknown symbol "${unknownSymbol}". Use a valid market symbol, or omit it to trade the focused symbol (${ctx.symbol}).`,
+        `${this.unknownOrderArgument(unknownSymbol)} Unknown symbol "${unknownSymbol}". Use a valid market symbol, or omit it to trade the focused symbol (${ctx.symbol}).`,
       );
     }
 
     const args = this.getRawArgs(ctx);
+    if (args.includes('po') && !args.includes('at') && !args.includes('best')) {
+      return this.error('po requires a limit order: use at PRICE or best. Nothing was sent.');
+    }
+    const leadingSymbol = this.validateSymbols(exchange, args[1]?.split(',') || []).length > 0;
+    const consumed = leadingSymbol ? [1, 2] : [1];
+    for (const keyword of ['reduce', 'po', 'best', 'stop', 'tp', ...(args.includes('best') ? [] : ['at'])]) {
+      const index = args.indexOf(keyword);
+      if (index > 0) {
+        consumed.push(index);
+        if (['at', 'stop', 'tp'].includes(keyword) && args[index + 1] !== undefined) consumed.push(index + 1);
+      }
+    }
+    const invalid = this.refuseUnknownOrderArgs(ctx, consumed, {
+      allowSymbol: !leadingSymbol, symbolLists: true,
+      symbolAfter: args.includes('at') && !args.includes('best') ? args.indexOf('at') + 1 : 1,
+    });
+    if (invalid) {
+      if (/^\d+(?:\.\d+)?$/.test(args.find((_, index) => ![0, ...consumed].includes(index)) ?? '')) {
+        this.printError(ctx, `${invalid.error} did you mean \`at <price>\`?`);
+        return this.error('Invalid syntax');
+      }
+      return invalid;
+    }
 
     // Phase 3: `best` → limit at best bid/ask (mutually exclusive with `at`).
     if (this.hasArgValue(args, 'best')) {
@@ -55,16 +82,16 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
   }
 
   /**
-   * Resolve `stop <price>` if present in args. Returns the absolute
+   * Resolve `stop <price>` or `tp <price>` if present in args. Returns the absolute
    * stop price (after `processPrice` for relative forms), or undefined
    * if not present. Throws on malformed args.
    */
-  protected resolveStopLoss(ctx: CommandContext, symbol: string, args: string[]): number | undefined {
-    const stopIdx = this.findArgIndex(args, 'stop');
+  protected resolveBracketPrice(ctx: CommandContext, symbol: string, args: string[], modifier = 'stop'): number | undefined {
+    const stopIdx = this.findArgIndex(args, modifier);
     if (stopIdx === -1) return undefined;
     const arg = args[stopIdx + 1];
     if (!arg) {
-      throw new Error("'stop' must be followed by a price");
+      throw new Error(`'${modifier}' must be followed by a price`);
     }
     const ticker = ctx.exchange!.store?.tickers?.find((t) => t.symbol === symbol);
     if (!ticker?.last) {
@@ -73,29 +100,20 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     return parseFloat(this.processPrice(arg, ticker.last));
   }
 
-  /**
-   * Scan the args for a token that was clearly meant to be a symbol but
-   * doesn't resolve to any market on this exchange. The buy/sell grammar
-   * is `[SYMBOL] SIZE [at PRICE] [best] [stop PRICE] [reduce] [po]
-   * [SYMBOL]`, so once keywords, their price operands, and any
-   * size/percent/number token are excluded, anything left that isn't a
-   * resolvable market is a typo'd symbol. Returns the first such token
-   * (so `execute` can fail closed) or undefined when every token is
-   * accounted for. Comma lists count as resolvable if at least one part
-   * is a real market (matching `validateSymbols`).
-   */
+  /** Reject unknown explicit symbols before constructing fan-out orders.
+   * Price/size operands and implemented modifiers belong to their parsers. */
   protected findUnknownSymbolToken(ctx: CommandContext): string | undefined {
     const exchange = ctx.exchange;
     if (!exchange) return undefined;
     const args = this.getRawArgs(ctx);
-    const KEYWORDS = new Set(['reduce', 'po', 'best', 'at', 'stop']);
+    const KEYWORDS = new Set(['reduce', 'po', 'best', 'at', 'stop', 'tp']);
     for (let i = 1; i < args.length; i++) {
       const tok = args[i];
       if (!tok) continue;
       if (KEYWORDS.has(tok.toLowerCase())) continue;
       // Price operand directly after `at` / `stop`.
       const prev = args[i - 1]?.toLowerCase();
-      if (prev === 'at' || prev === 'stop') continue;
+      if (prev === 'at' || prev === 'stop' || prev === 'tp') continue;
       // Size / percent / bare-number tokens are never symbols.
       if (this.tokenLooksLikeNonSymbol(tok)) continue;
       // Symbol (or comma list of symbols). Fail closed if ANY part
@@ -116,42 +134,6 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     const exchange = ctx.exchange!;
     const args = this.getRawArgs(ctx);
     const reduceOnly = this.hasArgValue(args, 'reduce');
-    // `po` is parsed in market-order handling for symmetry but ignored
-    // — market orders don't have a post-only mode. We still consume
-    // the keyword so it doesn't trip symbol detection.
-    const hasAttachedStop = this.findArgIndex(args, 'stop') !== -1;
-
-    // Safety check: detect bare numbers that look like prices (forgot "at" keyword).
-    // Skipped when `stop <p>` is present — the number after `stop` is the
-    // intentional stop-loss price, not a forgotten limit.
-    // When the SYMBOL leads (`buy BTC 1`), args[2] is the SIZE slot, and a bare
-    // size there is legitimate — it means raw contracts. Scanning from index 2
-    // unconditionally turned `buy BTC 1` into a syntax error.
-    const symbolLeads = this.validateSymbols(exchange, args[1]?.split(',') || []).length > 0;
-    const firstUnconsumedIndex = symbolLeads ? 3 : 2;
-
-    if (!hasAttachedStop) {
-      for (let i = firstUnconsumedIndex; i < args.length; i++) {
-        const arg = args[i];
-        if (arg === 'reduce' || arg === 'po') continue;
-        if (/^\d+(\.\d+)?$/.test(arg)) {
-          // ANY unconsumed bare number, not just one >= 100.
-          //
-          // The threshold assumed BTC-shaped prices. On a coin quoted at
-          // $0.05 it never fired, so `sell 33$ 0.051533 reduce` dropped the
-          // price and MARKET-sold — which is what a user reported as "my
-          // limit filled instantly at a terrible price". There is no reading
-          // of a leftover number here that means anything, so refusing is
-          // always right and silently discarding it never was.
-          this.printError(
-            ctx,
-            `Unexpected number "${arg}" - did you mean "${args[0]} ${args[1]} at ${arg}"? Use "at" keyword for limit orders.`,
-          );
-          return this.error('Invalid syntax');
-        }
-      }
-    }
-
     // Check for symbol at start: "buy SYMBOL $100"
     const symbolsAtStart = this.validateSymbols(exchange, args[1]?.split(',') || []);
     if (symbolsAtStart.length > 0) {
@@ -172,9 +154,9 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     // Check for symbol at end: "buy $100 SYMBOL" or "buy $100 reduce SYMBOL"
     let trailingSymbols: string[] = [];
     for (let i = args.length - 1; i >= 2; i--) {
-      if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'stop' || args[i] === 'best') continue;
+      if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'stop' || args[i] === 'tp' || args[i] === 'best') continue;
       // Skip the price token immediately after `stop`
-      if (i > 0 && args[i - 1] === 'stop') continue;
+      if (i > 0 && (args[i - 1] === 'stop' || args[i - 1] === 'tp')) continue;
       trailingSymbols = this.validateSymbols(exchange, args[i].split(','));
       if (trailingSymbols.length > 0) break;
     }
@@ -209,7 +191,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
    *  `stop` keyword in args. */
   private maybeStopLoss(ctx: CommandContext, symbol: string, args: string[]): number | undefined | Error {
     try {
-      return this.resolveStopLoss(ctx, symbol, args);
+      return this.resolveBracketPrice(ctx, symbol, args);
     } catch (e) {
       return e as Error;
     }
@@ -233,8 +215,8 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     } else {
       // Look for trailing symbol; skip best/reduce/stop and the price after stop.
       for (let i = args.length - 1; i >= 2; i--) {
-        if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'best' || args[i] === 'stop') continue;
-        if (i > 0 && args[i - 1] === 'stop') continue;
+        if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'best' || args[i] === 'stop' || args[i] === 'tp') continue;
+        if (i > 0 && (args[i - 1] === 'stop' || args[i - 1] === 'tp')) continue;
         const t = this.validateSymbols(exchange, args[i].split(','));
         if (t.length > 0) {
           possibleSymbols.push(...t);
@@ -296,8 +278,8 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       // the user never named.
       const atIndex = this.findArgIndex(args, 'at');
       for (let i = args.length - 1; i > atIndex + 1; i--) {
-        if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'best' || args[i] === 'stop') continue;
-        if (i > 0 && args[i - 1] === 'stop') continue;
+        if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'best' || args[i] === 'stop' || args[i] === 'tp') continue;
+        if (i > 0 && (args[i - 1] === 'stop' || args[i - 1] === 'tp')) continue;
         const trailingSymbols = this.validateSymbols(exchange, args[i].split(','));
         if (trailingSymbols.length > 0) {
           possibleSymbols.push(...trailingSymbols);
@@ -351,6 +333,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     stopLoss?: number,
     postOnly = false,
   ): PlaceOrderOpts {
+    const takeProfit = this.resolveBracketPrice(ctx, symbol, this.getRawArgs(ctx), 'tp');
     return {
       symbol,
       side: this.side,
@@ -360,6 +343,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       ...(price !== undefined ? { price } : {}),
       timeInForce: postOnly ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
       ...(stopLoss !== undefined ? { stopLoss } : {}),
+      ...(takeProfit !== undefined ? { takeProfit } : {}),
     };
   }
 

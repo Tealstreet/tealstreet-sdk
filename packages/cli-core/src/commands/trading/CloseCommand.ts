@@ -59,6 +59,30 @@ export class CloseCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['long'], ['short']]);
+    if (duplicate) return duplicate;
+    const global = ['longs', 'shorts', 'allpos', 'all'].includes(args[1]?.toLowerCase());
+    const size = this.findSizeToken(args);
+    const consumed = size ? [args.indexOf(size)] : [];
+    for (const keyword of global ? [args[1]] : ['long', 'short']) {
+      const index = args.indexOf(keyword);
+      if (index > 0) consumed.push(index);
+    }
+    const possibleSymbols: string[] = [];
+    if (!global) {
+      for (let i = 1; i <= 3 && i < args.length; i++) {
+        if (consumed.includes(i)) continue;
+        const symbols = this.validateSymbols(exchange, args[i].split(','));
+        if (symbols.length > 0) {
+          consumed.push(i);
+          possibleSymbols.push(...symbols);
+        }
+      }
+    }
+    const invalid = this.refuseUnknownArgs(ctx, consumed);
+    if (invalid) return invalid;
 
     // Global "close every position" / side-filtered variants. These run
     // before the per-symbol path below so a `longs` / `shorts` / `allpos`
@@ -82,20 +106,7 @@ export class CloseCommand extends TradingBaseCommand {
     // and end up in "no position" land if not a symbol.
     const sizeArg = this.findSizeToken(args);
 
-    const possibleSymbols = [
-      ...this.validateSymbols(
-        exchange,
-        sizeArg && args[1] === sizeArg ? [] : args[1]?.split(',') || [],
-      ),
-      ...this.validateSymbols(
-        exchange,
-        sizeArg && args[2] === sizeArg ? [] : args[2]?.split(',') || [],
-      ),
-      ...this.validateSymbols(
-        exchange,
-        sizeArg && args[3] === sizeArg ? [] : args[3]?.split(',') || [],
-      ),
-    ];
+    this.assertUniqueSymbols(possibleSymbols);
 
     if (possibleSymbols.length === 0) {
       possibleSymbols.push(ctx.symbol);
