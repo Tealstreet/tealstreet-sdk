@@ -67,8 +67,14 @@ To control external logging:
 session. Call it on logout. Cleanup and user changes invalidate cached ingest
 tokens and pending token requests; a late response cannot authorize the next
 user's uploads. Uploads waiting on a token or compression stop when their session
-ends. Restarting logging for the same active user can reuse an unexpired token,
-and a stale cleanup cannot invalidate the current session.
+ends. Every buffered entry and pending batch retains its originating user and
+epoch. Cleanup or a user switch makes one best-effort flush of queued data using
+only that owner's already-held, valid ingest token; unavailable authorization,
+offline data and failed delivery are dropped without retry. Cookie-authenticated
+`/api/logs` cannot retain an old owner's authorization, so its old buffers are
+dropped. An in-flight batch cannot remove a newer user's queued work on completion.
+Restarting logging for the same active user preserves the queue and can reuse an
+unexpired token, and a stale cleanup cannot invalidate the current session.
 
 ### Web Worker Usage
 

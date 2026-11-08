@@ -5,9 +5,9 @@ import { LogSeverity } from './LogSeverity';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const stringifyMessage = (str: any) => (needsStringification(str) ? JSON.stringify(str) : str);
+const stringifyMessage = (str: unknown) => (needsStringification(str) ? JSON.stringify(str) : str);
 
-const needsStringification = (str: any) =>
+const needsStringification = (str: unknown) =>
   typeof str == 'string' ||
   typeof str == 'number' ||
   typeof str == 'boolean' ||
@@ -17,7 +17,11 @@ const needsStringification = (str: any) =>
     ? false
     : Boolean(Array.isArray(str) || typeof str == 'object');
 
-let logQueue: Array<[string, string, { level: string }]> = [];
+type LoggingOwner = { userId: string; epoch: number };
+type QueuedLogEntry = { owner: LoggingOwner; value: [string, string, { level: string }] };
+type LogBatch = { owner: LoggingOwner; entries: QueuedLogEntry[] };
+
+let logQueue: QueuedLogEntry[] = [];
 let logQueueSizeApprox = 0;
 let localUserId = '';
 let localUsername: string | undefined;
@@ -25,7 +29,8 @@ let sessionKey = nanoid();
 let flushInterval: ReturnType<typeof setInterval> | undefined;
 let visibilityListener: (() => void) | undefined;
 let uploadInProgress = false;
-let pendingLogBatches: Array<typeof logQueue> = [];
+let pendingLogBatches: LogBatch[] = [];
+let activeLogBatch: LogBatch | undefined;
 
 const LOG_FLUSH_INTERVAL_MS = 60_000;
 const MAX_RETRIES = 5;
@@ -43,6 +48,16 @@ type LoggingMetrics = {
   retries: number;
 };
 
+const loggingMetricNames = [
+  'generatedEvents',
+  'generatedBytes',
+  'pressureFlushes',
+  'droppedBatches',
+  'uploadsStarted',
+  'uploadsSucceeded',
+  'retries',
+] satisfies Array<keyof LoggingMetrics>;
+
 let loggingMetrics: LoggingMetrics = {
   generatedEvents: 0,
   generatedBytes: 0,
@@ -59,7 +74,8 @@ type LogIngestToken = {
   token: string;
 };
 
-let cachedLogIngestToken: (LogIngestToken & { userId: string }) | undefined;
+type OwnedLogIngestToken = LogIngestToken & LoggingOwner;
+let cachedLogIngestToken: OwnedLogIngestToken | undefined;
 let logIngestTokenRequest: { userId: string; epoch: number; promise: Promise<LogIngestToken | undefined> } | undefined;
 let logIngestTokenEpoch = 0;
 
@@ -74,6 +90,9 @@ function resetLogIngestToken() {
 const isLoggingOwnerCurrent = (userId: string, epoch: number) =>
   userId === localUserId && epoch === logIngestTokenEpoch;
 
+const sameLoggingOwner = (left: LoggingOwner, right: LoggingOwner) =>
+  left.userId === right.userId && left.epoch === right.epoch;
+
 export const getSessionKey = () => sessionKey;
 
 // Test-only reset for module-scoped queues. Production code must use the
@@ -84,6 +103,7 @@ export const resetLoggingStateForTests = () => {
   logQueue = [];
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
+  activeLogBatch = undefined;
   uploadInProgress = false;
   resetLogIngestToken();
 };
@@ -128,13 +148,16 @@ const pushLogsToQueue = (level: LogSeverity, rawMessage: string) => {
       }
 
       if (finalMessage) {
-        logQueue.push([
-          date,
-          finalMessage,
-          {
-            level: level === LogSeverity.Error ? 'ERROR' : level === LogSeverity.Warning ? 'WARN' : 'INFO',
-          },
-        ]);
+        logQueue.push({
+          owner: { userId: localUserId, epoch: logIngestTokenEpoch },
+          value: [
+            date,
+            finalMessage,
+            {
+              level: level === LogSeverity.Error ? 'ERROR' : level === LogSeverity.Warning ? 'WARN' : 'INFO',
+            },
+          ],
+        });
       }
 
       logQueueSizeApprox += finalMessage.length;
@@ -153,20 +176,54 @@ export const dumpLogQueue = () => {
   logQueueSizeApprox = 0;
   if (ir.length === 0) return;
 
-  // A noisy source can pressure-flush faster than the network can complete.
-  // Keep only a bounded amount of diagnostic data and never fan it out into
-  // parallel Vercel function invocations.
-  if (pendingLogBatches.length >= MAX_PENDING_LOG_BATCHES) {
-    pendingLogBatches.shift();
-    loggingMetrics.droppedBatches++;
-    console.warn('[Logging] Dropped oldest pending batch because the upload queue is full');
+  const batches: LogBatch[] = [];
+  for (const entry of ir) {
+    const batch = batches.find((candidate) => sameLoggingOwner(candidate.owner, entry.owner));
+    if (batch) batch.entries.push(entry);
+    else batches.push({ owner: entry.owner, entries: [entry] });
   }
-  pendingLogBatches.push(ir);
+  for (const batch of batches) {
+    // Bound pending data while one upload is in progress.
+    if (pendingLogBatches.length >= MAX_PENDING_LOG_BATCHES) {
+      pendingLogBatches.shift();
+      loggingMetrics.droppedBatches++;
+      console.warn('[Logging] Dropped oldest pending batch because the upload queue is full');
+    }
+    pendingLogBatches.push(batch);
+  }
   void drainLogBatches();
 };
 
+function retireLoggingOwner() {
+  const owner = { userId: localUserId, epoch: logIngestTokenEpoch };
+  const entries = [
+    ...pendingLogBatches.filter((batch) => batch !== activeLogBatch).flatMap((batch) => batch.entries),
+    ...logQueue,
+  ].filter((entry) => sameLoggingOwner(entry.owner, owner));
+  logQueue = [];
+  logQueueSizeApprox = 0;
+  pendingLogBatches = [];
+  const token = cachedLogIngestToken;
+  const origin = getLogIngestOrigin();
+  // A final attempt can use only the old owner's already-held authorization.
+  // Cookie-authenticated fallback cannot preserve ownership after a switch.
+  if (
+    entries.length &&
+    token &&
+    sameLoggingOwner(token, owner) &&
+    token.expiresAt > Date.now() &&
+    origin &&
+    isPageReadyForLogging()
+  ) {
+    void sendToGrafana({ owner, entries }, { token, origin });
+  }
+}
+
 export const startLoggingToGrafana = (userId: string, username?: string) => {
-  if (userId !== localUserId) resetLogIngestToken();
+  if (userId !== localUserId) {
+    retireLoggingOwner();
+    resetLogIngestToken();
+  }
   localUserId = userId;
   localUsername = username;
 
@@ -203,6 +260,7 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
     if (flushInterval === activeFlushInterval) {
       clearInterval(activeFlushInterval);
       flushInterval = undefined;
+      retireLoggingOwner();
       localUserId = '';
       localUsername = undefined;
       resetLogIngestToken();
@@ -226,11 +284,11 @@ const getLogIngestOrigin = () => {
   return origin?.replace(/\/+$/, '') || undefined;
 };
 
-const getLogIngestToken = async (baseUrl: string, userId: string) => {
-  const epoch = logIngestTokenEpoch;
+const getLogIngestToken = async (baseUrl: string, { userId, epoch }: LoggingOwner) => {
   if (!isLoggingOwnerCurrent(userId, epoch)) return undefined;
   if (
     cachedLogIngestToken?.userId === userId &&
+    cachedLogIngestToken.epoch === epoch &&
     cachedLogIngestToken.expiresAt - Date.now() > LOG_INGEST_TOKEN_REFRESH_SKEW_MS
   ) {
     return cachedLogIngestToken.token;
@@ -245,13 +303,20 @@ const getLogIngestToken = async (baseUrl: string, userId: string) => {
           throw new Error(`Log token API responded with status ${response.status}`);
         }
 
-        const payload = (await response.json()) as Partial<LogIngestToken>;
-        if (typeof payload.token !== 'string' || typeof payload.expiresAt !== 'number') {
+        const payload: unknown = await response.json();
+        if (
+          !payload ||
+          typeof payload !== 'object' ||
+          !('token' in payload) ||
+          !('expiresAt' in payload) ||
+          typeof payload.token !== 'string' ||
+          typeof payload.expiresAt !== 'number'
+        ) {
           throw new Error('Log token API returned an invalid response');
         }
 
         if (!isLoggingOwnerCurrent(userId, epoch)) return undefined;
-        cachedLogIngestToken = { expiresAt: payload.expiresAt, token: payload.token, userId };
+        cachedLogIngestToken = { expiresAt: payload.expiresAt, token: payload.token, userId, epoch };
         return cachedLogIngestToken;
       })
       .finally(() => {
@@ -271,9 +336,11 @@ const drainLogBatches = async () => {
       if (!isPageReadyForLogging()) return;
       const batch = pendingLogBatches[0];
       if (batch) {
-        const complete = await sendToGrafana(localUserId, batch);
+        activeLogBatch = batch;
+        const complete = await sendToGrafana(batch);
+        activeLogBatch = undefined;
         if (!complete) return;
-        pendingLogBatches.shift();
+        pendingLogBatches = pendingLogBatches.filter((pending) => pending !== batch);
       }
     }
   } finally {
@@ -281,8 +348,16 @@ const drainLogBatches = async () => {
   }
 };
 
-const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<boolean> => {
-  const ownerEpoch = logIngestTokenEpoch;
+const sendToGrafana = async (
+  batch: LogBatch,
+  retiring?: { token: OwnedLogIngestToken; origin: string },
+): Promise<boolean> => {
+  const { userId, epoch: ownerEpoch } = batch.owner;
+  const queue = batch.entries.filter((entry) => sameLoggingOwner(entry.owner, batch.owner)).map((entry) => entry.value);
+  const isAuthorized = () =>
+    retiring
+      ? sameLoggingOwner(retiring.token, batch.owner) && retiring.token.expiresAt > Date.now()
+      : isLoggingOwnerCurrent(userId, ownerEpoch);
   // Skip logging in development unless explicitly forced
   // Default to logging if process is undefined (e.g., in web workers)
   let isDevelopment = false;
@@ -301,8 +376,9 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
   }
   if (queue.length === 0) return true;
 
-  for (let retries = 0; retries <= MAX_RETRIES; retries++) {
-    if (!isLoggingOwnerCurrent(userId, ownerEpoch)) return true;
+  const maxRetries = retiring ? 0 : MAX_RETRIES;
+  for (let retries = 0; retries <= maxRetries; retries++) {
+    if (!isAuthorized()) return true;
     if (!isPageReadyForLogging()) return false;
     const reportMetrics = Date.now() - lastMetricsReportAt >= METRICS_REPORT_INTERVAL_MS;
     const metricsSnapshot = reportMetrics ? { ...loggingMetrics } : undefined;
@@ -334,16 +410,16 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
     try {
       loggingMetrics.uploadsStarted++;
       const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
-      const logIngestOrigin = getLogIngestOrigin();
+      const logIngestOrigin = retiring?.origin ?? getLogIngestOrigin();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (logIngestOrigin) {
-        const token = await getLogIngestToken(baseUrl, userId);
+        const token = retiring?.token.token ?? (await getLogIngestToken(baseUrl, batch.owner));
         if (!token) return true;
         headers.Authorization = `Bearer ${token}`;
       }
 
       const body = await compress(JSON.stringify(nr));
-      if (!isLoggingOwnerCurrent(userId, ownerEpoch)) return true;
+      if (!isAuthorized()) return true;
       const response = await fetch(logIngestOrigin ? `${logIngestOrigin}/v1/logs` : `${baseUrl}/api/logs`, {
         method: 'POST',
         body,
@@ -352,16 +428,16 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
       if (!response.ok) throw new Error(`Logs API responded with status ${response.status}`);
       loggingMetrics.uploadsSucceeded++;
       if (metricsSnapshot) {
-        for (const key of Object.keys(metricsSnapshot) as Array<keyof LoggingMetrics>) {
+        for (const key of loggingMetricNames) {
           loggingMetrics[key] = Math.max(0, loggingMetrics[key] - metricsSnapshot[key]);
         }
         lastMetricsReportAt = Date.now();
       }
       return true;
     } catch (error) {
-      if (!isLoggingOwnerCurrent(userId, ownerEpoch)) return true;
-      if (retries === MAX_RETRIES) {
-        console.error(`Error in startLoggingToGrafana: ${error}. Dropping batch after ${MAX_RETRIES} retries`);
+      if (!isAuthorized()) return true;
+      if (retries === maxRetries) {
+        console.error(`Error in startLoggingToGrafana: ${error}. Dropping batch after ${maxRetries} retries`);
         return true;
       }
       const retryDelayMs = Math.min(1_000 * 2 ** retries, MAX_RETRY_DELAY_MS);
