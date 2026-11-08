@@ -100,7 +100,12 @@ describe('shared hosted provider presentation', () => {
       }
     }
     expect(() => setup(exchangeName, { secondary_key: 'read-public', secondary_passphrase: '' })).toThrow(/passphrase/);
-    expect(() => setup(exchangeName, { publicDataOnly: true, secondary_key: 'read-public', secondary_passphrase: '' })).toThrow(/passphrase/);
+    const publicOnly = setup(exchangeName, { publicDataOnly: true, secondary_key: 'read-public', secondary_passphrase: '' });
+    expect(publicOnly.ids).toEqual({});
+    await expect(publicOnly.capsule.signer(request(), context()))
+      .rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+    expect(publicOnly.callback).not.toHaveBeenCalled();
+    publicOnly.capsule.dispose();
     const own = setup(exchangeName, { secondary_key: 'read-public', secondary_passphrase: 'own-read-presentation' });
     expect(own.ids.secondary?.passphrase).not.toBe(own.ids.primary?.passphrase);
     expect((await own.capsule.signer(ownedRequest(own.ids, 'secondary'), context())).values[2])

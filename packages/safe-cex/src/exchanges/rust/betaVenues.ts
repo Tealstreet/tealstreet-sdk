@@ -66,6 +66,10 @@ export const assertBetaVenue = (name: string): void => {
 
 /** Unsupported signing modes cannot fall through to a TypeScript venue. */
 export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeOptions>): void => {
+  if (name === 'polymarket' && options.publicDataOnly !== true && (options.remoteSigner || options.payloadSigner)) {
+    const message = 'Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply';
+    throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+  }
   assertBetaVenue(name);
   if (
     options.publicDataOnly !== true &&
