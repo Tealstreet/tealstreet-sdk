@@ -252,7 +252,7 @@ impl Backpack {
         }
     }
     pub(crate) fn start_repairs(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !cx.now.is_finite() {
+        if !cx.now.is_finite() || !self.repairs.active.is_empty() {
             return;
         }
         for i in 0..self.repairs.grants.len() {
@@ -306,6 +306,7 @@ impl Backpack {
                     stage: Stage::Cancel,
                 },
             );
+            return;
         }
     }
     pub(crate) fn repair_stream(&mut self, id: &str, symbol: &str, fill: f64, terminal: bool) {
@@ -619,6 +620,7 @@ impl Backpack {
             }
             cx.notice(Level::Warn, code::ORDER_REJECTED, MANUAL);
         }
+        self.start_repairs(cx);
         self.repair_refresh(cx);
     }
 }
