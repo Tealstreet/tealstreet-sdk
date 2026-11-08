@@ -94,6 +94,8 @@ impl ClosedPnlOutput {
             let raw: &serde_json::value::RawValue = serde_json::from_str(row)
                 .map_err(|_| VenueError::new("invalid closed-position output"))?;
             if !raw.get().starts_with('{') {
+                serde_json::from_str::<wire::ValidatedIgnored>(raw.get())
+                    .map_err(|_| VenueError::new("invalid closed-position output"))?;
                 continue;
             }
             let row: Row = serde_json::from_str(raw.get())

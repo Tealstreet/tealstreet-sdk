@@ -80,3 +80,46 @@ fn accepted_reported_rows_keep_their_projection_and_incomplete_notice_after_page
         safe_cex_engine::Notice::Event(event) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
     )));
 }
+
+fn fetch_reported_row(extra: &str) -> Result<String, String> {
+    let mut h = startup(Variant::Linear, true);
+    fetch(&mut h, 73, Some("BTCUSDT"), Some(1.), Some(2.));
+    let row = format!(
+        r#"{{"symbol":"BTCUSDT","side":"Sell","closedSize":"2","avgEntryPrice":"90","avgExitPrice":"100","createdTime":"1","updatedTime":"2"{extra}}}"#
+    );
+    h.respond("/v5/position/closed-pnl", 200, &page(&[&row], ""));
+    h.result(73).expect("terminal read result").clone()
+}
+
+#[test]
+fn reported_pnl_valid_control_keeps_native_bytes() {
+    assert_eq!(
+        fetch_reported_row(r#", "closedPnl":"-4.25""#).unwrap(),
+        r#"[{"provenance":"venue","symbol":"BTCUSDT","notional":0.0,"contracts":2.0,"entryPrice":90.0,"exitPrice":100.0,"unrealizedPnl":-4.25,"side":"long","fees":0.0,"time":1.0,"closedTime":2.0,"account":"fixture-account","leverage":0.0}]"#
+    );
+}
+
+#[test]
+fn overflow_inside_pnl_object_preserves_prior_refusal() {
+    assert_eq!(
+        fetch_reported_row(r#", "closedPnl":{"x":1e309}"#),
+        Err("invalid closed-position output".into())
+    );
+}
+
+#[test]
+fn unknown_overflow_preserves_prior_refusal() {
+    assert_eq!(
+        fetch_reported_row(r#", "extra":1e309"#),
+        Err("invalid closed-position output".into())
+    );
+}
+
+#[test]
+fn deep_unknown_array_preserves_prior_refusal() {
+    let extra = format!(", \"extra\":{}0{}", "[".repeat(150), "]".repeat(150));
+    assert_eq!(
+        fetch_reported_row(&extra),
+        Err("invalid closed-position output".into())
+    );
+}

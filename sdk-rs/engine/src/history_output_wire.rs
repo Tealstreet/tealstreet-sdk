@@ -1,5 +1,5 @@
 //! Typed fields consumed by the four native closed-position projections.
-use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 
@@ -93,7 +93,7 @@ impl<'de> Visitor<'de> for RowVisitor {
                 "closeFee" => row.close_fee = fields.next_value()?,
                 "fee" => row.fee = fields.next_value()?,
                 _ => {
-                    fields.next_value::<IgnoredAny>()?;
+                    fields.next_value::<ValidatedIgnored>()?;
                 }
             }
         }
@@ -179,10 +179,53 @@ impl<'de> Visitor<'de> for FieldVisitor {
         })
     }
     fn visit_map<A: MapAccess<'de>>(self, mut fields: A) -> Result<Field, A::Error> {
-        while fields.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        while fields.next_entry::<String, ValidatedIgnored>()?.is_some() {}
         Ok(Field {
             text: "[object Object]".into(),
             ..Field::default()
         })
+    }
+}
+
+// Unlike IgnoredAny, deserialize_any preserves serde_json's numeric and depth checks.
+pub(super) struct ValidatedIgnored;
+
+impl<'de> Deserialize<'de> for ValidatedIgnored {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(Self)
+    }
+}
+
+impl<'de> Visitor<'de> for ValidatedIgnored {
+    type Value = Self;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a valid native JSON value")
+    }
+    fn visit_unit<E: de::Error>(self) -> Result<Self, E> {
+        Ok(self)
+    }
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self, E> {
+        Ok(self)
+    }
+    fn visit_str<E: de::Error>(self, _: &str) -> Result<Self, E> {
+        Ok(self)
+    }
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self, E> {
+        Ok(self)
+    }
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self, E> {
+        Ok(self)
+    }
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self, E> {
+        Ok(self)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut values: A) -> Result<Self, A::Error> {
+        while values.next_element::<Self>()?.is_some() {}
+        Ok(self)
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut fields: A) -> Result<Self, A::Error> {
+        while fields.next_entry::<String, Self>()?.is_some() {}
+        Ok(self)
     }
 }

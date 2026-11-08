@@ -99,3 +99,47 @@ fn native_field_names_remain_distinct_across_projection_formats() {
         assert_eq!(result[0]["leverage"], leverage);
     }
 }
+
+#[test]
+fn ignored_native_values_preserve_numeric_and_depth_refusals() {
+    let nested =
+        |value: &str, depth| format!("{}{}{}", "[".repeat(depth), value, "]".repeat(depth));
+    let mut values = vec![
+        ("1e309".to_owned(), true),
+        ("-1e309".into(), true),
+        (r#"{"x":1e309}"#.into(), true),
+        ("[1e309]".into(), true),
+        ("1e308".into(), false),
+        (r#"{"x":[null,true,"1e309",1e308]}"#.into(), false),
+    ];
+    for depth in [126, 127, 128, 150] {
+        values.push((nested("0", depth), depth >= 127));
+    }
+    for format in [
+        ClosedPositionFormat::Bybit,
+        ClosedPositionFormat::Okx,
+        ClosedPositionFormat::Blofin,
+        ClosedPositionFormat::Bitunix,
+    ] {
+        let output = output::ClosedPnlOutput::new(format, String::new(), false, None, &[]);
+        for (value, refuses) in &values {
+            for row in [
+                format!(r#"{{"extra":{value}}}"#),
+                format!(r#"{{"closedPnl":{value}}}"#),
+                value.clone(),
+            ] {
+                // The original parser validates the whole row, even when it has no projected fields.
+                let prior = serde_json::from_str::<serde_json::Value>(&row);
+                let result = output.encode(std::slice::from_ref(&row));
+                assert_eq!(result.is_err(), prior.is_err(), "{format:?}: {row}");
+                if row.starts_with('{') && row.contains("\"extra\"") {
+                    assert_eq!(prior.is_err(), *refuses, "depth/range control: {row}");
+                }
+                if let Err(error) = result {
+                    assert_eq!(error.message, "invalid closed-position output");
+                    assert_eq!(error.kind, None);
+                }
+            }
+        }
+    }
+}
