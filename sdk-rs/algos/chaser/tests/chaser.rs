@@ -2081,6 +2081,26 @@ async fn keep_order_stops_without_cancelling() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn keep_order_retains_legacy_cancellation_of_late_placement() {
+    // TS c78bed93d ChaserOrderManager.ts:307-322 cancels late IDs even after removeKeepOrder.
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        port.place_answer_ms.set(2_000);
+        let (factory, _) = start(&port, BUY_ONE);
+        settle(10).await;
+        let book = factory.book();
+        let id = book.active_chasers()[0].id.clone();
+        book.remove_keep_order(&id);
+        settle(2_500).await;
+        assert_eq!(port.placements().len(), 1);
+        assert_eq!(port.cancels(), ["o1"]);
+        assert_eq!(port.completes().len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_vanished_order_needs_two_order_frames_to_stop_the_chase() {
     local(async {
         let port = FakePort::new("bybit");

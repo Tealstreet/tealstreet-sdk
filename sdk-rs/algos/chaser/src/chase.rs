@@ -140,6 +140,7 @@ struct State {
     stopped: bool,
     stop_reason: String,
     current: Vec<String>,
+    orders_released: bool,
     ever: Vec<String>,
     filled_by: HashMap<String, f64>,
     /// Fill events per order: the same fills a row's `filled` reports.
@@ -418,7 +419,15 @@ impl Chase {
                 state.ever.push(id.clone());
             }
         }
-        state.current = ids;
+        if !state.orders_released {
+            state.current = ids;
+        }
+    }
+
+    pub fn release_orders(&self) {
+        let mut state = self.state.borrow_mut();
+        state.orders_released = true;
+        state.current.clear();
     }
 
     /// True once per order, for the task that will cancel it.

@@ -448,6 +448,80 @@ async fn chase_slices_run_on_the_account_chaser_book() {
         .await;
 }
 
+async fn halt_real_chaser_keeps_order(answer_ms: u64) {
+    LocalSet::new()
+        .run_until(async {
+            let _clock = support::ClockGuard::new();
+            let port = Rc::new(Port::default());
+            {
+                let mut store = port.store.borrow_mut();
+                store.venue = "binance".into();
+                store.markets.insert("BTCUSDT".into(), market());
+                store.tickers.insert(
+                    "BTCUSDT".into(),
+                    Ticker {
+                        symbol: "BTCUSDT".into(),
+                        bid: 100.0,
+                        ask: 101.0,
+                        last: 100.0,
+                        ..Ticker::default()
+                    },
+                );
+            }
+            port.answer_ms.set(answer_ms);
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let chasers = safe_cex_chaser::ChaserBook::new(cx.clone());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(chasers.clone()));
+            factory
+                .start(
+                    serde_json::from_str(&twap_options(json!({
+                        "size": 1, "ordersCount": 1, "useChaserOrders": true
+                    })))
+                    .unwrap(),
+                )
+                .unwrap();
+            settle().await;
+            assert_eq!(placed_amounts(&port), [1.0]);
+            let id = chasers.active_chasers()[0].id.clone();
+            TwapChasers::halt(&chasers, &cx, &id);
+            for _ in 0..8 {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                settle().await;
+            }
+            assert_eq!(placed_amounts(&port), [1.0]);
+            assert!(
+                !port.commands.borrow().iter().any(|command| matches!(
+                    command,
+                    Command::CancelOrders { .. } | Command::CancelOrdersWithSymbols { .. }
+                )),
+                "Unknown halt must retain even a late accepted order: {:?}",
+                port.commands.borrow()
+            );
+            assert!(chasers.active_chasers().is_empty());
+            assert_eq!(
+                port.emits
+                    .borrow()
+                    .iter()
+                    .filter(|(op, _)| op == "chaser:complete")
+                    .count(),
+                1
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn unknown_halt_keeps_late_accepted_chaser_order() {
+    // TS c78bed93d TwapInstance.ts:213-220 cancels on timeout; Unknown uses the exception.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at TwapInstance.ts:255-280.
+    halt_real_chaser_keeps_order(5000).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn unknown_halt_keeps_already_accepted_chaser_order() {
+    halt_real_chaser_keeps_order(0).await;
+}
+
 fn market() -> Market {
     Market {
         id: "BTCUSDT".into(),

@@ -23,7 +23,7 @@ pub trait TwapChasers {
     /// An `Err` is the refusal the client sees as an error log.
     fn start_with_id(&self, cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String>;
     fn progress(&self, chaser_id: &str) -> Option<ChaserProgress>;
-    /// Stop without I/O after an uncertain TWAP outcome; resting orders stay.
+    /// Stop further writes after an uncertain TWAP outcome; current and late orders stay.
     fn halt(&self, cx: &AlgoCx, chaser_id: &str);
     /// Stop the chaser and cancel its open order.
     fn remove(&self, cx: &AlgoCx, chaser_id: &str);
@@ -471,7 +471,7 @@ impl TwapEnv for CxEnv {
 /// `ChaserFactory::book()` and register that same `ChaserFactory`.
 impl TwapChasers for Rc<ChaserBook> {
     fn halt(&self, _cx: &AlgoCx, id: &str) {
-        ChaserBook::remove_keep_order(self, id);
+        ChaserBook::halt_keep_order(self, id);
     }
 
     fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {

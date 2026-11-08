@@ -13,6 +13,10 @@ Genuine Unknown halts the action under Sean/daxx's recorded parity exception
 timers and stops owned chasers while retaining their resting orders. It never
 replays an uncertain child or issues a cancellation/replacement because of Unknown.
 Previously dispatched responses still settle and update the reported native IDs.
+The Unknown-only chaser halt also relinquishes orders whose placement response
+arrives later. Ordinary timeout removal still cancels before market fallback
+(legacy `TwapInstance.ts:213-220`); generic keep-order removal retains its legacy
+late-response cancellation (`ChaserOrderManager.ts:307-322,1017-1035`).
 
 The exact local wording is `The outcome is unknown. Check Open Orders`, matching
 `engine/src/http_evidence.rs:38` per the lead's literal rule. Shared engine code

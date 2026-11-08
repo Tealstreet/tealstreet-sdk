@@ -288,6 +288,14 @@ impl ChaserBook {
         }
     }
 
+    /// Unknown halts relinquish both current and still-pending orders, without cancelling.
+    pub fn halt_keep_order(self: &Rc<Self>, id: &str) {
+        if let Some(chase) = self.find(id) {
+            chase.release_orders();
+        }
+        self.remove_keep_order(id);
+    }
+
     /// Stop every chase; their cleanups run in the background.
     pub fn terminate_all(self: &Rc<Self>, reason: &str) {
         for chase in self.stop_all(reason) {
