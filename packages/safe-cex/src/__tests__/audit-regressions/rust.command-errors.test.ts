@@ -177,24 +177,32 @@ it('retains applied cancel batch counts and the unknown index without created or
   expect(r.errors).toHaveBeenCalledTimes(1);
 });
 
-it('Bitunix applied cancel Unknown retains attempted counts without created IDs', async () => {
+it.each([false, true])('Bitunix applied cancel Unknown retains caller order and effects (unknownFirst=%s)', async (unknownFirst) => {
+  const ids = unknownFirst ? ['uncertain', 'confirmed'] : ['confirmed', 'uncertain'];
+  const failedIndex = unknownFirst ? 0 : 1;
   const r = await fixture('bitunix');
   const detail: VenueErrorDetail = {
-    message: 'Bitunix cancellation not acknowledged for every order; replacement was not placed',
+    message: 'Bitunix cancellation not acknowledged for every order; replacement was not placed; The outcome is unknown. Check Open Orders',
     kind: 'network',
     outcome: 'unknown',
     venueCode: '10001',
     venueMessage: 'Network Error',
-    partial: { orderIds: [], total: 2, failedIndex: 1 },
+    partial: { orderIds: [], total: 2, failedIndex },
+    elements: ids.map((id, index) => id === 'confirmed'
+      ? { index, status: 'applied' as const, effect: 'cancel' as const, targetOrderId: id }
+      : { index, status: 'unknown' as const, error: {
+        message: 'Network Error', kind: 'network' as const, outcome: 'unknown' as const,
+        venueCode: '10001', venueMessage: 'Network Error',
+      } }),
   };
   r.onCommand(({ command }) => [{ op: 'done', command, error: detail.message, detail }]);
-  const targets = ['confirmed', 'uncertain'].map((id) => ({
+  const targets = ids.map((id) => ({
     ...order, id, status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
   }));
   const error = await r.exchange.cancelOrders(targets).catch((error: unknown) => error);
   expect(error).toBeInstanceOf(ExchangeError);
   expect(r.commands.filter(({ command }) => command !== undefined)).toEqual([
-    expect.objectContaining({ op: 'cancelOrders', ids: ['confirmed', 'uncertain'] }),
+    expect.objectContaining({ op: 'cancelOrders', ids }),
   ]);
   const expected = {
     message: detail.message,
@@ -206,7 +214,8 @@ it('Bitunix applied cancel Unknown retains attempted counts without created IDs'
     // This counts created IDs, not confirmed cancellation effects.
     partialOrderCount: 0,
     totalOrderCount: 2,
-    failedOrderIndex: 1,
+    failedOrderIndex: failedIndex,
+    elements: detail.elements,
     errorReported: true,
   };
   expect(error).toMatchObject(expected);

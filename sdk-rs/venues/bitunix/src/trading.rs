@@ -5,7 +5,7 @@ use crate::account::{Axis, NativeOrder};
 use crate::sign::Params;
 use crate::wire::Str;
 use crate::{BitunixFutures, Pending, codes, error};
-use safe_cex_engine::classify::{BatchItem, Intent, Native, NativeCode, WriteFact};
+use safe_cex_engine::classify::{self, BatchItem, Intent, Native, NativeCode, Released, WriteFact};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{CallAuth, SerialCall, SerialPolicy, Slot};
@@ -15,6 +15,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::signing::Identity as SigningIdentity;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 use safe_cex_engine::{Command, Cx, ErrorKind, Method, Outcome, Response, VenueError, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -176,10 +177,48 @@ struct Job {
     restore: Vec<OrderStatus>,
     recover: Option<Vec<PlaceOrderOpts>>,
     created: Vec<String>,
+    cancel_report: Option<CancelReport>,
     /// The leg re-placed after its two-leg TP/SL was cancelled: id, symbol, side and kind.
     kept: Option<(String, String, OrderSide, OrderType)>,
     /// The kept leg's placement went out, so a failure leaves the position without it.
     kept_sent: bool,
+}
+struct CancelReport {
+    targets: Vec<String>,
+    journal: WritePlan,
+    confirmed: HashSet<String>,
+}
+impl CancelReport {
+    fn new(targets: &[String]) -> Self {
+        Self {
+            targets: targets.to_vec(),
+            confirmed: HashSet::new(),
+            journal: WritePlan::new(
+                targets
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| Element {
+                        index,
+                        client_order_id: None,
+                    })
+                    .collect(),
+            ),
+        }
+    }
+    fn record(&mut self, target: &str, result: ElementResult) {
+        if matches!(result, ElementResult::Applied { .. }) {
+            self.confirmed.insert(target.to_owned());
+        } else if self.confirmed.contains(target) {
+            return;
+        }
+        for (index, id) in self.targets.iter().enumerate() {
+            if id == target {
+                self.journal
+                    .record(index, result.clone())
+                    .expect("caller cancellation index");
+            }
+        }
+    }
 }
 struct Prepare {
     orders: Vec<PlaceOrderOpts>,
@@ -1043,7 +1082,10 @@ impl BitunixFutures {
         }
     }
     fn plan_cancel(&self, cx: &Cx<'_, Pending>, ids: &[String]) -> Result<Job, String> {
-        let mut job = Job::default();
+        let mut job = Job {
+            cancel_report: Some(CancelReport::new(ids)),
+            ..Default::default()
+        };
         let mut regular: Vec<(String, Vec<String>)> = vec![];
         let mut seen = HashSet::new();
         let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
@@ -1793,6 +1835,9 @@ impl BitunixFutures {
         };
         Self::cleanup(cx, &live.job);
         self.reread_held(cx);
+        if let Some(report) = &live.job.cancel_report {
+            error = report.journal.attach(error);
+        }
         match &live.plan {
             None => {
                 let failed = cx.fail_preflight(&live.preflight, error);
@@ -1879,6 +1924,33 @@ impl BitunixFutures {
         self.account.reask = false;
         self.account.reconcile = false;
     }
+    fn cancel_failure(&mut self, request: &Request, error: &VenueError) {
+        let Some(report) = self
+            .trading
+            .live
+            .get_mut(&request.command)
+            .and_then(|live| live.job.cancel_report.as_mut())
+        else {
+            return;
+        };
+        let ids = match &request.step.call {
+            Call::Cancel { ids, .. } => ids.clone(),
+            Call::CancelSymbol { .. } => report.targets.clone(),
+            _ => return,
+        };
+        for id in ids {
+            let result = if error.outcome == Some(Outcome::Unknown) {
+                ElementResult::Unknown {
+                    error: Box::new(error.clone()),
+                }
+            } else {
+                ElementResult::NotSent {
+                    error: Some(Box::new(error.clone())),
+                }
+            };
+            report.record(&id, result);
+        }
+    }
     /// A call failed in transport; a released write is Unknown.
     pub(crate) fn trade_failed(
         &mut self,
@@ -1894,7 +1966,9 @@ impl BitunixFutures {
         if !write && let Some(live) = self.trading.live.get_mut(&request.command) {
             live.note = Some(message.to_owned());
         }
-        self.end(cx, request.command, error::transport(message, write));
+        let error = error::transport(message, write);
+        self.cancel_failure(&request, &error);
+        self.end(cx, request.command, error);
     }
     /// A call refused before release (signing): NotSent for this call.
     pub(crate) fn trade_error(
@@ -1904,6 +1978,7 @@ impl BitunixFutures {
         mut error: VenueError,
     ) {
         self.kept_gone(request.command, &mut error);
+        self.cancel_failure(&request, &error);
         // Never released: a settings scope ends with the job.
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.settings_released = false;
@@ -1937,6 +2012,10 @@ impl BitunixFutures {
         if request.step.read() {
             return self.replacement_answer(cx, request, response);
         }
+        self.cancel_failure(
+            &request,
+            &error::malformed("Unacknowledged Bitunix cancellation", true),
+        );
         // Fence before parsing: a partial ACK can apply accepted effects and
         // then stop on a rejected or malformed sibling.
         cx.store.invalidate_order_snapshots();
@@ -1964,9 +2043,7 @@ impl BitunixFutures {
                 clients,
                 batch: true,
             } => self.batch_answer(cx, &request, data, clients.len()),
-            Call::Cancel { ids, require_ack } => {
-                self.cancel_answer(cx, &request, data, ids, *require_ack, false)
-            }
+            Call::Cancel { ids, .. } => self.cancel_answer(cx, &request, &response, data, ids),
             Call::CancelSymbol { symbol } => {
                 let ids: Vec<_> = cx
                     .store
@@ -1975,7 +2052,7 @@ impl BitunixFutures {
                     .filter(|o| o.symbol == *symbol)
                     .map(|o| o.id.clone())
                     .collect();
-                self.cancel_answer(cx, &request, data, &ids, false, true)
+                self.cancel_answer(cx, &request, &response, data, &ids)
             }
             Call::Amend {
                 id, parent, leg, ..
@@ -2071,6 +2148,7 @@ impl BitunixFutures {
         error: VenueError,
     ) {
         let command = request.command;
+        self.cancel_failure(&request, &error);
         // HTTP status owns classification; a native code decides only a 2xx.
         let code = error
             .venue_code
@@ -2449,11 +2527,15 @@ impl BitunixFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: &Request,
+        response: &Response<'_>,
         data: &str,
         ids: &[String],
-        require_ack: bool,
-        sweep: bool,
     ) -> Result<(), Option<VenueError>> {
+        let (require_ack, sweep) = match &request.step.call {
+            Call::Cancel { require_ack, .. } => (*require_ack, false),
+            Call::CancelSymbol { .. } => (false, true),
+            _ => unreachable!("cancellation response"),
+        };
         #[derive(Deserialize, Default)]
         #[serde(rename_all = "camelCase")]
         struct Item<'a> {
@@ -2483,13 +2565,16 @@ impl BitunixFutures {
         let Ok(ack) = ack else {
             return Self::record(cx, request, Err("Malformed Bitunix cancellation".into()));
         };
-        let raw_id = |id: &String| {
-            self.account
-                .native
-                .get(id)
-                .map_or(id.as_str(), |n| n.raw_id.as_str())
-                .to_owned()
-        };
+        let raw_ids: Vec<_> = ids
+            .iter()
+            .map(|id| {
+                self.account
+                    .native
+                    .get(id)
+                    .map_or(id.as_str(), |n| n.raw_id.as_str())
+                    .to_owned()
+            })
+            .collect();
         let (successes, rows_valid) = match ack_rows(ack.success_list) {
             Ok(rows) => (rows, true),
             Err(_) => (Vec::new(), false),
@@ -2521,8 +2606,8 @@ impl BitunixFutures {
         let clean = !require_ack && !malformed && rejected.is_empty();
         let all = clean && !sweep;
         let mut canceled = Vec::new();
-        for id in ids {
-            if all || succeeded.contains(&raw_id(id)) {
+        for (id, raw) in ids.iter().zip(&raw_ids) {
+            if all || succeeded.contains(raw) {
                 canceled.push(id.clone());
                 cx.store.update_order(id, |row| {
                     if !matches!(row.status, OrderStatus::Closed | OrderStatus::Canceled) {
@@ -2531,21 +2616,118 @@ impl BitunixFutures {
                 });
             }
         }
+        if let Some(report) = self
+            .trading
+            .live
+            .get_mut(&request.command)
+            .and_then(|live| live.job.cancel_report.as_mut())
+        {
+            for id in &canceled {
+                report.record(
+                    id,
+                    ElementResult::Applied {
+                        effect: AppliedEffect::Cancel,
+                        target_order_id: Some(id.clone()),
+                        position_key: None,
+                    },
+                );
+            }
+        }
         if clean {
             return Self::record(cx, request, Ok(canceled));
         }
-        let raws: Vec<_> = if sweep {
-            echoed
-        } else {
-            canceled.iter().map(raw_id).collect()
-        };
-        let mut items: Vec<_> = raws.iter().map(|id| BatchItem::Accepted(id)).collect();
-        items.extend(failures.iter().map(|f| {
-            BatchItem::Native(Native {
+        fn native<'a>(f: &'a Item<'_>) -> Native<'a> {
+            Native {
                 code: NativeCode::Int(f.error_code.map_or(0, |code| code.0)),
-                message: &f.error_msg,
+                message: f.error_msg.as_ref(),
+            }
+        }
+        let accepted: Vec<_> = if sweep {
+            echoed.iter().map(String::as_str).collect()
+        } else {
+            ids.iter()
+                .zip(&raw_ids)
+                .filter(|(id, _)| canceled.contains(id))
+                .map(|(_, raw)| raw.as_str())
+                .collect()
+        };
+        let mut items: Vec<_> = accepted
+            .iter()
+            .map(|id| BatchItem::Accepted(id))
+            .chain(failures.iter().map(|f| BatchItem::Native(native(f))))
+            .collect();
+        // Match native identities before changing reporting order. Unattributed
+        // or malformed replies retain the existing batch classification policy.
+        let correlated = !sweep
+            && !malformed
+            && items.len() == ids.len()
+            && failures.iter().all(|failure| {
+                !failure.order_id.is_empty()
+                    && raw_ids.iter().any(|raw| raw == failure.order_id.as_ref())
+                    && !succeeded.iter().any(|id| id.as_str() == failure.order_id)
+                    && failures
+                        .iter()
+                        .filter(|other| other.order_id == failure.order_id)
+                        .count()
+                        == 1
             })
-        }));
+            && raw_ids.iter().all(|raw| {
+                succeeded.contains(raw)
+                    || failures
+                        .iter()
+                        .any(|failure| failure.order_id == raw.as_str())
+            });
+        if correlated {
+            items = raw_ids
+                .iter()
+                .map(|raw| {
+                    if succeeded.contains(raw) {
+                        BatchItem::Accepted(raw.as_str())
+                    } else {
+                        let failure = failures
+                            .iter()
+                            .find(|f| f.order_id == raw.as_str())
+                            .expect("correlated cancellation failure");
+                        BatchItem::Native(native(failure))
+                    }
+                })
+                .collect();
+        }
+        if let Some(report) = self
+            .trading
+            .live
+            .get_mut(&request.command)
+            .and_then(|live| live.job.cancel_report.as_mut())
+        {
+            for (id, raw) in ids.iter().zip(&raw_ids) {
+                if canceled.contains(id) {
+                    continue;
+                }
+                let error =
+                    if let Some(failure) = failures.iter().find(|f| f.order_id == raw.as_str()) {
+                        let native = native(failure);
+                        classify::error(
+                            codes::BITUNIX.verdict(&native, Intent::Cancel),
+                            Intent::Cancel,
+                            Released::Response(response),
+                            Some(&native),
+                            native.message,
+                        )
+                    } else {
+                        error::malformed("Unacknowledged Bitunix cancellation", true)
+                    };
+                let result = if error.outcome == Some(Outcome::Unknown) {
+                    ElementResult::Unknown {
+                        error: Box::new(error),
+                    }
+                } else {
+                    ElementResult::NotSent {
+                        error: Some(Box::new(error)),
+                    }
+                };
+                report.record(id, result);
+            }
+        }
         if malformed {
             items.push(BatchItem::Accepted(""));
         }
@@ -2583,7 +2765,25 @@ impl BitunixFutures {
                 | WriteResult::KnownPartial(error)
                 | WriteResult::PartialUnknown(error)
                 | WriteResult::Failed(error),
-            ) => Err(Some(error)),
+            ) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    const UNKNOWN: &str = "The outcome is unknown. Check Open Orders";
+                    if let Some(live) = self.trading.live.get_mut(&request.command) {
+                        live.note = Some(match live.note.take() {
+                            Some(note) => format!("{note}; {UNKNOWN}"),
+                            None => UNKNOWN.to_owned(),
+                        });
+                    }
+                    let command = request.command;
+                    cx.event(
+                        safe_cex_engine::Level::Warn,
+                        "order.outcome_unknown",
+                        UNKNOWN,
+                        vec![("command", command.into())],
+                    );
+                }
+                Err(Some(error))
+            }
             Err(_) => Err(None),
         }
     }
