@@ -473,3 +473,40 @@ it('keeps an unsupported history read quiet but still rejects it, typed', async 
   await r.exchange.fetchIncomeHistory({ incomeType: 'FUNDING_FEE' }).catch(() => undefined);
   expect(r.errors).toHaveBeenCalledTimes(1);
 });
+
+// Mirrors OKX's regular/algo recording pins: one accepted cancel and one 51412 row.
+it.each([false, true])('OKX applied cancel keeps Unknown counts without created IDs (algo=%s)', async (algo) => {
+  const r = await fixture('okx');
+  const detail: VenueErrorDetail = {
+    message: 'Cancellation timed out',
+    kind: 'timeout',
+    outcome: 'unknown',
+    venueCode: '51412',
+    venueMessage: 'Cancellation timed out',
+    partial: { orderIds: [], total: 2, failedIndex: 1 },
+  };
+  r.onCommand(({ command }) => [{ op: 'done', command, error: detail.message, detail }]);
+  const targets = (algo ? ['91_sl', '92_sl'] : ['1', '2']).map((id) => ({
+    ...order, id, type: algo ? OrderType.StopLoss : OrderType.Limit,
+    status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+  }));
+  const error = await r.exchange.cancelOrders(targets).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ExchangeError);
+  expect(r.commands.findLast(({ op }) => op.startsWith('cancelOrders'))?.orders).toEqual(
+    targets.map(({ id, symbol, type }) => ({ id, symbol, type })),
+  );
+  const expected = {
+    message: detail.message,
+    outcome: 'unknown',
+    kind: 'timeout',
+    venueCode: '51412',
+    partialOrderIds: [],
+    partialOrderCount: 0,
+    totalOrderCount: 2,
+    failedOrderIndex: 1,
+  };
+  // The zero counts created IDs; the attempted cancellation remains uncertain.
+  expect(error).toMatchObject(expected);
+  expect(serializeCommandError(error)).toMatchObject(expected);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+});

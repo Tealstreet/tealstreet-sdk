@@ -2942,6 +2942,12 @@ fn cancel_batch_unknown_row_has_no_created_target_ids(algo: bool) {
             .is_none_or(|partial| partial.order_ids.is_empty()),
         "existing cancellation targets are never created-order evidence: {error:?}"
     );
+    let partial = error
+        .partial
+        .as_ref()
+        .expect("applied batch retains reporting metadata");
+    assert_eq!(partial.total, Some(2));
+    assert_eq!(partial.failed_index, Some(1));
     for id in ids {
         assert_eq!(
             e.store().order(id).unwrap().status,
