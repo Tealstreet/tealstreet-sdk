@@ -12,7 +12,7 @@ mod backpack;
 #[cfg(feature = "kraken")]
 mod kraken;
 
-#[cfg(feature = "kucoin")]
+#[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
 mod kucoin;
 
 #[derive(Clone, Copy, Deserialize)]
@@ -169,7 +169,7 @@ pub enum OutputKind {
     Backpack {
         ws: bool,
     },
-    #[cfg(feature = "kucoin")]
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
     Kucoin {
         broker: bool,
         ws: bool,
@@ -192,7 +192,7 @@ impl OutputKind {
     /// Value count and MAC position of the captured work's result.
     fn layout(self) -> (usize, Option<usize>) {
         match self {
-            #[cfg(feature = "kucoin")]
+            #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
             Self::Kucoin { broker, .. } => (if broker { 4 } else { 3 }, Some(1)),
             Self::Credential => (1, None),
             Self::Http(policy) if policy.passphrase_header.is_some() => (3, Some(1)),
@@ -321,6 +321,7 @@ fn family(venue: &str) -> bool {
         || (cfg!(feature = "backpack") && venue == "backpack")
         || (cfg!(feature = "kucoin") && venue == "kucoin")
         || (cfg!(feature = "kraken") && venue == "kraken")
+        || (cfg!(feature = "kucoinspot") && venue == "kucoinspot")
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "woo") && venue == "woo")
@@ -402,13 +403,16 @@ pub fn prepare(
             Input::Credential {} => {}
         }
     }
-    #[cfg(feature = "kucoin")]
-    if venue == "kucoin" {
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+    if (cfg!(feature = "kucoin") && venue == "kucoin")
+        || (cfg!(feature = "kucoinspot") && venue == "kucoinspot")
+    {
         match input {
             Input::Http {
                 payload, stamp_ms, ..
             } => {
                 return kucoin::prepare(
+                    venue,
                     identities,
                     payload,
                     SignReceipt {
@@ -421,7 +425,7 @@ pub fn prepare(
             Input::WsAuth {
                 to_sign,
                 output_format: OutputFormat::KucoinBatch,
-            } => return kucoin::prepare(identities, to_sign, SignReceipt::default(), true),
+            } => return kucoin::prepare(venue, identities, to_sign, SignReceipt::default(), true),
             Input::WsAuth { .. } => return Err(SignError::Unsupported),
             Input::Credential {} => {}
         }
@@ -535,7 +539,7 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
     if let OutputKind::Backpack { ws } = kind {
         return backpack::finish(ws, result);
     }
-    #[cfg(feature = "kucoin")]
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
     if let OutputKind::Kucoin { broker, ws } = kind {
         return kucoin::finish(broker, ws, result);
     }
@@ -589,7 +593,7 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         OutputKind::Backpack { .. } => unreachable!(),
         #[cfg(feature = "backpack")]
         OutputKind::WsAuth(OutputFormat::BackpackEd25519) => return Err(SignError::Unsupported),
-        #[cfg(feature = "kucoin")]
+        #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
         OutputKind::Kucoin { .. } => unreachable!(),
         OutputKind::WsAuth(OutputFormat::KucoinBatch) => return Err(SignError::Unsupported),
         OutputKind::Credential => unreachable!(),
