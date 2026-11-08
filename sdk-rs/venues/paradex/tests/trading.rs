@@ -508,7 +508,7 @@ fn placement_continues_after_a_rejection_and_retains_earlier_and_later_ids() {
 }
 
 #[test]
-fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
+fn a_refused_entry_skips_its_children_and_an_unknown_entry_stops_the_action() {
     for ambiguous in [false, true] {
         let mut h = private();
         let mut bracket = opts(OrderType::Market);
@@ -535,25 +535,21 @@ fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
                 r#"{"error":"REJECTED","message":"entry refused"}"#,
             );
         }
-        let next = h.take("/orders");
-        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
-        assert_eq!(payload.kind, "MARKET");
-        assert_eq!(payload.client_id.as_deref(), Some("next"));
-        h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
         if ambiguous {
-            // Nothing is resent; the Unknown outcome only queues the fence's read.
+            after_failure_no_more_writes(&h);
             reconcile_read_only(&mut h);
-        }
-        assert!(h.pending.is_empty());
-        if ambiguous {
-            // A lost entry may have been accepted: never success, and the
-            // accepted next order stays visible.
             let error = failed(&h, 71);
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-            assert_eq!(error.partial.unwrap().order_ids, ["accepted-next"]);
+            assert!(error.partial.is_none());
         } else {
+            let next = take_method(&mut h, Method::Post, "/orders");
+            let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload.kind, "MARKET");
+            assert_eq!(payload.client_id.as_deref(), Some("next"));
+            h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
             assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
         }
+        assert!(h.pending.is_empty());
     }
 }
 
@@ -2053,7 +2049,10 @@ fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
     let mut second = opts(OrderType::Market);
     second.client_order_id = Some("second".into());
     place(&mut h, 73, vec![opts(OrderType::Market), second]);
-    for unknown in [unknown_first, !unknown_first] {
+    for unknown in [unknown_first, !unknown_first]
+        .into_iter()
+        .take(if unknown_first { 1 } else { 2 })
+    {
         let request = take_method(&mut h, Method::Post, "/orders");
         if unknown && malformed {
             h.respond(request, 200, "{}");
@@ -2095,7 +2094,11 @@ fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
         text.contains("unknown") && text.contains("check open orders"),
         "{error:?}"
     );
-    assert!(text.contains("definitive refusal"), "{text}");
+    assert_eq!(
+        text.contains("definitive refusal"),
+        !unknown_first,
+        "{text}"
+    );
     assert!(!error.message.contains(diagnostic), "{error:?}");
     assert!(
         !h.pending.iter().any(|r| r.method != Method::Get),
@@ -2105,14 +2108,14 @@ fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
 }
 
 #[test]
-fn aggregation_retains_first_unknown_diagnostics_when_both_legs_are_uncertain() {
+fn the_first_unknown_diagnostic_is_retained_and_the_next_leg_is_withheld() {
     use safe_cex_engine::{ErrorKind, Outcome};
     for transport_first in [false, true] {
         let mut h = private();
         let mut second = opts(OrderType::Market);
         second.client_order_id = Some("second".into());
         place(&mut h, 73, vec![opts(OrderType::Market), second]);
-        for transport in [transport_first, !transport_first] {
+        for transport in [transport_first, !transport_first].into_iter().take(1) {
             let request = take_method(&mut h, Method::Post, "/orders");
             if transport {
                 h.e.handle(
@@ -2150,7 +2153,10 @@ fn aggregation_normalizes_transport_unknown_warning() {
         let mut second = opts(OrderType::Market);
         second.client_order_id = Some("second".into());
         place(&mut h, 73, vec![opts(OrderType::Market), second]);
-        for lost in [lost_first, !lost_first] {
+        for lost in [lost_first, !lost_first]
+            .into_iter()
+            .take(if lost_first { 1 } else { 2 })
+        {
             let request = take_method(&mut h, Method::Post, "/orders");
             if lost {
                 h.e.handle(
@@ -2178,7 +2184,7 @@ fn aggregation_normalizes_transport_unknown_warning() {
             text.contains("unknown") && text.contains("check open orders"),
             "{error:?}"
         );
-        assert!(text.contains("definitive refusal"), "{text}");
+        assert_eq!(text.contains("definitive refusal"), !lost_first, "{text}");
         assert!(!text.contains("connection reset"), "{text}");
         assert!(
             !h.pending.iter().any(|r| r.method != Method::Get),
@@ -2196,7 +2202,10 @@ fn aggregation_keeps_unknown_warning_beside_a_definitive_refusal() {
             let mut second = opts(OrderType::Market);
             second.client_order_id = Some("second".into());
             place(&mut h, 73, vec![opts(OrderType::Market), second]);
-            for ambiguous in [ambiguous_first, !ambiguous_first] {
+            for ambiguous in [ambiguous_first, !ambiguous_first]
+                .into_iter()
+                .take(if ambiguous_first { 1 } else { 2 })
+            {
                 let request = take_method(&mut h, Method::Post, "/orders");
                 if ambiguous {
                     h.respond(request, status, body);
@@ -2216,9 +2225,10 @@ fn aggregation_keeps_unknown_warning_beside_a_definitive_refusal() {
                 text.contains("unknown") && text.contains("check open orders"),
                 "{error:?}"
             );
-            assert!(
+            assert_eq!(
                 text.contains("definitive refusal"),
-                "the independent known failure stays visible: {text}"
+                !ambiguous_first,
+                "only an already-attempted refusal stays visible: {text}"
             );
             assert!(
                 !h.pending.iter().any(|r| r.method != Method::Get),
@@ -3427,7 +3437,7 @@ fn after_failure_native_batch_stops_later_chunks_and_serial_entries() {
 }
 
 #[test]
-fn after_failure_serial_entry_continues_without_sending_its_children() {
+fn after_failure_serial_entry_continues_only_after_definite_refusal() {
     // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1958-1965.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
     // TS paradex.exchange.ts:1414-1431,1958-1965 catches one entry, then continues the loop.
@@ -3442,6 +3452,14 @@ fn after_failure_serial_entry_continues_without_sending_its_children() {
         place(&mut h, 91, vec![entry, next]);
         let first = h.take("/orders");
         after_failure_refuse(&mut h, first, lost);
+        if lost {
+            after_failure_no_more_writes(&h);
+            assert_eq!(
+                failed(&h, 91).outcome,
+                Some(safe_cex_engine::Outcome::Unknown)
+            );
+            continue;
+        }
         let next = take_method(&mut h, Method::Post, "/orders");
         let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
         assert_eq!(payload.kind, "MARKET");
@@ -3452,7 +3470,7 @@ fn after_failure_serial_entry_continues_without_sending_its_children() {
 }
 
 #[test]
-fn after_failure_take_profit_skips_stop_loss_but_continues_the_next_entry() {
+fn after_failure_take_profit_skips_stop_loss_and_continues_only_after_refusal() {
     // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     // TS paradex.exchange.ts:1817-1896 has one try for TP+SL; 1949-1965 continues entries.
@@ -3465,6 +3483,14 @@ fn after_failure_take_profit_skips_stop_loss_but_continues_the_next_entry() {
         let payload: Payload = serde_json::from_str(tp.body.as_deref().unwrap()).unwrap();
         assert_eq!(payload.kind, "TAKE_PROFIT_MARKET");
         after_failure_refuse(&mut h, tp, lost);
+        if lost {
+            after_failure_no_more_writes(&h);
+            assert_eq!(
+                failed(&h, 91).outcome,
+                Some(safe_cex_engine::Outcome::Unknown)
+            );
+            continue;
+        }
         let next = take_method(&mut h, Method::Post, "/orders");
         let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
         assert_eq!(payload.kind, "MARKET");

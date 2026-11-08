@@ -1492,7 +1492,8 @@ impl Trading {
                     };
                     // TS awaits batch flushes outside its serial-entry catch. A bracket's
                     // TP and SL share one try, so either failure skips its remaining children.
-                    if *batch {
+                    // Sean/daxx's Unknown exception also withholds independent later entries.
+                    if *batch || error.outcome == Some(Outcome::Unknown) {
                         job.operations.clear();
                     } else {
                         while job.operations.front().is_some_and(|op| {
