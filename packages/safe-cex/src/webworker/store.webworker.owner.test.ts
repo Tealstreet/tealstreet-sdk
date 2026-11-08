@@ -92,6 +92,79 @@ beforeEach(() => {
 });
 
 describe('SharedWorker session ownership', () => {
+  it.each([undefined, 'A'])('accepts unstamped commands on an unchanged initial attachment: %s', async (instanceId) => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const initial = { ...init('A'), instanceId };
+    await a.send(initial);
+    await a.send(initial);
+    expect(fixture.workers).toHaveLength(1);
+    for (const commandId of [undefined, '']) {
+      const command: StoreWorkerPayload = { op: 'chaser:start', instanceId: commandId, data: { id: 'A-chase' } };
+      await a.send(command);
+      expect(fixture.workers[0].handlePayload).toHaveBeenCalledWith(command);
+    }
+  });
+
+  it.each([
+    ['chaser:start', undefined],
+    ['chaser:start', ''],
+    ['chaser:terminateAll', undefined],
+    ['chaser:terminateAll', ''],
+  ] as const)('drops deferred A %s with instanceId %s after B rebinds the port', async (op, instanceId) => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    await a.send(init('A'));
+    const release = deferred<void>();
+    const old: StoreWorkerPayload = { op, instanceId, data: { id: 'A-chase' } };
+    const pending = release.promise.then(() => a.send(old));
+    await a.send(init('B'));
+    expect(fixture.workers).toHaveLength(2);
+    expect(fixture.workers[0].exchange.isDisposed).toBe(true);
+    const current: StoreWorkerPayload = { op, instanceId: 'B', data: { id: 'B-chase' } };
+    await a.send(current);
+    expect(fixture.workers[1].handlePayload).toHaveBeenCalledExactlyOnceWith(current);
+    release.resolve();
+    await pending;
+    expect(fixture.workers[1].handlePayload).not.toHaveBeenCalledWith(old);
+    expect(fixture.workers[1].handlePayload).toHaveBeenCalledExactlyOnceWith(current);
+  });
+
+  it.each([undefined, '', 'A'])('refuses an owner rebind without a fresh lifecycle ID: %s', async (instanceId) => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    await a.send(init('A'));
+    a.context.postMessage.mockClear();
+    await a.send({ ...init('B'), instanceId });
+    expect(a.context.postMessage).toHaveBeenCalledWith({ op: 'start-status', data: false });
+    expect(fixture.workers).toHaveLength(1);
+    expect(fixture.workers[0].exchange.isDisposed).toBe(false);
+    const current: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'A', data: { id: 'A-chase' } };
+    await a.send(current);
+    expect(fixture.workers[0].handlePayload).toHaveBeenCalledExactlyOnceWith(current);
+  });
+
+  it('does not reuse a retired lifecycle ID when the port returns to A', async () => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    await a.send(init('A'));
+    const release = deferred<void>();
+    const old: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'A', data: { id: 'old-A-chase' } };
+    const pending = release.promise.then(() => a.send(old));
+    await a.send(init('B'));
+    await a.send(init('A'));
+    expect(a.context.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'warning' }));
+    expect(fixture.workers).toHaveLength(2);
+    await a.send({ ...init('A'), instanceId: 'fresh-A' });
+    expect(fixture.workers).toHaveLength(3);
+    release.resolve();
+    await pending;
+    expect(fixture.workers[2].handlePayload).not.toHaveBeenCalled();
+    const current: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'fresh-A', data: { id: 'new-A-chase' } };
+    await a.send(current);
+    expect(fixture.workers[2].handlePayload).toHaveBeenCalledExactlyOnceWith(current);
+  });
+
   it('retires A when its last port switches to B before A startup settles', async () => {
     const { default: start } = await import('./store.webworker');
     const a = port(start);

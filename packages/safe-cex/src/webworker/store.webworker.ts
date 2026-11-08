@@ -179,6 +179,8 @@ const start = (ctx: Worker, shared = false) => {
   let portKey: string;
   let attachedSharedWorker: ExchangeWorker | undefined;
   let sharedInstanceId: string | undefined;
+  const sharedInstanceIds = new Set<string>();
+  let sharedRequiresInstanceId = false;
   let initGeneration = 0;
   let hasLoggedInstanceMismatch = false;
   const _originalPostMessage = !shared
@@ -452,6 +454,7 @@ const start = (ctx: Worker, shared = false) => {
 
     if (shared && payload.op !== 'init') {
       const target = getRegisteredWorker() ?? failedWorker;
+      if (sharedRequiresInstanceId && !payload.instanceId) return;
       if (sharedInstanceId && payload.instanceId && sharedInstanceId !== payload.instanceId) return;
       if (!attachedSharedWorker || target !== attachedSharedWorker) {
         if (payload.op === 'dispose') {
@@ -488,6 +491,27 @@ const start = (ctx: Worker, shared = false) => {
 
     switch (payload.op) {
       case 'init': {
+        if (shared) {
+          const rebindsPort =
+            _initPayload &&
+            (accountName !== payload.data.accountName ||
+              exchangeName !== payload.data.exchangeName ||
+              _initPayload.data.sessionKey !== payload.data.sessionKey ||
+              sharedInstanceId !== payload.instanceId);
+          if (rebindsPort) {
+            if (!payload.instanceId || sharedInstanceIds.has(payload.instanceId)) {
+              ctx.postMessage({ op: 'start-status', data: false });
+              ctx.postMessage({
+                op: 'warning',
+                data: ['This account connection cannot be reused safely. Close it and open a new connection.'],
+              });
+              return;
+            }
+            // Unstamped work cannot prove which attachment created it after a rebind.
+            sharedRequiresInstanceId = true;
+          }
+          if (payload.instanceId) sharedInstanceIds.add(payload.instanceId);
+        }
         const generation = ++initGeneration;
         await initExchangeWorker(payload);
         if (generation !== initGeneration) return;

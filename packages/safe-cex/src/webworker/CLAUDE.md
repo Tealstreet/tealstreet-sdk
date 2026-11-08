@@ -70,6 +70,11 @@ channel's session until they detach. Session keys are never logged or echoed.
 
 Each shared port is bound to the exact accepted worker and its own optional
 `instanceId`, so another tab's instance ID does not prevent same-session sharing.
+Unstamped inbound commands are accepted only on the initial binding. Changing
+the session, account, exchange or instance requires a nonempty instance ID never
+previously used on that port; subsequent commands must carry that exact ID.
+Missing or retired IDs refuse the rebind before disturbing the current worker.
+An identical init retains its binding. Legacy callers can open a new port instead.
 Commands from detached or replaced bindings are dropped. A stale `dispose` may
 detach only its own port; it cannot dispose another session's worker. When the
 last port changes owner, the previous worker is disposed; other old-owner tabs
