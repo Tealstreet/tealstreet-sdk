@@ -80,3 +80,21 @@ fn bingx_refuses_the_bitunix_scheme_and_a_missing_primary() {
         Err(SignError::Unavailable)
     ));
 }
+
+#[test]
+fn bingxspot_keeps_the_existing_hosted_hmac_contract() {
+    let (provider, ids) = fixture();
+    let (work, kind) = hosted_signing::prepare(
+        "bingxspot",
+        &ids,
+        Input::Http {
+            payload: TO_SIGN.into(),
+            stamp_ms: 1_700_000_000_000.,
+            revision: "0".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(work.context.venue, "bingxspot");
+    let output = hosted_signing::finish(kind, &provider.sign_now(&work).unwrap()).unwrap();
+    assert_eq!(output.signature.as_deref(), Some(GOLDEN));
+}

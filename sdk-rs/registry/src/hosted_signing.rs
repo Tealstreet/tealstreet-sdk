@@ -303,7 +303,7 @@ fn family(venue: &str) -> bool {
         || bybit
         || okx
         || bitget
-        || (cfg!(feature = "bingx") && venue == "bingx")
+        || (cfg!(feature = "bingx") && matches!(venue, "bingx" | "bingxspot"))
         || (cfg!(feature = "blofin") && venue == "blofin")
         || (cfg!(feature = "backpack") && venue == "backpack")
         || (cfg!(feature = "kucoin") && venue == "kucoin")

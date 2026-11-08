@@ -1,0 +1,572 @@
+//! Fully preflighted serial writes. The engine classifies every released outcome.
+use super::*;
+use safe_cex_engine::{
+    Outcome,
+    classify::{CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact},
+    request_context::{
+        Plan, PreflightPolicy, PreflightPurpose,
+        plan::{CallAuth, SerialCall, SerialPolicy, Slot},
+    },
+};
+const ORDER: &str = "/openApi/spot/v1/trade/order";
+const CANCEL: &str = "/openApi/spot/v1/trade/cancel";
+const CANCEL_ALL: &str = "/openApi/spot/v1/trade/cancelOpenOrders";
+const SERIAL: SerialCall = SerialCall {
+    auth: CallAuth::Preflight,
+    operation: Operation::Mutation,
+    timeout_ms: 20_000,
+    attempts: 1,
+    pacing: None,
+};
+// Official Spot Error Code Reference; busy, rate limits and duplicate IDs stay Unknown.
+const TABLE: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(100001),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100004),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100413),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100419),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100421),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100202),
+            verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+            only: Some(Intent::Place),
+        },
+        Row {
+            key: Key::Int(100440),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: Some(Intent::Place),
+        },
+        Row {
+            key: Key::Int(100490),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: Some(Intent::Place),
+        },
+    ],
+    success: &[Key::Int(0)],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+struct Step {
+    params: Params,
+    native: String,
+    kind: Call,
+    receipt: Option<OrderIdentityReceipt>,
+}
+enum Call {
+    Place { side: OrderSide, kind: OrderType },
+    Cancel { id: String },
+    CancelAll,
+}
+pub struct Request {
+    pub(super) command: CommandId,
+    plan: Plan,
+    slot: Slot,
+    context: Context,
+    step: Step,
+}
+pub(super) struct Run {
+    pub(super) plan: Plan,
+    next: Option<Slot>,
+    steps: VecDeque<Step>,
+    ids: Vec<String>,
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SingleAck {
+    order_id: Id,
+    symbol: String,
+    status: String,
+    side: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+}
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum Ack {
+    Single(SingleAck),
+    Many { orders: Vec<SingleAck> },
+}
+fn proven_ids(call: &Call, native: &str, ack: &Ack) -> Option<Vec<String>> {
+    let same = |a: &SingleAck| a.order_id.valid() && a.symbol == native;
+    let canceled = |a: &SingleAck| same(a) && matches!(a.status.as_str(), "CANCELED" | "CANCELLED");
+    match (call, ack) {
+        (Call::Place { side, kind }, Ack::Single(a))
+            if same(a)
+                && matches!(
+                    a.status.as_str(),
+                    "NEW" | "PENDING" | "PARTIALLY_FILLED" | "FILLED"
+                )
+                && a.side.as_deref()
+                    == Some(if *side == OrderSide::Buy {
+                        "BUY"
+                    } else {
+                        "SELL"
+                    })
+                && a.kind.as_deref()
+                    == Some(if *kind == OrderType::Limit {
+                        "LIMIT"
+                    } else {
+                        "MARKET"
+                    }) =>
+        {
+            Some(vec![a.order_id.text()])
+        }
+        (Call::Cancel { id }, Ack::Single(a)) if canceled(a) && a.order_id.text() == *id => {
+            Some(vec![id.clone()])
+        }
+        (Call::CancelAll, Ack::Many { orders }) if orders.iter().all(canceled) => {
+            let mut ids = HashSet::new();
+            orders
+                .iter()
+                .all(|a| ids.insert(a.order_id.text()))
+                .then(|| orders.iter().map(|a| a.order_id.text()).collect())
+        }
+        _ => None,
+    }
+}
+fn not_sent(msg: impl Into<String>) -> VenueError {
+    invalid(msg)
+        .outcome(Outcome::NotSent)
+        .kind(ErrorKind::InvalidInput)
+}
+impl BingxSpot {
+    fn prepare_place(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Step, VenueError> {
+        if !matches!(o.kind, OrderType::Limit | OrderType::Market)
+            || o.stop_loss.is_some()
+            || o.take_profit.is_some()
+            || o.trigger_price.is_some()
+            || o.trigger_type.is_some()
+            || o.tp_trigger_type.is_some()
+            || o.sl_trigger_type.is_some()
+            || o.reduce_only == Some(true)
+            || o.close == Some(true)
+            || o.stp_mode.is_some()
+            || o.bybit_bbo.is_some()
+            || o.bybit_slippage_tolerance_ticks.is_some()
+            || o.max_slippage_pct.is_some()
+            || o.implied_volatility.is_some()
+        {
+            return Err(not_sent(
+                "BingX Spot supports only ordinary limit/market orders",
+            ));
+        }
+        let m = cx
+            .store
+            .market(&o.symbol)
+            .filter(|m| m.active && m.is_spot == Some(true) && m.is_read_only != Some(true))
+            .ok_or_else(|| not_sent("Active BingX Spot market required"))?;
+        let rules = self.rules.get(&o.symbol);
+        if rules.is_some_and(|r| match o.side {
+            OrderSide::Buy => r.api_state_buy == Some(false),
+            OrderSide::Sell => r.api_state_sell == Some(false),
+        }) {
+            return Err(not_sent("BingX Spot market disables this side"));
+        }
+        if !o.amount.is_finite()
+            || o.amount <= 0.
+            || o.price.is_some_and(|v| !v.is_finite() || v <= 0.)
+        {
+            return Err(not_sent("Invalid Spot amount or price"));
+        }
+        let amount = safe_cex_engine::num::adjust(o.amount, m.precision.amount);
+        if !amount.is_finite() || amount <= 0. {
+            return Err(not_sent("Spot amount rounds to zero"));
+        }
+        let needs_price =
+            o.kind == OrderType::Limit || (o.kind == OrderType::Market && o.side == OrderSide::Buy);
+        let reference = if needs_price {
+            o.price.ok_or_else(||not_sent("Spot limit orders and market buys require a price (market buy quote conversion)"))?
+        } else {
+            o.price
+                .or_else(|| cx.store.ticker(&o.symbol).map(|t| t.bid))
+                .unwrap_or(0.)
+        };
+        let price = safe_cex_engine::num::adjust(reference, m.precision.price);
+        if needs_price && price <= 0. {
+            return Err(not_sent("Spot price rounds to zero"));
+        }
+        let cost = amount * price;
+        if !cost.is_finite() {
+            return Err(not_sent("Spot order notional overflow"));
+        }
+        if let Some(r) = rules {
+            let max = if o.kind == OrderType::Market && r.max_market_notional > 0. {
+                r.max_market_notional
+            } else {
+                r.max_notional
+            };
+            if price > 0. && (cost < r.min_notional || cost > max) {
+                return Err(not_sent("Spot order exceeds native notional limits"));
+            }
+        }
+        let client = if let Some(id) = &o.client_order_id {
+            if !(1..=40).contains(&id.len())
+                || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            {
+                return Err(not_sent(
+                    "BingX Spot clientOrderId requires 1-40 letters, digits or '_'",
+                ));
+            }
+            id.clone()
+        } else {
+            safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
+                .map_err(not_sent)?
+                .replace('-', "")
+        };
+        let mut params = Params::new()
+            .str("symbol", &m.id)
+            .str(
+                "side",
+                if o.side == OrderSide::Buy {
+                    "BUY"
+                } else {
+                    "SELL"
+                },
+            )
+            .str(
+                "type",
+                if o.kind == OrderType::Limit {
+                    "LIMIT"
+                } else {
+                    "MARKET"
+                },
+            )
+            .str("newClientOrderId", &client);
+        if o.kind == OrderType::Market && o.side == OrderSide::Buy {
+            params = params.num("quoteOrderQty", cost);
+        } else {
+            params = params.num("quantity", amount);
+        }
+        if o.kind == OrderType::Limit {
+            params = params.num("price", price).str(
+                "timeInForce",
+                match o.time_in_force {
+                    Some(TimeInForce::ImmediateOrCancel) => "IOC",
+                    Some(TimeInForce::FillOrKill) => "FOK",
+                    Some(TimeInForce::PostOnly) => "PostOnly",
+                    _ => "GTC",
+                },
+            );
+        } else if o
+            .time_in_force
+            .is_some_and(|t| t != TimeInForce::GoodTillCancel)
+        {
+            return Err(not_sent("Spot market order cannot honor this timeInForce"));
+        }
+        Ok(Step {
+            params,
+            native: m.id.clone(),
+            kind: Call::Place {
+                side: o.side,
+                kind: o.kind,
+            },
+            receipt: Some(OrderIdentityReceipt {
+                symbol: o.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: client,
+            }),
+        })
+    }
+    fn prepare_cancel(
+        &self,
+        cx: &Cx<'_, Pending>,
+        id: &str,
+        symbol: &str,
+    ) -> Result<Step, VenueError> {
+        if id.is_empty() || id == "0" || !id.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(not_sent(
+                "Spot cancellation requires a native numeric order ID",
+            ));
+        }
+        let m = cx
+            .store
+            .market(symbol)
+            .ok_or_else(|| not_sent("Spot cancel market missing"))?;
+        if cx.store.order(id).is_some_and(|o| o.symbol != symbol) {
+            return Err(not_sent("Spot cancel symbol contradicts stored order"));
+        }
+        Ok(Step {
+            params: Params::new().str("symbol", &m.id).str("orderId", id),
+            native: m.id.clone(),
+            kind: Call::Cancel { id: id.into() },
+            receipt: None,
+        })
+    }
+    pub(super) fn write_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let Some(identity) = self.credentials().cloned() else {
+            self.local_failure(cx, "BingX Spot credentials required", Operation::Mutation);
+            return;
+        };
+        let credential = Credential {
+            slot: safe_cex_engine::CredentialSlot::Primary,
+            reference: identity.credential,
+        };
+        let Ok(owner) = cx.begin_preflight(PreflightPolicy {
+            purpose: PreflightPurpose::WriteAfterReads,
+            read_credential: None,
+            write_credential: Some(credential.clone()),
+        }) else {
+            return;
+        };
+        let result = (|| -> Result<(CommandId, VecDeque<Step>), VenueError> {
+            match command {
+                Command::PlaceOrders { command, orders } => {
+                    let mut ids = HashSet::new();
+                    let mut steps = VecDeque::new();
+                    for o in orders {
+                        if let Some(id) = &o.client_order_id
+                            && !ids.insert(id.clone())
+                        {
+                            return Err(not_sent("Duplicate Spot caller clientOrderId"));
+                        }
+                        steps.push_back(self.prepare_place(cx, &o)?);
+                    }
+                    Ok((command, steps))
+                }
+                Command::CancelOrders { command, ids } => {
+                    let mut steps = VecDeque::new();
+                    for id in ids {
+                        let o = cx.store.order(&id).ok_or_else(|| {
+                            not_sent(
+                                "Spot cancel requires stored symbol or CancelOrdersWithSymbols",
+                            )
+                        })?;
+                        steps.push_back(self.prepare_cancel(cx, &id, &o.symbol)?);
+                    }
+                    Ok((command, steps))
+                }
+                Command::CancelOrdersWithSymbols { command, orders } => {
+                    let steps = orders
+                        .iter()
+                        .map(|o| self.prepare_cancel(cx, &o.id, &o.symbol))
+                        .collect::<Result<VecDeque<_>, _>>()?;
+                    Ok((command, steps))
+                }
+                Command::CancelSymbolOrders { command, symbol } => {
+                    let market = cx
+                        .store
+                        .market(&symbol)
+                        .ok_or_else(|| not_sent("Spot cancel requires a valid symbol"))?;
+                    Ok((
+                        command,
+                        VecDeque::from([Step {
+                            params: Params::new().str("symbol", &market.id),
+                            native: market.id.clone(),
+                            kind: Call::CancelAll,
+                            receipt: None,
+                        }]),
+                    ))
+                }
+                _ => Err(not_sent("BingX Spot command unsupported").kind(ErrorKind::Unsupported)),
+            }
+        })();
+        let (command, steps) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = cx.fail_preflight(&owner, e);
+                return;
+            }
+        };
+        if steps.is_empty() {
+            let _ = cx.done_empty_plan(&owner, "[]".into());
+            return;
+        }
+        match cx.admit_serial_plan(
+            &owner,
+            SERIAL,
+            SerialPolicy {
+                credential: Some(credential),
+                pacing: None,
+                refusals_complete: false,
+            },
+        ) {
+            Ok((plan, slot)) => {
+                self.jobs.insert(
+                    command,
+                    Run {
+                        plan,
+                        next: Some(slot),
+                        steps,
+                        ids: vec![],
+                    },
+                );
+                self.advance(cx, command);
+            }
+            Err(e) => {
+                let _ = cx.fail_preflight(&owner, e.venue_error());
+            }
+        }
+    }
+    pub(super) fn advance(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        let Some(run) = self.jobs.get_mut(&command) else {
+            return;
+        };
+        let Some(step) = run.steps.pop_front() else {
+            let plan = run.plan.clone();
+            let value = serde_json::to_string(&run.ids).expect("string IDs");
+            let _ = cx.done_plan(&plan, value);
+            return;
+        };
+        let Some(slot) = run.next.take() else {
+            run.steps.push_front(step);
+            return;
+        };
+        let plan = run.plan.clone();
+        let intent = if matches!(step.kind, Call::Place { .. }) {
+            Intent::Place
+        } else {
+            Intent::Cancel
+        };
+        let context = match cx.plan_leg_context_with_intent(&plan, &slot, intent) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = cx.fail_plan(&plan, e.venue_error());
+                return;
+            }
+        };
+        if let Some(r) = &step.receipt {
+            cx.command_progress(command, vec![r.clone()]);
+        }
+        let Some(identity) = self.credentials().cloned() else {
+            let _ = cx.fail_plan(&plan, not_sent("Spot signing identity missing"));
+            return;
+        };
+        let path = match step.kind {
+            Call::Place { .. } => ORDER,
+            Call::Cancel { .. } => CANCEL,
+            Call::CancelAll => CANCEL_ALL,
+        };
+        let recipe = Http::spot(identity, Method::Post, path, step.params.clone());
+        let (url, _, body) = recipe.unsigned();
+        let request = Request {
+            command,
+            plan,
+            slot,
+            context: context.clone(),
+            step,
+        };
+        if let Err((Pending::Write(r), error)) = cx.request_signed_managed(
+            context,
+            None,
+            Method::Post,
+            url,
+            body,
+            Box::new(recipe),
+            Pending::Write(Box::new(request)),
+        ) {
+            self.write_failed(cx, *r, error.venue_error());
+        }
+    }
+    pub(super) fn write_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: VenueError) {
+        let _ = cx.fail_plan(&r.plan, error);
+    }
+    pub(super) fn write_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        r: Request,
+        response: Response<'_>,
+    ) {
+        if cx.validate_plan_delivery(&r.plan, &r.context).is_err() {
+            return;
+        }
+        let envelope = serde_json::from_str::<Envelope<Ack>>(response.body).ok();
+        let ack = envelope
+            .as_ref()
+            .filter(|e| e.code == 0)
+            .and_then(|e| e.data.as_ref());
+        let valid = ack.and_then(|ack| proven_ids(&r.step.kind, &r.step.native, ack));
+        if let Some(proven) = valid.filter(|_| (200..300).contains(&response.status)) {
+            let ids = if matches!(r.step.kind, Call::Place { .. }) {
+                proven.clone()
+            } else {
+                vec![]
+            };
+            if let Err(e) = cx.http_write_fact(
+                &r.context,
+                WriteFact::Accepted {
+                    order_ids: ids.clone(),
+                },
+                None,
+            ) {
+                let _ = cx.fail_plan(&r.plan, e.venue_error());
+                return;
+            }
+            if !matches!(r.step.kind, Call::Place { .. }) {
+                for id in proven {
+                    cx.store.set_order_status(&id, OrderStatus::Canceled);
+                    self.remember_terminal(id);
+                }
+            }
+            if let Some(run) = self.jobs.get_mut(&r.command) {
+                run.ids.extend(ids);
+                let result = if run.steps.is_empty() {
+                    cx.finish_plan_call(&r.plan, &r.slot, &r.context)
+                } else {
+                    cx.continue_serial_plan(&r.plan, &r.slot, &r.context, SERIAL)
+                        .map(|slot| run.next = Some(slot))
+                };
+                if let Err(e) = result {
+                    let _ = cx.fail_plan(&r.plan, e.venue_error());
+                    return;
+                }
+            }
+            self.balance_revision = self.balance_revision.saturating_add(1);
+            self.advance(cx, r.command);
+            self.orders(cx, true);
+            self.balances(cx);
+        } else {
+            let native = envelope.as_ref().map(|e| Native {
+                code: NativeCode::Int(e.code),
+                message: &e.msg,
+            });
+            let mut fact = match cx.classify_write(
+                &r.context,
+                &TABLE,
+                native.as_ref(),
+                "BingX Spot write not proven; check Open Orders",
+            ) {
+                Ok(f) => f,
+                Err(e) => {
+                    let _ = cx.fail_plan(&r.plan, e.venue_error());
+                    return;
+                }
+            };
+            if envelope.as_ref().is_some_and(|e| e.data.is_some()) {
+                fact = fact.unproven();
+            }
+            let error = fact.error().clone();
+            if let Err(e) = cx.http_write_fact(
+                &r.context,
+                WriteFact::Failed {
+                    fact,
+                    known_effects: false,
+                },
+                None,
+            ) {
+                let _ = cx.fail_plan(&r.plan, e.venue_error());
+                return;
+            }
+            let _ = cx.fail_plan(&r.plan, error);
+        }
+    }
+}

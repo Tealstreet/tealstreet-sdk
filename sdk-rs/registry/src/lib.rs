@@ -77,7 +77,7 @@ use safe_cex_venue_binance::{
     BinanceFutures, Options as BinanceOptions, Variant as BinanceVariant,
 };
 #[cfg(feature = "bingx")]
-use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+use safe_cex_venue_bingx::{Bingx, Options as BingxOptions, spot::BingxSpot};
 #[cfg(feature = "bitget")]
 use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 #[cfg(feature = "bitrue")]
@@ -512,7 +512,7 @@ pub fn supported(venue: &str) -> bool {
         #[cfg(feature = "kucoin")]
         "kucoin" => true,
         #[cfg(feature = "bingx")]
-        "bingx" => true,
+        "bingx" | "bingxspot" => true,
         #[cfg(feature = "weex")]
         "weex" => true,
         #[cfg(feature = "woo")]
@@ -2101,7 +2101,12 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "bingx")]
-        "bingx" => {
+        "bingx" | "bingxspot" => {
+            if venue == "bingxspot" && options.testnet {
+                return Err(VenueError::new("BingX Spot testnet is unsupported")
+                    .kind(ErrorKind::Unsupported)
+                    .outcome(safe_cex_engine::Outcome::NotSent));
+            }
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
                 || options.secret.as_ref().is_some_and(|s| !s.is_empty())
                 || options.read_credentials.is_some()
@@ -2118,16 +2123,20 @@ pub fn build_with_signer<T: Visit>(
             {
                 return Err(invalid("Engine signing provider is required"));
             }
-            let mut engine = Engine::new(
-                Bingx::new(BingxOptions {
-                    read_credentials: identities.secondary,
-                    public_data_only: options.public_data_only,
-                    credentials: identities.primary,
-                }),
-                entropy,
-            )?;
-            engine.set_signer(signer)?;
-            finish(visitor, policy, startup, engine)
+            let venue_options = BingxOptions {
+                read_credentials: identities.secondary,
+                public_data_only: options.public_data_only,
+                credentials: identities.primary,
+            };
+            if venue == "bingxspot" {
+                let mut engine = Engine::new(BingxSpot::new(venue_options), entropy)?;
+                engine.set_signer(signer)?;
+                finish(visitor, policy, startup, engine)
+            } else {
+                let mut engine = Engine::new(Bingx::new(venue_options), entropy)?;
+                engine.set_signer(signer)?;
+                finish(visitor, policy, startup, engine)
+            }
         }
         #[cfg(feature = "weex")]
         "weex" => {
@@ -2516,6 +2525,7 @@ pub struct EngineOptions {
     #[cfg(feature = "lighter")]
     pub lighter_signer_provider: Option<String>,
     #[cfg(any(
+        feature = "bingx",
         feature = "grvt",
         feature = "coinbase",
         feature = "paradex",

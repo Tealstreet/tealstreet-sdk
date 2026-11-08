@@ -142,6 +142,7 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   mexc: 'ApiKey',
   bitunix: 'api-key',
   bingx: 'X-BX-APIKEY',
+  bingxspot: 'X-BX-APIKEY',
   bitrue: 'X-CH-APIKEY',
   weex: 'ACCESS-KEY',
   blofin: 'ACCESS-KEY',
@@ -396,7 +397,9 @@ const isPublicBinanceRead = (exchange: ExchangeName, request: Request, credentia
 
 /** The account's tunnel setting under the venue's default: BingX tunnels unless switched off. */
 const tunnelFlagOn = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
-  exchange === 'bingx' ? options.tealstreetTunnel !== false : Boolean(options.tealstreetTunnel);
+  exchange === 'bingx' || exchange === 'bingxspot'
+    ? options.tealstreetTunnel !== false
+    : Boolean(options.tealstreetTunnel);
 
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
@@ -404,7 +407,7 @@ const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =
     ? !options.publicDataOnly && !options.payloadSigner
     : ['hyperliquid', 'hyperliquidspot', 'kucoin', 'kucoinspot'].includes(exchange)
       ? !options.publicDataOnly
-      : exchange === 'bingx'
+      : exchange === 'bingx' || exchange === 'bingxspot'
         ? !options.publicDataOnly && tunnelFlagOn(exchange, options)
         : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && tunnelFlagOn(exchange, options);
 
