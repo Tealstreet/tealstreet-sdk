@@ -8,6 +8,9 @@ import { nanoid } from 'nanoid';
 import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
 import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveEffectivePublicDataOnly, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
 import { createRemoteSignerProvider, remoteSignerAlgorithms } from './remoteSignerProvider';
+import { capturedDelegatedCallbacks, snapshotDelegatedSigningOptions } from './delegatedSigningSnapshot';
+
+export { delegatedCallbacksWellFormed } from './delegatedSigningSnapshot';
 
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
 const invalid = (message = 'Invalid delegated signer setup'): never => {
@@ -47,6 +50,7 @@ export class DelegatedSignerSetup {
   readonly signerAlgorithms: readonly SignAlgorithm[];
 
   constructor(name: ExchangeName, options: ExchangeOptions) {
+    options = snapshotDelegatedSigningOptions(name, options);
     this.#venue = name;
     this.#publicOnly = resolveEffectivePublicDataOnly(name, options);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
@@ -76,12 +80,10 @@ export class DelegatedSignerSetup {
       const message = 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    const remoteSigner = options.remoteSigner;
-    const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
+    const callbacks = capturedDelegatedCallbacks(options) ?? invalid();
+    const remoteSigner = callbacks.remoteSigner;
+    const payloadSigner = this.usesPayloadSigner ? callbacks.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');
-    if ((this.intent.remoteSigner && (!remoteSigner || typeof remoteSigner.sign !== 'function'
-      || typeof remoteSigner.isAvailable !== 'function' || typeof remoteSigner.onAvailabilityChange !== 'function'))
-      || (this.intent.payloadSigner && typeof options.payloadSigner !== 'function')) invalid();
     const primary = publicCredential(options.key, primaryMetadata?.trimCredential === true);
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined

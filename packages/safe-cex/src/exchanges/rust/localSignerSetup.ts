@@ -58,21 +58,42 @@ export const effectiveIdentityMetadata = (
   return effective;
 };
 
-/** Resolve public intent before delegated callbacks or private setup validation. */
-export const resolveEffectivePublicDataOnly = (name: ExchangeName, options: ExchangeOptions): boolean => {
-  if (options.publicDataOnly === true) return true;
+/** Primary key presence exactly as signer setup normalizes it (effective metadata, Rust trim).
+ * A non-string key, or unparseable metadata beside a nonempty key, is keyed and malformed. */
+const primaryKeyPresence = (name: ExchangeName, options: Partial<ExchangeOptions>):
+  { key: boolean; primary?: LocalIdentityMetadata; malformed: boolean } => {
   const rawKey: unknown = options.key;
-  if (rawKey !== undefined && typeof rawKey !== 'string') return false;
-  let primary: LocalIdentityMetadata | undefined;
+  if (rawKey !== undefined && typeof rawKey !== 'string') return { key: true, malformed: true };
   try {
-    primary = effectiveIdentityMetadata(parseLocalSignerMetadata(options.localSigner).primary, deriveSignerSetupPolicy(name).primary);
+    const primary = effectiveIdentityMetadata(parseLocalSignerMetadata(options.localSigner).primary, deriveSignerSetupPolicy(name).primary);
+    return { key: credentialPresent(options.key, primary?.trimCredential === true), primary, malformed: false };
   } catch {
-    if (options.key !== undefined && options.key !== '') return false;
+    const keyed = options.key !== undefined && options.key !== '';
+    return { key: keyed, malformed: keyed };
   }
-  const key = credentialPresent(options.key, primary?.trimCredential === true);
-  const callback = options.remoteSigner !== undefined || options.payloadSigner !== undefined;
-  const secret = credentialPresent(options.secret, primary?.trimSigning === true) || (key && callback);
-  return derivePublicMode(name, options, undefined, { key, secret }).publicDataOnly;
+};
+
+/** Whether the account carries a primary key, normalized as signer setup does. */
+export const hasPrimaryKey = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean =>
+  primaryKeyPresence(name, options).key;
+
+/** Public mode resolved before any custody, callback or admission check, from the same
+ * normalized credential presence signer setup gives derivePublicMode. A configured callback
+ * (any value but undefined) stands in for the secret only beside a nonempty primary key, as
+ * the delegated primary signing identity does natively; malformed setup on a keyed account
+ * resolves private so setup reports its typed invalidInput refusal. */
+export const resolveEffectivePublicDataOnly = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean => {
+  if (options.publicDataOnly === true) return true;
+  const { key, primary, malformed } = primaryKeyPresence(name, options);
+  // A malformed key or unparseable metadata keeps a keyed account private for setup's typed refusal.
+  if (malformed) return false;
+  const remoteSigner = options.remoteSigner !== undefined;
+  const payloadSigner = options.payloadSigner !== undefined;
+  const secret = credentialPresent(options.secret, primary?.trimSigning === true) || (key && (remoteSigner || payloadSigner));
+  // Keyed: a configured callback is present even if malformed, so admission/setup refuse it.
+  // Keyless: unused callbacks keep raw truthiness and never make the account private.
+  const callbacks = key ? { remoteSigner, payloadSigner } : {};
+  return derivePublicMode(name, { key: '', secret: '', ...options }, undefined, { key, secret, ...callbacks }).publicDataOnly;
 };
 
 /** One required-field/fallback policy for trusted local and callback setup.
