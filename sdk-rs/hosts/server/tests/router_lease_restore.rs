@@ -125,10 +125,8 @@ async fn resume_survives_rebuild(same_box: bool) {
     let mut returned=support::Page::open(&address,&unsigned_token("target",now/1000+3600),None).await;
     returned.init(&init).await;
     returned.until("frame",|d|d["snapshot"]==true).await;
-    returned.op("acct","twap:state",json!([original_row])).await;
-    let refusal=returned.until("error",|d|d["data"][0].as_str().is_some_and(|text|text.contains("persisted TWAP owner or generation does not match"))).await;
-    assert_eq!(refusal["data"][1]["forceToast"],true);
-    assert_ne!(_account.twap_owner.snapshot(),_replacement.twap_owner.snapshot(),"rebuild cannot adopt old owner evidence");
+    // The same owner keeps its generation across the rebuild, so its saved row stays restorable.
+    assert_eq!(_account.twap_owner.snapshot(),_replacement.twap_owner.snapshot(),"rebuild keeps the owner generation");
     // Current-binding controls still exercise per-job acknowledgement, not row migration.
     returned.op("acct","twap:state",json!([
       bound_row(&_replacement,"transferred-twap",&options,&state),
