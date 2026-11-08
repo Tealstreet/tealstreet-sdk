@@ -184,12 +184,17 @@ impl Venue for TestVenue {
         Box::new(std::iter::empty())
     }
 }
+#[path = "trading/after_failure.rs"]
+mod after_failure;
+
 struct Harness {
     engine: Engine<TestVenue>,
     requests: Vec<HttpRequest>,
     done: Vec<Result<String, String>>,
     failures: Vec<safe_cex_engine::VenueError>,
     receipted: std::collections::HashSet<String>,
+    telemetry: Vec<safe_cex_engine::log::LogEvent>,
+    sent: Vec<(safe_cex_engine::Method, String, Option<String>)>,
     now: f64,
 }
 impl Harness {
@@ -233,6 +238,8 @@ impl Harness {
             done: Vec::new(),
             failures: Vec::new(),
             receipted: Default::default(),
+            telemetry: Vec::new(),
+            sent: Vec::new(),
             now: 1_000.,
         };
         h.collect();
@@ -273,8 +280,10 @@ impl Harness {
                         r.url
                     );
                     receipts.clear();
+                    self.sent.push((r.method, r.url.clone(), r.body.clone()));
                     self.requests.push(r);
                 }
+                Action::Notice(Notice::Event(event)) => self.telemetry.push(event),
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(Ok(result)),
                 Action::Notice(Notice::CommandFailed { error, .. }) => {
                     self.failures.push(error.clone());
@@ -624,6 +633,8 @@ fn accept_parity_payload(h: &mut Harness, id: &str) -> serde_json::Value {
 }
 
 #[test]
+// TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1544-1564;1854-1889
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx | perp-max-qty-splitting trading.rs:1425
 fn legacy_parity_below_notional_tail_can_follow_accepted_batch_writes() {
     let mut h = Harness::new(None);
     h.place(vec![
@@ -653,6 +664,8 @@ fn legacy_parity_below_notional_tail_can_follow_accepted_batch_writes() {
 }
 
 #[test]
+// TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1485-1542;1854-1889
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx | missing/nonpositive notional reference trading.rs:1387
 fn legacy_parity_market_batch_does_not_require_a_positive_last_reference() {
     for last in [None, Some(0.), Some(-1.)] {
         let mut h = Harness::new(None);
@@ -684,6 +697,8 @@ fn legacy_parity_market_batch_does_not_require_a_positive_last_reference() {
 }
 
 #[test]
+// TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1485-1487;1544-1564
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx | exact-quantity-conservation and explicit-dust-close minimum policy trading.rs:1387/1425
 fn legacy_parity_quantity_normalization_does_not_refuse_raw_off_step_intent() {
     let mut h = Harness::new(None);
     h.place(vec![PlaceOrderOpts {
@@ -697,6 +712,8 @@ fn legacy_parity_quantity_normalization_does_not_refuse_raw_off_step_intent() {
 }
 
 #[test]
+// TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1125-1157
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx | ordinary-quantity-amend trading.rs:1540
 fn legacy_parity_quantity_amend_has_quantity_bounds_without_notional_gate() {
     let mut h = Harness::new(Some((order(), "LIMIT")));
     h.command(Command::AmendOrder {
@@ -721,6 +738,8 @@ fn legacy_parity_quantity_amend_has_quantity_bounds_without_notional_gate() {
 }
 
 #[test]
+// TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1331-1343;1360-1440
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx | ordinary-atomic-cancel-replace trading.rs:1540
 fn legacy_parity_atomic_replace_does_not_add_new_quantity_or_notional_checks() {
     for maximum in [10., 0.5] {
         let mut h = Harness::new(Some((order(), "LIMIT")));
@@ -747,6 +766,8 @@ fn legacy_parity_atomic_replace_does_not_add_new_quantity_or_notional_checks() {
 }
 
 #[test]
+// TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1567-1595;1854-1889
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx | attached-TP-SL children trading.rs:1450
 fn legacy_parity_bracket_notional_is_left_to_the_venue_after_entry_placement() {
     let mut h = Harness::new(None);
     h.place(vec![PlaceOrderOpts {
@@ -772,6 +793,8 @@ fn legacy_parity_bracket_notional_is_left_to_the_venue_after_entry_placement() {
 }
 
 #[test]
+// TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1447-1452;1854-1889
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx | perp-serial-batch trading.rs:1233
 fn legacy_parity_price_normalization_does_not_add_a_positive_tick_gate() {
     for tick in [0., f64::NAN] {
         let mut h = Harness::new(None);
@@ -789,6 +812,8 @@ fn legacy_parity_price_normalization_does_not_add_a_positive_tick_gate() {
 }
 
 #[test]
+// TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1451-1452;1854-1889
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx | combined-native-write-count trading.rs:1233
 fn legacy_parity_serial_batch_has_no_new_combined_native_write_limit() {
     let mut h = Harness::new(None);
     h.place(vec![
