@@ -56,3 +56,10 @@ When a later ordinary cancel leg is unknown, its uncertainty text and diagnostic
 replace any earlier refusal in the terminal error. Ordinary Futures and Spot
 write warnings use the normalized write error before command completion, so both
 warning and terminal text direct ambiguous outcomes to Check Open Orders.
+
+Ordinary Futures cancel-family fallback requires HTTP 404 with explicit native
+`404` or `404000` not-found evidence. Native server errors, unlisted codes, and
+malformed replies cannot release a second DELETE. Unknown write warnings and
+terminals, including native `500000` and transport failures, direct callers to
+Check Open Orders while retaining native diagnostics. An exhausted cancellation
+confirmation read emits its warning after adding the same uncertainty guidance.

@@ -6,7 +6,7 @@ import type { Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import type { ExchangeLike } from '../../types';
-import { formatBaseSize } from '../../utils/formatBaseSize';
+import { formatOrderBaseSize } from '../../utils/formatBaseSize';
 import { GREEN, RED, YELLOW, CYAN, RESET, DIM, BOLD } from './colors';
 
 /**
@@ -232,7 +232,7 @@ export function formatChaserStatus(
   // Current order
   if (openOrder) {
     const orderPrice = formatPrice(openOrder.price || 0, pricePrecision);
-    lines.push(`  Order:    ${CYAN}${orderPrice}${RESET} @ ${formatBaseSize(openOrder.remaining, market)}`);
+    lines.push(`  Order:    ${CYAN}${orderPrice}${RESET} @ ${formatOrderBaseSize(openOrder, market)}`);
   } else if (!instance.isStopped) {
     lines.push(`  Order:    ${YELLOW}placing...${RESET}`);
   }
