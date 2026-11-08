@@ -7,7 +7,7 @@
         "fixture-key"
       ]
     ],
-    "url": "https://papi.binance.com/papi/v1/um/order?symbol=BTCUSDT&positionSide=BOTH&side=BUY&type=LIMIT&quantity=0.01&price=100&timeInForce=GTC&newClientOrderId=ordinary&timestamp=1000&recvWindow=20000&signature=7ab41a5c08b5f26c75f8a02b188e99fb249bd2cbd877651ae96a84edc784f48e"
+    "url": "https://papi.binance.com/papi/v1/um/order?symbol=BTCUSDT&positionSide=BOTH&side=BUY&type=LIMIT&quantity=0.1&price=100&timeInForce=GTC&newClientOrderId=ordinary&timestamp=1000&recvWindow=20000&signature=e15bd0495d5a82a7b7dfe6916c316d7e49e01601018e34a326ea7d5668b4a355"
   },
   {
     "body": null,
@@ -17,6 +17,6 @@
         "fixture-key"
       ]
     ],
-    "url": "https://papi.binance.com/papi/v1/um/order?symbol=BTCUSDT&positionSide=BOTH&side=BUY&type=MARKET&quantity=0.01&newClientOrderId=ordinary&timestamp=1000&recvWindow=20000&signature=26ec6cbe1d1faae721cdd84fc5ddd6a66624d7bd3c3e0b45a88d935b52b98191"
+    "url": "https://papi.binance.com/papi/v1/um/order?symbol=BTCUSDT&positionSide=BOTH&side=BUY&type=MARKET&quantity=0.1&newClientOrderId=ordinary&timestamp=1000&recvWindow=20000&signature=011ab093c9a25bda3c2b407a1294f80df4528a921eabbf4c9b8545e838ed28c4"
   }
 ]

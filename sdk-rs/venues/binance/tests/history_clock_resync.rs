@@ -310,7 +310,7 @@ fn a_rejected_order_placement_never_enters_read_clock_recovery() {
             symbol: "BTCUSDT".into(),
             kind: OrderType::Limit,
             side: OrderSide::Buy,
-            amount: 0.001,
+            amount: 0.01,
             price: Some(1000.),
             trigger_price: None,
             stop_loss: None,

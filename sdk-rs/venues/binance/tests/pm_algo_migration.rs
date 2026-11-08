@@ -76,7 +76,7 @@ fn proof(status: &str) -> serde_json::Value {
     serde_json::json!({"algoId":123,"clientAlgoId":"stop","symbol":"BTCUSDT","algoStatus":status,"actualOrderId":"","actualPrice":"0.00000","triggerTime":0})
 }
 fn order(kind: OrderType) -> PlaceOrderOpts {
-    serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":kind,"side":"buy","amount":0.01,"price":100,"clientOrderId":"ordinary"})).unwrap()
+    serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":kind,"side":"buy","amount":0.1,"price":100,"clientOrderId":"ordinary"})).unwrap()
 }
 
 #[test]

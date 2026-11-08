@@ -313,7 +313,7 @@ fn a_stale_position_snapshot_cannot_overwrite_a_newer_stream_event() {
 }
 
 fn conditional(trigger: f64, price: Option<f64>) -> PlaceOrderOpts {
-    let mut opts = limit(OrderSide::Buy, 0.012, 90000.0);
+    let mut opts = limit(OrderSide::Buy, 0.12, 90000.0);
     opts.kind = OrderType::Conditional;
     opts.trigger_price = Some(trigger);
     opts.price = price;
@@ -425,7 +425,7 @@ fn a_rejected_entry_stops_the_bracket_and_reports_the_venue_message() {
 }
 
 #[test]
-fn batches_five_orders_per_request() {
+fn batches_five_orders_and_stops_after_a_native_row_refusal() {
     let mut h = ready();
     let orders = (0..6)
         .map(|i| limit(OrderSide::Buy, 0.01, 90000.0 - f64::from(i)))
@@ -438,16 +438,18 @@ fn batches_five_orders_per_request() {
         "{payload}"
     );
     h.reply(batch.id, 200, "", r#"[{"orderId":1},{"orderId":2},{"code":-2019,"msg":"Margin is insufficient."},{"orderId":4},{"orderId":5}]"#);
-    let single = h.take("/fapi/v1/order");
-    h.reply(single.id, 200, "", r#"{"orderId":6}"#);
-    // Both lots still run, but the failed item cannot become whole-command
-    // success. The engine retains every accepted native ID in the partial.
-    assert_eq!(h.result(9), Some(&Err(r#"{"message":"Margin is insufficient.","partialOrderIds":["1","2","4","5","6"],"partialOrderCount":5}"#.to_owned())));
+    assert!(
+        !h.has_request("/fapi/v1/order"),
+        "the untouched suffix stays unsent"
+    );
+    // Preserve every native acceptance within the dispatched batch, but stop
+    // before the next physical write after any refused row.
+    assert_eq!(h.result(9), Some(&Err(r#"{"message":"Margin is insufficient.","partialOrderIds":["1","2","4","5"],"partialOrderCount":4}"#.to_owned())));
     let failure = &h.failures.iter().find(|(id, _)| *id == 9).unwrap().1;
     assert_eq!(failure.outcome, None);
     assert_eq!(
         failure.partial.as_ref().unwrap().order_ids,
-        ["1", "2", "4", "5", "6"]
+        ["1", "2", "4", "5"]
     );
 }
 

@@ -40,6 +40,10 @@ pub struct Filter<'a> {
     #[serde(borrow, default)]
     pub tick_size: Option<Str<'a>>,
     #[serde(borrow, default)]
+    pub min_price: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub max_price: Option<Str<'a>>,
+    #[serde(borrow, default)]
     pub step_size: Option<Str<'a>>,
     #[serde(borrow, default)]
     pub min_qty: Option<Str<'a>>,
@@ -47,6 +51,14 @@ pub struct Filter<'a> {
     pub max_qty: Option<Str<'a>>,
     #[serde(borrow, default, alias = "minNotional")]
     pub notional: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub max_notional: Option<Str<'a>>,
+    #[serde(default)]
+    pub apply_to_market: Option<bool>,
+    #[serde(default)]
+    pub apply_min_to_market: Option<bool>,
+    #[serde(default)]
+    pub apply_max_to_market: Option<bool>,
 }
 
 #[derive(Deserialize)]

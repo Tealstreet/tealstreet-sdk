@@ -1422,6 +1422,7 @@ impl Venue for BinanceFutures {
     ) {
         if let Pending::Trade(request) = pending {
             self.capture_unproven_trade(request, response, evidence);
+            self.capture_unproven_plan(request, evidence);
         }
     }
 
@@ -1800,16 +1801,10 @@ impl Venue for BinanceFutures {
                     }
                 {
                     let market = market_from_wire(&m, self.options.variant);
-                    if let Some(notional) = m
-                        .filters
-                        .iter()
-                        .find(|f| f.filter_type == "MIN_NOTIONAL")
-                        .and_then(|f| f.notional.as_deref())
-                    {
-                        self.trading
-                            .min_notional
-                            .insert(market.symbol.clone(), num::parse(notional));
-                    }
+                    self.trading.native_rules.insert(
+                        market.symbol.clone(),
+                        trading::NativeRules::from_wire(&m.filters),
+                    );
                     if !market.precision.is_tradable() {
                         *rejected = true;
                         safe_cex_engine::startup::skipped_row(cx);

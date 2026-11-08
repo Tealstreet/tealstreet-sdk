@@ -253,7 +253,12 @@ fn spot_and_inverse_splits_preserve_entry_and_both_bracket_totals() {
                 native_orders += 1;
             }
             let body = if count == 1 {
-                format!(r#"{{"orderId":{native_orders}}}"#)
+                let key = if r.url.contains("algoOrder") {
+                    "algoId"
+                } else {
+                    "orderId"
+                };
+                format!(r#"{{"{key}":{native_orders}}}"#)
             } else {
                 format!(
                     "[{}]",
@@ -621,11 +626,6 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
             }
             let request = h.requests.remove(0);
             writes += 1;
-            let response = if request.url.contains("batchOrders") {
-                r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5}]"#
-            } else {
-                r#"{"orderId":1}"#
-            };
             // Return one acknowledgement per submitted lot, preserving strict COIN-M counts.
             let response = if request.url.contains("batchOrders") {
                 format!(
@@ -635,8 +635,10 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
                         .collect::<Vec<_>>()
                         .join(",")
                 )
+            } else if request.url.contains("algoOrder") {
+                r#"{"algoId":1}"#.into()
             } else {
-                response.into()
+                r#"{"orderId":1}"#.into()
             };
             h.reply(request.id, 200, "", &response);
         }
@@ -746,7 +748,7 @@ const SIGNATURE_REJECTED: &str =
     r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#;
 
 #[test]
-fn a_signature_rejected_write_is_re_signed_and_resent_once() {
+fn a_signature_rejection_stops_a_validated_placement_without_resending() {
     let mut h = ready(Variant::Spot);
     place(
         &mut h,
@@ -755,47 +757,34 @@ fn a_signature_rejected_write_is_re_signed_and_resent_once() {
     let first = h.take("/api/v3/order");
     h.now += 5.0;
     h.reply(first.id, 400, "", SIGNATURE_REJECTED);
-    let second = h.take("/api/v3/order");
-    assert!(h.requests.is_empty(), "exactly one resend");
-    assert_ne!(second.id, first.id);
-    assert!(h.done.is_empty(), "the resend decides the outcome");
-    assert!(second.url.contains("newClientOrderId=caller_1"));
-    // The same order: every parameter but the timestamp and signature is identical.
-    let order_params = |url: &str| {
-        let mut params: Vec<_> = url
-            .split_once('?')
-            .map_or("", |(_, query)| query)
-            .split('&')
-            .filter(|param| !param.starts_with("timestamp=") && !param.starts_with("signature="))
-            .map(str::to_owned)
-            .collect();
-        params.sort();
-        params
-    };
-    assert_eq!(order_params(&second.url), order_params(&first.url));
-    assert_ne!(
-        second.url, first.url,
-        "the resend is re-signed at its own timestamp"
-    );
-    h.reply(second.id, 200, "", r#"{"orderId":123}"#);
-    assert_eq!(
-        h.done.last().unwrap().1.as_ref().unwrap(),
-        r#"["caller_1"]"#
-    );
+    assert!(h.requests.is_empty(), "a failed write plan cannot resend");
+    let (_, error) = h.failures.last().unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    let rows = serde_json::to_value(error).unwrap();
+    assert_eq!(rows["elements"][0]["status"], "notSent");
 }
 
 #[test]
-fn a_second_signature_rejection_fails_without_a_third_send() {
+fn a_signature_rejection_keeps_the_accepted_prefix_and_unsent_suffix() {
     let mut h = ready(Variant::Spot);
-    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    place(
+        &mut h,
+        vec![order(Variant::Spot, r#""reduceOnly":false"#); 3],
+    );
     let first = h.take("/api/v3/order");
-    h.reply(first.id, 400, "", SIGNATURE_REJECTED);
+    h.reply(first.id, 200, "", r#"{"orderId":123}"#);
     let second = h.take("/api/v3/order");
     h.reply(second.id, 400, "", SIGNATURE_REJECTED);
-    assert!(h.requests.is_empty(), "no third send");
-    let (_, error) = h.failures.last().expect("the write fails");
+    assert!(h.requests.is_empty(), "no resend, suffix or repair");
+    let (_, error) = h.failures.last().unwrap();
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
-    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert_ne!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert_ne!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    let rows = serde_json::to_value(error).unwrap();
+    assert_eq!(rows["elements"][0]["status"], "placed");
+    assert_eq!(rows["elements"][1]["status"], "notSent");
+    assert_eq!(rows["elements"][2]["status"], "notSent");
 }
 
 #[test]
