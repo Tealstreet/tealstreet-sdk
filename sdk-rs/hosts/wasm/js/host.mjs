@@ -833,11 +833,14 @@ export class EngineHost {
     if (typeof this.engine.algoStart !== 'function')
       throw new ExchangeError('This engine has no algos', { kind: 'unsupported', outcome: 'notSent' });
     if (twapOwner !== undefined) {
-      if (!twapOwner || typeof twapOwner.ownerId !== 'string' || !twapOwner.ownerId || !Number.isSafeInteger(twapOwner.generation) || twapOwner.generation < 0)
-        throw new TypeError('Invalid TWAP owner or generation');
-      if (typeof this.engine.algoStartOwned !== 'function')
-        throw new ExchangeError('This engine has no TWAP ownership support', { kind: 'unsupported', outcome: 'notSent' });
-      this.invoke(this.engine.algoStartOwned, accountName, JSON.stringify({ ownerId: twapOwner.ownerId, generation: twapOwner.generation }), this.transport.now(), Date.now());
+      const bound = twapOwner && typeof twapOwner.ownerId === 'string' && twapOwner.ownerId
+        && Number.isSafeInteger(twapOwner.generation) && twapOwner.generation >= 0;
+      const start = bound ? this.engine.algoStartOwned : this.engine.algoStartUnowned;
+      if (typeof start !== 'function')
+        throw new ExchangeError('This engine build predates TWAP ownership; update the engine to run algos', { kind: 'unsupported', outcome: 'notSent' });
+      // An owner hook without a current owner still starts algos; only TWAP restores are refused.
+      if (bound) this.invoke(start, accountName, JSON.stringify({ ownerId: twapOwner.ownerId, generation: twapOwner.generation }), this.transport.now(), Date.now());
+      else this.invoke(start, accountName, this.transport.now(), Date.now());
     } else {
       this.invoke(this.engine.algoStart, accountName, this.transport.now(), Date.now());
     }

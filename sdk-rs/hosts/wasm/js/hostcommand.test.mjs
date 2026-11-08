@@ -49,17 +49,22 @@ test('algoStart selects bound ownership only when the optional owner is provided
   }
 });
 
-test('invalid or unsupported explicit TWAP ownership never falls back to legacy restore', () => {
+test('an owner hook without a current owner starts algos unowned, never legacy', () => {
   for (const owner of [null, {}, { ownerId: '', generation: 1 }, { ownerId: 'A', generation: -1 }, { ownerId: 'A', generation: 1.5 }]) {
     const calls = [];
+    const { host } = rig({}, { algoStart: () => calls.push('legacy'), algoStartUnowned: () => calls.push('unowned'), algoDeadline: () => undefined, algoRunning: () => true, algoDispose: () => '' });
+    host.algoStart('acct', owner);
+    assert.deepEqual(calls, ['unowned']);
+    assert.equal(host.algosRunning, true);
+    host.dispose();
+  }
+  for (const owner of [null, { ownerId: 'A', generation: 7 }]) {
+    const calls = [];
     const { host } = rig({}, { algoStart: () => calls.push('legacy') });
-    assert.throws(() => host.algoStart('acct', owner));
+    assert.throws(() => host.algoStart('acct', owner), (error) => error.kind === 'unsupported' && /predates TWAP ownership/.test(error.message));
     assert.deepEqual(calls, []);
     host.dispose();
   }
-  const { host } = rig({}, { algoStart() {} });
-  assert.throws(() => host.algoStart('acct', { ownerId: 'A', generation: 7 }), /owner|ownership/i);
-  host.dispose();
 });
 
 test('deadlines validate without sending commands; only the effective wait enters native JSON', async () => {

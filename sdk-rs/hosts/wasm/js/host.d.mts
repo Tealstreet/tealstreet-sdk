@@ -477,6 +477,7 @@ export interface WasmEngineLike {
   /** `algos` builds: `now` is the engine clock, `wall` epoch ms. */
   algoStart?(accountName: string, now: number, wall: number): void;
   algoStartOwned?(accountName: string, twapOwnerJson: string, now: number, wall: number): void;
+  algoStartUnowned?(accountName: string, now: number, wall: number): void;
   algoOp?(op: string, dataJson: string, now: number, wall: number): string;
   algoAdvance?(now: number, wall: number): string;
   algoDeadline?(): number | undefined;
