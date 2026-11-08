@@ -17,6 +17,9 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
 
+mod support;
+use support::{ClockGuard, ENGINE_UNKNOWN_TEXT};
+
 #[derive(Debug, PartialEq)]
 enum RecordedWrite {
     Order(f64),
@@ -88,6 +91,7 @@ struct Chasers {
 }
 
 impl TwapChasers for Chasers {
+    fn halt(&self, _cx: &AlgoCx, _id: &str) {}
     fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {
         self.started.borrow_mut().push(request.clone());
         Ok(())
@@ -160,48 +164,6 @@ fn market() -> Market {
         is_read_only: None,
         taker_fee: None,
         maker_fee: None,
-    }
-}
-
-struct Clock {
-    start: tokio::time::Instant,
-}
-
-impl safe_cex_algos::executor::Executor for Clock {
-    fn spawn(
-        &self,
-        task: safe_cex_algos::executor::LocalFuture<()>,
-    ) -> safe_cex_algos::executor::TaskHandle {
-        safe_cex_algos::executor::TaskHandle::new(tokio::task::spawn_local(task).abort_handle())
-    }
-    fn sleep(&self, ms: f64) -> safe_cex_algos::executor::LocalFuture<()> {
-        Box::pin(tokio::time::sleep(Duration::from_secs_f64(
-            ms.max(0.0) / 1000.0,
-        )))
-    }
-    fn monotonic_ms(&self) -> f64 {
-        self.start.elapsed().as_secs_f64() * 1000.0
-    }
-    fn now_ms(&self) -> f64 {
-        1_700_000_000_000.0 + self.start.elapsed().as_secs_f64() * 1000.0
-    }
-}
-
-struct ClockGuard(Option<Rc<dyn safe_cex_algos::executor::Executor>>);
-
-impl ClockGuard {
-    fn new() -> Self {
-        Self(safe_cex_algos::executor::set_current(Some(Rc::new(
-            Clock {
-                start: tokio::time::Instant::now(),
-            },
-        ))))
-    }
-}
-
-impl Drop for ClockGuard {
-    fn drop(&mut self) {
-        safe_cex_algos::executor::set_current(self.0.take());
     }
 }
 
@@ -369,28 +331,20 @@ async fn resumed_schedule_continues_after_failed_child() {
         .await;
 }
 
-#[tokio::test(start_paused = true)]
-async fn unknown_runtime_failure_continues_without_resending_that_child() {
-    // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280.
-    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | runtime rejected/unknown child continuation
-    LocalSet::new()
-        .run_until(check_continuation(
-            "binance",
-            None,
-            safe_cex_engine::error::Outcome::Unknown,
-        ))
-        .await;
-}
-
 #[derive(Default)]
 struct PolicyChasers {
     writes: Rc<RefCell<Vec<RecordedWrite>>>,
     started: RefCell<Vec<ChaserRequest>>,
     removed: RefCell<Vec<String>>,
     refuse_first: Cell<bool>,
+    halted: RefCell<Vec<String>>,
+    uncertain: Cell<bool>,
 }
 
 impl TwapChasers for PolicyChasers {
+    fn halt(&self, _cx: &AlgoCx, id: &str) {
+        self.halted.borrow_mut().push(id.to_owned());
+    }
     fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {
         self.writes
             .borrow_mut()
@@ -405,7 +359,14 @@ impl TwapChasers for PolicyChasers {
     fn progress(&self, id: &str) -> Option<ChaserProgress> {
         Some(ChaserProgress {
             remaining_size: 1.0,
-            ended: self.removed.borrow().iter().any(|removed| removed == id),
+            ended: self.uncertain.get()
+                || self.removed.borrow().iter().any(|removed| removed == id),
+            order_may_be_open: self.uncertain.get()
+                && self
+                    .started
+                    .borrow()
+                    .first()
+                    .is_some_and(|request| request.id == id),
             ..Default::default()
         })
     }
@@ -467,10 +428,7 @@ async fn chaser_handoff_failure_keeps_later_slices_scheduled() {
 async fn failed_compensating_market_remainder_keeps_next_chaser_scheduled() {
     // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:142-165,181-194,213-220,255-280.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | chaser handoff and compensating market remainder
-    for outcome in [
-        safe_cex_engine::error::Outcome::Rejected,
-        safe_cex_engine::error::Outcome::Unknown,
-    ] {
+    for outcome in [safe_cex_engine::error::Outcome::Rejected] {
         LocalSet::new()
             .run_until(async {
                 let _clock = ClockGuard::new();
@@ -535,6 +493,269 @@ async fn failed_compensating_market_remainder_keeps_next_chaser_scheduled() {
                             .as_str()
                             .is_some_and(|text| text.contains("slice remainder failed:"))
                 }));
+            })
+            .await;
+    }
+}
+
+async fn check_unknown_halt(venue: &str, restored_status: Option<&str>) {
+    let _clock = ClockGuard::new();
+    let (port, cx, factory) = fixture(venue);
+    if venue == "bingx" {
+        port.store
+            .borrow_mut()
+            .markets
+            .get_mut("BTCUSDT")
+            .unwrap()
+            .limits
+            .amount
+            .max = f64::INFINITY;
+    }
+    let options: Value =
+        serde_json::from_str(&twap_options(json!({ "size": 3, "ordersCount": 3 }))).unwrap();
+    if let Some(status) = restored_status {
+        let rows = json!([{
+            "id": "unknown-restore", "options": options,
+            "state": { "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" },
+                "size": 3, "ordersSizes": [1, 1, 1], "side": "buy", "status": status,
+                "ordersCount": 3, "ordersExecuted": 0, "nextOrderAt": cx.now_ms() }
+        }]);
+        factory
+            .handle("twap:state", &rows.to_string(), &cx)
+            .unwrap();
+        if status == "paused" {
+            factory
+                .handle("twap:resume", "\"unknown-restore\"", &cx)
+                .unwrap();
+        }
+        advance(1).await;
+    } else {
+        factory
+            .start(serde_json::from_value(options).unwrap())
+            .unwrap();
+        settle().await;
+    }
+    assert_eq!(placed_amounts(&port), [1.0]);
+    port.fail.set(true);
+    port.fail_outcome
+        .set(Some(safe_cex_engine::error::Outcome::Unknown));
+    advance(21).await;
+    port.fail.set(false);
+    advance(100).await;
+    assert_eq!(
+        placed_amounts(&port),
+        [1.0, 1.0],
+        "Unknown must halt this action, even if a later write would succeed"
+    );
+    assert_eq!(port.commands.borrow().len(), 2);
+    assert!(factory.active_twaps("a").is_empty());
+    let emits = port.emits.borrow();
+    let (_, result) = emits
+        .iter()
+        .find(|(op, _)| op == "twap:outcome")
+        .expect("indexed outcome event");
+    let error = &result["error"];
+    assert_eq!(error["outcome"], "unknown");
+    assert_eq!(error["message"], ENGINE_UNKNOWN_TEXT);
+    assert_eq!(error["partial"]["orderIds"], json!(["order-1"]));
+    let elements = error["elements"].as_array().unwrap();
+    assert_eq!(elements.len(), 3);
+    assert_eq!(elements[0]["status"], "placed");
+    assert_eq!(elements[0]["orderIds"], json!(["order-1"]));
+    assert_eq!(elements[1]["status"], "unknown");
+    assert_eq!(elements[1]["error"]["message"], error["message"]);
+    assert_eq!(elements[2]["status"], "notSent");
+    assert!(emits.iter().any(|(op, event)| op == "telemetry"
+        && event["kind"] == "twap.unknown_outcome"
+        && event["unknown"] == 1));
+    assert!(
+        emits
+            .iter()
+            .any(|(op, data)| op == "error" && data == &error["message"])
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn unknown_exception_fresh_schedule_halts_with_outcomes_and_telemetry() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:249-280.
+    LocalSet::new()
+        .run_until(check_unknown_halt("binance", None))
+        .await;
+}
+#[tokio::test(start_paused = true)]
+async fn unknown_exception_native_rule_delegation_halts_with_outcomes_and_telemetry() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:117-139,255-280.
+    LocalSet::new()
+        .run_until(check_unknown_halt("bingx", None))
+        .await;
+}
+#[tokio::test(start_paused = true)]
+async fn unknown_exception_restored_schedule_halts_with_outcomes_and_telemetry() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/handlers/TwapHandler.ts:95-99.
+    LocalSet::new()
+        .run_until(check_unknown_halt("binance", Some("running")))
+        .await;
+}
+#[tokio::test(start_paused = true)]
+async fn unknown_exception_resumed_schedule_halts_with_outcomes_and_telemetry() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:330-345,255-280.
+    LocalSet::new()
+        .run_until(check_unknown_halt("binance", Some("paused")))
+        .await;
+}
+#[tokio::test(start_paused = true)]
+async fn unknown_exception_runtime_reply_halts_with_outcomes_and_telemetry() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280.
+    LocalSet::new()
+        .run_until(check_unknown_halt("binance", None))
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn unknown_exception_market_remainder_halts_without_next_chaser() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:181-194,213-220.
+    for count in [1, 3] {
+        LocalSet::new()
+        .run_until(async {
+            let _clock = ClockGuard::new();
+            let (port, cx, _) = fixture("binance");
+            port.fail.set(true);
+            port.answer_ms.set(1000);
+            port.fail_outcome
+                .set(Some(safe_cex_engine::error::Outcome::Unknown));
+            let chasers = Rc::new(PolicyChasers {
+                writes: port.writes.clone(),
+                ..Default::default()
+            });
+            let factory = TwapFactory::new("a", cx, chasers.clone());
+            factory
+                .start(
+                    serde_json::from_str(&twap_options(json!({
+                        "size": count, "ordersCount": count, "useChaserOrders": true, "timeoutPct": 50,
+                        "timeoutAction": "market", "failAction": "market"
+                    })))
+                    .unwrap(),
+                )
+                .unwrap();
+            settle().await;
+            advance(60 / count / 2 + 1).await;
+            advance(1).await;
+            advance(2).await;
+            port.fail.set(false);
+            advance(100).await;
+            assert_eq!(
+                chasers.started.borrow().len(),
+                1,
+                "uncertain remainder must halt new child chasers"
+            );
+            assert_eq!(
+                port.commands.borrow().len(),
+                1,
+                "no replay/cancel/repair after Unknown"
+            );
+            let emits = port.emits.borrow();
+            let (_, result) = emits
+                .iter()
+                .find(|(op, _)| op == "twap:outcome")
+                .expect("journal event");
+            let elements = result["error"]["elements"].as_array().unwrap();
+            assert_eq!(elements[0]["status"], "applied");
+            assert_eq!(elements[1]["status"], "unknown");
+            assert!(elements[2..].iter().all(|row| row["status"] == "notSent"));
+            assert_eq!(result["error"]["message"], ENGINE_UNKNOWN_TEXT);
+            assert!(
+                emits
+                    .iter()
+                    .any(|(op, data)| op == "telemetry" && data["kind"] == "twap.unknown_outcome")
+            );
+        })
+        .await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn unknown_exception_restored_in_flight_halts_without_replay_or_suffix() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:291-310.
+    LocalSet::new().run_until(async {
+        let _clock = ClockGuard::new();
+        let (port, cx, factory) = fixture("binance");
+        let rows = json!([{ "id": "restored-flight", "options": serde_json::from_str::<Value>(&twap_options(json!({"size": 3, "ordersCount": 3}))).unwrap(),
+            "state": { "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" }, "size": 3,
+                "ordersSizes": [1, 1], "side": "buy", "status": "running", "ordersCount": 3,
+                "ordersExecuted": 0, "nextOrderAt": cx.now_ms(), "inFlight": {"size": 1, "clientOrderId": "uncertain-client"} }
+        }]);
+        factory.handle("twap:state", &rows.to_string(), &cx).unwrap();
+        advance(100).await;
+        factory.handle("twap:resume", "\"restored-flight\"", &cx).unwrap();
+        factory.handle("twap:state", &rows.to_string(), &cx).unwrap();
+        advance(100).await;
+        assert!(port.commands.borrow().is_empty());
+        assert!(factory.active_twaps("a").is_empty());
+        let emits = port.emits.borrow();
+        let error = &emits.iter().find(|(op, _)| op == "twap:outcome").unwrap().1["error"];
+        assert_eq!(error["message"], ENGINE_UNKNOWN_TEXT);
+        assert_eq!(error["elements"][0]["status"], "unknown");
+        assert_eq!(error["elements"][0]["clientOrderId"], "uncertain-client");
+        assert_eq!(error["elements"][1]["status"], "notSent");
+        assert_eq!(error["elements"][2]["status"], "notSent");
+        assert!(emits.iter().any(|(op, event)| op == "telemetry" && event["error"] == *error));
+    }).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn unknown_exception_chaser_halts_siblings_without_cancel_or_replacement() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:181-194,213-220,255-280.
+    for orders_count in [1, 3] {
+        LocalSet::new()
+            .run_until(async {
+                let _clock = ClockGuard::new();
+                let (port, cx, _) = fixture("binance");
+                let chasers = Rc::new(PolicyChasers {
+                    writes: port.writes.clone(),
+                    ..Default::default()
+                });
+                let factory = TwapFactory::new("a", cx, chasers.clone());
+                factory.start(serde_json::from_str(&twap_options(json!({
+                "size": orders_count, "ordersCount": orders_count, "useChaserOrders": true
+            }))).unwrap()).unwrap();
+                settle().await;
+                if orders_count == 3 {
+                    advance(21).await;
+                }
+                let started_before_unknown = chasers.started.borrow().len();
+                chasers.uncertain.set(true);
+                advance(1).await;
+                advance(100).await;
+                assert_eq!(chasers.started.borrow().len(), started_before_unknown);
+                assert_eq!(
+                    *chasers.halted.borrow(),
+                    chasers
+                        .started
+                        .borrow()
+                        .iter()
+                        .map(|request| request.id.clone())
+                        .collect::<Vec<_>>()
+                );
+                assert!(
+                    chasers.removed.borrow().is_empty(),
+                    "no automatic cancellation after Unknown"
+                );
+                assert!(port.commands.borrow().is_empty());
+                assert_eq!(port.writes.borrow().len(), started_before_unknown);
+                let emits = port.emits.borrow();
+                let error = &emits.iter().find(|(op, _)| op == "twap:outcome").unwrap().1["error"];
+                assert_eq!(error["message"], ENGINE_UNKNOWN_TEXT);
+                assert_eq!(error["elements"][0]["status"], "unknown");
+                assert!(
+                    error["elements"].as_array().unwrap()[started_before_unknown..]
+                        .iter()
+                        .all(|row| row["status"] == "notSent")
+                );
+                assert!(
+                    emits
+                        .iter()
+                        .any(|(op, event)| op == "telemetry" && event["error"] == *error)
+                );
             })
             .await;
     }

@@ -90,11 +90,12 @@ pub struct TwapOrderRequest {
 }
 
 /// Why a slice placement failed, and whether that proves no order exists.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SliceFailure {
-    pub message: String,
-    /// False when an order may be live: the slice still counts as executed.
-    pub nothing_placed: bool,
+pub type SliceFailure = safe_cex_engine::error::VenueError;
+
+fn unknown_outcome(mut error: SliceFailure) -> SliceFailure {
+    error.message = "The outcome is unknown. Check Open Orders".to_owned();
+    error.outcome = Some(safe_cex_engine::error::Outcome::Unknown);
+    error
 }
 
 /// The chaser a `useChaserOrders` slice starts, with the id TWAP tracks it by.
@@ -113,11 +114,18 @@ pub struct ChaserRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TwapEffect {
+    Outcome {
+        twap_id: String,
+        error: Box<safe_cex_engine::error::VenueError>,
+    },
+    /// Halt a child chaser without canceling or replacing its resting order.
+    HaltChaser { chaser_id: String },
     /// Place through the engine. With a `settle_token`, report the outcome to
-    /// [`TwapBook::placement_settled`]; without one the outcome is ignored.
+    /// [`TwapBook::placement_settled`]; without one report it to [`TwapBook::remainder_settled`].
     PlaceOrder {
         twap_id: String,
         settle_token: Option<u64>,
+        element_index: usize,
         request: TwapOrderRequest,
     },
     /// Stop the chaser and cancel its open order.
@@ -285,6 +293,26 @@ impl TwapBook {
             entry
                 .instance
                 .placement_settled(token, outcome, env, &mut effects);
+        }
+        self.settle(&mut effects);
+        effects
+    }
+
+    pub fn remainder_settled(
+        &mut self,
+        id: &str,
+        index: usize,
+        outcome: Result<Vec<String>, SliceFailure>,
+    ) -> Vec<TwapEffect> {
+        let mut effects = Vec::new();
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.instance.id == id)
+        {
+            entry
+                .instance
+                .remainder_settled(index, outcome, &mut effects);
         }
         self.settle(&mut effects);
         effects

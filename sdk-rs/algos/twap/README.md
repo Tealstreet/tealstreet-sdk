@@ -1,71 +1,56 @@
-# Shared TWAP legacy parity
+# Shared TWAP outcomes and legacy parity
 
-TWAP admits and releases one scheduled child at a time. Venue formatting and
-validation stay at each native write; there is no new shared full-plan quantity,
-price or notional gate. The next distinct child remains scheduled after a
-rejected or uncertain placement. An uncertain child is not resent.
+TWAP releases one scheduled child at a time. Quantity, price and notional rules
+remain delegated to native writes. A definite refusal leaves later distinct
+children scheduled, as in legacy TS. There is no new whole-plan admission gate.
 
-The legacy implementation at `c78bed93d6eb4e45a3ec072b7d09fc1529d10a9b` provides
-the evidence in `packages/safe-cex/src/webworker/twap/TwapInstance.ts`:
+Genuine Unknown halts the action under Sean/daxx's recorded parity exception
+(2026-11-08, decision #3355; Sam to verify). It clears future child and fallback
+timers and stops owned chasers while retaining their resting orders. It never
+replays an uncertain child or issues a cancellation/replacement because of Unknown.
+Previously dispatched responses still settle and update the reported native IDs.
 
-| Path | Verdict | Legacy evidence |
+The exact local wording is `The outcome is unknown. Check Open Orders`, matching
+`engine/src/http_evidence.rs:38` per the lead's literal rule. Shared engine code
+and the engine duplicate-write fence are unchanged by this follow-up.
+
+The shared reporting-only WritePlan records indexed placed, applied, unknown and
+not-sent rows. `twap:outcome` carries the structured error, native partial IDs and
+all element outcomes; a `telemetry` event carries the same error with the kind
+`twap.unknown_outcome`. The normal `error` op carries the canonical user message.
+These are AccountPort emissions; the tests do not claim backend Sentry delivery.
+Accepted chaser handoffs use `applied/deferredChild`, not fabricated native IDs.
+Optional market remainder writes occupy separate journal rows. Completed parents
+retain outstanding remainder responses and observe child chasers until settled.
+
+Legacy source is pinned to `c78bed93d6eb4e45a3ec072b7d09fc1529d10a9b`.
+All five paths are TS-partial and TS-continues after failure, including Unknown;
+Rust retains TS continuation for definite refusals and records the explicit
+stop-after-UNKNOWN exception for each path:
+
+| Path | Legacy TS evidence | Unknown recording test in `tests/after_failure.rs` |
 | --- | --- | --- |
-| Generated children | TS-partial | Lines 80–114 build raw sizes; 232 shifts one child; 249–256 place it. |
-| Quantity, price and notional checks | TS-partial | Lines 117–139 select the due child's amount and live ticker; 167 delegates to the exchange. |
-| Restore/resume | TS-partial | `handlers/TwapHandler.ts` lines 60–100 restores state/ownership; instance lines 330–345 arm the next timer. |
-| Failed or uncertain child | TS-partial | Lines 255–270 log failure and advance; 273–280 schedule the next child. |
-| Chaser fallback | TS-partial | Lines 181–194 retain best-effort market remainders; 213–220 retain timeout/failure actions. |
+| scheduled-TWAP-children (fresh schedules, every venue) | `packages/safe-cex/src/webworker/twap/TwapInstance.ts:249-280` | `unknown_exception_fresh_schedule_halts_with_outcomes_and_telemetry` |
+| quantity/min/max/grid/notional/price delegation (including BingX unbounded maximum) | `packages/safe-cex/src/webworker/twap/TwapInstance.ts:117-139,167,255-280` | `unknown_exception_native_rule_delegation_halts_with_outcomes_and_telemetry` |
+| restore/resume child preflight | `packages/safe-cex/src/webworker/handlers/TwapHandler.ts:95-99; packages/safe-cex/src/webworker/twap/TwapInstance.ts:291-310,330-345,255-280` | `unknown_exception_{restored,resumed}_schedule_halts_with_outcomes_and_telemetry; unknown_exception_restored_in_flight_halts_without_replay_or_suffix` |
+| runtime rejected/unknown child continuation | `packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280` | `unknown_exception_runtime_reply_halts_with_outcomes_and_telemetry` |
+| chaser handoff and compensating market remainder | `packages/safe-cex/src/webworker/twap/TwapInstance.ts:181-194,213-220,255-280` | `unknown_exception_market_remainder_halts_without_next_chaser; unknown_exception_chaser_halts_siblings_without_cancel_or_replacement` |
 
-KNOWN-ISSUE (legacy TS also partial-places): an early child can be accepted
-before a later child fails a native rule. Runtime failures intentionally leave
-later children scheduled. This matches Sam's parity scope and supersedes this
-PR's earlier full-plan claims under the
-[split-plan invariant](../../../docs/plans/SPLIT_PLAN_INVARIANT.md).
+Each Unknown pin cites `PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx,
+2026-11-08)` and its legacy TS file/line. The tests assert no subsequent action
+writes, the indexed outcome and exact message, and the journal/telemetry emissions.
+The recording AccountPort and chaser fixtures observe algorithm commands, not
+physical venue HTTP. Their clock advances epoch time with Tokio's paused clock.
 
-The new validation gate, native notional sidecars and dispatch-controlling
-WritePlan adoption were reverted in new commits. This TWAP path does not use
-the shared helper. Lead decision #3355 requires any future helper adoption to
-report outcomes without deciding admission or continuation. Existing chaser
-cancellation and compensating market-remainder writes are retained.
+Definite-refusal controls retain the legacy sequence: fresh/restored/resumed
+schedules release the third child after the second refuses; BingX's unbounded cap
+remains usable; refused chaser handoffs allow later children; and a definite
+market-remainder refusal retains chase -> cancellation -> market remainder ->
+next chase. Compensation before an Unknown remains intact. Last-child Unknown
+remainders, uncertain restored in-flight work, and late successful responses are
+covered separately. Skipped zero slices retain their original journal indices.
 
-The factory parity regressions record algorithm commands, not physical HTTP
-requests: BingX's unbounded maximum remains usable, a restored [3, 1] plan with
-minimum 2 releases the prefix, and rejected/unknown second children still
-allow a distinct third child. Existing controls cover all-valid schedules and
-chaser timeout/failure market fallbacks.
-
-## After-failure parity
-
-| Path | After a failed element | Legacy evidence at the pinned TS commit |
-| --- | --- | --- |
-| Fresh scheduled children | TS-continues | `twap/TwapInstance.ts:255-280` logs and schedules the next child. |
-| Native quantity/price/notional delegation | TS-continues | `twap/TwapInstance.ts:117-139,167,255-280` delegates the write, catches its refusal, then continues. |
-| Restore and resume | TS-continues | `handlers/TwapHandler.ts:95-99` and `twap/TwapInstance.ts:330-345,255-280` reuse the same timer/start path. |
-| Runtime rejected or unknown child | TS-continues | `twap/TwapInstance.ts:255-280` catches either failure without vetoing the suffix. |
-| Chaser handoff and market remainder | TS-continues | `twap/TwapInstance.ts:142-165,181-194,213-220,255-280` retains compensation and the next child after failure. |
-
-The historical `NEEDS-WRITEPLAN-CONTINUE` entries describe the trial helper at
-`a28cf2e28`, whose settlement sealed dispatch. That admission/failure-stop
-adoption was removed by `059da70bb`, followed by the parity reverts.
-`INHERITED-STOP`: no helper stop or refusal remains in the current TWAP path.
-Explicit user termination still stops the schedule, as TS checks at lines
-267–269. No replacement journal or helper workaround was introduced.
-
-`tests/after_failure.rs` covers each row, with separate restored/resumed cases,
-unknown results, a refused chaser handoff and rejected/unknown compensating
-market remainders. Its test executor advances epoch time with Tokio's paused
-clock, so both cancellation settlement and subsequent child timers are checked.
-
-## Pinned legacy write sequences
-
-Every parity pin cites the TS file/line and its exact `shared-twap` row in
-`~/agent-reports/known-issues-for-sam.txt`. These are recording AccountPort and
-chaser-port fixtures; they assert algorithm commands, not physical venue HTTP.
-
-| Parity path | Recording test | Pinned sequence |
-| --- | --- | --- |
-| Fresh scheduled children | `after_failure::fresh_schedule_continues_after_failed_child` | Three distinct buy/market children of size 1; the second refusal does not remove the third. |
-| Native quantity/price/notional delegation | `factory::legacy_parity_bingx_unbounded_max_does_not_gate_the_schedule`; `after_failure::native_rule_delegation_with_unbounded_max_continues_after_refusal` | An unbounded max permits [2, 2]; a native refusal still permits the next distinct child. |
-| Restore/resume | `factory::legacy_parity_restored_invalid_tail_is_left_to_each_native_write`; `after_failure::{restored,resumed}_schedule_continues_after_failed_child` | [3, 1] is sent despite minimum 2; resumed/restored [1, 1, 1] still sends the third child after the second fails. |
-| Rejected/unknown child | `factory::legacy_parity_{rejected,unknown}_child_does_not_stop_later_children`; `after_failure::unknown_runtime_failure_continues_without_resending_that_child` | The failed child is not resent; the third distinct child is sent, preserving reduce-only and supported client IDs. |
-| Chaser handoff/compensating remainder | `after_failure::{chaser_handoff_failure_keeps_later_slices_scheduled,failed_compensating_market_remainder_keeps_next_chaser_scheduled}` | Refused handoff then later chasers; or chase -> cancel that chase -> market remainder -> next chase, even if the remainder is rejected/unknown. |
+KNOWN-ISSUE (legacy TS also partial-places): a valid prefix can land before a
+later native-rule refusal. The earlier full-plan validator, notional sidecars and
+dispatch-controlling helper adoption were reverted. The reporting helper cannot
+veto dispatch; TWAP's explicit Unknown policy decides the action's stop.

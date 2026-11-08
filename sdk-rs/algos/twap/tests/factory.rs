@@ -1,6 +1,9 @@
 //! The runtime adapter: ops in, engine commands and wire replies out.
 #![cfg(not(target_arch = "wasm32"))]
 
+mod support;
+use support::ENGINE_UNKNOWN_TEXT;
+
 use std::cell::{Cell, Ref, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
@@ -72,6 +75,7 @@ struct Chasers {
 }
 
 impl TwapChasers for Chasers {
+    fn halt(&self, _cx: &AlgoCx, _id: &str) {}
     fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {
         self.started.borrow_mut().push(request.clone());
         Ok(())
@@ -148,6 +152,8 @@ async fn a_failed_slice_logs_an_error_and_continues() {
         .run_until(async {
             let port = Rc::new(Port::default());
             port.fail.set(true);
+            port.fail_outcome
+                .set(Some(safe_cex_engine::error::Outcome::Rejected));
             let cx = AlgoCx::new(port.clone(), Scope::new());
             let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
             factory
@@ -158,7 +164,7 @@ async fn a_failed_slice_logs_an_error_and_continues() {
                 "error".to_owned(),
                 json!("TWAP BTCUSDT slice failed: rejected")
             )));
-            assert_eq!(factory.active_twaps("a")[0]["ordersExecuted"], 1);
+            assert_eq!(factory.active_twaps("a")[0]["ordersExecuted"], 0);
         })
         .await;
 }
@@ -311,7 +317,6 @@ fn rejects_malformed_payloads() {
 
 #[test]
 fn placement_outcomes_read_ids_strictly() {
-    use safe_cex_algo_twap::SliceFailure;
     use safe_cex_algo_twap::factory::placement_outcome;
     use safe_cex_engine::error::Outcome;
     assert_eq!(
@@ -321,13 +326,8 @@ fn placement_outcomes_read_ids_strictly() {
     assert_eq!(placement_outcome(Ok("[]".into())), Ok(vec![]));
     for unreadable in [r#"{"orderIds":["a"]}"#, "null", ""] {
         let error = placement_outcome(Ok(unreadable.into())).unwrap_err();
-        assert!(
-            error
-                .message
-                .starts_with("order ids unknown, the order may be live"),
-            "{unreadable}"
-        );
-        assert!(!error.nothing_placed);
+        assert_eq!(error.message, ENGINE_UNKNOWN_TEXT);
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
     }
     let failed = |message: &str, outcome| {
         placement_outcome(Err(VenueError {
@@ -336,34 +336,30 @@ fn placement_outcomes_read_ids_strictly() {
             ..Default::default()
         }))
     };
-    assert_eq!(
-        failed("timeout", Some(Outcome::Unknown)),
-        Err(SliceFailure {
-            message: "outcome unknown, the order may be live: timeout".to_owned(),
-            nothing_placed: false,
-        })
-    );
-    for outcome in [Outcome::Rejected, Outcome::NotSent] {
-        assert_eq!(
-            failed("insufficient margin", Some(outcome)),
-            Err(SliceFailure {
-                message: "insufficient margin".to_owned(),
-                nothing_placed: true,
-            })
-        );
+    for outcome in [Some(Outcome::Unknown), None] {
+        let error = failed("timeout", outcome).unwrap_err();
+        assert_eq!(error.message, ENGINE_UNKNOWN_TEXT);
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
     }
-    // Unclassified proves nothing, and neither does a refusal with accepted legs.
-    assert!(!failed("?", None).unwrap_err().nothing_placed);
+    for outcome in [Outcome::Rejected, Outcome::NotSent] {
+        let error = failed("insufficient margin", Some(outcome)).unwrap_err();
+        assert_eq!(error.message, "insufficient margin");
+        assert_eq!(error.outcome, Some(outcome));
+    }
     let partial = VenueError::new("partly refused")
         .outcome(Outcome::Rejected)
         .partial_ids(&["a".to_owned()]);
-    assert!(!placement_outcome(Err(partial)).unwrap_err().nothing_placed);
+    let error = placement_outcome(Err(partial)).unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.message, ENGINE_UNKNOWN_TEXT);
+    assert_eq!(error.partial.unwrap().order_ids, ["a"]);
 }
 
 #[derive(Default)]
 struct RefusingChasers;
 
 impl TwapChasers for RefusingChasers {
+    fn halt(&self, _cx: &AlgoCx, _id: &str) {}
     fn start_with_id(&self, _cx: &AlgoCx, _request: &ChaserRequest) -> Result<(), String> {
         Err("chaser refused".to_owned())
     }
@@ -406,6 +402,7 @@ async fn a_refused_chase_slice_is_not_counted() {
 async fn chase_slices_run_on_the_account_chaser_book() {
     LocalSet::new()
         .run_until(async {
+            let _clock = support::ClockGuard::new();
             let port = Rc::new(Port::default());
             {
                 let mut store = port.store.borrow_mut();
@@ -689,8 +686,12 @@ async fn legacy_continues_after_child_failure(outcome: safe_cex_engine::error::O
     let commands = port.commands.borrow();
     assert_eq!(
         commands.len(),
-        3,
-        "one distinct command per legacy child, with no resend or repair"
+        if outcome == safe_cex_engine::error::Outcome::Unknown {
+            2
+        } else {
+            3
+        },
+        "Unknown halts; definite refusal retains legacy continuation"
     );
     let mut client_ids = std::collections::HashSet::new();
     for command in commands.iter() {
@@ -703,7 +704,7 @@ async fn legacy_continues_after_child_failure(outcome: safe_cex_engine::error::O
     }
     assert!(factory.active_twaps("a").is_empty());
     let expected = if outcome == safe_cex_engine::error::Outcome::Unknown {
-        "TWAP BTCUSDT slice failed: outcome unknown, the order may be live: rejected"
+        ENGINE_UNKNOWN_TEXT
     } else {
         "TWAP BTCUSDT slice failed: rejected"
     };
@@ -727,7 +728,8 @@ async fn legacy_parity_rejected_child_does_not_stop_later_children() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn legacy_parity_unknown_child_does_not_stop_later_children() {
+async fn unknown_exception_child_stops_later_children() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280.
     // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | runtime rejected/unknown child continuation
     LocalSet::new()
