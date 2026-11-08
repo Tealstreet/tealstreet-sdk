@@ -298,6 +298,8 @@ enum Finish {
 #[serde(rename_all = "camelCase")]
 struct OrderPayload {
     #[serde(skip)]
+    rules: OrderWireRules,
+    #[serde(skip)]
     symbol: String,
     inst_id: String,
     td_mode: &'static str,
@@ -641,7 +643,10 @@ impl Okx {
                 algos.push(o);
                 continue;
             }
-            let m = cx.store.market(&o.symbol).expect("preflight market");
+            let m = cx
+                .store
+                .market(&o.symbol)
+                .ok_or_else(|| format!("Market {} not found on OKX", o.symbol))?;
             if !m.limits.amount.max.is_finite()
                 || m.limits.amount.max <= 0.0
                 || m.precision.amount <= 0.0
@@ -786,7 +791,7 @@ impl Okx {
                 _ => "conditional",
             },
             pos_side,
-            ..empty_payload()
+            ..empty_payload(self.order_wire_rules(m, o.kind)?)
         };
         let generated = || generated_order_id(cx);
         if algo {
@@ -867,6 +872,26 @@ impl Okx {
             _ => {}
         }
         Ok(p)
+    }
+
+    fn order_wire_rules(&self, market: &Market, kind: OrderType) -> Result<OrderWireRules, String> {
+        let limits = &self
+            .products
+            .get(&market.id)
+            .ok_or("Native OKX order limits are unavailable")?
+            .order_limits;
+        Ok(OrderWireRules {
+            min: limits.min,
+            max: match kind {
+                OrderType::Limit => limits.limit,
+                OrderType::Market => limits.market,
+                OrderType::Conditional => limits.trigger,
+                _ => limits.stop,
+            },
+            step: market.precision.amount,
+            tick: market.precision.price,
+            kind,
+        })
     }
 
     fn plan_cancel(&self, cx: &Cx<'_, Pending>, ids: Vec<String>) -> Result<Job, String> {
@@ -2163,8 +2188,9 @@ fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
 
-fn empty_payload() -> OrderPayload {
+fn empty_payload(rules: OrderWireRules) -> OrderPayload {
     OrderPayload {
+        rules,
         symbol: String::new(),
         inst_id: String::new(),
         td_mode: "cross",
@@ -2344,11 +2370,26 @@ fn adjusted(value: f64, precision: f64, allow_zero: bool) -> Result<f64, String>
         return Err("order amount/price must be finite".into());
     }
     let result = num::adjust(value, precision);
-    if result < 0.0 || (result == 0.0 && (!allow_zero || value > 0.0)) {
+    if !result.is_finite() || result < 0.0 || (result == 0.0 && (!allow_zero || value > 0.0)) {
         Err("Order amount or price is too small".into())
     } else {
         Ok(result)
     }
+}
+
+fn wire_multiple(text: &str, step: f64) -> Result<f64, String> {
+    let value: f64 = text.parse().map_err(|_| "Invalid OKX wire amount/price")?;
+    let aligned = num::adjust(value, step);
+    if !value.is_finite()
+        || value <= 0.
+        || !step.is_finite()
+        || step <= 0.
+        || !aligned.is_finite()
+        || (value - aligned).abs() > step * 1e-8
+    {
+        return Err("OKX wire amount/price must be a positive native step multiple".into());
+    }
+    Ok(value)
 }
 
 // Integer decimal units avoid floor(0.3 / 0.1) losing an entire lot.
@@ -2368,20 +2409,29 @@ fn lot_floor(max: f64, step: f64) -> Result<f64, String> {
     Ok(num::adjust((max_units / step_units) as f64 * step, step))
 }
 
-fn placement_step<T: Serialize + ?Sized + PlacementIdentities>(
+fn placement_step<T: Serialize + ?Sized + PlacementBody>(
     path: &'static str,
     body: &T,
     expected: usize,
     collect_ids: bool,
 ) -> Result<Step, String> {
+    validate_write(&PlacementWrite {
+        path,
+        orders: body.orders(),
+    })
+    .map_err(|error| error.message)?;
     let mut write = step(path, body, expected, collect_ids)?;
     write.receipts = body.identities();
     Ok(write)
 }
-trait PlacementIdentities {
+trait PlacementBody {
     fn identities(&self) -> Vec<OrderIdentityReceipt>;
+    fn orders(&self) -> Vec<&OrderPayload>;
 }
-impl PlacementIdentities for OrderPayload {
+impl PlacementBody for OrderPayload {
+    fn orders(&self) -> Vec<&OrderPayload> {
+        vec![self]
+    }
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
         self.cl_ord_id
             .iter()
@@ -2394,16 +2444,210 @@ impl PlacementIdentities for OrderPayload {
             .collect()
     }
 }
-impl<const N: usize> PlacementIdentities for [OrderPayload; N] {
+impl<const N: usize> PlacementBody for [OrderPayload; N] {
+    fn orders(&self) -> Vec<&OrderPayload> {
+        self.as_slice().orders()
+    }
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
         self.as_slice().identities()
     }
 }
-impl PlacementIdentities for [OrderPayload] {
+impl PlacementBody for [OrderPayload] {
+    fn orders(&self) -> Vec<&OrderPayload> {
+        self.iter().collect()
+    }
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
-        self.iter()
-            .flat_map(PlacementIdentities::identities)
-            .collect()
+        self.iter().flat_map(PlacementBody::identities).collect()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct OrderWireRules {
+    min: f64,
+    max: f64,
+    step: f64,
+    tick: f64,
+    kind: OrderType,
+}
+struct PlacementWrite<'a> {
+    path: &'static str,
+    orders: Vec<&'a OrderPayload>,
+}
+
+// Pure gate over final wire fields and captured rules; no transport or venue state.
+fn validate_write(write: &PlacementWrite<'_>) -> Result<(), VenueError> {
+    let reject = |message| not_sent(message).kind(ErrorKind::InvalidInput);
+    let count_limit = match write.path {
+        "/api/v5/trade/batch-orders" => 20,
+        "/api/v5/trade/order-algo" => 1,
+        _ => return Err(reject("Unknown OKX placement route".into())),
+    };
+    if write.orders.is_empty() || write.orders.len() > count_limit {
+        return Err(reject(
+            "OKX placement exceeds the native batch count".into(),
+        ));
+    }
+    for payload in &write.orders {
+        if (write.path == "/api/v5/trade/batch-orders")
+            != matches!(payload.rules.kind, OrderType::Limit | OrderType::Market)
+        {
+            return Err(reject(
+                "OKX order kind does not match its placement route".into(),
+            ));
+        }
+        validate_order_payload(payload).map_err(reject)?;
+    }
+    Ok(())
+}
+
+fn validate_order_payload(payload: &OrderPayload) -> Result<(), String> {
+    let rules = payload.rules;
+    let required_price = match rules.kind {
+        OrderType::Limit => payload.px.as_deref(),
+        OrderType::Conditional => payload.trigger_px.as_deref(),
+        OrderType::StopLoss => payload.sl_trigger_px.as_deref(),
+        OrderType::TakeProfit => payload.tp_trigger_px.as_deref(),
+        OrderType::TrailingStopLoss => payload.callback_spread.as_deref(),
+        OrderType::Market => None,
+    };
+    if (rules.kind != OrderType::Market && required_price.is_none())
+        || (rules.kind == OrderType::Conditional && payload.order_px.is_none())
+    {
+        return Err("OKX native order is missing its execution or trigger price".into());
+    }
+    if let Some(size) = &payload.sz {
+        let size = wire_multiple(size, rules.step)?;
+        if !rules.min.is_finite()
+            || rules.min <= 0.
+            || !rules.max.is_finite()
+            || rules.max < rules.min
+            || size < rules.min
+            || size > rules.max
+        {
+            return Err("OKX native order size is outside minSz or its order-type maximum".into());
+        }
+    } else if payload.close_fraction != Some("1")
+        || !matches!(rules.kind, OrderType::StopLoss | OrderType::TakeProfit)
+    {
+        return Err("OKX native order requires a size".into());
+    }
+    for price in [
+        payload.px.as_deref(),
+        payload.trigger_px.as_deref(),
+        payload.sl_trigger_px.as_deref(),
+        payload.tp_trigger_px.as_deref(),
+        payload.callback_spread.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        wire_multiple(price, rules.tick)?;
+    }
+    if let Some(price) = &payload.order_px
+        && price != "-1"
+    {
+        wire_multiple(price, rules.tick)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod write_validation_tests {
+    use super::*;
+
+    fn payload() -> OrderPayload {
+        let mut payload = empty_payload(OrderWireRules {
+            min: 4.,
+            max: 5.,
+            step: 1.,
+            tick: 0.1,
+            kind: OrderType::Limit,
+        });
+        payload.sz = Some("5".into());
+        payload.px = Some("38000".into());
+        payload
+    }
+
+    #[test]
+    fn pure_write_gate_checks_every_row_and_native_batch_count() {
+        for (path, counts) in [
+            (
+                "/api/v5/trade/batch-orders",
+                [(0, false), (1, true), (20, true), (21, false)],
+            ),
+            (
+                "/api/v5/trade/order-algo",
+                [(0, false), (1, true), (2, false), (20, false)],
+            ),
+        ] {
+            for (count, valid) in counts {
+                let payloads: Vec<_> = (0..count)
+                    .map(|_| {
+                        let mut payload = payload();
+                        if path.ends_with("/order-algo") {
+                            payload.rules.kind = OrderType::StopLoss;
+                            payload.ord_type = "conditional";
+                            payload.sl_trigger_px = Some("36000".into());
+                            payload.sl_ord_px = Some("-1");
+                            payload.px = None;
+                            payload.reduce_only = Some(true);
+                        }
+                        payload
+                    })
+                    .collect();
+                let write = PlacementWrite {
+                    path,
+                    orders: payloads.iter().collect(),
+                };
+                let result = validate_write(&write);
+                assert_eq!(result.is_ok(), valid);
+                if let Err(error) = result {
+                    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+                    assert_eq!(error.outcome, Some(Outcome::NotSent));
+                }
+            }
+        }
+        let mut payloads: Vec<_> = (0..20).map(|_| payload()).collect();
+        let Some(last) = payloads.last_mut() else {
+            panic!("nonempty fixture")
+        };
+        last.sz = Some("1".into());
+        let error = validate_write(&PlacementWrite {
+            path: "/api/v5/trade/batch-orders",
+            orders: payloads.iter().collect(),
+        })
+        .expect_err("last invalid row must refuse the full write");
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+    }
+
+    #[test]
+    fn pure_write_gate_checks_final_price_ticks_and_rejects_invalid_rule_bounds() {
+        for (price, min, max) in [
+            ("38000.04", 4., 5.),
+            ("0", 4., 5.),
+            ("38000", f64::NAN, 5.),
+            ("38000", 4., f64::INFINITY),
+        ] {
+            let mut payload = payload();
+            payload.px = Some(price.into());
+            payload.rules.min = min;
+            payload.rules.max = max;
+            let error = validate_write(&PlacementWrite {
+                path: "/api/v5/trade/batch-orders",
+                orders: vec![&payload],
+            })
+            .expect_err("wire values and native bounds must be valid");
+            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+            assert_eq!(error.outcome, Some(Outcome::NotSent));
+        }
+        let mut payload = payload();
+        payload.px = None;
+        let error = validate_write(&PlacementWrite {
+            path: "/api/v5/trade/batch-orders",
+            orders: vec![&payload],
+        })
+        .expect_err("missing limit price must refuse");
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
     }
 }
 

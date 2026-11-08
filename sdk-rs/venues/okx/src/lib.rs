@@ -58,6 +58,14 @@ struct Product {
     kind: InstrumentType,
     underlying: String,
     settle_ccy: String,
+    order_limits: OrderLimits,
+}
+struct OrderLimits {
+    min: f64,
+    limit: f64,
+    market: f64,
+    stop: f64,
+    trigger: f64,
 }
 
 struct Connection {
@@ -1230,6 +1238,13 @@ impl Venue for Okx {
                             kind: *kind,
                             underlying: underlying.into(),
                             settle_ccy: m.settle_ccy.into(),
+                            order_limits: OrderLimits {
+                                min: num::parse(m.min_sz),
+                                limit: native_cap(m.max_lmt_sz, max),
+                                market: native_cap(m.max_mkt_sz, max),
+                                stop: native_cap(m.max_stop_sz, max),
+                                trigger: native_cap(m.max_trigger_sz, max),
+                            },
                         },
                     );
                     rows.push(Market {
@@ -2064,6 +2079,13 @@ fn scaled(value: f64, factor: f64) -> f64 {
     let digits = num::decimals(value) + num::decimals(factor);
     let scale = 10f64.powi(digits.min(15) as i32);
     (value * factor * scale).round() / scale
+}
+fn native_cap(value: &str, fallback: f64) -> f64 {
+    if value.is_empty() {
+        fallback
+    } else {
+        num::parse(value)
+    }
 }
 
 impl CandleRead {

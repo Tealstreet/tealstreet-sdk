@@ -420,6 +420,13 @@ mod encoding_tests {
                             kind: InstrumentType::Swap,
                             underlying: format!("U{}", index / 2),
                             settle_ccy: "USDT".into(),
+                            order_limits: OrderLimits {
+                                min: 1.,
+                                limit: 100.,
+                                market: 100.,
+                                stop: 100.,
+                                trigger: 100.,
+                            },
                         },
                     );
                     markets.push(Market {

@@ -167,11 +167,20 @@ pub fn trading_engine_at_level(
     configure: impl FnOnce(&mut Engine<Okx>),
     level: &str,
 ) -> Engine<Okx> {
+    trading_engine_at_level_with_instrument(options, configure, level, MARKET)
+}
+
+pub fn trading_engine_at_level_with_instrument(
+    options: FixtureOptions,
+    configure: impl FnOnce(&mut Engine<Okx>),
+    level: &str,
+    instrument: &str,
+) -> Engine<Okx> {
     let mut e = engine(options);
     configure(&mut e);
     e.start(0.0);
     let a = take_http(&mut prepared(&mut e, 0.0));
-    reply(&mut e, &a, &envelope(MARKET), 1.0);
+    reply(&mut e, &a, &envelope(instrument), 1.0);
     let mut out = prepared(&mut e, 1.0);
     let a = take_http(&mut out);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
