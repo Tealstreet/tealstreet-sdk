@@ -42,7 +42,10 @@ export class StopCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
-    const targetSymbol = this.getTargetSymbol(ctx, ['buy', 'sell', 'at', 'trigger']);
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['buy', 'sell'], ['at'], ['trigger']]);
+    if (duplicate) return duplicate;
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
 
     const isBuySellFirstArg = ['buy', 'sell'].includes(String(args[1]));
     const sizePosition = this.looksLikeSize(args[1]) ? 1 : isBuySellFirstArg && this.looksLikeSize(args[2]) ? 2 : -1;
@@ -70,12 +73,31 @@ export class StopCommand extends TradingBaseCommand {
         index !== triggerOperand &&
         (this.looksLikeSize(arg) || this.looksLikePrice(arg)),
     );
+    const consumed = [sizePosition, pricePosition];
+    for (const keyword of ['buy', 'sell', 'at', 'trigger']) {
+      const index = args.indexOf(keyword);
+      if (index > 0) {
+        consumed.push(index);
+        if (keyword === 'trigger' && args[index + 1] !== undefined) consumed.push(index + 1);
+      }
+    }
+    const symbolIndex = args.findIndex((_, index) => index > 0 && !consumed.includes(index));
+    const invalid = this.refuseUnknownOrderArgs(ctx, consumed);
+    if (invalid && stray === undefined) {
+      if (pricePosition <= 0) {
+        return this.error(`${invalid.error} stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`.`);
+      }
+      return invalid;
+    }
     if (stray !== undefined) {
       const refusal = `stop: refusing "${stray}": it would be ignored and the stop would cover the whole position. A stop size needs a $, e.g. \`stop sell $500 at 1%\`; nothing was placed`;
       this.printError(ctx, refusal);
       return this.error(refusal);
     }
 
+    const targetSymbol = symbolIndex > 0
+      ? this.validateSymbols(exchange, [args[symbolIndex]])[0] ?? ctx.symbol
+      : ctx.symbol;
     if (pricePosition > 0 && args[pricePosition] !== undefined) {
       const ticker = exchange.store?.tickers?.find((ticker) => ticker.symbol === targetSymbol);
       const currentPrice = ticker?.last;
@@ -88,7 +110,7 @@ export class StopCommand extends TradingBaseCommand {
         : this.hasArgValue(args, 'sell')
           ? OrderSide.Sell
           : undefined;
-      const limitPrice = parseFloat(this.processPrice(args[pricePosition], currentPrice));
+      const limitPrice = Number(this.processPrice(args[pricePosition], currentPrice));
 
       // Optional `trigger <abs>` keyword turns this into a true limit
       // stop. Without it, trigger == limit (market stop). Spec: trigprice
@@ -100,7 +122,7 @@ export class StopCommand extends TradingBaseCommand {
         if (!triggerArg) {
           return this.error('trigger: missing absolute price argument');
         }
-        const parsed = parseFloat(triggerArg);
+        const parsed = this.parseOrderNumber(triggerArg);
         if (!Number.isFinite(parsed) || parsed <= 0) {
           return this.error(`trigger: '${triggerArg}' must be an absolute positive price`);
         }
