@@ -21,6 +21,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -28,11 +29,26 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
+use std::ops::Range;
 
 const BROKER_PREFIX: &str = "x-s3vFFRQp";
 /// Errors callers handle themselves; they are not shown to the user.
 const SILENT_CODES: [i64; 4] = [-2011, -2013, -4059, -5022];
 const UNKNOWN_ORDER: i64 = -2011;
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
+    if error.outcome == Some(Outcome::Unknown)
+        && !error.message.contains(UNKNOWN_TEXT)
+        && !error
+            .message
+            .contains("outcome of this order change is unknown")
+    {
+        format!("{}. {UNKNOWN_TEXT}", error.message)
+    } else {
+        error.message.clone()
+    }
+}
 
 fn is_stop_kind(kind: OrderType) -> bool {
     matches!(
@@ -57,6 +73,7 @@ struct Resend {
     method: Method,
     url: String,
     query: Query,
+    elements: Range<usize>,
 }
 
 /// What a response means for its job.
@@ -157,6 +174,80 @@ struct Job {
     replacing_stop: Option<(String, OrderSide, OrderType)>,
     /// The same for any other order: a refusal now leaves it gone.
     replacing_order: Option<String>,
+    report: Option<PlacementReport>,
+}
+
+struct PlacementReport {
+    journal: WritePlan,
+    next: usize,
+    failure: Option<VenueError>,
+}
+
+impl PlacementReport {
+    fn new(steps: &VecDeque<Vec<Planned>>) -> Self {
+        let elements = steps
+            .iter()
+            .flatten()
+            .flat_map(|planned| {
+                (0..reporting_count(&planned.call)).map(|index| {
+                    planned
+                        .receipts
+                        .get(index)
+                        .map(|receipt| receipt.identity.clone())
+                })
+            })
+            .enumerate()
+            .map(|(index, client_order_id)| Element {
+                index,
+                client_order_id,
+            })
+            .collect();
+        Self {
+            journal: WritePlan::new(elements),
+            next: 0,
+            failure: None,
+        }
+    }
+
+    fn begin(&mut self, call: &Call) -> Range<usize> {
+        let elements = self.next..self.next + reporting_count(call);
+        self.next = elements.end;
+        for index in elements.clone() {
+            self.journal
+                .record(
+                    index,
+                    ElementResult::Unknown {
+                        error: Box::new(VenueError::new(UNKNOWN_TEXT).outcome(Outcome::Unknown)),
+                    },
+                )
+                .expect("reporting indexes are assigned from the prepared steps");
+        }
+        elements
+    }
+
+    fn record(
+        &mut self,
+        elements: Range<usize>,
+        rows: Vec<ElementResult>,
+        error: Option<VenueError>,
+    ) {
+        if let Some(error) = error {
+            self.failure.get_or_insert(error);
+        }
+        for (index, row) in elements.zip(rows) {
+            self.journal
+                .record(index, row)
+                .expect("response belongs to its prepared reporting indexes");
+        }
+    }
+}
+
+fn reporting_count(call: &Call) -> usize {
+    match call {
+        Call::PlaceBatch { expected } => *expected,
+        Call::VerifyPmAlgo { .. } => 0,
+        _ => 1,
+    }
 }
 
 impl Job {
@@ -649,8 +740,17 @@ impl BinanceFutures {
         let Some(step) = step.filter(|step| !step.is_empty()) else {
             let job = self.trading.jobs.remove(&command).expect("present");
             let context = job.context.expect("managed job has an authority");
-            match job.planning_error {
+            let error = job.planning_error.or_else(|| {
+                job.report
+                    .as_ref()
+                    .and_then(|report| report.failure.clone())
+            });
+            match error {
                 Some(error) => {
+                    let error = job.report.as_ref().map_or_else(
+                        || error.clone(),
+                        |report| report.journal.attach(error.clone()),
+                    );
                     let _ = cx.fail_context(&context, error);
                 }
                 None => {
@@ -671,8 +771,8 @@ impl BinanceFutures {
             let verifying_pm_cancel = matches!(planned.call, Call::VerifyPmAlgo { .. });
             if verifying_pm_cancel && root.deadline() <= cx.now + 20_000.0 {
                 let _ = cx.inherit_http_uncertainty(&root);
-                self.trading.jobs.remove(&command);
-                let _ = cx.fail_context(&root, "Binance PM algo cancellation could not be confirmed within the command bound; check Open Orders before re-placing");
+                let error = self.take_trade_failure(command, VenueError::new("Binance PM algo cancellation could not be confirmed within the command bound; check Open Orders before re-placing"), None);
+                let _ = cx.fail_context(&root, error);
                 return;
             }
             let (selection, credentials) = self
@@ -709,31 +809,67 @@ impl BinanceFutures {
                 if verifying_pm_cancel {
                     let _ = cx.inherit_http_uncertainty(&root);
                 }
-                self.trading.jobs.remove(&command);
-                let _ = cx.fail_context(
-                    &root,
+                let error = self.take_trade_failure(
+                    command,
                     VenueError::new("Binance HTTP lifecycle refused the next leg"),
+                    None,
                 );
+                let _ = cx.fail_context(&root, error);
                 return;
             };
             cx.command_progress(command, planned.receipts);
+            let elements = self
+                .trading
+                .jobs
+                .get_mut(&command)
+                .and_then(|job| job.report.as_mut())
+                .map_or(0..0, |report| report.begin(&planned.call));
             let resend = Resend {
                 method: planned.method,
                 url: format!("{}{}", self.urls.account_rest, planned.path),
                 query: planned.query,
+                elements,
             };
+            let elements = resend.elements.clone();
             if !self.send_trade(cx, command, context, planned.call, resend, credentials) {
                 if verifying_pm_cancel {
                     let _ = cx.inherit_http_uncertainty(&root);
                 }
-                self.trading.jobs.remove(&command);
-                let _ = cx.fail_context(
-                    &root,
-                    VenueError::new("Binance HTTP lifecycle refused the next leg"),
+                let error = self.take_trade_failure(
+                    command,
+                    not_sent("Binance HTTP lifecycle refused the next leg"),
+                    Some(elements),
                 );
+                let _ = cx.fail_context(&root, error);
                 return;
             }
         }
+    }
+
+    fn take_trade_failure(
+        &mut self,
+        command: CommandId,
+        error: VenueError,
+        unsent: Option<Range<usize>>,
+    ) -> VenueError {
+        let Some(mut report) = self
+            .trading
+            .jobs
+            .remove(&command)
+            .and_then(|job| job.report)
+        else {
+            return error;
+        };
+        if let Some(elements) = unsent {
+            let rows = vec![
+                ElementResult::NotSent {
+                    error: Some(Box::new(error.clone()))
+                };
+                elements.len()
+            ];
+            report.record(elements, rows, Some(error.clone()));
+        }
+        report.journal.attach(error)
     }
 
     /// Sign and send one write leg; false when the engine refuses it.
@@ -769,6 +905,19 @@ impl BinanceFutures {
         response: Response<'_>,
         evidence: &mut UnprovenEvidence,
     ) {
+        if let Some(report) = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .filter(|job| {
+                job.context
+                    .as_ref()
+                    .is_some_and(|context| context.owner() == request.context.owner())
+            })
+            .and_then(|job| job.report.as_ref())
+        {
+            evidence.write_plan(&report.journal);
+        }
         if let Call::PlaceBatch { .. } = &request.call {
             // A batch-wide native refusal has an object envelope. Preserve its
             // bounded diagnostics, but a non-array can never supply batch IDs.
@@ -867,7 +1016,7 @@ impl BinanceFutures {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
-        self.on_trade_result(cx, request, response);
+        self.on_trade_result(cx, request, response, None);
     }
     pub(crate) fn on_trade_sign_failed(
         &mut self,
@@ -875,13 +1024,14 @@ impl BinanceFutures {
         request: Request,
         error: VenueError,
     ) {
-        self.on_trade_result(cx, request, Err(&error.message));
+        self.on_trade_result(cx, request, Err(&error.message), Some(error.clone()));
     }
     fn on_trade_result(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         response: Result<Response<'_>, &str>,
+        local_error: Option<VenueError>,
     ) {
         if let Call::VerifyPmAlgo { target } = &request.call {
             return self.pm_cancel_readback(cx, &request, target.clone(), response);
@@ -897,6 +1047,7 @@ impl BinanceFutures {
             .as_ref()
             .is_ok_and(|response| (200..300).contains(&response.status));
         let resend_call = call.clone();
+        let reporting_call = call.clone();
         let stopped = self.trading.jobs.get(&command).is_some_and(|job| job.stop);
 
         let mut reports = Vec::new();
@@ -918,6 +1069,7 @@ impl BinanceFutures {
         // Native IDs on an ambiguous batch are reconciliation evidence only;
         // never feed them into accepted placement planning or caller bindings.
         let mut evidence_ids = Vec::new();
+        let mut reported_rows = Vec::new();
         let mut known_cancel_effects = false;
         let error = match (call, outcome) {
             (Call::PlaceOne { .. }, Ok(body)) if self.is_options() => {
@@ -998,10 +1150,44 @@ impl BinanceFutures {
                         continue_after_item_refusal = batch_http_success;
                         for item in items {
                             match (item.order_id, item.code) {
-                                (Some(id), None) => ids.push(id.to_string()),
+                                (Some(id), None) => {
+                                    ids.push(id.to_string());
+                                    reported_rows.push(ElementResult::Placed {
+                                        order_ids: vec![id.to_string()],
+                                    });
+                                }
                                 (_, code) => {
                                     let code = code.unwrap_or(0);
                                     unproven |= item_unknown(code);
+                                    let message = item
+                                        .msg
+                                        .as_deref()
+                                        .unwrap_or("Binance batch order rejected");
+                                    let mut detail = VenueError::new(message)
+                                        .venue_code(code.to_string())
+                                        .venue_message(message);
+                                    detail.kind = BINANCE
+                                        .verdict(
+                                            &Native {
+                                                code: NativeCode::Int(code),
+                                                message,
+                                            },
+                                            Intent::Place,
+                                        )
+                                        .kind();
+                                    let row = if item_unknown(code) {
+                                        detail.outcome = Some(Outcome::Unknown);
+                                        detail.message = terminal_failure_text(&detail);
+                                        ElementResult::Unknown {
+                                            error: Box::new(detail),
+                                        }
+                                    } else {
+                                        detail.outcome = Some(Outcome::Rejected);
+                                        ElementResult::NotSent {
+                                            error: Some(Box::new(detail)),
+                                        }
+                                    };
+                                    reported_rows.push(row);
                                     rejection.get_or_insert((
                                         code,
                                         algo_only_refusal(
@@ -1150,6 +1336,7 @@ impl BinanceFutures {
                 // A signature refusal is as proven as any; once the cancel landed it is not resent.
                 let refused =
                     !unproven && matches!(verdict, Verdict::Refused(_) | Verdict::RefusedResend(_));
+                continue_after_item_refusal &= refused;
                 // The cancel landed, so the leg's words lead with what the user lost.
                 let gone = self
                     .trading
@@ -1170,10 +1357,17 @@ impl BinanceFutures {
                 && !continue_after_item_refusal
             {
                 job.stop = true;
+                if !native_response
+                    || native_fact
+                        .as_ref()
+                        .is_some_and(|fact| matches!(fact.verdict(), Verdict::Unknown(_)))
+                {
+                    job.continue_on_error = false;
+                }
             }
         }
         if native_response {
-            let fact = match native_fact {
+            let fact = match native_fact.clone() {
                 Some(fact) => {
                     let evidence: Vec<_> = ids.iter().chain(&evidence_ids).cloned().collect();
                     WriteFact::Failed {
@@ -1221,6 +1415,45 @@ impl BinanceFutures {
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
+        if let Some(report) = &mut job.report {
+            let error = native_fact
+                .as_ref()
+                .map(|fact| fact.error().clone())
+                .or_else(|| {
+                    (!native_response).then(|| {
+                        local_error.unwrap_or_else(|| {
+                            VenueError::new(UNKNOWN_TEXT).outcome(Outcome::Unknown)
+                        })
+                    })
+                });
+            if reported_rows.is_empty() {
+                let row = match &error {
+                    Some(error)
+                        if error.outcome == Some(Outcome::Rejected)
+                            || error.outcome == Some(Outcome::NotSent) =>
+                    {
+                        ElementResult::NotSent {
+                            error: Some(Box::new(error.clone())),
+                        }
+                    }
+                    Some(error) => ElementResult::Unknown {
+                        error: Box::new(error.clone()),
+                    },
+                    None => match &reporting_call {
+                        Call::Cancel { ids, .. } => ElementResult::Applied {
+                            effect: AppliedEffect::Cancel,
+                            target_order_id: (ids.len() == 1).then(|| ids[0].clone()),
+                            position_key: None,
+                        },
+                        _ => ElementResult::Placed {
+                            order_ids: ids.clone(),
+                        },
+                    },
+                };
+                reported_rows = vec![row; resend.elements.len()];
+            }
+            report.record(resend.elements, reported_rows, error);
+        }
         job.ids.extend(ids);
         job.outstanding = job.outstanding.saturating_sub(1);
         if job.outstanding == 0 {
@@ -1303,6 +1536,7 @@ impl BinanceFutures {
         call: Call,
         resend: Resend,
     ) {
+        let elements = resend.elements.clone();
         let sent = self
             .credentials
             .select(CredentialRole::Mutation)
@@ -1314,13 +1548,18 @@ impl BinanceFutures {
                     .then_some(())
             });
         if sent.is_none()
-            && let Some(job) = self.trading.jobs.remove(&command)
-            && let Some(root) = job.context
+            && let Some(root) = self
+                .trading
+                .jobs
+                .get(&command)
+                .and_then(|job| job.context.clone())
         {
-            let _ = cx.fail_context(
-                &root,
-                VenueError::new("Binance HTTP lifecycle refused the signature resend"),
+            let error = self.take_trade_failure(
+                command,
+                not_sent("Binance HTTP lifecycle refused the signature resend"),
+                Some(elements),
             );
+            let _ = cx.fail_context(&root, error);
         }
     }
 
@@ -1443,6 +1682,7 @@ impl BinanceFutures {
                 },
             }]);
         }
+        job.report = Some(PlacementReport::new(&job.steps));
         Ok(job)
     }
 

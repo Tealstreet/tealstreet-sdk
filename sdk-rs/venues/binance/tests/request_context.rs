@@ -994,7 +994,9 @@ fn rate_limits_are_unknown_while_definitive_status_refusals_stay_rejected() {
 }
 
 #[test]
-fn a_native_batch_item_rate_limit_continues_lots_and_retains_unknown() {
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/binance/binance.exchange.ts:1997-2011.
+fn a_native_batch_item_rate_limit_stops_lots_while_definite_refusals_continue() {
     for rate_limited in [true, false] {
         let mut h = ready();
         h.requests.clear();
@@ -1016,13 +1018,15 @@ fn a_native_batch_item_rate_limit_continues_lots_and_retains_unknown() {
             {"code":-2019,"msg":"insufficient margin"}
         ]);
         h.reply(batch.id, 200, "", &rows.to_string());
-        let last = h.take("/fapi/v1/order");
-        h.reply(
-            last.id,
-            400,
-            "",
-            r#"{"code":-2019,"msg":"insufficient margin"}"#,
-        );
+        if !rate_limited {
+            let last = h.take("/fapi/v1/order");
+            h.reply(
+                last.id,
+                400,
+                "",
+                r#"{"code":-2019,"msg":"insufficient margin"}"#,
+            );
+        }
         assert!(
             h.requests
                 .iter()
@@ -1040,6 +1044,21 @@ fn a_native_batch_item_rate_limit_continues_lots_and_retains_unknown() {
             }),
             "{error:?}"
         );
+        if rate_limited {
+            assert!(
+                error
+                    .message
+                    .contains("The outcome is unknown. Check Open Orders")
+            );
+            let rows = error.elements.as_ref().unwrap();
+            assert!(
+                matches!(&rows[1].result, safe_cex_engine::write_plan::ElementResult::Unknown { error } if error.venue_code.as_deref() == Some("-1003"))
+            );
+            assert!(matches!(
+                &rows[5].result,
+                safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+            ));
+        }
     }
 }
 

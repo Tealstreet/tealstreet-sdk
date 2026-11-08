@@ -41,11 +41,14 @@ Native lot rebalancing, whole-plan filter refusals and new fail-stop rules are
 outside this parity change. Engine-owned transport classification remains in
 place. Binance does not adopt `WritePlan` as a dispatch gate.
 
-After a native batch item error in a successful HTTP response, USD-M and COIN-M continue later
-chunks and attached children, matching the reference's per-item logging loop.
-This includes an item timeout; its native outcome remains Unknown, and that row
-is never resent. Returned signature-error rows also continue without resending
-the batch; whole-request signature handling retains its existing policy.
+After a definite native batch item refusal in a successful HTTP response, USD-M
+and COIN-M continue later chunks and attached children, matching the reference's
+per-item logging loop. Returned signature-error rows also continue without
+resending the batch; whole-request signature handling retains its existing policy.
+A genuine Unknown row instead stops all later writes for the action, including
+later lots, chunks and attached children, and is never retried. This is the
+recorded stop-after-UNKNOWN parity exception (Sean/daxx, 2026-11-08): the TypeScript
+batch loop continues even for a native item timeout or uncertain rate response.
 An HTTP request failure stops the serial placement path, including later algo
 children. After cancellation succeeds but its replacement is refused, the
 command ends without an automatic protective put-back: the reference's
@@ -59,3 +62,23 @@ the venue's existing trailing-rate validation.
 | Split lots / chunks: HTTP failure, including Spot and PM serial placement | Stop | `binance.exchange.ts:2012`, `binancespot.exchange.ts:586`, `binancepm.exchange.ts:1035` |
 | Attached TP/SL: HTTP failure | Stop later children | `binance.exchange.ts:2029`, `binancepm.exchange.ts:1068` |
 | Cancel-replace: cancel or replacement failure | Stop; no automatic put-back | `binance.exchange.ts:1617`, `binanceinverse.exchange.ts:808`, `binancespot.exchange.ts:459`, `binancepm.exchange.ts:834` |
+
+Placement failures include the reporting-only `WritePlan` journal. Its indexes
+follow prepared step order, with one row per native batch element; a conflicting
+cancel is an Applied effect. The accepted rows retain their native IDs, uncertain
+rows remain Unknown and an unissued suffix remains notSent. Native batch row
+attribution is kept separately from the engine's aggregate physical classification.
+The journal adds no filter validation, reallocation, retries or dispatch decisions.
+It also reaches engine-owned unproven HTTP seals through the existing read-only
+capture hook. Venue-authored Unknown failures and warnings include exactly
+`The outcome is unknown. Check Open Orders`; engine-owned seals retain their
+existing canonical wording. Existing cancellation and amendment paths continue
+to use their physical lifecycle journal.
+
+| Pinned audit path | Recording-transport tests | Reference evidence |
+| --- | --- | --- |
+| Maximum-quantity splitting | `legacy_partial_placement::spot_split_lots_keep_the_legacy_partial_write_sequence`; `after_failure::split_lots_continue_after_a_definite_batch_item_refusal` | `binancespot.exchange.ts:535-547,576-594`; `binance.exchange.ts:1830-1844,1997-2011` |
+| Batch chunks / below-minimum later order | `legacy_partial_placement::spot_native_minimum_is_not_a_new_whole_plan_gate`; `after_failure::later_batch_chunks_continue_after_a_definite_item_refusal` | `binancespot.exchange.ts:467-470,576-594`; `binanceinverse.exchange.ts:928-943` |
+| Separate TP/SL children | `legacy_partial_placement::attached_algo_keeps_legacy_whole_quantity_after_split_parent`; `after_failure::children_follow_a_parent_batch_item_refusal_but_stop_after_a_child_refusal` | `binance.exchange.ts:1685-1714,1783-1816,1851-1905,2025-2040` |
+| Cancel-replace | `after_failure::a_refused_stop_replacement_ends_without_a_ts_absent_put_back`; existing unchanged `trading_lifecycle` and `audit_trading` fill-race controls | `binance.exchange.ts:1597-1618`; `binancespot.exchange.ts:445-460` |
+| Unknown parity exception: split lots, chunks, children | Three `after_failure::a_native_item_timeout_stops_*` pins for USD-M and COIN-M; `request_context::a_native_batch_item_rate_limit_stops_lots_while_definite_refusals_continue` | TS continues at `binance.exchange.ts:1997-2011,1685-1714`; `binanceinverse.exchange.ts:937-941`; Rust stops by the recorded exception |

@@ -31,6 +31,9 @@ fn ready(variant: Variant) -> Harness {
 }
 
 #[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: binance | batch-chunking/audit trading.rs:1468
+// TS: packages/safe-cex/src/__tests__/reference/binance/binancespot.exchange.ts:467-470,576-594.
+// The first order lands before the below-minimum second order is sent and refused.
 fn spot_native_minimum_is_not_a_new_whole_plan_gate() {
     let mut h = ready(Variant::Spot);
     h.event(Event::Command(Command::PlaceOrders {
@@ -58,6 +61,9 @@ fn spot_native_minimum_is_not_a_new_whole_plan_gate() {
 }
 
 #[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: binance | separate-TP-SL-children/audit trading.rs:2452
+// TS: packages/safe-cex/src/__tests__/reference/binance/binance.exchange.ts:1783-1816,1851-1905.
+// Both regular lots are dispatched before the single whole-quantity algo child.
 fn attached_algo_keeps_legacy_whole_quantity_after_split_parent() {
     let mut h = ready(Variant::UsdM);
     h.event(Event::Command(Command::PlaceOrders {
@@ -75,4 +81,50 @@ fn attached_algo_keeps_legacy_whole_quantity_after_split_parent() {
             .iter()
             .all(|request| request.method == Method::Get)
     );
+}
+
+#[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: binance | max-qty-splitting/audit trading.rs:2831
+// TS: packages/safe-cex/src/__tests__/reference/binance/binancespot.exchange.ts:535-547,576-594.
+// A 10-unit intent with max=5 emits two 5-unit writes; a later refusal keeps the prefix.
+fn spot_split_lots_keep_the_legacy_partial_write_sequence() {
+    let mut h = ready(Variant::Spot);
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 77,
+        orders: serde_json::from_str(
+            r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":10,"price":100}]"#,
+        )
+        .unwrap(),
+    }));
+    let first = h.take("/api/v3/order");
+    assert_eq!(first.method, Method::Post);
+    assert!(first.url.contains("quantity=5&"));
+    assert!(h.requests.is_empty());
+    h.reply(first.id, 200, "", r#"{"orderId":1}"#);
+    let last = h.take("/api/v3/order");
+    assert_eq!(last.method, Method::Post);
+    assert!(last.url.contains("quantity=5&"));
+    assert!(h.requests.is_empty());
+    h.reply(
+        last.id,
+        400,
+        "",
+        r#"{"code":-1013,"msg":"Filter failure: MIN_NOTIONAL"}"#,
+    );
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == Method::Get)
+    );
+    let failure = &h.failures.iter().find(|(id, _)| *id == 77).unwrap().1;
+    assert_eq!(failure.partial.as_ref().unwrap().order_ids.len(), 1);
+    let rows = failure.elements.as_ref().unwrap();
+    assert!(matches!(
+        &rows[0].result,
+        safe_cex_engine::write_plan::ElementResult::Placed { .. }
+    ));
+    assert!(matches!(
+        &rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(_) }
+    ));
 }
