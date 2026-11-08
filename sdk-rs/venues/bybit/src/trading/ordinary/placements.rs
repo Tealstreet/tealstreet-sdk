@@ -522,6 +522,7 @@ impl BybitLinear {
             unlisted: Vec::new(),
             unlisted_read: None,
             unlisted_landed: None,
+            unlisted_scopes: Vec::new(),
             ids: Vec::new(),
             error: None,
         }));

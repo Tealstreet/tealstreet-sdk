@@ -66,12 +66,12 @@ fn check_lots(variant: Variant, single: bool) {
                     opts.stop_loss = stop_loss;
                     let lots = venue.format_lots(cx, &opts).unwrap();
                     let quantities = if variant.is_inverse() {
-                        // KNOWN-ISSUE: legacy TS under-allocates (sum 2 of requested 5); kept for parity per Sam; decision pending
+                        // KNOWN-ISSUE: legacy TS under-allocates (sum 2 of requested 5); kept for exact TS parity per Sam's decision
                         &["2"][..]
                     } else if variant.is_spot() {
                         &["2", "2", "1"][..]
                     } else {
-                        // KNOWN-ISSUE: legacy TS under-allocates (sum 4 of requested 5); kept for parity per Sam; decision pending
+                        // KNOWN-ISSUE: legacy TS under-allocates (sum 4 of requested 5); kept for exact TS parity per Sam's decision
                         &["1", "1", "1", "1"][..]
                     };
                     assert_eq!(lots.len(), quantities.len());

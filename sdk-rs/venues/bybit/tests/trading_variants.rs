@@ -175,7 +175,7 @@ fn body(request: &HttpRequest) -> &str {
 #[test]
 fn second_review_perp_remainder_keeps_ts_protection() {
     // reference/bybit/bybit.exchange.ts:2723-2731 restores the original request on the remainder.
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
     for (amount, expected, sum) in [
         (26., &["4", "4", "4", "4", "4", "4", "1"][..], 25.),
         (10., &["5", "5"][..], 10.),
@@ -351,7 +351,7 @@ fn assert_allocation_quantities(
 fn perp_lot_allocation_matches_legacy_ts_audit() {
     // reference/bybit/bybit.exchange.ts:2718-2731, including rounded totals below the requested amount.
     for (amount, max, step, expected, expected_sum) in [
-        // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
         (
             26.0,
             5.0,
@@ -359,9 +359,9 @@ fn perp_lot_allocation_matches_legacy_ts_audit() {
             &["4", "4", "4", "4", "4", "4", "1"][..],
             25.,
         ),
-        // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
         (11.0, 5.0, 1.0, &["3", "3", "3", "1"][..], 10.),
-        // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
         (12.0, 5.0, 1.0, &["3", "3", "3", "2"][..], 11.),
         (10.0, 5.0, 1.0, &["5", "5"][..], 10.),
         (7.0, 3.0, 0.5, &["2", "2", "2", "1"][..], 7.),
@@ -420,6 +420,15 @@ fn managed_split_market_close_accepts_server_echoes_without_caller_ids() {
                 .map(|child| child["qty"].as_str().unwrap())
                 .collect::<Vec<_>>(),
             quantities
+        );
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 1399.999 of requested 1400); kept for exact TS parity per Sam's decision
+        let total: f64 = children
+            .iter()
+            .map(|child| child["qty"].as_str().unwrap().parse::<f64>().unwrap())
+            .sum();
+        assert_eq!(
+            safe_cex_engine::num::adjust(total, 0.001),
+            if amount == 1400. { 1399.999 } else { 900. }
         );
         assert!(
             children
@@ -572,7 +581,7 @@ fn outcome(h: &Harness, command: u32) -> Option<safe_cex_engine::Outcome> {
 #[test]
 fn second_review_inverse_clamps_to_ts_maximum() {
     // reference/bybit/bybitinverse.exchange.ts:1523-1541 clamps before :1614-1636 allocates.
-    // KNOWN-ISSUE: legacy TS sends 10 of requested 25.6; kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 25.6); kept for exact TS parity per Sam's decision
     let mut h = ready(Variant::Inverse);
     place(&mut h, 1, vec![order("BTCUSD", 25.6)]);
     let mode = h.take("/v5/position/list");
@@ -1396,6 +1405,22 @@ fn demo_cancel_all_without_affected_identity_cannot_retire_or_tombstone_live_row
             "{ack}"
         );
         assert!(h.result(92).unwrap().is_err(), "{ack}");
+        if h.has_request("/v5/order/realtime") {
+            // Failed scope proof now seals Unknown and requests the engine's fresh read.
+            assert_eq!(outcome(&h, 92), Some(safe_cex_engine::Outcome::Unknown));
+            assert!(h.has_request("/v5/order/realtime"));
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|r| r.method == safe_cex_engine::Method::Get)
+            );
+            h.respond(
+                "settleCoin=USDT&limit=50",
+                200,
+                &format!(r#"{{"retCode":0,"result":{{"list":[{row}],"nextPageCursor":""}}}}"#),
+            );
+            h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+        }
         assert!(!h.has_request("/v5/order/realtime"), "{ack}");
     }
 }
@@ -1585,6 +1610,7 @@ fn cancel_all_omitting_a_stop_the_venue_already_removed_succeeds_after_the_read(
     h.advance(0.0);
     assert_eq!(h.result(96), Some(&Ok("[]".into())));
     assert!(h.engine.store().order("stop-1").is_none());
+    assert!(!h.notices.iter().any(|n| matches!(n, safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown")));
 }
 
 #[test]
@@ -1624,6 +1650,62 @@ fn cancel_all_whose_read_fails_says_the_order_is_unconfirmed() {
     assert!(
         error.contains("could not confirm 1 order(s) on BTCUSDT: stop-1"),
         "{error}"
+    );
+}
+
+#[test]
+fn cancel_all_failed_read_retains_unknown_scope_and_warning() {
+    use safe_cex_engine::write_plan::ElementResult;
+    use safe_cex_engine::{Notice, Outcome};
+    let mut h = cancel_all_omitting_a_stop(998);
+    h.respond(
+        "settleCoin=USDT&limit=50",
+        200,
+        r#"{"retCode":0,"result":{}}"#,
+    );
+    h.advance(0.0);
+    let error = applied_failure(&h, 998);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(
+        error
+            .message
+            .contains("The outcome is unknown. Check Open Orders")
+    );
+    let rows = error.elements.as_ref().expect("cancel-all scope journal");
+    assert_eq!(rows.len(), 1);
+    assert!(
+        matches!(&rows[0].result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown))
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|p| p.order_ids.is_empty())
+    );
+    let events: Vec<_> = h
+        .notices
+        .iter()
+        .filter_map(|n| match n {
+            Notice::Event(event) if event.code == "order.outcome_unknown" => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert!(
+        events[0]
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "command" && *value == 998u32.into())
+    );
+    assert_eq!(
+        h.engine.store().order("stop-1").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    h.advance(120_000.);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method != safe_cex_engine::Method::Get)
     );
 }
 
@@ -6047,6 +6129,23 @@ fn applied_cancel_batch_keeps_native_target_rows_and_stops_later_chunks() {
             200,
             &serde_json::json!({"retCode":0,"result":{"list":rows},"retExtInfo":{"list":statuses}})
                 .to_string(),
+        );
+        assert!(
+            applied_failure(&h, 155)
+                .partial
+                .as_ref()
+                .is_none_or(|partial| partial.order_ids.is_empty()),
+            "cancel targets are Applied effects, never created-order IDs"
+        );
+        let partial = applied_failure(&h, 155)
+            .partial
+            .as_ref()
+            .expect("native batch counts");
+        assert_eq!(partial.total, Some(10));
+        assert_eq!(partial.failed_index, Some(1));
+        assert_eq!(
+            applied_failure(&h, 155).venue_code.as_deref(),
+            Some(code.to_string().as_str())
         );
         let elements = applied_failure(&h, 155)
             .elements

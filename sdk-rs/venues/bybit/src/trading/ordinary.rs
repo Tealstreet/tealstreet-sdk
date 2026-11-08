@@ -103,6 +103,13 @@ struct Run {
     unlisted_read: Option<Category>,
     /// That read has landed: whether it was complete.
     unlisted_landed: Option<bool>,
+    unlisted_scopes: Vec<UnlistedScope>,
+}
+
+struct UnlistedScope {
+    ids: Vec<String>,
+    elements: Vec<usize>,
+    effects: Vec<write_plan::EffectTarget>,
 }
 
 struct Leg {
@@ -608,6 +615,7 @@ impl BybitLinear {
             unlisted: Vec::new(),
             unlisted_read: None,
             unlisted_landed: None,
+            unlisted_scopes: Vec::new(),
         })
     }
 
@@ -1196,18 +1204,16 @@ impl BybitLinear {
                 write_plan::record_rows(journal, &active.leg.elements, results)
             } else {
                 match &decision {
-                    Decision::Next(_) | Decision::Unlisted(_) if !active.leg.effects.is_empty() => {
-                        write_plan::record_rows(
-                            journal,
-                            &active.leg.elements,
-                            active
-                                .leg
-                                .effects
-                                .iter()
-                                .map(write_plan::EffectTarget::applied)
-                                .collect(),
-                        )
-                    }
+                    Decision::Next(_) if !active.leg.effects.is_empty() => write_plan::record_rows(
+                        journal,
+                        &active.leg.elements,
+                        active
+                            .leg
+                            .effects
+                            .iter()
+                            .map(write_plan::EffectTarget::applied)
+                            .collect(),
+                    ),
                     Decision::Next(ids) => write_plan::record_rows(
                         journal,
                         &active.leg.elements,
@@ -1220,6 +1226,14 @@ impl BybitLinear {
                     | Decision::Restore(_, error) => {
                         write_plan::record_failure(journal, &active.leg.elements, error.clone())
                     }
+                    Decision::Unlisted(_) => write_plan::record_failure(
+                        journal,
+                        &active.leg.elements,
+                        unknown_outcome(
+                            internal("Bybit cancel-all awaits its order read")
+                                .outcome(Outcome::Unknown),
+                        ),
+                    ),
                     _ => write_plan::record_failure(
                         journal,
                         &active.leg.elements,
@@ -1323,6 +1337,11 @@ impl BybitLinear {
                 }
             }
             Decision::Unlisted(unlisted) => {
+                run.unlisted_scopes.push(UnlistedScope {
+                    ids: unlisted.clone(),
+                    elements: active.leg.elements.clone(),
+                    effects: active.leg.effects.clone(),
+                });
                 run.unlisted.extend(unlisted);
                 if cx
                     .finish_plan_call(&plan, &active.slot, &active.context)
@@ -1598,18 +1617,61 @@ impl BybitLinear {
                     })
                     .map(String::as_str)
                     .collect();
-                if let Some(first) = left.first().and_then(|order| cx.store.order(order)) {
+                let unresolved = !confirmed || !left.is_empty();
+                let message = if let Some(first) =
+                    left.first().and_then(|order| cx.store.order(order))
+                {
                     let (count, symbol, list) = (left.len(), &first.symbol, left.join_with(", "));
-                    let message = if confirmed {
+                    if confirmed {
                         format!("Bybit cancel-all left {count} live order(s) on {symbol}: {list}")
                     } else {
                         format!(
                             "Bybit cancel-all could not confirm {count} order(s) on {symbol}: {list}"
                         )
-                    };
-                    cx.command_error(id, message.clone());
-                    run.error
-                        .get_or_insert(VenueError::new(message).outcome(Outcome::Unknown));
+                    }
+                } else {
+                    "Bybit cancel-all could not confirm its affected scopes".into()
+                };
+                let error = unknown_outcome(VenueError::new(message).outcome(Outcome::Unknown));
+                for scope in std::mem::take(&mut run.unlisted_scopes) {
+                    let applied = confirmed
+                        && scope.ids.iter().all(|id| {
+                            cx.store.order(id).is_none_or(|order| {
+                                matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+                            })
+                        });
+                    if let Some(journal) = &mut run.writes {
+                        let recorded = if applied {
+                            write_plan::record_rows(
+                                journal,
+                                &scope.elements,
+                                scope
+                                    .effects
+                                    .iter()
+                                    .map(write_plan::EffectTarget::applied)
+                                    .collect(),
+                            )
+                        } else {
+                            write_plan::record_failure(journal, &scope.elements, error.clone())
+                        };
+                        if let Err(error) = recorded {
+                            cx.command_error(
+                                id,
+                                format!("Bybit outcome recording unavailable: {error}"),
+                            );
+                        }
+                    }
+                }
+                if unresolved {
+                    let _ = cx.inherit_plan_uncertainty(&run.plan);
+                    cx.command_error(id, error.message.clone());
+                    cx.event(
+                        safe_cex_engine::Level::Warn,
+                        "order.outcome_unknown",
+                        &error.message,
+                        vec![("command", id.into()), ("outcome", "unknown".into())],
+                    );
+                    run.error = Some(error);
                 }
             }
             self.continue_ordinary(cx, id, entry);
@@ -2308,7 +2370,7 @@ impl BybitLinear {
                     Err(_) => return Decision::Lost,
                 }
                 let items = Self::batch_items(&rows);
-                let Ok(outcome) = cx.http_write_batch(
+                let Ok(outcome) = cx.http_write_applied_batch(
                     context,
                     &BYBIT,
                     ids.len(),
@@ -2364,7 +2426,7 @@ impl BybitLinear {
                     Err(_) => return Decision::Lost,
                 }
                 let items = Self::batch_items(&rows);
-                let Ok(outcome) = cx.http_write_batch(
+                let Ok(outcome) = cx.http_write_applied_batch(
                     context,
                     &PROTECTIVE,
                     1,

@@ -1104,6 +1104,7 @@ fn a_split_uses_legacy_rounded_quantities_and_ts_first_and_remainder_brackets() 
         .iter()
         .map(|row| row.qty.parse::<f64>().unwrap())
         .sum();
+    // KNOWN-ISSUE: legacy TS over-allocates (sum 26 of requested 25); kept for exact TS parity per Sam's decision
     assert_eq!(total, 26.0);
     assert_eq!(batch.request[0].stop_loss.as_deref(), Some("85000"));
     assert_eq!(batch.request[3].stop_loss.as_deref(), Some("85000"));
