@@ -1092,9 +1092,16 @@ impl Grvt {
                     {
                         return Err("GRVT trigger orders cannot carry attached brackets".into());
                     }
-                    // Legacy TS sends new creates above max; replacement and put-back stay bounded.
-                    let entry =
-                        self.placement_with_maximum_check(cx, &opts, None, None, &mut used, false)?;
+                    // Legacy TS keeps the maximum guard for caller IDs;
+                    // replacement and put-back also stay bounded.
+                    let entry = self.placement_with_maximum_check(
+                        cx,
+                        &opts,
+                        None,
+                        None,
+                        &mut used,
+                        opts.client_order_id.is_some(),
+                    )?;
                     let Effect::Place(entry_order) = &entry.effect else {
                         unreachable!()
                     };

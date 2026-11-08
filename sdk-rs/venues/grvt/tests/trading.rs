@@ -341,7 +341,11 @@ fn legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal() {
             &mut e,
             Command::PlaceOrders {
                 command: 91,
-                orders: vec![PlaceOrderOpts { amount, ..opts() }],
+                orders: vec![PlaceOrderOpts {
+                    amount,
+                    client_order_id: None,
+                    ..opts()
+                }],
             },
         );
         assert!(
@@ -377,6 +381,42 @@ fn legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal() {
             !actions
                 .iter()
                 .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("create_order")))
+        );
+    }
+}
+#[test]
+fn above_max_caller_id_refuses_the_whole_batch_before_any_write() {
+    // TS grvt.exchange.ts:1351 calls BaseExchange's rounded maximum guard first (:1211-1225).
+    for valid_prefix in [false, true] {
+        let mut e = boot();
+        e.store_mut().update_markets(|market| {
+            market.precision.amount = 1.;
+            market.limits.amount.min = 1.;
+            market.limits.amount.max = 5.;
+        });
+        let mut orders = Vec::new();
+        if valid_prefix {
+            orders.push(PlaceOrderOpts {
+                client_order_id: Some("123456789".into()),
+                ..opts()
+            });
+        }
+        orders.push(PlaceOrderOpts {
+            amount: 26.,
+            ..opts()
+        });
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 93,
+                orders,
+            },
+        );
+        let error = done(&actions, 93).unwrap().unwrap_err();
+        assert!(error.contains("outside market limits"), "{error}");
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "caller-ID maximum preflight must precede every HTTP request"
         );
     }
 }
