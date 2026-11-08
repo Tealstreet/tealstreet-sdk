@@ -567,6 +567,14 @@ State that SCXF does not carry stays JSON, under the existing op names and shape
 - **`op:'store'` partial payloads:** these carry only the fields frames don't (`fetchedLeverage`, `balance.info`, `socketHealth`, `messageHandlerStats`, `activeChasers`, `activeTWAPs`, `ordersRisk`). They are merged over the frame store, which matches the worker's `_derivedStorePayload` in frame mode.
 - **Unchanged replies:** `error`, `warning`, `log`, `engine-event`, `command-progress`, `callMethod:done`, `exec-result`, `updatePositions:done`, `chaser:*` and `twap:*`.
 
+Account output captures a socket-local account generation before a callback,
+detached read, signer or frame pump can defer it. An accepted rebuilding init
+retires that generation before obtaining the replacement; dispose and orphan
+release retire it too. Both enqueue and socket dequeue check the captured
+generation and discard stale output, including delayed algo stop notices and
+already-queued frames. Repeated init and re-snapshot of the same account keep
+their generation. Other accounts and session envelopes are unaffected.
+
 How FrameServer notices map onto `msg`:
 
 | FrameServer notice | `msg` op |

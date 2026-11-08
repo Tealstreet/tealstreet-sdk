@@ -332,6 +332,17 @@ impl Account {
         }
     }
 
+    fn live_outboxes(&self) -> Vec<Outbox> {
+        self.holders
+            .lock()
+            .unwrap()
+            .by_id
+            .values()
+            .flatten()
+            .map(|live| live.outbox.clone())
+            .collect()
+    }
+
     /// Signing and the proxy token follow this socket, which already holds the account.
     pub fn sign_through_socket(&self, id: u64, outbox: Outbox, token: Option<(String, u64)>) {
         self.hold(id, Live { outbox, token });
@@ -613,9 +624,9 @@ fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, St
 /// differing fields stay readable). Two inits that would build the same engine
 /// share it, whatever else differs between the clients that sent them: a field
 /// another venue reads, a default sent explicitly, flags resolving alike.
-/// Hands a disposed account's stop notices and chase ends to one socket. A later,
+/// Hands a disposed account's stop notices and chase ends to its sockets. A later,
 /// fuller `Kept` repeats what came before it, so only what is new is sent.
-fn tell_through(account: &Account, outbox: Outbox) -> crate::algos::StopNotice {
+fn tell_through(account: &Account, outboxes: Vec<Outbox>) -> crate::algos::StopNotice {
     let name = account.name.clone();
     let told = Mutex::new((0, 0));
     Box::new(move |kept: crate::algos::Kept| {
@@ -626,7 +637,9 @@ fn tell_through(account: &Account, outbox: Outbox) -> crate::algos::StopNotice {
         };
         *told = (kept.notices.len(), kept.ends.len());
         for frame in new.frames(&name) {
-            outbox(frame);
+            for outbox in &outboxes {
+                outbox(frame.clone());
+            }
         }
     })
 }
@@ -962,7 +975,7 @@ impl Registry {
                 &replaced,
                 Disposal::Replaced,
                 "account replaced by a newer init",
-                Some(tell_through(&replaced, outbox)),
+                Some(tell_through(&replaced, replaced.live_outboxes())),
             );
         }
         Ok(account)
@@ -1289,15 +1302,7 @@ impl Registry {
             },
         );
         let name = account.name.clone();
-        let live: Vec<Outbox> = account
-            .holders
-            .lock()
-            .unwrap()
-            .by_id
-            .values()
-            .flatten()
-            .map(|live| live.outbox.clone())
-            .collect();
+        let live = account.live_outboxes();
         for outbox in &live {
             outbox(crate::envelope::algo_error(
                 &name,
@@ -1346,7 +1351,7 @@ impl Registry {
             account,
             disposal,
             "its key or connection settings changed",
-            Some(tell_through(account, outbox)),
+            Some(tell_through(account, vec![outbox])),
         );
     }
 
@@ -1680,7 +1685,7 @@ impl Registry {
         user: &str,
         holder: u64,
         token: (String, u64),
-        outbox: &Outbox,
+        outbox: &dyn Fn(&str) -> Outbox,
     ) -> Vec<Arc<Account>> {
         let mut parked = self.parked.lock().unwrap();
         let Some(entry) = parked.get_mut(resume_id) else {
@@ -1699,7 +1704,7 @@ impl Registry {
                 account.hold(
                     holder,
                     Live {
-                        outbox: outbox.clone(),
+                        outbox: outbox(&account.name),
                         token: Some(token.clone()),
                     },
                 );
@@ -2711,7 +2716,8 @@ pub(crate) mod tests {
                 registry.park("r1".into(), "u", vec![(account, 7)]);
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 let outbox: Outbox = Arc::new(|_| true);
-                let resumed = registry.resume("r1", "u", 8, ("t".into(), u64::MAX), &outbox);
+                let resumed =
+                    registry.resume("r1", "u", 8, ("t".into(), u64::MAX), &|_| outbox.clone());
                 assert_eq!(resumed.len(), 1);
                 tokio::time::sleep(Duration::from_secs(150)).await;
                 assert!(
@@ -2744,7 +2750,7 @@ pub(crate) mod tests {
                 let token = ("t".to_owned(), u64::MAX);
                 assert!(
                     registry
-                        .resume("r1", "u", 8, token.clone(), &outbox)
+                        .resume("r1", "u", 8, token.clone(), &|_| outbox.clone())
                         .is_empty(),
                     "nothing is parked while the old socket looks open"
                 );
@@ -2758,7 +2764,7 @@ pub(crate) mod tests {
                     .await
                     .unwrap();
                 old.await.unwrap();
-                let resumed = registry.resume("r1", "u", 8, token, &outbox);
+                let resumed = registry.resume("r1", "u", 8, token, &|_| outbox.clone());
                 assert_eq!(resumed.len(), 1, "resumed, not re-inited");
                 assert!(Arc::ptr_eq(&resumed[0], &account));
                 assert_eq!(account.holders.lock().unwrap().signing, Some(8));
