@@ -46,8 +46,8 @@ const frame = (position: Record<string, number | null>) =>
         filled: 0,
         remaining: 1,
         lastUpdate: 1,
-        takeProfit: Infinity,
-        stopLoss: -Infinity,
+        takeProfit: NaN,
+        stopLoss: NaN,
       }),
     }),
     positions: () => ({
@@ -87,6 +87,15 @@ it('preserves native normalized fields and sizing guards without repairing them'
   const [order] = store.orders;
   expect(order).not.toHaveProperty('takeProfit');
   expect(order).not.toHaveProperty('stopLoss');
+});
+
+it('refuses non-finite Order fields rather than repairing them in the frame reader', () => {
+  const input = frame({ leverage: 5, unrealizedPnl: 0, liquidationPrice: null });
+  const orders = input.orders();
+  if (orders === undefined) throw new Error('Expected Order fixture');
+  orders.takeProfit[0] = Infinity;
+  input.orders = () => orders;
+  expect(() => new FrameApplier(new DefaultStore()).apply(input)).toThrow('invalid Order optional number');
 });
 
 it('keeps positive liquidation prices and other finite values', () => {

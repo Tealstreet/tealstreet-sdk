@@ -27,6 +27,7 @@ pub mod nonce;
 pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
+mod order_output;
 pub mod order_read_cover;
 pub mod paging;
 mod placement_acks;

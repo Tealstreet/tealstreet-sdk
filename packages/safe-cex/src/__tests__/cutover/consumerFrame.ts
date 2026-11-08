@@ -155,6 +155,8 @@ export function consumerFrame(
   if (delta) table(4, [], [delta]);
   if (data.orders) {
     const rows = data.orders;
+    const columns: (keyof Pick<Order, 'price' | 'amount' | 'filled' | 'remaining' | 'lastUpdate' | 'takeProfit' | 'stopLoss'>)[] =
+      ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
     const status = ['open', 'closed', 'canceled', 'creating', 'updating', 'canceling'];
     const type = ['market', 'limit', 'conditional', 'stop_market', 'take_profit_market', 'trailing_stop_market'];
     const tif = [undefined, 'GoodTillCancel', 'ImmediateOrCancel', 'FillOrKill', 'PostOnly'];
@@ -180,9 +182,8 @@ export function consumerFrame(
         ...rows.map((row) => marketIndex(row.symbol)),
         ...rows.map(enums),
       ],
-      ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss']
-        .map((field) => rows.map((row) => (row[field as keyof Order] as number) ?? NaN))
-        .concat([rows.map((row) => (row.extra?.remainingNative as number) ?? NaN)]),
+      columns.map((field) => rows.map((row) => row[field] ?? NaN))
+        .concat([rows.map((row) => row.extra?.remainingNative ?? NaN)]),
     );
   }
   if (data.positions) {

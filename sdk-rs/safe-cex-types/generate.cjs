@@ -87,7 +87,7 @@ function generate(bindings) {
   assert.deepEqual(seen.sort(), Object.keys(metadata).sort(), 'every exported Rust enum must be rendered exactly once');
 }
 
-function publishPosition() {
+function publishModels() {
   const bindings = path.join(__dirname, 'bindings');
   const destination = path.resolve(__dirname, '../../packages/safe-cex/src/generated');
   fs.mkdirSync(destination, { recursive: true });
@@ -106,11 +106,11 @@ function publishPosition() {
     }
     fs.writeFileSync(path.join(destination, filename), source);
   };
-  copy('Position');
+  for (const name of ['Position', 'Order', 'PlaceOrderOpts', 'UpdateOrderOpts']) copy(name);
 }
 
 if (require.main === module) {
   generate(path.join(__dirname, 'bindings'));
-  publishPosition();
+  publishModels();
 }
 module.exports = { transform, stringLiterals };

@@ -42,6 +42,7 @@ fn private_companions_cannot_drift_from_canonical_definitions() {
     for relative in [
         "src/lib.rs",
         "src/position.rs",
+        "src/order.rs",
         "src/store_model.rs",
         "src/extra_model.rs",
         "src/accounts.rs",

@@ -1,5 +1,9 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+import { OrderStatus } from './generated/OrderStatus';
+import { OrderSide } from './generated/OrderSide';
+import { OrderType } from './generated/OrderType';
+import type { Order } from './generated/Order';
 import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from './commandOutcome';
@@ -587,94 +591,15 @@ export type PublicTrade = {
   readonly side: OrderSide;
 };
 
-export enum OrderStatus {
-  Open = 'open',
-  Closed = 'closed',
-  Canceled = 'canceled',
-
-  // local statuses
-  Creating = 'creating',
-  Updating = 'updating',
-  Canceling = 'canceling',
-}
-
-export enum OrderType {
-  Market = 'market',
-  Limit = 'limit',
-  Conditional = 'conditional',
-  StopLoss = 'stop_market',
-  TakeProfit = 'take_profit_market',
-  TrailingStopLoss = 'trailing_stop_market',
-}
-
-export enum OrderSide {
-  Buy = 'buy',
-  Sell = 'sell',
-}
-
-export enum OrderTimeInForce {
-  GoodTillCancel = 'GoodTillCancel',
-  ImmediateOrCancel = 'ImmediateOrCancel',
-  FillOrKill = 'FillOrKill',
-  PostOnly = 'PostOnly',
-}
-
-export enum OrderStopTriggerType {
-  MarkPrice = 'mark_price',
-  LastPrice = 'last_price',
-  IndexPrice = 'index_price',
-}
-
-// some exchanges reject orders async (via ws after order sent over http). this lets us track why it failed
-// needed for things like chaser order to handle post only order failure
-export enum OrderRejectReason {
-  PostOnly = 'PostOnly',
-  InsufficientBalance = 'InsufficientBalance',
-  ReduceOnly = 'ReduceOnly',
-}
-
-export type Order = {
-  readonly id: string;
-  readonly parentId?: string;
-  readonly status: OrderStatus;
-  readonly symbol: string;
-  readonly type: OrderType;
-  readonly side: OrderSide;
-  readonly price: number;
-  readonly amount: number;
-  readonly filled: number;
-  // always in whole units of base for easy math elsewhere
-  readonly remaining: number;
-  readonly reduceOnly: boolean;
-  readonly close?: boolean;
-  readonly info?: any;
-  // The venue client order ID, where the adapter maps it to the top level
-  // (Hyperliquid's cloid). `info` is stripped before a worker posts the store,
-  // so a field the web must match on cannot live there.
-  readonly clientOrderId?: string;
-  readonly timeInForce?: OrderTimeInForce;
-  readonly lastUpdate: number;
-  readonly triggerType?: OrderStopTriggerType;
-  readonly tpTriggerType?: OrderStopTriggerType;
-  readonly slTriggerType?: OrderStopTriggerType;
-  readonly takeProfit?: number;
-  readonly stopLoss?: number;
-  readonly extra?: {
-    // actual remaining size in contracts considering contract size, inverse, quanto, etc
-    readonly remainingNative?: number;
-    // Cumulative filled size in the same unit accepted by this adapter's PlaceOrderOpts.amount.
-    // This is not universally base or native.
-    readonly filledInPlacementUnits?: number;
-    readonly remainingNotional?: number;
-    readonly conditionalOrderPrice?: number;
-    readonly rejectReason?: OrderRejectReason;
-    // Chaser-related fields
-    readonly isFromChaser?: boolean;
-    readonly chaserId?: string;
-    readonly chaserAttempts?: number;
-    readonly chaserMaxAttempts?: number;
-  };
-};
+export { OrderSide } from './generated/OrderSide';
+export { OrderStatus } from './generated/OrderStatus';
+export { OrderType } from './generated/OrderType';
+export { OrderTimeInForce } from './generated/OrderTimeInForce';
+export { OrderStopTriggerType } from './generated/OrderStopTriggerType';
+export { OrderRejectReason } from './generated/OrderRejectReason';
+export type { Order } from './generated/Order';
+export type { PlaceOrderOpts } from './generated/PlaceOrderOpts';
+export type { UpdateOrderOpts } from './generated/UpdateOrderOpts';
 
 export type DisplayedPosition = Position & {
   readonly account: string;
@@ -809,34 +734,6 @@ export type Execution = {
    */
   readonly venueReportedRevenue?: number;
   readonly venueReportedRevenueAsset?: string;
-};
-
-export type PlaceOrderOpts = {
-  readonly symbol: string;
-  readonly type: OrderType;
-  readonly side: OrderSide;
-  readonly amount: number;
-  readonly price?: number;
-  readonly triggerPrice?: number;
-  readonly stopLoss?: number;
-  readonly takeProfit?: number;
-  readonly reduceOnly?: boolean;
-  readonly timeInForce?: OrderTimeInForce;
-  readonly triggerType?: OrderStopTriggerType;
-  readonly tpTriggerType?: OrderStopTriggerType;
-  readonly slTriggerType?: OrderStopTriggerType;
-  // Sent verbatim as the venue-native client order ID, or the order is rejected
-  // before any write (see CLAUDE.md → "Client order ID contract").
-  readonly clientOrderId?: string;
-  readonly maxSlippagePct?: number;
-  readonly close?: boolean;
-  /** Price an option order by implied volatility, as a fraction. Option markets only. */
-  readonly impliedVolatility?: number;
-};
-
-export type UpdateOrderOpts = {
-  readonly order: Order;
-  readonly update: { readonly amount: number } | { readonly price: number };
 };
 
 export type OHLCVOptions = {

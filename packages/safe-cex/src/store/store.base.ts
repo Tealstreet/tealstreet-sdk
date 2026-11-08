@@ -625,7 +625,7 @@ export class DefaultStore implements Store {
 
     // A worker's store already kept its terminal orders closed.
     if (!fromWorker && normalizedChanges.orders) {
-      const orders = this.keepTerminalOrdersClosed(normalizedChanges.orders as Order[]);
+      const orders = this.keepTerminalOrdersClosed(normalizedChanges.orders);
       if (orders !== normalizedChanges.orders) ensureMutableChanges().orders = orders;
     }
     Object.assign(this.state, normalizedChanges);

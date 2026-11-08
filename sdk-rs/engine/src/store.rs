@@ -1747,67 +1747,13 @@ impl Store {
     }
 
     fn write_orders<'a>(&'a self, w: &mut FrameWriter<'a>) {
-        let orders = &self.orders;
-        w.begin_revision(section::ORDERS, 1);
-        w.u32(orders.len() as u32);
-        for o in orders {
-            let refs = [
-                w.string(&o.id),
-                w.optional_string(o.client_order_id.as_deref()),
-                w.optional_string(o.parent_id.as_deref()),
-            ];
-            w.u32s(refs);
-        }
-        w.u32s(orders.iter().map(|o| self.market_ref(&o.symbol)));
-        w.u32s(orders.iter().map(|o| {
-            wire::order_enums(
-                o.status,
-                o.kind,
-                o.side,
-                o.reduce_only,
-                o.close,
-                o.time_in_force,
-                o.trigger_type,
-                o.extra.as_ref().and_then(|e| e.reject_reason),
-            )
-        }));
-        w.pad();
-        let columns: [fn(&Order) -> f64; 7] = [
-            |o| o.price,
-            |o| o.amount,
-            |o| o.filled,
-            |o| o.remaining,
-            |o| o.last_update,
-            |o| o.take_profit.unwrap_or(f64::NAN),
-            |o| o.stop_loss.unwrap_or(f64::NAN),
-        ];
-        for column in columns {
-            w.f64s(orders.iter().map(column));
-        }
-        let extra_columns: [fn(&crate::model::OrderExtra) -> Option<f64>; 4] = [
-            |extra| extra.remaining_native,
-            |extra| extra.filled_in_placement_units,
-            |extra| extra.remaining_notional,
-            |extra| extra.conditional_order_price,
-        ];
-        for column in extra_columns {
-            w.f64s(
-                orders
-                    .iter()
-                    .map(|order| order.extra.as_ref().and_then(column).unwrap_or(f64::NAN)),
-            );
-        }
-        w.u32s(orders.iter().map(|order| {
-            order
-                .extra
-                .as_ref()
-                .map_or(0, crate::model::order_trigger_word::encode)
-        }));
-        for order in orders {
-            let symbol = w.string(&order.symbol);
-            w.u32(symbol);
-        }
-        w.end();
+        crate::order_output::write(
+            &self.orders,
+            |symbol| self.market(symbol),
+            |symbol| self.market_ref(symbol),
+            self.quantity_units,
+            w,
+        );
     }
 
     fn write_settings<'a>(&'a self, w: &mut FrameWriter<'a>) {
