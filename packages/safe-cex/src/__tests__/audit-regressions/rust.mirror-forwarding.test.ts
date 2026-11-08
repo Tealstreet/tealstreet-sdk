@@ -143,6 +143,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   stopAccountAlgos: 'mirror',
   // The worker's own handlers call these on the engine they own; a mirror has none.
   startAlgos: 'mirror',
+  setTwapOwnerProvider: 'mirror',
   algoOp: 'mirror',
   routeAlgoOp: 'mirror',
   refreshAccountSettings: 'worker',

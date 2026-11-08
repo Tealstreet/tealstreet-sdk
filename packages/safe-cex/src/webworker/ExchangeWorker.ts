@@ -4,7 +4,8 @@ import type { Exchange } from '../exchanges/base';
 import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
 import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
-import type { TwapWorkerContext } from './twap/TwapOwner';
+import type { TwapOwner, TwapWorkerContext } from './twap/TwapOwner';
+import { captureTwapOwner } from './twap/TwapOwner';
 
 import throttle from 'lodash/throttle';
 
@@ -107,6 +108,7 @@ export class ExchangeWorker {
   private readonly _accountName: string;
   private readonly _options: ExchangeOptions;
   private readonly _ctx: TwapWorkerContext;
+  private readonly _twapOwner: TwapOwner | null | undefined;
   private readonly _settings: AppSettingsWorkerType;
   private readonly _metadata: ExchangeMetadataWorkerType;
   private readonly _sessionKey: string;
@@ -185,6 +187,7 @@ export class ExchangeWorker {
     const { workerMirror: _workerMirror, ...ownedOptions } = options;
     this._options = ownedOptions;
     this._ctx = ctx;
+    this._twapOwner = captureTwapOwner(ctx.getTwapOwner && (() => ctx.getTwapOwner!()));
     this._settings = settings;
     this._metadata = metadata;
     this._sessionKey = sessionKey;
@@ -379,6 +382,14 @@ export class ExchangeWorker {
         return false;
       }
       this._exchange = new Exchange(this._exchangeName, this._options, this._store);
+      if (this._exchange instanceof RustEngineExchange && (this._twapOwner !== undefined || this._ctx.getTwapOwner)) {
+        this._exchange.setTwapOwnerProvider(() => {
+          const current = captureTwapOwner(() => this._ctx.getTwapOwner?.() ?? null);
+          return generation === this._generation && !this._stopped && current &&
+            current.ownerId === this._twapOwner?.ownerId && current.generation === this._twapOwner?.generation
+            ? this._twapOwner! : null;
+        });
+      }
       if (this._recoveryAttempted) this._exchange.setActiveTickerSymbols(this._activeTickerSymbols);
       if (mainAcceptsFrames()) this._mainDecodesFrames = this.forwardFrames(generation, true);
       // A recovered exchange keeps forwarding where main asked for this account's frames.

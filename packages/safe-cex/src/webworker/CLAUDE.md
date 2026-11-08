@@ -445,6 +445,23 @@ unchanged; native ownership checks remain authoritative. Captured session
 snapshots remain private to the pending restore and are never persisted or
 forwarded to the engine.
 
+The local Rust engine receives the same provider before startup. The worker
+captures its owner at construction and refuses owned algo startup if that owner
+or generation changes during startup. `EngineHost.algoStart(accountName,
+twapOwner?)` passes a present `{ ownerId: string, generation: number }` as JSON
+to the additive WASM `algoStartOwned(accountName, twapOwnerJson, now, wall)`.
+Absent providers use the existing `algoStart` ABI and its interim account-name
+restore behavior. Explicit null/invalid owners fail closed. The declaration in
+`hosts/wasm/js/host.d.mts` is authored API source, not generated wasm bindings.
+
+Once bound, legacy rows with neither top-level tag never resume. The wrapper
+posts a `warning` message `TWAP <symbol> restore cancelled-for-owner-change:
+persisted ownerId is missing` and removes the pending row. A direct native
+restore, or an owner-tagged row missing only generation, emits `error` with
+`TWAP <symbol> not restored: persisted TWAP owner or generation does not match`.
+The native server forwards this error with `forceToast: true`. No path fills in
+a missing generation from `getTwapOwner`.
+
 `twap/RustTwapOwnership.ts`, owned by `TwapHandler`, keeps these rules for the
 Rust TWAPs: it takes each running TWAP's Web Lock, holds a restored row until it
 has the lock and has settled the row's `inFlight` slice, and posts

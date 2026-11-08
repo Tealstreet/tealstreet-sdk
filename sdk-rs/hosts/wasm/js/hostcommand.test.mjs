@@ -31,6 +31,37 @@ function rig(options = {}, overrides = {}, handlers = {}) {
 
 const done = (host, id, result = '"done"') => host.run(JSON.stringify([{ op: 'done', command: id, result }]));
 
+test('algoStart selects bound ownership only when the optional owner is provided', () => {
+  for (const owner of [undefined, { ownerId: 'A', generation: 7 }]) {
+    const calls = [];
+    const { host } = rig({}, {
+      algoStart: (...args) => calls.push(['legacy', ...args]),
+      algoStartOwned: (...args) => calls.push(['owned', ...args]),
+      algoDeadline: () => undefined,
+      algoRunning: () => true,
+      algoDispose: () => '',
+    });
+    host.algoStart('acct', owner);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], owner ? 'owned' : 'legacy');
+    assert.deepEqual(calls[0].slice(1, -1), owner ? ['acct', JSON.stringify(owner), 0] : ['acct', 0]);
+    host.dispose();
+  }
+});
+
+test('invalid or unsupported explicit TWAP ownership never falls back to legacy restore', () => {
+  for (const owner of [null, {}, { ownerId: '', generation: 1 }, { ownerId: 'A', generation: -1 }, { ownerId: 'A', generation: 1.5 }]) {
+    const calls = [];
+    const { host } = rig({}, { algoStart: () => calls.push('legacy') });
+    assert.throws(() => host.algoStart('acct', owner));
+    assert.deepEqual(calls, []);
+    host.dispose();
+  }
+  const { host } = rig({}, { algoStart() {} });
+  assert.throws(() => host.algoStart('acct', { ownerId: 'A', generation: 7 }), /owner|ownership/i);
+  host.dispose();
+});
+
 test('deadlines validate without sending commands; only the effective wait enters native JSON', async () => {
   for (const invalid of [0, -1, NaN, Infinity, 1.5, 2_147_483_648, '100', null]) {
     assert.throws(() => rig({ commandTimeoutMs: invalid }), RangeError);

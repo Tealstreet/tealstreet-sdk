@@ -476,6 +476,7 @@ export interface WasmEngineLike {
   command(json: string, now: number): string;
   /** `algos` builds: `now` is the engine clock, `wall` epoch ms. */
   algoStart?(accountName: string, now: number, wall: number): void;
+  algoStartOwned?(accountName: string, twapOwnerJson: string, now: number, wall: number): void;
   algoOp?(op: string, dataJson: string, now: number, wall: number): string;
   algoAdvance?(now: number, wall: number): string;
   algoDeadline?(): number | undefined;
@@ -572,7 +573,7 @@ export class EngineHost {
   health(): EngineHealth | undefined;
   /** Start this account's Rust algos on an `algos` engine build; the host then
    * keeps their timer armed and delivers replies to `onAlgoEmit`. */
-  algoStart(accountName: string): void;
+  algoStart(accountName: string, twapOwner?: Readonly<{ ownerId: string; generation: number }> | null): void;
   /** Started and not yet stopped or disposed. */
   readonly algosRunning: boolean;
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if refused. */

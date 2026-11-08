@@ -81,6 +81,19 @@ impl TwapFactory {
         )
     }
 
+    /// Interim WASM compatibility for hosts not yet supplying an authenticated owner.
+    pub fn with_legacy_restore(
+        account_name: &str,
+        account_cx: AlgoCx,
+        chasers: Rc<dyn TwapChasers>,
+    ) -> Self {
+        Self::from_book(
+            TwapBook::with_legacy_restore(account_name),
+            account_cx,
+            chasers,
+        )
+    }
+
     fn from_book(book: TwapBook, account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
         Self {
             inner: Rc::new(Inner {

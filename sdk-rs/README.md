@@ -6,6 +6,17 @@ patterns are in [`docs/plans/RUST_REWRITE.md`](../docs/plans/RUST_REWRITE.md).
 
 ## Crates
 
+Local worker TWAP restore ownership is optional for compatibility with existing
+JS hosts. `EngineHost.algoStart(accountName, twapOwner?)` accepts a trusted
+`{ ownerId: string, generation: number }` snapshot (nonempty owner and a safe,
+nonnegative integer generation). It calls the additive WASM entry point
+`algoStartOwned(accountName, twapOwnerJson, now, wall)`; the JSON contains exactly
+`ownerId` and `generation`. Existing three-argument WASM `algoStart` remains
+unchanged and retains the prior account-name-only restore behavior when the
+owner parameter is absent. This compatibility exception is interim; explicit
+null/invalid ownership never selects it. Bound restores require both original
+persisted tags; untagged saved rows do not resume.
+
 | Crate | Purpose |
 | --- | --- |
 | `safe-cex-crypto` | Signing primitives: HMAC, Ed25519, P-256, EIP-712, Starknet SNIP-12, Lighter Poseidon2/Schnorr, zkLink |

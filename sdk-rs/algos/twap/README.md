@@ -17,6 +17,14 @@ owner before enabling restore; a TypeScript precheck cannot replace the native
 ownership check. Existing rows without generation evidence are not adopted or
 automatically assigned the current owner.
 
+The WASM host has one explicit compatibility exception: its existing
+`algoStart(accountName, now, wall)` uses `with_legacy_restore` until the host
+supplies an owner. This retains pre-release-8 account-name-only restore behavior,
+including untagged rows; it never invents missing tags. The separate
+`algoStartOwned(accountName, twapOwnerJson, now, wall)` requires both persisted
+tags to match its trusted owner. Invalid or unavailable explicit ownership
+never falls back to compatibility mode.
+
 The native `actual_worker_round_trip_preserves_native_restore_ownership` test
 runs the real TypeScript restore wrapper before restoring its JSON into the
 native book. It requires Node and the workspace's Yarn dependencies. It checks

@@ -52,11 +52,14 @@ class ControlledEngine implements WasmEngineLike {
   };
   algoOps: Array<[string, unknown]> = [];
   algoStart?: () => void;
+  algoStartOwned?: (account: string, ownerJson: string) => void;
+  algoOwner?: { ownerId: string; generation: number };
   algoOp?: (op: string, dataJson: string) => string;
   constructor(readonly venue = 'binance') {
     sources.push(this);
     if (!algosBuild) return;
     this.algoStart = () => {};
+    this.algoStartOwned = (_account, ownerJson) => { this.algoOwner = JSON.parse(ownerJson); };
     this.algoOp = (op, dataJson) => {
       this.algoOps.push([op, JSON.parse(dataJson)]);
       return '[]';
@@ -161,10 +164,10 @@ const transport: Transport = {
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 const workers: ExchangeWorker[] = [];
-const createWorker = (options: Partial<ExchangeOptions> = {}, account = 'same-name') => {
+const createWorker = (options: Partial<ExchangeOptions> = {}, account = 'same-name', getTwapOwner?: () => { ownerId: string; generation: number } | null) => {
   const messages: Array<{ op: string; data?: any }> = [];
   const worker = new ExchangeWorker(
-    { postMessage: (message: any) => messages.push(message) } as unknown as Worker,
+    { postMessage: (message: any) => messages.push(message), ...(getTwapOwner && { getTwapOwner }) } as unknown as Worker,
     account,
     'binance',
     { key: '', secret: '', engine: 'rust', publicDataOnly: true, ...options },
@@ -485,6 +488,25 @@ describe('Rust worker engine ownership', () => {
     expect(accepted).toHaveLength(1);
     expect(accepted[0].data).toMatchObject({ success: true, result: ['accepted-id'] });
     expect(sources[1].commands.some((command) => command.op === 'placeOrders')).toBe(false);
+  });
+
+  it('binds native algos to the worker creation owner instead of restored row evidence', async () => {
+    algosBuild = true;
+    const { worker } = createWorker({}, 'same-name', () => ({ ownerId: 'A', generation: 7 }));
+    expect(await start(worker)).toBe(true);
+    expect(sources[0].algoOwner).toEqual({ ownerId: 'A', generation: 7 });
+  });
+
+  it.each(['owner', 'generation'])('refuses native algo startup if the %s switches while the worker is starting', async (change) => {
+    algosBuild = true;
+    let owner = { ownerId: 'A', generation: 7 };
+    const { worker } = createWorker({}, 'same-name', () => owner);
+    const pending = worker.start();
+    owner = { ownerId: change === 'owner' ? 'B' : 'A', generation: 8 };
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await pending).toBe(false);
+    expect(sources[0].algoOwner).toBeUndefined();
+    expect(sources[0].algoOps).toEqual([]);
   });
 
   it('settles a held Rust exec once, as an unknown outcome, when the engine traps', async () => {

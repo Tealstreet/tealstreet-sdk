@@ -136,6 +136,7 @@ pub struct TwapBook {
     /// The `accountName` every TWAP here must carry; `activeTWAPs` lists by it.
     account_name: String,
     owner: Option<TwapOwner>,
+    legacy_restore: bool,
     entries: Vec<Entry>,
     /// Completed or stopped ids, oldest first, that a restore must not revive.
     retired: VecDeque<String>,
@@ -145,7 +146,8 @@ pub struct TwapBook {
 #[derive(Debug)]
 struct Entry {
     instance: TwapInstance,
-    owner: Option<TwapOwner>,
+    owner_id: Option<String>,
+    owner_generation: Option<u64>,
     /// False once removed from the TS manager; the entry lingers only while
     /// in-flight placements or slice timeouts can still act.
     managed: bool,
@@ -157,6 +159,7 @@ impl TwapBook {
         Self {
             account_name: account_name.into(),
             owner: None,
+            legacy_restore: false,
             entries: Vec::new(),
             retired: VecDeque::new(),
             retired_set: HashSet::new(),
@@ -167,6 +170,14 @@ impl TwapBook {
     pub fn with_owner(account_name: impl Into<String>, owner: TwapOwner) -> Self {
         Self {
             owner: Some(owner),
+            ..Self::new(account_name)
+        }
+    }
+
+    /// Interim WASM compatibility only: callers without an owner retain account-name checks.
+    pub fn with_legacy_restore(account_name: impl Into<String>) -> Self {
+        Self {
+            legacy_restore: true,
             ..Self::new(account_name)
         }
     }
@@ -243,7 +254,11 @@ impl TwapBook {
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
         let instance = TwapInstance::new(id.clone(), options, None, env);
-        self.add(instance, self.owner.clone());
+        self.add(
+            instance,
+            self.owner.as_ref().map(|owner| owner.owner_id.clone()),
+            self.owner.as_ref().map(|owner| owner.generation),
+        );
         if let Some(instance) = self.managed_mut(&id) {
             instance.start(env, view, effects);
         }
@@ -332,9 +347,11 @@ impl TwapBook {
             if instance.state.status != TwapStatus::Completed {
                 let mut row =
                     serde_json::json!({ "options": instance.options, "state": instance.state });
-                if let Some(owner) = &entry.owner {
-                    row["ownerId"] = Value::String(owner.owner_id.clone());
-                    row["ownerGeneration"] = Value::from(owner.generation);
+                if let Some(owner_id) = &entry.owner_id {
+                    row["ownerId"] = Value::String(owner_id.clone());
+                }
+                if let Some(generation) = entry.owner_generation {
+                    row["ownerGeneration"] = Value::from(generation);
                 }
                 result.insert(instance.id.clone(), row);
             }
@@ -382,6 +399,9 @@ impl TwapBook {
 
     fn owns(&self, entry: &PersistedTwap) -> Result<(), String> {
         self.owns_account(&entry.options)?;
+        if self.legacy_restore {
+            return Ok(());
+        }
         let Some(owner) = self
             .owner
             .as_ref()
@@ -441,10 +461,16 @@ impl TwapBook {
     }
 
     /// `Map.set`: a known id keeps its position and takes the new instance.
-    fn add(&mut self, instance: TwapInstance, owner: Option<TwapOwner>) {
+    fn add(
+        &mut self,
+        instance: TwapInstance,
+        owner_id: Option<String>,
+        owner_generation: Option<u64>,
+    ) {
         let entry = Entry {
             instance,
-            owner,
+            owner_id,
+            owner_generation,
             managed: true,
         };
         match self
@@ -502,7 +528,8 @@ impl TwapBook {
             let id = entry.id.clone();
             self.add(
                 TwapInstance::new(entry.id, entry.options, Some(entry.state), env),
-                self.owner.clone(),
+                entry.owner_id,
+                entry.owner_generation,
             );
             if let Some(instance) = self.managed_mut(&id) {
                 // Persisted at once, so the host sees which rows it adopted.

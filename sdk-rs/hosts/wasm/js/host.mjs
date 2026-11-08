@@ -827,12 +827,20 @@ export class EngineHost {
 
   /** Start this account's Rust algos (chaser, TWAP, exec) on an `algos` engine
    * build. Their replies reach `handlers.onAlgoEmit(op, data)`. */
-  algoStart(accountName) {
+  algoStart(accountName, twapOwner) {
     this.assertHttpHandoffIdle();
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     if (typeof this.engine.algoStart !== 'function')
       throw new ExchangeError('This engine has no algos', { kind: 'unsupported', outcome: 'notSent' });
-    this.invoke(this.engine.algoStart, accountName, this.transport.now(), Date.now());
+    if (twapOwner !== undefined) {
+      if (!twapOwner || typeof twapOwner.ownerId !== 'string' || !twapOwner.ownerId || !Number.isSafeInteger(twapOwner.generation) || twapOwner.generation < 0)
+        throw new TypeError('Invalid TWAP owner or generation');
+      if (typeof this.engine.algoStartOwned !== 'function')
+        throw new ExchangeError('This engine has no TWAP ownership support', { kind: 'unsupported', outcome: 'notSent' });
+      this.invoke(this.engine.algoStartOwned, accountName, JSON.stringify({ ownerId: twapOwner.ownerId, generation: twapOwner.generation }), this.transport.now(), Date.now());
+    } else {
+      this.invoke(this.engine.algoStart, accountName, this.transport.now(), Date.now());
+    }
     if (this.deadError) throw this.deadError;
     this.algosStarted = true;
     this.armAlgos();

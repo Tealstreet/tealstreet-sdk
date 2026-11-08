@@ -1,4 +1,6 @@
 import type { WorkerMethodArguments } from '../../webworker/workerMethodArguments';
+import type { TwapOwner } from '../../webworker/twap/TwapOwner';
+import { captureTwapOwner } from '../../webworker/twap/TwapOwner';
 import type {
   AccountAuthResult,
   AlgoStopAllResult,
@@ -1375,6 +1377,11 @@ export class RustEngineExchange extends BaseExchange {
   private algoRoute: 'rust' | 'unsupported' | undefined;
   /** Algo ops that arrived before the engine host, replayed in order once it decides. */
   private queuedAlgoOps: { op: string; rust: () => void; refuse: (message: string) => void }[] = [];
+  private twapOwnerProvider?: () => TwapOwner | null;
+
+  setTwapOwnerProvider(getOwner?: () => TwapOwner | null) {
+    this.twapOwnerProvider = getOwner;
+  }
 
   /** Chaser, TWAP and exec ops run in this account's engine (an `algos` build). */
   get runsRustAlgos(): boolean {
@@ -1388,7 +1395,7 @@ export class RustEngineExchange extends BaseExchange {
     if (!host || this.isDisposed || this.engineFailure) return false;
     if (this.algoRoute) return this.algoRoute === 'rust' && this.runsRustAlgos;
     try {
-      host.algoStart(accountName);
+      host.algoStart(accountName, captureTwapOwner(this.twapOwnerProvider));
       this.algoRoute = 'rust';
     } catch (error) {
       if (!(error instanceof ExchangeError && error.kind === 'unsupported')) throw error;
