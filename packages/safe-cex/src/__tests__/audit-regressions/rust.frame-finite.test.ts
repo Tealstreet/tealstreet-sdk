@@ -71,6 +71,7 @@ const frame = (position: Record<string, number | null>) =>
     balance: () => undefined,
     tickers: () => undefined,
     tickerDeltas: () => undefined,
+    tickerObservations: () => undefined,
     status: () => undefined,
     settings: () => undefined,
   }) as unknown as Frame;

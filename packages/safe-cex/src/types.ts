@@ -8,7 +8,6 @@ export type { DataProvenance } from './generated/DataProvenance';
 export type { IncomeCategory } from './generated/IncomeCategory';
 import { OrderStatus } from './generated/OrderStatus';
 import { OrderSide } from './generated/OrderSide';
-import { OrderType } from './generated/OrderType';
 import type { Order } from './generated/Order';
 import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import type { ExchangeErrorKind } from './commandOutcome';

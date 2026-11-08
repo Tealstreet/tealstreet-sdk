@@ -35,7 +35,7 @@ describe.each([
       units: profile.units,
       contractSize: profile.contractSize,
       native: true,
-      orders: [{ id: 'partial', amount: 7, filled: 2, remaining: profile.remaining, native: profile.native }],
+      orders: [{ id: 'partial', amount: 7, filled: 2, remaining: profile.remaining, native: profile.native, remainingNotional: 500 }],
     });
     const orders = frame.orders();
     if (!orders) throw new Error('Inverse fixture is missing its orders table');

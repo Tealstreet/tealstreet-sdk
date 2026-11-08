@@ -11,7 +11,7 @@ const frame = ({ markets, books = [], deltas = [] }: { markets?: Array<[string, 
     base: () => 'BTC', quote: () => 'USDT',
     ...Object.fromEntries(['flags', 'precisionAmount', 'precisionPrice', 'minAmount', 'maxAmount', 'minLeverage', 'maxLeverage', 'minPrice', 'contractSize', 'takerFee', 'makerFee'].map((key) => [key, Float64Array.from(markets, () => 1)])),
   },
-  tickers: () => undefined, tickerDeltas: () => undefined, orders: () => undefined,
+  tickers: () => undefined, tickerDeltas: () => undefined, tickerObservations: () => undefined, orders: () => undefined,
   positions: () => undefined, balance: () => undefined, status: () => undefined,
   settings: () => undefined,
   books: function* () { for (const book of books) yield { market: book.market, bids: Float64Array.from(book.bids), asks: Float64Array.from(book.asks) }; },
@@ -123,7 +123,8 @@ describe('Rust BOOK_DELTA reconstruction', () => {
     ] });
     broken.balance = () => ({ used: 1, free: 6, total: 7, upnl: 0 });
     broken.fills = () => ({ count: 1, market: Uint32Array.of(0), side: Uint32Array.of(0),
-      rows: Float64Array.of(99, 0.25), orderId: () => 'tracked-order' });
+      rows: Float64Array.of(99, 0.25), orderId: () => 'tracked-order',
+      fillId: () => 'execution-1', symbol: () => 'BTCUSDT' });
     expect(() => applier.apply(broken)).toThrow(/snapshot required/);
     expect(applier.books(broken)).toEqual([]);
     expect(store.balance.total).toBe(7);

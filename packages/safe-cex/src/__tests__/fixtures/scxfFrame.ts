@@ -9,6 +9,8 @@ export type OrderRow = {
   remaining: number;
   native?: number;
   filledNative?: number;
+  remainingNotional?: number;
+  brackets?: number;
   enums?: number;
 };
 
@@ -19,7 +21,7 @@ export type OrderRow = {
 export const inverseUnitsFrameBytes = ({
   native = false,
   inverse = true,
-  orders = [] as OrderRow[],
+  orders = [],
   positions = false,
   markets = true,
   contractSize = NaN,
@@ -29,6 +31,7 @@ export const inverseUnitsFrameBytes = ({
   positionNativePnl,
   units = 0,
   orderMarket = 0,
+  orderRevision1 = false,
 }: {
   native?: boolean;
   inverse?: boolean;
@@ -40,6 +43,7 @@ export const inverseUnitsFrameBytes = ({
   positionLiquidationPrice?: number;
   units?: number;
   orderMarket?: number;
+  orderRevision1?: boolean;
   positionNativeContracts?: number;
   positionNativePnl?: number;
 } = {}) => {
@@ -78,8 +82,13 @@ export const inverseUnitsFrameBytes = ({
     orders.map(() => NaN),
     orders.map(() => NaN),
   ];
-  if (native || orders.some((o) => o.filledNative !== undefined)) columns.push(orders.map((o) => o.native ?? NaN));
-  if (orders.some((o) => o.filledNative !== undefined)) columns.push(orders.map((o) => o.filledNative ?? NaN));
+  const revisedOrders = orderRevision1 || orders.some((o) => o.remainingNotional !== undefined || o.brackets !== undefined);
+  if (native || revisedOrders || orders.some((o) => o.filledNative !== undefined)) columns.push(orders.map((o) => o.native ?? NaN));
+  if (revisedOrders || orders.some((o) => o.filledNative !== undefined)) columns.push(orders.map((o) => o.filledNative ?? NaN));
+  if (revisedOrders) {
+    columns.push(orders.map((o) => o.remainingNotional ?? NaN));
+    columns.push(orders.map(() => NaN));
+  }
   table(
     7,
     [
@@ -90,6 +99,19 @@ export const inverseUnitsFrameBytes = ({
     ],
     columns,
   );
+  if (revisedOrders) {
+    // Revision 1 carries native display output, bracket words and explicit symbols.
+    const section = sections[sections.length - 1];
+    const bytes = new Uint8Array(section.bytes.length + orders.length * 8);
+    bytes.set(section.bytes);
+    const view = new DataView(bytes.buffer);
+    orders.forEach((row, i) => {
+      view.setUint32(section.bytes.length + i * 4, row.brackets ?? 0, true);
+      view.setUint32(section.bytes.length + (orders.length + i) * 4, ref('BTCUSD'), true);
+    });
+    section.bytes = bytes;
+    section.revision = 1;
+  }
   if (positions) {
     // Independent revision-2 producer fixture: extras are explicit native output.
     const size = contractSize > 0 ? contractSize : 1;

@@ -250,7 +250,7 @@ it('forwards genuine unchanged source observations, never polling time, to every
   vi.useFakeTimers();
   try {
     const venue = restartableSource();
-    const row = { ...ticker('BTCUSDT', 100), observedAt: [1_000, 1_000, 1_000] as [number, number, number] };
+    const row: Ticker = { ...ticker('BTCUSDT', 100), observedAt: [1_000, 1_000, 1_000] };
     venue.load([market('BTCUSDT')], [row]);
     const first = account(venue.source, true);
     const second = account(venue.source, true);
@@ -277,11 +277,11 @@ it('forwards genuine unchanged source observations, never polling time, to every
   }
 });
 
-it('negotiates observations so a legacy consumer receives the exact legacy ticker shape', async () => {
+it('negotiates observations independently of the other ticker fields', async () => {
   vi.useFakeTimers();
   try {
     const venue = restartableSource();
-    const row = { ...ticker('BTCUSDT', 100), observedAt: [1_000, 1_000, 1_000] as [number, number, number] };
+    const row: Ticker = { ...ticker('BTCUSDT', 100), observedAt: [1_000, 1_000, 1_000] };
     venue.load([market('BTCUSDT')], [row]);
     const old = account(venue.source);
     const current = account(venue.source, true);
@@ -289,7 +289,8 @@ it('negotiates observations so a legacy consumer receives the exact legacy ticke
     await Promise.all([old.connected, current.connected]);
     expect(old.updates.at(-1)).toEqual({
       op: 'publicFeedUpdate',
-      tickers: [{ symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100, midPrice: null }],
+      tickers: [{ symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100, midPrice: null,
+        percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0 }],
     });
     expect(current.updates.at(-1)).toMatchObject({ tickers: [{ observedAt: [1_000, 1_000, 1_000] }] });
     old.client.dispose();
