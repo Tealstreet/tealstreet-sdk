@@ -90,8 +90,11 @@ test('Rust revised sections preserve native fields and identity through the SDK'
       } else {
         assert.equal(row.extra.contractsNative, fixture.expectedNative);
       }
+      const ids = worker.positions.map((position) => position.id);
       worker.addOrUpdatePositionsFull([]);
-      assert.deepEqual(worker.positions, []);
+      // Legacy merge/retain semantics: a full update without the symbol zeroes its row rather than removing it.
+      assert.deepEqual(worker.positions.map((position) => [position.id, position.contracts, position.notional]),
+        ids.map((id) => [id, 0, 0]));
     }
   });
   const read = (name) => {
