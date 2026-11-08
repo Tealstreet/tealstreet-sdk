@@ -218,9 +218,9 @@ fn managed_create_batch_conflicting_echoes_remain_unknown_without_publication_or
         ("same", "same", None),
     ] {
         let mut h = ready(Variant::Demo);
-        let mut second = order("BTCUSDT", 0.2);
+        let mut second = order("BTCUSDT", 0.02);
         second.client_order_id = requested.map(str::to_owned);
-        place(&mut h, 132, vec![order("BTCUSDT", 0.1), second]);
+        place(&mut h, 132, vec![order("BTCUSDT", 0.01), second]);
         resolve_mode(&mut h, "BTCUSDT");
         let request = h.take("/v5/order/create-batch");
         h.reply(request.id, 200, &serde_json::json!({"retCode":0,"result":{"list":[
@@ -241,7 +241,7 @@ fn managed_unproven_create_batch_reports_redacted_child_shape_without_values() {
     place(
         &mut h,
         131,
-        vec![order("BTCUSDT", 0.1), order("BTCUSDT", 0.2)],
+        vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
     );
     resolve_mode(&mut h, "BTCUSDT");
     let request = h.take("/v5/order/create-batch");
@@ -332,362 +332,6 @@ fn outcome(h: &Harness, command: u32) -> Option<safe_cex_engine::Outcome> {
         .iter()
         .find(|(id, _)| *id == command)
         .and_then(|(_, outcome)| *outcome)
-}
-
-fn assert_plain_limit_plan_refused(price: Option<f64>, valid_rows: usize) {
-    for variant in [Variant::Spot, Variant::Hyrotrader] {
-        let mut h = ready(variant);
-        let mut orders = vec![order("BTCUSDT", 1.0); valid_rows];
-        let mut invalid = order("BTCUSDT", 1.0);
-        invalid.price = price;
-        orders.push(invalid);
-        place(&mut h, 141, orders);
-        assert_eq!(
-            h.requests.len(),
-            0,
-            "{variant:?}: invalid full plan reached transport"
-        );
-        assert!(matches!(h.result(141), Some(Err(_))));
-        assert_eq!(outcome(&h, 141), Some(safe_cex_engine::Outcome::NotSent));
-        assert!(!h.unknown.contains(&141));
-        assert!(h.engine.store().orders().is_empty());
-    }
-}
-
-#[test]
-fn plain_limit_plan_valid_first_unpriced_second_refuses_before_transport() {
-    assert_plain_limit_plan_refused(None, 1);
-}
-
-#[test]
-fn plain_limit_plan_valid_first_zero_price_second_refuses_before_transport() {
-    assert_plain_limit_plan_refused(Some(0.0), 1);
-}
-
-#[test]
-fn plain_limit_plan_positive_price_rounding_to_zero_refuses_before_transport() {
-    assert_plain_limit_plan_refused(Some(0.01), 1);
-}
-
-#[test]
-fn plain_limit_plan_last_row_below_native_notional_refuses_before_transport() {
-    for variant in [Variant::Spot, Variant::Hyrotrader] {
-        let instruments = if variant == Variant::Spot {
-            support::INSTRUMENTS.replace("minNotionalValue", "minOrderAmt")
-        } else {
-            support::INSTRUMENTS.to_owned()
-        };
-        let mut h = ready_listing_with_instruments(options(variant), EMPTY, Some(instruments));
-        place(
-            &mut h,
-            148,
-            vec![order("BTCUSDT", 1.0), order("BTCUSDT", 0.01)],
-        );
-        assert!(
-            h.requests.is_empty(),
-            "invalid last notional released a prefix"
-        );
-        assert_eq!(outcome(&h, 148), Some(safe_cex_engine::Outcome::NotSent));
-    }
-}
-
-#[test]
-fn plain_limit_plan_unpriced_last_row_beyond_chunk_boundary_refuses_before_transport() {
-    assert_plain_limit_plan_refused(None, 11);
-}
-
-#[test]
-fn plain_limit_plan_invalid_second_batch_refuses_before_transport() {
-    for price in [None, Some(0.0)] {
-        let mut h = ready(Variant::Linear);
-        let mut prime = order("BTCUSDT", 1.0);
-        prime.client_order_id = Some("prime-mode".into());
-        place(&mut h, 144, vec![prime]);
-        resolve_mode(&mut h, "BTCUSDT");
-        let request = h.take("/v5/order/create-batch");
-        h.reply(request.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"prime","orderLinkId":"prime-mode"}]},"retExtInfo":{"list":[{"code":0}]}}"#);
-        assert!(matches!(h.result(144), Some(Ok(_))));
-        assert!(h.requests.is_empty());
-        let mut orders = vec![order("BTCUSDT", 1.0); 10];
-        let mut invalid = order("BTCUSDT", 1.0);
-        invalid.price = price;
-        orders.push(invalid);
-        place(&mut h, 145, orders);
-        assert_eq!(
-            h.requests.len(),
-            0,
-            "invalid second batch released its valid first batch"
-        );
-        assert!(matches!(h.result(145), Some(Err(_))));
-        assert_eq!(outcome(&h, 145), Some(safe_cex_engine::Outcome::NotSent));
-        assert!(!h.unknown.contains(&145));
-    }
-}
-
-#[test]
-fn plain_limit_plan_all_valid_spot_rows_are_sent_once_in_order() {
-    let mut h = ready(Variant::Spot);
-    let orders = (0..12)
-        .map(|index| {
-            let mut opts = order("BTCUSDT", 1.0);
-            opts.client_order_id = Some(format!("preflight-{index}"));
-            opts
-        })
-        .collect();
-    place(&mut h, 142, orders);
-    let mut ids = Vec::new();
-    for index in 0..12 {
-        if h.requests.is_empty() {
-            h.advance(1_001.0);
-        }
-        assert_eq!(h.requests.len(), 1);
-        let request = h.take("/v5/order/create");
-        let sent: serde_json::Value = serde_json::from_str(body(&request)).expect("create body");
-        assert_eq!(sent["price"], "100");
-        assert_eq!(sent["qty"], "1");
-        assert_eq!(sent["orderLinkId"], format!("preflight-{index}"));
-        let id = format!("accepted-{index}");
-        h.reply(
-            request.id,
-            200,
-            &serde_json::json!({
-                "retCode":0,"result":{"orderId":id,"orderLinkId":format!("preflight-{index}")}
-            })
-            .to_string(),
-        );
-        ids.push(id);
-    }
-    assert_eq!(
-        h.result(142),
-        Some(&Ok(serde_json::to_string(&ids).expect("created ids")))
-    );
-    assert!(h.requests.is_empty());
-    assert!(!h.unknown.contains(&142));
-}
-
-#[test]
-fn plain_limit_plan_runtime_refusal_stops_and_reports_each_serial_row() {
-    assert_serial_plan_failure(Some(200));
-}
-
-#[test]
-fn plain_limit_plan_lost_reply_stops_and_reports_unknown_serial_row() {
-    assert_serial_plan_failure(None);
-}
-
-#[test]
-fn plain_limit_plan_server_error_keeps_prefix_pending_and_unsent_rows() {
-    assert_serial_plan_failure(Some(503));
-}
-
-fn assert_serial_plan_failure(status: Option<u16>) {
-    for variant in [Variant::Spot, Variant::Hyrotrader] {
-        let mut h = ready(variant);
-        let orders = (0..3)
-            .map(|index| {
-                let mut opts = order("BTCUSDT", 1.0);
-                if variant == Variant::Spot {
-                    opts.client_order_id = Some(format!("journal-{index}"));
-                }
-                opts
-            })
-            .collect();
-        place(&mut h, 146, orders);
-        assert_eq!(h.requests.len(), 1, "{variant:?}: {:?}", h.done);
-        let first = h.take("/v5/order/create");
-        let first_link = link(&first);
-        h.reply(first.id, 200, &serde_json::json!({"retCode":0,"result":{"orderId":"placed-first","orderLinkId":first_link}}).to_string());
-        assert_eq!(h.requests.len(), 1, "{variant:?}: {:?}", h.done);
-        let second = h.take("/v5/order/create");
-        let second_link = link(&second);
-        if let Some(status) = status {
-            h.reply(
-                second.id,
-                status,
-                r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
-            );
-        } else {
-            h.event(Event::HttpFailed {
-                request: second.id,
-                error: "reply lost",
-            });
-        }
-        let detail = h
-            .notices
-            .iter()
-            .find_map(|notice| match notice {
-                safe_cex_engine::Notice::CommandFailed {
-                    command: 146,
-                    error,
-                } => Some(error),
-                _ => None,
-            })
-            .expect("terminal failure");
-        let elements = detail.elements.as_ref().expect("indexed write outcomes");
-        assert_eq!(elements.len(), 3);
-        for (index, row) in elements.iter().enumerate() {
-            assert_eq!(row.element.index, index);
-            if variant == Variant::Spot {
-                assert_eq!(
-                    row.element.client_order_id,
-                    Some(format!("journal-{index}"))
-                );
-            } else {
-                assert!(
-                    row.element
-                        .client_order_id
-                        .as_ref()
-                        .is_some_and(|id| !id.is_empty())
-                );
-            }
-        }
-        assert_eq!(
-            elements[0].element.client_order_id.as_ref(),
-            Some(&first_link)
-        );
-        assert_eq!(
-            elements[1].element.client_order_id.as_ref(),
-            Some(&second_link)
-        );
-        use safe_cex_engine::write_plan::ElementResult;
-        assert!(
-            matches!(&elements[0].result, ElementResult::Placed { order_ids } if order_ids == &["placed-first"])
-        );
-        if status != Some(200) {
-            assert!(
-                matches!(&elements[1].result, ElementResult::Unknown { error } if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
-            );
-        } else {
-            assert!(
-                matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
-            );
-        }
-        assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
-        assert!(!matches!(
-            detail.outcome,
-            Some(safe_cex_engine::Outcome::NotSent | safe_cex_engine::Outcome::Rejected)
-        ));
-        assert_eq!(
-            detail.partial.as_ref().expect("accepted prefix").order_ids,
-            ["placed-first"]
-        );
-        assert!(
-            !h.requests
-                .iter()
-                .any(|request| request.method == safe_cex_engine::Method::Post),
-            "failed row released another write"
-        );
-        h.advance(1_201.0);
-        assert!(
-            !h.requests
-                .iter()
-                .any(|request| request.method == safe_cex_engine::Method::Post),
-            "resend, suffix or rollback write"
-        );
-    }
-}
-
-#[test]
-fn plain_limit_plan_bbo_without_explicit_price_is_still_sent_once() {
-    let mut h = ready(Variant::Inverse);
-    let mut opts = order("BTCUSD", 1.0);
-    opts.price = None;
-    opts.reduce_only = Some(true);
-    opts.client_order_id = Some("bbo-control".into());
-    opts.bybit_bbo = Some(BybitBbo {
-        side_type: "Queue".into(),
-        level: 3.0,
-    });
-    place(&mut h, 143, vec![opts]);
-    assert_eq!(h.requests.len(), 1);
-    resolve_mode(&mut h, "BTCUSD");
-    assert_eq!(h.requests.len(), 1);
-    let request = h.take("/v5/order/create");
-    let sent: serde_json::Value = serde_json::from_str(body(&request)).expect("create body");
-    assert_eq!(sent["bboSideType"], "Queue");
-    assert_eq!(sent["bboLevel"], "3");
-    assert_eq!(sent["reduceOnly"], true);
-    assert_eq!(sent["orderLinkId"], "bbo-control");
-    assert!(sent.get("price").is_none());
-    h.reply(
-        request.id,
-        200,
-        r#"{"retCode":0,"result":{"orderId":"bbo-accepted","orderLinkId":"bbo-control"}}"#,
-    );
-    assert_eq!(h.result(143), Some(&Ok("[\"bbo-accepted\"]".into())));
-    assert!(h.requests.is_empty());
-}
-
-#[test]
-fn plain_limit_plan_mixed_batch_preserves_native_rows_and_stops_later_chunks() {
-    for code in [110007, 10000] {
-        let mut h = ready(Variant::Linear);
-        let orders = (0..12)
-            .map(|index| {
-                let mut opts = order("BTCUSDT", 1.0);
-                opts.client_order_id = Some(format!("batch-journal-{index}"));
-                opts
-            })
-            .collect();
-        place(&mut h, 147, orders);
-        resolve_mode(&mut h, "BTCUSDT");
-        let request = h.take("/v5/order/create-batch");
-        let rows: Vec<_> = (0..10).map(|index| {
-            if index == 1 {
-                serde_json::json!({"orderLinkId":format!("batch-journal-{index}")})
-            } else {
-                serde_json::json!({"orderLinkId":format!("batch-journal-{index}"),"orderId":format!("native-{index}")})
-            }
-        }).collect();
-        let statuses: Vec<_> = (0..10).map(|index| {
-            serde_json::json!({"code":if index == 1 {code} else {0},"msg":"native row"})
-        }).collect();
-        h.reply(
-            request.id,
-            200,
-            &serde_json::json!({"retCode":0,"result":{"list":rows},"retExtInfo":{"list":statuses}})
-                .to_string(),
-        );
-        let detail = h
-            .notices
-            .iter()
-            .find_map(|notice| match notice {
-                safe_cex_engine::Notice::CommandFailed {
-                    command: 147,
-                    error,
-                } => Some(error),
-                _ => None,
-            })
-            .expect("mixed-batch terminal failure");
-        let elements = detail.elements.as_ref().expect("native indexed rows");
-        assert_eq!(elements.len(), 12);
-        use safe_cex_engine::write_plan::ElementResult;
-        for (index, element) in elements.iter().enumerate() {
-            assert_eq!(element.element.index, index);
-            assert_eq!(
-                element.element.client_order_id,
-                Some(format!("batch-journal-{index}"))
-            );
-            match index {
-                1 if code == 110007 => assert!(
-                    matches!(&element.result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
-                ),
-                1 => assert!(
-                    matches!(&element.result, ElementResult::Unknown { error } if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
-                ),
-                10.. => assert_eq!(element.result, ElementResult::NotSent { error: None }),
-                _ => assert!(
-                    matches!(&element.result, ElementResult::Placed { order_ids } if order_ids == &[format!("native-{index}")])
-                ),
-            }
-        }
-        h.advance(1_201.0);
-        assert!(
-            !h.requests
-                .iter()
-                .any(|request| request.method == safe_cex_engine::Method::Post)
-        );
-    }
 }
 
 #[test]
@@ -1956,9 +1600,6 @@ fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
                 }
             };
             h.reply(request.id, 200, reply);
-            if failed == Some(filter) {
-                break;
-            }
         }
         for (id, filter) in [
             ("ordinary", "Order"),
@@ -1968,11 +1609,7 @@ fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
         ] {
             assert_eq!(
                 h.engine.store().order(id).unwrap().status,
-                if failed.is_some_and(|failed| {
-                    let filters = ["Order", "StopOrder", "tpslOrder"];
-                    filters.iter().position(|item| *item == filter)
-                        >= filters.iter().position(|item| *item == failed)
-                }) {
+                if failed == Some(filter) {
                     safe_cex_engine::model::OrderStatus::Open
                 } else {
                     safe_cex_engine::model::OrderStatus::Canceled
@@ -2095,7 +1732,7 @@ fn hyro_receipts_cover_shared_write_late_waiter_and_retained_accepted_lots() {
     );
 }
 #[test]
-fn ordinary_bybit_receipts_preserve_absence_and_caller_identity_on_batch_refusal() {
+fn ordinary_bybit_receipts_preserve_absence_and_caller_identity_through_batch_fallback() {
     let mut h = ready(Variant::Linear);
     let mut supplied = order("BTCUSDT", 1.0);
     supplied.client_order_id = Some("Caller91".into());
@@ -2120,24 +1757,35 @@ fn ordinary_bybit_receipts_preserve_absence_and_caller_identity_on_batch_refusal
         200,
         r#"{"retCode":10001,"retMsg":"batch rejected"}"#,
     );
-    assert!(!h.has_request("/v5/order/create"));
-    assert_eq!(h.progress.len(), 1);
-    let error = h
-        .notices
-        .iter()
-        .find_map(|notice| match notice {
-            safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
-            _ => None,
-        })
-        .expect("terminal batch refusal");
-    let elements = error.elements.as_ref().expect("row receipts");
-    assert_eq!(elements.len(), 2);
-    assert_eq!(
-        elements[0].element.client_order_id.as_deref(),
-        Some("Caller91")
+    let first = h.take("/v5/order/create");
+    assert!(body(&first).contains("Caller91"));
+    assert_eq!(h.progress[1], h.progress[0]);
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"first"}}"#,
     );
-    assert_eq!(elements[1].element.client_order_id, None);
-    assert!(matches!(h.result(91), Some(Err(_))));
+    let second = h.take("/v5/order/create");
+    assert!(!body(&second).contains("orderLinkId"));
+    assert_eq!(h.progress.len(), 2);
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"second"}}"#,
+    );
+    assert_eq!(h.result(91), Some(&Ok("[\"first\",\"second\"]".into())));
+    assert_eq!(
+        h.command_errors.len(),
+        1,
+        "partial success keeps its diagnostic"
+    );
+    assert_eq!(h.command_errors[0].0, 91);
+    assert!(
+        h.command_errors[0]
+            .1
+            .contains("Failed to place batch orders")
+    );
+    assert_eq!(h.command_notices, [(91, "error"), (91, "done")]);
 }
 
 #[test]
@@ -2926,7 +2574,7 @@ fn ordinary_signature_words_in_native_success_cannot_authorize_retry() {
 #[test]
 fn ordinary_signature_words_in_mode_read_success_cannot_authorize_retry() {
     let mut h = ready(Variant::Demo);
-    place(&mut h, 93, vec![order("BTCUSDT", 0.1)]);
+    place(&mut h, 93, vec![order("BTCUSDT", 0.01)]);
     let mode = h.take("/v5/position/list");
     h.reply(mode.id, 200, r#"{"retCode":0,"retMsg":"error sign","result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#);
     assert!(!h.has_request("/v5/position/list"));
@@ -2995,7 +2643,7 @@ fn managed_create_batch_count_mismatch_keeps_only_evidence_ids_without_local_row
     place(
         &mut h,
         95,
-        vec![order("BTCUSDT", 0.1), order("BTCUSDT", 0.2)],
+        vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
     );
     resolve_mode(&mut h, "BTCUSDT");
     let create = h.take("/v5/order/create-batch");
@@ -3039,11 +2687,11 @@ fn managed_create_batch_native_shapes_are_validated_before_any_local_publication
     ];
     for (case, reply) in replies.into_iter().enumerate() {
         let mut h = ready(Variant::Demo);
-        let mut first = order("BTCUSDT", 0.1);
+        let mut first = order("BTCUSDT", 0.01);
         if case == 4 {
             first.client_order_id = Some("requested-echo".into());
         }
-        place(&mut h, 96, vec![first, order("BTCUSDT", 0.2)]);
+        place(&mut h, 96, vec![first, order("BTCUSDT", 0.02)]);
         resolve_mode(&mut h, "BTCUSDT");
         let create = h.take("/v5/order/create-batch");
         h.reply(create.id, 200, &reply);
@@ -3096,7 +2744,7 @@ fn assert_contradictory_managed_batch_refusal_does_not_retry(code: i64) {
     place(
         &mut h,
         97,
-        vec![order("BTCUSDT", 0.1), order("BTCUSDT", 0.2)],
+        vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
     );
     resolve_mode(&mut h, "BTCUSDT");
     let create = h.take("/v5/order/create-batch");
@@ -3125,7 +2773,7 @@ fn assert_batch_refusal_with_item_effect_does_not_retry(code: i64) {
         place(
             &mut h,
             98,
-            vec![order("BTCUSDT", 0.1), order("BTCUSDT", 0.2)],
+            vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
         );
         resolve_mode(&mut h, "BTCUSDT");
         let create = h.take("/v5/order/create-batch");
@@ -3180,7 +2828,7 @@ fn managed_cancel_benign_native_refusal_keeps_valid_target_echoes() {
 #[test]
 fn managed_native_id_overflow_denies_local_publication_before_command_seal() {
     let mut h = ready(Variant::Demo);
-    place(&mut h, 100, vec![order("BTCUSDT", 0.1)]);
+    place(&mut h, 100, vec![order("BTCUSDT", 0.01)]);
     resolve_mode(&mut h, "BTCUSDT");
     let create = h.take("/v5/order/create-batch");
     let native_id = "n".repeat(1025);
@@ -3200,7 +2848,7 @@ fn managed_create_batch_proven_subset_survives_an_unresolved_sibling() {
     place(
         &mut h,
         101,
-        vec![order("BTCUSDT", 0.1), order("BTCUSDT", 0.2)],
+        vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
     );
     resolve_mode(&mut h, "BTCUSDT");
     let create = h.take("/v5/order/create-batch");
@@ -3438,15 +3086,15 @@ fn managed_not_modified_amend_succeeds_and_publishes_no_new_value() {
 
 fn managed_single_create() -> (Harness, HttpRequest) {
     let mut h = ready(Variant::Demo);
-    let mut opts = order("BTCUSDT", 0.1);
+    let mut opts = order("BTCUSDT", 0.01);
     opts.client_order_id = Some("SingleCaller".into());
-    opts.price = None;
-    opts.bybit_bbo = Some(BybitBbo {
-        side_type: "Queue".into(),
-        level: 1.0,
-    });
     place(&mut h, 107, vec![opts]);
     resolve_mode(&mut h, "BTCUSDT");
+    h.respond(
+        "/v5/order/create-batch",
+        200,
+        r#"{"retCode":10001,"retMsg":"native batch refusal"}"#,
+    );
     let create = h.take("/v5/order/create");
     assert!(body(&create).contains("SingleCaller"));
     (h, create)
@@ -3678,7 +3326,7 @@ fn managed_mode_read_rejects_positional_rows_without_seeding_cache_or_advancing_
         format!(r#"{{"list":[{{"symbol":"BTCUSDT","positionIdx":0}},{positional}]}}"#),
     ] {
         let mut h = ready(Variant::Demo);
-        place(&mut h, 112, vec![order("BTCUSDT", 0.1)]);
+        place(&mut h, 112, vec![order("BTCUSDT", 0.01)]);
         h.respond(
             "/v5/position/list",
             200,
@@ -3693,7 +3341,7 @@ fn managed_mode_read_rejects_positional_rows_without_seeding_cache_or_advancing_
             h.outcomes
                 .contains(&(112, Some(safe_cex_engine::Outcome::NotSent)))
         );
-        place(&mut h, 113, vec![order("BTCUSDT", 0.1)]);
+        place(&mut h, 113, vec![order("BTCUSDT", 0.01)]);
         assert!(
             h.has_request("/v5/position/list"),
             "invalid prefix must not seed cached mode: {result}"
@@ -4451,9 +4099,9 @@ fn brazil_limit_ack_publishes_locally_but_plain_linear_waits_for_the_stream() {
     }
 }
 
-// B3: a named inverse symbol switches alone.
+// Legacy TS discards symbol selection and switches linear USDT once.
 #[test]
-fn inverse_position_mode_switches_a_named_symbol_alone() {
+fn legacy_position_mode_switch_uses_linear_usdt_even_with_an_inverse_symbol() {
     let mut h = ready(Variant::Inverse);
     h.command(Command::SetPositionMode {
         command: 1,
@@ -4463,7 +4111,7 @@ fn inverse_position_mode_switches_a_named_symbol_alone() {
     let request = h.take("/v5/position/switch-mode");
     assert_eq!(
         body(&request),
-        r#"{"category":"inverse","symbol":"BTCUSD","mode":3}"#
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
     );
     h.reply(request.id, 200, r#"{"retCode":0,"result":{}}"#);
     assert_eq!(h.result(1), Some(&Ok("[]".into())));
@@ -4539,47 +4187,29 @@ fn a_position_stop_quantity_rounding_to_zero_is_refused() {
     );
 }
 
-// A native refusal leaves the remaining coin effects unsent.
+// B3: one coin refusing leaves the other coins to be tried.
 #[test]
-fn inverse_position_mode_refusal_stops_the_remaining_coins() {
+fn legacy_position_mode_refusal_does_not_release_a_second_coin() {
     let mut h = ready(Variant::Inverse);
-    let mut second = h.engine.store().markets()[0].clone();
-    second.base = "ZZZ".into();
-    second.symbol = "ZZZUSD".into();
-    second.id = "ZZZUSD".into();
-    h.engine.store_mut().update_markets(|_| {});
-    let mut markets = h.engine.store().markets().to_vec();
-    markets.push(second);
-    h.engine.store_mut().set_markets(markets);
     h.command(Command::SetPositionMode {
         command: 1,
         hedged: true,
         symbol: None,
     });
-    h.respond(
-        "/v5/position/switch-mode",
-        200,
-        r#"{"retCode":10001,"retMsg":"refused"}"#,
+    let request = h.take("/v5/position/switch-mode");
+    assert_eq!(
+        body(&request),
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
     );
-    h.advance(250.0);
-    assert!(
-        !h.has_request("/v5/position/switch-mode"),
-        "{:?}",
-        h.paths()
-    );
+    h.reply(request.id, 200, r#"{"retCode":10001,"retMsg":"refused"}"#);
+    h.advance(1_201.0);
+    assert!(!h.has_request("/v5/position/switch-mode"));
     assert!(matches!(h.result(1), Some(Err(_))));
 }
 
 #[test]
-fn inverse_position_mode_paces_its_coins() {
+fn legacy_position_mode_success_has_no_per_coin_suffix() {
     let mut h = ready(Variant::Inverse);
-    let mut second = h.engine.store().markets()[0].clone();
-    second.base = "ZZZ".into();
-    second.symbol = "ZZZUSD".into();
-    second.id = "ZZZUSD".into();
-    let mut markets = h.engine.store().markets().to_vec();
-    markets.push(second);
-    h.engine.store_mut().set_markets(markets);
     h.command(Command::SetPositionMode {
         command: 1,
         hedged: true,
@@ -4590,13 +4220,9 @@ fn inverse_position_mode_paces_its_coins() {
         200,
         r#"{"retCode":0,"result":{}}"#,
     );
-    assert!(
-        !h.has_request("/v5/position/switch-mode"),
-        "{:?}",
-        h.paths()
-    );
-    h.advance(250.0);
-    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
+    h.advance(1_201.0);
+    assert!(!h.has_request("/v5/position/switch-mode"));
+    assert_eq!(h.result(1), Some(&Ok("[]".into())));
 }
 
 // A cached mode Bybit just refused is re-read before the next order.
@@ -5791,6 +5417,158 @@ fn engine_ambiguity_429_clock_code_cannot_replay() {
     }
 }
 
+#[test]
+fn legacy_serial_runtime_refusal_stops_and_reports_each_serial_row() {
+    assert_serial_plan_failure(Some(200));
+}
+
+#[test]
+fn legacy_serial_lost_reply_stops_and_reports_unknown_serial_row() {
+    assert_serial_plan_failure(None);
+}
+
+#[test]
+fn legacy_serial_server_error_keeps_prefix_pending_and_unsent_rows() {
+    assert_serial_plan_failure(Some(503));
+}
+
+fn assert_serial_plan_failure(status: Option<u16>) {
+    let variant = Variant::Hyrotrader;
+    let mut h = ready(variant);
+    let orders = (0..3)
+        .map(|index| {
+            let mut opts = order("BTCUSDT", 1.0);
+            if variant == Variant::Spot {
+                opts.client_order_id = Some(format!("journal-{index}"));
+            }
+            opts
+        })
+        .collect();
+    place(&mut h, 146, orders);
+    assert_eq!(h.requests.len(), 1, "{variant:?}: {:?}", h.done);
+    let first = h.take("/v5/order/create");
+    let first_link = link(&first);
+    h.reply(first.id, 200, &serde_json::json!({"retCode":0,"result":{"orderId":"placed-first","orderLinkId":first_link}}).to_string());
+    assert_eq!(h.requests.len(), 1, "{variant:?}: {:?}", h.done);
+    let second = h.take("/v5/order/create");
+    let second_link = link(&second);
+    if let Some(status) = status {
+        h.reply(
+            second.id,
+            status,
+            r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+        );
+    } else {
+        h.event(Event::HttpFailed {
+            request: second.id,
+            error: "reply lost",
+        });
+    }
+    let detail = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 146,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .expect("terminal failure");
+    let elements = detail.elements.as_ref().expect("indexed write outcomes");
+    assert_eq!(elements.len(), 3);
+    for (index, row) in elements.iter().enumerate() {
+        assert_eq!(row.element.index, index);
+        if variant == Variant::Spot {
+            assert_eq!(
+                row.element.client_order_id,
+                Some(format!("journal-{index}"))
+            );
+        } else {
+            assert!(
+                row.element
+                    .client_order_id
+                    .as_ref()
+                    .is_some_and(|id| !id.is_empty())
+            );
+        }
+    }
+    assert_eq!(
+        elements[0].element.client_order_id.as_ref(),
+        Some(&first_link)
+    );
+    assert_eq!(
+        elements[1].element.client_order_id.as_ref(),
+        Some(&second_link)
+    );
+    use safe_cex_engine::write_plan::ElementResult;
+    assert!(
+        matches!(&elements[0].result, ElementResult::Placed { order_ids } if order_ids == &["placed-first"])
+    );
+    if status != Some(200) {
+        assert!(
+            matches!(&elements[1].result, ElementResult::Unknown { error } if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+        );
+    } else {
+        assert!(
+            matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+        );
+    }
+    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+    assert!(!matches!(
+        detail.outcome,
+        Some(safe_cex_engine::Outcome::NotSent | safe_cex_engine::Outcome::Rejected)
+    ));
+    assert_eq!(
+        detail.partial.as_ref().expect("accepted prefix").order_ids,
+        ["placed-first"]
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post),
+        "failed row released another write"
+    );
+    h.advance(1_201.0);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post),
+        "resend, suffix or rollback write"
+    );
+}
+
+#[test]
+fn legacy_serial_bbo_without_explicit_price_is_still_sent_once() {
+    let mut h = ready(Variant::Inverse);
+    let mut opts = order("BTCUSD", 1.0);
+    opts.price = None;
+    opts.reduce_only = Some(true);
+    opts.client_order_id = Some("bbo-control".into());
+    opts.bybit_bbo = Some(BybitBbo {
+        side_type: "Queue".into(),
+        level: 3.0,
+    });
+    place(&mut h, 143, vec![opts]);
+    assert_eq!(h.requests.len(), 1);
+    resolve_mode(&mut h, "BTCUSD");
+    assert_eq!(h.requests.len(), 1);
+    let request = h.take("/v5/order/create");
+    let sent: serde_json::Value = serde_json::from_str(body(&request)).expect("create body");
+    assert_eq!(sent["bboSideType"], "Queue");
+    assert_eq!(sent["bboLevel"], "3");
+    assert_eq!(sent["reduceOnly"], true);
+    assert_eq!(sent["orderLinkId"], "bbo-control");
+    assert!(sent.get("price").is_none());
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"bbo-accepted","orderLinkId":"bbo-control"}}"#,
+    );
+    assert_eq!(h.result(143), Some(&Ok("[\"bbo-accepted\"]".into())));
+    assert!(h.requests.is_empty());
+}
+
 fn applied_failure(h: &Harness, command: u32) -> &safe_cex_engine::VenueError {
     h.notices
         .iter()
@@ -5925,53 +5703,6 @@ fn applied_amend_prefix_names_existing_parent_without_placing_an_order() {
 }
 
 #[test]
-fn applied_settings_prefix_has_a_native_coin_scope_and_no_fabricated_order_id() {
-    let mut h = ready(Variant::Inverse);
-    let mut markets = h.engine.store().markets().to_vec();
-    let mut third = markets[0].clone();
-    third.id = "SOLUSD".into();
-    third.symbol = "SOLUSD".into();
-    third.base = "SOL".into();
-    markets.push(third);
-    h.engine.store_mut().set_markets(markets);
-    h.command(Command::SetPositionMode {
-        command: 153,
-        hedged: true,
-        symbol: None,
-    });
-    let first = h.take("/v5/position/switch-mode");
-    assert!(body(&first).contains("BTC"));
-    h.reply(first.id, 200, r#"{"retCode":0,"result":{}}"#);
-    h.advance(251.0);
-    let second = h.take("/v5/position/switch-mode");
-    h.reply(
-        second.id,
-        200,
-        r#"{"retCode":110007,"retMsg":"native refusal"}"#,
-    );
-    let error = applied_failure(&h, 153);
-    let elements = error.elements.as_ref().expect("settings outcomes");
-    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
-    assert_eq!(elements.len(), 3);
-    assert!(
-        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Settings, target_order_id: None, position_key: Some(key) } if key.contains("BTC"))
-    );
-    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
-    assert!(
-        error
-            .partial
-            .as_ref()
-            .is_none_or(|partial| partial.order_ids.is_empty())
-    );
-    h.advance(1_201.0);
-    assert!(
-        !h.requests
-            .iter()
-            .any(|request| request.method == safe_cex_engine::Method::Post)
-    );
-}
-
-#[test]
 fn applied_trading_stop_prefix_survives_a_rejected_create_without_an_order_id() {
     let mut h = ready(Variant::Hyrotrader);
     h.message("/v5/private", r#"{"topic":"position","data":[{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"1","avgPrice":"100","markPrice":"100","positionValue":"100","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}]}"#);
@@ -6080,5 +5811,46 @@ fn applied_cancel_batch_keeps_native_target_rows_and_stops_later_chunks() {
                 .iter()
                 .any(|request| request.method == safe_cex_engine::Method::Post)
         );
+    }
+}
+
+#[test]
+fn legacy_non_option_price_and_notional_do_not_gain_a_whole_plan_gate() {
+    for variant in [Variant::Spot, Variant::Hyrotrader] {
+        for (price, amount) in [(None, 1.0), (Some(0.0), 1.0), (Some(100.0), 0.01)] {
+            let mut h = ready(variant);
+            let mut last = order("BTCUSDT", amount);
+            last.price = price;
+            let mut first = order("BTCUSDT", 1.0);
+            if variant == Variant::Spot {
+                first.client_order_id = Some("parity-prefix".into());
+                last.client_order_id = Some("parity-last".into());
+            }
+            place(&mut h, 156, vec![first, last]);
+            let first = h.take("/v5/order/create");
+            let first_link = link(&first);
+            h.reply(first.id, 200, &serde_json::json!({"retCode":0,"result":{"orderId":"legacy-prefix","orderLinkId":first_link}}).to_string());
+            let second = h.take("/v5/order/create");
+            let wire: serde_json::Value = serde_json::from_str(body(&second)).unwrap();
+            assert_eq!(wire["qty"], amount.to_string());
+            if price.is_none() || price == Some(0.0) {
+                assert!(wire.get("price").is_none());
+            }
+            h.reply(
+                second.id,
+                200,
+                r#"{"retCode":110007,"retMsg":"native rejection"}"#,
+            );
+            let error = applied_failure(&h, 156);
+            assert_eq!(error.partial.as_ref().unwrap().order_ids, ["legacy-prefix"]);
+            if variant == Variant::Hyrotrader {
+                assert!(matches!(
+                    error.elements.as_ref().unwrap()[0].result,
+                    safe_cex_engine::write_plan::ElementResult::Placed { .. }
+                ));
+            } else {
+                assert!(error.elements.is_none());
+            }
+        }
     }
 }

@@ -628,7 +628,7 @@ fn places_a_batch_with_attached_brackets_and_exact_parameters() {
 }
 
 #[test]
-fn a_batch_refused_whole_stops_without_single_order_fallback() {
+fn a_batch_refused_whole_falls_back_to_single_orders() {
     let mut h = ready();
     place(
         &mut h,
@@ -640,18 +640,21 @@ fn a_batch_refused_whole_stops_without_single_order_fallback() {
         200,
         r#"{"retCode":10001,"retMsg":"params error","result":{},"retExtInfo":{},"time":1}"#,
     );
-    assert!(h.requests.is_empty());
-    assert!(matches!(h.result(8), Some(Err(_))));
-    let error = h
-        .notices
-        .iter()
-        .find_map(|notice| match notice {
-            safe_cex_engine::Notice::CommandFailed { command: 8, error } => Some(error),
-            _ => None,
-        })
-        .expect("typed batch refusal");
-    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
-    assert_eq!(error.elements.as_ref().expect("indexed refusal").len(), 1);
+    let single = h.take("/v5/order/create");
+    assert_eq!(
+        body(&single),
+        r#"{"category":"linear","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","qty":"0.01","price":"90000","reduceOnly":false,"timeInForce":"GTC","closeOnTrigger":false,"positionIdx":0}"#
+    );
+    // "Place Order", the documented response.
+    h.reply(
+        single.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"1321003749386327552","orderLinkId":"spot-test-postonly"},"retExtInfo":{},"time":1672211918471}"#,
+    );
+    assert_eq!(
+        h.result(8),
+        Some(&Ok(r#"["1321003749386327552"]"#.to_owned()))
+    );
 }
 
 #[test]

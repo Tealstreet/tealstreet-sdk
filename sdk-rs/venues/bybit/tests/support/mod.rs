@@ -357,7 +357,7 @@ pub fn order() -> safe_cex_engine::model::PlaceOrderOpts {
         kind: safe_cex_engine::model::OrderType::Limit,
         side: safe_cex_engine::model::OrderSide::Buy,
         amount: 0.01,
-        price: Some(1000.0),
+        price: Some(100.0),
         trigger_price: None,
         stop_loss: None,
         take_profit: None,

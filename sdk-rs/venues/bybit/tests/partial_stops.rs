@@ -306,13 +306,13 @@ fn replacement(h: &mut Harness, profile: Profile) -> StopWrite {
 }
 
 #[test]
-fn partial_drag_cancels_before_replacing_and_preserves_valid_price_and_side() {
+fn partial_drag_cancels_before_replacing_and_projects_raw_price_without_changing_side() {
     for profile in PROFILES {
         for (side, kind, price, field, by) in [
-            ("Sell", "StopLoss", 100.1, "takeProfit", "tpTriggerBy"),
-            ("Sell", "TakeProfit", 99.9, "stopLoss", "slTriggerBy"),
-            ("Buy", "StopLoss", 99.9, "takeProfit", "tpTriggerBy"),
-            ("Buy", "TakeProfit", 100.1, "stopLoss", "slTriggerBy"),
+            ("Sell", "StopLoss", 100.049, "takeProfit", "tpTriggerBy"),
+            ("Sell", "TakeProfit", 99.95, "stopLoss", "slTriggerBy"),
+            ("Buy", "StopLoss", 99.95, "takeProfit", "tpTriggerBy"),
+            ("Buy", "TakeProfit", 100.049, "stopLoss", "slTriggerBy"),
         ] {
             let mut h = ready(profile);
             seed(&mut h, profile, side, kind, "IndexPrice", false, true);
@@ -3036,7 +3036,7 @@ fn assert_applied_partial_failure(h: &Harness) {
 }
 
 #[test]
-fn partial_off_tick_replacement_refuses_the_entire_plan_before_cancel() {
+fn legacy_partial_replacement_preserves_raw_trigger_without_a_new_tick_gate() {
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -3049,12 +3049,15 @@ fn partial_off_tick_replacement_refuses_the_entire_plan_before_cancel() {
         true,
     );
     amend(&mut h, Some(95.049), None);
-    assert!(h.requests.is_empty());
-    assert!(matches!(h.result(91), Some(Err(_))));
-    assert!(
-        h.outcomes
-            .contains(&(91, Some(safe_cex_engine::Outcome::NotSent)))
+    accept_cancel(&mut h, profile);
+    let request = h.take("/v5/position/trading-stop");
+    assert!(body(&request).contains("95.049"));
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"replacement refused"}"#,
     );
+    assert_applied_partial_failure(&h);
 }
 
 fn seed_limit_partial(h: &mut Harness, profile: Profile, kind: &str) {
@@ -3078,68 +3081,30 @@ fn seed_limit_partial(h: &mut Harness, profile: Profile, kind: &str) {
 }
 
 #[test]
-fn full_limit_replacement_refuses_before_canceling_existing_protection() {
+fn legacy_limit_partial_replacement_uses_default_market_execution() {
     for profile in PROFILES {
         for kind in ["StopLoss", "TakeProfit"] {
-            let mut h = ready(profile);
-            seed_limit_partial(&mut h, profile, kind);
-            let original = h.engine.store().order("partial").unwrap().clone();
-            amend(
-                &mut h,
-                Some(if kind == "StopLoss" { 95.0 } else { 105.0 }),
-                Some(0.0),
-            );
-            assert!(
-                h.requests.is_empty(),
-                "{profile:?}/{kind}: no destructive prefix"
-            );
-            assert_eq!(h.engine.store().order("partial"), Some(&original));
-            let error = h
-                .notices
-                .iter()
-                .find_map(|notice| match notice {
-                    safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
-                    _ => None,
-                })
-                .expect("typed refusal");
-            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
-            let elements = error.elements.as_ref().expect("whole-plan outcomes");
-            assert_eq!(elements.len(), 2);
-            assert!(elements.iter().all(|row| matches!(
-                row.result,
-                safe_cex_engine::write_plan::ElementResult::NotSent { .. }
-            )));
-        }
-    }
-}
-
-#[test]
-fn partial_limit_replacement_keeps_execution_price_and_is_admitted() {
-    for profile in PROFILES {
-        for kind in ["StopLoss", "TakeProfit"] {
-            let mut h = ready(profile);
-            seed_limit_partial(&mut h, profile, kind);
-            amend(
-                &mut h,
-                Some(if kind == "StopLoss" { 95.0 } else { 105.0 }),
-                Some(8.0),
-            );
-            accept_cancel(&mut h, profile);
-            let request = h.take("/v5/position/trading-stop");
-            let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
-            let (order_type, limit_price) = if kind == "StopLoss" {
-                ("slOrderType", "slLimitPrice")
-            } else {
-                ("tpOrderType", "tpLimitPrice")
-            };
-            assert_eq!(wire["tpslMode"], "Partial");
-            assert_eq!(wire[order_type], "Limit");
-            assert_eq!(
-                wire[limit_price],
-                if kind == "StopLoss" { "89" } else { "111" }
-            );
-            h.reply(request.id, 200, OK);
-            assert!(matches!(h.result(91), Some(Ok(_))));
+            for amount in [0.0, 8.0] {
+                let mut h = ready(profile);
+                seed_limit_partial(&mut h, profile, kind);
+                amend(
+                    &mut h,
+                    Some(if kind == "StopLoss" { 95.0 } else { 105.0 }),
+                    Some(amount),
+                );
+                accept_cancel(&mut h, profile);
+                let request = h.take("/v5/position/trading-stop");
+                let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+                assert_eq!(
+                    wire["tpslMode"],
+                    if amount == 0.0 { "Full" } else { "Partial" }
+                );
+                for field in ["slOrderType", "tpOrderType", "slLimitPrice", "tpLimitPrice"] {
+                    assert!(wire.get(field).is_none(), "legacy TS omits {field}");
+                }
+                h.reply(request.id, 200, OK);
+                assert!(matches!(h.result(91), Some(Ok(_))));
+            }
         }
     }
 }

@@ -183,10 +183,6 @@ pub struct PriceFilter<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct LotSizeFilter<'a> {
     #[serde(borrow, default)]
-    pub min_notional_value: Opt<'a>,
-    #[serde(borrow, default)]
-    pub min_order_amt: Opt<'a>,
-    #[serde(borrow, default)]
     pub base_precision: Opt<'a>,
     #[serde(borrow, default)]
     pub max_limit_order_qty: Opt<'a>,

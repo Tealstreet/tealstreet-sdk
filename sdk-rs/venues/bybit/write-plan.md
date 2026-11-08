@@ -1,29 +1,27 @@
-# Bybit write plans
+# Bybit legacy parity and outcome reporting
 
-Ordinary and Hyro mutation dispatch uses `safe-cex-engine::write_plan`. The owned
-payload keeps exact JSON plus create rows and immutable native precision,
-quantity caps and published minimum-notional rules. The pure callback checks all
-rows, mutation values and batch counts before admission. Existing complete lot
-formatting, conservation checks, option price/IV rules and live release vetoes
-still apply. Fixed-price non-reduce-only creates honor minimum notional; market
-and BBO execution prices retain their existing semantics.
+Legacy TypeScript owns the write behavior. Ordinary non-option orders have no
+new whole-command price, precision or minimum-notional gate. Existing capability,
+caller-ID and option preflight checks remain. The previous Rust lot normalization
+and transport classification stay in their existing owners.
 
-Typed mutation and create-batch envelopes decode the frozen bodies. Full-mode
-position protection permits only Market execution; a Limit replacement refuses
-the complete plan before canceling existing protection. Partial-mode Limit
-replacements retain their execution type and native limit price.
+Hyro awaits each order and stops when it fails. Its shared `WritePlan` is a
+reporting journal with an accepting callback; it records Placed,
+Applied, the classified failure and untouched NotSent rows. Typed envelopes retain
+native effect scopes without untyped JSON trees or invented order IDs. Read-only
+partial-stop confirmation requests consume no mutation index.
 
-Each physical call has one journal index, with consecutive logical elements for
-native create/cancel batch rows. Read-only partial-stop proofs consume no mutation
-index. Dispatch marks the index pending before signing/admission. A local veto
-settles NotSent; a lost released reply stays Unknown. Strict native row decoding
-and the existing engine classifier supply each result before aggregate reduction.
-Unproven HTTP seals copy the same journal through `UnprovenEvidence::write_plan`.
+Spot retains its distinct native-rejection stop and caught-provider-failure
+continuation. Placement there uses existing engine aggregate reporting, since a
+permanently stopping journal would change the latter behavior.
 
-New native creations use Placed with their returned IDs. Accepted effects without
-new native IDs use Applied:
+Linear/Inverse batch placement retains the pre-adoption native batch-to-single
+fallback and continuation schedule. This path uses its existing engine aggregate
+reporting: the shared helper permanently stops after a failure, so enabling it
+here would change the legacy write sequence. No new helper API or venue-local
+replacement journal is introduced.
 
-| Effect | Correlation |
+| Accepted effect | Correlation |
 | --- | --- |
 | Cancel, partial-stop cancel | Existing native target ID |
 | Cancel-all | Native category, symbol/coin and order-filter scope |
@@ -31,15 +29,15 @@ new native IDs use Applied:
 | Trading-stop, partial-stop replacement | Native category, symbol and position index |
 | Leverage, margin mode, position mode | Native symbol/coin scope or account setting endpoint |
 
-Targets never become Placed identities. Existing successful command return values
-remain compatible, including amend's existing target ID. Applied effects survive
-later failures and prevent an entire partially applied intent being called unsent.
+Partial TP/SL edits cancel then replace, as TS does. Replacement payloads use the
+native default Market execution and omit conditional Limit execution fields for
+both Full and Partial modes. A failed replacement does not automatically restore
+the old stop: TS has no such catch/restore branch. Protection warnings and native
+reconciliation remain. Existing declared batch fallbacks are retained.
 
-A terminal refusal stops every unissued mutation. There is no batch-to-singles
-fallback, automatic cancel, partial-stop restore or rollback. A failed replacement
-reports its applied cancel and its own classified result, retaining protection
-warnings and native reconciliation. Existing engine-granted fresh-signature
-retries remain within an unsettled call; ambiguous or terminal failures never
-retry. Custody, signing, nonce and physical transport ownership stay unchanged.
+Known legacy issue: ordinary missing/zero prices, below-minimum notionals and
+other later native refusals may follow accepted rows. Batch rows/chunks may
+continue after earlier failures. This PR does not add an atomic-admission policy.
 
-See the [split-plan invariant](https://github.com/Tealstreet/tealstreet-sdk/blob/docs/split-plan-invariant/docs/plans/SPLIT_PLAN_INVARIANT.md).
+The earlier [split-plan invariant](https://github.com/Tealstreet/tealstreet-sdk/blob/docs/split-plan-invariant/docs/plans/SPLIT_PLAN_INVARIANT.md)
+is superseded for this PR by the owner's legacy-parity scope.

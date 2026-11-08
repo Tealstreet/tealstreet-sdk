@@ -463,7 +463,7 @@ impl BybitLinear {
         mut entry: Ordinary,
         legs: VecDeque<Leg>,
     ) {
-        let writes = match super::write_plan::build(self, cx, &legs) {
+        let writes = match super::write_plan::build(&legs) {
             Ok(writes) => writes,
             Err(error) => {
                 let _ = cx.fail_preflight(&entry.preflight, error);
@@ -517,6 +517,7 @@ impl BybitLinear {
             partial: None,
             queue: legs,
             active: None,
+            continue_on_error: false,
             unlisted: Vec::new(),
             unlisted_read: None,
             unlisted_landed: None,
@@ -644,7 +645,7 @@ impl BybitLinear {
         if let Some(writes) = &mut run.writes
             && let Some(index) = run.active.as_ref().and_then(|active| active.write_index)
         {
-            let _ = writes.fail(index, error.clone());
+            let _ = super::write_plan::settle_failure(writes, index, error.clone());
         }
         if error.outcome == Some(Outcome::NotSent) {
             // Refused before release: this send never happened (legacy sign failure).

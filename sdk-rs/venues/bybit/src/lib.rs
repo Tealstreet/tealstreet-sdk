@@ -346,7 +346,6 @@ pub struct BybitLinear {
     classification: HashMap<String, InstrumentClassification>,
     derivatives: HashMap<String, DerivativeProduct>,
     order_caps: HashMap<String, OrderCaps>,
-    min_notionals: HashMap<String, f64>,
     wallet: Option<account::Wallet>,
     orders_loaded: HashSet<Category>,
     positions_loaded: HashSet<Category>,
@@ -609,7 +608,6 @@ impl BybitLinear {
             classification: HashMap::new(),
             derivatives: HashMap::new(),
             order_caps: HashMap::new(),
-            min_notionals: HashMap::new(),
             wallet: None,
             orders_loaded: HashSet::new(),
             positions_loaded: HashSet::new(),
@@ -3370,16 +3368,6 @@ impl Venue for BybitLinear {
                 {
                     self.classification
                         .insert(row.symbol.to_string(), classification_from_wire(&row));
-                    if let Some(lot) = &row.lot_size_filter
-                        && let Some(minimum) = if self.variant.is_spot() {
-                            present(&lot.min_order_amt)
-                        } else {
-                            present(&lot.min_notional_value)
-                        }
-                    {
-                        self.min_notionals
-                            .insert(row.symbol.to_string(), float(minimum));
-                    }
                     if !self.variant.is_spot()
                         && let Some(caps) = OrderCaps::from_wire(&row)
                     {

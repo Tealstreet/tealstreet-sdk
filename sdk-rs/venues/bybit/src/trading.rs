@@ -25,8 +25,6 @@ use std::collections::{HashMap, VecDeque};
 const BATCH_LIMIT: usize = 10;
 /// Pacing between batches, inside the per-second order limits.
 const PLACE_BATCH_DELAY_MS: f64 = 1_200.0;
-/// Inverse mode switches are one call per coin; unpaced, 10006 hit at coin 13 of 22.
-const MODE_SWITCH_DELAY_MS: f64 = 250.0;
 const CANCEL_BATCH_DELAY_MS: f64 = 1_000.0;
 const CANCEL_BATCH_LIMIT: usize = 10;
 const AGREEMENT_CODES: [i64; 2] = [110_123, 110_125];
@@ -44,7 +42,9 @@ struct LocalWrite {
 /// What a response means for its job.
 enum Call {
     PlaceOne,
-    PlaceBatch,
+    PlaceBatch {
+        fallback: Vec<(String, Vec<OrderIdentityReceipt>)>,
+    },
     TradingStop,
     PartialStop {
         /// The stop its cancel removed, named if this write then fails.
@@ -210,6 +210,7 @@ struct Step {
 #[derive(Default)]
 struct Job {
     steps: VecDeque<Step>,
+    continue_on_error: bool,
 }
 
 #[derive(Default)]
@@ -344,6 +345,7 @@ fn single(path: &'static str, body: String, call: Call) -> Job {
                 receipts: Vec::new(),
             }],
         }]),
+        ..Job::default()
     }
 }
 
@@ -353,26 +355,6 @@ pub(crate) struct Lot {
     category: Category,
     item: Body,
     pub(crate) single: Body,
-}
-
-struct LimitPrice {
-    price: Option<f64>,
-    bbo: bool,
-}
-
-// Pure normalized-wire gate, also usable by the shared WritePlan validator.
-// Options keep their separate price/IV formatter.
-fn validate_limit_price(write: &LimitPrice) -> Result<(), VenueError> {
-    if !write.bbo && write.price.is_none() {
-        return Err(not_sent("Bybit limit orders require a price or BBO"));
-    }
-    if write
-        .price
-        .is_some_and(|price| !price.is_finite() || price <= 0.0)
-    {
-        return Err(not_sent("Order prices must be finite and positive"));
-    }
-    Ok(())
 }
 
 impl BybitLinear {
@@ -488,7 +470,10 @@ impl BybitLinear {
                     return Some(Ok(self.plan_cancel(&orders)));
                 }
                 if self.variant.is_spot() {
-                    let mut job = Job::default();
+                    let mut job = Job {
+                        continue_on_error: true,
+                        ..Job::default()
+                    };
                     // Spot defaults to ordinary orders; every trigger family
                     // needs its own cancel, even when absent from our snapshot.
                     for filter in ["Order", "StopOrder", "tpslOrder"] {
@@ -552,54 +537,11 @@ impl BybitLinear {
                 };
                 Ok(single("/v5/account/set-margin-mode", body, call))
             }
-            Command::SetPositionMode { hedged, symbol, .. } => {
+            Command::SetPositionMode { hedged, .. } => {
                 let hedged = *hedged;
-                if self.category == Category::Inverse {
-                    // Inverse modes switch per symbol or per base coin; a named symbol
-                    // switches alone. A refusal leaves later coins unsent.
-                    if let Some(symbol) = symbol {
-                        let body = Body::new()
-                            .str("category", self.paths.category)
-                            .str("symbol", symbol)
-                            .int("mode", if hedged { 3 } else { 0 })
-                            .finish();
-                        return Some(Ok(single(
-                            "/v5/position/switch-mode",
-                            body,
-                            Call::PositionMode { hedged },
-                        )));
-                    }
-                    let mut coins = std::collections::BTreeSet::new();
-                    for market in cx.store.markets() {
-                        coins.insert(market.base.clone());
-                    }
-                    let mut job = Job::default();
-                    for (index, coin) in coins.into_iter().enumerate() {
-                        let body = Body::new()
-                            .str("category", self.paths.category)
-                            .str("coin", &coin)
-                            .int("mode", if hedged { 3 } else { 0 })
-                            .finish();
-                        job.steps.push_back(Step {
-                            delay_ms: if index > 0 { MODE_SWITCH_DELAY_MS } else { 0.0 },
-                            requests: vec![Planned {
-                                receipts: Vec::new(),
-                                path: "/v5/position/switch-mode",
-                                body,
-                                call: Call::PositionMode { hedged },
-                            }],
-                        });
-                    }
-                    if job.steps.is_empty() {
-                        return Some(Err(
-                            "No inverse markets loaded for position-mode switch".into()
-                        ));
-                    }
-                    return Some(Ok(job));
-                }
-                // Linear modes switch per settle coin; USDT carries every perp but USDC's.
+                // Legacy TS switches linear USDT once for either account adapter.
                 let body = Body::new()
-                    .str("category", self.paths.category)
+                    .str("category", "linear")
                     .str("coin", "USDT")
                     .int("mode", if hedged { 3 } else { 0 })
                     .finish();
@@ -658,7 +600,10 @@ impl BybitLinear {
 
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
         self.check_ids(cx, orders)?;
-        let mut job = Job::default();
+        let mut job = Job {
+            continue_on_error: true,
+            ..Job::default()
+        };
         let mut lots = Vec::new();
         for opts in orders {
             let category = self.category_for(&opts.symbol);
@@ -736,13 +681,17 @@ impl BybitLinear {
                     .str("category", category.as_str())
                     .raw("request", &format!("[{}]", items.join_with(",")))
                     .finish();
+                let fallback = chunk
+                    .iter()
+                    .map(|lot| (lot.single.clone().finish(), lot.receipts.clone()))
+                    .collect();
                 job.steps.push_back(Step {
                     delay_ms: if index > 0 { PLACE_BATCH_DELAY_MS } else { 0.0 },
                     requests: vec![Planned {
                         receipts: chunk.iter().flat_map(|lot| lot.receipts.clone()).collect(),
                         path: "/v5/order/create-batch",
                         body,
-                        call: Call::PlaceBatch,
+                        call: Call::PlaceBatch { fallback },
                     }],
                 });
             }
@@ -834,13 +783,6 @@ impl BybitLinear {
             && (opts.kind == OrderType::Limit || (conditional && price.is_some())))
         .then_some(price)
         .flatten();
-        if order_type == "Limit" {
-            validate_limit_price(&LimitPrice {
-                price: limit_price,
-                bbo: execution.bbo_side.is_some(),
-            })
-            .map_err(|error| error.message)?;
-        }
         let direction = match trigger_price.filter(|_| !self.variant.is_spot()) {
             Some(trigger) => {
                 let ticker = cx
@@ -1190,7 +1132,6 @@ impl BybitLinear {
         price: f64,
         trigger: Option<StopTriggerType>,
         amount: f64,
-        limit: Option<f64>,
     ) -> (String, &'static str) {
         let partial = amount != 0.0;
         let (level, by, size, reference) = if kind == OrderType::StopLoss {
@@ -1219,22 +1160,6 @@ impl BybitLinear {
             .str(level, &number(price))
             .str(by, reference)
             .opt_str(size, partial.then(|| number(amount)).as_deref())
-            .opt_str(
-                if kind == OrderType::StopLoss {
-                    "slOrderType"
-                } else {
-                    "tpOrderType"
-                },
-                limit.map(|_| "Limit"),
-            )
-            .opt_str(
-                if kind == OrderType::StopLoss {
-                    "slLimitPrice"
-                } else {
-                    "tpLimitPrice"
-                },
-                limit.map(number).as_deref(),
-            )
             .finish();
         (body, reference)
     }
@@ -1315,8 +1240,7 @@ impl BybitLinear {
                     order.symbol
                 ));
             }
-            let (body, reference) =
-                self.trading_stop_body(cx, order, kind, price, trigger, amount, limit);
+            let (body, reference) = self.trading_stop_body(cx, order, kind, price, trigger, amount);
             let by = match reference {
                 "LastPrice" => StopTriggerType::LastPrice,
                 "IndexPrice" => StopTriggerType::IndexPrice,
