@@ -156,15 +156,21 @@ function fixture(extraMarkets = false) {
   const run = (raw: string) => executeCommand(raw, 'BTCUSDT', undefined, exchange, adapter);
   const placedOrders = () =>
     write.mock.calls.flatMap(([input]) => {
-      if (typeof input !== 'object' || input === null) return [];
-      if (Array.isArray(input))
-        return input.filter((order): order is PlaceOrderOpts => 'symbol' in order && 'amount' in order);
-      return 'symbol' in input && 'type' in input ? [input] : [];
+      if (typeof input !== 'object' || input === null) throw new Error('Unexpected placement observation');
+      if (Array.isArray(input)) {
+        return input.map((order) => {
+          if ('symbol' in order && 'amount' in order) return order;
+          throw new Error('Unexpected placement observation');
+        });
+      }
+      if ('symbol' in input && 'type' in input) return [input];
+      throw new Error('Unexpected placement observation');
     });
   const updatedOrders = () =>
-    write.mock.calls.flatMap(([input]) =>
-      typeof input === 'object' && input !== null && 'order' in input ? [input] : [],
-    );
+    write.mock.calls.map(([input]) => {
+      if (typeof input === 'object' && input !== null && 'order' in input) return input;
+      throw new Error('Unexpected amendment observation');
+    });
   return { run, write, startChase, exchange, placedOrders, updatedOrders };
 }
 afterEach(() => {
@@ -805,4 +811,81 @@ it.each(['BUY', 'buy', 'SELL', 'sell'])('reads a complete side-word leverage ali
   expect((await run(`lev ${alias}`)).success).toBe(true);
   expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-log', { message: `${symbol}: 1x` });
   expect(write).not.toHaveBeenCalled();
+});
+
+describe('catalogued modifier aliases do not depend on ticker readiness', () => {
+  const commands = [
+    'buy $500 reduce',
+    'sell $500 reduce',
+    'chase buy $500 reduce',
+    'scale buy $500 into 2 from 75700 to 75800 reduce',
+    'swarm buy $500 into 2 reduce',
+    'twap buy $500 into 2 over 10 reduce',
+    'twap chase buy $500 into 2 over 10 reduce',
+  ];
+  it.each(commands.flatMap((command) => ['ready', 'missing-alias', 'omitted'].map((state) => ({ command, state }))))(
+    'refuses $command with ticker state $state before writing on the focused market',
+    async ({ command, state }) => {
+      for (const token of ['reduce', 'REDUCE']) {
+        const { exchange, write, startChase } = fixture(true);
+        const { tickers, ...withoutTickers } = exchange.store;
+        const testExchange: ExchangeLike = {
+          ...exchange,
+          store:
+            state === 'omitted'
+              ? withoutTickers
+              : {
+                  ...exchange.store,
+                  tickers: state === 'missing-alias' ? tickers.filter((row) => row.symbol !== 'REDUCEUSDT') : tickers,
+                },
+        };
+        expect(testExchange.store?.markets?.some((row) => row.symbol === 'REDUCEUSDT')).toBe(true);
+        const result = await executeCommand(
+          command.replace('reduce', token),
+          'BTCUSDT',
+          undefined,
+          testExchange,
+          new WorkerPlatformAdapter(testExchange),
+        );
+        expect(
+          result.success,
+          JSON.stringify({
+            command,
+            state,
+            token,
+            writes: write.mock.calls,
+            chaseSymbols: startChase.mock.calls.map((row) => row[2]),
+            taskSymbol: result.taskAction?.params?.symbol,
+          }),
+        ).toBe(false);
+        expect(result.errorDetails).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+        expect(write).not.toHaveBeenCalled();
+        expect(startChase).not.toHaveBeenCalled();
+        expect(result.taskAction).toBeUndefined();
+      }
+    },
+  );
+});
+
+it('placement observations reject an unexpected extra write instead of silently filtering it', async () => {
+  const { write, placedOrders } = fixture();
+  await write({
+    symbol: 'BUYUSDT',
+    side: OrderSide.Buy,
+    type: OrderType.Limit,
+    amount: 1,
+    price: 75800,
+    takeProfit: 76100,
+  });
+  await write('BTCUSDT', 50);
+  expect(write.mock.calls).toHaveLength(2);
+  expect(() => placedOrders()).toThrow('Unexpected placement observation');
+});
+
+it('amendment observations reject an unexpected extra write instead of silently filtering it', async () => {
+  const { write, updatedOrders } = fixture();
+  await write({ order: openOrder(), update: { price: 75800 } });
+  await write('BTCUSDT', 50);
+  expect(write.mock.calls).toHaveLength(2);
+  expect(() => updatedOrders()).toThrow('Unexpected amendment observation');
 });

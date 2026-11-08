@@ -47,6 +47,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
   ): void {
     if (ctx.exchange === null) return;
     const args = ctx.args._;
+    const catalog = ctx.exchange.store?.markets;
     if (args[leadingSymbolIndex] === '%all%') return;
     if (this.validateSymbols(ctx.exchange, args[leadingSymbolIndex]?.split(',')).length > 0) return;
     const operandSlots = new Set<number>();
@@ -64,7 +65,8 @@ export abstract class TradingBaseCommand extends BaseCommand {
       if (operandSlots.has(index) || keywordSlots.has(index)) continue;
       const token = args[index];
       if (token === '%all%') return;
-      if (this.validateSymbols(ctx.exchange, token.split(',')).length === 0) continue;
+      const listed = token.split(',').every((symbol) => resolveCompleteMarketSymbol(catalog, symbol) !== undefined);
+      if (listed === false) continue;
       if (modifiers.includes(token.toLowerCase())) candidates.push(token);
       else return;
     }

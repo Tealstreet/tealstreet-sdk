@@ -671,5 +671,7 @@ leading selector positions, case-insensitively. A trailing symbol such as `buy`
 after a stop price resolves to its loaded market alias, without changing side
 or falling back to the focused market. A modifier that also names a market
 (e.g. trailing `reduce`) needs an explicit scope; otherwise order commands
-refuse with `invalidInput` / `notSent`. Use the full market symbol or the
+refuse with `invalidInput` / `notSent`. Collision detection reads the market
+catalog independently of ticker readiness; missing tickers cannot authorize
+a write on the focused market. Use the full market symbol or the
 command's supported leading-symbol form to disambiguate.
