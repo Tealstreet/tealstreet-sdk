@@ -1858,7 +1858,11 @@ impl BitgetFutures {
             if max <= 0.0 {
                 return Err("Bitget maximum size is smaller than one lot".into());
             }
-            let mut left = total;
+            let max = if !self.account.uta && cap.is_finite() {
+                cap
+            } else {
+                max
+            };
             let count = (total / max).ceil() as usize;
             if o.client_order_id.is_some() && count > 1 {
                 return Err("Bitget caller clientOrderId would split across native orders".into());
@@ -1866,18 +1870,30 @@ impl BitgetFutures {
             if count > 10_000 {
                 return Err("Bitget order exceeds the split bound".into());
             }
-            while left > 0.0 {
-                let size = left.min(max);
-                left = num::adjust(left - size, m.precision.amount);
-                let payload = self.normal_payload(cx, o, size)?;
-                if self.account.uta {
+            if self.account.uta {
+                let mut left = total;
+                while left > 0.0 {
+                    let size = left.min(max);
+                    left = num::adjust(left - size, m.precision.amount);
                     calls.push(Planned {
                         path: paths::UTA_PLACE,
-                        payload,
+                        payload: self.normal_payload(cx, o, size)?,
                         effect: Effect::Place { expected: 1 },
                     });
-                } else if let Some((_, group)) =
-                    groups.iter_mut().find(|(symbol, _)| symbol == &o.symbol)
+                }
+                continue;
+            }
+            // TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2059-2073.
+            // Classic repeats the rounded equal lot, then appends its rounded remainder.
+            let rest = if total > max {
+                num::adjust(total % max, m.precision.amount)
+            } else {
+                0.0
+            };
+            let size = num::adjust((total - rest) / count as f64, m.precision.amount);
+            for size in std::iter::repeat_n(size, count).chain((rest != 0.0).then_some(rest)) {
+                let payload = self.normal_payload(cx, o, size)?;
+                if let Some((_, group)) = groups.iter_mut().find(|(symbol, _)| symbol == &o.symbol)
                 {
                     group.push(payload);
                 } else {

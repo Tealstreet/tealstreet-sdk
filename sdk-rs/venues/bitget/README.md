@@ -30,6 +30,11 @@ the old socket and invalidates older HTTP generations. REST snapshots preserve
 newer WebSocket state, terminal orders and recently opened orders. Failed reads
 never commit empty account state.
 
+Classic normal orders use the legacy TS allocation: round the requested amount,
+repeat the rounded equal lot `ceil(amount / max)` times, then append the rounded
+remainder. Per-lot rounding can change the submitted total. Batch chunks retain
+their 50-row limit and the existing partial-failure reporting.
+
 UTA fills use the dedicated execution channel. UTA account topics cover multiple
 products, so orders are filtered by category and positions by margin coin and
 known market. Combined standalone TP/SL strategies use separate leg identities

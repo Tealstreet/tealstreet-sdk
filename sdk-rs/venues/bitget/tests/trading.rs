@@ -50,8 +50,8 @@ fn classic_with_market_cap(cap: Option<&str>) -> Harness {
 #[test]
 fn market_quantity_cap_splits_reduce_only_children_but_keeps_the_limit_cap() {
     for (kind, reduce_only, expected) in [
-        ("market", false, vec![40.0, 40.0, 20.0]),
-        ("market", true, vec![40.0, 40.0, 20.0]),
+        ("market", false, vec![26.667, 26.667, 26.667, 20.0]),
+        ("market", true, vec![26.667, 26.667, 26.667, 20.0]),
         ("limit", false, vec![100.0]),
     ] {
         let mut h = classic_with_market_cap(Some("40"));
@@ -103,7 +103,7 @@ fn market_quantity_cap_never_exceeds_limit_and_missing_field_keeps_previous_cap(
             .iter()
             .map(|child| child["size"].as_str().unwrap().parse().unwrap())
             .collect();
-        assert_eq!(quantities, vec![120.0, 30.0]);
+        assert_eq!(quantities, vec![60.0, 60.0, 30.0]);
     }
 }
 
@@ -282,7 +282,60 @@ fn caller_id_rejects_brackets_stops_and_precision_induced_split() {
 }
 
 #[test]
-fn split_preserves_size_and_batches_at_fifty() {
+fn classic_lot_allocation_matches_the_six_ts_audit_sequences() {
+    let mut mismatches = vec![];
+    for (amount, max, step, expected) in [
+        (26.0, 5.0, 1.0, vec!["4", "4", "4", "4", "4", "4", "1"]),
+        (11.0, 5.0, 1.0, vec!["3", "3", "3", "1"]),
+        (12.0, 5.0, 1.0, vec!["3", "3", "3", "2"]),
+        (10.0, 5.0, 1.0, vec!["5", "5"]),
+        (7.0, 3.0, 0.5, vec!["2", "2", "2", "1"]),
+        (
+            1.0005,
+            0.3,
+            0.001,
+            vec!["0.225", "0.225", "0.225", "0.225", "0.101"],
+        ),
+    ] {
+        let mut h = Harness::classic();
+        h.engine.store_mut().update_markets(|market| {
+            market.precision.amount = step;
+            market.limits.amount.min = step;
+            market.limits.amount.max = max;
+        });
+        let mut order = limit();
+        order["amount"] = json!(amount);
+        place(&mut h, vec![order]);
+        let (request, payload) = body(&mut h, "/batch-place-order");
+        let actual: Vec<_> = payload["orderList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["size"].as_str().unwrap())
+            .collect();
+        if actual != expected {
+            mismatches.push(format!("{amount}/{max}/{step}: {actual:?} != {expected:?}"));
+        }
+        let ids: Vec<_> = (0..actual.len())
+            .map(|index| format!("native-{index}"))
+            .collect();
+        batch_success(
+            &mut h,
+            request,
+            &ids.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        assert!(h.done[0].1.is_ok());
+        assert!(
+            h.requests
+                .iter()
+                .all(|request| request.method == Method::Get)
+        );
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+#[test]
+fn split_uses_ts_equal_lots_and_batches_at_fifty() {
     let mut h = Harness::classic();
     h.engine.store_mut().update_markets(|m| {
         m.precision.amount = 1.0;
@@ -299,9 +352,9 @@ fn split_preserves_size_and_batches_at_fifty() {
             .iter()
             .map(|p| p["size"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["3", "3", "3", "1"]
+        ["2", "2", "2", "2", "1"]
     );
-    batch_success(&mut h, request, &["a", "b", "c", "d"]);
+    batch_success(&mut h, request, &["a", "b", "c", "d", "e"]);
     let mut h = Harness::classic();
     place(&mut h, (0..51).map(|_| limit()).collect());
     let (request, p) = body(&mut h, "/batch-place-order");
@@ -1166,13 +1219,14 @@ fn split_batch_and_uta_receipts_match_only_dispatched_native_ids() {
                     r#"{"code":"00000","data":{"orderId":"created"}}"#,
                 );
             } else {
-                batch_success(&mut h, request.id, &["a", "b", "c"]);
+                batch_success(&mut h, request.id, &["a", "b", "c", "d"]);
             }
         }
-        assert_eq!(ids.len(), 3);
+        let expected = if unified { 3 } else { 4 };
+        assert_eq!(ids.len(), expected);
         assert_eq!(
             ids.iter().collect::<std::collections::HashSet<_>>().len(),
-            3
+            expected
         );
     }
 }
@@ -1656,7 +1710,7 @@ fn split_remainder_stays_on_the_lot_step() {
         .iter()
         .map(|row| row["size"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(sizes, ["72000", "72000", "36000.1"]);
+    assert_eq!(sizes, ["48000", "48000", "48000", "36000.1"]);
 }
 
 fn account_cancel(h: &mut Harness, command: u32) {
