@@ -74,6 +74,48 @@ fn placements(
     }
     Ok(requests)
 }
+
+// Quantization must not leave a subminimum size or a zero execution price.
+fn validate_placement(payload: &Placement<'_>, market: &Market) -> Result<(), VenueError> {
+    let native = |text: &str, step: f64| {
+        let value = num::parse_decimal(text)
+            .filter(|value| *value > 0.0)
+            .ok_or_else(|| not_sent("KuCoin Spot wire quantity and prices must be positive"))?;
+        if !step.is_finite() || step <= 0.0 || num::format(adjust(value, step)) != text {
+            return Err(not_sent(
+                "KuCoin Spot wire value must align with its native step",
+            ));
+        }
+        Ok(value)
+    };
+    let amount = native(&payload.size, market.precision.amount)?;
+    let limits = &market.limits.amount;
+    if !limits.min.is_finite()
+        || limits.min < 0.0
+        || !limits.max.is_finite()
+        || limits.max <= 0.0
+        || amount < limits.min
+        || amount > limits.max
+    {
+        return Err(not_sent(
+            "KuCoin Spot wire quantity is outside native size limits",
+        ));
+    }
+    if let Some(price) = &payload.price {
+        let price = native(price, market.precision.price)?;
+        if market
+            .limits
+            .price
+            .as_ref()
+            .is_some_and(|limit| !limit.min.is_finite() || price < limit.min)
+        {
+            return Err(not_sent(
+                "KuCoin Spot wire price is below the native minimum",
+            ));
+        }
+    }
+    Ok(())
+}
 impl KucoinSpot {
     fn placement(&mut self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Write, String> {
         if !matches!(o.kind, OrderType::Limit | OrderType::Market)
@@ -100,9 +142,6 @@ impl KucoinSpot {
             return Err("invalid KuCoin Spot order amount or price".into());
         }
         let amount = adjust(o.amount, m.precision.amount);
-        if amount <= 0.0 || amount > m.limits.amount.max {
-            return Err("KuCoin Spot order exceeds native size limits".into());
-        }
         let client_oid = client_oid(o.client_order_id.as_deref(), || {
             safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
         })?;
@@ -136,6 +175,7 @@ impl KucoinSpot {
             }),
             post_only: (o.time_in_force == Some(TimeInForce::PostOnly)).then_some(true),
         };
+        validate_placement(&payload, m).map_err(|error| error.legacy_text())?;
         Ok(Write {
             receipt: Some(OrderIdentityReceipt {
                 symbol: o.symbol.clone(),
@@ -144,7 +184,7 @@ impl KucoinSpot {
             }),
             method: Method::Post,
             path: "/api/v1/hf/orders".into(),
-            body: Some(serde_json::to_string(&payload).unwrap()),
+            body: Some(serde_json::to_string(&payload).map_err(|error| error.to_string())?),
             kind: WriteKind::Place,
         })
     }
