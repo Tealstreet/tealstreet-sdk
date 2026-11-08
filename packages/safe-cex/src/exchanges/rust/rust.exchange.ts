@@ -133,6 +133,7 @@ import {
   deriveSignerSetupPolicy,
 } from './construction';
 import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigning } from './delegatedSignerSetup';
+import { snapshotDelegatedSigningOptions, withoutDelegatedSigningSnapshot } from './delegatedSigningSnapshot';
 import { mapHyperliquidSignerSetup } from './hyperliquidSignerSetup';
 import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
@@ -853,8 +854,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    options = snapshotDelegatedSigningOptions(exchangeName, options);
     assertBetaAccount(exchangeName, options);
-    const accountOptions = options;
+    const accountOptions = withoutDelegatedSigningSnapshot(options);
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
     // Coinbase drops its read egress with the key, as it always has (secondaryReadKeys.ts).
     if (
@@ -969,6 +971,7 @@ export class RustEngineExchange extends BaseExchange {
       const message = 'This Rust account has no REST-only PayloadSigner lifecycle';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
+    options = withoutDelegatedSigningSnapshot(options);
     if (signerSetup || setupError)
       options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
     if (hyperliquid && (signerSetup || setupError)) options = { ...options, key: hyperliquidAccount };

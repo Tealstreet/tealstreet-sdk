@@ -58,7 +58,8 @@ export const effectiveIdentityMetadata = (
   return effective;
 };
 
-/** Use setup's normalized key presence; malformed keyed setup stays private for validation. */
+/** Primary key presence exactly as signer setup normalizes it (effective metadata, Rust trim).
+ * A non-string key, or unparseable metadata beside a nonempty key, is keyed and malformed. */
 const primaryKeyPresence = (name: ExchangeName, options: Partial<ExchangeOptions>):
   { key: boolean; primary?: LocalIdentityMetadata; malformed: boolean } => {
   const rawKey: unknown = options.key;
@@ -72,14 +73,25 @@ const primaryKeyPresence = (name: ExchangeName, options: Partial<ExchangeOptions
   }
 };
 
-/** Resolve public mode before custody checks; only a keyed callback supplies signing presence. */
+/** Whether the account carries a primary key, normalized as signer setup does. */
+export const hasPrimaryKey = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean =>
+  primaryKeyPresence(name, options).key;
+
+/** Public mode resolved before any custody, callback or admission check, from the same
+ * normalized credential presence signer setup gives derivePublicMode. A configured callback
+ * (any value but undefined) stands in for the secret only beside a nonempty primary key, as
+ * the delegated primary signing identity does natively; malformed setup on a keyed account
+ * resolves private so setup reports its typed invalidInput refusal. */
 export const resolveEffectivePublicDataOnly = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean => {
   if (options.publicDataOnly === true) return true;
   const { key, primary, malformed } = primaryKeyPresence(name, options);
+  // A malformed key or unparseable metadata keeps a keyed account private for setup's typed refusal.
   if (malformed) return false;
   const remoteSigner = options.remoteSigner !== undefined;
   const payloadSigner = options.payloadSigner !== undefined;
   const secret = credentialPresent(options.secret, primary?.trimSigning === true) || (key && (remoteSigner || payloadSigner));
+  // Keyed: a configured callback is present even if malformed, so admission/setup refuse it.
+  // Keyless: unused callbacks keep raw truthiness and never make the account private.
   const callbacks = key ? { remoteSigner, payloadSigner } : {};
   return derivePublicMode(name, { key: '', secret: '', ...options }, undefined, { key, secret, ...callbacks }).publicDataOnly;
 };
