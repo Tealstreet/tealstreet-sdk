@@ -1,14 +1,18 @@
-import type { EngineSnapshot } from '../exchanges/base';
+import type { EngineSnapshot, OHLCVFrameRejection, OrderBookFrameRejection } from '../exchanges/base';
 
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 
+import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { consumerFrame } from '../__tests__/cutover/consumerFrame';
-import { BaseExchange } from '../exchanges/base';
 import { marketDataFrameApplier } from './marketDataFrameApplier.fixture';
+import { marketDataWorkerExchange } from './marketDataWorkerExchange.fixture';
 import { DefaultStore } from './store.base';
+
+const BaseExchange = marketDataWorkerExchange();
+type BaseExchange = InstanceType<typeof BaseExchange>;
 
 const mirrors: BaseExchange[] = [];
 const valid = () =>
@@ -240,3 +244,139 @@ it('queues a newer rejection received while a now-stale snapshot RPC is in fligh
   await settle();
   expect(requests).toBe(2);
 });
+
+function identityFrame(name: string, market = 0, interval = '1m') {
+  const bytes = new Uint8Array(nativeFrame(name));
+  const frame = new Frame(bytes.buffer);
+  let marketOffset: number;
+  if (name.toLowerCase().includes('candle')) {
+    const rows = frame.candles();
+    if (!rows) throw new Error('Missing candle fixture');
+    marketOffset = rows.market.byteOffset;
+  } else {
+    const [book] = frame.books();
+    if (!book) throw new Error('Missing book fixture');
+    marketOffset = book.bids.byteOffset - 16;
+  }
+  new DataView(bytes.buffer).setUint32(marketOffset, market, true);
+  if (interval === '5m') {
+    for (let i = 0; i < bytes.length - 1; i++) {
+      if (bytes[i] === 49 && bytes[i + 1] === 109) bytes[i] = 53;
+    }
+  }
+  return bytes.buffer;
+}
+
+function identityMirror(snapshot: () => ArrayBuffer) {
+  const result = mirror(() => ({ frame: snapshot(), fetchedLeverage: {} }));
+  const Applier = marketDataFrameApplier();
+  Object.defineProperty(result.exchange, 'workerFrameApplier', { value: new Applier(result.exchange.store) });
+  const market = (symbol: string, id: string) => ({
+    symbol,
+    id,
+    base: id,
+    quote: 'USD',
+    active: true,
+    precision: { amount: 0.001, price: 0.01 },
+    limits: { amount: { min: 0, max: 100 }, leverage: { min: 1, max: 100 } },
+  });
+  result.exchange.applyWorkerFrame(consumerFrame({ markets: [market('A/USD', 'a'), market('B/USD', 'b')] }));
+  return result;
+}
+
+const unrelatedStreams = [
+  { name: 'different book symbol', bad: 'unordered', good: 'bookUpdate', market: 1, interval: '1m' },
+  { name: 'different candle symbol', bad: 'invalidCandle', good: 'candleUpdate', market: 1, interval: '1m' },
+  { name: 'different candle interval', bad: 'invalidCandle', good: 'candleUpdate', market: 0, interval: '5m' },
+];
+
+it.each(unrelatedStreams)(
+  'keeps stream backoff when recovery returns a $name',
+  async ({ bad, good, market, interval }) => {
+    const { exchange, calls } = identityMirror(() => identityFrame(good));
+    for (let i = 0; i < 20; i++) {
+      exchange.applyWorkerFrame(identityFrame(bad, market, interval));
+      await settle();
+    }
+    expect(calls).toHaveBeenCalledTimes(1);
+    exchange.applyWorkerFrame(identityFrame(good, market, interval));
+    exchange.applyWorkerFrame(identityFrame(bad, market, interval));
+    await settle();
+    expect(calls).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each(unrelatedStreams)(
+  'keeps stream backoff across healthy traffic for a $name',
+  async ({ bad, good, market, interval }) => {
+    const { exchange, calls } = identityMirror(() => identityFrame(bad, market, interval));
+    for (let i = 0; i < 20; i++) {
+      exchange.applyWorkerFrame(identityFrame(bad, market, interval));
+      await settle();
+      exchange.applyWorkerFrame(identityFrame(good));
+      await settle();
+    }
+    expect(calls).toHaveBeenCalledTimes(1);
+    exchange.applyWorkerFrame(identityFrame(good, market, interval));
+    exchange.applyWorkerFrame(identityFrame(bad, market, interval));
+    await settle();
+    expect(calls).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each(unrelatedStreams)('reports only the rejected identity for a $name', ({ bad, market, interval }) => {
+  const { exchange } = identityMirror(() => identityFrame(bad, market, interval));
+  const signals: Array<OrderBookFrameRejection | OHLCVFrameRejection> = [];
+  for (const symbol of ['A/USD', 'B/USD']) {
+    exchange.listenOrderBookWebworker(
+      symbol,
+      () => {},
+      (signal) => signals.push(signal),
+    );
+    const intervals: Array<'1m' | '5m'> = ['1m', '5m'];
+    for (const candleInterval of intervals) {
+      exchange.listenOHLCVWebworker(
+        { symbol, interval: candleInterval },
+        () => {},
+        (signal) => signals.push(signal),
+      );
+    }
+  }
+  exchange.applyWorkerFrame(identityFrame(bad, market, interval));
+  expect(signals).toHaveLength(1);
+  expect(signals[0]).toMatchObject({
+    stream: bad === 'unordered' ? 'orderBook' : 'ohlcv',
+    symbol: market === 0 ? 'A/USD' : 'B/USD',
+    ...(bad === 'unordered' ? {} : { interval }),
+    error: expect.any(Error),
+  });
+});
+
+it('keeps backoff until both unresolved book identities recover', async () => {
+  const { exchange, calls } = identityMirror(() => identityFrame('unordered', 1));
+  exchange.applyWorkerFrame(identityFrame('unordered', 0));
+  await settle();
+  exchange.applyWorkerFrame(identityFrame('unordered', 1));
+  exchange.applyWorkerFrame(identityFrame('bookUpdate', 0));
+  exchange.applyWorkerFrame(identityFrame('unordered', 1));
+  await settle();
+  expect(calls).toHaveBeenCalledTimes(1);
+  exchange.applyWorkerFrame(identityFrame('bookUpdate', 1));
+  exchange.applyWorkerFrame(identityFrame('unordered', 1));
+  await settle();
+  expect(calls).toHaveBeenCalledTimes(2);
+});
+
+it.each(['unordered', 'invalidCandle'])(
+  'retains unidentified %s recovery across unrelated catalogue snapshots',
+  async (bad) => {
+    const { exchange, calls } = identityMirror(() => nativeFrame('snapshot'));
+    for (let i = 0; i < 20; i++) {
+      exchange.applyWorkerFrame(identityFrame(bad, 99));
+      await settle();
+      exchange.applyWorkerFrame(nativeFrame('snapshot'));
+      await settle();
+    }
+    expect(calls).toHaveBeenCalledTimes(1);
+  },
+);

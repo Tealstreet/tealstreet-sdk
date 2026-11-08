@@ -271,15 +271,20 @@ diff --git a/packages/safe-cex/src/store/frameApplier.ts b/packages/safe-cex/src
    }
 
    applyLeverage(symbol: string, leverage: FetchedLeverage): void {
-@@ -572,6 +576,7 @@
+@@ -571,7 +575,12 @@
+     return this.marketSymbols[market] ?? fallback ?? '';
    }
 
++  marketSymbolsFor(frame: Frame): readonly string[] {
++    return this.frameMarkets.get(frame)?.symbols ?? this.marketSymbols;
++  }
++
    books(frame: Frame): FrameBook[] {
 +    if (this.bookErrors.has(frame)) throw this.bookErrors.get(frame);
      const captured = this.frameMarkets.get(frame);
      const markets = captured ? undefined : frame.markets();
      return this.ingestBooks(
-@@ -583,119 +588,12 @@
+@@ -583,119 +592,12 @@
    }
 
    private ingestBooks(frame: Frame, symbols: string[], ids: string[]): FrameBook[] {
@@ -649,7 +654,23 @@ diff --git a/packages/safe-cex/package.json b/packages/safe-cex/package.json
 diff --git a/packages/safe-cex/src/exchanges/base.ts b/packages/safe-cex/src/exchanges/base.ts
 --- a/packages/safe-cex/src/exchanges/base.ts
 +++ b/packages/safe-cex/src/exchanges/base.ts
-@@ -1273,8 +1273,8 @@
+@@ -4,6 +4,7 @@
+ import type { TinyEmitter } from 'tiny-emitter';
+ import type { PositionRecord } from '../journal/position.types';
+ import type { Store } from '../store/store.interface';
++import type { WorkerFrameRejection } from '../store/workerFrameRecoveryScopes';
+ import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
+ import type { HttpFailureRecord } from '../utils/httpFailureContext';
+ import type {
+@@ -28,6 +29,7 @@
+ import { withHistoryCompleteness } from '../historyCompleteness';
+ import { buildFoldedPositionRecords } from '../journal/buildRecords';
+ import { FrameApplier, FrameApplyError } from '../store/frameApplier';
++import { WorkerFrameRecoveryScopes } from '../store/workerFrameRecoveryScopes';
+ import { reportException } from '../telemetry';
+ import {
+   AccountGreeks,
+@@ -1273,8 +1275,8 @@
      await Promise.reject(new Error('Not implemented'));
    };
 
@@ -660,6 +681,126 @@ diff --git a/packages/safe-cex/src/exchanges/base.ts b/packages/safe-cex/src/exc
    };
 
    fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async (_opts: ExecutionsOptions) => {
+@@ -1703,8 +1705,15 @@
+         c(event.candle);
+       }
+     };
+-    const rejected = (error: unknown) =>
+-      this.dispatchFrameEvent(() => onRejection?.({ stream: 'ohlcv', symbol: o.symbol, interval: o.interval, error }));
++    const rejected = (signal: WorkerFrameRejection) => {
++      if (
++        signal.candles === undefined ||
++        signal.candles.some((stream) => stream.symbol === o.symbol && stream.interval === o.interval)
++      )
++        this.dispatchFrameEvent(() =>
++          onRejection?.({ stream: 'ohlcv', symbol: o.symbol, interval: o.interval, error: signal.error }),
++        );
++    };
+     this.emitter.on('listenOHLCV', handler);
+     if (onRejection) this.emitter.on('workerCandleFrameRejected', rejected);
+     return () => {
+@@ -1724,7 +1733,7 @@
+   private workerFrameRecoveryAttempts = 0;
+   private workerFrameRecoveryAt = 0;
+   private workerFrameRecoveryRevision = 0;
+-  private readonly workerFrameRejectedSections = new Set<'frame' | 'books' | 'candles' | 'fills'>();
++  private readonly workerFrameRejectedSections = new WorkerFrameRecoveryScopes();
+
+   fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
+     throw new Error('Engine snapshots are unavailable for this exchange');
+@@ -1755,13 +1764,18 @@
+     const notified = new Set<string>();
+     const rejected = (section: 'frame' | 'books' | 'candles' | 'fills', error: unknown) => {
+       needsSnapshot = true;
+-      this.workerFrameRejectedSections.add(section);
++      const signal = this.workerFrameRejectedSections.reject(
++        section,
++        error,
++        frame,
++        frame ? applier.marketSymbolsFor(frame) : [],
++      );
+       if (notified.has(section)) return;
+       notified.add(section);
+       if (section === 'frame' || section === 'books')
+-        this.dispatchFrameEvent(() => this.emitter.emit('workerBookFrameRejected', error));
++        this.dispatchFrameEvent(() => this.emitter.emit('workerBookFrameRejected', signal));
+       if (section === 'frame' || section === 'candles')
+-        this.dispatchFrameEvent(() => this.emitter.emit('workerCandleFrameRejected', error));
++        this.dispatchFrameEvent(() => this.emitter.emit('workerCandleFrameRejected', signal));
+     };
+     try {
+       frame = new Frame(buffer);
+@@ -1780,20 +1794,25 @@
+       }
+       try {
+         applier.apply(decoded);
+-        if (applier.hasMarketIdentity && decoded.markets()) this.workerFrameRejectedSections.delete('frame');
++        if (applier.hasMarketIdentity && decoded.markets()) this.workerFrameRejectedSections.acceptMarketSnapshot();
+       } catch (error) {
+         if (error instanceof FrameApplyError) {
+           needsSnapshot = true;
+           if (error.bookRejected) rejected('books', error);
+-          if (error.otherRejected) this.workerFrameRejectedSections.add('frame');
++          if (error.otherRejected) this.workerFrameRejectedSections.reject('frame', error);
+         }
+         console.error('Engine frame apply failed', error);
+       }
+-      const deliver = <T>(read: () => T[], event: string, section: 'books' | 'candles' | 'fills') => {
++      const deliver = <T>(
++        read: () => T[],
++        event: string,
++        section: 'books' | 'candles' | 'fills',
++        accept: (rows: T[]) => void,
++      ) => {
+         let rows: T[];
+         try {
+           rows = read();
+-          if (rows.length && applier.hasMarketIdentity) this.workerFrameRejectedSections.delete(section);
++          if (applier.hasMarketIdentity) accept(rows);
+         } catch (error) {
+           rejected(section, error);
+           console.error('Engine frame section failed', error);
+@@ -1801,9 +1820,24 @@
+         }
+         for (const row of rows) this.dispatchFrameEvent(() => this.emitter.emit(event, row));
+       };
+-      deliver(() => applier.books(decoded), 'listenOrderBook', 'books');
+-      deliver(() => applier.candles(decoded), 'listenOHLCV', 'candles');
+-      deliver(() => applier.fills(decoded), 'fill', 'fills');
++      deliver(
++        () => applier.books(decoded),
++        'listenOrderBook',
++        'books',
++        (rows) => this.workerFrameRejectedSections.acceptBooks(rows),
++      );
++      deliver(
++        () => applier.candles(decoded),
++        'listenOHLCV',
++        'candles',
++        (rows) => this.workerFrameRejectedSections.acceptCandles(rows),
++      );
++      deliver(
++        () => applier.fills(decoded),
++        'fill',
++        'fills',
++        (rows) => this.workerFrameRejectedSections.acceptFills(rows.length > 0),
++      );
+       if (recovering && !needsSnapshot && this.workerFrameRejectedSections.size === 0) {
+         clearTimeout(this.workerFrameRecoveryTimer);
+         this.workerFrameRecoveryTimer = undefined;
+@@ -1873,8 +1907,10 @@
+         c(event.orderbook);
+       }
+     };
+-    const rejected = (error: unknown) =>
+-      this.dispatchFrameEvent(() => onRejection?.({ stream: 'orderBook', symbol: s, error }));
++    const rejected = (signal: WorkerFrameRejection) => {
++      if (signal.books === undefined || signal.books.includes(s))
++        this.dispatchFrameEvent(() => onRejection?.({ stream: 'orderBook', symbol: s, error: signal.error }));
++    };
+     this.emitter.on('listenOrderBook', handler);
+     if (onRejection) this.emitter.on('workerBookFrameRejected', rejected);
+     return () => {
 diff --git a/packages/safe-cex/src/__tests__/reference/asterdex/asterdex.ws-public.ts b/packages/safe-cex/src/__tests__/reference/asterdex/asterdex.ws-public.ts
 --- a/packages/safe-cex/src/__tests__/reference/asterdex/asterdex.ws-public.ts
 +++ b/packages/safe-cex/src/__tests__/reference/asterdex/asterdex.ws-public.ts
