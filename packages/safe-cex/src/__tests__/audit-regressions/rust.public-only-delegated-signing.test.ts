@@ -211,3 +211,61 @@ it('a disposed public-only setup cannot construct an engine', () => {
     .toThrow('disposed');
   expect(Engine).not.toHaveBeenCalled();
 });
+
+// Keys are normalized exactly as signer setup presents them to derivePublicMode:
+// declared or caller trimCredential with Rust White_Space semantics.
+const blankKeys = ['   ', '\u0085 '];
+const callerTrimVenues: ExchangeName[] = ['kucoin', 'kucoinspot', 'grvt', 'apexomni', 'backpack', 'binance'];
+const trimCases: Array<{ name: ExchangeName; localSigner?: ExchangeOptions['localSigner'] }> = [
+  { name: 'bitunix' }, { name: 'mexc' },
+  ...callerTrimVenues.map((name) => ({ name, localSigner: { primary: { trimCredential: true } } })),
+];
+
+it.each(trimCases)('$name resolves a key that normalizes to empty as public before custody', async ({ name, localSigner }) => {
+  const { remoteSigner, payloadSigner } = unusedSigners();
+  for (const key of blankKeys) {
+    for (const callbacks of [{ remoteSigner }, { payloadSigner }]) {
+      const label = `${name} ${JSON.stringify(key)} ${Object.keys(callbacks)[0]}`;
+      const exchange = new RustEngineExchange(name, { key, secret: '', ...(localSigner ? { localSigner } : {}), ...callbacks },
+        new DefaultStore());
+      try {
+        expect(exchange.isPublicDataOnly, label).toBe(true);
+        expect(exchange.privateWebsocket, label).toBeUndefined();
+        const setup: unknown = Reflect.get(exchange, 'signerSetup');
+        if (setup instanceof DelegatedSignerSetup) {
+          expect(setup.credentialPresence, label).toEqual({ key: false, secret: false });
+          expect(setup.signerAlgorithms, label).toEqual([]);
+        }
+      } finally { exchange.dispose(); }
+    }
+  }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+it('keeps an untrimmed whitespace key as exact private bytes when no trim policy applies', () => {
+  const { remoteSigner } = unusedSigners();
+  const exchange = new RustEngineExchange('binance', { key: blankKeys[0], secret: '', remoteSigner }, new DefaultStore());
+  try { expect(exchange.isPublicDataOnly).toBe(false); }
+  finally { exchange.dispose(); }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+});
+
+const malformedCallbacks: Array<{ field: 'remoteSigner' | 'payloadSigner'; value: unknown }> = [
+  { field: 'remoteSigner', value: null }, { field: 'remoteSigner', value: false },
+  { field: 'remoteSigner', value: {} }, { field: 'remoteSigner', value: 'not-a-signer' },
+  { field: 'payloadSigner', value: null }, { field: 'payloadSigner', value: '' },
+  { field: 'payloadSigner', value: false }, { field: 'payloadSigner', value: 'not-a-function' },
+];
+
+it.each(malformedCallbacks)('a keyed account with a configured malformed $field ($value) keeps its typed refusal', ({ field, value }) => {
+  const options: ExchangeOptions = { key: 'fixture-key', secret: '' };
+  Reflect.set(options, field, value);
+  expect(() => new RustEngineExchange('binance', options, new DefaultStore()))
+    .toThrowError(expect.objectContaining({ kind: 'invalidInput', outcome: 'notSent' }));
+  const keyless: ExchangeOptions = { key: '', secret: '' };
+  Reflect.set(keyless, field, value);
+  const exchange = new RustEngineExchange('binance', keyless, new DefaultStore());
+  try { expect(exchange.isPublicDataOnly).toBe(true); }
+  finally { exchange.dispose(); }
+});

@@ -4,7 +4,8 @@ import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { unsupportedVenueError } from '../../unsupportedVenue';
-import { deriveRemoteSigningPolicy, resolveEffectivePublicDataOnly } from './construction';
+import { deriveRemoteSigningPolicy } from './construction';
+import { resolveEffectivePublicDataOnly } from './localSignerSetup';
 
 /** The Rust-only beta build's complete venue policy, including saved aliases. */
 export const BETA_VENUES = Object.freeze([

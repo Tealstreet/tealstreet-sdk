@@ -5,8 +5,8 @@ import type { CredentialPresence } from './construction';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { nanoid } from 'nanoid';
 
-import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy, resolveEffectivePublicDataOnly } from './construction';
-import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
+import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
+import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveEffectivePublicDataOnly, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
 import { createRemoteSignerProvider, remoteSignerAlgorithms } from './remoteSignerProvider';
 
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
