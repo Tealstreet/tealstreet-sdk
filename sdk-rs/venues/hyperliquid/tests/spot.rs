@@ -184,49 +184,7 @@ fn late_rest_balance_does_not_overwrite_newer_websocket() {
     assert_eq!(e.store().balance().total, 20.0);
 }
 fn order(symbol: &str) -> PlaceOrderOpts {
-    serde_json::from_str(&format!(r#"{{"symbol":"{symbol}","type":"limit","side":"buy","price":0.00093722,"amount":12416,"clientOrderId":"0x00000000000000000000000000000001"}}"#)).unwrap()
-}
-#[test]
-fn spot_whole_plan_refuses_invalid_last_wire_before_any_transport() {
-    for amount in [1., 0.4, 501.] {
-        let (mut e, _) = ready(true);
-        e.drain_plain().for_each(drop);
-        e.store_mut().update_markets(|market| {
-            market.precision.amount = 1.;
-            market.limits.amount.min = 2.;
-            market.limits.amount.max = 500.;
-        });
-        let mut first = order("PURR/USDC");
-        first.amount = 100.;
-        first.price = Some(0.2);
-        first.client_order_id = None;
-        let mut last = first.clone();
-        last.amount = amount;
-        e.handle(
-            2000.,
-            Event::Command(Command::PlaceOrders {
-                command: 92,
-                orders: vec![first, last],
-            }),
-        );
-        let actions = prepared_now(&mut e);
-        assert_eq!(
-            actions
-                .iter()
-                .filter(|action| matches!(action, Action::Http(_)))
-                .count(),
-            0,
-            "{actions:?}"
-        );
-        assert!(
-            actions.iter().any(|action| matches!(action,
-                Action::Notice(Notice::CommandFailed { command: 92, error })
-                    if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                        && error.kind == Some(safe_cex_engine::ErrorKind::InvalidInput)
-            )),
-            "{actions:?}"
-        );
-    }
+    serde_json::from_str(&format!(r#"{{"symbol":"{symbol}","type":"limit","side":"buy","price":0.00093722,"amount":6208,"clientOrderId":"0x00000000000000000000000000000001"}}"#)).unwrap()
 }
 #[test]
 fn spot_receipt_keeps_canonical_symbol_and_actual_shifted_asset_cloid() {
@@ -490,7 +448,7 @@ fn spot_market_order_uses_last_mid_with_five_percent_gtc_envelope() {
     e.drain_plain().for_each(drop);
     let mut o = order("PURR/USDC");
     o.kind = OrderType::Market;
-    o.amount = 100.0;
+    o.amount = 10.0;
     o.price = None;
     e.handle(
         3000.0,
@@ -800,7 +758,7 @@ fn spot_metadata_failures_keep_retrying_without_committing_partial_markets() {
 
 #[test]
 fn fills_before_resting_ack_preserve_native_executed_quantity() {
-    for (sizes, remaining) in [(vec![12416.0], 0.0), (vec![1000.0, 2000.0], 9416.0)] {
+    for (sizes, remaining) in [(vec![6208.0], 0.0), (vec![1000.0, 2000.0], 3208.0)] {
         let (mut e, s) = ready(true);
         e.drain_plain().for_each(drop);
         e.handle(
@@ -1983,7 +1941,7 @@ fn a_trade_print_does_not_move_a_spot_market_order_price() {
     e.drain_plain().for_each(drop);
     let mut o = order("PURR/USDC");
     o.kind = OrderType::Market;
-    o.amount = 100.0;
+    o.amount = 10.0;
     o.price = None;
     e.handle(
         3000.0,

@@ -95,6 +95,13 @@ impl Hyperliquid {
                 return;
             }
         };
+        job.journal = match write_plan::Journal::new(&job.steps) {
+            Ok(journal) => journal,
+            Err(error) => {
+                cx.refuse_command(Operation::Mutation, error);
+                return;
+            }
+        };
         let remaining = if job.amend_source.is_some() {
             remaining.min(AMEND_READ_MS as u32)
         } else {
@@ -406,6 +413,7 @@ impl Hyperliquid {
         job: &Job,
         result: Result<String, VenueError>,
     ) {
+        let result = result.map_err(|error| job.journal.failure(error));
         let custody = job.custody.as_ref().unwrap();
         if let Some(timer) = custody.intent_timer {
             cx.clear_timer(timer);
@@ -659,18 +667,11 @@ impl Hyperliquid {
         response: Response<'_>,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
-        if let Some(plan) = self
-            .trading
-            .active
-            .as_ref()
-            .filter(|job| {
-                job.command == request.command
-                    && job.custody.as_ref().and_then(|c| c.context.as_ref())
-                        == Some(&request.context)
-            })
-            .and_then(|job| job.writes.as_ref())
-        {
-            evidence.write_plan(plan);
+        if let Some(job) = self.trading.active.as_ref().filter(|job| {
+            job.command == request.command
+                && job.custody.as_ref().and_then(|c| c.context.as_ref()) == Some(&request.context)
+        }) {
+            job.journal.evidence(evidence);
         }
         if let Ok(reply) = serde_json::from_str::<Reply<'_>>(response.body)
             && reply.status == "err"
@@ -711,11 +712,9 @@ impl Hyperliquid {
             },
             None,
         )?;
-        if let Some(job) = self.trading.active.as_mut()
-            && let Some(index) = job.pending_write.take()
-            && let Some(plan) = job.writes.as_mut()
-        {
-            plan.fail(index, fact.error().clone())
+        if let Some(job) = self.trading.active.as_mut() {
+            job.journal
+                .fail(fact.error().clone())
                 .map_err(|_| safe_cex_engine::request_context::Error::Invalid)?;
         }
         Ok(())
@@ -731,9 +730,9 @@ impl Hyperliquid {
         let Some(job) = self.trading.active.as_ref() else {
             return Ok(());
         };
-        let Some(index) = job.pending_write else {
+        if !job.journal.pending() {
             return Ok(());
-        };
+        }
         let idempotent_cancel = job.amend_source.is_none();
         let intent = match &request.effect {
             Effect::Place(_) if request.order_reply == OrderReply::FullPosition => Intent::Setting,
@@ -841,12 +840,8 @@ impl Hyperliquid {
             };
             results.push(result);
         }
-        if let Some(job) = self.trading.active.as_mut()
-            && let Some(plan) = job.writes.as_mut()
-        {
-            plan.settle(index, results)
-                .map_err(|e| unproven(e.to_string()))?;
-            job.pending_write = None;
+        if let Some(job) = self.trading.active.as_mut() {
+            job.journal.settle(results)?;
         }
         Ok(())
     }

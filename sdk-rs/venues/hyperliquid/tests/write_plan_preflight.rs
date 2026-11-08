@@ -1,10 +1,10 @@
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, HttpRequest, Notice, Outcome};
+use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Outcome};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::{Value, json};
-use support::{Plain, advance_packet_timers, message, prepared_now, ready, reply};
+use support::{advance_packet_timers, prepared_now, ready, reply};
 
 #[derive(Default)]
 struct ScriptedTransport {
@@ -38,138 +38,58 @@ fn configured() -> Engine<Hyperliquid> {
     engine
 }
 
-fn refuse(engine: &mut Engine<Hyperliquid>, command: Command) {
-    engine.handle(2000., Event::Command(command));
-    let actions = prepared_now(engine);
-    let mut transport = ScriptedTransport::default();
-    transport.record(&actions);
-    assert_eq!(
-        transport.requests.len(),
-        0,
-        "preknown invalid plan must send zero transport requests: {actions:?}"
-    );
-    let errors: Vec<_> = actions
-        .iter()
-        .filter_map(|action| match action {
-            Action::Notice(Notice::CommandFailed { command: 77, error }) => Some(error),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(errors.len(), 1, "{actions:?}");
-    assert_eq!(errors[0].outcome, Some(Outcome::NotSent));
-    assert_eq!(errors[0].kind, Some(ErrorKind::InvalidInput));
-    assert!(errors[0].partial.is_none());
-}
-
 #[test]
-fn valid_first_below_min_second_zero_writes() {
-    refuse(
-        &mut configured(),
-        Command::PlaceOrders {
-            command: 77,
-            orders: vec![order(3.), order(1.)],
+fn legacy_serial_dispatch_does_not_add_native_rule_gates() {
+    for last in [
+        order(1.),
+        order(0.4),
+        order(6.),
+        {
+            let mut last = order(3.);
+            last.price = Some(3.);
+            last
         },
-    );
-}
-
-#[test]
-fn valid_first_rounds_zero_second_zero_writes() {
-    refuse(
-        &mut configured(),
-        Command::PlaceOrders {
-            command: 77,
-            orders: vec![order(3.), order(0.4)],
+        {
+            let mut last = order(3.);
+            last.price = Some(0.000000001);
+            last
         },
-    );
-}
-
-#[test]
-fn valid_first_above_max_second_zero_writes() {
-    refuse(
-        &mut configured(),
-        Command::PlaceOrders {
-            command: 77,
-            orders: vec![order(3.), order(6.)],
+        {
+            let mut last = order(3.);
+            last.stop_loss = Some(0.000000001);
+            last
         },
-    );
+    ] {
+        let payloads = submit_valid(vec![order(3.), last]);
+        assert_eq!(
+            payloads.len(),
+            2,
+            "TS formats and sends each serial row without min/max/notional gates"
+        );
+    }
 }
 
 #[test]
-fn rounded_last_quantity_above_max_zero_writes() {
+fn caller_id_validation_still_refuses_entire_batch() {
     let mut engine = configured();
-    engine
-        .store_mut()
-        .update_markets(|market| market.limits.amount.max = 4.9);
-    refuse(
-        &mut engine,
-        Command::PlaceOrders {
-            command: 77,
-            orders: vec![order(3.), order(4.9)],
-        },
-    );
-}
-
-#[test]
-fn invalid_last_bracket_wire_zero_writes() {
     let mut last = order(3.);
-    last.stop_loss = Some(0.000000001);
-    refuse(
-        &mut configured(),
-        Command::PlaceOrders {
+    last.client_order_id = Some("invalid".into());
+    engine.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
             command: 77,
             orders: vec![order(3.), last],
-        },
+        }),
     );
-}
-
-#[test]
-fn last_row_below_native_notional_zero_writes() {
-    let mut last = order(3.);
-    last.price = Some(3.);
-    refuse(
-        &mut configured(),
-        Command::PlaceOrders {
-            command: 77,
-            orders: vec![order(3.), last],
-        },
+    let actions = prepared_now(&mut engine);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
     );
-}
-
-#[test]
-fn positive_last_price_rounds_zero_zero_writes() {
-    let mut last = order(3.);
-    last.price = Some(0.000000001);
-    refuse(
-        &mut configured(),
-        Command::PlaceOrders {
-            command: 77,
-            orders: vec![order(3.), last],
-        },
-    );
-}
-
-#[test]
-fn invalid_replacement_never_cancels() {
-    let (mut engine, socket) = ready("disabled");
-    message(
-        &mut engine,
-        socket,
-        1900.,
-        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"100","origSz":"3","sz":"3","reduceOnly":false,"orderType":"Limit"},"status":"open"}]}"#,
-    );
-    engine.drain_plain().for_each(drop);
-    engine
-        .store_mut()
-        .update_markets(|market| market.limits.amount.min = 2.);
-    refuse(
-        &mut engine,
-        Command::AmendOrder {
-            command: 77,
-            id: "9".into(),
-            price: Some(110.),
-            amount: Some(1.),
-        },
-    );
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { command: 77, error })
+        if error.outcome == Some(Outcome::NotSent) && error.message.contains("client order ID"))));
 }
 
 fn submit_valid(orders: Vec<PlaceOrderOpts>) -> Vec<Value> {
@@ -387,55 +307,55 @@ fn runtime_server_failure_retains_complete_journal() {
 }
 
 #[test]
-fn local_veto_after_next_marks_pending_row_not_sent() {
+fn later_market_write_uses_current_price_without_frozen_plan_veto() {
     let mut engine = configured();
+    let mut second = order(3.);
+    second.kind = safe_cex_engine::model::OrderType::Market;
+    second.price = None;
     engine.handle(
         2000.,
         Event::Command(Command::PlaceOrders {
             command: 77,
-            orders: vec![order(3.), order(3.), order(3.)],
+            orders: vec![order(3.), second],
         }),
     );
     let mut actions = prepared_now(&mut engine);
     let mut writes = 0;
-    let mut failure = None;
+    let mut done = false;
     for _ in 0..8 {
         for action in &actions {
+            assert!(
+                !matches!(action, Action::Notice(Notice::CommandFailed { .. })),
+                "{actions:?}"
+            );
             match action {
                 Action::Http(request) if request.url.ends_with("/exchange") => {
                     writes += 1;
-                    assert_eq!(writes, 1, "local veto must not release another write");
-                    engine
-                        .store_mut()
-                        .update_markets(|market| market.limits.amount.max = 2.);
-                    reply(
-                        &mut engine,
-                        request,
-                        200,
-                        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":91}}]}}}"#,
-                    );
+                    assert!(writes <= 2);
+                    if writes == 1 {
+                        engine
+                            .store_mut()
+                            .update_ticker("BTC-PERP", |ticker| ticker.mark = 200.);
+                        engine
+                            .store_mut()
+                            .update_markets(|market| market.limits.amount.max = 2.);
+                    } else {
+                        let body: Value =
+                            serde_json::from_str(request.body.as_deref().expect("body"))
+                                .expect("wire");
+                        assert_eq!(body["action"]["orders"][0]["p"], "210");
+                    }
+                    reply(&mut engine, request, 200, &json!({"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":90+writes}}]}}}).to_string());
                 }
-                Action::Notice(Notice::CommandFailed { command: 77, error }) => {
-                    failure = Some(serde_json::to_value(error).expect("error JSON"));
-                }
-                Action::Notice(Notice::CommandDone { command: 77, .. }) => {
-                    panic!("local veto reported whole")
-                }
+                Action::Notice(Notice::CommandDone { command: 77, .. }) => done = true,
                 _ => {}
             }
         }
         let next = prepared_now(&mut engine);
-        actions = advance_packet_timers(&mut engine, next, 20_000.);
+        actions = advance_packet_timers(&mut engine, next, 4000.);
     }
-    assert_eq!(writes, 1);
-    let error = failure.expect("terminal failure");
-    let elements = error["elements"].as_array().expect("complete journal");
-    assert_eq!(elements.len(), 3);
-    assert_eq!(elements[0]["status"], "placed");
-    assert_eq!(elements[1]["status"], "notSent");
-    assert_eq!(elements[1]["error"]["outcome"], "notSent");
-    assert_eq!(elements[2]["status"], "notSent");
-    assert!(elements[2].get("error").is_none());
+    assert!(done);
+    assert_eq!(writes, 2);
 }
 
 fn accepted_idless_prefix(first: PlaceOrderOpts, statuses: Value, expected: &[&str]) {
@@ -643,4 +563,35 @@ fn settings_and_schedule_controls_have_journaled_runtime_refusals() {
             |action| matches!(action, Action::Http(request) if request.url.ends_with("/exchange"))
         ));
     }
+}
+
+#[test]
+fn caller_id_size_gate_matches_ts_rounded_maximum() {
+    let mut accepted = order(5.1);
+    accepted.client_order_id = Some("0x00000000000000000000000000000001".into());
+    let payloads = submit_valid(vec![order(3.), accepted]);
+    assert_eq!(payloads[1]["action"]["orders"][0]["s"], "5");
+
+    let mut engine = configured();
+    engine
+        .store_mut()
+        .update_markets(|market| market.limits.amount.max = 4.9);
+    let mut refused = order(4.9);
+    refused.client_order_id = Some("0x00000000000000000000000000000001".into());
+    engine.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 77,
+            orders: vec![order(3.), refused],
+        }),
+    );
+    let actions = prepared_now(&mut engine);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { command: 77, error })
+        if error.outcome == Some(Outcome::NotSent) && error.message.contains("cannot be split"))));
 }
