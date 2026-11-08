@@ -49,7 +49,10 @@ After a placement refusal, dispatch follows the legacy TS path: Classic
 `failureList` rows and HTTP failures stop later batches and standalone TP/SL;
 UTA normal and strategy refusals stop subsequent writes. Classic batch HTTP-200
 business refusals without a `failureList` continue to later batches and TP/SL,
-while the final command retains the refusal and acknowledged partial identities.
+while Rust retains the refusal and acknowledged partial identities in its terminal
+error (`kind=rejected`, with no outcome after partial success). Legacy TS resolves
+with the collected IDs instead. This terminal-classification parity exception is
+pending Sam's decision; the current pins deliberately retain the Rust result.
 Native amend rejection still releases its cancel/replace fallback. A rejected
 UTA protective replacement still attempts the original stop once; a refused
 restore ends the sequence. Zero-rounded anonymous rows remain omitted before

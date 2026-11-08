@@ -1,7 +1,7 @@
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::{Command, HttpRequest, Method};
+use safe_cex_engine::{Command, ErrorKind, HttpRequest, Method};
 use serde_json::{Value, json};
 use support::*;
 
@@ -118,6 +118,13 @@ fn stopped(h: &Harness) {
     );
     assert_eq!(h.done.len(), 1);
     assert!(h.done[0].1.is_err());
+}
+
+fn pending_terminal_kind(h: &Harness) {
+    stopped(h);
+    assert_eq!(h.failures[0].kind, Some(ErrorKind::Rejected));
+    assert_eq!(h.failures[0].outcome, None);
+    assert_eq!(h.failures[0].venue_code.as_deref(), Some("40017"));
 }
 
 fn row_refusal(h: &mut Harness, r: HttpRequest, body: &Value, uta: bool) {
@@ -343,8 +350,9 @@ fn failed_protective_replacement_restores_once_and_a_failed_restore_stops() {
 }
 
 #[test]
-// TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2284-2305.
+// TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2280-2316 resolves the collected IDs.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bitget | trading.rs:1802/max-qty-splitting
+// PARITY-EXCEPTION-PENDING bitget trading.rs:1802/max-qty-splitting/Classic-envelope-terminal: kind Rejected, outcome None; Sam to decide.
 fn classic_split_envelope_refusal_continues_to_later_lots() {
     let mut h = ready(false);
     place(&mut h, vec![normal(6120.0)]);
@@ -353,7 +361,7 @@ fn classic_split_envelope_refusal_continues_to_later_lots() {
     let (last, body) = take_write(&mut h, "/batch-place-order");
     assert_eq!(body["orderList"].as_array().expect("last lot").len(), 1);
     accepted(&mut h, last, &body);
-    stopped(&h);
+    pending_terminal_kind(&h);
     assert_eq!(
         h.failures[0]
             .partial
@@ -366,8 +374,9 @@ fn classic_split_envelope_refusal_continues_to_later_lots() {
 }
 
 #[test]
-// TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2008,2284-2305.
+// TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2008,2280-2316 resolves the collected IDs.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bitget | trading.rs:1861/classic-batch-chunks-and-UTA-serial
+// PARITY-EXCEPTION-PENDING bitget trading.rs:1861/classic-batch-chunks-and-UTA-serial/Classic-envelope-terminal: kind Rejected, outcome None; Sam to decide.
 fn classic_batch_envelope_refusal_continues_to_later_rows_and_standalone_stop() {
     let mut h = ready(false);
     let mut rows = vec![normal(1.0); 51];
@@ -379,7 +388,7 @@ fn classic_batch_envelope_refusal_continues_to_later_rows_and_standalone_stop() 
     accepted(&mut h, last, &body);
     let (stop, body) = take_write(&mut h, "/place-tpsl-order");
     accepted(&mut h, stop, &body);
-    stopped(&h);
+    pending_terminal_kind(&h);
     assert_eq!(
         h.failures[0]
             .partial
@@ -392,8 +401,9 @@ fn classic_batch_envelope_refusal_continues_to_later_rows_and_standalone_stop() 
 }
 
 #[test]
-// TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2472-2480,2505-2529,2284-2305.
+// TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2472-2480,2505-2529,2316 resolves replacement IDs.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bitget | trading.rs:2378/amend-fallback-and-cancel-replace
+// PARITY-EXCEPTION-PENDING bitget trading.rs:2378/amend-fallback-and-cancel-replace/Classic-envelope-terminal: kind Rejected, outcome None; Sam to decide.
 fn classic_amend_fallback_replacement_envelope_refusal_continues_to_later_lots() {
     let mut h = ready(false);
     amend_fallback(&mut h, 6120.0);
@@ -402,7 +412,7 @@ fn classic_amend_fallback_replacement_envelope_refusal_continues_to_later_lots()
     h.reply(first.id, 200, REJECTED);
     let (last, body) = take_write(&mut h, "/batch-place-order");
     accepted(&mut h, last, &body);
-    stopped(&h);
+    pending_terminal_kind(&h);
     assert_eq!(
         h.failures[0]
             .partial
