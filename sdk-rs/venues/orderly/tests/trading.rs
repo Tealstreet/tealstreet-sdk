@@ -209,7 +209,7 @@ fn bybit_ticks_on_later_batch_item_reject_before_any_read_write_or_mutation() {
 #[test]
 fn split_quantities_match_legacy_ts_and_report_partial_acceptance() {
     // TS: packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts:1073-1082.
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 40.999 of requested 41); kept for parity per Sam.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 40.999 of requested 41); kept for exact TS parity per Sam's decision
     let (mut e, _) = ready();
     requests(&mut e);
     place(

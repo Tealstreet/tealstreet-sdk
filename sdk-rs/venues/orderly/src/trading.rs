@@ -538,10 +538,7 @@ impl Orderly {
                 0.0
             };
             let qty = num::adjust((amount - rest) / lots, market.precision.amount);
-            let count = lots
-                .to_string()
-                .parse::<usize>()
-                .map_err(|_| "Orderly lot count exceeds addressable storage")?;
+            let count = ts_lot_count(lots)?;
             for (index, qty) in std::iter::repeat_n(qty, count)
                 .chain((rest != 0.0).then_some(rest))
                 .enumerate()
@@ -1817,6 +1814,17 @@ fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
 
+fn ts_lot_count(lots: f64) -> Result<usize, &'static str> {
+    // lodash/times returns no equal lots above Number.MAX_SAFE_INTEGER.
+    // The caller still appends the separately computed modulo remainder.
+    if lots > 9_007_199_254_740_991.0 {
+        return Ok(0);
+    }
+    lots.to_string()
+        .parse::<usize>()
+        .map_err(|_| "Orderly lot count exceeds addressable storage")
+}
+
 /// An explicit refusal (`success: false` or a 4xx). Orderly's server-side and
 /// duplicate-request codes do not prove nothing happened.
 fn answer_failure(response: Response<'_>, message: String, write: bool) -> VenueError {
@@ -1858,4 +1866,22 @@ fn ambiguous_write(mut error: VenueError) -> VenueError {
     error.venue_message.get_or_insert(error.message);
     error.message = "Orderly write outcome is unknown. Check Open Orders".into();
     error.outcome(Outcome::Unknown)
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::ts_lot_count;
+
+    #[test]
+    fn lodash_times_count_boundary_without_allocating() {
+        assert_eq!(ts_lot_count(1.0), Ok(1));
+        assert_eq!(ts_lot_count(101.0), Ok(101));
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(
+            ts_lot_count(9_007_199_254_740_991.0),
+            Ok(9_007_199_254_740_991)
+        );
+        assert_eq!(ts_lot_count(9_007_199_254_740_992.0), Ok(0));
+        assert_eq!(ts_lot_count(10_000_000_000_000_000.0), Ok(0));
+    }
 }

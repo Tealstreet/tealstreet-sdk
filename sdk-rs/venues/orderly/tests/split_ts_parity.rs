@@ -76,18 +76,33 @@ fn assert_ts_split(amount: f64, max: f64, step: f64, expected: &[f64], sum: f64)
 
 #[test]
 fn ts_split_26_5_1_preserves_legacy_underallocation() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
     assert_ts_split(26., 5., 1., &[4., 4., 4., 4., 4., 4., 1.], 25.);
 }
 #[test]
 fn ts_split_11_5_1_preserves_legacy_underallocation() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
     assert_ts_split(11., 5., 1., &[3., 3., 3., 1.], 10.);
 }
 #[test]
 fn ts_split_12_5_1_preserves_legacy_underallocation() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
     assert_ts_split(12., 5., 1., &[3., 3., 3., 2.], 11.);
+}
+#[test]
+fn ts_split_41_20_fractional_preserves_complete_legacy_sequence() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 40.999 of requested 41); kept for exact TS parity per Sam's decision
+    assert_ts_split(41., 20., 0.001, &[13.333, 13.333, 13.333, 1.], 40.999);
+}
+#[test]
+fn ts_split_above_lodash_count_boundary_sends_no_equal_lots() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 0 of requested 10000000000000000); kept for exact TS parity per Sam's decision
+    assert_ts_split(10_000_000_000_000_000., 1., 1., &[], 0.);
+}
+#[test]
+fn ts_split_above_lodash_count_boundary_keeps_separate_remainder() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 0.25 of requested 10000000000000000); kept for exact TS parity per Sam's decision
+    assert_ts_split(10_000_000_000_000_000., 0.75, 0.25, &[0.25], 0.25);
 }
 #[test]
 fn ts_split_exact_multiple_control() {
@@ -118,7 +133,7 @@ fn ts_split_does_not_add_a_hundred_lot_limit() {
 
 #[test]
 fn ts_split_sends_a_below_minimum_tail_and_surfaces_native_refusal() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
     // TS :1073-1106 sends the below-minimum tail, then stops on the venue refusal.
     let (mut e, _) = ready();
     actions(&mut e);

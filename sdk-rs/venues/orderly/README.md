@@ -25,9 +25,11 @@ Ordinary split quantities match the legacy TypeScript formatter: emit
 `ceil(amount / max)` equal rounded lots, then a separately rounded modulo
 remainder. This intentionally preserves legacy under-allocation: 26 with a
 maximum of 5 and step of 1 sends `[4, 4, 4, 4, 4, 4, 1]`, totaling 25.
-KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam.
+KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
 Generated below-minimum tails reach the venue, whose refusal stops the serial
 placement sequence; no local remainder/minimum or hundred-lot gate is added.
+Like Lodash `times`, a lot count above `Number.MAX_SAFE_INTEGER` produces no
+equal lots; a nonzero modulo remainder still produces its separate order.
 Reference: `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts:1073-1106`.
 
 Standalone stop-loss and take-profit orders accept the app's `triggerPrice`
