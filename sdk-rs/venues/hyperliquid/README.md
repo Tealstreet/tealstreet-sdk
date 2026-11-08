@@ -4,9 +4,15 @@ WritePlan records outcomes and has no validation or dispatch authority.
 Stop-after-UNKNOWN is a recorded parity exception (Sean/daxx, 2026-11-08;
 doc #3355). A genuine Unknown halts further physical writes for that action,
 including replacement after an uncertain cancellation. The engine duplicate-write
-fence remains authoritative. There is no automatic retry or protective put-back.
+fence remains authoritative. Unknown never triggers a retry or protective put-back.
 Definite refusals retain the TS behavior; an already-terminal perp cancellation
 can still proceed to replacement.
+
+Protective put-back kept per Sam's decision, SPLIT_PLAN_INVARIANT.md exception 2
+(doc #3355). After a definite full-position replacement refusal, master's existing
+policy attempts the captured original protection once with a fresh identity.
+Source, fill, position, newer-protection and fresh-mark checks remain unchanged.
+The journal records this recovery without controlling dispatch.
 
 Unknown publications retain placed native IDs and indexed Unknown/NotSent rows.
 The terminal error, Unknown elements and `order.outcome_unknown` telemetry carry

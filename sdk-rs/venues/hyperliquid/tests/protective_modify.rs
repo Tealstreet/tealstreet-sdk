@@ -183,26 +183,62 @@ fn fallback_place(e: &mut Engine<Hyperliquid>, row: &Value) -> HttpRequest {
 }
 
 #[test]
-fn definitive_replacement_refusal_stops_and_reports_unprotected() {
-    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | protective-compensation
-    // TS hyperliquid.exchange.ts:4411-4416 propagates replacement failure without put-back.
+fn definitive_fallback_refusal_restores_exact_original_once() {
+    // Protective put-back kept per Sam's decision, SPLIT_PLAN_INVARIANT.md exception 2.
     for refusal in [
         "Order has invalid price.",
         "Invalid TP/SL price.",
         "Price must be divisible by tick size.",
     ] {
         let row = order("Take Profit Market", "120", "0");
-        let (mut e, _) = setup(&row);
+        let (mut e, socket) = setup(&row);
         let replacement = fallback_place(&mut e, &row);
-        reply(&mut e, &replacement, 200, &json!({"status":"ok","response":{"type":"order","data":{"statuses":[{"error":refusal}]}}}).to_string());
-        let actions = prepared_now(&mut e);
-        let actions = advance_packet_timers(&mut e, actions, 20_000.);
-        assert!(
-            !actions
-                .iter()
-                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+        assert_eq!(
+            action(&replacement)["orders"][0]["t"]["trigger"]["tpsl"],
+            "sl"
         );
-        let errors: Vec<_> = actions
+        reply(
+        &mut e,
+        &replacement,
+        200,
+        &json!({"status":"ok","response":{"type":"order","data":{"statuses":[{"error":refusal}]}}}).to_string(),
+    );
+        let a = prepared_now(&mut e);
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 90, .. }))),
+            "one caller terminal only after recovery"
+        );
+        let a = advance_packet_timers(&mut e, a, 2668.);
+        let restore = write(&a);
+        let restored = action(restore);
+        assert_eq!(restored["type"], "order");
+        assert_eq!(restored["grouping"], "positionTpsl");
+        let restore_cloid = restored["orders"][0]["c"]
+            .as_str()
+            .expect("fresh put-back identity");
+        assert_ne!(restored["orders"][0]["c"], row["cloid"]);
+        assert_ne!(
+            restored["orders"][0]["c"],
+            action(&replacement)["orders"][0]["c"]
+        );
+        assert_eq!(restore_cloid.len(), 34);
+        assert!(
+            restore_cloid.starts_with("0x")
+                && restore_cloid[2..].bytes().all(|b| b.is_ascii_hexdigit())
+        );
+        assert_eq!(
+            restored["orders"][0],
+            json!({"a":0,"b":false,"p":"70","s":"0","r":true,"t":{"trigger":{"isMarket":true,"triggerPx":"120","tpsl":"tp"}},"c":restore_cloid})
+        );
+        reply(
+            &mut e,
+            restore,
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+        );
+        let a = prepared_now(&mut e);
+        let errors: Vec<_> = a
             .iter()
             .filter_map(|a| match a {
                 Action::Notice(Notice::CommandFailed { command: 90, error }) => Some(error),
@@ -212,18 +248,123 @@ fn definitive_replacement_refusal_stops_and_reports_unprotected() {
         assert_eq!(errors.len(), 1);
         assert_eq!(
             errors[0].protection,
-            Some(safe_cex_engine::error::Protection::Unprotected)
+            Some(safe_cex_engine::error::Protection::Restored)
         );
-        let elements = errors[0].elements.as_ref().expect("replacement journal");
-        assert_eq!(elements.len(), 2);
+        let elements = errors[0].elements.as_ref().expect("recovery journal");
+        assert_eq!(elements.len(), 3);
         use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+        assert!(matches!(&elements[0].result,
+            ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == "9"));
+        assert!(matches!(&elements[1].result,
+            ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected)));
+        assert!(matches!(&elements[2].result,
+            ElementResult::Applied { effect: AppliedEffect::PositionTrigger, position_key: Some(symbol), .. } if symbol == "BTC-PERP"));
         assert!(
-            matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == "9")
+            !a.iter()
+                .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange"))),
+            "never restore twice"
         );
-        assert!(
-            matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+        let mut live = row.clone();
+        live["oid"] = 42.into();
+        live["cloid"] = restore_cloid.into();
+        message(
+            &mut e,
+            socket,
+            2669.,
+            &json!({"channel":"orderUpdates","data":[{"order":live,"status":"open"}]}).to_string(),
+        );
+        let visible = e
+            .store()
+            .order("42")
+            .expect("put-back publishes under its fresh identity");
+        assert_eq!(visible.client_order_id.as_deref(), Some(restore_cloid));
+        assert_eq!(visible.price, 120.);
+        assert_eq!(visible.kind, OrderType::TakeProfit);
+    }
+}
+
+fn check_restore_failure(case: &str) {
+    let row = order("Take Profit Market", "120", "0");
+    let (mut e, _) = setup(&row);
+    let replacement = fallback_place(&mut e, &row);
+    reply(
+        &mut e,
+        &replacement,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order has invalid price."}]}}}"#,
+    );
+    let a = prepared_now(&mut e);
+    let a = advance_packet_timers(&mut e, a, 2668.);
+    let restore = write(&a);
+    if case == "unknown" {
+        e.handle(
+            2668.,
+            Event::HttpFailed {
+                request: restore.id,
+                error: "transport reply lost",
+            },
+        );
+    } else if case == "rate_limited" {
+        reply(&mut e, restore, 429, "Too many requests");
+    } else {
+        reply(
+            &mut e,
+            restore,
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order has invalid size."}]}}}"#,
         );
     }
+    let a = prepared_now(&mut e);
+    let failure = a
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 90, error }) => Some(error),
+            _ => None,
+        })
+        .expect("one visible restore terminal");
+    if case == "refused" {
+        assert_eq!(
+            failure.protection,
+            Some(safe_cex_engine::error::Protection::Unprotected)
+        );
+        assert!(failure.message.contains("UNPROTECTED"));
+        assert!(failure.message.contains("could not be restored"));
+    } else {
+        assert_eq!(failure.protection, None, "{case}");
+        assert_eq!(failure.outcome, Some(Outcome::Unknown));
+        assert_eq!(failure.message, ENGINE_UNKNOWN_TEXT);
+        assert!(
+            !failure.message.contains("UNPROTECTED")
+                && !failure.message.contains("could not be restored")
+        );
+        assert_eq!(
+            failure.kind,
+            Some(safe_cex_engine::ErrorKind::Rejected),
+            "serial root remains the earlier replacement refusal"
+        );
+    }
+    assert_eq!(
+        a.iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 90, .. })))
+            .count(),
+        1
+    );
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange")))
+    );
+}
+#[test]
+fn definitive_restore_refusal_is_unprotected_without_retry() {
+    check_restore_failure("refused");
+}
+#[test]
+fn unknown_restore_is_uncertain_without_protection_or_retry() {
+    check_restore_failure("unknown");
+}
+#[test]
+fn rate_limited_restore_is_uncertain_without_protection_or_retry() {
+    check_restore_failure("rate_limited");
 }
 #[test]
 fn ambiguous_replacement_never_creates_a_second_protection() {
@@ -446,6 +587,98 @@ fn a_newer_protection_cannot_be_overwritten_by_restoring_the_old_one() {
         "newer protection wins over an obsolete restore"
     );
     assert_eq!(e.store().order("12"), Some(&before));
+}
+
+#[test]
+fn held_restore_rechecks_position_newer_protection_and_fresh_original_trigger() {
+    use safe_cex_engine::request_context::{HttpAction, Prepared};
+    for case in ["closed", "newer", "crossed", "stale", "filled"] {
+        let row = order("Take Profit Market", "120", "0");
+        let (mut e, s) = setup(&row);
+        let replacement = fallback_place(&mut e, &row);
+        reply(
+            &mut e,
+            &replacement,
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order has invalid price."}]}}}"#,
+        );
+        let (preparation, r) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } if request.url.ends_with("/exchange") => Some((preparation, request)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("held one-shot restore");
+        e.http_prepared(
+            2668.,
+            preparation,
+            Prepared {
+                id: r.id.0,
+                expires_at: None,
+            },
+        );
+        let permit = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        let at = if case == "stale" { 6501. } else { 2700. };
+        match case {
+            "closed" => message(
+                &mut e,
+                s,
+                at,
+                r#"{"channel":"clearinghouseState","data":{"user":"0x14791697260e4c9a71f18484c9f997b308e59325","dex":"","clearinghouseState":{"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":2700}}}"#,
+            ),
+            "newer" => {
+                let mut newer = order("Take Profit Market", "130", "0");
+                newer["oid"] = json!(12);
+                newer["cloid"] = json!("0x22222222222222222222222222222222");
+                message(
+                    &mut e,
+                    s,
+                    at,
+                    &json!({"channel":"orderUpdates","data":[{"order":newer,"status":"open"}]})
+                        .to_string(),
+                );
+            }
+            "crossed" => mark(&mut e, s, at, 125.),
+            "filled" => message(
+                &mut e,
+                s,
+                at,
+                &json!({"channel":"orderUpdates","data":[{"order":row,"status":"filled"}]})
+                    .to_string(),
+            ),
+            _ => {}
+        }
+        assert!(
+            e.claim_http(at, permit).is_err(),
+            "{case}: obsolete or immediately firing restore must not be released"
+        );
+        let a = prepared_now(&mut e);
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+        );
+        assert!(
+            a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 90, .. }))),
+            "{case}: visible terminal"
+        );
+    }
 }
 
 #[test]
@@ -767,7 +1000,7 @@ fn dispatched_ambiguity_replacement_is_uncertain_without_restore_or_resend() {
 }
 
 #[test]
-fn released_cancel_keeps_replacement_and_refusal_after_original_intent_expiry() {
+fn released_cancel_keeps_replacement_and_restored_result_after_original_intent_expiry() {
     let row = order("Take Profit Market", "120", "0");
     let (mut e, _) = setup(&row);
     e.handle_command(
@@ -825,11 +1058,18 @@ fn released_cancel_keeps_replacement_and_refusal_after_original_intent_expiry() 
     );
     let actions = prepared_now(&mut e);
     let actions = advance_packet_timers(&mut e, actions, 2668.);
-    assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    let restore = write(&actions);
+    assert_eq!(
+        action(restore)["orders"][0]["t"]["trigger"]["triggerPx"],
+        "120"
     );
+    reply(
+        &mut e,
+        restore,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+    );
+    let actions = prepared_now(&mut e);
     let failures: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
@@ -840,9 +1080,9 @@ fn released_cancel_keeps_replacement_and_refusal_after_original_intent_expiry() 
     assert_eq!(failures.len(), 1);
     assert_eq!(
         failures[0].protection,
-        Some(safe_cex_engine::error::Protection::Unprotected)
+        Some(safe_cex_engine::error::Protection::Restored)
     );
-    assert!(failures[0].message.contains("UNPROTECTED"));
+    assert!(failures[0].message.contains("restored"));
     assert!(
         !actions
             .iter()

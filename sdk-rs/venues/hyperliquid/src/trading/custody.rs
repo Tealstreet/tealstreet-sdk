@@ -711,7 +711,7 @@ impl Hyperliquid {
             None,
         )?;
         if let Some(job) = self.trading.active.as_mut() {
-            job.journal.fail(fact.error().clone());
+            job.journal.record_failure(fact.error().clone());
         }
         Ok(())
     }
@@ -745,7 +745,7 @@ impl Hyperliquid {
         };
         let Some(status) = status else {
             if let Some(job) = self.trading.active.as_mut() {
-                job.journal.fail(unproven("Missing native reply"));
+                job.journal.record_failure(unproven("Missing native reply"));
             }
             return;
         };
@@ -761,7 +761,7 @@ impl Hyperliquid {
         };
         let mut results = Vec::new();
         for row in 0..count {
-            let status = if matches!(&request.effect, Effect::Place(_))
+            let status = if let Effect::Place(_) = &request.effect
                 && matches!(statuses, [Status::Error { .. }])
             {
                 statuses.first()
@@ -888,7 +888,7 @@ impl Hyperliquid {
         {
             return self.report_attached_order(cx, request, statuses, message);
         }
-        if matches!(&request.effect, Effect::Cancel(_))
+        if let Effect::Cancel(_) = &request.effect
             && statuses.iter().all(|status| matches!(status, Status::Text(text) if text == "success")
                 || matches!(status, Status::Error { error } if idempotent_cancel && only_terminal_cancel(error)))
         {

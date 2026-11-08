@@ -26,7 +26,7 @@ fn clients(step: &Step) -> Vec<Option<String>> {
             .iter()
             .map(|order| order.client_order_id.clone())
             .collect(),
-        Step::ScheduleCancel { .. } | Step::Leverage { .. } => vec![None],
+        Step::ScheduleCancel { .. } | Step::Leverage { .. } | Step::Restore => vec![None],
     }
 }
 
@@ -59,6 +59,10 @@ impl Journal {
 
     pub(super) fn begin(&mut self, step: &Step) {
         if !clients(step).is_empty() {
+            // The driver's one-shot protective restore is planned after a refusal.
+            if self.next == self.writes.len() {
+                self.writes.push(write(clients(step)));
+            }
             self.pending = Some(self.next);
             self.next += 1;
         }
@@ -96,7 +100,7 @@ impl Journal {
         }
     }
 
-    pub(super) fn fail(&mut self, error: VenueError) {
+    pub(super) fn record_failure(&mut self, error: VenueError) {
         if let Some(index) = self.pending {
             let result = if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
                 ElementResult::NotSent {

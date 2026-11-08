@@ -134,14 +134,15 @@ fn ordinary_cancel_error_stops_before_replacement_as_ts() {
 }
 
 #[test]
-fn full_position_replacement_refusal_stops_without_rust_only_restore() {
+fn full_position_replacement_refusal_keeps_masters_one_shot_restore() {
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | protective-compensation
     // TS hyperliquid.exchange.ts:4411-4416 has no catch/put-back after placement failure.
+    // Protective put-back kept per Sam's decision, SPLIT_PLAN_INVARIANT.md exception 2.
     amend_trace(
         true,
         None,
         Some("Invalid TP/SL price."),
-        &["cancel", "order"],
+        &["cancel", "order", "order"],
     );
 }
 

@@ -2123,7 +2123,7 @@ fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, un
 #[test]
 fn spot_serial_rows_pin_native_partial_sends_and_stop_after_refusal() {
     // TS spot exchange:1007-1016 posts each row; API:78-95 throws before flatMap.
-    // BaseExchange:1111-1114 stops the serial suffix after that throw.
+    // exchanges/base.ts:1111-1114 stops the serial suffix after that throw.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
     spot_serial_status_trace(serde_json::json!([{"resting":{"oid":92}}]), false, false);
     spot_serial_status_trace(
@@ -2135,7 +2135,7 @@ fn spot_serial_rows_pin_native_partial_sends_and_stop_after_refusal() {
 
 #[test]
 fn spot_unrecognized_or_empty_statuses_keep_unknown_fence_after_accepted_prefix() {
-    // TS spot exchange:787-790,1013-1016 drops unknown/empty rows; BaseExchange:1111-1114 continues.
+    // TS spot exchange:787-790,1013-1016 drops unknown/empty rows; exchanges/base.ts:1111-1114 continues.
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquidspot.exchange.ts:787-790,1013-1016,1182-1187,1205-1209.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
     for statuses in [serde_json::json!([]), serde_json::json!([{"mystery":true}])] {

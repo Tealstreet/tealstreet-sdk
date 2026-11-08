@@ -73,7 +73,7 @@ fn legacy_serial_dispatch_does_not_add_native_rule_gates() {
 
 #[test]
 fn caller_id_validation_still_refuses_entire_batch() {
-    // TS BaseExchange:1173-1200; hyperliquid.exchange.ts:4440 checks the whole batch before I/O.
+    // TS exchanges/base.ts:1173-1200; hyperliquid.exchange.ts:4440 checks the whole batch before I/O.
     let mut engine = configured();
     let mut last = order(3.);
     last.client_order_id = Some("invalid".into());
@@ -655,7 +655,7 @@ fn settings_and_schedule_controls_have_journaled_runtime_refusals() {
 
 #[test]
 fn caller_id_size_gate_matches_ts_rounded_maximum() {
-    // TS BaseExchange:1211-1223 rounds before the positive-cap unsplit check.
+    // TS exchanges/base.ts:1211-1223 rounds before the positive-cap unsplit check.
     let mut accepted = order(5.1);
     accepted.client_order_id = Some("0x00000000000000000000000000000001".into());
     let payloads = submit_valid(vec![order(3.), accepted]);

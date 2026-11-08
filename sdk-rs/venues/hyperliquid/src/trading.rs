@@ -93,6 +93,7 @@ enum Step {
         time_ms: Option<u64>,
     },
     Place(PlaceOrderOpts),
+    Restore,
     Cancel(Vec<Order>),
     Leverage {
         symbol: String,
@@ -141,7 +142,7 @@ impl Job {
     }
     fn touches(&self, symbol: &str) -> bool {
         self.steps.iter().any(|step| match step {
-            Step::ScheduleCancel { .. } => true,
+            Step::ScheduleCancel { .. } | Step::Restore => true,
             Step::Place(order) => order.symbol == symbol,
             Step::Cancel(orders) => orders.iter().any(|order| order.symbol == symbol),
             Step::Leverage { symbol: market, .. } => market == symbol,
@@ -170,7 +171,7 @@ impl Job {
             return false;
         }
         self.steps.iter().all(|step| match step {
-            Step::ScheduleCancel { .. } => false,
+            Step::ScheduleCancel { .. } | Step::Restore => false,
             Step::Place(order) => {
                 !older.touches(&order.symbol)
                     && order
@@ -1092,6 +1093,7 @@ impl Hyperliquid {
                     Effect::Place(records),
                 ))
             }
+            Step::Restore => self.prepare_protective_restore(cx),
             Step::Cancel(orders) => {
                 let cancels = orders
                     .iter()
@@ -1559,13 +1561,27 @@ impl Hyperliquid {
         if let Err(error) = &result
             && let Some(job) = self.trading.active.as_mut()
         {
-            job.journal.fail(error.clone());
+            job.journal.record_failure(error.clone());
         }
-        let result = result.map_err(|error| self.protective_trade_failure(cx, error));
+        let result = match result {
+            Err(error) => match self.protective_trade_failure(cx, error) {
+                Some(error) => Err(error),
+                None => return,
+            },
+            other => other,
+        };
         if let Some(mut job) = self.trading.active.take() {
             if let Some(timer) = self.trading.builder_wait.take() {
                 cx.clear_timer(timer);
             }
+            let result = if result.is_ok() {
+                job.protection
+                    .as_ref()
+                    .and_then(|p| p.restored_error())
+                    .map_or(result, Err)
+            } else {
+                result
+            };
             if let Err(mut error) = result {
                 error = error.partial_ids(&job.ids);
                 let unknown = error.outcome != Some(Outcome::Rejected)
