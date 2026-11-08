@@ -312,11 +312,12 @@ impl Coinbase {
             }
         };
         let amount = num::adjust(opts.amount, market.precision.amount);
+        // Legacy TS sends above-max new creates as one payload. Keep replacement bounds.
         if !opts.amount.is_finite()
             || opts.amount <= 0.0
-            || opts.amount > market.limits.amount.max
             || amount < market.limits.amount.min
-            || amount > market.limits.amount.max
+            || (canceled.is_some()
+                && (opts.amount > market.limits.amount.max || amount > market.limits.amount.max))
         {
             return Err("Coinbase size is outside market limits".into());
         }

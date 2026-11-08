@@ -34,6 +34,10 @@ jobs:
         run: corepack yarn check:script-types
       - run: corepack yarn typecheck
       - run: corepack yarn lint
+      - name: Install pinned Bun for standalone CLI tests
+        run: |
+          corepack yarn -s global add bun@1.4.3
+          corepack yarn -s global bin >> "$GITHUB_PATH"
       - run: corepack yarn test
 
 

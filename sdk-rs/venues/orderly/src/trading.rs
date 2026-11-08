@@ -1853,7 +1853,9 @@ fn answer_failure(response: Response<'_>, message: String, write: bool) -> Venue
 }
 
 fn ambiguous_write(mut error: VenueError) -> VenueError {
-    error.venue_message.get_or_insert(error.message);
+    error
+        .venue_message
+        .get_or_insert_with(|| error.message.into_boxed_str());
     error.message = "Orderly write outcome is unknown. Check Open Orders".into();
     error.outcome(Outcome::Unknown)
 }
