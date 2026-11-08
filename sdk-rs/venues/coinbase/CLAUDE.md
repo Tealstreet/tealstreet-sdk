@@ -4,6 +4,10 @@
 portfolio type and can select INTX, CFM or Spot. Public-only non-spot accounts
 read the drb USDC perpetual catalogue and public stream.
 
+DRB candle history bounds implicit and future-clamped ends with synchronized
+protocol UTC, rounded down to whole milliseconds. Scheduling time can stop
+during suspend and remains reserved for deadlines and pacing. Explicit range
+
 ## Advanced Trade ambiguous writes
 
 Released Advanced Trade creates, edits and cancellations answered with HTTP
