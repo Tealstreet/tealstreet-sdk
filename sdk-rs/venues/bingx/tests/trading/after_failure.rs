@@ -80,15 +80,21 @@ fn refused(path: Path) {
     h.reply(r#"{"code":100400,"msg":"scripted definite refusal"}"#);
     assert_eq!(h.requests.len(), 1, "TS continues the untouched suffix");
     accept_parity_payload(&mut h, "later");
+    let has_tail = matches!(path, Path::Lots | Path::Normalized | Path::MissingReference);
+    if has_tail {
+        accept_parity_payload(&mut h, "tail");
+    }
     let expected = match path {
         Path::Lots | Path::Normalized => vec![
-            ("LIMIT", 10., Some(2.)),
-            ("LIMIT", 10., Some(2.)),
+            ("LIMIT", 6.667, Some(2.)),
+            ("LIMIT", 6.667, Some(2.)),
+            ("LIMIT", 6.667, Some(2.)),
             ("LIMIT", 1., Some(2.)),
         ],
         Path::MissingReference => vec![
             ("LIMIT", 1., Some(95.)),
-            ("MARKET", 10., None),
+            ("MARKET", 5., None),
+            ("MARKET", 5., None),
             ("MARKET", 1., None),
         ],
         Path::Batch => vec![
@@ -120,6 +126,8 @@ fn refused(path: Path) {
         rows.len(),
         if matches!(path, Path::CombinedCount) {
             10_001
+        } else if has_tail {
+            4
         } else {
             3
         }
@@ -133,6 +141,11 @@ fn refused(path: Path) {
     assert!(
         matches!(&rows[2].result, ElementResult::Placed { order_ids } if order_ids == &["later"])
     );
+    if has_tail {
+        assert!(
+            matches!(&rows[3].result, ElementResult::Placed { order_ids } if order_ids == &["tail"])
+        );
+    }
 }
 
 // TS: packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1544-1564,1854-1889
@@ -330,7 +343,7 @@ fn definite_refusal_then_unknown_keeps_every_fact() {
         assert_eq!(h.sent.len(), 3);
         assert_unknown(&h, 2, 1);
         let rows = h.failures[0].elements.as_ref().unwrap();
-        assert_eq!(rows.len(), 4);
+        assert_eq!(rows.len(), 5);
         assert!(
             matches!(&rows[0].result, ElementResult::Placed { order_ids } if order_ids == &["prefix"])
         );

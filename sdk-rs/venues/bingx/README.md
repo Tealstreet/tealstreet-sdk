@@ -37,6 +37,13 @@ notional and quantity rules to the venue. These known partial-placement cases
 retain the pre-existing behavior rather than adding a new validation gate.
 Protective put-back, restore and replacement behavior is unchanged.
 
+Lot allocation follows `bingx.exchange.ts:1544-1564`: take
+`ceil(amount / maxQty)` equal rounded lots, then append the rounded native
+remainder when nonzero. Each quantity is rounded independently, so their sum
+can differ from the normalized requested amount. Recording tests in
+`tests/trading/allocation.rs` pin the six audited sequences, including integer,
+half-step and thousandth-step cases.
+
 Prepared native writes use the shared `WritePlan` journal. Failures expose an
 ordered `elements` array covering each placed, refused, unknown and unsent lot
 or child, with exact client/native identities. Accepted cancellation, amendment

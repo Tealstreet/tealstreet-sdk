@@ -188,6 +188,8 @@ impl Venue for TestVenue {
 }
 #[path = "trading/after_failure.rs"]
 mod after_failure;
+#[path = "trading/allocation.rs"]
+mod allocation;
 
 struct Harness {
     engine: Engine<TestVenue>,
@@ -645,7 +647,8 @@ fn legacy_parity_below_notional_tail_can_follow_accepted_batch_writes() {
         },
     ]);
     accept_parity_payload(&mut h, "prefix");
-    assert_eq!(accept_parity_payload(&mut h, "first_lot")["quantity"], 10.);
+    assert_eq!(accept_parity_payload(&mut h, "first_lot")["quantity"], 5.);
+    assert_eq!(accept_parity_payload(&mut h, "second_lot")["quantity"], 5.);
     let tail: serde_json::Value = serde_json::from_str(h.body()).expect("tail payload");
     assert_eq!(tail["quantity"], 1.);
     assert_eq!(tail["price"], 1.);
@@ -658,7 +661,7 @@ fn legacy_parity_below_notional_tail_can_follow_accepted_batch_writes() {
             .as_ref()
             .expect("accepted prefix")
             .order_ids,
-        ["prefix", "first_lot"]
+        ["prefix", "first_lot", "second_lot"]
     );
 }
 
@@ -683,7 +686,7 @@ fn legacy_parity_market_batch_does_not_require_a_positive_last_reference() {
             },
         ]);
         accept_parity_payload(&mut h, "prefix");
-        for (id, quantity) in [("first_lot", 10.), ("tail", 1.)] {
+        for (id, quantity) in [("first_lot", 5.), ("second_lot", 5.), ("tail", 1.)] {
             let body = accept_parity_payload(&mut h, id);
             assert_eq!(body["type"], "MARKET");
             assert_eq!(body["quantity"], quantity);
@@ -857,7 +860,7 @@ fn assert_writeplan_middle_failure(h: &Harness, unknown: bool) {
     );
     assert_eq!(h.done.len(), 1);
     let elements = h.failures[0].elements.as_ref().expect("per-lot outcomes");
-    assert_eq!(elements.len(), 3);
+    assert_eq!(elements.len(), 4);
     for (index, element) in elements.iter().enumerate() {
         assert_eq!(element.element.index, index);
         assert!(element.element.client_order_id.is_some());
@@ -873,16 +876,22 @@ fn assert_writeplan_middle_failure(h: &Harness, unknown: bool) {
             ElementResult::NotSent { error: Some(error) }
                 if error.outcome == Some(safe_cex_engine::Outcome::Rejected)));
     }
-    assert!(matches!(
-        &elements[2].result,
-        ElementResult::NotSent { error: None }
-    ));
+    for element in &elements[2..] {
+        assert!(matches!(
+            &element.result,
+            ElementResult::NotSent { error: None }
+        ));
+    }
 }
 
 #[test]
 fn writeplan_rejected_middle_lot_reports_every_element() {
     let mut h = writeplan_split();
     h.reply(r#"{"code":100400,"msg":"bad quantity"}"#);
+    assert_eq!(
+        accept_parity_payload(&mut h, "later-lot")["quantity"],
+        6.667
+    );
     assert_eq!(accept_parity_payload(&mut h, "last-lot")["quantity"], 1.);
     let rows = h.failures[0].elements.as_ref().unwrap();
     assert!(
@@ -892,7 +901,10 @@ fn writeplan_rejected_middle_lot_reports_every_element() {
         matches!(&rows[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(e) } if e.outcome == Some(safe_cex_engine::Outcome::Rejected))
     );
     assert!(
-        matches!(&rows[2].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["last-lot"])
+        matches!(&rows[2].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["later-lot"])
+    );
+    assert!(
+        matches!(&rows[3].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["last-lot"])
     );
 }
 
@@ -917,13 +929,20 @@ fn writeplan_gateway_middle_lot_keeps_prefix_and_unsent_suffix() {
 fn writeplan_signature_refusal_after_accepted_prefix_never_resends() {
     let mut h = writeplan_split();
     h.reply(r#"{"code":100001,"msg":"Signature verification failed"}"#);
+    assert_eq!(
+        accept_parity_payload(&mut h, "later-lot")["quantity"],
+        6.667
+    );
     assert_eq!(accept_parity_payload(&mut h, "last-lot")["quantity"], 1.);
     let rows = h.failures[0].elements.as_ref().unwrap();
     assert!(
         matches!(&rows[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(e) } if e.venue_code.as_deref() == Some("100001"))
     );
     assert!(
-        matches!(&rows[2].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["last-lot"])
+        matches!(&rows[2].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["later-lot"])
+    );
+    assert!(
+        matches!(&rows[3].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["last-lot"])
     );
 }
 
@@ -932,7 +951,11 @@ fn writeplan_all_valid_control_places_every_lot_once() {
     let mut h = writeplan_split();
     assert_eq!(
         accept_parity_payload(&mut h, "accepted-second-lot")["quantity"],
-        10.
+        6.667
+    );
+    assert_eq!(
+        accept_parity_payload(&mut h, "accepted-third-lot")["quantity"],
+        6.667
     );
     assert_eq!(
         accept_parity_payload(&mut h, "accepted-last-lot")["quantity"],
@@ -947,6 +970,7 @@ fn writeplan_all_valid_control_places_every_lot_once() {
         [
             "accepted-first-lot",
             "accepted-second-lot",
+            "accepted-third-lot",
             "accepted-last-lot"
         ]
     );
@@ -1494,7 +1518,7 @@ fn raw_trigger_kind_is_authoritative_even_if_normalized_kind_was_reclassified() 
 }
 
 #[test]
-fn split_quantities_conserve_the_original_amount() {
+fn split_quantities_match_the_independently_rounded_ts_lots() {
     #[derive(serde::Deserialize)]
     struct Quantity {
         quantity: f64,
@@ -1505,13 +1529,13 @@ fn split_quantities_conserve_the_original_amount() {
         ..opts()
     }]);
     let mut total = 0.0;
-    for id in 1..=3 {
+    for (id, expected) in [6.667, 6.667, 6.667, 5.001].into_iter().enumerate() {
         let q: Quantity = serde_json::from_str(h.body()).unwrap();
-        assert!(q.quantity > 0.0 && q.quantity <= 10.0);
+        assert_eq!(q.quantity, expected);
         total += q.quantity;
         h.reply(&format!(r#"{{"code":0,"data":{{"orderId":{id}}}}}"#));
     }
-    assert!((total - 25.001).abs() < 1e-10);
+    assert!((total - 25.002).abs() < 1e-10);
     assert!(h.done[0].is_ok());
 }
 #[test]
@@ -1523,9 +1547,10 @@ fn every_split_entry_is_receipted_but_trigger_children_still_omit_identity() {
         ..opts()
     }]);
     let mut actual = std::collections::HashSet::new();
-    for index in 0..6 {
+    for index in 0..8 {
         let payload: serde_json::Value = serde_json::from_str(h.body()).unwrap();
-        if index < 3 {
+        assert_eq!(payload["quantity"], [6.667, 6.667, 6.667, 5.][index % 4]);
+        if index < 4 {
             assert!(actual.insert(payload["clientOrderId"].as_str().unwrap().to_owned()));
         } else {
             assert!(payload.get("clientOrderId").is_none());
@@ -1707,7 +1732,7 @@ fn pending_native_orders_use_the_pending_cancel_restriction() {
 }
 
 #[test]
-fn entry_and_bracket_lots_respect_the_maximum_and_conserve_protected_quantity() {
+fn entry_and_bracket_lots_share_the_exact_ts_allocation() {
     #[derive(serde::Deserialize)]
     struct Quantity {
         quantity: f64,
@@ -1721,19 +1746,19 @@ fn entry_and_bracket_lots_respect_the_maximum_and_conserve_protected_quantity() 
     }]);
     for family in 0..3 {
         let mut total = 0.0;
-        for lot in 0..3 {
+        for (lot, expected) in [6.667, 6.667, 6.667, 5.001].into_iter().enumerate() {
             let q: Quantity = serde_json::from_str(h.body()).unwrap();
-            assert!(q.quantity > 0.0 && q.quantity <= 10.0);
+            assert_eq!(q.quantity, expected);
             total += q.quantity;
             if family > 0 {
                 assert!(h.body().contains("\"type\":\"TRIGGER_MARKET\""));
             }
             h.reply(&format!(
                 r#"{{"code":0,"data":{{"orderId":{}}}}}"#,
-                family * 3 + lot + 1
+                family * 4 + lot + 1
             ));
         }
-        assert!((total - 25.001).abs() < 1e-10);
+        assert!((total - 25.002).abs() < 1e-10);
     }
     assert!(h.done[0].is_ok());
 }

@@ -2089,18 +2089,17 @@ fn split(amount: f64, max: f64, step: f64) -> Result<Vec<f64>, String> {
     if amount <= max {
         return Ok(vec![amount]);
     }
-    let mut size = num::adjust(max, step);
-    if size > max {
-        size = num::adjust(size - step, step);
-    }
-    if !size.is_finite() || size <= 0.0 {
-        return Err("Split order rounds to zero".into());
-    }
-    let lots = (amount / size).floor();
+    // Legacy TS: bingx.exchange.ts:1544-1564. Round equal lots and the native
+    // remainder independently; do not redistribute their rounding difference.
+    let lots = (amount / max).ceil();
     if lots > 10_000.0 {
         return Err("Order would require too many lots".into());
     }
-    let rest = num::adjust(amount - lots * size, step);
+    let rest = num::adjust(amount % max, step);
+    let size = num::adjust((amount - rest) / lots, step);
+    if !size.is_finite() || size <= 0.0 {
+        return Err("Split order rounds to zero".into());
+    }
     let mut result = vec![size; lots as usize];
     if rest > 0.0 {
         result.push(rest);
