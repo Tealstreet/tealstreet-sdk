@@ -1873,7 +1873,7 @@ impl Venue for BinanceFutures {
                         });
                         self.trading.market_amount.insert(
                             market.symbol.clone(),
-                            safe_cex_engine::market_facts::MarketAmountRules {
+                            safe_cex_engine::model::MarketAmountRules {
                                 minimum,
                                 maximum,
                                 step: positive(lot.step_size.as_deref()),

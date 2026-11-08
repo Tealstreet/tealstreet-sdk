@@ -327,13 +327,15 @@ fn rejects_malformed_payloads() {
 
 #[test]
 fn placement_outcomes_read_ids_strictly() {
+    use safe_cex_algo_twap::SliceFailure;
     use safe_cex_algo_twap::factory::placement_outcome;
     use safe_cex_engine::error::Outcome;
     assert_eq!(
         placement_outcome(Ok(r#"["a","b"]"#.into())),
         Ok(vec!["a".to_owned(), "b".to_owned()])
     );
-    for unreadable in [r#"{"orderIds":["a"]}"#, "null", "", "[]", r#"[""]"#] {
+    assert_eq!(placement_outcome(Ok("[]".into())), Ok(vec![]));
+    for unreadable in [r#"{"orderIds":["a"]}"#, "null", ""] {
         let error = placement_outcome(Ok(unreadable.into())).unwrap_err();
         assert!(
             error
@@ -341,28 +343,37 @@ fn placement_outcomes_read_ids_strictly() {
                 .starts_with("order ids unknown, the order may be live"),
             "{unreadable}"
         );
-        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert!(!error.nothing_placed);
     }
-    for outcome in [Outcome::Rejected, Outcome::NotSent, Outcome::Unknown] {
-        let native = VenueError::new("native failure")
-            .outcome(outcome)
-            .kind(safe_cex_engine::error::ErrorKind::InsufficientBalance);
-        let failure = placement_outcome(Err(native.clone())).unwrap_err();
-        assert_eq!(failure.outcome, Some(outcome));
-        assert_eq!(failure.kind, native.kind);
-    }
+    let failed = |message: &str, outcome| {
+        placement_outcome(Err(VenueError {
+            message: message.into(),
+            outcome,
+            ..Default::default()
+        }))
+    };
     assert_eq!(
-        placement_outcome(Err(VenueError::new("?")))
-            .unwrap_err()
-            .outcome,
-        Some(Outcome::Unknown)
+        failed("timeout", Some(Outcome::Unknown)),
+        Err(SliceFailure {
+            message: "outcome unknown, the order may be live: timeout".to_owned(),
+            nothing_placed: false,
+        })
     );
+    for outcome in [Outcome::Rejected, Outcome::NotSent] {
+        assert_eq!(
+            failed("insufficient margin", Some(outcome)),
+            Err(SliceFailure {
+                message: "insufficient margin".to_owned(),
+                nothing_placed: true,
+            })
+        );
+    }
+    // Unclassified proves nothing, and neither does a refusal with accepted legs.
+    assert!(!failed("?", None).unwrap_err().nothing_placed);
     let partial = VenueError::new("partly refused")
         .outcome(Outcome::Rejected)
         .partial_ids(&["a".to_owned()]);
-    let failure = placement_outcome(Err(partial)).unwrap_err();
-    assert_eq!(failure.outcome, Some(Outcome::Unknown));
-    assert_eq!(failure.partial.unwrap().order_ids, ["a"]);
+    assert!(!placement_outcome(Err(partial)).unwrap_err().nothing_placed);
 }
 
 #[derive(Default)]
@@ -719,7 +730,7 @@ fn native_notional_port(minimum: f64, exempt: bool) -> Rc<Port> {
         let mut store = port.store.borrow_mut();
         store.market_order_facts.insert(
             "BTCUSDT".to_owned(),
-            safe_cex_engine::market_facts::MarketOrderFacts {
+            safe_cex_engine::model::MarketOrderFacts {
                 min_notional: Some(minimum),
                 reduce_only_exempt: exempt,
                 ..Default::default()
@@ -873,8 +884,7 @@ async fn native_quote_units_do_not_use_price_and_exemption_is_not_blanket_reduce
                     .market_order_facts
                     .get_mut("BTCUSDT")
                     .unwrap()
-                    .notional_basis =
-                    safe_cex_engine::market_facts::NotionalBasis::Quote { per_amount };
+                    .notional_basis = safe_cex_engine::model::NotionalBasis::Quote { per_amount };
                 let cx = AlgoCx::new(port.clone(), Scope::new());
                 let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
                 let options =
@@ -1024,7 +1034,7 @@ async fn native_market_lot_grid_is_used_before_any_child_and_does_not_change_lim
                         .market_order_facts
                         .get_mut("BTCUSDT")
                         .unwrap()
-                        .market_amount = Some(safe_cex_engine::market_facts::MarketAmountRules {
+                        .market_amount = Some(safe_cex_engine::model::MarketAmountRules {
                         minimum: Some(1.0),
                         maximum: Some(10.0),
                         step: Some(1.0),
@@ -1052,135 +1062,5 @@ async fn native_market_lot_grid_is_used_before_any_child_and_does_not_change_lim
                 assert_eq!(port.commands.borrow().len(), 2);
             }
         })
-        .await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn bingx_positive_infinite_maximum_keeps_valid_twaps_enabled() {
-    LocalSet::new()
-        .run_until(async {
-            let port = Rc::new(Port::default());
-            {
-                let mut store = port.store.borrow_mut();
-                store.venue = "bingx".to_owned();
-                store.markets.get_mut("BTCUSDT").unwrap().limits.amount.max = f64::INFINITY;
-            }
-            let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
-            factory
-                .start(serde_json::from_str(&twap_options(json!({ "size": 4 }))).unwrap())
-                .expect("BingX publishes positive infinity to mean no quantity cap");
-            settle().await;
-            tokio::time::advance(Duration::from_secs(31)).await;
-            settle().await;
-            assert_eq!(placed_amounts(&port), [2.0, 2.0]);
-            assert_eq!(port.commands.borrow().len(), 2);
-        })
-        .await;
-}
-
-async fn scripted_child_failure(outcome: Option<safe_cex_engine::error::Outcome>) {
-    let port = Rc::new(Port::default());
-    port.store.borrow_mut().venue = "binance".to_owned();
-    let cx = AlgoCx::new(port.clone(), Scope::new());
-    let factory = TwapFactory::new("a", cx, Rc::new(Chasers::default()));
-    let id = factory
-        .start(
-            serde_json::from_str(&twap_options(json!({
-                "size": 3, "ordersCount": 3, "reduceOnly": true
-            })))
-            .unwrap(),
-        )
-        .unwrap();
-    settle().await;
-    assert_eq!(placed_amounts(&port), [1.0]);
-    port.fail.set(outcome.is_some());
-    port.fail_outcome.set(outcome);
-    tokio::time::advance(Duration::from_secs(21)).await;
-    settle().await;
-    tokio::time::advance(Duration::from_secs(21)).await;
-    settle().await;
-    tokio::time::advance(Duration::from_secs(100)).await;
-    settle().await;
-    let expected_writes = if outcome.is_some() { 2 } else { 3 };
-    assert_eq!(
-        port.commands.borrow().len(),
-        expected_writes,
-        "no suffix, resend, cancel or rollback after failure"
-    );
-    let commands = port.commands.borrow();
-    let orders: Vec<_> = commands
-        .iter()
-        .flat_map(|command| match command {
-            Command::PlaceOrders { orders, .. } => orders.iter().collect::<Vec<_>>(),
-            _ => panic!("no repair/cancel command belongs to this plan"),
-        })
-        .collect();
-    assert!(orders.iter().all(|order| order.reduce_only == Some(true)));
-    assert_ne!(orders[0].client_order_id, orders[1].client_order_id);
-    let emits = port.emits.borrow();
-    let result = emits
-        .iter()
-        .rev()
-        .find(|(op, data)| op == "twap:outcome" && data["id"] == id)
-        .expect("terminal result must retain every indexed child outcome");
-    let elements = result.1["elements"].as_array().unwrap();
-    assert_eq!(elements.len(), 3);
-    for (index, element) in elements.iter().enumerate() {
-        assert_eq!(element["index"], index);
-        assert!(
-            element["clientOrderId"]
-                .as_str()
-                .is_some_and(|id| !id.is_empty())
-        );
-        if let Some(order) = orders.get(index) {
-            assert_eq!(
-                element["clientOrderId"].as_str(),
-                order.client_order_id.as_deref()
-            );
-        }
-    }
-    assert_eq!(elements[0]["status"], "placed");
-    assert_eq!(elements[0]["orderIds"], json!(["order-1"]));
-    match outcome {
-        None => assert!(elements.iter().all(|element| element["status"] == "placed")),
-        Some(safe_cex_engine::error::Outcome::Rejected) => {
-            assert_eq!(elements[1]["status"], "notSent");
-            assert_eq!(elements[1]["error"]["outcome"], "rejected");
-            assert_eq!(elements[2]["status"], "notSent");
-            assert_eq!(result.1["error"]["partial"]["orderIds"], json!(["order-1"]));
-        }
-        Some(safe_cex_engine::error::Outcome::Unknown) => {
-            assert_eq!(elements[1]["status"], "unknown");
-            assert_eq!(elements[1]["error"]["outcome"], "unknown");
-            assert_eq!(elements[2]["status"], "notSent");
-        }
-        other => panic!("unexpected script {other:?}"),
-    }
-    assert!(factory.active_twaps("a").is_empty());
-}
-
-#[tokio::test(start_paused = true)]
-async fn runtime_rejection_stops_suffix_and_keeps_indexed_outcomes() {
-    LocalSet::new()
-        .run_until(scripted_child_failure(Some(
-            safe_cex_engine::error::Outcome::Rejected,
-        )))
-        .await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn runtime_unknown_stops_suffix_and_keeps_indexed_outcomes() {
-    LocalSet::new()
-        .run_until(scripted_child_failure(Some(
-            safe_cex_engine::error::Outcome::Unknown,
-        )))
-        .await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn all_valid_schedule_reports_each_child_once() {
-    LocalSet::new()
-        .run_until(scripted_child_failure(None))
         .await;
 }

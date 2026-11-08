@@ -16,7 +16,7 @@ pub struct AlgoStore {
     pub tickers: HashMap<String, Ticker>,
     pub markets: HashMap<String, Market>,
     /// Native planning facts, copied directly from Rust rather than decoded frames.
-    pub market_order_facts: HashMap<String, safe_cex_engine::market_facts::MarketOrderFacts>,
+    pub market_order_facts: HashMap<String, safe_cex_engine::model::MarketOrderFacts>,
     pub update_ids: UpdateIds,
     /// `None` until the account's first balance frame.
     pub balance: Option<Balance>,

@@ -7,7 +7,7 @@ use crate::{OrderKind, TwapOrderRequest};
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OrderRules {
     pub minimum_amount: f64,
-    /// Zero or positive infinity means the venue publishes no upper bound.
+    /// Zero means the venue publishes no upper bound.
     pub maximum_amount: f64,
     pub amount_step: Option<f64>,
     pub price_tick: Option<f64>,
@@ -59,8 +59,7 @@ pub fn validate_write(write: &PlannedOrder) -> Result<(), VenueError> {
         return Err(invalid("slice amount must be finite and positive"));
     }
     if !(rules.minimum_amount.is_finite() && rules.minimum_amount >= 0.0)
-        || rules.maximum_amount.is_nan()
-        || rules.maximum_amount < 0.0
+        || !(rules.maximum_amount.is_finite() && rules.maximum_amount >= 0.0)
     {
         return Err(invalid("invalid native quantity bounds"));
     }

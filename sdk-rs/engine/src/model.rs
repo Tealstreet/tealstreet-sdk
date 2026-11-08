@@ -1,5 +1,6 @@
 //! Store-facing records. Field names and enum spellings serialize to exactly the
 //! shapes `packages/safe-cex/src/types.ts` gives the main thread.
+pub use crate::market_facts::{MarketAmountRules, MarketOrderFacts, NotionalBasis};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]

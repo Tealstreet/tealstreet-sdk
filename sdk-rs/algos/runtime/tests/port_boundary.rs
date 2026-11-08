@@ -9,8 +9,6 @@ use std::path::{Path, PathBuf};
 /// Engine paths the algos may name, as their first segments.
 const ALLOWED: &[&str] = &[
     "model",
-    "market_facts",
-    "write_plan",
     "engine::Command",
     "engine::CommandId",
     "engine::Fill",
