@@ -30,6 +30,10 @@ Kraken Spot treats a dispatched write's HTTP 408, 429, or 5xx response as
 or rate-limit error. HTTP 429 retains `ErrorKind::RateLimited` for diagnostics.
 These responses cannot authorize a resend or terminal credential rejection;
 uncertain placements trigger an `OpenOrders` read before another placement.
+An unknown result also refuses already-queued placements and amendments as
+`Outcome::NotSent`; they were admitted before the uncertainty was known.
+Queued cancellations remain available. Reconciliation never replays refused
+writes: the caller checks Open Orders before explicitly retrying.
 
 Definitive signature refusals retain the single re-sign attempt. Private reads
 also retain their existing bounded signature and transport retry policies.
@@ -39,3 +43,13 @@ responses unknown, including a bracket leg after an accepted entry. Their user
 text says the outcome is unknown and directs the caller to Check Open Orders.
 These failures never resend or place a replacement stop. Definitive refusals and
 private reads retain their existing behavior.
+
+As on Spot, an unknown Futures result refuses already-queued placements and
+edits as `NotSent`, including after partial acceptance. Queued cancellations,
+account settings and leverage reads remain available; refused writes never
+resume automatically after reconciliation.
+
+All Futures Unknown trading failures include reconciliation guidance, including
+HTTP 200 native server errors and unproven cancellation statuses. Batch errors
+retain an unknown leg's message and native diagnostics together when a later
+leg is definitively refused.
