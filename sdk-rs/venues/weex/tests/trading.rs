@@ -494,6 +494,14 @@ fn oversized_unbatched_orders_keep_one_payload_per_ts_endpoint() {
         let payload = body(request);
         assert_eq!(payload["quantity"], "26");
         assert!(payload.get("batchOrders").is_none());
+        let quantities = [payload["quantity"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap()];
+        assert_eq!(quantities, [26.0]);
+        let sum: f64 = quantities.iter().sum();
+        assert_eq!(sum, 26.0);
         let client = payload
             .get("newClientOrderId")
             .unwrap_or(&payload["clientAlgoId"]);
