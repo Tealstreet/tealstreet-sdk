@@ -17,10 +17,11 @@ struct RecordingTransport {
 impl RecordingTransport {
     fn poll(&mut self, engine: &mut Driver) -> Vec<Action> {
         let out = actions(engine);
-        self.events.extend(out.iter().filter_map(|action| match action {
-            Action::Notice(Notice::Event(event)) => Some(event.clone()),
-            _ => None,
-        }));
+        self.events
+            .extend(out.iter().filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) => Some(event.clone()),
+                _ => None,
+            }));
         self.writes
             .extend(out.iter().filter_map(|action| match action {
                 Action::Http(request) if request.method != Method::Get => Some(request.clone()),
@@ -216,21 +217,40 @@ fn repair_unknown_halts_before_next_candidate() -> Result {
             .replace("\"123\"", "\"456\"")
             .replace("\"clientId\":42", "\"clientId\":43");
         let prefix = old.replace("\"123\"", "\"099\"");
-        reply(&mut engine, &snapshot, 200, &format!("[{prefix},{old},{second}]"));
+        reply(
+            &mut engine,
+            &snapshot,
+            200,
+            &format!("[{prefix},{old},{second}]"),
+        );
         let mut transport = RecordingTransport::default();
         let cancel_prefix = transport.next(&mut engine)?;
-        reply(&mut engine,&cancel_prefix,200,r#"{"id":"099","status":"Cancelled","executedQuantity":"0"}"#);
+        reply(
+            &mut engine,
+            &cancel_prefix,
+            200,
+            r#"{"id":"099","status":"Cancelled","executedQuantity":"0"}"#,
+        );
         let place_prefix = transport.next(&mut engine)?;
-        reply(&mut engine,&place_prefix,200,r#"{"id":"prefix-placed"}"#);
+        reply(&mut engine, &place_prefix, 200, r#"{"id":"prefix-placed"}"#);
         let first = transport.next(&mut engine)?;
         let mut expected = vec![
-            (Method::Delete,"/api/v1/order",json!({"symbol":SYMBOL,"orderId":"099"})),
-            (Method::Post,"/api/v1/order",json!({"symbol":SYMBOL,"side":"Bid","orderType":"Market","triggerPrice":"130.00","triggerQuantity":"5.00","triggerBy":"MarkPrice"})),
-        (
-            Method::Delete,
-            "/api/v1/order",
-            json!({"symbol":SYMBOL,"orderId":"123"}),
-        )];
+            (
+                Method::Delete,
+                "/api/v1/order",
+                json!({"symbol":SYMBOL,"orderId":"099"}),
+            ),
+            (
+                Method::Post,
+                "/api/v1/order",
+                json!({"symbol":SYMBOL,"side":"Bid","orderType":"Market","triggerPrice":"130.00","triggerQuantity":"5.00","triggerBy":"MarkPrice"}),
+            ),
+            (
+                Method::Delete,
+                "/api/v1/order",
+                json!({"symbol":SYMBOL,"orderId":"123"}),
+            ),
+        ];
         if fail_cancel {
             reply(
                 &mut engine,
@@ -270,7 +290,42 @@ fn repair_unknown_halts_before_next_candidate() -> Result {
             })
             .ok_or("missing settled repair journal telemetry")?;
         assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
-        assert!(transport.events.iter().any(|event| event.code=="backpack.repair.placed" && event.fields.iter().any(|(key,value)| *key=="orderId" && value.as_str()==Some("prefix-placed"))));
+        let prefix_event = transport
+            .events
+            .iter()
+            .find(|event| {
+                event.code == "backpack.repair.placed"
+                    && event.fields.iter().any(|(key, value)| {
+                        *key == "orderId" && value.as_str() == Some("prefix-placed")
+                    })
+            })
+            .ok_or("missing accepted repair prefix")?;
+        assert_eq!(
+            event
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "actionGeneration")
+                .map(|(_, value)| value),
+            prefix_event
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "actionGeneration")
+                .map(|(_, value)| value),
+        );
+        assert!(
+            event
+                .fields
+                .iter()
+                .any(|(key, value)| *key == "cancelOutcome"
+                    && value.as_str() == Some(if fail_cancel { "Unknown" } else { "Accepted" }))
+        );
+        assert!(
+            event
+                .fields
+                .iter()
+                .any(|(key, value)| *key == "placeOutcome"
+                    && value.as_str() == Some(if fail_cancel { "NotSent" } else { "Unknown" }))
+        );
         assert!(
             event
                 .fields

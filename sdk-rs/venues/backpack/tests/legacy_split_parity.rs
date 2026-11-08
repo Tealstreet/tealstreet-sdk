@@ -457,6 +457,7 @@ fn legacy_trigger_and_attached_prices_are_sent_past_catalogue_cap() -> Result {
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1223-1229.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime row/pair failure suffix
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1223-1229.
 #[test]
 fn legacy_serial_failure_halts_unknown_with_complete_reporting() -> Result {
     unknown_stop("serial")
@@ -464,6 +465,7 @@ fn legacy_serial_failure_halts_unknown_with_complete_reporting() -> Result {
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime TP/SL child failure suffix
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025.
 #[test]
 fn legacy_tp_failure_halts_before_sl() -> Result {
     unknown_stop("tp")
@@ -471,6 +473,7 @@ fn legacy_tp_failure_halts_before_sl() -> Result {
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1010-1028,1223-1229.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime TP/SL child failure suffix
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1010-1028.
 #[test]
 fn legacy_sl_failure_halts_before_later_entry() -> Result {
     unknown_stop("sl")
@@ -478,6 +481,7 @@ fn legacy_sl_failure_halts_before_later_entry() -> Result {
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1072-1079.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | CancelOrders accepted-ID-less effect and failed-row continuation
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1072-1079.
 #[test]
 fn legacy_cancel_failure_halts_without_inventing_ids() -> Result {
     unknown_stop("cancel")
@@ -610,6 +614,7 @@ fn legacy_bracket_sends_each_rounded_quantity_without_a_wire_bound_gate() -> Res
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:984,1047-1049,1223-1229.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime TP/SL child failure suffix
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1047-1049,1223-1229.
 #[test]
 fn legacy_failed_entry_halts_children_and_other_orders() -> Result {
     unknown_stop("entry")
@@ -617,6 +622,7 @@ fn legacy_failed_entry_halts_children_and_other_orders() -> Result {
 
 // Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1213-1219.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | runtime row/pair failure suffix
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1213-1219.
 #[test]
 fn legacy_mixed_pair_failure_halts_the_next_pair() -> Result {
     unknown_stop("pair")

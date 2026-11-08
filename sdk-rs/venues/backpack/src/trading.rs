@@ -21,6 +21,8 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+pub(crate) const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
 const BACKPACK: CodeTable = CodeTable {
     rows: &[],
     success: &[],
@@ -211,7 +213,10 @@ fn record_failure(plan: &mut WritePlan, indices: &[usize], error: &VenueError) {
             }
         } else {
             ElementResult::Unknown {
-                error: Box::new(error.clone().outcome(Outcome::Unknown)),
+                error: Box::new(VenueError {
+                    message: UNKNOWN_TEXT.into(),
+                    ..error.clone().outcome(Outcome::Unknown)
+                }),
             }
         };
         let _ = plan.record(*index, result);
@@ -1043,14 +1048,14 @@ impl Backpack {
                                 ) {
                                     return;
                                 }
-                                let error = self.plan_failure(&request, error, false);
+                                let error = self.plan_failure(cx, &request, error, false);
                                 let _ = cx.fail_plan(&managed.plan, error);
                                 return;
                             }
                         }
                     }
                     Err(error) => {
-                        let error = self.plan_failure(&request, error.venue_error(), true);
+                        let error = self.plan_failure(cx, &request, error.venue_error(), true);
                         let _ = cx.fail_plan(&managed.plan, error);
                         return;
                     }
@@ -1227,7 +1232,7 @@ impl Backpack {
                     if let Err(error) =
                         cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context)
                     {
-                        let error = self.plan_failure(&request, error.venue_error(), false);
+                        let error = self.plan_failure(cx, &request, error.venue_error(), false);
                         let _ = cx.fail_plan(&managed.plan, error);
                         return;
                     }
@@ -1254,7 +1259,7 @@ impl Backpack {
                             }
                             _ => None,
                         };
-                        let error = self.plan_failure(&request, VenueError::new(e), false);
+                        let error = self.plan_failure(cx, &request, VenueError::new(e), false);
                         let _ = match &gone {
                             Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
                             None => cx.fail_plan(&managed.plan, error),
@@ -1272,7 +1277,7 @@ impl Backpack {
                     let error = match fact {
                         Ok(error) => error,
                         Err(error) => {
-                            let error = self.plan_failure(&request, error.venue_error(), true);
+                            let error = self.plan_failure(cx, &request, error.venue_error(), true);
                             let _ = cx.fail_plan(&managed.plan, error);
                             return;
                         }
@@ -1328,22 +1333,35 @@ impl Backpack {
         let Some(indices) = job.elements.get(request.write) else {
             return;
         };
-        for (index, result) in indices.iter().zip(results) {
+        for (index, mut result) in indices.iter().zip(results) {
+            if let ElementResult::Unknown { error } = &mut result {
+                error.message = UNKNOWN_TEXT.into();
+            }
             let _ = job.write_plan.record(*index, result);
         }
     }
 
     fn plan_failure(
         &mut self,
+        cx: &mut Cx<'_, Pending>,
         request: &Request,
         mut error: VenueError,
         pending: bool,
     ) -> VenueError {
+        if error.outcome == Some(Outcome::Unknown) {
+            error.message = UNKNOWN_TEXT.into();
+        }
         if let Some(job) = self.trading.jobs.get_mut(&request.command) {
             if pending {
                 record_failure(&mut job.write_plan, &job.elements[request.write], &error);
             }
             error = job.write_plan.attach(error);
+        }
+        if error.outcome == Some(Outcome::Unknown) {
+            if let Some(managed) = &request.managed {
+                let _ = cx.present_plan_failure(&managed.plan, &error.message);
+            }
+            cx.notice(Level::Warn, "backpack.write.unknown", &error.message);
         }
         error
     }
@@ -1372,6 +1390,13 @@ impl Backpack {
         error: VenueError,
         data: bool,
     ) {
+        let mut error = error;
+        if !data && error.outcome.is_none() {
+            error.outcome = Some(Outcome::Unknown);
+        }
+        if error.outcome == Some(Outcome::Unknown) {
+            error.message = UNKNOWN_TEXT.into();
+        }
         let managed = request.managed.as_ref().expect("foreground delivery");
         let optional = matches!(
             request.step,
@@ -1417,7 +1442,7 @@ impl Backpack {
         if self.continue_reported_failure(cx, &request, error.clone(), true, data) {
             return;
         }
-        let error = self.plan_failure(&request, error, true);
+        let error = self.plan_failure(cx, &request, error, true);
         let _ = match &gone {
             Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
             None => cx.fail_plan(&managed.plan, error),
@@ -1432,6 +1457,9 @@ impl Backpack {
         pending: bool,
         data: bool,
     ) -> bool {
+        if !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
+            return false;
+        }
         let Some(job) = self
             .trading
             .jobs
