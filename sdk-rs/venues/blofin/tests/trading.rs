@@ -1104,7 +1104,8 @@ fn settings_rejections_preserve_known_leverage() {
 }
 #[test]
 fn legacy_split_sizing_uses_rounded_equal_lots_and_native_remainder() {
-    // TS:2199-2220 yields 333.3 * 3 + 1, retaining its 0.1 quantity shortfall.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 1000.9 of requested 1001); kept for parity per Sam; decision pending
+    // TS:2199-2220 yields 333.3 * 3 + 1.
     let mut h = Harness::new();
     h.seed();
     place(
@@ -1121,6 +1122,11 @@ fn legacy_split_sizing_uses_rounded_equal_lots_and_native_remainder() {
         .collect::<Vec<_>>();
     assert_eq!(sizes, [333.3, 333.3, 333.3, 1.0]);
     assert!(sizes.iter().all(|s| *s <= 500.0));
+    let allocated_tenths = sizes
+        .iter()
+        .map(|size| (size * 10.0).round() as u64)
+        .sum::<u64>();
+    assert_eq!(allocated_tenths, 10_009);
 }
 #[test]
 fn grouped_normal_batches_keep_their_own_native_receipt_slices() {
