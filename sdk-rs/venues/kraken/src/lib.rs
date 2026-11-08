@@ -603,6 +603,9 @@ impl Venue for Kraken {
     fn discard_unproven_http_command(&mut self, owner: safe_cex_engine::request_context::Owner) {
         self.discard_provider_trade(owner);
     }
+    fn finish_deferred_commands(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.trading_finish_deferred(cx);
+    }
     fn http_plans() -> bool {
         false
     }

@@ -15,6 +15,7 @@ pub struct Trading {
     queue: VecDeque<Job>,
     active: Option<Job>,
     waiting: bool,
+    deferred_failures: Vec<(safe_cex_engine::request_context::Context, VenueError)>,
 }
 struct Job {
     command: CommandId,
@@ -146,10 +147,27 @@ impl Kraken {
         {
             self.trading.active = None;
             self.trading.waiting = false;
+            let failures = &mut self.trading.deferred_failures;
+            self.trading.queue.retain(|job| {
+                if blocks_after_uncertainty(job)
+                    && let Some(root) = &job.root
+                {
+                    failures.push((root.clone(), queued_uncertainty()));
+                    false
+                } else {
+                    true
+                }
+            });
         }
         self.trading
             .queue
             .retain(|job| job.root.as_ref().is_none_or(|root| root.owner() != owner));
+    }
+    pub(super) fn trading_finish_deferred(&mut self, cx: &mut Cx<'_, Pending>) {
+        for (root, error) in std::mem::take(&mut self.trading.deferred_failures) {
+            let _ = cx.fail_context(&root, error);
+        }
+        self.trading_pump(cx);
     }
     pub(crate) fn trading_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
         let (id, result) = match command {
@@ -761,32 +779,41 @@ impl Kraken {
                     })
             })
             .cloned();
-        let result = reply.and_then(|r| {
-            if !ok
-                || r.result != "success"
-                || matches!(r.status.as_deref(), Some("BAD_REQUEST" | "unauthorized"))
-                || r.error.as_ref().is_some_and(|e| !e.is_empty())
-                || !r.errors.is_empty()
-            {
-                let code = r
-                    .error
-                    .as_deref()
-                    .filter(|code| !code.is_empty())
-                    .or_else(|| r.errors.first().map(|e| e.message.as_str()));
-                let message = if !ok {
-                    let detail = code.map(|code| format!(": {code}")).unwrap_or_default();
-                    format!("Kraken HTTP {}{detail}", response.status)
-                } else {
-                    code.unwrap_or("Kraken rejected trading request").to_owned()
-                };
-                let code = code.or(r
-                    .status
-                    .as_deref()
-                    .filter(|status| matches!(*status, "BAD_REQUEST" | "unauthorized")));
-                return Err(classified_failure(&response, intent, code, message));
-            }
-            self.trading_apply(cx, request.step, request.settings_revision, r)
-        });
+        let result = reply
+            .and_then(|r| {
+                if !ok
+                    || r.result != "success"
+                    || matches!(r.status.as_deref(), Some("BAD_REQUEST" | "unauthorized"))
+                    || r.error.as_ref().is_some_and(|e| !e.is_empty())
+                    || !r.errors.is_empty()
+                {
+                    let code = r
+                        .error
+                        .as_deref()
+                        .filter(|code| !code.is_empty())
+                        .or_else(|| r.errors.first().map(|e| e.message.as_str()));
+                    let message = if !ok {
+                        let detail = code.map(|code| format!(": {code}")).unwrap_or_default();
+                        format!("Kraken HTTP {}{detail}", response.status)
+                    } else {
+                        code.unwrap_or("Kraken rejected trading request").to_owned()
+                    };
+                    let code = code.or(r
+                        .status
+                        .as_deref()
+                        .filter(|status| matches!(*status, "BAD_REQUEST" | "unauthorized")));
+                    return Err(classified_failure(&response, intent, code, message));
+                }
+                self.trading_apply(cx, request.step, request.settings_revision, r)
+            })
+            .map_err(|error| {
+                let partial = self
+                    .trading
+                    .active
+                    .as_ref()
+                    .is_some_and(|job| job.effective || !job.ids.is_empty());
+                trading_failure(error, partial)
+            });
         if let Some(context) = context.as_ref().filter(|_| !leverage_read) {
             let ids = self
                 .trading
@@ -864,7 +891,9 @@ impl Kraken {
                 self.trading_finish(cx, Err(error))
             }
         }
-        self.trading_pump(cx);
+        if self.identities.is_none() {
+            self.trading_pump(cx);
+        }
     }
     fn trading_apply(
         &mut self,
@@ -987,14 +1016,9 @@ impl Kraken {
                         } else {
                             unproven(message)
                         };
-                        // The last failure's text, but an Unknown entry is never overwritten.
+                        // Keep an unknown leg's text and native diagnostics together.
                         error = match error {
-                            Some(first) if first.outcome == Some(Outcome::Unknown) => {
-                                Some(VenueError {
-                                    message: failure.message,
-                                    ..first
-                                })
-                            }
+                            Some(first) if first.outcome == Some(Outcome::Unknown) => Some(first),
                             _ => Some(failure),
                         };
                     }
@@ -1102,20 +1126,32 @@ impl Kraken {
                 Err(mut error) => {
                     let ids: Vec<_> = job
                         .canceled_ids
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .chain(job.ids.iter().cloned())
                         .collect();
                     error = error.partial_ids(&ids);
-                    if job.effective || !job.ids.is_empty() {
-                        error.outcome = Some(Outcome::Unknown);
-                    }
+                    error = trading_failure(error, job.effective || !job.ids.is_empty());
                     if error.outcome == Some(Outcome::Rejected) {
                         cx.placement_resolved(job.command);
                     }
-                    if let Some(root) = &job.root {
-                        let _ = cx.fail_context(root, error);
-                    } else {
-                        cx.fail(job.command, error);
+                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    fail_job(cx, &job, error);
+                    if unknown {
+                        // Admission preceded this uncertainty; never pump those
+                        // placements or edits. Cancels, settings and reads remain.
+                        let failures = &mut self.trading.deferred_failures;
+                        self.trading.queue.retain(|queued| {
+                            if !blocks_after_uncertainty(queued) {
+                                return true;
+                            }
+                            if let Some(root) = &queued.root {
+                                failures.push((root.clone(), queued_uncertainty()));
+                            } else {
+                                fail_job(cx, queued, queued_uncertainty());
+                            }
+                            false
+                        });
                     }
                 }
             }
@@ -1137,7 +1173,9 @@ impl Kraken {
             error.outcome(Outcome::Unknown)
         };
         self.trading_finish(cx, Err(error));
-        self.trading_pump(cx);
+        if self.identities.is_none() {
+            self.trading_pump(cx);
+        }
     }
     pub(crate) fn trading_sign_failed(
         &mut self,
@@ -1146,8 +1184,40 @@ impl Kraken {
         error: VenueError,
     ) {
         self.trading_finish(cx, Err(error.outcome(Outcome::NotSent)));
-        self.trading_pump(cx);
+        if self.identities.is_none() {
+            self.trading_pump(cx);
+        }
     }
+}
+
+fn fail_job(cx: &mut Cx<'_, Pending>, job: &Job, error: VenueError) {
+    if let Some(root) = &job.root {
+        let _ = cx.fail_context(root, error);
+    } else {
+        cx.fail(job.command, error);
+    }
+}
+fn blocks_after_uncertainty(job: &Job) -> bool {
+    job.steps
+        .iter()
+        .any(|step| matches!(step, Step::Place(_) | Step::Edit { .. }))
+}
+fn queued_uncertainty() -> VenueError {
+    not_sent(
+        "Kraken Futures queued write was not sent: earlier write outcome is uncertain. Check Open Orders before retrying",
+    )
+}
+fn trading_failure(mut error: VenueError, partial: bool) -> VenueError {
+    if partial {
+        error.outcome = Some(Outcome::Unknown);
+    }
+    if error.outcome == Some(Outcome::Unknown) && !error.message.contains("Check Open Orders") {
+        error.message = format!(
+            "Kraken write outcome is unknown. Check Open Orders: {}",
+            error.message
+        );
+    }
+    error
 }
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {

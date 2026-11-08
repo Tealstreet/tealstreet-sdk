@@ -682,6 +682,11 @@ Account construction, from `init`:
 A construction error replies `msg` `{op:'error', accountName, data:[message]}`.
 This is the same as `sendInitError`.
 
+Unsupported venues, including saved BitMEX accounts, are refused before routing
+or account replacement. Their error has `data:[message, {forceToast:true,
+initRefused:true, kind:'unsupported', outcome:'notSent'}]` so the client stops
+waiting for that account without disrupting other accounts on the socket.
+
 Sessions and resume (same semantics as today):
 
 - **Session id:** every socket gets a `resumeId`.
