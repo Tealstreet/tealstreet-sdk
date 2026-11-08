@@ -91,3 +91,24 @@ and the new credential-erasure line; it adds no raw credential holder. Ordinary
 and protective restore fixes share the provider path. Full checks and measured
 WASM budget evidence belong in the PR description; CI and maintainer review
 remain authoritative.
+
+## Native remote-provider slice
+
+The native `hosts/remote-signer` GRVT family now accepts only the owned
+credential Present for login or the three-operation order graph described
+above. Its capability probe reports secp256k1 only for its owned signing ref;
+the operational interpreter ships with that declaration. Public-address setup
+remains unsupported: GRVT uses its configured expected address and verifies
+the address and recovered signature on every order.
+
+Fixed public ethers/browser goldens cover both networks. Native link tests
+cover malformed graphs/replies, cancellation, timeout, disconnect and late
+replies without a second request. No local scalar or new crypto dependency is
+installed on the server. The shared admission policy and WASM caps are unchanged.
+
+NEEDS-NX: native GRVT provider capability is no longer the generic HMAC fallback;
+update native hosted-refusal examples that assumed it could not sign. This
+slice alone does not complete native hosted GRVT: server InitPayload still
+needs signer-address forwarding, caller compatibility and a real server/device
+round-trip proof in the subsequent slice. Keep activation frozen pending
+non-author review and the existing caller coordination.
