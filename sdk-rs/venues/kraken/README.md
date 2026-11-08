@@ -12,6 +12,8 @@ registry construction uses `Kraken::with_signing` with opaque refs only.
 Native public-only startup discards unused primary identities before validation,
 so saved blank or key-only primary fields do not block unauthenticated market
 data. Private primary and secondary read credentials retain their validation.
+The SDK's shared explicit-public setup also ignores unused signing callbacks
+and grants no signing authority.
 
 REST signs the exact encoded form, optional frozen decimal nonce and path (without the
 `/derivatives` prefix) with SHA256 followed by HMAC-SHA512. WS signs SHA256 of
@@ -47,7 +49,7 @@ Callers explicitly supplying nonces still own key-wide coordination: our managed
 nonce allocator shares state only within one native process or WASM module.
 The existing explicit-nonce recipe API and Spot nonce behavior are unchanged.
 
-PayloadSigner remains typed unsupported/NotSent: that callback's current
+Private PayloadSigner remains typed unsupported/NotSent: that callback's current
 `hmac-sha256` string contract cannot express Kraken's binary SHA256-to-HMAC-SHA512
 graph. Kraken Futures uses symmetric API keys rather than this SDK's wallet-agent
 cosigning modes. [Subaccounts have separately controlled API keys](https://support.kraken.com/ca/articles/360042809671-understanding-derivatives-subaccounts);

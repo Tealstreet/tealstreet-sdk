@@ -1,5 +1,5 @@
 import type { SignRequest, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { expect, it, vi } from 'vitest';
 
@@ -17,7 +17,7 @@ const unusedSigners = () => ({
   payloadSigner: vi.fn(),
 });
 
-it.each(['kucoin', 'kucoinspot'] as const)('%s constructs explicitly public-only accounts with an unused PayloadSigner', (name) => {
+it.each(['kucoin', 'kucoinspot', 'kraken'] satisfies ExchangeName[])('%s constructs explicitly public-only accounts with an unused PayloadSigner', (name) => {
   const payloadSigner = vi.fn();
   for (const key of ['', 'unused-public-key']) {
     const exchange = new RustEngineExchange(name, { key, secret: '', publicDataOnly: true, payloadSigner }, new DefaultStore());
