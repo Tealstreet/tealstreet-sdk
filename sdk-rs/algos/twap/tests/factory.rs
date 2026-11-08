@@ -522,6 +522,108 @@ async fn unknown_halt_keeps_already_accepted_chaser_order() {
     halt_real_chaser_keeps_order(0).await;
 }
 
+async fn real_chaser_placement_outcome(duration: f64, unknown: bool) {
+    LocalSet::new()
+        .run_until(async {
+            let _clock = support::ClockGuard::new();
+            let port = Rc::new(Port::default());
+            {
+                let mut store = port.store.borrow_mut();
+                store.venue = "binance".into();
+                store.markets.insert("BTCUSDT".into(), market());
+                store.tickers.insert(
+                    "BTCUSDT".into(),
+                    Ticker {
+                        symbol: "BTCUSDT".into(),
+                        bid: 100.0,
+                        ask: 101.0,
+                        last: 100.0,
+                        ..Ticker::default()
+                    },
+                );
+            }
+            port.fail.set(unknown);
+            port.fail_outcome
+                .set(Some(safe_cex_engine::Outcome::Unknown));
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let chasers = safe_cex_chaser::ChaserBook::new(cx.clone());
+            let factory = TwapFactory::new("a", cx, Rc::new(chasers));
+            factory
+                .start(
+                    serde_json::from_str(&twap_options(json!({
+                        "size": 3, "ordersCount": 3, "duration": duration,
+                        "useChaserOrders": true
+                    })))
+                    .unwrap(),
+                )
+                .unwrap();
+            settle().await;
+            for _ in 0..80 {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                settle().await;
+            }
+            assert_eq!(
+                placed_amounts(&port),
+                if unknown { vec![1.0] } else { vec![1.0; 3] },
+                "real chaser placement outcome must control later TWAP dispatch: {:?}",
+                port.commands.borrow()
+            );
+            if unknown {
+                assert!(!port.commands.borrow().iter().any(|command| matches!(
+                    command,
+                    Command::CancelOrders { .. } | Command::CancelOrdersWithSymbols { .. }
+                )));
+                let emits = port.emits.borrow();
+                let outcomes: Vec<_> = emits
+                    .iter()
+                    .filter(|(op, _)| op == "twap:outcome")
+                    .collect();
+                assert_eq!(outcomes.len(), 1);
+                let error = &outcomes[0].1["error"];
+                assert_eq!(error["message"], ENGINE_UNKNOWN_TEXT);
+                assert_eq!(error["outcome"], "unknown");
+                assert_eq!(error["elements"].as_array().unwrap().len(), 3);
+                assert_eq!(error["elements"][0]["status"], "unknown");
+                assert_eq!(
+                    error["elements"][0]["error"]["message"],
+                    ENGINE_UNKNOWN_TEXT
+                );
+                for row in &error["elements"].as_array().unwrap()[1..] {
+                    assert_eq!(row["status"], "notSent");
+                }
+                let telemetry: Vec<_> = emits.iter().filter(|(op, _)| op == "telemetry").collect();
+                assert_eq!(telemetry.len(), 1);
+                assert_eq!(telemetry[0].1["kind"], "twap.unknown_outcome");
+                assert_eq!(telemetry[0].1["error"], *error);
+                assert_eq!(telemetry[0].1["twapId"], outcomes[0].1["id"]);
+                assert!(
+                    emits
+                        .iter()
+                        .any(|(op, value)| op == "error" && value == ENGINE_UNKNOWN_TEXT)
+                );
+                assert!(factory.active_twaps("a").is_empty());
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn real_chaser_unknown_placement_halts_twap() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at TwapInstance.ts:249-280.
+    real_chaser_placement_outcome(1.0, true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn real_chaser_unknown_placement_halts_before_lookup_retries_finish() {
+    // TS TwapInstance.ts:142-165,249-280 delegates children; the Unknown exception halts new writes.
+    real_chaser_placement_outcome(0.1, true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn real_chaser_success_keeps_later_children_scheduled() {
+    real_chaser_placement_outcome(1.0, false).await;
+}
+
 fn market() -> Market {
     Market {
         id: "BTCUSDT".into(),

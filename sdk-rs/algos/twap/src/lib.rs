@@ -49,7 +49,7 @@ pub struct ChaserProgress {
     pub stopped: bool,
     /// Finished: its cancel has settled and its remainder is final.
     pub ended: bool,
-    /// Ended with a cancel that never proved its order gone.
+    /// A placement or cancellation has not proved whether an order remains open.
     pub order_may_be_open: bool,
 }
 

@@ -158,6 +158,7 @@ struct State {
     outcome_told: bool,
     /// A stop cancel ended without proof the order is gone.
     order_may_be_open: bool,
+    placement_unknown: bool,
     last_partial_fill_at: Option<Instant>,
 }
 
@@ -390,7 +391,12 @@ impl Chase {
     }
 
     pub fn order_may_be_open(&self) -> bool {
-        self.state.borrow().order_may_be_open
+        let state = self.state.borrow();
+        state.order_may_be_open || state.placement_unknown
+    }
+
+    pub fn set_placement_unknown(&self, unknown: bool) {
+        self.state.borrow_mut().placement_unknown = unknown;
     }
 
     pub fn outcome_told(&self) -> bool {

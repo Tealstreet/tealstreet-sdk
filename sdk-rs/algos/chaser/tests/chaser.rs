@@ -2592,6 +2592,14 @@ async fn a_lost_placement_found_open_is_adopted() {
             vec!["o7".to_string()]
         );
         assert!(port.completes().is_empty());
+        let chase_id = factory.book().active_chasers()[0].id.clone();
+        assert!(
+            !factory
+                .book()
+                .progress(&chase_id)
+                .unwrap()
+                .order_may_be_open
+        );
     })
     .await;
 }
@@ -2601,7 +2609,12 @@ async fn a_lost_placement_never_found_stops_after_the_lookups() {
     local(async {
         let port = FakePort::new("hyperliquid");
         lose_placements(&port, r#"{"found":false,"definitive":false}"#);
-        let _chase = start(&port, BUY_ONE);
+        let (factory, _) = start(&port, BUY_ONE);
+        settle(10).await;
+        let id = factory.book().active_chasers()[0].id.clone();
+        let progress = factory.book().progress(&id).unwrap();
+        assert!(progress.order_may_be_open);
+        assert!(!progress.ended);
         settle(20_000).await;
         assert_eq!(port.placements().len(), 1);
         assert_eq!(lookups(&port), 4);
@@ -2609,6 +2622,8 @@ async fn a_lost_placement_never_found_stops_after_the_lookups() {
             port.completes()[0]["stopReason"],
             UNCONFIRMED_ORDER_STOP_REASON
         );
+        let progress = factory.book().progress(&id).unwrap();
+        assert!(progress.order_may_be_open && progress.ended);
     })
     .await;
 }

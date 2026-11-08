@@ -17,6 +17,9 @@ The Unknown-only chaser halt also relinquishes orders whose placement response
 arrives later. Ordinary timeout removal still cancels before market fallback
 (legacy `TwapInstance.ts:213-220`); generic keep-order removal retains its legacy
 late-response cancellation (`ChaserOrderManager.ts:307-322,1017-1035`).
+Real child chasers expose an Unknown placement while read-only identity lookups
+are still pending, so even a shorter slice interval cannot release another child.
+An unresolved placement retains that signal in the ended chaser's progress.
 
 The exact local wording is `The outcome is unknown. Check Open Orders`, matching
 `engine/src/http_evidence.rs:38` per the lead's literal rule. Shared engine code

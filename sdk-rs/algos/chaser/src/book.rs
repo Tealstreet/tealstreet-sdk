@@ -120,7 +120,7 @@ pub struct Progress {
     pub stopped: bool,
     /// Finished: nothing of this chase is still working.
     pub ended: bool,
-    /// Ended with a cancel that never proved its order gone.
+    /// A placement or cancellation has not proved whether an order remains open.
     pub order_may_be_open: bool,
 }
 
@@ -245,7 +245,7 @@ impl ChaserBook {
                 remaining_size: chase.remaining(),
                 stopped: chase.is_stopped(),
                 ended: false,
-                order_may_be_open: false,
+                order_may_be_open: chase.order_may_be_open(),
             })
             .or_else(|| {
                 let ended = self.ended.borrow();
@@ -1230,6 +1230,11 @@ impl ChaserBook {
                     _ => (Vec::new(), error.outcome == Some(Outcome::Unknown)),
                 },
             };
+            chase.set_placement_unknown(
+                lost || placed
+                    .as_ref()
+                    .is_err_and(|error| error.outcome == Some(Outcome::Unknown)),
+            );
             if let Err(error) = &placed {
                 last_refusal = Some(error.message.clone());
                 if let Some((reason, refused)) = settled_refusal(error)
@@ -1266,8 +1271,10 @@ impl ChaserBook {
                     {
                         ids = vec![order.id];
                         unconfirmed = false;
+                        chase.set_placement_unknown(false);
                     }
                     Some(order) => {
+                        chase.set_placement_unknown(false);
                         // Filled, or a post-only reject after a partial fill:
                         // count it, then retry what is left.
                         chase.set_filled_amount(&order.id, order.placement_filled());
@@ -1280,6 +1287,7 @@ impl ChaserBook {
                 }
             }
             if unconfirmed {
+                chase.note_order_may_be_open();
                 // Not found, or no client id to look it up by: placing again
                 // could double it, and it may still land.
                 let message = format!(
