@@ -1775,29 +1775,41 @@ impl Store {
 
     fn write_positions<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let positions = &self.positions;
-        w.begin_revision(section::POSITIONS, 1);
+        let extras: Vec<_> = positions
+            .iter()
+            .map(|position| {
+                let market = self
+                    .market_by_symbol
+                    .get(position.symbol.as_str())
+                    .map(|index| &self.markets[*index as usize]);
+                crate::position_output::native_extras(position, market, self.quantity_units)
+            })
+            .collect();
+        w.begin_revision(section::POSITIONS, 2);
         w.u32(positions.len() as u32);
         w.u32s(positions.iter().map(|p| self.market_ref(&p.symbol)));
-        w.u32s(
-            positions
-                .iter()
-                .map(|p| wire::position_enums(p.side, p.margin_type, p.position_mode)),
-        );
+        w.u32s(positions.iter().zip(&extras).map(|(p, extra)| {
+            wire::position_enums(p.side, p.margin_type, p.position_mode)
+                | (u32::from(extra[0].is_some()) << 24)
+                | (u32::from(extra[1].is_some()) << 25)
+        }));
         w.pad();
         let columns: [fn(&Position) -> f64; 9] = [
             |p| p.entry_price,
             |p| p.notional,
-            |p| p.leverage,
-            |p| p.unrealized_pnl,
-            |p| p.realized_pnl.unwrap_or(f64::NAN),
+            |p| crate::position_output::display(p.leverage),
+            |p| crate::position_output::display(p.unrealized_pnl),
+            |p| p.realized_pnl.filter(|v| v.is_finite()).unwrap_or(f64::NAN),
             |p| p.contracts,
-            |p| p.liquidation_price,
-            |p| p.margin_size.unwrap_or(f64::NAN),
-            |p| p.last_update.unwrap_or(f64::NAN),
+            |p| crate::position_output::liquidation(p.liquidation_price).unwrap_or(f64::NAN),
+            |p| p.margin_size.filter(|v| v.is_finite()).unwrap_or(f64::NAN),
+            |p| p.last_update.filter(|v| v.is_finite()).unwrap_or(f64::NAN),
         ];
         for column in columns {
             w.f64s(positions.iter().map(column));
         }
+        w.f64s(extras.iter().map(|extra| extra[0].unwrap_or(f64::NAN)));
+        w.f64s(extras.iter().map(|extra| extra[1].unwrap_or(f64::NAN)));
         for position in positions {
             let id = w.string(&position.id);
             w.u32(id);
@@ -2354,11 +2366,11 @@ mod tests {
         let mut writer = FrameWriter::new(Vec::new(), 1.);
         store.write_positions(&mut writer);
         let frame = writer.finish();
-        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 2);
         let rows = wire::sections(&frame).next().unwrap().1;
         assert_eq!(word(rows, 4), wire::NONE);
-        assert_eq!(frame_string(&frame, word(rows, 88)), "venue-position-7");
-        assert_eq!(frame_string(&frame, word(rows, 92)), "DELISTED");
+        assert_eq!(frame_string(&frame, word(rows, 104)), "venue-position-7");
+        assert_eq!(frame_string(&frame, word(rows, 108)), "DELISTED");
     }
 
     #[test]
@@ -3109,14 +3121,14 @@ mod tests {
             let (_, positions) = wire::sections(&frame)
                 .find(|(kind, _)| *kind == section::POSITIONS)
                 .unwrap();
-            // Revision one appends exact ID and symbol after numeric columns.
-            assert_eq!(positions.len(), 96);
+            // Revision two appends exact ID and symbol after numeric columns.
+            assert_eq!(positions.len(), 112);
             assert_eq!(
-                frame_string(&frame, word(positions, 88)),
+                frame_string(&frame, word(positions, 104)),
                 store.positions()[0].id,
             );
             assert_eq!(
-                frame_string(&frame, word(positions, 92)),
+                frame_string(&frame, word(positions, 108)),
                 store.positions()[0].symbol,
             );
         }

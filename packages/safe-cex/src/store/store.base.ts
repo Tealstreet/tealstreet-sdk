@@ -858,56 +858,9 @@ export class DefaultStore implements Store {
     this.notify();
   };
 
-  /**
-   * Creates an empty position from actual position.
-   *
-   * Use to mark position is closed when wiping any other position information is not desired.
-   *
-   * @param position
-   */
-  createEmptyPositionFrom = (position: Position) => {
-    return {
-      ...position,
-      entryPrice: 0,
-      notional: 0,
-      unrealizedPnl: 0,
-      contracts: 0,
-      liquidationPrice: null,
-      marginSize: 0,
-      info: undefined,
-      extra: undefined,
-    };
-  };
-
-  /**
-   * does the same thing as a function above but cleans up unannounced positions.
-   *
-   * @param positions
-   */
+  /** Replace the authoritative native snapshot, including an empty snapshot. */
   addOrUpdatePositionsFull = (positions: Position[]) => {
-    const usedIds = new Set<string>();
-    const positionIndexById =
-      positions.length > 1 && this.state.positions.length > 1 ? this.buildIdIndexMap(this.state.positions) : undefined;
-    positions.forEach((position) => {
-      usedIds.add(position.id);
-      const idx = this.findIndexById(this.state.positions, position.id, positionIndexById);
-      if (idx > -1) {
-        this.updateInArray('positions', idx, position);
-      } else {
-        if (positionIndexById) {
-          positionIndexById[position.id] = this.state.positions.length;
-        }
-        this.state.positions.push({ ...position });
-      }
-    });
-    Object.assign(this.state, {
-      positions: this.state.positions.map((position) =>
-        usedIds.has(position.id) ? position : this.createEmptyPositionFrom(position),
-      ),
-    });
-
-    this.state.updateIds.positions += 1;
-    this.notify();
+    this.update({ positions });
   };
 
   /**

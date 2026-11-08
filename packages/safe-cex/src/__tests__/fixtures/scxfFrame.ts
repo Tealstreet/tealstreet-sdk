@@ -25,8 +25,23 @@ export const inverseUnitsFrameBytes = ({
   contractSize = NaN,
   positionPnl = 0.002,
   positionLiquidationPrice = 40000,
+  positionNativeContracts,
+  positionNativePnl,
   units = 0,
   orderMarket = 0,
+}: {
+  native?: boolean;
+  inverse?: boolean;
+  orders?: OrderRow[];
+  positions?: boolean;
+  markets?: boolean;
+  contractSize?: number;
+  positionPnl?: number;
+  positionLiquidationPrice?: number;
+  units?: number;
+  orderMarket?: number;
+  positionNativeContracts?: number;
+  positionNativePnl?: number;
 } = {}) => {
   const strings = [
     'BTCUSD',
@@ -35,7 +50,7 @@ export const inverseUnitsFrameBytes = ({
     ...orders.flatMap((row) => [row.id, ...(row.parentId ? [row.parentId] : [])]),
   ];
   const ref = (s: string | undefined) => (s === undefined ? 0xffffffff : strings.indexOf(s));
-  const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
+  const sections: Array<{ kind: number; bytes: Uint8Array; revision?: number }> = [];
   const table = (kind: number, words: number[], columns: number[][]) => {
     const bytes = new Uint8Array(align8(words.length * 4) + columns.reduce((n, column) => n + column.length * 8, 0));
     const view = new DataView(bytes.buffer);
@@ -75,12 +90,35 @@ export const inverseUnitsFrameBytes = ({
     ],
     columns,
   );
-  if (positions)
+  if (positions) {
+    // Independent revision-2 producer fixture: extras are explicit native output.
+    const size = contractSize > 0 ? contractSize : 1;
+    const nativeContracts =
+      positionNativeContracts ??
+      (units === 1
+        ? (inverse ? 1000 : 0.02) / size
+        : units === 3
+          ? (inverse ? 1000 : 0.02) / size
+          : inverse || units === 2
+            ? 1000 / (units === 4 ? size : 1)
+            : NaN);
+    const nativePnl = positionNativePnl ?? ((inverse && units !== 1 && units !== 3) || units === 2 ? positionPnl : NaN);
+    const liq =
+      Number.isFinite(positionLiquidationPrice) && positionLiquidationPrice > 0 ? positionLiquidationPrice : NaN;
     table(
       8,
-      [1, 0, (2 << 8) | (2 << 16)],
-      [49000, 1000, 10, positionPnl, 0.001, 0.02, positionLiquidationPrice, 100, 1234].map((n) => [n]),
+      [1, 0, (2 << 8) | (2 << 16) | (Number(!Number.isNaN(nativeContracts)) << 24) | (Number(!Number.isNaN(nativePnl)) << 25)],
+      [49000, 1000, 10, positionPnl, 0.001, 0.02, liq, 100, 1234, nativeContracts, nativePnl].map((n) => [n]),
     );
+    const section = sections[sections.length - 1];
+    const bytes = new Uint8Array(section.bytes.length + 8);
+    bytes.set(section.bytes);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(section.bytes.length, ref('BTCUSD'), true);
+    view.setUint32(section.bytes.length + 4, ref('BTCUSD'), true);
+    section.bytes = bytes;
+    section.revision = 2;
+  }
   const encoded = strings.map((s) => new TextEncoder().encode(s));
   const bytes = new Uint8Array(align8(4 + (strings.length + 1) * 4 + encoded.reduce((n, s) => n + s.length, 0)));
   const view = new DataView(bytes.buffer);
@@ -101,6 +139,7 @@ export const inverseUnitsFrameBytes = ({
   let offset = 16;
   for (const section of sections) {
     header.setUint16(offset, section.kind, true);
+    header.setUint16(offset + 2, section.revision ?? 0, true);
     header.setUint32(offset + 4, section.bytes.length, true);
     new Uint8Array(buffer, offset + 8, section.bytes.length).set(section.bytes);
     offset += 8 + section.bytes.length;

@@ -12,19 +12,22 @@ For MEXC, BloFin, KuCoin futures, Coinbase and the OKX family,
 and main stores. Prefer the exact native remaining column when present; legacy
 frames reconstruct placement quantities from `contractSize` so chaser arithmetic
 retains its native-volume contract. Use decimal-safe division here: a base fill
-of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots. Position frames also
-restore `extra.contractsNative` for native-volume venues, which copier closes
-consume as their placement quantity. `SETTINGS` optionally carries
+of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots. Position revision-2
+frames carry Rust-computed `extra.contractsNative` for native-volume venues,
+which copier closes consume as their placement quantity. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
-single representative leverage value when applying frames. `POSITIONS` may append
-string references for venue-defined position IDs; preserve these when present
-so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
-frames still derive identity from symbol and position mode.
+single representative leverage value when applying frames. `POSITIONS` revision 2
+requires exact native position ID and symbol references,
+so simultaneous Cross and Isolated rows stay distinct. Older Position sections
+are refused; no host identity fallback remains.
 
 Position `liquidationPrice` is a finite positive price or `null` when unknown,
-including through serialization and worker snapshots. The frame applier maps
-non-finite and nonpositive columns to `null`. Empty, retained closed, stub and
-pending chaser positions also use `null` for an unknown liquidation price.
+including through serialization and worker snapshots. Rust normalizes unknown
+thresholds to the binary NaN/null encoding and display leverage/PnL to finite
+numbers. The wire decoder validates this contract; the frame applier does not
+coerce numbers. Authoritative replacement snapshots remove omitted positions;
+the store no longer fabricates retained closed rows. Stub and pending chaser
+positions use `null` for an unknown liquidation price.
 
 Revised SCXF sections carry explicit revisions with fixed tails. Preserve venue
 `prettySymbol`, bracket trigger types, conditional prices, remaining notionals,
@@ -326,12 +329,13 @@ frame cannot detach future delta state. Forwarding workers call
 
 ## Rust frame native units
 
-`FrameApplier` preserves inverse sizing metadata across the worker bridge.
+The native Position writer computes inverse sizing metadata before the worker bridge;
+`FrameApplier` only copies the provided values.
 For Bybit/Bitget inverse, position `notional` is the native quote-contract
-size, so the applier also publishes it as `extra.contractsNative`. Binance
-COIN-M uses fixed USD contract sizes: its worker and main appliers divide
-notional by market `contractSize` for native contract counts, and multiply exact
-order leaves by `contractSize` for `remainingNotional`; `extra.unrealizedPnlNative`
+size, which Rust also publishes as `extra.contractsNative`. Binance COIN-M uses
+fixed USD contract sizes: Rust divides notional by market `contractSize` for
+native position contract counts. The order appliers still multiply exact order
+leaves by `contractSize` for `remainingNotional`; `extra.unrealizedPnlNative`
 keeps the native PnL. Copier closes consume the native size rather than the
 rounded base-coin `contracts` field.
 
@@ -398,3 +402,7 @@ retains exact `filledInPlacementUnits` after native leaves. Inverse fills cannot
 be reconstructed by dividing base fills by a quote contract multiplier. OKX
 reports USD-normalized position PnL, so its frame consumer does not label that
 number as native coin PnL.
+
+Position enum-word bits 24 and 25 declare the presence of native contracts and
+native PnL columns. A present non-finite native size is rejected, never treated
+as absent (which could select an unsafe base-unit fallback).

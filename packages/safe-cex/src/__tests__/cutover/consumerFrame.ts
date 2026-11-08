@@ -21,7 +21,7 @@ export function consumerFrame(
     if (index < 0) index = strings.push(value) - 1;
     return index;
   };
-  const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
+  const sections: Array<{ kind: number; bytes: Uint8Array; revision?: number }> = [];
   const marketIndex = (symbol: string) => {
     const index = marketSymbols.indexOf(symbol);
     if (index < 0) throw new Error(`Fixture market index missing for ${symbol}`);
@@ -115,7 +115,9 @@ export function consumerFrame(
           ...products.map(({ index }) => index),
           ...products.map(({ market }) =>
             market.option
-              ? market.option.right === 'call' ? 2 : 3
+              ? market.option.right === 'call'
+                ? 2
+                : 3
               : ['FUTURE', 'CALL', 'PUT'].indexOf(market.info?.instrumentKind) + 1,
           ),
           ...products.flatMap(({ market }) => [
@@ -166,7 +168,10 @@ export function consumerFrame(
       (row.close === undefined ? 0 : (8 | (row.close ? 4 : 0)) << 16) |
       (rejection.indexOf(row.extra?.rejectReason) << 20) |
       (tif.indexOf(row.timeInForce) << 24) |
-      (trigger.indexOf(row.triggerType ?? (row.type === 'take_profit_market' ? row.tpTriggerType : row.slTriggerType)) << 28);
+      (trigger.indexOf(
+        row.triggerType ?? (row.type === 'take_profit_market' ? row.tpTriggerType : row.slTriggerType),
+      ) <<
+        28);
     table(
       7,
       [
@@ -185,7 +190,9 @@ export function consumerFrame(
     const enums = (row: Position) =>
       Number(row.side === 'short') |
       ([undefined, 'isolated', 'cross'].indexOf(row.marginType) << 8) |
-      ([undefined, 'hedged', 'oneway'].indexOf(row.positionMode) << 16);
+      ([undefined, 'hedged', 'oneway'].indexOf(row.positionMode) << 16) |
+      (Number(row.extra?.contractsNative !== undefined) << 24) |
+      (Number(row.extra?.unrealizedPnlNative !== undefined) << 25);
     table(
       8,
       [rows.length, ...rows.map((row) => marketIndex(row.symbol)), ...rows.map(enums)],
@@ -199,10 +206,16 @@ export function consumerFrame(
         'liquidationPrice',
         'marginSize',
         'lastUpdate',
-      ].map((field) => rows.map((row) => (row[field as keyof Position] as number) ?? NaN)),
-      rows.map((row) => ref(row.id)),
+      ]
+        .map((field) => rows.map((row) => (row[field as keyof Position] as number) ?? NaN))
+        .concat([
+          rows.map((row) => row.extra?.contractsNative ?? NaN),
+          rows.map((row) => row.extra?.unrealizedPnlNative ?? NaN),
+        ]),
+      [...rows.map((row) => ref(row.id)), ...rows.map((row) => ref(row.symbol))],
     );
   }
+  if (data.positions) sections[sections.length - 1].revision = 2;
   if (data.balance) {
     const balance = data.balance;
     const coins = Object.entries(balance.coins ?? {});
@@ -295,6 +308,7 @@ export function consumerFrame(
   let at = 16;
   for (const section of sections) {
     header.setUint16(at, section.kind, true);
+    header.setUint16(at + 2, section.revision ?? 0, true);
     header.setUint32(at + 4, section.bytes.length, true);
     new Uint8Array(buffer, at + 8, section.bytes.length).set(section.bytes);
     at += 8 + section.bytes.length;

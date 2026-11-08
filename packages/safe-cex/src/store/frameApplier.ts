@@ -1,15 +1,5 @@
 import type { Frame, QuantityUnits } from '@tealstreet/safe-cex-wasm/wire';
-import type {
-  Candle,
-  FetchedLeverage,
-  Market,
-  Order,
-  OrderBook,
-  OrderFillEvent,
-  Position,
-  Ticker,
-  Writable,
-} from '../types';
+import type { Candle, FetchedLeverage, Market, Order, OrderBook, OrderFillEvent, Ticker, Writable } from '../types';
 import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import {
@@ -17,11 +7,11 @@ import {
   MARKET_FLAG,
   marketQuantityUnits,
   orderEnums,
-  positionEnums,
   TICKER_FIELDS,
 } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, OrderSide, PositionMode } from '../types';
 import { divide, subtract } from '../utils/safe-math';
+import { readPositionFrame } from './positionFrames';
 
 export type FrameBook = { symbol: string; orderbook: OrderBook };
 type BookLevels = Map<number, number> | Float64Array;
@@ -31,13 +21,6 @@ export type FrameCandle = { symbol: string; interval: string; candle: Candle };
 export class FrameApplyError extends Error {}
 
 const finite = (value: number) => (Number.isFinite(value) ? value : undefined);
-/**
- * Other display fields retain the existing zero fallback; liquidation prices
- * preserve unknown separately as null.
- * Sizing inputs (`contracts`, `notional`) stay raw: a NaN there makes nuke refuse the close.
- */
-const displayNumber = (value: number) => (Number.isFinite(value) ? value : 0);
-
 /** The sizing rules each `QuantityUnits` convention implies for order and position extras. */
 type UnitProfile = {
   nativePlacementAmounts: boolean;
@@ -457,91 +440,8 @@ export class FrameApplier {
 
     attempt(() => {
       if (marketsFailed) return;
-      const positions = frame.positions();
-      if (positions) {
-        const rows: Position[] = [];
-        const greekTable = frame.positionGreeks?.();
-        const greeksById = new Map<string, NonNullable<Position['option']>>();
-        if (greekTable) {
-          for (let i = 0; i < greekTable.count; i++) {
-            greeksById.set(greekTable.positionId(i), {
-              greeks: {
-                delta: greekTable.delta[i],
-                gamma: greekTable.gamma[i],
-                vega: greekTable.vega[i],
-                theta: greekTable.theta[i],
-                units: greekTable.units(i),
-              },
-            });
-          }
-        }
-        const predictionHoldings = frame.predictionHoldings?.();
-        const holdingFlags = predictionHoldings && new Map<number, number>();
-        if (predictionHoldings) {
-          for (let i = 0; i < predictionHoldings.count; i++)
-            holdingFlags!.set(predictionHoldings.market[i], predictionHoldings.flags[i]);
-        }
-        for (let i = 0; i < positions.count; i++) {
-          const enums = positionEnums(positions.enums[i]);
-          const symbol = resolveSymbol(positions.market[i], positions.symbol?.(i));
-          const market = update.markets ? update.markets[positions.market[i]] : this.store.marketsBySymbol[symbol];
-          const mode = enums.positionMode as PositionMode | undefined;
-          const { nativePlacementAmounts, inverseNativeAmounts, contractCountAmounts, inverseContractSized } = unitsOf(
-            positions.market[i],
-          );
-          const id = positions.id(i) ?? (mode === PositionMode.Hedged ? `${symbol}:${enums.side}` : symbol);
-          rows.push({
-            id,
-            ...(greeksById.has(id) && { option: greeksById.get(id) }),
-            symbol,
-            side: enums.side as Position['side'],
-            ...(market?.info?.conditionId && {
-              info: {
-                tokenId: market.id,
-                conditionId: market.info.conditionId,
-                redeemable: ((holdingFlags?.get(positions.market[i]) ?? 0) & 1) !== 0,
-                mergeable: ((holdingFlags?.get(positions.market[i]) ?? 0) & 2) !== 0,
-              },
-            }),
-            entryPrice: positions.entryPrice[i],
-            notional: positions.notional[i],
-            leverage: displayNumber(positions.leverage[i]),
-            unrealizedPnl: displayNumber(positions.unrealizedPnl[i]),
-            contracts: positions.contracts[i],
-            ...(market &&
-              (nativePlacementAmounts || contractCountAmounts || market?.isInverse || inverseNativeAmounts) && {
-                extra: {
-                  ...(nativePlacementAmounts && {
-                    contractsNative: divide(positions.contracts[i], contractSizes[positions.market[i]]),
-                  }),
-                  ...(contractCountAmounts
-                    ? {
-                        contractsNative: divide(
-                          market?.isInverse ? positions.notional[i] : positions.contracts[i],
-                          contractSizes[positions.market[i]],
-                        ),
-                      }
-                    : (market?.isInverse || inverseNativeAmounts) && {
-                        contractsNative: divide(
-                          positions.notional[i],
-                          inverseContractSized || nativePlacementAmounts ? contractSizes[positions.market[i]] : 1,
-                        ),
-                        ...(!nativePlacementAmounts && {
-                          unrealizedPnlNative: displayNumber(positions.unrealizedPnl[i]),
-                        }),
-                      }),
-                },
-              }),
-            liquidationPrice: positions.liquidationPrice[i] > 0 ? (finite(positions.liquidationPrice[i]) ?? null) : null,
-            ...(mode !== undefined && { positionMode: mode }),
-            ...(enums.marginType !== undefined && { marginType: enums.marginType as MarginType }),
-            ...(finite(positions.realizedPnl[i]) !== undefined && { realizedPnl: positions.realizedPnl[i] }),
-            ...(finite(positions.marginSize[i]) !== undefined && { marginSize: positions.marginSize[i] }),
-            ...(finite(positions.lastUpdate[i]) !== undefined && { lastUpdate: positions.lastUpdate[i] }),
-          } as Position);
-        }
-        update.positions = rows;
-      }
+      const positions = readPositionFrame(frame, this.store, update.markets);
+      if (positions) update.positions = positions;
     }, LOADED_FLAG.POSITIONS);
 
     attempt(() => {

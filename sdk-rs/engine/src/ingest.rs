@@ -706,7 +706,7 @@ fn orders(
     Ok(())
 }
 
-/// `POSITIONS` (revision 1, `Store::write_positions`): replaces the positions.
+/// `POSITIONS` (revision 2, `Store::write_positions`): replaces the positions.
 fn positions(
     store: &mut Store,
     _: &IngestState,
@@ -717,7 +717,7 @@ fn positions(
     const SIDE: [PositionSide; 2] = [PositionSide::Long, PositionSide::Short];
     const MARGIN: [MarginType; 2] = [MarginType::Isolated, MarginType::Cross];
     const MODE: [PositionMode; 2] = [PositionMode::Hedged, PositionMode::Oneway];
-    if section.revision != 1 {
+    if section.revision != 2 {
         return Err(IngestError("unsupported POSITIONS revision"));
     }
     let strings = &frame.strings;
@@ -731,7 +731,7 @@ fn positions(
         enums.push(c.u32()?);
     }
     c.align8();
-    let mut columns = [(); 9].map(|_| Vec::with_capacity(count));
+    let mut columns = [(); 11].map(|_| Vec::with_capacity(count));
     for column in &mut columns {
         for _ in 0..count {
             column.push(c.f64()?);

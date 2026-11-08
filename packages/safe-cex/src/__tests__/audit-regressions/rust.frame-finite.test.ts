@@ -6,12 +6,12 @@ import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 import { inverseUnitsFrame } from '../fixtures/scxfFrame';
 
-const cols = (fields: Record<string, number>) =>
-  Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, Float64Array.of(value)]));
+const cols = (fields: Record<string, number | null>) =>
+  Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, [value]]));
 
 // Bybit maps an absent `leverage` to NaN; an engine division can yield ±Infinity.
 // Display fields read 0; sizing inputs keep NaN so nuke refuses rather than skips.
-const frame = (position: Record<string, number>) =>
+const frame = (position: Record<string, number | null>) =>
   ({
     markets: () => ({
       count: 1,
@@ -54,14 +54,17 @@ const frame = (position: Record<string, number>) =>
       count: 1,
       market: Uint32Array.of(0),
       enums: Uint32Array.of(0),
-      id: () => undefined,
+      id: () => 'BTCUSDT',
+      symbol: () => 'BTCUSDT',
+      realizedPnl: [undefined],
+      marginSize: [undefined],
+      lastUpdate: [undefined],
+      contractsNative: [undefined],
+      unrealizedPnlNative: [undefined],
       ...cols({
         entryPrice: 40000,
         notional: 1000,
         contracts: 0.025,
-        realizedPnl: Infinity,
-        marginSize: -Infinity,
-        lastUpdate: NaN,
         ...position,
       }),
     }),
@@ -72,11 +75,9 @@ const frame = (position: Record<string, number>) =>
     settings: () => undefined,
   }) as unknown as Frame;
 
-it('keeps liquidation unknown while normalizing other display fields and preserving sizing guards', () => {
+it('preserves native normalized fields and sizing guards without repairing them', () => {
   const store = new DefaultStore();
-  new FrameApplier(store).apply(
-    frame({ leverage: NaN, liquidationPrice: Infinity, unrealizedPnl: -Infinity, contracts: NaN }),
-  );
+  new FrameApplier(store).apply(frame({ leverage: 0, liquidationPrice: null, unrealizedPnl: 0, contracts: NaN }));
   const [position] = store.positions;
   expect(position).toMatchObject({ leverage: 0, liquidationPrice: null, unrealizedPnl: 0, notional: 1000 });
   expect(position.contracts).toBeNaN();
@@ -138,7 +139,7 @@ it.each([NaN, Infinity, -Infinity, 0, -0, -1])(
     const applier = new FrameApplier(store);
     applier.apply(frame({ leverage: 5, liquidationPrice: 67.8, unrealizedPnl: 0 }));
     expect(store.positions[0].liquidationPrice).toBe(67.8);
-    applier.apply(frame({ leverage: 5, liquidationPrice, unrealizedPnl: 0 }));
+    applier.apply(frame({ leverage: 5, liquidationPrice: null, unrealizedPnl: 0 }));
     expect(store.positions[0].liquidationPrice).toBeNull();
     expect(JSON.parse(JSON.stringify(store.positions[0])).liquidationPrice).toBeNull();
   },
@@ -148,7 +149,7 @@ it.each([NaN, Infinity, -Infinity, 0, -0, -1])(
   'preserves unknown liquidation through packed frames and serialization (%s)',
   (liquidationPrice) => {
     const packed = inverseUnitsFrame({ positions: true, inverse: false, positionLiquidationPrice: liquidationPrice });
-    expect(packed.positions()!.liquidationPrice[0]).toBe(liquidationPrice);
+    expect(packed.positions()!.liquidationPrice[0]).toBeNull();
     const store = new DefaultStore();
     new FrameApplier(store).apply(packed);
     expect(store.positions[0].liquidationPrice).toBeNull();

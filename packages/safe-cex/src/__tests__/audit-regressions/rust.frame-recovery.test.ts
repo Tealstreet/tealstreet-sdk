@@ -63,7 +63,7 @@ const fixture = ({
     words.forEach((word, i) => view.setUint32(i * 4, word, true));
     numbers.forEach((number, i) => view.setFloat64(numericOffset + i * 8, number, true));
     tail.forEach((word, i) => view.setUint32(numericOffset + numbers.length * 8 + i * 4, word, true));
-    sections.push({ kind, bytes, revision: tail.length ? 1 : 0 });
+    sections.push({ kind, bytes, revision: kind === SECTION.POSITIONS ? 2 : tail.length ? 1 : 0 });
   };
   if (markets) {
     const columns = [0.001, 1, 0.001, 100, 1, 100, NaN, 1, NaN, NaN];
@@ -75,7 +75,7 @@ const fixture = ({
     );
   }
   table(SECTION.ORDERS, [1, 3, 0xffffffff, 0xffffffff, 0, 256], [100, 1, 0, 1, 1234, NaN, NaN]);
-  table(SECTION.POSITIONS, [1, 0, 2 << 16], [100, 50, 5, 0, 0, 0.5, 80, 10, 1234]);
+  table(SECTION.POSITIONS, [1, 0, 2 << 16], [100, 50, 5, 0, 0, 0.5, 80, 10, 1234, NaN, NaN], [0, 0]);
   table(SECTION.BALANCE, [], [total - 30, 30, total, 0]);
   if (!omitSettings)
     table(SECTION.SETTINGS, settings ? [1, 0, 2] : [0], settings ? [leverage, buyLeverage, sellLeverage] : []);

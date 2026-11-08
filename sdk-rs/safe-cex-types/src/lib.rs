@@ -554,6 +554,9 @@ pub struct PositionExtra {
     pub unrealized_pnl_native: Option<f64>,
 }
 
+/// Canonical SDK position. liquidationPrice is required and null when the threshold is unavailable.
+/// contracts is the whole base-unit quantity; extra.contractsNative retains native placement units.
+/// marginSize is absolute quote-currency margin when published by the venue; cross margin may be zero.
 #[derive(Debug, Clone, PartialEq, TS)]
 #[ts(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -573,7 +576,8 @@ pub struct Position {
     #[ts(as = "Option<f64>")]
     pub realized_pnl: ModelField<f64>,
     pub contracts: f64,
-    pub liquidation_price: f64,
+    #[ts(type = "number | null")]
+    pub liquidation_price: Option<f64>,
     #[ts(as = "Option<f64>")]
     pub margin_size: ModelField<f64>,
     #[ts(type = "any", optional)]
@@ -3919,6 +3923,12 @@ mod strict_codecs {
         }
     }
 
+    fn required_nullable_price<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<f64>, D::Error> {
+        serde::Deserialize::deserialize(deserializer)
+    }
+
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::Position")]
     #[serde(rename_all = "camelCase")]
@@ -3938,7 +3948,8 @@ mod strict_codecs {
         #[serde(default)]
         realized_pnl: ModelField<f64>,
         contracts: f64,
-        liquidation_price: f64,
+        #[serde(deserialize_with = "required_nullable_price")]
+        liquidation_price: Option<f64>,
         #[serde(default)]
         margin_size: ModelField<f64>,
         #[serde(default, deserialize_with = "crate::model_field::deserialize_info")]

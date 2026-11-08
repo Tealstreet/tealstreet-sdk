@@ -87,5 +87,30 @@ function generate(bindings) {
   assert.deepEqual(seen.sort(), Object.keys(metadata).sort(), 'every exported Rust enum must be rendered exactly once');
 }
 
-if (require.main === module) generate(path.join(__dirname, 'bindings'));
+function publishPosition() {
+  const bindings = path.join(__dirname, 'bindings');
+  const destination = path.resolve(__dirname, '../../packages/safe-cex/src/generated');
+  fs.mkdirSync(destination, { recursive: true });
+  const visited = new Set();
+  const copy = name => {
+    if (visited.has(name)) return;
+    visited.add(name);
+    const filename = `${name}.ts`;
+    const source = fs.readFileSync(path.join(bindings, filename), 'utf8');
+    const ast = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
+    for (const statement of ast.statements) {
+      if (ts.isImportDeclaration(statement)) {
+        assert(statement.moduleSpecifier.text.startsWith('./'), 'model dependency must be local');
+        copy(statement.moduleSpecifier.text.slice(2));
+      }
+    }
+    fs.writeFileSync(path.join(destination, filename), source);
+  };
+  copy('Position');
+}
+
+if (require.main === module) {
+  generate(path.join(__dirname, 'bindings'));
+  publishPosition();
+}
 module.exports = { transform, stringLiterals };

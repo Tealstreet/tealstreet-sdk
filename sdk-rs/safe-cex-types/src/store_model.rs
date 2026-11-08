@@ -658,7 +658,7 @@ mod strict_codecs {
         assert_eq!(wire.position.notional, 2.5);
         assert_eq!(wire.position.leverage, 3.75);
         assert_eq!(wire.position.contracts, 4.125);
-        assert_eq!(wire.position.liquidation_price, 5.5);
+        assert_eq!(wire.position.liquidation_price, Some(5.5));
         assert_eq!(wire.position.unrealized_pnl.to_bits(), (-0.0_f64).to_bits());
         assert_eq!(wire.one_min_upnl.unwrap().to_bits(), (-0.0_f64).to_bits());
         let mut wrong = serde_json::Deserializer::from_str("[]");

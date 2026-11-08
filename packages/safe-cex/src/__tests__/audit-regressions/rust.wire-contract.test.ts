@@ -93,6 +93,8 @@ it.each(
       enums: Uint32Array.of(0),
       id: () => 'orphan-position',
       symbol: () => 'ORPHAN',
+      contractsNative: [undefined],
+      unrealizedPnlNative: [undefined],
       ...Object.fromEntries(
         [
           'entryPrice',

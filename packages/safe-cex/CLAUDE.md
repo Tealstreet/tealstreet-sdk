@@ -1951,3 +1951,24 @@ starts no metadata command. UI callers also validate their account market bindin
 Bybit native receive-window corrections emit bybit.clock.corrected with numeric
 offsetMs only. Hosts without an explicit clock-advice listener keep the normal
 info log; CLI listeners replace it with one clock-sync warning per session.
+
+## Position type ownership (P1)
+
+`src/generated/Position.ts` and its enum/Greeks dependencies are generated from
+`sdk-rs/safe-cex-types`; `src/types.ts` imports/re-exports them for the existing
+public API. Run `corepack yarn types:generate`, then
+`corepack yarn generate:script-types`; never edit generated declarations or the
+script bundle. The Position-only compiler gate is
+`node --test sdk-rs/safe-cex-types/tests/position-contract.cjs`.
+
+The native engine owns Position display normalization and native sizing extras.
+Positions use SCXF section revision 2 with eleven numeric columns and required
+ID/symbol references; the host refuses older Position sections. Deploy matching
+native/WASM and SDK artifacts together. Other section revisions are unchanged.
+Live position snapshots are authoritative; omitted rows are removed rather than
+retained as fabricated empty positions. NX must land its corresponding consumer
+and artifact changes before this cutover. See `docs/plans/TYPE_OWNERSHIP_P1.md`.
+
+Position enum-word bits 24 and 25 declare the presence of native contracts and
+native PnL columns. A present non-finite native size is rejected, never treated
+as absent (which could select an unsafe base-unit fallback).

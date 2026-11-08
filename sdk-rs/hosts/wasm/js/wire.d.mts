@@ -90,7 +90,7 @@ export const ORDER_COLUMNS: readonly ['price', 'amount', 'filled', 'remaining', 
 export type OrderColumn = (typeof ORDER_COLUMNS)[number];
 export const POSITION_COLUMNS: readonly [
   'entryPrice', 'notional', 'leverage', 'unrealizedPnl', 'realizedPnl',
-  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate',
+  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate', 'contractsNative', 'unrealizedPnlNative',
 ];
 export type PositionColumn = (typeof POSITION_COLUMNS)[number];
 
@@ -221,7 +221,19 @@ export type OrderTable = { count: number; market: Uint32Array; enums: Uint32Arra
   clientOrderId(i: number): string | undefined;
   parentId(i: number): string | undefined;
 };
-export type PositionTable = { count: number; market: Uint32Array; enums: Uint32Array; id(i: number): string | undefined; symbol?(i: number): string | undefined } & Columns<PositionColumn>;
+export type PositionTable = {
+  count: number;
+  market: Uint32Array;
+  enums: Uint32Array;
+  id(i: number): string;
+  symbol(i: number): string;
+  liquidationPrice: Array<number | null>;
+  realizedPnl: Array<number | undefined>;
+  marginSize: Array<number | undefined>;
+  lastUpdate: Array<number | undefined>;
+  contractsNative: Array<number | undefined>;
+  unrealizedPnlNative: Array<number | undefined>;
+} & Columns<'entryPrice' | 'notional' | 'leverage' | 'unrealizedPnl' | 'contracts'>;
 export interface CoinBalance { base: string; amount: number; notional: number }
 export interface CurrencyBalance {
   used: number;

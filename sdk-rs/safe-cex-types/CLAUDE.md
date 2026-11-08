@@ -304,3 +304,14 @@ unmeasured, not zero; absent/non-numeric values still refuse. Native STATUS uses
 an explicit presence flag, with legacy positive samples retained.
 Their canonical fields retain the required-nullable deserialize metadata used by
 the private companions, so the strict metadata inventory remains exact.
+
+## Generated Position cutover
+
+Position now owns the SDK declaration (and PositionSide/PositionMode/MarginType/
+OptionGreeks dependencies), published by `generate.cjs` into
+`packages/safe-cex/src/generated`. `liquidation_price` is `Option<f64>` but the
+wire property is required and nullable, not optional. The private decoder uses
+an explicit required nullable field reader. Run the scoped compiler/freshness
+gate `node --test sdk-rs/safe-cex-types/tests/position-contract.cjs` after generation.
+The legacy broad parity script still has unrelated missing capability-declaration
+coverage on this baseline; do not mistake it for the Position cutover gate.

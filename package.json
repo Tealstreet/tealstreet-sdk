@@ -84,7 +84,8 @@
     "rust:gate:verify": "node sdk-rs/harness/verify-gates.mjs",
     "rust:wasm-budget": "node sdk-rs/harness/wasm-budget.mjs",
     "rust:private-tape-bitgetusdc": "node sdk-rs/harness/private-tape-bitgetusdc.mjs",
-    "rust:public-tape-bitgetusdc": "node sdk-rs/harness/private-tape-bitgetusdc.mjs --public"
+    "rust:public-tape-bitgetusdc": "node sdk-rs/harness/private-tape-bitgetusdc.mjs --public",
+    "types:generate": "cargo run -j2 --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-types --example generate && node sdk-rs/safe-cex-types/generate.cjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

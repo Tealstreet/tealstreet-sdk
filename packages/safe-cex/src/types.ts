@@ -4,6 +4,8 @@ import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocke
 import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from './commandOutcome';
 import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
+import type { OptionGreeks } from './generated/OptionGreeks';
+import type { Position } from './generated/Position';
 import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
 import type { TwapInstance } from './webworker/twap/TwapInstance';
@@ -11,6 +13,12 @@ import type { TwapOptions } from './webworker/twap/TwapOptions';
 import type { TwapState } from './webworker/twap/TwapState';
 
 import { MessageHandlersStats } from './exchanges/types';
+import { MarginType } from './generated/MarginType';
+import { PositionMode } from './generated/PositionMode';
+import { PositionSide } from './generated/PositionSide';
+
+export type { Position, OptionGreeks };
+export { PositionSide, PositionMode, MarginType };
 
 export type ExchangeName =
   | 'apexomni'
@@ -460,18 +468,6 @@ export type OptionTerms = {
   readonly settleAsset: string;
 };
 
-/**
- * Greeks as the venue publishes them. `units` records what was measured, because venues
- * do not agree on scale (per 1 vol point or per 100%, per day or per year, coin or quote).
- */
-export type OptionGreeks = {
-  readonly delta: number;
-  readonly gamma: number;
-  readonly vega: number;
-  readonly theta: number;
-  readonly units: string;
-};
-
 /** One option's prices and implied volatilities. IVs are fractions; 0 means unavailable. */
 export type OptionQuote = {
   readonly symbol: string;
@@ -677,57 +673,6 @@ export type Order = {
     readonly chaserId?: string;
     readonly chaserAttempts?: number;
     readonly chaserMaxAttempts?: number;
-  };
-};
-
-export enum PositionSide {
-  Long = 'long',
-  Short = 'short',
-}
-
-export enum PositionMode {
-  Hedged = 'hedged',
-  OneWay = 'oneway',
-}
-
-export enum MarginType {
-  Isolated = 'isolated',
-  Cross = 'cross',
-}
-
-/**
- * If you're modifying this file, update createEmptyPositionFrom in store.base.ts
- * accordingly as well.
- */
-export type Position = {
-  readonly id: string;
-  readonly symbol: string;
-  readonly side: PositionSide;
-  readonly entryPrice: number;
-  readonly notional: number;
-  readonly leverage: number;
-  readonly marginType?: MarginType;
-  readonly positionMode?: PositionMode;
-  readonly unrealizedPnl: number;
-  readonly realizedPnl?: number;
-  // always in whole units of base for easy math elsewhere
-  readonly contracts: number;
-  /** Null when the liquidation threshold is unavailable. */
-  readonly liquidationPrice: number | null;
-  // absolute quote-currency margin allocated to the position, when the
-  // exchange exposes it. Cross-margin positions may be reported as 0 by
-  // some exchanges; mappers should fall back to notional/leverage in that
-  // case if a meaningful number can be derived.
-  readonly marginSize?: number;
-  readonly info?: any;
-  readonly extra?: {
-    // actual size in contracts considering contract size, inverse, quanto, etc
-    readonly contractsNative?: number;
-    readonly unrealizedPnlNative?: number;
-  };
-  readonly lastUpdate?: number;
-  readonly option?: {
-    readonly greeks?: OptionGreeks;
   };
 };
 

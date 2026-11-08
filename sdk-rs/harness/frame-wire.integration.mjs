@@ -13,7 +13,7 @@ import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
 test('Rust BOOK_DELTA reconstructs two full 1,000-level books through FrameApplier', () => {
   const directory = mkdtempSync(join(tmpdir(), 'safe-cex-frame-wire-'));
   try {
-    const result = spawnSync('cargo', ['run', '--quiet', '--locked', '--manifest-path',
+    const result = spawnSync('cargo', ['run', '-j2', '--quiet', '--locked', '--manifest-path',
       'sdk-rs/Cargo.toml', '-p', 'safe-cex-engine', '--example', 'book_bandwidth', '--', directory],
     { encoding: 'utf8', timeout: 120_000 });
     assert.equal(result.status, 0, result.stderr || result.error?.message);
@@ -51,11 +51,49 @@ test('Rust BOOK_DELTA reconstructs two full 1,000-level books through FrameAppli
 });
 
 test('Rust revised sections preserve native fields and identity through the SDK', async (t) => {
-  const result = spawnSync('cargo', ['run', '--quiet', '--locked', '--manifest-path',
+  const result = spawnSync('cargo', ['run', '-j2', '--quiet', '--locked', '--manifest-path',
     'sdk-rs/Cargo.toml', '-p', 'safe-cex-engine', '--example', 'wire_contract_frames'],
   { encoding: 'utf8', timeout: 120_000 });
   assert.equal(result.status, 0, result.stderr || result.error?.message);
   const fixtures = JSON.parse(result.stdout);
+  await t.test('P1: actual native Position output preserves null, optional fields and native quantities', () => {
+    assert.equal(fixtures.positionCases.length, 13);
+    for (const [index, fixture] of fixtures.positionCases.entries()) {
+      const bytes = Uint8Array.from(Buffer.from(fixture.frame, 'hex'));
+      const frame = new Frame(bytes.buffer);
+      const worker = new DefaultStore();
+      if (fixture.invalidNative) {
+        assert.throws(() => new FrameApplier(worker).apply(frame), /invalid Position contractsNative/);
+        assert.deepEqual(worker.positions, []);
+        continue;
+      }
+      new FrameApplier(worker).apply(frame);
+      // The same bytes reach the main store; no display or sizing repair is needed.
+      const main = new DefaultStore();
+      new FrameApplier(main).apply(new Frame(structuredClone(frame.buffer)));
+      assert.deepEqual(main.positions, worker.positions);
+      assert.equal(frame.first(8).revision, 2);
+      const row = worker.positions[0];
+      if (index < 6) {
+        const expected = index === 5 ? 123.5 : null;
+        assert.equal(row.liquidationPrice, expected);
+        assert.equal(fixture.raw.liquidationPrice, expected);
+        assert.equal(fixture.raw.leverage, 0);
+        assert.equal(fixture.raw.unrealizedPnl, 0);
+        assert.equal('realizedPnl' in fixture.raw, false);
+        assert.equal(row.leverage, 0);
+        assert.equal(row.unrealizedPnl, 0);
+        assert.equal('realizedPnl' in row, false);
+        assert.equal('marginSize' in row, false);
+        assert.equal('lastUpdate' in row, false);
+        assert.equal(JSON.parse(JSON.stringify(worker.serialize())).positions[0].liquidationPrice, expected);
+      } else {
+        assert.equal(row.extra.contractsNative, fixture.expectedNative);
+      }
+      worker.addOrUpdatePositionsFull([]);
+      assert.deepEqual(worker.positions, []);
+    }
+  });
   const read = (name) => {
     const bytes = Uint8Array.from(Buffer.from(fixtures[name], 'hex'));
     return new Frame(bytes.buffer);

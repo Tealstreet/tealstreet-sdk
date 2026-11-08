@@ -50,6 +50,8 @@ describe('Rust frames preserve inverse native units', () => {
     applier.apply(
       fixture({
         markets: false,
+        units: 4,
+        contractSize: 100,
         positions: true,
         native: true,
         orders: [{ id: 'coin-m', amount: 7, filled: 2, remaining: 5, native: 5 }],
