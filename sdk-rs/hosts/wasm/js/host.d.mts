@@ -111,6 +111,7 @@ export interface VenueErrorDetail {
   /** Complete logical outcomes of a validated multi-write plan, in dispatch order. */
   elements?: ({ index: number; clientOrderId?: string } & (
     | { status: 'placed'; orderIds: string[] }
+    | { status: 'applied'; effect: 'cancel' | 'amend' | 'tradingStop' | 'settings' | 'deferredChild' | 'positionTrigger'; targetOrderId?: string; positionKey?: string }
     | { status: 'notSent'; error?: VenueErrorDetail }
     | { status: 'unknown'; error: VenueErrorDetail }
   ))[];

@@ -19,12 +19,32 @@ pub struct PlannedWrite<T> {
     pub elements: Vec<Element>,
 }
 
+/// Proven accepted effects that do not identify a newly created native order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AppliedEffect {
+    Cancel,
+    Amend,
+    TradingStop,
+    Settings,
+    DeferredChild,
+    PositionTrigger,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum ElementResult {
     Placed {
         #[serde(rename = "orderIds")]
         order_ids: Vec<String>,
+    },
+    /// Accepted without a new native order ID; targets identify existing state.
+    Applied {
+        effect: AppliedEffect,
+        #[serde(rename = "targetOrderId", skip_serializing_if = "Option::is_none")]
+        target_order_id: Option<String>,
+        #[serde(rename = "positionKey", skip_serializing_if = "Option::is_none")]
+        position_key: Option<String>,
     },
     /// A local refusal or definitive venue rejection; inspect `error.outcome`.
     NotSent {
@@ -64,6 +84,7 @@ pub enum PlanError {
     WrongWrite,
     WrongElementCount,
     MissingOrderIdentity,
+    EmptyEffectTarget,
 }
 
 impl fmt::Display for PlanError {
@@ -73,6 +94,7 @@ impl fmt::Display for PlanError {
             Self::WrongWrite => "Settlement does not match the pending write",
             Self::WrongElementCount => "Settlement must cover every element of the write",
             Self::MissingOrderIdentity => "Placed elements must retain their native identities",
+            Self::EmptyEffectTarget => "Applied targets must be nonempty when supplied",
         })
     }
 }
@@ -96,6 +118,13 @@ fn refusal(message: &str) -> VenueError {
 }
 
 fn result_for_failure(mut error: VenueError) -> ElementResult {
+    if error
+        .partial
+        .as_ref()
+        .is_some_and(|p| !p.order_ids.is_empty())
+    {
+        error.outcome = Some(Outcome::Unknown);
+    }
     match error.outcome {
         Some(Outcome::NotSent | Outcome::Rejected) => ElementResult::NotSent {
             error: Some(Box::new(error)),
@@ -190,6 +219,13 @@ impl<T> WritePlan<T> {
         {
             return Err(PlanError::MissingOrderIdentity);
         }
+        if results.iter().any(|r| {
+            matches!(r, ElementResult::Applied { target_order_id, position_key, .. }
+            if target_order_id.as_ref().is_some_and(String::is_empty)
+                || position_key.as_ref().is_some_and(String::is_empty))
+        }) {
+            return Err(PlanError::EmptyEffectTarget);
+        }
         for (element, result) in planned.elements.iter().zip(results) {
             let result = match result {
                 ElementResult::Unknown { error } => {
@@ -198,7 +234,10 @@ impl<T> WritePlan<T> {
                 ElementResult::NotSent { error: Some(error) } => result_for_failure(*error),
                 other => other,
             };
-            self.stopped |= !matches!(result, ElementResult::Placed { .. });
+            self.stopped |= !matches!(
+                result,
+                ElementResult::Placed { .. } | ElementResult::Applied { .. }
+            );
             self.journal[element.index].result = result;
         }
         self.pending = None;
@@ -233,7 +272,7 @@ impl<T> WritePlan<T> {
             .partial
             .as_ref()
             .map_or_else(Vec::new, |partial| partial.order_ids.clone());
-        let mut has_effect = false;
+        let mut has_effect = !ids.is_empty();
         for element in &self.journal {
             match &element.result {
                 ElementResult::Placed { order_ids } => {
@@ -244,14 +283,35 @@ impl<T> WritePlan<T> {
                         }
                     }
                 }
-                ElementResult::Unknown { .. } => has_effect = true,
-                ElementResult::NotSent { .. } => {}
+                ElementResult::Applied { .. } => has_effect = true,
+                ElementResult::Unknown { error: detail }
+                | ElementResult::NotSent {
+                    error: Some(detail),
+                } => {
+                    has_effect |= matches!(element.result, ElementResult::Unknown { .. });
+                    if let Some(partial) = &detail.partial {
+                        has_effect |= !partial.order_ids.is_empty();
+                        for id in &partial.order_ids {
+                            if !ids.contains(id) {
+                                ids.push(id.clone());
+                            }
+                        }
+                        if error.partial.is_none() {
+                            error.partial = Some(partial.clone());
+                        }
+                    }
+                }
+                ElementResult::NotSent { error: None } => {}
             }
         }
         if has_effect {
             error.outcome = Some(Outcome::Unknown);
         }
-        error = error.partial_ids(&ids);
+        if let Some(partial) = &mut error.partial {
+            partial.order_ids = ids;
+        } else {
+            error = error.partial_ids(&ids);
+        }
         error.elements = Some(Box::new(ElementOutcomes(self.outcomes())));
         error
     }

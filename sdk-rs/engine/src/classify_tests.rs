@@ -1253,3 +1253,56 @@ fn batch_code_less_rows_preserve_the_tables_unlisted_verdict() {
         assert_eq!(error.partial.unwrap().order_ids, ["accepted"]);
     }
 }
+
+#[test]
+fn known_partial_batch_remains_unknown_without_logical_row_attribution() {
+    use crate::request_context::WriteResult;
+    use crate::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
+    let mut writes = vec![
+        PlannedWrite {
+            payload: (),
+            elements: vec![
+                Element {
+                    index: 0,
+                    client_order_id: Some("first".into()),
+                },
+                Element {
+                    index: 1,
+                    client_order_id: Some("second".into()),
+                },
+            ],
+        },
+        PlannedWrite {
+            payload: (),
+            elements: vec![Element {
+                index: 2,
+                client_order_id: None,
+            }],
+        },
+    ];
+    let mut plan = WritePlan::validate(std::mem::take(&mut writes), |_| Ok(())).unwrap();
+    plan.next_write().unwrap();
+    let WriteResult::KnownPartial(error) = project(
+        &[
+            BatchItem::Accepted("accepted-native"),
+            BatchItem::Native(int(-1111)),
+        ],
+        2,
+    ) else {
+        panic!("classifier must supply native KnownPartial evidence");
+    };
+    plan.fail(0, error).unwrap();
+    let terminal = plan.failure(VenueError::new("stopped").outcome(Outcome::NotSent));
+    assert_eq!(terminal.outcome, Some(Outcome::Unknown));
+    let partial = terminal.partial.unwrap();
+    assert_eq!(partial.order_ids, ["accepted-native"]);
+    assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
+    let rows = terminal.elements.unwrap();
+    assert!(
+        rows[..2]
+            .iter()
+            .all(|row| matches!(row.result, ElementResult::Unknown { .. }))
+    );
+    assert_eq!(rows[2].result, ElementResult::NotSent { error: None });
+    assert!(plan.next_write().is_none());
+}
