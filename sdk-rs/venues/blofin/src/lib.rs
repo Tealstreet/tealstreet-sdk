@@ -529,6 +529,9 @@ impl Venue for Blofin {
             self.capture_trade_write_plan(request, evidence);
         }
     }
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::terminal_failure_text)
+    }
     fn managed_sockets() -> bool {
         true
     }

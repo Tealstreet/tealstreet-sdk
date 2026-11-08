@@ -1,8 +1,9 @@
 //! Stop edits BloFin cannot make in place (a leg of a partly filled entry): the
-//! cancel is re-checked when it is finally sent; a failed replacement never
-//! dispatches a restore or rollback.
+//! cancel is re-checked when it is finally sent, and a refused replacement puts
+//! the original entry and its legs back once.
 #[allow(dead_code)]
 mod support;
+use safe_cex_engine::error::Protection;
 use safe_cex_engine::{Action, Command, Event, Notice, Outcome};
 use support::*;
 
@@ -86,7 +87,7 @@ fn to_replacement(h: &mut Harness) -> safe_cex_engine::HttpRequest {
 const REFUSED: &str = r#"{"code":"1","msg":"All operations failed","data":[{"orderId":"0","code":"102014","msg":"trigger refused"}]}"#;
 
 #[test]
-fn a_refused_replacement_never_restores_the_original() {
+fn a_refused_replacement_puts_the_original_entry_and_legs_back_once() {
     let mut h = Harness::new();
     partly_filled(&mut h);
     edit_stop(&mut h, 56000.0);
@@ -96,46 +97,89 @@ fn a_refused_replacement_never_restores_the_original() {
         "56000"
     );
     h.respond(replacement, REFUSED);
-    let error = failure(&h).expect("replacement refused");
-    let elements = error.elements.as_ref().expect("placement outcome");
-    assert_eq!(elements.len(), 2);
+    let restore = h.take("batch-orders");
+    let p = body(&restore);
+    assert_eq!(p[0]["side"], "buy");
+    assert_eq!(p[0]["orderType"], "limit");
+    assert_eq!(p[0]["price"], "60000");
     assert_eq!(
-        elements[0].result,
-        safe_cex_engine::write_plan::ElementResult::Applied {
-            effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
-            target_order_id: Some("12".into()),
-            position_key: None,
-        }
+        p[0]["size"], "6",
+        "the unfilled remainder, as before the edit"
     );
+    assert_eq!(p[0]["tpTriggerPrice"], "65000");
+    assert_eq!(
+        p[0]["slTriggerPrice"], "55000",
+        "the original stop, not the edit"
+    );
+    let client = p[0]["clientOrderId"].as_str().unwrap();
+    h.respond(
+        restore,
+        &format!(r#"{{"code":"0","data":[{{"orderId":"13","clientOrderId":"{client}","code":"0","msg":null}}]}}"#),
+    );
+    let error = failure(&h).expect("the edit did not happen");
     assert!(
-        matches!(&elements[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+        error.message.contains("is unchanged") && error.message.contains("put back"),
+        "{}",
+        error.message
     );
-    assert!(
-        error
-            .partial
-            .as_ref()
-            .is_none_or(|partial| partial.order_ids.is_empty()),
-        "cancelled targets are not newly placed orders"
-    );
-    assert!(writes(&h).is_empty(), "no automatic restore or rollback");
+    assert_eq!(error.protection, Some(Protection::Restored));
+    assert!(writes(&h).is_empty(), "one put-back only: {:?}", writes(&h));
 }
 
 #[test]
-fn a_refused_replacement_preserves_native_refusal_detail() {
+fn a_refused_put_back_is_typed_unprotected_and_never_retried() {
     let mut h = Harness::new();
     partly_filled(&mut h);
     edit_stop(&mut h, 56000.0);
     let replacement = to_replacement(&mut h);
     h.respond(replacement, REFUSED);
-    let error = failure(&h).expect("replacement refused");
-    let outcomes = error.elements.as_ref().expect("native placement outcome");
-    assert!(
-        matches!(&outcomes[1].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.venue_code.as_deref() == Some("102014"))
-    );
-    assert!(writes(&h).is_empty());
+    let restore = h.take("batch-orders");
+    h.respond(restore, REFUSED);
+    let error = failure(&h).expect("nothing stands");
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
 }
 
 const RATE_LIMITED: &str = r#"{"code":"429","msg":"Too Many Requests"}"#;
+
+#[test]
+fn documented_http400_replacement_refusal_puts_the_original_back_once() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond_status(
+        replacement,
+        400,
+        r#"{"code":"102014","msg":"trigger refused","data":[]}"#,
+    );
+    let restore = h.take("batch-orders");
+    assert_eq!(body(&restore)[0]["size"], "6");
+    assert_eq!(body(&restore)[0]["slTriggerPrice"], "55000");
+    h.respond(
+        restore,
+        r#"{"code":"0","data":[{"orderId":"13","code":"0"}]}"#,
+    );
+    assert_eq!(failure(&h).unwrap().protection, Some(Protection::Restored));
+    assert!(writes(&h).is_empty());
+}
+
+#[test]
+fn unproven_http400_replacement_never_claims_unprotected_or_puts_back() {
+    for response in [
+        r#"{"code":"103013","msg":"internal failure","data":[]}"#,
+        r#"{"code":"","msg":"internal failure","data":[]}"#,
+        r#"{"code":"999999","msg":"internal failure","data":[]}"#,
+        "Bad Request",
+    ] {
+        let mut h = Harness::new();
+        partly_filled(&mut h);
+        edit_stop(&mut h, 56000.0);
+        let replacement = to_replacement(&mut h);
+        h.respond_status(replacement, 400, response);
+        assert_unknown_stop(&h);
+    }
+}
 
 /// A 429 may have placed the order, so it is unknown, never Unprotected.
 fn assert_unknown_stop(h: &Harness) {
@@ -162,17 +206,15 @@ fn assert_unknown_stop(h: &Harness) {
 }
 
 #[test]
-fn an_accepted_replacement_is_not_repeated() {
+fn a_rate_limited_put_back_is_unknown_not_unprotected() {
     let mut h = Harness::new();
     partly_filled(&mut h);
     edit_stop(&mut h, 56000.0);
     let replacement = to_replacement(&mut h);
-    h.respond(
-        replacement,
-        r#"{"code":"0","data":[{"orderId":"13","code":"0"}]}"#,
-    );
-    assert!(failure(&h).is_none());
-    assert!(writes(&h).is_empty());
+    h.respond(replacement, REFUSED);
+    let restore = h.take("batch-orders");
+    h.respond_status(restore, 429, RATE_LIMITED);
+    assert_unknown_stop(&h);
 }
 
 #[test]
@@ -186,7 +228,7 @@ fn a_rate_limited_replacement_is_unknown_and_never_put_back() {
 }
 
 #[test]
-fn a_replacement_keeps_each_legs_trigger_reference() {
+fn a_put_back_keeps_each_legs_trigger_reference() {
     for (legs, tp, sl) in [
         (
             r#""tpTriggerPrice":"65000","tpTriggerPriceType":"mark","slTriggerPrice":"55000","slTriggerPriceType":"index""#,
@@ -222,28 +264,11 @@ fn a_replacement_keeps_each_legs_trigger_reference() {
                 }),
             );
             let replacement = to_replacement(&mut h);
-            let restore = body(&replacement);
             h.respond(replacement, REFUSED);
-            assert!(writes(&h).is_empty());
+            let restore = body(&h.take("batch-orders"));
             for p in [&restore[0], &restore[0]["attachAlgoOrders"][0]] {
-                assert_eq!(
-                    p["tpTriggerPrice"],
-                    if leg.ends_with("loss") {
-                        "65000"
-                    } else {
-                        "66000"
-                    },
-                    "{leg}: {restore}"
-                );
-                assert_eq!(
-                    p["slTriggerPrice"],
-                    if leg.ends_with("loss") {
-                        "56000"
-                    } else {
-                        "55000"
-                    },
-                    "{leg}: {restore}"
-                );
+                assert_eq!(p["tpTriggerPrice"], "65000", "{leg}: {restore}");
+                assert_eq!(p["slTriggerPrice"], "55000", "{leg}: {restore}");
                 assert_eq!(p["tpTriggerPriceType"], tp, "{leg}: {restore}");
                 assert_eq!(p["slTriggerPriceType"], sl, "{leg}: {restore}");
             }
@@ -361,18 +386,28 @@ fn a_cancel_of_the_stop_while_it_is_replaced_is_refused_visibly() {
             .iter()
             .filter(|r| r.url.ends_with("/batch-orders"))
             .count(),
-        0,
-        "no put-back"
+        1,
+        "one put-back"
     );
 }
 
 #[test]
-fn a_later_cancel_never_targets_an_invented_restore() {
+fn a_later_cancel_of_the_original_follows_it_to_the_put_back_entry() {
     let mut h = Harness::new();
     partly_filled(&mut h);
     edit_stop(&mut h, 56000.0);
     let replacement = to_replacement(&mut h);
     h.respond(replacement, REFUSED);
+    let restore = h.take("batch-orders");
+    let client = body(&restore)[0]["clientOrderId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    h.respond(
+        restore,
+        &format!(r#"{{"code":"0","data":[{{"orderId":"13","clientOrderId":"{client}","code":"0","msg":null}}]}}"#),
+    );
+    // A screen still showing the original cancels it by its old id.
     h.handle(
         h.now,
         Event::Command(Command::CancelOrders {
@@ -381,25 +416,37 @@ fn a_later_cancel_never_targets_an_invented_restore() {
         }),
     );
     h.collect();
-    assert!(writes(&h).is_empty());
+    let cancel = h.take("cancel-batch-orders");
+    assert!(
+        cancel.body.as_deref().unwrap().contains("\"13\""),
+        "{:?}",
+        cancel.body
+    );
 }
 
-/// Engine-sealed replacement failures retain the placement journal.
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
 #[test]
-fn an_unproven_replacement_stays_unknown_without_restoration() {
+fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
     for status in [408, 503] {
         let mut h = Harness::new();
         partly_filled(&mut h);
         edit_stop(&mut h, 56000.0);
         let replacement = to_replacement(&mut h);
-        h.respond_status(replacement, status, "");
+        h.respond(replacement, REFUSED);
+        let restore = h.take("batch-orders");
+        h.respond_status(restore, status, "");
         let error = failure(&h).expect("the engine seals the Plan");
-        assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert!(matches!(
-            &error.elements.as_ref().expect("complete placement outcome")[1].result,
-            safe_cex_engine::write_plan::ElementResult::Unknown { .. }
-        ));
-        assert!(writes(&h).is_empty());
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("trigger refused"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{status}");
+        assert_eq!(error.protection, None, "{status}");
+        assert!(writes(&h).is_empty(), "{status}: never resent");
     }
 }
 
@@ -472,6 +519,84 @@ fn dispatched_ambiguity_native_rate_row_cannot_authorize_put_back() {
 }
 
 #[test]
+fn unknown_native_replacement_rows_never_authorize_put_back() {
+    for (code, message) in [
+        ("103013", "internal failure"),
+        ("150003", "clientId already exist"),
+        ("987654", "unlisted failure"),
+    ] {
+        let mut h = Harness::new();
+        partly_filled(&mut h);
+        edit_stop(&mut h, 56000.0);
+        let replacement = to_replacement(&mut h);
+        let response = serde_json::json!({
+            "code": "1", "msg": "All operations failed",
+            "data": [{"orderId": "0", "code": code, "msg": message}],
+        });
+        h.respond(replacement, &response.to_string());
+        assert!(
+            writes(&h).is_empty(),
+            "{code}: never put back an unknown replacement"
+        );
+        assert_unknown_stop(&h);
+        let error = failure(&h).unwrap();
+        assert_eq!(error.venue_code.as_deref(), Some(code));
+        assert_eq!(error.venue_message.as_deref(), Some(message));
+    }
+}
+
+fn assert_unproven_replacement_never_puts_back(row: serde_json::Value) {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    let response = serde_json::json!({
+        "code": "1", "msg": "All operations failed", "data": [row],
+    });
+    h.respond(replacement, &response.to_string());
+    assert!(
+        writes(&h).is_empty(),
+        "unproven replacement must never authorize put-back"
+    );
+    assert_unknown_stop(&h);
+}
+
+#[test]
+fn missing_replacement_row_code_never_authorizes_put_back() {
+    assert_unproven_replacement_never_puts_back(serde_json::json!({
+        "orderId": "0", "msg": "internal failure",
+    }));
+}
+
+#[test]
+fn contradictory_success_row_never_authorizes_put_back() {
+    assert_unproven_replacement_never_puts_back(serde_json::json!({
+        "orderId": "0", "code": "0", "msg": "Order placed",
+    }));
+}
+
+#[test]
+fn wire_none_placed_row_never_authorizes_put_back() {
+    assert_unproven_replacement_never_puts_back(serde_json::json!({
+        "orderId": "0", "code": "none-placed", "msg": "unlisted wire failure",
+    }));
+}
+
+#[test]
+fn wire_none_placed_envelope_never_authorizes_put_back() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond(
+        replacement,
+        r#"{"code":"none-placed","msg":"unlisted wire failure","data":[]}"#,
+    );
+    assert!(writes(&h).is_empty(), "wire text cannot prove a refusal");
+    assert_unknown_stop(&h);
+}
+
+#[test]
 fn partially_accepted_split_replacement_never_puts_back_the_old_remainder() {
     use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
     let instruments = INSTRUMENT
@@ -493,7 +618,12 @@ fn partially_accepted_split_replacement_never_puts_back_the_old_remainder() {
     h.respond(replacement, r#"{"code":"2","data":[{"orderId":"100","code":"0"},{"orderId":"0","code":"103003","msg":"refused"},{"orderId":"0","code":"103003","msg":"refused"}]}"#);
     let error = failure(&h).expect("partial replacement");
     let outcomes = error.elements.as_ref().expect("all replacement effects");
-    assert_eq!(outcomes.len(), 4);
+    assert_eq!(outcomes.len(), 7);
+    assert!(
+        outcomes[4..]
+            .iter()
+            .all(|row| matches!(row.result, ElementResult::NotSent { error: None }))
+    );
     assert_eq!(
         outcomes[0].result,
         ElementResult::Applied {
