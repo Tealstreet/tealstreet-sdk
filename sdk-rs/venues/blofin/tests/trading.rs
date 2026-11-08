@@ -1939,7 +1939,7 @@ fn a_size_amend_of_a_partly_filled_order_treats_the_size_as_the_new_total() {
 
 // deaws2's live body.
 #[test]
-fn a_partly_succeeded_batch_with_an_already_gone_row_is_done() {
+fn a_partly_succeeded_cancel_envelope_stops_but_retains_applied_facts() {
     let mut h = Harness::new();
     h.open_private();
     h.seed();
@@ -1954,13 +1954,18 @@ fn a_partly_succeeded_batch_with_an_already_gone_row_is_done() {
     );
     h.collect();
     h.reply("cancel-batch-orders", r#"{"code":"2","msg":"Batch operation partially succeeded.","data":[{"orderId":"1000171264712","clientOrderId":"","msg":"Cancel failed as the order has been filled, triggered, canceled or does not exist.","code":"1000"},{"orderId":"1000171264711","clientOrderId":"x","msg":"Order canceled","code":"0"}]}"#);
+    // TS:2445-2463 treats every non-gone row under envelope 2 as a real failure.
+    assert!(done(&h));
+    let error = h.failures.last().unwrap();
     assert!(
-        !done(&h),
-        "{:?}",
-        h.actions
-            .iter()
-            .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
-            .count()
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
     );
+    assert!(error.elements.as_ref().unwrap().iter().all(|row| matches!(
+        row.result,
+        safe_cex_engine::write_plan::ElementResult::Applied { .. }
+    )));
     assert!(h.e.store().order("1000171264712").is_none());
 }

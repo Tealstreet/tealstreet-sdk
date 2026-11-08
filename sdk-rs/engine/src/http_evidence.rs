@@ -112,9 +112,9 @@ impl UnprovenEvidence {
         }
     }
 
-    /// Preserve a validated plan's logical facts when the engine seals an
+    /// Preserve the venue's recorded logical facts when the engine seals an
     /// unproven response before the venue decoder runs. Pending rows stay Unknown.
-    pub fn write_plan<T>(&mut self, plan: &crate::write_plan::WritePlan<T>) {
+    pub fn write_plan(&mut self, plan: &crate::write_plan::WritePlan) {
         let mut elements = plan.outcomes();
         let mut failure = self.error.clone();
         failure.elements = None;
@@ -321,29 +321,34 @@ pub(super) fn mark_id_overflow(error: &mut VenueError) {
 #[cfg(test)]
 mod write_plan_tests {
     use super::*;
-    use crate::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
+    use crate::write_plan::{Element, ElementResult, WritePlan};
 
     #[test]
     fn unproven_http_seal_preserves_prefix_pending_and_unissued_rows() {
-        let writes = (0..3)
-            .map(|index| PlannedWrite {
-                payload: (),
-                elements: vec![Element {
+        let mut plan = WritePlan::new(
+            (0..3)
+                .map(|index| Element {
                     index,
                     client_order_id: None,
-                }],
-            })
-            .collect();
-        let mut plan = WritePlan::validate(writes, |_| Ok(())).unwrap();
-        plan.next_write().unwrap();
-        plan.settle(
+                })
+                .collect(),
+        );
+        plan.record(
             0,
-            vec![ElementResult::Placed {
+            ElementResult::Placed {
                 order_ids: vec!["native-0".into()],
-            }],
+            },
         )
         .unwrap();
-        plan.next_write().unwrap();
+        plan.record(
+            1,
+            ElementResult::Unknown {
+                error: Box::new(
+                    VenueError::new("awaiting native response").outcome(Outcome::Unknown),
+                ),
+            },
+        )
+        .unwrap();
         let mut evidence = UnprovenEvidence::new(EvidenceBudget::default(), 503).unwrap();
         evidence.write_plan(&plan);
         evidence.write_plan(&plan);
@@ -358,6 +363,9 @@ mod write_plan_tests {
                 && error.outcome == Some(Outcome::Unknown) && error.elements.is_none())
         );
         assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
-        assert!(plan.next_write().is_none());
+        assert!(matches!(
+            plan.outcomes()[1].result,
+            ElementResult::Unknown { .. }
+        ));
     }
 }

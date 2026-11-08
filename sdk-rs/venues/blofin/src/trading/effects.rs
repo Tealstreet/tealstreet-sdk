@@ -19,7 +19,6 @@ impl EffectRow {
 }
 #[derive(Clone)]
 pub(super) struct EffectWrite {
-    pub body: String,
     pub effect: AppliedEffect,
     pub targets: Vec<Option<String>>,
     pub position_key: Option<String>,

@@ -1446,7 +1446,7 @@ fn mixed_cancel_outcomes_reference_targets_without_placing_them() {
 }
 
 #[test]
-fn a_code_zero_row_is_accepted_whatever_its_text_says() {
+fn a_code_zero_row_retains_acceptance_when_legacy_message_policy_stops() {
     let mut h = seeded();
     command(&mut h, place(860, 1.0));
     reply(
@@ -1455,7 +1455,11 @@ fn a_code_zero_row_is_accepted_whatever_its_text_says() {
         200,
         r#"{"code":"0","msg":"","data":[{"orderId":"9","code":"0","msg":"Order placed successfully"}]}"#,
     );
-    assert_eq!(succeeded(&h, 860), r#"["9"]"#);
+    // TS:2254 stops on this message; code 0 still proves the order was placed.
+    let error = failure(&h, 860);
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["9"]);
+    assert!(matches!(&error.elements.as_ref().unwrap()[0].result,
+        safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["9"]));
 }
 
 // Live, 5 of 5: a partly filled order's cancel reads partially_canceled, and the replacement was lost.

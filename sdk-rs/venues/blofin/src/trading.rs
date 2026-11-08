@@ -14,7 +14,7 @@ use safe_cex_engine::request_context::{
     HttpOwnerRetirement, Plan, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData,
 };
 use safe_cex_engine::setting_holds::SettingKey;
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, PlannedWrite, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 use safe_cex_engine::{CommandWait, ErrorKind, Outcome, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -150,8 +150,8 @@ struct Job {
     command: CommandId,
     intent: Intent,
     steps: VecDeque<Step>,
-    writes: Option<WritePlan<PlannedMutation>>,
-    pending_write: Option<usize>,
+    writes: Option<WritePlan>,
+    pending_write: Option<(usize, usize)>,
     ids: Vec<String>,
     /// Store rows issued so far, restored on every terminal.
     creating: Vec<String>,
@@ -235,20 +235,6 @@ struct Step {
     effect: Effect,
     delay: f64,
 }
-#[derive(Clone)]
-enum PlannedMutation {
-    Placement(PlannedPlacement),
-    Effect(EffectWrite),
-}
-impl PlannedMutation {
-    fn body(&self) -> &str {
-        match self {
-            Self::Placement(write) => &write.body,
-            Self::Effect(write) => &write.body,
-        }
-    }
-}
-
 #[derive(Clone)]
 struct PlannedPlacement {
     payloads: Vec<Placement>,
@@ -420,8 +406,21 @@ struct ResultRow<'a> {
     algo_id: Str<'a>,
     #[serde(borrow, default, deserialize_with = "nullable_text")]
     code: Str<'a>,
-    #[serde(borrow, default, deserialize_with = "nullable_text")]
-    msg: Str<'a>,
+    #[serde(borrow, default)]
+    msg: Option<Str<'a>>,
+}
+impl ResultRow<'_> {
+    fn message(&self) -> &str {
+        self.msg.as_deref().unwrap_or_default()
+    }
+    fn normal_dispatch_failed(&self) -> bool {
+        self.msg.as_deref().is_some_and(|message| {
+            !matches!(
+                message.trim().to_ascii_lowercase().as_str(),
+                "success" | "order placed"
+            )
+        })
+    }
 }
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -507,83 +506,62 @@ fn positive(value: f64, label: &str) -> Result<(), String> {
 impl Job {
     fn settle_applied(&mut self, request: &Request) -> Result<(), VenueError> {
         let write = request.effect_write.as_ref().ok_or_else(|| {
-            unknown("BloFin accepted effect has no validated plan entry").kind(ErrorKind::Internal)
+            unknown("BloFin accepted effect has no report description").kind(ErrorKind::Internal)
         })?;
         self.settle_write(
             request.write_index,
             (0..write.targets.len())
                 .map(|index| write.applied(index))
                 .collect(),
-        )
+        );
+        Ok(())
     }
-    fn prepare_writes(&mut self) -> Result<(), VenueError> {
-        let mut index = 0;
-        let mut writes = Vec::new();
+    fn prepare_writes(&mut self) {
+        let mut elements = Vec::new();
         for step in self.steps.iter_mut().chain(&mut self.amend_fallback) {
             if step.read() {
                 continue;
             }
-            let (payload, correlations) = if let Some(placement) = &step.placement {
-                (
-                    PlannedMutation::Placement(placement.clone()),
-                    placement
-                        .payloads
-                        .iter()
-                        .map(|row| Some(row.client_order_id.clone()))
-                        .collect::<Vec<_>>(),
-                )
-            } else {
-                let effect = Blofin::plan_effect(step)?;
-                let correlations = vec![None; effect.targets.len()];
-                (PlannedMutation::Effect(effect), correlations)
-            };
-            let elements = correlations
-                .into_iter()
-                .map(|client_order_id| {
-                    let element = Element {
-                        index,
-                        client_order_id,
-                    };
-                    index += 1;
-                    element
-                })
-                .collect();
-            step.write_index = Some(writes.len());
-            writes.push(PlannedWrite { payload, elements });
+            step.write_index = Some(elements.len());
+            for offset in 0..step.element_count() {
+                elements.push(Element {
+                    index: elements.len(),
+                    client_order_id: step
+                        .placement
+                        .as_ref()
+                        .map(|write| write.payloads[offset].client_order_id.clone()),
+                });
+            }
         }
-        if !writes.is_empty() {
-            self.writes = Some(WritePlan::validate(writes, |_| Ok(()))?);
-        }
-        Ok(())
+        self.writes = Some(WritePlan::new(elements));
     }
 
-    fn settle_write(
-        &mut self,
-        index: Option<usize>,
-        results: Vec<ElementResult>,
-    ) -> Result<(), VenueError> {
-        let (Some(writes), Some(index)) = (&mut self.writes, index) else {
-            return Err(unknown("BloFin placement has no pending write-plan entry")
-                .kind(ErrorKind::Internal));
-        };
-        writes
-            .settle(index, results)
-            .map_err(|error| unknown(error.to_string()).kind(ErrorKind::Internal))?;
+    fn settle_write(&mut self, index: Option<usize>, results: Vec<ElementResult>) {
+        if let (Some(writes), Some(index)) = (&mut self.writes, index) {
+            for (offset, result) in results.into_iter().enumerate() {
+                let recorded = writes.record(index + offset, result);
+                debug_assert!(recorded.is_ok(), "BloFin reporting index missing");
+            }
+        }
         self.pending_write = None;
-        Ok(())
     }
 
     fn failure(&mut self, error: VenueError) -> VenueError {
-        if let Some(writes) = &mut self.writes {
-            if let Some(index) = self.pending_write.take()
-                && let Err(reason) = writes.fail(index, error.clone())
-            {
-                return writes.failure(unknown(reason.to_string()).kind(ErrorKind::Internal));
-            }
-            writes.failure(error)
-        } else {
-            error
+        if let Some((index, count)) = self.pending_write.take() {
+            let result = if definite_refusal(&error) {
+                ElementResult::NotSent {
+                    error: Some(Box::new(error.clone())),
+                }
+            } else {
+                ElementResult::Unknown {
+                    error: Box::new(error.clone().outcome(Outcome::Unknown)),
+                }
+            };
+            self.settle_write(Some(index), vec![result; count]);
         }
+        self.writes
+            .as_ref()
+            .map_or(error.clone(), |writes| writes.attach(error))
     }
 
     fn new(command: CommandId, intent: Intent) -> Self {
@@ -608,6 +586,15 @@ impl Job {
     }
 }
 impl Step {
+    fn element_count(&self) -> usize {
+        if let Some(write) = &self.placement {
+            write.payloads.len()
+        } else if let Effect::Cancel(targets) = &self.effect {
+            targets.len()
+        } else {
+            1
+        }
+    }
     fn read(&self) -> bool {
         matches!(
             self.effect,
@@ -628,37 +615,37 @@ impl Step {
     }
 }
 impl Blofin {
-    fn plan_effect(step: &Step) -> Result<EffectWrite, VenueError> {
-        let build = || -> Result<EffectWrite, String> {
-            let body: Option<EffectRow> = if matches!(step.effect, Effect::Cancel(_)) {
-                None
-            } else {
-                Some(serde_json::from_str(&step.body).map_err(|error| error.to_string())?)
-            };
-            let (effect, targets) = match &step.effect {
-                Effect::Cancel(targets) => (
-                    AppliedEffect::Cancel,
-                    targets
-                        .iter()
-                        .map(|target| Some(target.id.clone()))
-                        .collect(),
-                ),
-                Effect::AmendTpsl(_) | Effect::NativeAmend { .. } => {
-                    let target = body.as_ref().and_then(EffectRow::target).map(str::to_owned);
-                    (AppliedEffect::Amend, vec![target])
-                }
-                Effect::Setting => (AppliedEffect::Settings, vec![None]),
-                _ => return Err("BloFin read or placement is not an applied-effect write".into()),
-            };
-            let position_key = body.as_ref().and_then(|row| row.inst_id.clone());
-            Ok(EffectWrite {
-                body: step.body.clone(),
-                effect,
-                targets,
-                position_key,
-            })
+    fn plan_effect(step: &Step) -> EffectWrite {
+        let body = if matches!(step.effect, Effect::Cancel(_)) {
+            None
+        } else {
+            let parsed = serde_json::from_str::<EffectRow>(&step.body);
+            debug_assert!(
+                parsed.is_ok(),
+                "BloFin effect body must match its serializer"
+            );
+            parsed.ok()
         };
-        build().map_err(|message| not_sent(message).kind(ErrorKind::InvalidInput))
+        let (effect, targets) = match &step.effect {
+            Effect::Cancel(targets) => (
+                AppliedEffect::Cancel,
+                targets
+                    .iter()
+                    .map(|target| Some(target.id.clone()))
+                    .collect(),
+            ),
+            Effect::AmendTpsl(_) | Effect::NativeAmend { .. } => (
+                AppliedEffect::Amend,
+                vec![body.as_ref().and_then(EffectRow::target).map(str::to_owned)],
+            ),
+            Effect::Setting => (AppliedEffect::Settings, vec![None]),
+            _ => unreachable!("read and placement have no applied-effect report"),
+        };
+        EffectWrite {
+            effect,
+            targets,
+            position_key: body.and_then(|row| row.inst_id),
+        }
     }
 
     pub(crate) fn capture_trade_write_plan(
@@ -2100,10 +2087,7 @@ impl Blofin {
                 return self.next_job(cx);
             }
         };
-        if let Err(error) = job.prepare_writes() {
-            let _ = cx.fail_preflight(&preflight, error);
-            return self.next_job(cx);
-        }
+        job.prepare_writes();
         if matches!(job.commit, Commit::Margin(_))
             && (cx.store.positions().iter().any(|p| p.contracts > 0.0)
                 || cx
@@ -2194,48 +2178,27 @@ impl Blofin {
     /// Queues one Plan call, applying native optimistic status after admission
     /// and before release.
     fn issue(&mut self, cx: &mut Cx<'_, Pending>, mut active: Active, slot: Slot, step: Step) {
-        let mut effect_write = None;
-        let write_index = if !step.read() {
-            if let Some(writes) = active.job.writes.as_mut() {
-                match step
-                    .write_index
-                    .and_then(|index| writes.observe_write(index))
-                {
-                    Some((index, write)) => {
-                        active.job.pending_write = Some(index);
-                        if let PlannedMutation::Effect(write) = &write.payload {
-                            effect_write = Some(write.clone());
-                        }
-                        if write.payload.body() != step.body {
-                            return self.end(
-                                cx,
-                                active,
-                                None,
-                                not_sent("BloFin placement differs from its validated wire body"),
-                            );
-                        }
-                        Some(index)
-                    }
-                    _ => {
-                        return self.end(
-                            cx,
-                            active,
-                            None,
-                            not_sent("BloFin validated placement plan cannot advance"),
-                        );
-                    }
-                }
-            } else {
-                return self.end(
-                    cx,
-                    active,
-                    None,
-                    not_sent("BloFin placement has no validated write plan"),
-                );
-            }
+        let effect_write = if !step.read() && step.placement.is_none() {
+            Some(Self::plan_effect(&step))
         } else {
             None
         };
+        let write_index = step.write_index;
+        if let Some(index) = write_index {
+            let count = step.element_count();
+            active.job.pending_write = Some((index, count));
+            if let Some(writes) = &mut active.job.writes {
+                for offset in 0..count {
+                    let recorded = writes.record(
+                        index + offset,
+                        ElementResult::Unknown {
+                            error: Box::new(unknown("Write dispatched; awaiting outcome")),
+                        },
+                    );
+                    debug_assert!(recorded.is_ok(), "BloFin reporting index missing");
+                }
+            }
+        }
         let plan = active.plan.clone().expect("admitted Plan");
         let narrowed = matches!(
             (active.job.intent, step.intent()),
@@ -2727,8 +2690,8 @@ impl Blofin {
             }
             return self.end(cx, active, current, error);
         }
-        // The step's write fact is recorded; a native pause follows only an
-        // accepted call with more to send.
+        // Native facts are recorded before the TS dispatch policy permits
+        // another call, including an ignored row refusal.
         let delay = request.step.delay as u32;
         if delay > 0
             && let Some(next) = active.job.steps.front()
@@ -2798,6 +2761,16 @@ impl Blofin {
                 count,
                 inst_id,
             } => {
+                // Legacy TS:2248-2256 checks normal row messages, :2304 only
+                // checks the TP/SL envelope, and :2045 checks trigger row codes/IDs.
+                let dispatch_failed = reply.code != "0"
+                    || match family {
+                        0 => rows.iter().any(ResultRow::normal_dispatch_failed),
+                        1 => false,
+                        _ => rows.iter().any(|row| {
+                            (!row.code.is_empty() && row.code != "0") || row.algo_id.is_empty()
+                        }),
+                    };
                 let multi_position = reply.code == MULTI_POSITION_CODE
                     || rows.iter().any(|row| row.code == MULTI_POSITION_CODE);
                 let message = if multi_position {
@@ -2829,7 +2802,7 @@ impl Blofin {
                         1 => &row.tpsl_id,
                         _ => &row.algo_id,
                     };
-                    let text = row.msg.trim().to_ascii_lowercase();
+                    let text = row.message().trim().to_ascii_lowercase();
                     // Only a non-zero row code refuses, and code 0 accepts whatever its
                     // text says. A cancel-only "gone" code or a code-less row with
                     // unexpected text proves nothing here.
@@ -2845,25 +2818,29 @@ impl Blofin {
                     if none_placed && row.code != "429" {
                         items.push(BatchItem::Native(Native {
                             code: NativeCode::Text(NONE_PLACED),
-                            message: &row.msg,
+                            message: row.message(),
                         }));
-                        let mut result =
-                            failed_element(cx, context, native(NONE_PLACED, &row.msg), &row.msg);
+                        let mut result = failed_element(
+                            cx,
+                            context,
+                            native(NONE_PLACED, row.message()),
+                            row.message(),
+                        );
                         if let ElementResult::NotSent { error: Some(error) } = &mut result {
                             error.venue_code = Some(row.code.to_string());
                         }
                         results.push(result);
-                        error = Some(format!("BloFin placement rejected: {}", row.msg));
+                        error = Some(format!("BloFin placement rejected: {}", row.message()));
                     } else if refused && !gone {
-                        items.push(BatchItem::Native(native(&row.code, &row.msg)));
+                        items.push(BatchItem::Native(native(&row.code, row.message())));
                         results.push(failed_element(
                             cx,
                             context,
-                            native(&row.code, &row.msg),
-                            &row.msg,
+                            native(&row.code, row.message()),
+                            row.message(),
                         ));
-                        maybe_live |= outcome_unknown(&row.code, &row.msg);
-                        error = Some(format!("BloFin placement rejected: {}", row.msg));
+                        maybe_live |= outcome_unknown(&row.code, row.message());
+                        error = Some(format!("BloFin placement rejected: {}", row.message()));
                     } else if refused
                         || id.is_empty()
                         || id == "0"
@@ -2874,10 +2851,10 @@ impl Blofin {
                         results.push(ElementResult::Unknown {
                             error: Box::new(unknown(format!(
                                 "BloFin placement acknowledgement is unproven: {}",
-                                row.msg
+                                row.message()
                             ))),
                         });
-                        error = Some(format!("BloFin placement rejected: {}", row.msg));
+                        error = Some(format!("BloFin placement rejected: {}", row.message()));
                     } else {
                         items.push(BatchItem::Accepted(id));
                         results.push(ElementResult::Placed {
@@ -2947,7 +2924,7 @@ impl Blofin {
                         };
                     }
                 }
-                job.settle_write(request.write_index, results)?;
+                job.settle_write(request.write_index, results);
                 if multi_position {
                     error = Some(MULTI_POSITION_MESSAGE.to_owned());
                 }
@@ -2977,12 +2954,21 @@ impl Blofin {
                     }
                     job.ids.push(id);
                 }
-                let error = error.or_else(|| unproven.then_some(message));
-                match error {
-                    Some(error) if unproven || maybe_live => Err(unknown(error)),
-                    Some(error) => Err(VenueError::new(error)),
-                    None => Ok(()),
+                if !dispatch_failed {
+                    return Ok(());
                 }
+                let error = error.unwrap_or_else(|| {
+                    rows.iter()
+                        .find(|row| *family == 0 && row.normal_dispatch_failed())
+                        .map_or(message, |row| {
+                            format!("BloFin placement rejected: {}", row.message())
+                        })
+                });
+                Err(if unproven || maybe_live {
+                    unknown(error)
+                } else {
+                    VenueError::new(error)
+                })
             }
             Effect::Cancel(targets) => {
                 if reply.code != "0" && rows.is_empty() {
@@ -3025,12 +3011,13 @@ impl Blofin {
                         Some(index) => matched[index] = Some(row),
                     }
                 }
+                let mut replacement_already_gone = false;
                 let mut items = Vec::with_capacity(targets.len());
                 let mut results = Vec::with_capacity(targets.len());
                 let effect_write = request
                     .effect_write
                     .as_ref()
-                    .ok_or_else(|| unknown("BloFin cancellation lacks its validated effect"))?;
+                    .ok_or_else(|| unknown("BloFin cancellation lacks its effect description"))?;
                 for (index, (target, row)) in targets.iter().zip(&matched).enumerate() {
                     let Some(row) = row else {
                         results.push(ElementResult::Unknown {
@@ -3043,7 +3030,7 @@ impl Blofin {
                     // Only under the documented code: the same text under an unlisted one stays unproven.
                     let gone_text = row.code == "500"
                         && row
-                            .msg
+                            .message()
                             .to_ascii_lowercase()
                             .contains("filled, triggered, canceled or does not exist");
                     let gone = matches!(&*row.code, "1000" | "102068") || gone_text;
@@ -3051,6 +3038,7 @@ impl Blofin {
                     let accepted = row.code == "0" || (reply.code == "0" && row.code.is_empty());
                     let replacing = !job.replacement_targets.is_empty();
                     if gone && replacing {
+                        replacement_already_gone = true;
                         // Nothing to move: the old order ended first, and no replacement goes out.
                         job.replacing_stop = None;
                         job.replacing_order = None;
@@ -3065,14 +3053,14 @@ impl Blofin {
                         results.push(failed_element(
                             cx,
                             context,
-                            native(&row.code, &row.msg),
-                            &row.msg,
+                            native(&row.code, row.message()),
+                            row.message(),
                         ));
                     }
                     if accepted || (gone_text && !replacing) {
                         items.push(BatchItem::Accepted(&target.id));
                     } else {
-                        items.push(BatchItem::Native(native(&row.code, &row.msg)));
+                        items.push(BatchItem::Native(native(&row.code, row.message())));
                     }
                     if gone || accepted {
                         self.trading.acknowledged.remove(&target.id);
@@ -3105,13 +3093,13 @@ impl Blofin {
                             self.account.sources.remove(id);
                         }
                     } else {
-                        error = Some(format!("BloFin cancellation rejected: {}", row.msg));
+                        error = Some(format!("BloFin cancellation rejected: {}", row.message()));
                     }
                 }
                 if rows.iter().any(|row| row.code == "429") {
                     error = Some(UNKNOWN_RATE.to_owned());
                 }
-                job.settle_write(request.write_index, results)?;
+                job.settle_write(request.write_index, results);
                 if unproven {
                     let message = error.clone().unwrap_or_default();
                     let _ = cx.http_write_unproven(context, message);
@@ -3126,6 +3114,26 @@ impl Blofin {
                         None,
                     );
                 }
+                // TS:2445/2488 ignore normal/TP-SL row errors under envelope 0.
+                // Trigger cancellations (:2542) still inspect every row.
+                if !replacement_already_gone
+                    && reply.code == "0"
+                    && targets.iter().all(|target| target.family < 2)
+                {
+                    return Ok(());
+                }
+                if reply.code != "0"
+                    && error.is_none()
+                    && !rows.iter().all(|row| {
+                        row.code == "1000"
+                            || row
+                                .message()
+                                .to_ascii_lowercase()
+                                .contains("filled, triggered, canceled or does not exist")
+                    })
+                {
+                    error = Some(format!("BloFin cancellation rejected: {}", reply.msg));
+                }
                 match error {
                     Some(error) if unproven => Err(unknown(error)),
                     Some(error) => Err(VenueError::new(error)),
@@ -3136,7 +3144,7 @@ impl Blofin {
                 let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
                 if reply.code != "0" || refused.is_some() {
                     let (code, message) = match refused {
-                        Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
+                        Some(row) if reply.code == "0" => (&*row.code, row.message()),
                         _ => (&*reply.code, &*reply.msg),
                     };
                     let error =
@@ -3172,7 +3180,7 @@ impl Blofin {
                     return Ok(());
                 }
                 let (code, msg) = match refused {
-                    Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
+                    Some(row) if reply.code == "0" => (&*row.code, row.message()),
                     _ => (&*reply.code, &*reply.msg),
                 };
                 let message = format!("BloFin TP/SL amend {code}: {msg}");
@@ -3180,7 +3188,7 @@ impl Blofin {
                 job.settle_write(
                     request.write_index,
                     vec![failed_element(cx, context, native(code, msg), &message)],
-                )?;
+                );
                 // An ambiguous amend cannot authorize any subsequent mutation.
                 if outcome_unknown(code, msg) {
                     return Err(unknown(format!(
@@ -3207,7 +3215,7 @@ impl Blofin {
                 }
                 // A row speaks for its order, whatever the envelope says.
                 let (code, msg) = match refused {
-                    Some(row) => (&*row.code, &*row.msg),
+                    Some(row) => (&*row.code, row.message()),
                     None => (&*reply.code, &*reply.msg),
                 };
                 let gone = matches!(code, "1000" | "102068")

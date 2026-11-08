@@ -36,3 +36,14 @@ notSent. TS has no original-order put-back after a refused replacement, so that
 separate Rust behavior is absent. Accepted cancels, settings and amendments use
 `Applied` with known target references. Cancel targets never become created IDs;
 engine classification, reconciliation fences, custody and signing remain intact.
+
+After-failure dispatch follows the legacy TS envelope/message rules: normal
+batches stop on a non-success row message; TP/SL children and normal/TP-SL
+cancels continue after definite row refusals under envelope `0`. Trigger row
+failures and failing envelopes stop. `WritePlan::record` only reports outcomes;
+it neither validates payloads nor grants or refuses dispatch.
+
+Known boundary: the shared serial engine still prevents continuation after an
+Unknown native outcome, even where TS ignores that row. The ignored red probe
+`code_only_unknown_row_needs_engine_continuation` records this unresolved parity
+gap; changing the engine policy requires the lead's decision.
