@@ -98,6 +98,55 @@ fn unknown_outcome(mut error: SliceFailure) -> SliceFailure {
     error
 }
 
+fn has_unknown_outcome(error: &SliceFailure) -> bool {
+    use safe_cex_engine::write_plan::ElementResult;
+    error.outcome == Some(safe_cex_engine::error::Outcome::Unknown)
+        || error.elements.as_ref().is_some_and(|rows| {
+            rows.iter().any(|row| match &row.result {
+                ElementResult::Unknown { .. } => true,
+                ElementResult::NotSent { error: Some(error) } => has_unknown_outcome(error),
+                _ => false,
+            })
+        })
+}
+
+// A fully known native journal can omit the aggregate outcome after partial success.
+// Actual Unknown facts take precedence over aggregate refusal hints.
+fn known_refusal(error: &SliceFailure) -> bool {
+    !has_unknown_outcome(error)
+        && (matches!(
+            error.outcome,
+            Some(
+                safe_cex_engine::error::Outcome::NotSent
+                    | safe_cex_engine::error::Outcome::Rejected
+            )
+        ) || error.elements.as_ref().is_some_and(|rows| !rows.is_empty()))
+}
+
+fn retained_order_ids(error: &SliceFailure) -> Vec<String> {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut ids = error
+        .partial
+        .as_ref()
+        .map_or_else(Vec::new, |partial| partial.order_ids.clone());
+    if let Some(rows) = &error.elements {
+        for row in rows.iter() {
+            let row_ids = match &row.result {
+                ElementResult::Placed { order_ids } => order_ids.clone(),
+                ElementResult::Unknown { error }
+                | ElementResult::NotSent { error: Some(error) } => retained_order_ids(error),
+                _ => Vec::new(),
+            };
+            for id in row_ids {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+    ids
+}
+
 /// The chaser a `useChaserOrders` slice starts, with the id TWAP tracks it by.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChaserRequest {

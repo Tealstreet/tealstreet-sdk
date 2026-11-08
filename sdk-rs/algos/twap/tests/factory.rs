@@ -349,10 +349,7 @@ fn placement_outcomes_read_ids_strictly() {
     let partial = VenueError::new("partly refused")
         .outcome(Outcome::Rejected)
         .partial_ids(&["a".to_owned()]);
-    let error = placement_outcome(Err(partial)).unwrap_err();
-    assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert_eq!(error.message, ENGINE_UNKNOWN_TEXT);
-    assert_eq!(error.partial.unwrap().order_ids, ["a"]);
+    assert_eq!(placement_outcome(Err(partial.clone())), Err(partial));
 }
 
 #[derive(Default)]
@@ -737,4 +734,78 @@ async fn unknown_exception_child_stops_later_children() {
             safe_cex_engine::error::Outcome::Unknown,
         ))
         .await;
+}
+
+#[test]
+fn native_partial_facts_distinguish_refusal_from_uncertainty() {
+    use safe_cex_algo_twap::factory::placement_outcome;
+    use safe_cex_engine::error::Outcome;
+    use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
+    let mut journal = WritePlan::new(vec![
+        Element {
+            index: 0,
+            client_order_id: None,
+        },
+        Element {
+            index: 1,
+            client_order_id: None,
+        },
+    ]);
+    journal
+        .record(
+            0,
+            ElementResult::Placed {
+                order_ids: vec!["accepted".to_owned()],
+            },
+        )
+        .unwrap();
+    journal
+        .record(
+            1,
+            ElementResult::NotSent {
+                error: Some(Box::new(
+                    VenueError::new("refused").outcome(Outcome::Rejected),
+                )),
+            },
+        )
+        .unwrap();
+    for aggregate in [None, Some(Outcome::Rejected), Some(Outcome::NotSent)] {
+        let known = journal.attach(VenueError {
+            message: "partly refused".to_owned(),
+            outcome: aggregate,
+            ..Default::default()
+        });
+        assert_eq!(
+            placement_outcome(Err(known.clone())),
+            Err(known),
+            "native journal proves a fully known partial even without aggregate partial IDs"
+        );
+    }
+    let aggregate_unknown =
+        journal.attach(VenueError::new("uncertain aggregate").outcome(Outcome::Unknown));
+    let error = placement_outcome(Err(aggregate_unknown)).unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.message, ENGINE_UNKNOWN_TEXT);
+    journal
+        .record(
+            1,
+            ElementResult::Unknown {
+                error: Box::new(VenueError::new("uncertain leg")),
+            },
+        )
+        .unwrap();
+    for aggregate in [None, Some(Outcome::Rejected), Some(Outcome::NotSent)] {
+        let error = placement_outcome(Err(journal.attach(VenueError {
+            message: "native unknown".to_owned(),
+            outcome: aggregate,
+            ..Default::default()
+        })))
+        .unwrap_err();
+        assert_eq!(
+            error.outcome,
+            Some(Outcome::Unknown),
+            "Unknown leg takes precedence over an outer refusal hint"
+        );
+        assert_eq!(error.message, ENGINE_UNKNOWN_TEXT);
+    }
 }

@@ -163,9 +163,10 @@ impl TwapInstance {
         for row in self.journal.outcomes() {
             let row_ids = match row.result {
                 ElementResult::Placed { order_ids } => order_ids,
-                ElementResult::Unknown { error } => error
-                    .partial
-                    .map_or_else(Vec::new, |partial| partial.order_ids),
+                ElementResult::Unknown { error }
+                | ElementResult::NotSent { error: Some(error) } => {
+                    crate::retained_order_ids(&error)
+                }
                 _ => Vec::new(),
             };
             for id in row_ids {
@@ -190,10 +191,7 @@ impl TwapInstance {
         self.pending_remainders.retain(|pending| *pending != index);
         match result {
             Ok(ids) => self.record_success(index, &ids, effects),
-            Err(error)
-                if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
-                    && error.partial.is_none() =>
-            {
+            Err(error) if crate::known_refusal(&error) => {
                 effects.push(TwapEffect::Log {
                     message: format!(
                         "TWAP {} slice remainder failed: {}",
@@ -448,14 +446,18 @@ impl TwapInstance {
                 }
             }
             Err(failure) => {
-                if !matches!(failure.outcome, Some(Outcome::NotSent | Outcome::Rejected))
-                    || failure.partial.is_some()
-                {
+                if !crate::known_refusal(&failure) {
                     self.state.orders_executed = executed;
                     self.halt_unknown(pending.element_index, failure, effects);
                     return;
                 }
-                executed = pending.executed_before;
+                let placed_ids = crate::retained_order_ids(&failure);
+                if placed_ids.is_empty() {
+                    executed = pending.executed_before;
+                }
+                if pending.priced_limit {
+                    self.tracked_limit_order_ids.extend(placed_ids);
+                }
                 self.record(
                     pending.element_index,
                     ElementResult::NotSent {

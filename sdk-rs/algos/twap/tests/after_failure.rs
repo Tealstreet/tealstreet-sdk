@@ -37,6 +37,7 @@ struct Port {
     fail: Cell<bool>,
     fail_outcome: Cell<Option<safe_cex_engine::error::Outcome>>,
     answer_ms: Cell<u64>,
+    next_failure: RefCell<Option<VenueError>>,
 }
 
 impl AccountPort for Port {
@@ -62,8 +63,12 @@ impl AccountPort for Port {
         let fail = self.fail.get();
         let outcome = self.fail_outcome.get();
         let answer_ms = self.answer_ms.get();
+        let next_failure = self.next_failure.borrow_mut().take();
         Box::pin(async move {
             tokio::time::sleep(Duration::from_millis(answer_ms)).await;
+            if let Some(error) = next_failure {
+                return Err(error);
+            }
             if fail {
                 Err(VenueError {
                     message: "rejected".into(),
@@ -759,4 +764,187 @@ async fn unknown_exception_chaser_halts_siblings_without_cancel_or_replacement()
             })
             .await;
     }
+}
+
+// The reviewer's known-partial-probe: accepted native prefix plus definite refusal,
+// with no aggregate outcome and no Unknown elements.
+fn known_partial_refusal() -> VenueError {
+    use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
+    let mut journal = WritePlan::new(vec![
+        Element {
+            index: 0,
+            client_order_id: None,
+        },
+        Element {
+            index: 1,
+            client_order_id: None,
+        },
+    ]);
+    journal
+        .record(
+            0,
+            ElementResult::Placed {
+                order_ids: vec!["native-accepted".to_owned()],
+            },
+        )
+        .unwrap();
+    journal
+        .record(
+            1,
+            ElementResult::NotSent {
+                error: Some(Box::new(
+                    VenueError::new("insufficient margin")
+                        .outcome(safe_cex_engine::error::Outcome::Rejected),
+                )),
+            },
+        )
+        .unwrap();
+    journal.attach(
+        VenueError::new("last split lot refused").partial_ids(&["native-accepted".to_owned()]),
+    )
+}
+
+#[tokio::test(start_paused = true)]
+async fn known_partial_probe_continues_then_genuine_unknown_halts() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280.
+    LocalSet::new()
+        .run_until(async {
+            let _clock = ClockGuard::new();
+            let (port, _, factory) = fixture("binance");
+            factory
+                .start(
+                    serde_json::from_str(&twap_options(json!({"size": 4, "ordersCount": 4})))
+                        .unwrap(),
+                )
+                .unwrap();
+            settle().await;
+            let partial = known_partial_refusal();
+            assert_eq!(
+                safe_cex_algo_twap::factory::placement_outcome(Err(partial.clone())),
+                Err(partial.clone()),
+                "known-partial-probe must retain native facts and message"
+            );
+            *port.next_failure.borrow_mut() = Some(partial);
+            advance(16).await;
+            assert_eq!(placed_amounts(&port), [1.0, 1.0]);
+            assert_eq!(factory.active_twaps("a").len(), 1);
+            assert!(
+                !port
+                    .emits
+                    .borrow()
+                    .iter()
+                    .any(|(op, _)| op == "twap:outcome" || op == "telemetry")
+            );
+            assert_eq!(factory.active_twaps("a")[0]["ordersExecuted"], 2);
+            let mut uncertain = known_partial_refusal();
+            uncertain.elements.as_mut().unwrap().0[1].result =
+                safe_cex_engine::write_plan::ElementResult::Unknown {
+                    error: Box::new(VenueError::new("timeout")),
+                };
+            *port.next_failure.borrow_mut() = Some(uncertain);
+            advance(16).await;
+            advance(100).await;
+            assert_eq!(
+                placed_amounts(&port),
+                [1.0, 1.0, 1.0],
+                "continue after known partial; halt only after genuine Unknown"
+            );
+            assert!(factory.active_twaps("a").is_empty());
+            let emits = port.emits.borrow();
+            let error = &emits.iter().find(|(op, _)| op == "twap:outcome").unwrap().1["error"];
+            assert_eq!(error["message"], ENGINE_UNKNOWN_TEXT);
+            assert_eq!(
+                error["partial"]["orderIds"],
+                json!(["order-1", "native-accepted"])
+            );
+            let refused = &error["elements"][1]["error"];
+            assert_eq!(refused["message"], "last split lot refused");
+            assert_eq!(refused["elements"][0]["status"], "placed");
+            assert_eq!(
+                refused["elements"][0]["orderIds"],
+                json!(["native-accepted"])
+            );
+            assert_eq!(refused["elements"][1]["error"]["outcome"], "rejected");
+            assert_eq!(error["elements"][2]["status"], "unknown");
+            assert_eq!(error["elements"][3]["status"], "notSent");
+            assert!(
+                emits
+                    .iter()
+                    .any(|(op, event)| op == "telemetry" && event["error"] == *error)
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn known_partial_probe_remainder_continues_then_genuine_unknown_halts() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:181-194,255-280.
+    LocalSet::new()
+        .run_until(async {
+            let _clock = ClockGuard::new();
+            let (port, cx, _) = fixture("binance");
+            let chasers = Rc::new(PolicyChasers {
+                writes: port.writes.clone(),
+                ..Default::default()
+            });
+            let factory = TwapFactory::new("a", cx, chasers.clone());
+            *port.next_failure.borrow_mut() = Some(known_partial_refusal());
+            factory
+                .start(
+                    serde_json::from_str(&twap_options(json!({
+                        "size": 3, "ordersCount": 3, "useChaserOrders": true,
+                        "timeoutPct": 50, "timeoutAction": "market", "failAction": "market"
+                    })))
+                    .unwrap(),
+                )
+                .unwrap();
+            settle().await;
+            advance(11).await;
+            advance(1).await;
+            advance(9).await;
+            assert_eq!(
+                chasers.started.borrow().len(),
+                2,
+                "known partial remainder must keep next chase scheduled"
+            );
+            assert!(chasers.halted.borrow().is_empty());
+            assert!(
+                !port
+                    .emits
+                    .borrow()
+                    .iter()
+                    .any(|(op, _)| op == "twap:outcome" || op == "telemetry")
+            );
+            *port.next_failure.borrow_mut() =
+                Some(VenueError::new("timeout").outcome(safe_cex_engine::error::Outcome::Unknown));
+            advance(11).await;
+            advance(1).await;
+            advance(100).await;
+            assert_eq!(chasers.started.borrow().len(), 2);
+            assert_eq!(placed_amounts(&port), [1.0, 1.0]);
+            let emits = port.emits.borrow();
+            let error = &emits.iter().find(|(op, _)| op == "twap:outcome").unwrap().1["error"];
+            assert_eq!(error["message"], ENGINE_UNKNOWN_TEXT);
+            assert_eq!(error["partial"]["orderIds"], json!(["native-accepted"]));
+            assert_eq!(
+                error["elements"][1]["error"]["message"],
+                "last split lot refused"
+            );
+            assert_eq!(
+                error["elements"][1]["error"]["elements"][0]["status"],
+                "placed"
+            );
+            assert_eq!(error["elements"][3]["status"], "unknown");
+            assert!(
+                error["elements"].as_array().unwrap()[4..]
+                    .iter()
+                    .all(|row| row["status"] == "notSent")
+            );
+            assert!(
+                emits
+                    .iter()
+                    .any(|(op, event)| op == "telemetry" && event["error"] == *error)
+            );
+        })
+        .await;
 }

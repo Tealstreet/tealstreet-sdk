@@ -343,19 +343,13 @@ impl Inner {
     }
 }
 
-/// A slice placement's ids, or its failure. Ids that cannot be read and unknown
-/// outcomes say the order may be live. Only a whole refusal proves nothing was
-/// placed; an unclassified error or a partial one does not.
+/// Preserve fully known refusals and their native partial-placement facts.
+/// Unreadable identities or unresolved outcomes remain execution uncertainty.
 pub fn placement_outcome(result: Result<String, VenueError>) -> Result<Vec<String>, SliceFailure> {
     match result {
         Ok(result) => serde_json::from_str::<Vec<String>>(&result)
             .map_err(|_| crate::unknown_outcome(VenueError::new("unreadable order identities"))),
-        Err(error)
-            if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
-                && error.partial.is_none() =>
-        {
-            Err(error)
-        }
+        Err(error) if crate::known_refusal(&error) => Err(error),
         Err(error) => Err(crate::unknown_outcome(error)),
     }
 }

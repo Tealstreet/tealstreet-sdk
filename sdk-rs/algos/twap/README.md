@@ -2,7 +2,11 @@
 
 TWAP releases one scheduled child at a time. Quantity, price and notional rules
 remain delegated to native writes. A definite refusal leaves later distinct
-children scheduled, as in legacy TS. There is no new whole-plan admission gate.
+children scheduled, as in legacy TS. This includes a fully known native partial:
+a placed prefix plus definitive refusal with no Unknown element. Its native
+journal, IDs and refusal text are retained, even without an aggregate outcome.
+Only actual uncertainty in the aggregate or native journal halts the action.
+There is no new whole-plan admission gate.
 
 Genuine Unknown halts the action under Sean/daxx's recorded parity exception
 (2026-11-08, decision #3355; Sam to verify). It clears future child and fallback
