@@ -296,7 +296,7 @@ export const signHostedHttp = async (
 };
 
 export const signHostedWsAuth = async (
-  host: EngineHost,
+  host: Pick<EngineHost, 'hostedSigning' | 'hostedWalletSigning'>,
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   const { toSign, outputFormat } = request.wsAuth ?? {};
@@ -306,7 +306,7 @@ export const signHostedWsAuth = async (
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
   if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64'
-    && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519' && outputFormat !== 'kucoin-batch')
+    && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519' && outputFormat !== 'orderly-ed25519' && outputFormat !== 'kucoin-batch')
     return { id: request.id, error: 'Unsupported WS auth output format' };
   const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
   if (!output.signature) throw new Error('Signing result is unavailable');
