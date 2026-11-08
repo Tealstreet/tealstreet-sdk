@@ -589,8 +589,16 @@ fn an_idempotent_cancel_does_not_hide_a_sibling_failure() {
         assert!(
             out.iter().any(|a| match a {
                 Action::Notice(Notice::CommandError { message, .. }) => message.contains(failure),
-                Action::Notice(Notice::CommandFailed { error, .. }) =>
-                    error.message.contains(failure),
+                Action::Notice(Notice::CommandFailed { error, .. }) => {
+                    if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+                        assert_unknown_message(error, ENGINE_UNKNOWN_TEXT);
+                        assert_eq!(error.venue_code.as_deref(), Some(failure));
+                        assert_eq!(error.venue_message.as_deref(), Some("real failure"));
+                        true
+                    } else {
+                        error.message.contains(failure)
+                    }
+                }
                 _ => false,
             }),
             "{out:?}"

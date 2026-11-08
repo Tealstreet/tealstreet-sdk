@@ -2,6 +2,20 @@ use safe_cex_engine::{Action, Engine, Event, Method, Notice, Response, SocketId,
 use safe_cex_venue_okx::{Okx, Options as NativeOptions};
 type Options = FixtureOptions;
 
+// The venue-authored literal and engine-sealed messages have distinct owners.
+pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub const ENGINE_HTTP_UNKNOWN_TEXT: &str =
+    "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders";
+pub const ENGINE_UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+pub fn assert_unknown_message(error: &safe_cex_engine::VenueError, text: &str) {
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        error.message.contains(text),
+        "expected {text:?}, got {:?}",
+        error.message
+    );
+}
+
 // OKX v5 docs: public instruments, tickers and books payload schemas.
 // https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments
 pub const MARKET: &str = r#"{"instId":"BTC-USDT-SWAP","instType":"SWAP","ctType":"linear","ctVal":"0.01","ctValCcy":"BTC","settleCcy":"USDT","state":"live","lotSz":"0.01","tickSz":"0.1","minSz":"0.01","maxIcebergSz":"1000","maxLmtSz":"1000","maxMktSz":"1000","maxStopSz":"1000","maxTriggerSz":"1000","maxTwapSz":"1000","lever":"100"}"#;

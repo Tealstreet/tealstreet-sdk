@@ -242,45 +242,43 @@ fn ts_pin_mixed_algos_follow_entries_with_stable_stop_trailing_tp_priority() {
             .iter()
             .all(|(path, _)| path.ends_with("/batch-orders"))
     );
-    let signature: Vec<_> = seen[3..]
+    // This is a priority pin only: inherited Rust trailing bytes differ from TS :2203-2208.
+    let priority: Vec<_> = seen[3..]
         .iter()
         .map(|(path, row)| {
             assert!(path.ends_with("/order-algo"));
-            let (kind, price) = if let Some(price) = row.get("slTriggerPx") {
-                ("SL", price.as_str().expect("price"))
-            } else if let Some(price) = row.get("tpTriggerPx") {
-                ("TP", price.as_str().expect("price"))
+            if row.get("slTriggerPx").is_some() {
+                "SL"
+            } else if row.get("tpTriggerPx").is_some() {
+                "TP"
             } else if row["ordType"] == "move_order_stop" {
-                ("trailing", "")
+                "trailing"
             } else {
-                ("conditional", row["triggerPx"].as_str().expect("trigger"))
-            };
-            (kind, row["sz"].as_str().expect("size"), price)
+                "conditional"
+            }
         })
         .collect();
     assert_eq!(
-        signature,
-        vec![
-            ("SL", "4", "35000"),
-            ("SL", "11", "36000"),
-            ("trailing", "8", ""),
-            ("TP", "4", "43000"),
-            ("TP", "11", "42000"),
-            ("conditional", "5", "37000"),
-        ]
+        priority,
+        ["SL", "SL", "trailing", "TP", "TP", "conditional"]
     );
+    for (index, size, field, price) in [
+        (3, "4", "slTriggerPx", "35000"),
+        (4, "11", "slTriggerPx", "36000"),
+        (6, "4", "tpTriggerPx", "43000"),
+        (7, "11", "tpTriggerPx", "42000"),
+        (8, "5", "triggerPx", "37000"),
+    ] {
+        assert_eq!(seen[index].1["sz"], size);
+        assert_eq!(seen[index].1[field], price);
+    }
 }
 
 #[test]
 fn legacy_standalone_algos_do_not_add_a_native_cap_gate() {
     // TS okx.exchange.ts:2133-2211,2318-2343: pin released native writes, without a new gate.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | standalone algo native cap and positive SL/TP minimum
-    for kind in [
-        "stop_market",
-        "take_profit_market",
-        "trailing_stop_market",
-        "conditional",
-    ] {
+    for kind in ["stop_market", "take_profit_market", "conditional"] {
         let mut product = instrument();
         product["maxStopSz"] = json!("7");
         product["maxTriggerSz"] = json!("9");
@@ -295,6 +293,46 @@ fn legacy_standalone_algos_do_not_add_a_native_cap_gate() {
         assert_eq!(seen.len(), 1);
         assert!(seen[0].0.ends_with("/order-algo"));
         assert_eq!(seen[0].1["sz"], amount.to_string());
+    }
+}
+
+#[test]
+fn inherited_trailing_payload_control_is_not_a_ts_wire_parity_pin() {
+    // TS okx.exchange.ts:2203-2208 uses closeFraction, omits sz, and sends price as spread.
+    // Rust's existing native sz/distance behavior is deliberately documented separately.
+    let (seen, requests) = finish(
+        &mut ready(instrument()),
+        vec![
+            json!({"symbol":"BTCUSDT","type":"trailing_stop_market","side":"sell","amount":8,"price":36000}),
+        ],
+    );
+    assert_eq!(requests, 1);
+    assert_eq!(seen.len(), 1);
+    assert!(seen[0].0.ends_with("/order-algo"));
+    assert_eq!(seen[0].1["sz"], "8");
+    assert_eq!(seen[0].1["callbackSpread"], "4000");
+    assert!(seen[0].1.get("closeFraction").is_none());
+}
+
+#[test]
+fn ts_positive_subminimum_standalone_sl_tp_sends_one_native_algo_and_its_result() {
+    // TS okx.exchange.ts:2181-2200 emits positive SL/TP sizes without comparing minSz.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | standalone algo native cap and positive SL/TP minimum
+    for (kind, field, price) in [
+        ("stop_market", "slTriggerPx", 36000),
+        ("take_profit_market", "tpTriggerPx", 42000),
+    ] {
+        let (seen, requests) = finish(
+            &mut ready(instrument()),
+            vec![json!({"symbol":"BTCUSDT","type":kind,"side":"sell","amount":1,"price":price})],
+        );
+        assert_eq!(requests, 1);
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].0.ends_with("/order-algo"));
+        assert_eq!(seen[0].1["sz"], "1");
+        assert_eq!(seen[0].1[field], price.to_string());
+        assert_eq!(seen[0].1["reduceOnly"], true);
+        assert!(seen[0].1.get("closeFraction").is_none());
     }
 }
 
@@ -389,6 +427,9 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
         panic!("one failed terminal")
     };
     assert!(matches!(error.outcome, None | Some(Outcome::Unknown)));
+    if expected == Outcome::Unknown {
+        assert_unknown_message(error, ENGINE_UNKNOWN_TEXT);
+    }
     let elements = error.elements.as_ref().expect("complete shared journal");
     assert_eq!(elements.len(), 5);
     assert_eq!(
@@ -418,7 +459,7 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
             assert_eq!(error.venue_code.as_deref(), Some(code));
         }
         (ElementResult::Unknown { error }, Outcome::Unknown) => {
-            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_unknown_message(error, ENGINE_UNKNOWN_TEXT);
         }
         _ => panic!("native failure classification must survive"),
     }
@@ -495,16 +536,19 @@ fn legacy_native_placement_failure_stops_every_remaining_batch_and_algo() {
 
 #[test]
 fn runtime_ambiguous_native_reply_preserves_unknown_and_unsent_suffix() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at okx.exchange.ts:2325-2327 for code-0 rows carrying algoId.
     runtime_failure(200, "50004", Outcome::Unknown);
 }
 
 #[test]
 fn engine_owned_server_failure_preserves_unknown_and_unsent_suffix() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at utils/signatureRejection.ts:19-40 for signature-looking responses.
     runtime_failure(503, "50001", Outcome::Unknown);
 }
 
 #[test]
 fn lost_reply_preserves_unknown_and_unsent_suffix() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at okx.exchange.ts:2325-2327 for uncertain rows carrying algoId.
     runtime_failure(0, "", Outcome::Unknown);
 }
 
@@ -559,6 +603,9 @@ fn mixed_batch_failure(code: &str, rejected: bool) {
     let [Err(error)] = results.as_slice() else {
         panic!("one partial terminal")
     };
+    if !rejected {
+        assert_unknown_message(error, ENGINE_UNKNOWN_TEXT);
+    }
     let elements = error.elements.as_ref().expect("complete row journal");
     assert_eq!(elements.len(), 41);
     for (i, element) in elements.iter().enumerate() {
@@ -573,9 +620,10 @@ fn mixed_batch_failure(code: &str, rejected: bool) {
                     matches!(&element.result, ElementResult::NotSent { error: Some(e) } if e.outcome == Some(Outcome::Rejected) && e.venue_code.as_deref() == Some(code))
                 );
             } else {
-                assert!(
-                    matches!(&element.result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown))
-                );
+                let ElementResult::Unknown { error } = &element.result else {
+                    panic!("unknown row")
+                };
+                assert_unknown_message(error, ENGINE_UNKNOWN_TEXT);
             }
         } else if i == 40 {
             assert_eq!(element.result, ElementResult::NotSent { error: None });
@@ -597,6 +645,7 @@ fn native_batch_rejection_keeps_successful_rows_and_only_stops_unsent_writes() {
 
 #[test]
 fn ambiguous_native_batch_row_keeps_other_proven_rows() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at okx.exchange.ts:2297-2299 for code-0 rows carrying ordId.
     mixed_batch_failure("50004", false);
 }
 
@@ -643,6 +692,18 @@ fn ts_invalid_ordinary_market_rules_refuse_before_any_write() {
         .store_mut()
         .update_markets(|market| market.limits.amount.max = f64::INFINITY);
     not_sent(&mut engine, vec![limit(5.)]);
+}
+
+#[test]
+fn ts_invalid_ordinary_amount_precision_refuses_before_any_io() {
+    // TS okx.exchange.ts:2226-2235 refuses invalid amount precision before dispatch.
+    for precision in [0., -1., f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+        let mut engine = ready(instrument());
+        engine
+            .store_mut()
+            .update_markets(|market| market.precision.amount = precision);
+        not_sent(&mut engine, vec![limit(5.)]);
+    }
 }
 
 fn first_native_rows(engine: &mut Engine<Okx>, rows: Vec<Value>) -> Value {

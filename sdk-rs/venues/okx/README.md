@@ -42,4 +42,9 @@ Sequence pins require all entry batches before SL/trailing/TP algos. Children
 retain the original input amount, so a child refusal leaves the accepted entry
 prefix and stops later algos. Per-lot entry/SL/TP interleaving is not TS parity.
 
+The mixed-algo pin asserts trailing priority only. TS `okx.exchange.ts:2203-2208`
+sends `closeFraction=1`, omits `sz`, and uses the input price as `callbackSpread`.
+Inherited Rust behavior sends native `sz` and a distance from the last price;
+this remains a documented deviation, covered separately as a native control.
+
 This PR remains stacked on #3348; re-merge master after that dependency lands.

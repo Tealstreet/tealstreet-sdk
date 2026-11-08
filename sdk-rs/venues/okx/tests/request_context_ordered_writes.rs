@@ -1333,6 +1333,7 @@ fn other_key_refusals_are_never_resent() {
 
 #[test]
 fn a_signature_code_on_an_unproven_status_is_never_resent() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at utils/signatureRejection.ts:19-40.
     // A 5xx proves nothing about the write, so 50113 in its body is no refusal.
     let mut engine = trading_engine();
     place(&mut engine, vec![order(1)]);
@@ -1347,12 +1348,85 @@ fn a_signature_code_on_an_unproven_status_is_never_resent() {
         "no resend of an unproven write"
     );
     let failed = failures(&output);
+    assert_eq!(failed.len(), 1);
+    support::assert_unknown_message(failed[0], support::ENGINE_UNKNOWN_TEXT);
     assert!(
         failed
             .iter()
             .all(|error| error.outcome == Some(safe_cex_engine::Outcome::Unknown)),
         "an unproven write stays Unknown: {failed:?}"
     );
+}
+
+#[test]
+fn unknown_after_a_signature_refusal_keeps_the_engine_http_sealing_text() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at utils/signatureRejection.ts:19-40.
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 401, SIGNATURE_REJECTED, 6.);
+    let second = prepared(&mut engine, 6.);
+    refuse(&mut engine, post(&second), 503, SIGNATURE_REJECTED, 7.);
+    let output = prepared(&mut engine, 7.);
+    assert!(!output.iter().any(|action| matches!(action,
+        Action::Http(request) if request.method != safe_cex_engine::Method::Get
+    )));
+    let errors = failures(&output);
+    assert_eq!(errors.len(), 1);
+    support::assert_unknown_message(errors[0], support::ENGINE_HTTP_UNKNOWN_TEXT);
+    let elements = errors[0].elements.as_ref().expect("recorded unknown row");
+    assert_eq!(elements.len(), 1);
+    assert!(matches!(&elements[0].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { error }
+            if error.message.contains(support::ENGINE_UNKNOWN_TEXT)
+    ));
+}
+
+#[test]
+fn unknown_after_a_cancel_refusal_keeps_the_engine_refusal_sealing_text() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at okx.exchange.ts:2355-2363.
+    let mut engine = trading_engine();
+    let ids: Vec<_> = (1..=21).map(|id| id.to_string()).collect();
+    for id in &ids {
+        engine.store_mut().upsert_order(stored(id));
+    }
+    engine.handle(
+        5.,
+        Event::Command(Command::CancelOrders {
+            command: OWNER,
+            ids,
+        }),
+    );
+    let first = prepared(&mut engine, 5.);
+    let rows: Vec<_> = (1..=20)
+        .map(|id| {
+            serde_json::json!({
+                "ordId":id.to_string(), "sCode":if id == 1 { "51000" } else { "0" },
+                "sMsg":if id == 1 { "Parameter error" } else { "" }
+            })
+        })
+        .collect();
+    reply(
+        &mut engine,
+        post(&first),
+        &serde_json::json!({"code":"0","data":rows}).to_string(),
+        6.,
+    );
+    let second = prepared(&mut engine, 6.);
+    refuse(
+        &mut engine,
+        post(&second),
+        503,
+        r#"{"code":"50001","msg":"busy"}"#,
+        7.,
+    );
+    let output = prepared(&mut engine, 7.);
+    assert!(!output.iter().any(|action| matches!(action,
+        Action::Http(request) if request.method != safe_cex_engine::Method::Get
+    )));
+    let errors = failures(&output);
+    assert_eq!(errors.len(), 1);
+    support::assert_unknown_message(errors[0], support::ENGINE_UNKNOWN_AFTER_REFUSAL);
 }
 
 /// OKX's census runs each page under its own context. A mark made mid-census

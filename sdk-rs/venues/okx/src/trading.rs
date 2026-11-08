@@ -20,6 +20,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const BROKER: &str = "e847386590ce4dBC";
+const UNKNOWN_OUTCOME_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 /// Every write is one call with its own 20 s bound; only a 50113 signature
 /// refusal, which executed nothing, is re-signed and sent once more.
@@ -2079,6 +2080,9 @@ impl Okx {
         mut error: VenueError,
         uncertain: bool,
     ) {
+        if uncertain {
+            error = unknown_outcome(error);
+        }
         if !uncertain
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             && let Some(request) = current
@@ -2267,6 +2271,17 @@ fn rejection(message: String, code: Option<&str>, status: u16) -> VenueError {
     error
 }
 
+fn unknown_outcome(mut error: VenueError) -> VenueError {
+    if error.venue_message.is_none() {
+        error.venue_message = Some(error.message.clone().into_boxed_str());
+    }
+    error.message = UNKNOWN_OUTCOME_TEXT.into();
+    error.outcome = Some(Outcome::Unknown);
+    // Presentation only; the engine still classifies the retained write facts.
+    error.presents = true;
+    error
+}
+
 fn native_refusal(
     cx: &Cx<'_, Pending>,
     context: &Context,
@@ -2280,15 +2295,19 @@ fn native_refusal(
             ack.s_msg,
         )
         .map_err(|error| error.venue_error())?;
-    let error = Box::new(fact.error().clone());
+    let error = fact.error().clone();
     Ok(
         if matches!(
             fact.verdict(),
             Verdict::Refused(_) | Verdict::RefusedResend(_)
         ) {
-            ElementResult::NotSent { error: Some(error) }
+            ElementResult::NotSent {
+                error: Some(Box::new(error)),
+            }
         } else {
-            ElementResult::Unknown { error }
+            ElementResult::Unknown {
+                error: Box::new(unknown_outcome(error)),
+            }
         },
     )
 }
@@ -2308,13 +2327,13 @@ fn placement_results(
                 };
                 return Ok(if id.is_empty() {
                     ElementResult::Unknown {
-                        error: Box::new(
+                        error: Box::new(unknown_outcome(
                             VenueError::new(
                                 "OKX placement acknowledgement omitted native identity",
                             )
                             .kind(ErrorKind::Internal)
                             .outcome(Outcome::Unknown),
-                        ),
+                        )),
                     }
                 } else {
                     ElementResult::Placed {
