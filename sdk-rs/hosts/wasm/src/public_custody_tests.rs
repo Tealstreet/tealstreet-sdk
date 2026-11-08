@@ -3,6 +3,7 @@ use super::WasmEngine;
 use serde_json::json;
 
 fn host_admission(venue: &str, options: serde_json::Value, required: bool) {
+    let expected_public = options["publicMode"]["requested"].as_bool().unwrap_or(true);
     let engine = WasmEngine::new(venue, &options.to_string(), None)
         .unwrap_or_else(|_| panic!("{venue}: constructor failed"));
     let construction: serde_json::Value = serde_json::from_str(&engine.construction()).unwrap();
@@ -11,6 +12,7 @@ fn host_admission(venue: &str, options: serde_json::Value, required: bool) {
         "construction": construction,
         "requiresExternalSigner": engine.requires_external_signer(),
         "expectedRequired": required,
+        "expectedPublic": expected_public,
     });
     let output = std::process::Command::new("node")
         .arg(concat!(
@@ -80,4 +82,44 @@ fn empty_public_read_refs_need_no_engine_host_provider() {
         json!({"publicMode":{"requested":true},"signing":{}}),
         false,
     );
+}
+
+#[cfg(any(
+    feature = "bingx",
+    feature = "weex",
+    feature = "bitget",
+    feature = "okx"
+))]
+fn venue_owned_private_refs(venue: &str, passphrase: bool) {
+    let mut options = json!({"testnet":true,"remoteSigning":true,
+        "publicMode":{"requested":false,"remoteSigner":true},
+        "signing":{"primary":{"credential":"private-account","signing":"private-signing"}}});
+    if passphrase {
+        options["signing"]["primary"]["passphrase"] = "private-passphrase-ref".into();
+    }
+    host_admission(venue, options, true);
+}
+
+#[cfg(feature = "bingx")]
+#[test]
+fn bingx_private_refs_require_an_engine_host_provider() {
+    venue_owned_private_refs("bingx", false);
+}
+
+#[cfg(feature = "weex")]
+#[test]
+fn weex_private_refs_require_an_engine_host_provider() {
+    venue_owned_private_refs("weex", true);
+}
+
+#[cfg(feature = "bitget")]
+#[test]
+fn bitget_private_refs_require_an_engine_host_provider() {
+    venue_owned_private_refs("bitget", true);
+}
+
+#[cfg(feature = "okx")]
+#[test]
+fn okx_private_refs_require_an_engine_host_provider() {
+    venue_owned_private_refs("okx", true);
 }

@@ -82,7 +82,6 @@ trait AnyEngine {
     fn failed(&self) -> bool {
         false
     }
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         None
     }
@@ -90,8 +89,6 @@ trait AnyEngine {
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         (now, 0)
     }
-    /// Whether registry construction retained both a provider and credential refs.
-    fn has_signing_authority(&self) -> bool;
     /// `None` leaves host capability undeclared (unknown), so admission fails closed.
     fn external_signer(
         &mut self,
@@ -235,7 +232,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.address_setup_retired_wire(token, now)
     }
 
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
     }
@@ -245,11 +241,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
     fn failed(&self) -> bool {
         Engine::failed(self)
-    }
-    fn has_signing_authority(&self) -> bool {
-        let identities = Engine::identities(self);
-        Engine::signer(self).is_some()
-            && (identities.primary.is_some() || identities.secondary.is_some())
     }
     fn external_signer(
         &mut self,
@@ -1005,6 +996,9 @@ impl WasmEngine {
         // A false read-key result outranks any provider setup failure, as natively.
         safe_cex_venues::read_key_preflight(venue, &options).map_err(construction_error)?;
         let external_setup = options.signing.is_some() && signer_setup_json.is_none();
+        let has_external_refs = options.signing.as_ref().is_some_and(|identities| {
+            identities.primary.is_some() || identities.secondary.is_some()
+        });
         #[cfg(feature = "dispatch-signing")]
         let signer = if let Some(mut input) = signer_setup_json {
             if !dispatch_signing {
@@ -1084,9 +1078,9 @@ impl WasmEngine {
             Boxed,
         )
         .map_err(construction_error)?;
-        // Public-mode normalization may discard the requested provider and refs.
-        // Only retained authority requires a host callback, including PublicRead.
-        let external_signer = external_setup && inner.has_signing_authority();
+        // Public normalization may discard the provider. Otherwise the external
+        // refs still need a callback, including refs retained inside the venue.
+        let external_signer = external_setup && has_external_refs && inner.signer().is_some();
         Ok(Self {
             inner,
             construction,
@@ -2723,9 +2717,6 @@ mod tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
-            fn has_signing_authority(&self) -> bool {
-                false
-            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -2941,9 +2932,6 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
-        fn has_signing_authority(&self) -> bool {
-            false
-        }
         fn external_signer(
             &mut self,
             _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -3025,9 +3013,6 @@ mod tests {
 
         struct Counted;
         impl AnyEngine for Counted {
-            fn has_signing_authority(&self) -> bool {
-                false
-            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,

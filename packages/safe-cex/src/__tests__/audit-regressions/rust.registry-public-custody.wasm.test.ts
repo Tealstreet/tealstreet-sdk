@@ -104,3 +104,19 @@ it.each([null, true])('EngineHost accepts public TxFlow refs without a provider 
     expect(engine.requiresExternalSigner?.()).toBe(false);
   } finally { host.dispose(); }
 });
+
+it.each(['bingx', 'weex', 'bitget', 'okx'])('%s private references require an EngineHost provider', (venue) => {
+  const engine = new wasm.WasmEngine(venue, JSON.stringify({
+    testnet: true, remoteSigning: true,
+    publicMode: { requested: false, remoteSigner: true },
+    signing: { primary: { credential: 'private-account', signing: 'private-signing',
+      ...(venue === 'bingx' ? {} : { passphrase: 'private-passphrase-ref' }) } },
+  }));
+  try {
+    if (typeof engine.construction !== 'function') throw new Error('Missing construction record');
+    const construction: unknown = JSON.parse(engine.construction());
+    expect(construction).toMatchObject({ canSign: true, publicDataOnly: false });
+    expect(() => new EngineHost(engine, admissionTransport)).toThrow('Engine signing provider is required');
+    expect(engine.requiresExternalSigner?.()).toBe(true);
+  } finally { engine.free?.(); }
+});

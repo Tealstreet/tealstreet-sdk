@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { EngineHost } from './host.mjs';
 
 const row = JSON.parse(process.argv[2]);
+assert.equal(row.construction.publicDataOnly, row.expectedPublic);
+if (!row.expectedPublic) assert.equal(row.construction.canSign, true);
 const engine = { requiresExternalSigner: () => row.requiresExternalSigner, command: () => '[]' };
 if (row.expectedRequired) {
   assert.throws(() => new EngineHost(engine, {}), (error) =>

@@ -14,9 +14,10 @@ Resolved public-only delegated accounts discard unused callback and private setu
 configuration before validating custody. Native registry construction applies the
 same ordering before local capsule parsing and injected provider validation;
 declared PublicRead credentials retain their separate read-only policy.
-The WASM host derives `requiresExternalSigner` from the provider and identities
-retained after registry construction, so unused public refs require no host
-callback while retained PublicRead authority still requires one.
+The WASM host derives `requiresExternalSigner` from nonempty submitted external
+refs and the provider retained after registry construction. Refs may be owned by
+the venue rather than `Engine::identities()`. Discarded public providers require
+no callback; private and retained PublicRead providers still require one.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
