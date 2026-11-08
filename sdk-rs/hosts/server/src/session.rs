@@ -2038,6 +2038,88 @@ mod tests {
         }).await;
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn retained_stop_callback_drops_replaced_account_owner() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for replaced in [false, true] {
+                    let registry = crate::accounts::tests::registry();
+                    let first = acct_init();
+                    let account_a =
+                        crate::accounts::testing::trading_account(&registry, "u", &first);
+                    let (mut owner, mut owner_sent) = user_session(registry.clone(), "u");
+                    owner.init(first.clone()).await.unwrap();
+                    while owner_sent.try_recv().is_ok() {}
+                    let keep = registry.keep_notice(&account_a, &owner.resume_id);
+                    let old_end =
+                        envelope::msg("acct", "chaser:end", json!({"id":"synthetic-owner-A"}));
+                    let mut kept: crate::algos::Kept = "synthetic retained owner A".into();
+                    kept.ends.push(old_end.clone());
+                    let (release, wait) = tokio::sync::oneshot::channel();
+                    let callback = tokio::spawn(async move {
+                        wait.await.unwrap();
+                        keep(kept);
+                    });
+                    let current = if replaced {
+                        let second = InitPayload {
+                            key: "synthetic-owner-B".into(),
+                            ..first
+                        };
+                        let account_b =
+                            crate::accounts::testing::trading_account(&registry, "u", &second);
+                        owner.init(second.clone()).await.unwrap();
+                        assert!(Arc::ptr_eq(&owner.joined["acct"].account, &account_b));
+                        (registry.keep_notice(&account_b, &owner.resume_id))(
+                            "synthetic current owner B".into(),
+                        );
+                        second
+                    } else {
+                        first
+                    };
+                    release.send(()).unwrap();
+                    callback.await.unwrap();
+                    let (mut next, mut sent) = user_session(registry.clone(), "u");
+                    next.init(current.clone()).await.unwrap();
+                    let mut frames = Vec::new();
+                    while let Ok(frame) = sent.try_recv() {
+                        frames.push(frame);
+                    }
+                    let old_notices = frames
+                        .iter()
+                        .filter(|frame| frame.contains("synthetic retained owner A"))
+                        .count();
+                    assert_eq!(
+                        old_notices,
+                        usize::from(!replaced),
+                        "retained A notice crossed replacement={replaced}: {frames:?}"
+                    );
+                    assert_eq!(
+                        frames.iter().filter(|frame| **frame == old_end).count(),
+                        usize::from(!replaced)
+                    );
+                    assert_eq!(
+                        frames
+                            .iter()
+                            .filter(|frame| frame.contains("synthetic current owner B"))
+                            .count(),
+                        usize::from(replaced),
+                        "late A callback must not overwrite B's retained notice"
+                    );
+                    let (mut again, mut sent) = user_session(registry.clone(), "u");
+                    again.init(current).await.unwrap();
+                    while let Ok(frame) = sent.try_recv() {
+                        assert!(
+                            !frame.contains("synthetic retained owner A")
+                                && !frame.contains("synthetic current owner B"),
+                            "retained notice replayed twice: {frame}"
+                        );
+                        assert_ne!(frame, old_end);
+                    }
+                }
+            })
+            .await;
+    }
+
     /// User u's account under `registry`, with a chase running and a socket of u joined to it.
     async fn chasing_session(
         registry: &Arc<Registry>,
