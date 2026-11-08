@@ -614,3 +614,48 @@ fn empty_applied_targets_and_placed_ids_are_rejected_atomically() {
     .unwrap();
     assert_eq!(plan.next_write().unwrap().0, 1);
 }
+
+#[test]
+fn observing_a_native_fallback_reports_it_without_selecting_venue_policy() {
+    let mut plan = WritePlan::validate(writes(&[1, 2, 3, 4]), |_| Ok(())).unwrap();
+    assert_eq!(plan.observe_write(0).unwrap().0, 0);
+    plan.fail(
+        0,
+        VenueError::new("native amend refused").outcome(Outcome::Rejected),
+    )
+    .unwrap();
+    assert!(plan.next_write().is_none(), "gated callers still stop");
+    assert!(plan.observe_write(0).is_none(), "a write cannot repeat");
+    assert_eq!(plan.observe_write(2).unwrap().0, 2);
+    assert!(
+        plan.observe_write(3).is_none(),
+        "one physical write at a time"
+    );
+    plan.settle(
+        2,
+        vec![ElementResult::Applied {
+            effect: AppliedEffect::Cancel,
+            target_order_id: Some("old".into()),
+            position_key: None,
+        }],
+    )
+    .unwrap();
+    assert_eq!(plan.observe_write(3).unwrap().0, 3);
+    plan.settle(3, vec![placed(3)]).unwrap();
+    let error = plan.failure(VenueError::new("scripted terminal"));
+    let elements = error.elements.unwrap();
+    assert_eq!(elements.len(), 4);
+    assert!(matches!(
+        elements[0].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    assert_eq!(elements[1].result, ElementResult::NotSent { error: None });
+    assert!(matches!(
+        elements[2].result,
+        ElementResult::Applied {
+            effect: AppliedEffect::Cancel,
+            ..
+        }
+    ));
+    assert_eq!(elements[3].result, placed(3));
+}

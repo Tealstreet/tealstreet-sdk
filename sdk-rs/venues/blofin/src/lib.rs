@@ -46,7 +46,6 @@ pub enum Pending {
     Markets {
         rows: Vec<Market>,
         malformed: HashSet<String>,
-        size_rules: HashMap<String, trading::SizeRules>,
     },
     Tickers {
         rows: Vec<Ticker>,
@@ -80,7 +79,6 @@ pub struct Blofin {
     options: Options,
     account: account::Account,
     trading: trading::Trading,
-    size_rules: HashMap<String, trading::SizeRules>,
     public: Connection,
     startup: PublicRetries,
     // Instrument ids rejected as malformed; owned exposure there holds the snapshot.
@@ -159,7 +157,6 @@ impl Blofin {
             options,
             account: account::Account::new(),
             trading: trading::Trading::default(),
-            size_rules: HashMap::new(),
             public: Connection::default(),
             startup: Default::default(),
             malformed_markets: HashSet::new(),
@@ -268,11 +265,7 @@ impl Blofin {
             return;
         }
         match pending {
-            Pending::Markets {
-                rows,
-                malformed,
-                size_rules,
-            } if !rows.is_empty() => {
+            Pending::Markets { rows, malformed } if !rows.is_empty() => {
                 let refresh = cx.store.loaded().markets;
                 let rows = if refresh {
                     keep_listed(cx.store.markets(), rows)
@@ -280,9 +273,6 @@ impl Blofin {
                     rows
                 };
                 cx.store.set_markets(rows);
-                self.size_rules.extend(size_rules);
-                self.size_rules
-                    .retain(|id, _| cx.store.market_by_id(id).is_some());
                 let before = self.malformed_markets.len();
                 self.malformed_markets.extend(malformed);
                 self.malformed_markets
@@ -724,7 +714,6 @@ impl Venue for Blofin {
             Pending::Markets {
                 rows: vec![],
                 malformed: HashSet::new(),
-                size_rules: HashMap::new(),
             },
         );
     }
@@ -820,94 +809,87 @@ impl Venue for Blofin {
                 }
             }
             Pending::Leverage(_) => {}
-            Pending::Markets {
-                rows,
-                malformed,
-                size_rules,
-            } => match serde_json::from_str::<Instrument<'_>>(item) {
-                Ok(m)
-                    if m.inst_type.eq_ignore_ascii_case("SWAP")
-                        && m.contract_type.eq_ignore_ascii_case("linear") =>
-                {
-                    if m.inst_id.is_empty()
-                        || m.base_currency.is_empty()
-                        || m.quote_currency.is_empty()
-                        || [
-                            m.contract_value.0,
-                            m.min_size.0,
-                            m.lot_size.0,
-                            m.tick_size.0,
-                            m.max_limit_size.0,
-                            m.max_market_size.0,
-                            m.max_leverage.0,
-                        ]
-                        .iter()
-                        .any(|number| !number.is_finite() || *number <= 0.0)
+            Pending::Markets { rows, malformed } => {
+                match serde_json::from_str::<Instrument<'_>>(item) {
+                    Ok(m)
+                        if m.inst_type.eq_ignore_ascii_case("SWAP")
+                            && m.contract_type.eq_ignore_ascii_case("linear") =>
                     {
-                        safe_cex_engine::startup::skipped_row(cx);
-                        if !m.inst_id.is_empty() {
-                            malformed.insert(m.inst_id.into_owned());
+                        if m.inst_id.is_empty()
+                            || m.base_currency.is_empty()
+                            || m.quote_currency.is_empty()
+                            || [
+                                m.contract_value.0,
+                                m.min_size.0,
+                                m.tick_size.0,
+                                m.max_limit_size.0,
+                                m.max_market_size.0,
+                                m.max_leverage.0,
+                            ]
+                            .iter()
+                            .any(|number| !number.is_finite() || *number <= 0.0)
+                        {
+                            safe_cex_engine::startup::skipped_row(cx);
+                            if !m.inst_id.is_empty() {
+                                malformed.insert(m.inst_id.into_owned());
+                            }
+                            return;
                         }
-                        return;
+                        rows.push(Market {
+                            id: m.inst_id.to_string(),
+                            symbol: m.inst_id.trim_end_matches("-SWAP").replace('-', ""),
+                            pretty_symbol: None,
+                            base: m.base_currency.into_owned(),
+                            quote: m.quote_currency.into_owned(),
+                            active: m.state == "live",
+                            precision: Precision {
+                                amount: if m.lot_size.0 > 0.0 {
+                                    m.lot_size.0
+                                } else {
+                                    m.min_size.0
+                                },
+                                price: m.tick_size.0,
+                            },
+                            limits: Limits {
+                                amount: MinMax {
+                                    min: m.min_size.0 * m.contract_value.0,
+                                    max: m.max_limit_size.0.min(m.max_market_size.0),
+                                },
+                                leverage: MinMax {
+                                    min: 1.0,
+                                    max: m.max_leverage.0,
+                                },
+                                price: None,
+                            },
+                            contract_size: Some(m.contract_value.0),
+                            is_expiring: None,
+                            is_inverse: None,
+                            is_spot: None,
+                            is_perpetual: None,
+                            is_read_only: None,
+                            taker_fee: None,
+                            maker_fee: None,
+                        })
                     }
-                    size_rules.insert(
-                        m.inst_id.to_string(),
-                        trading::SizeRules {
-                            min: m.min_size.0,
-                            max_limit: m.max_limit_size.0,
-                            max_market: m.max_market_size.0,
-                        },
-                    );
-                    rows.push(Market {
-                        id: m.inst_id.to_string(),
-                        symbol: m.inst_id.trim_end_matches("-SWAP").replace('-', ""),
-                        pretty_symbol: None,
-                        base: m.base_currency.into_owned(),
-                        quote: m.quote_currency.into_owned(),
-                        active: m.state == "live",
-                        precision: Precision {
-                            amount: m.lot_size.0,
-                            price: m.tick_size.0,
-                        },
-                        limits: Limits {
-                            amount: MinMax {
-                                min: m.min_size.0 * m.contract_value.0,
-                                max: m.max_limit_size.0.min(m.max_market_size.0),
-                            },
-                            leverage: MinMax {
-                                min: 1.0,
-                                max: m.max_leverage.0,
-                            },
-                            price: None,
-                        },
-                        contract_size: Some(m.contract_value.0),
-                        is_expiring: None,
-                        is_inverse: None,
-                        is_spot: None,
-                        is_perpetual: None,
-                        is_read_only: None,
-                        taker_fee: None,
-                        maker_fee: None,
-                    })
-                }
-                Ok(_) => {}
-                Err(_) => {
-                    safe_cex_engine::startup::skipped_row(cx);
-                    if let Ok(key) = serde_json::from_str::<InstrumentKey<'_>>(item)
-                        && !key.inst_id.is_empty()
-                        && key
-                            .inst_type
-                            .as_deref()
-                            .is_none_or(|t| t.eq_ignore_ascii_case("SWAP"))
-                        && key
-                            .contract_type
-                            .as_deref()
-                            .is_none_or(|t| t.eq_ignore_ascii_case("linear"))
-                    {
-                        malformed.insert(key.inst_id.into_owned());
+                    Ok(_) => {}
+                    Err(_) => {
+                        safe_cex_engine::startup::skipped_row(cx);
+                        if let Ok(key) = serde_json::from_str::<InstrumentKey<'_>>(item)
+                            && !key.inst_id.is_empty()
+                            && key
+                                .inst_type
+                                .as_deref()
+                                .is_none_or(|t| t.eq_ignore_ascii_case("SWAP"))
+                            && key
+                                .contract_type
+                                .as_deref()
+                                .is_none_or(|t| t.eq_ignore_ascii_case("linear"))
+                        {
+                            malformed.insert(key.inst_id.into_owned());
+                        }
                     }
                 }
-            },
+            }
             Pending::Tickers { rows, failed } => match serde_json::from_str::<Tick<'_>>(item) {
                 Ok(t) => {
                     if let Some(m) = cx.store.market_by_id(&t.inst_id) {

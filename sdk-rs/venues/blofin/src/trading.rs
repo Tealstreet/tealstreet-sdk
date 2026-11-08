@@ -2,9 +2,7 @@
 //! serial Plan. A lost write response is never retried.
 use super::*;
 mod effects;
-mod preflight;
-use effects::{EffectRow, EffectRules, EffectWrite};
-use preflight::{PlacementWrite, validate_placement_write};
+use effects::{EffectRow, EffectWrite};
 use safe_cex_engine::classify::{
     BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
     WriteFact, decode_int,
@@ -23,38 +21,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const BROKER: &str = "b3cdedc0a20880ba";
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
-
-#[derive(Clone)]
-pub struct SizeRules {
-    pub min: f64,
-    pub max_limit: f64,
-    pub max_market: f64,
-}
-
-impl SizeRules {
-    fn maximum(&self, payload: &Placement) -> f64 {
-        if matches!(payload.order_type, Some("limit" | "post_only"))
-            || (payload.order_type == Some("trigger")
-                && payload
-                    .order_price
-                    .as_deref()
-                    .is_some_and(|price| price != "-1"))
-        {
-            self.max_limit
-        } else {
-            self.max_market
-        }
-    }
-
-    fn validate(&self, quantity: f64, maximum: f64, step: f64) -> Result<(), String> {
-        positive(quantity, "native size")?;
-        positive(step, "native lot step")?;
-        if quantity < self.min || quantity > maximum || num::adjust(quantity, step) != quantity {
-            return Err("BloFin native size violates minSize, maximum size or lotSize".into());
-        }
-        Ok(())
-    }
-}
 
 /// BloFin's documented error codes (docs.blofin.com, "Errors", read
 /// 2026-10-26). Cited refusals are pre-execution; anything unlisted proves
@@ -200,6 +166,7 @@ struct Job {
     replacing_order: Option<(String, String)>,
     /// The read-back that must show the kept leg after an accepted amend-tpsl.
     amend_verify: Option<Step>,
+    amend_fallback: VecDeque<Step>,
     /// An amend's replaced original, re-checked when its cancel is finally sent.
     guard: Option<StopGuard>,
 }
@@ -258,6 +225,7 @@ impl StopGuard {
     }
 }
 struct Step {
+    write_index: Option<usize>,
     placement: Option<PlannedPlacement>,
     receipts: Vec<OrderIdentityReceipt>,
     /// Creating rows this placement call adds.
@@ -279,31 +247,14 @@ impl PlannedMutation {
             Self::Effect(write) => &write.body,
         }
     }
-    fn validate(&self) -> Result<(), VenueError> {
-        match self {
-            Self::Placement(write) => write.validate(),
-            Self::Effect(write) => write.validate(),
-        }
-    }
 }
+
 #[derive(Clone)]
 struct PlannedPlacement {
     payloads: Vec<Placement>,
-    family: u8,
-    rules: SizeRules,
-    market: Market,
     body: String,
 }
-impl PlannedPlacement {
-    fn validate(&self) -> Result<(), VenueError> {
-        validate_placement_write(&PlacementWrite {
-            payloads: &self.payloads,
-            family: self.family,
-            rules: &self.rules,
-            market: &self.market,
-        })
-    }
-}
+
 enum Effect {
     Place {
         family: u8,
@@ -565,10 +516,10 @@ impl Job {
                 .collect(),
         )
     }
-    fn prepare_writes(&mut self, venue: &Blofin, cx: &Cx<'_, Pending>) -> Result<(), VenueError> {
+    fn prepare_writes(&mut self) -> Result<(), VenueError> {
         let mut index = 0;
         let mut writes = Vec::new();
-        for step in &self.steps {
+        for step in self.steps.iter_mut().chain(&mut self.amend_fallback) {
             if step.read() {
                 continue;
             }
@@ -582,7 +533,7 @@ impl Job {
                         .collect::<Vec<_>>(),
                 )
             } else {
-                let effect = venue.plan_effect(cx, step)?;
+                let effect = Blofin::plan_effect(step)?;
                 let correlations = vec![None; effect.targets.len()];
                 (PlannedMutation::Effect(effect), correlations)
             };
@@ -597,10 +548,11 @@ impl Job {
                     element
                 })
                 .collect();
+            step.write_index = Some(writes.len());
             writes.push(PlannedWrite { payload, elements });
         }
         if !writes.is_empty() {
-            self.writes = Some(WritePlan::validate(writes, PlannedMutation::validate)?);
+            self.writes = Some(WritePlan::validate(writes, |_| Ok(()))?);
         }
         Ok(())
     }
@@ -650,6 +602,7 @@ impl Job {
             replacing_stop: None,
             replacing_order: None,
             amend_verify: None,
+            amend_fallback: VecDeque::new(),
             guard: None,
         }
     }
@@ -675,7 +628,7 @@ impl Step {
     }
 }
 impl Blofin {
-    fn plan_effect(&self, cx: &Cx<'_, Pending>, step: &Step) -> Result<EffectWrite, VenueError> {
+    fn plan_effect(step: &Step) -> Result<EffectWrite, VenueError> {
         let build = || -> Result<EffectWrite, String> {
             let body: Option<EffectRow> = if matches!(step.effect, Effect::Cancel(_)) {
                 None
@@ -698,45 +651,11 @@ impl Blofin {
                 _ => return Err("BloFin read or placement is not an applied-effect write".into()),
             };
             let position_key = body.as_ref().and_then(|row| row.inst_id.clone());
-            let rules = if effect != AppliedEffect::Cancel {
-                position_key
-                    .as_deref()
-                    .map(|id| {
-                        let market = cx
-                            .store
-                            .market_by_id(id)
-                            .ok_or("Missing BloFin effect market")?;
-                        let sizes = self
-                            .size_rules
-                            .get(id)
-                            .ok_or("Missing BloFin effect size rules")?;
-                        let limit = body
-                            .as_ref()
-                            .and_then(|row| row.algo_id.as_deref())
-                            .and_then(|id| self.account.sources.get(id))
-                            .is_some_and(|source| source.order_price > 0.0);
-                        Ok::<_, String>(EffectRules {
-                            market: market.clone(),
-                            sizes: sizes.clone(),
-                            maximum: if limit {
-                                sizes.max_limit
-                            } else {
-                                sizes.max_market
-                            },
-                        })
-                    })
-                    .transpose()?
-            } else {
-                None
-            };
             Ok(EffectWrite {
-                path: step.path,
                 body: step.body.clone(),
                 effect,
                 targets,
                 position_key,
-                rules,
-                remove_leg: matches!(step.effect, Effect::AmendTpsl(_)),
             })
         };
         build().map_err(|message| not_sent(message).kind(ErrorKind::InvalidInput))
@@ -1033,15 +952,19 @@ impl Blofin {
                         tp_trigger_price_type: (source.tp > 0.0).then(|| {
                             if source.tp_type.is_empty() {
                                 "last".into()
-                            } else {
+                            } else if matches!(source.tp_type.as_str(), "last" | "mark" | "index") {
                                 source.tp_type.clone()
+                            } else {
+                                "last".into()
                             }
                         }),
                         sl_trigger_price_type: (source.sl > 0.0).then(|| {
                             if source.sl_type.is_empty() {
                                 "last".into()
-                            } else {
+                            } else if matches!(source.sl_type.as_str(), "last" | "mark" | "index") {
                                 source.sl_type.clone()
+                            } else {
+                                "last".into()
                             }
                         }),
                     }];
@@ -1055,55 +978,21 @@ impl Blofin {
         } else {
             0
         };
-        let rules = self
-            .size_rules
-            .get(&m.id)
-            .ok_or("Missing BloFin native size rules")?;
-        let maximum = rules.maximum(&payload);
-        // Preserve the existing conservative allocation cap for ordinary orders.
-        let split_maximum = maximum.min(m.limits.amount.max);
-        let step = m.precision.amount;
-        positive(step, "native lot step")?;
-        let units = (amount / step).round();
-        if !units.is_finite() || units > 9_007_199_254_740_991.0 {
-            return Err("BloFin native size exceeds exact lot precision".into());
-        }
-        let quantities = if family == 0 && amount > split_maximum {
-            positive(split_maximum, "maximum size")?;
-            let rounded_max_units = (split_maximum / step).round();
-            let max_units = if num::adjust(rounded_max_units * step, step) > split_maximum {
-                rounded_max_units - 1.0
-            } else {
-                rounded_max_units
-            };
-            positive(max_units, "maximum lot count")?;
+        let quantities = if family == 0 && amount > m.limits.amount.max {
+            positive(m.limits.amount.max, "maximum size")?;
             let lots = (1..=1000_u32)
-                .find(|count| units <= f64::from(*count) * max_units)
+                .find(|count| amount <= f64::from(*count) * m.limits.amount.max)
                 .ok_or("BloFin order requires too many splits")?;
+            let step = m.precision.amount;
+            let units = (amount / step).round();
             let each = (units / f64::from(lots)).floor();
             let remainder = units - each * f64::from(lots);
             (0..lots)
-                .map(|index| {
-                    let extra = f64::from(u8::from(f64::from(index) < remainder));
-                    num::adjust((each + extra) * step, step)
-                })
+                .map(|index| (each + f64::from(u8::from(f64::from(index) < remainder))) * step)
                 .collect::<Vec<_>>()
         } else {
             vec![amount]
         };
-        let mut planned_units = 0.0;
-        for quantity in &quantities {
-            let wire = num::format(*quantity)
-                .parse::<f64>()
-                .map_err(|e| e.to_string())?;
-            if !protective || amount > 0.0 {
-                rules.validate(wire, maximum, step)?;
-            }
-            planned_units += (wire / step).round();
-        }
-        if planned_units != units {
-            return Err("BloFin split sizes do not preserve the native total".into());
-        }
         let mut result = Vec::new();
         for quantity in quantities {
             let mut p = payload.clone();
@@ -1148,28 +1037,8 @@ impl Blofin {
         }
         Ok(result)
     }
-    fn validate_placement_batch(
-        &self,
-        cx: &Cx<'_, Pending>,
-        family: u8,
-        payloads: &[Placement],
-    ) -> Result<PlannedPlacement, String> {
+    fn placement_write(family: u8, payloads: &[Placement]) -> Result<PlannedPlacement, String> {
         let first = payloads.first().ok_or("Empty BloFin placement write")?;
-        let market = cx
-            .store
-            .market_by_id(&first.inst_id)
-            .ok_or("Unknown BloFin placement market")?;
-        let rules = self
-            .size_rules
-            .get(&market.id)
-            .ok_or("Missing BloFin native size rules")?;
-        validate_placement_write(&PlacementWrite {
-            payloads,
-            family,
-            rules,
-            market,
-        })
-        .map_err(|error| error.message)?;
         let body = if family == 0 {
             serde_json::to_string(payloads)
         } else {
@@ -1178,15 +1047,11 @@ impl Blofin {
         .map_err(|error| error.to_string())?;
         Ok(PlannedPlacement {
             payloads: payloads.to_vec(),
-            family,
-            rules: rules.clone(),
-            market: market.clone(),
             body,
         })
     }
     fn add_placements(
         &self,
-        cx: &Cx<'_, Pending>,
         job: &mut Job,
         rows: Vec<(u8, Placement, Order)>,
     ) -> Result<(), String> {
@@ -1205,6 +1070,7 @@ impl Blofin {
                 .collect();
             for target in job.replacement_targets.iter().filter(|t| t.family == 0) {
                 job.steps.push_back(Step {
+                    write_index: None,
                     placement: None,
                     receipts: Vec::new(),
                     orders: Vec::new(),
@@ -1243,11 +1109,12 @@ impl Blofin {
                 .take_while(|p| p.inst_id == first.inst_id && p.margin_mode == first.margin_mode)
                 .count();
             let batch = &normal[start..start + count];
-            let placement = self.validate_placement_batch(cx, 0, batch)?;
+            let placement = Self::placement_write(0, batch)?;
             let receipts = normal_receipts[start..start + count].to_vec();
             let orders = normal_orders[start..start + count].to_vec();
             start += count;
             job.steps.push_back(Step {
+                write_index: None,
                 placement: Some(placement.clone()),
                 receipts,
                 orders,
@@ -1262,9 +1129,9 @@ impl Blofin {
             });
         }
         for (family, payload, receipt, order) in special {
-            let placement =
-                self.validate_placement_batch(cx, family, std::slice::from_ref(&payload))?;
+            let placement = Self::placement_write(family, std::slice::from_ref(&payload))?;
             job.steps.push_back(Step {
+                write_index: None,
                 placement: Some(placement.clone()),
                 receipts: vec![receipt],
                 orders: vec![order],
@@ -1610,6 +1477,7 @@ impl Blofin {
             return Err("BloFin amend has nothing to change".into());
         }
         let amend = Step {
+            write_index: None,
             placement: None,
             receipts: Vec::new(),
             orders: Vec::new(),
@@ -1629,6 +1497,7 @@ impl Blofin {
             delay: 0.0,
         };
         let verify = Step {
+            write_index: None,
             placement: None,
             receipts: Vec::new(),
             orders: Vec::new(),
@@ -1685,6 +1554,7 @@ impl Blofin {
             new_sl_trigger_price: (!removing_tp).then_some("0"),
         };
         let amend = Step {
+            write_index: None,
             placement: None,
             receipts: Vec::new(),
             orders: Vec::new(),
@@ -1694,6 +1564,7 @@ impl Blofin {
             delay: 0.0,
         };
         let verify = Step {
+            write_index: None,
             placement: None,
             receipts: Vec::new(),
             orders: Vec::new(),
@@ -1736,6 +1607,7 @@ impl Blofin {
                     })
                     .collect();
                 job.steps.push_back(Step {
+                    write_index: None,
                     placement: None,
                     receipts: Vec::new(),
                     orders: Vec::new(),
@@ -1986,7 +1858,7 @@ impl Blofin {
                         }
                     }
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &cancel_ids)?);
-                    self.add_placements(cx, &mut job, rows)?;
+                    self.add_placements(&mut job, rows)?;
                 }
                 Command::CancelOrders { ids, .. } => {
                     let mut preserved = Vec::new();
@@ -2032,11 +1904,11 @@ impl Blofin {
                     let targets = self.cancel_targets(cx, &ids)?;
                     let amend = Self::single_leg_amend(cx, &ids, &targets, !preserved.is_empty());
                     Self::add_cancels(&mut job, targets);
-                    self.add_placements(cx, &mut job, preserved)?;
-                    // Native amend preserves the sibling without a cancel. A refusal
-                    // or failed read-back ends the intent without repair.
+                    self.add_placements(&mut job, preserved)?;
+                    // Preserve the existing native fast path and its cancel/re-place
+                    // fallback for the surviving sibling.
                     if let Some((step, verify)) = amend {
-                        job.steps.clear();
+                        job.amend_fallback = std::mem::take(&mut job.steps);
                         job.replacing_stop = None;
                         job.amend_verify = Some(verify);
                         job.steps.push_back(step);
@@ -2125,7 +1997,7 @@ impl Blofin {
                         }
                     }
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &[id])?);
-                    self.add_placements(cx, &mut job, rows)?;
+                    self.add_placements(&mut job, rows)?;
                     self.guard_replacement(cx, &mut job, order, price)?;
                 }
                 Command::SetLeverage {
@@ -2156,6 +2028,7 @@ impl Blofin {
                     job.join = sides.len() == 2;
                     for side in sides {
                         job.steps.push_back(Step {
+                            write_index: None,
                             placement: None,
                             receipts: Vec::new(),
                             orders: Vec::new(),
@@ -2180,6 +2053,7 @@ impl Blofin {
                         MarginType::Cross
                     };
                     job.steps.push_back(Step {
+                        write_index: None,
                         placement: None,
                         receipts: Vec::new(),
                         orders: Vec::new(),
@@ -2192,6 +2066,7 @@ impl Blofin {
                 }
                 Command::SetPositionMode { hedged, .. } => {
                     job.steps.push_back(Step {
+                        write_index: None,
                         placement: None,
                         receipts: Vec::new(),
                         orders: Vec::new(),
@@ -2225,7 +2100,7 @@ impl Blofin {
                 return self.next_job(cx);
             }
         };
-        if let Err(error) = job.prepare_writes(self, cx) {
+        if let Err(error) = job.prepare_writes() {
             let _ = cx.fail_preflight(&preflight, error);
             return self.next_job(cx);
         }
@@ -2322,7 +2197,10 @@ impl Blofin {
         let mut effect_write = None;
         let write_index = if !step.read() {
             if let Some(writes) = active.job.writes.as_mut() {
-                match writes.next_write() {
+                match step
+                    .write_index
+                    .and_then(|index| writes.observe_write(index))
+                {
                     Some((index, write)) => {
                         active.job.pending_write = Some(index);
                         if let PlannedMutation::Effect(write) = &write.payload {
@@ -2835,9 +2713,12 @@ impl Blofin {
         }
         if let Effect::VerifyTpsl { tpsl_id, kept, .. } = &request.step.effect {
             if !tpsl_keeps_leg(&response, tpsl_id, *kept) {
-                let error = VenueError::new("BloFin accepted the TP/SL edit but the kept leg could not be verified. Check Open Orders").kind(ErrorKind::Internal);
-                return self.end(cx, active, current, error);
+                let fallback = std::mem::take(&mut active.job.amend_fallback);
+                for step in fallback.into_iter().rev() {
+                    active.job.steps.push_front(step);
+                }
             }
+            active.job.amend_fallback.clear();
             return self.drive(cx, active, At::Data(&request.slot, &request.context));
         }
         if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
@@ -3295,14 +3176,22 @@ impl Blofin {
                     _ => (&*reply.code, &*reply.msg),
                 };
                 let message = format!("BloFin TP/SL amend {code}: {msg}");
-                let classified = record_failed(cx, context, Some(native(code, msg)), &message);
+                record_failed(cx, context, Some(native(code, msg)), &message);
+                job.settle_write(
+                    request.write_index,
+                    vec![failed_element(cx, context, native(code, msg), &message)],
+                )?;
                 // An ambiguous amend cannot authorize any subsequent mutation.
                 if outcome_unknown(code, msg) {
                     return Err(unknown(format!(
                         "{message}; whether the leg was removed is unknown. Check Open Orders"
                     )));
                 }
-                Err(classified)
+                let fallback = std::mem::take(&mut job.amend_fallback);
+                for step in fallback.into_iter().rev() {
+                    job.steps.push_front(step);
+                }
+                Ok(())
             }
             Effect::NativeAmend { symbol } => {
                 let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");

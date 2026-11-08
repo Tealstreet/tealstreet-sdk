@@ -190,9 +190,17 @@ impl<T> WritePlan<T> {
         if self.stopped || self.pending.is_some() {
             return None;
         }
-        let index = self.next;
+        self.observe_write(self.next)
+    }
+
+    /// Observe a branch selected by an existing venue driver without changing
+    /// its continuation policy. Skipped writes stay unsent; indices never repeat.
+    pub fn observe_write(&mut self, index: usize) -> Option<(usize, &PlannedWrite<T>)> {
+        if self.pending.is_some() || index < self.next {
+            return None;
+        }
         let write = self.writes.get(index)?;
-        self.next += 1;
+        self.next = index + 1;
         self.pending = Some(index);
         for element in &write.elements {
             self.journal[element.index].result = result_for_failure(
@@ -203,7 +211,8 @@ impl<T> WritePlan<T> {
     }
 
     /// Record explicit per-row facts, including mixed native batch responses.
-    /// Any refused or unknown row permanently stops the unissued suffix.
+    /// Refused or unknown rows stop `next_write`; reporting observers follow
+    /// only their existing venue driver's explicit branch selection.
     pub fn settle(&mut self, write: usize, results: Vec<ElementResult>) -> Result<(), PlanError> {
         let pending = self.pending.ok_or(PlanError::NoPendingWrite)?;
         if pending != write {
@@ -268,6 +277,7 @@ impl<T> WritePlan<T> {
     /// notSent/rejected classification from describing the whole command.
     pub fn failure(&mut self, mut error: VenueError) -> VenueError {
         self.stopped = true;
+        self.next = self.writes.len();
         let mut ids = error
             .partial
             .as_ref()

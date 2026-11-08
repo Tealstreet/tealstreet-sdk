@@ -666,7 +666,7 @@ fn full_position_combination_preserves_sibling_trigger_reference() {
     assert!(!done(&h));
 }
 #[test]
-fn refused_combined_leg_amend_never_cancels_or_recreates_its_sibling() {
+fn cancel_one_combined_leg_recreates_only_its_sibling() {
     let mut h = Harness::new();
     h.open_private();
     h.seed();
@@ -679,22 +679,38 @@ fn refused_combined_leg_amend_never_cancels_or_recreates_its_sibling() {
         }),
     );
     h.collect();
-    // A refusal terminates the intent without cancelling the kept sibling.
+    // The amend is tried first (ruled); a refused amend falls back to this path.
     h.reply(
         "amend-tpsl",
         r#"{"code":"102014","msg":"amend refused","data":null}"#,
     );
-    assert!(done(&h));
-    assert_eq!(
-        h.failures.last().expect("amend refusal").outcome,
-        Some(safe_cex_engine::Outcome::Rejected)
+    h.reply(
+        "cancel-tpsl",
+        r#"{"code":"0","data":[{"tpslId":"91","code":"0","msg":null}]}"#,
     );
-    assert!(
-        h.pending
-            .iter()
-            .all(|request| request.method == safe_cex_engine::Method::Get)
-    );
-    assert!(h.e.store().order("91__stop_loss").is_some());
+    let timer = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, at_ms } = a
+                && *at_ms == h.now + 1000.0
+            {
+                Some(*timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let at = h.now + 1000.0;
+    h.handle(at, Event::TimerFired { timer });
+    h.collect();
+    let r = h.take("order-tpsl");
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert!(p.get("tpTriggerPrice").is_none());
+    assert_eq!(p["slTriggerPrice"], "55000");
+    assert_eq!(p["slTriggerPriceType"], "mark");
+    assert_eq!(p["slOrderPrice"], "54900");
 }
 
 #[test]

@@ -34,3 +34,13 @@ This JSON is exposed by the wasm host's `ActionOut::Done.detail` and native host
 The engine's terminal failure projection preserves the complete plan's `elements` while retaining its existing authoritative physical aggregate classification and native failure text. This matters because its native-error selection otherwise replaces the fallback carrying the plan journal.
 
 For engine-owned unproven HTTP seals (including 5xx), call `UnprovenEvidence::write_plan(&plan)` from the venue's existing read-only `unproven_http_evidence` hook. It copies earlier placed and unissued rows and gives pending Unknown rows the engine's classified failure. It grants no send or completion authority; normal engine retirement still discards the venue job.
+
+## Legacy dispatch reporting
+
+A venue adopting this helper only for legacy parity may pass a no-op native
+validator and call `observe_write(index)` for the physical branch its existing
+driver selected. Native input checks and continuation/compensating-write decisions
+stay in that driver. Register conditional fallback steps with the primary steps;
+unused branches remain notSent. Observation is monotonic and refuses a repeated
+index or another pending write. `failure` seals further observations.
+`next_write` retains its existing stop-on-refusal behavior for gated adopters.

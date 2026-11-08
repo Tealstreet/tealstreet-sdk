@@ -235,35 +235,62 @@ fn cancelling_one_leg_of_a_sized_bracket_amends_it_away() {
     assert!(!h.pending.iter().any(|r| r.url.contains("cancel-tpsl")));
 }
 
-/// Read-back failure must not trigger cancellation or replacement.
+/// The existing sibling fallback remains active when native read-back fails.
 #[test]
-fn an_amend_whose_read_back_lacks_the_kept_leg_stops_without_repair() {
+fn an_amend_whose_read_back_lacks_the_kept_leg_falls_back() {
     let mut h = Harness::new();
     sized_bracket(&mut h);
     let r = h.take("amend-tpsl");
     h.respond(
         r,
-        r#"{"code":"0","msg":"success","data":{"tpslId":"500","code":"0"}}"#,
+        r#"{"code":"0","msg":"success","data":{"tpslId":"500","code":"0","ts":"1762100000000"}}"#,
     );
     let read = h.take("tpslId=500");
-    h.respond(read, r#"{"code":"0","data":[]}"#);
-    let error = failure(&h).expect("unverified accepted edit");
-    assert_eq!(error.outcome, None);
+    h.respond(read, r#"{"code":"0","msg":"success","data":[]}"#);
     assert!(
-        matches!(&error.elements.as_ref().expect("applied leg-removal effect")[0].result,
-        safe_cex_engine::write_plan::ElementResult::Applied { effect: safe_cex_engine::write_plan::AppliedEffect::Amend, target_order_id: Some(id), .. } if id == "500")
+        h.pending.iter().any(|r| r.url.contains("cancel-tpsl")),
+        "falls back to cancel and re-place"
     );
-    no_cancel_or_placement(&h);
 }
 
+/// A refused amend falls back to cancel then re-place at the surviving leg's size.
+
 #[test]
-fn a_refused_amend_stops_without_cancel_or_replacement() {
+fn a_refused_amend_falls_back_to_cancel_and_re_place() {
     let mut h = Harness::new();
     sized_bracket(&mut h);
     let r = h.take("amend-tpsl");
     h.respond(r, r#"{"code":"102014","msg":"amend refused","data":null}"#);
-    let error = failure(&h).expect("amend refused");
-    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
-    assert_eq!(error.venue_code.as_deref(), Some("102014"));
-    no_cancel_or_placement(&h);
+    let r = h.take("cancel-tpsl");
+    h.respond(
+        r,
+        r#"{"code":"0","data":[{"tpslId":"500","code":"0","msg":null}]}"#,
+    );
+    let at = h.now + 2_000.0;
+    h.collect_at(at);
+    for a in &h.actions {
+        if let Action::SetTimer { timer, at_ms } = a
+            && *at_ms > 1.0
+            && *at_ms < 3_000.0
+        {
+            let (t, m) = (*timer, *at_ms);
+            h.handle(m, Event::TimerFired { timer: t });
+            break;
+        }
+    }
+    h.collect();
+    let resent = h.pending.iter().any(|r| {
+        r.url.contains("order-tpsl")
+            && r.body
+                .as_deref()
+                .is_some_and(|b| b.contains("55000") && b.contains("\"4\""))
+    });
+    assert!(
+        resent,
+        "{:?}",
+        h.pending
+            .iter()
+            .map(|r| (&r.url, &r.body))
+            .collect::<Vec<_>>()
+    );
 }

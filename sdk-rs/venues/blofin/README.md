@@ -22,24 +22,17 @@ authorize a protective put-back. Native rate failures direct the caller to
 Check Open Orders and retain the venue code/message as diagnostic evidence.
 Reads and documented definitive refusal codes on other statuses are unchanged.
 
-Placement plans validate every serialized contract quantity against native
-`minSize`, the applicable maximum and `lotSize`, including all split lots,
-grouped batches and cancel-replace legs, before any write. Ordinary
-orders retain their conservative split cap; off-step maxima are floored before
-balanced allocation. Invalid plans return `NotSent` with zero transport requests.
-Final entry and protection prices must be positive and tick-aligned; explicit
-full-position TP/SL retains its native `size=-1` sentinel. Discovery rejects
-missing, malformed or nonpositive `lotSize` instead of substituting `minSize`.
-The gate accepts only `last`, `mark` or `index` trigger references, including
-nested protection copied from an existing order before cancellation. BloFin
-discovery does not expose a separate minimum-notional rule to this adapter.
+Trading validation and compensating writes follow the legacy TS adapter.
+Normal split lots and grouped rows do not gain a whole-plan native min/max gate;
+legacy partial-placement cases remain known issues. Existing zero-size and
+opening-trigger shape/provenance checks remain in the venue driver. Unknown
+stored protection references normalize to the TS default `last`.
 
-Mutation writes retain owned wire bodies and native rule snapshots in the shared
-`WritePlan`. Failures report each placement as placed, not sent or unknown,
-including mixed native batches and the untouched suffix. A rejected or ambiguous
-write stops dispatch without resend, restore or rollback. Signing refusals before
-release remain not sent; lost replies and engine-sealed HTTP ambiguity remain unknown.
-Accepted cancels, settings and native amendments report `Applied` with existing
-target references. Cancel targets never become newly placed IDs; cancellation
-batches retain the engine's native classification and absent-order reconciliation
-fences. Read-only verification steps do not consume write-plan indices.
+`WritePlan` reports per-element outcomes without selecting execution policy.
+The existing native amendment fast path retains its cancel/re-place fallback
+for a surviving TP/SL sibling after a definite refusal or failed verification.
+Fallback steps are registered in the same journal, while unused branches remain
+notSent. TS has no original-order put-back after a refused replacement, so that
+separate Rust behavior is absent. Accepted cancels, settings and amendments use
+`Applied` with known target references. Cancel targets never become created IDs;
+engine classification, reconciliation fences, custody and signing remain intact.

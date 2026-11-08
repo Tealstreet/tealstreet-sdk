@@ -80,183 +80,6 @@ fn next_batch(h: &mut Harness) {
 }
 
 #[test]
-fn balanced_split_last_part_below_min_zero_writes() {
-    let mut h = harness(4.0, 5.0, 1.0);
-    place(&mut h, json!([order(11.0)]));
-    not_sent(&h);
-}
-
-#[test]
-fn positive_unsplit_below_native_minimum_zero_writes() {
-    let mut h = harness(4.0, 5.0, 1.0);
-    place(&mut h, json!([order(3.0)]));
-    not_sent(&h);
-}
-
-#[test]
-fn first_valid_last_subminimum_row_zero_writes() {
-    let mut h = harness(4.0, 5.0, 1.0);
-    let mut rows = vec![order(4.0); 20];
-    rows.push(order(3.0));
-    place(&mut h, json!(rows));
-    not_sent(&h);
-}
-
-#[test]
-fn first_valid_last_invalid_split_row_zero_writes() {
-    let mut h = harness(4.0, 5.0, 1.0);
-    place(&mut h, json!([order(4.0), order(11.0)]));
-    not_sent(&h);
-}
-
-#[test]
-fn sized_protective_below_minimum_zero_writes() {
-    let mut h = harness(4.0, 5.0, 1.0);
-    place(
-        &mut h,
-        json!([{"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":3,"price":55000}]),
-    );
-    not_sent(&h);
-}
-
-#[test]
-fn off_step_maximum_rebalances_without_oversize() {
-    let mut h = harness(1.0, 4.6, 1.0);
-    place(&mut h, json!([order(9.0)]));
-    let rows = accept_batch(&mut h, 100);
-    assert_eq!(
-        rows.iter()
-            .map(|row| row["size"].clone())
-            .collect::<Vec<_>>(),
-        json!(["3", "3", "3"]).as_array().unwrap().clone()
-    );
-    assert!(h.failures.is_empty());
-    assert_eq!(h.pending.len(), 0);
-    assert_eq!(h.requests.len(), 1);
-}
-
-#[test]
-fn exact_fractional_maximum_control() {
-    let mut h = harness(0.1, 0.3, 0.1);
-    place(&mut h, json!([order(0.6)]));
-    let rows = accept_batch(&mut h, 100);
-    assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row["size"] == "0.3"));
-    assert!(h.failures.is_empty());
-    assert_eq!(h.pending.len(), 0);
-}
-
-#[test]
-fn rounded_part_above_max_zero_writes() {
-    let mut h = harness(4.0, 4.6, 1.0);
-    place(&mut h, json!([order(9.0)]));
-    not_sent(&h);
-}
-
-#[test]
-fn invalid_replacement_never_cancels() {
-    for amount in [3.0, 11.0] {
-        let mut h = harness(4.0, 5.0, 1.0);
-        seed_entry(&mut h);
-        amend(&mut h, amount);
-        not_sent(&h);
-        assert!(h.e.store().order("12").is_some());
-    }
-}
-
-fn seed_entry(h: &mut Harness) {
-    h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"12","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"4","filledSize":"0","price":"60000","state":"live"}]}"#);
-    assert!(h.e.store().order("12").is_some());
-}
-
-fn amend(h: &mut Harness, amount: f64) {
-    h.handle(
-        1.0,
-        Event::Command(Command::AmendOrder {
-            command: 7,
-            id: "12".into(),
-            price: None,
-            amount: Some(amount),
-        }),
-    );
-    h.collect();
-}
-
-#[test]
-fn valid_replacement_cancels_once_and_places_each_lot_once() {
-    let mut h = harness(4.0, 5.0, 1.0);
-    seed_entry(&mut h);
-    amend(&mut h, 12.0);
-    assert_eq!(h.pending.len(), 1);
-    h.reply(
-        "cancel-batch-orders",
-        r#"{"code":"0","data":[{"orderId":"12","code":"0"}]}"#,
-    );
-    next_batch(&mut h);
-    assert_eq!(h.pending.len(), 1);
-    h.reply("order-detail", r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"0"}}"#);
-    let rows = accept_batch(&mut h, 100);
-    assert_eq!(rows.len(), 3);
-    assert!(rows.iter().all(|row| row["size"] == "4"));
-    assert!(h.failures.is_empty());
-    assert_eq!(h.pending.len(), 0);
-    assert_eq!(
-        h.requests.len(),
-        3,
-        "one cancel, one verify read, one placement"
-    );
-}
-
-#[test]
-fn native_order_type_maximum_controls_every_lot() {
-    let mut instruments: Value = serde_json::from_str(INSTRUMENT).unwrap();
-    let row = &mut instruments["data"][0];
-    row["minSize"] = json!("2");
-    row["lotSize"] = json!("1");
-    row["maxLimitSize"] = json!("5");
-    row["maxMarketSize"] = json!("4");
-    for kind in ["limit", "market"] {
-        let mut h = Harness::with_instruments(&instruments.to_string());
-        h.seed();
-        h.requests.clear();
-        let mut intent = order(5.0);
-        intent["type"] = json!(kind);
-        place(&mut h, json!([intent]));
-        let rows = accept_batch(&mut h, 100);
-        assert_eq!(
-            rows.iter()
-                .map(|row| row["size"].as_str().unwrap())
-                .collect::<Vec<_>>(),
-            ["3", "2"]
-        );
-        assert!(h.failures.is_empty());
-        assert_eq!(h.pending.len(), 0);
-    }
-    for execution in [json!(60000), Value::Null] {
-        let mut h = Harness::with_instruments(&instruments.to_string());
-        h.seed();
-        h.requests.clear();
-        let intent = json!({"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":5,"price":execution,"triggerPrice":61000});
-        place(&mut h, json!([intent]));
-        if execution.is_null() {
-            not_sent(&h);
-        } else {
-            assert_eq!(h.pending.len(), 1);
-            let request = h.take("order-algo");
-            let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-            assert_eq!(payload["size"], "5");
-            assert_eq!(payload["orderPrice"], "60000");
-            h.respond(
-                request,
-                r#"{"code":"0","data":[{"algoId":"100","code":"0"}]}"#,
-            );
-            assert!(h.failures.is_empty());
-            assert_eq!(h.pending.len(), 0);
-        }
-    }
-}
-
-#[test]
 fn positional_zero_protection_remains_explicit() {
     let mut h = harness(4.0, 5.0, 1.0);
     place(
@@ -274,16 +97,6 @@ fn positional_zero_protection_remains_explicit() {
     assert!(h.failures.is_empty());
     assert_eq!(h.pending.len(), 0);
 }
-
-#[test]
-fn final_trigger_rounding_to_zero_rejects_whole_group() {
-    let mut h = harness(4.0, 5.0, 1.0);
-    let mut invalid = order(4.0);
-    invalid["stopLoss"] = json!(0.01);
-    place(&mut h, json!([order(4.0), invalid]));
-    not_sent(&h);
-}
-
 #[test]
 fn exact_minimum_balanced_control() {
     let mut h = harness(4.0, 5.0, 1.0);
@@ -311,7 +124,6 @@ fn exact_minimum_balanced_control() {
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
     );
 }
-
 #[test]
 fn valid_grouped_chunks_preserve_each_caller_id_exactly_once() {
     let mut h = harness(4.0, 5.0, 1.0);
@@ -422,7 +234,6 @@ fn assert_outcomes(h: &Harness, ambiguous: bool) {
             .all(|request| request.method == safe_cex_engine::Method::Get)
     );
 }
-
 #[test]
 fn runtime_rejection_reports_placed_failed_and_unsent_elements() {
     let mut h = three_write_plan();
@@ -586,111 +397,6 @@ fn shuffled_batch_acknowledgements_keep_their_caller_element_indices() {
 }
 
 #[test]
-fn native_amend_invalid_wire_size_is_refused_before_transport() {
-    for amount in [3.0, 4.5, 6.0] {
-        let mut h = harness(4.0, 5.0, 1.0);
-        h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"500","side":"sell","size":"4","marginMode":"cross","positionSide":"net","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"last","state":"live"}]}"#);
-        h.handle(
-            h.now,
-            Event::Command(Command::AmendOrder {
-                command: 7,
-                id: "500__stop_loss".into(),
-                price: None,
-                amount: Some(amount),
-            }),
-        );
-        h.collect();
-        not_sent(&h);
-        let elements = h.failures[0]
-            .elements
-            .as_ref()
-            .expect("full gate rejected native amendment");
-        assert_eq!(elements.len(), 1);
-        assert!(
-            matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::NotSent))
-        );
-    }
-}
-
-#[test]
-fn malformed_native_lot_size_never_invents_a_step_or_sends() {
-    for step in ["garbage", "-1", "0", "NaN", "inf"] {
-        let mut instruments: Value = serde_json::from_str(INSTRUMENT).unwrap();
-        let mut neighbor = instruments["data"][0].clone();
-        neighbor["instId"] = json!("ETH-USDT");
-        neighbor["baseCurrency"] = json!("ETH");
-        let row = &mut instruments["data"][0];
-        row["minSize"] = json!("4");
-        row["maxLimitSize"] = json!("5");
-        row["maxMarketSize"] = json!("5");
-        row["lotSize"] = json!(step);
-        instruments["data"].as_array_mut().unwrap().push(neighbor);
-        let mut h = Harness::with_instruments(&instruments.to_string());
-        h.modes();
-        h.reply("account/positions", r#"{"code":"0","data":[]}"#);
-        h.reply("balances", r#"{"code":"0","data":[{"currency":"USDT","balance":"1000","available":"1000","frozen":"0"}]}"#);
-        for path in [
-            "orders-pending",
-            "orders-tpsl-pending",
-            "orders-algo-pending",
-        ] {
-            h.reply(path, r#"{"code":"0","data":[]}"#);
-        }
-        h.requests.clear();
-        place(&mut h, json!([order(4.0)]));
-        not_sent(&h);
-        assert!(h.e.store().market("ETHUSDT").is_some());
-        assert!(h.e.store().market("BTCUSDT").is_none(), "{step}");
-    }
-}
-
-fn amend_conditional_with_reference(reference: &str, field: &str) -> Harness {
-    let mut h = harness(1.0, 20.0, 1.0);
-    let mut protection = json!({"tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"mark","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"index"});
-    protection[field] = json!(reference);
-    h.ws(&json!({"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","algoId":"500","orderType":"trigger","side":"buy","marginMode":"cross","positionSide":"net","size":"4","orderPrice":"-1","triggerPrice":"61000","triggerPriceType":"last","state":"live","attachAlgoOrders":[protection]}]}).to_string());
-    assert!(h.e.store().order("500").is_some());
-    h.e.store_mut().update_ticker("BTCUSDT", |ticker| {
-        ticker.mark = 60000.0;
-        ticker.index = 60000.0;
-        ticker.last = 60000.0;
-    });
-    h.requests.clear();
-    h.handle(
-        1.0,
-        Event::Command(Command::AmendOrder {
-            command: 7,
-            id: "500".into(),
-            price: Some(62000.0),
-            amount: None,
-        }),
-    );
-    h.collect();
-    h
-}
-
-#[test]
-fn invalid_nested_protection_reference_refuses_before_cancel_replace() {
-    for field in ["tpTriggerPriceType", "slTriggerPriceType"] {
-        let h = amend_conditional_with_reference("garbage", field);
-        not_sent(&h);
-        assert!(h.e.store().order("500").is_some());
-    }
-}
-
-#[test]
-fn supported_nested_protection_references_allow_the_planned_cancel() {
-    for reference in ["last", "mark", "index"] {
-        for field in ["tpTriggerPriceType", "slTriggerPriceType"] {
-            let h = amend_conditional_with_reference(reference, field);
-            assert!(h.failures.is_empty(), "{reference}: {:?}", h.failures);
-            assert_eq!(h.requests.len(), 1);
-            assert!(h.requests[0].1.contains("cancel-algo"));
-        }
-    }
-}
-
-#[test]
 fn forty_one_rows_keep_global_outcomes_after_partial_or_ambiguous_second_batch() {
     use safe_cex_engine::write_plan::ElementResult;
     for ambiguous in [false, true] {
@@ -770,4 +476,167 @@ fn forty_one_rows_keep_global_outcomes_after_partial_or_ambiguous_second_batch()
                 .all(|request| request.method == safe_cex_engine::Method::Get)
         );
     }
+}
+
+#[test]
+fn legacy_native_bounds_are_left_to_the_venue() {
+    for amount in [3.0, 11.0] {
+        let mut h = harness(4.0, 5.0, 1.0);
+        place(&mut h, json!([order(amount)]));
+        let rows = accept_batch(&mut h, 100);
+        let sizes: Vec<_> = rows.iter().map(|row| row["size"].clone()).collect();
+        assert_eq!(
+            sizes,
+            if amount == 3.0 {
+                vec![json!("3")]
+            } else {
+                vec![json!("4"), json!("4"), json!("3")]
+            }
+        );
+        assert_eq!(h.requests.len(), 1);
+        assert!(h.failures.is_empty());
+    }
+}
+
+#[test]
+fn legacy_grouped_late_native_refusal_keeps_the_accepted_prefix() {
+    let mut h = harness(4.0, 5.0, 1.0);
+    let mut rows = vec![order(4.0); 20];
+    rows.push(order(3.0));
+    place(&mut h, json!(rows));
+    accept_batch(&mut h, 100);
+    next_batch(&mut h);
+    h.reply(
+        "batch-orders",
+        r#"{"code":"1","data":[{"orderId":"0","code":"102014","msg":"below minSize"}]}"#,
+    );
+    let error = h.failures.last().expect("venue refusal");
+    let elements = error.elements.as_ref().expect("reporting only");
+    assert_eq!(elements.len(), 21);
+    assert!(elements[..20].iter().all(|row| matches!(
+        row.result,
+        safe_cex_engine::write_plan::ElementResult::Placed { .. }
+    )));
+    assert!(
+        matches!(&elements[20].result,safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert_eq!(h.requests.len(), 2);
+}
+
+#[test]
+fn legacy_zero_size_still_refuses_before_transport() {
+    let mut h = harness(4.0, 5.0, 1.0);
+    place(&mut h, json!([order(4.0), order(0.0)]));
+    not_sent(&h);
+}
+
+fn amend_conditional_with_reference(reference: &str, field: &str) -> Harness {
+    let mut h = harness(1.0, 20.0, 1.0);
+    let mut protection = json!({"tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"mark","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"index"});
+    protection[field] = json!(reference);
+    h.ws(&json!({"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","algoId":"500","orderType":"trigger","side":"buy","marginMode":"cross","positionSide":"net","size":"4","orderPrice":"-1","triggerPrice":"61000","triggerPriceType":"last","state":"live","attachAlgoOrders":[protection]}]}).to_string());
+    assert!(h.e.store().order("500").is_some());
+    h.e.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 60000.0;
+        ticker.index = 60000.0;
+        ticker.last = 60000.0;
+    });
+    h.requests.clear();
+    h.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id: "500".into(),
+            price: Some(62000.0),
+            amount: None,
+        }),
+    );
+    h.collect();
+    h
+}
+
+fn seed_entry(h: &mut Harness) {
+    h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"12","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"4","filledSize":"0","price":"60000","state":"live"}]}"#);
+    assert!(h.e.store().order("12").is_some());
+}
+
+fn amend(h: &mut Harness, amount: f64) {
+    h.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id: "12".into(),
+            price: None,
+            amount: Some(amount),
+        }),
+    );
+    h.collect();
+}
+
+#[test]
+fn legacy_unknown_protection_reference_normalizes_to_last() {
+    for field in ["tpTriggerPriceType", "slTriggerPriceType"] {
+        let mut h = amend_conditional_with_reference("garbage", field);
+        assert!(h.failures.is_empty());
+        h.reply(
+            "cancel-algo",
+            r#"{"code":"0","data":[{"algoId":"500","code":"0"}]}"#,
+        );
+        next_batch(&mut h);
+        let request = h.take("order-algo");
+        let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["attachAlgoOrders"][0][field], "last");
+        h.respond(
+            request,
+            r#"{"code":"0","data":{"algoId":"100","code":"0"}}"#,
+        );
+        assert!(h.failures.is_empty());
+        assert_eq!(
+            h.requests
+                .iter()
+                .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+                .count(),
+            2
+        );
+    }
+}
+
+#[test]
+fn legacy_replacement_native_refusal_occurs_after_the_cancel() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut h = harness(4.0, 5.0, 1.0);
+    seed_entry(&mut h);
+    amend(&mut h, 3.0);
+    h.reply(
+        "cancel-batch-orders",
+        r#"{"code":"0","data":[{"orderId":"12","code":"0"}]}"#,
+    );
+    next_batch(&mut h);
+    h.reply("order-detail",r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"0"}}"#);
+    let request = h.take("batch-orders");
+    let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body[0]["size"], "3");
+    h.respond(
+        request,
+        r#"{"code":"1","data":[{"orderId":"0","code":"102014","msg":"below minSize"}]}"#,
+    );
+    let error = h
+        .failures
+        .last()
+        .expect("native refusal after cancellation");
+    let elements = error.elements.as_ref().expect("reported effects");
+    assert_eq!(elements.len(), 2);
+    assert!(
+        matches!(&elements[0].result,ElementResult::Applied { effect: AppliedEffect::Cancel,target_order_id:Some(id),.. } if id=="12")
+    );
+    assert!(
+        matches!(&elements[1].result,ElementResult::NotSent { error: Some(error) } if error.outcome==Some(Outcome::Rejected))
+    );
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+            .count(),
+        2
+    );
 }
