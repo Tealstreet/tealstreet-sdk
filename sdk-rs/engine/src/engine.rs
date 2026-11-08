@@ -3697,7 +3697,7 @@ impl crate::engine::CoreCx<'_> {
             fields.push(("venueCode", venue_code.as_str().into()));
         }
         if let Some(venue_message) = &error.venue_message {
-            fields.push(("venueMessage", venue_message.as_str().into()));
+            fields.push(("venueMessage", venue_message.as_ref().into()));
         }
         if let Some(retry_after_ms) = error.retry_after_ms {
             fields.push(("retryAfterMs", retry_after_ms.into()));

@@ -603,7 +603,9 @@ Native rejections retain known partial-order results. SDK worker and outer CLI
 executor error boundaries copy an explicit allowlist of command fields, including IDs and
 partial counts, instead of flattening them or copying arbitrary error objects.
 Validated `elements` retain each write-plan row's index, optional client order ID,
-placed IDs, refusal or unknown detail through host errors and worker/CLI clones.
+placed IDs, applied effects with existing-target references, refusal or unknown
+detail through host errors and worker/CLI clones. Applied effects create no IDs;
+accepted partial IDs without row attribution remain unknown.
 Malformed arrays are discarded whole; nested errors copy only declared venue fields.
 Cancellation commands retain the caller's id, symbol and type alongside legacy
 ID dispatch; venue unknown-ID behavior is a separate native contract.
