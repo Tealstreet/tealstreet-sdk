@@ -17,8 +17,16 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
 
+#[derive(Debug, PartialEq)]
+enum RecordedWrite {
+    Order(f64),
+    Chase(String),
+    CancelChase(String),
+}
+
 #[derive(Default)]
 struct Port {
+    writes: Rc<RefCell<Vec<RecordedWrite>>>,
     store: RefCell<AlgoStore>,
     ids: Cell<CommandId>,
     commands: RefCell<Vec<Command>>,
@@ -40,6 +48,13 @@ impl AccountPort for Port {
         self.ids.get()
     }
     fn command(&self, command: Command) -> CommandFuture {
+        if let Command::PlaceOrders { orders, .. } = &command {
+            self.writes.borrow_mut().extend(
+                orders
+                    .iter()
+                    .map(|order| RecordedWrite::Order(order.amount)),
+            );
+        }
         self.commands.borrow_mut().push(command);
         let fail = self.fail.get();
         let outcome = self.fail_outcome.get();
@@ -274,6 +289,10 @@ async fn check_continuation(
             panic!("unexpected compensation in direct schedule")
         };
         assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].symbol, "BTCUSDT");
+        assert_eq!(orders[0].kind, safe_cex_engine::model::OrderType::Market);
+        assert_eq!(orders[0].side, safe_cex_engine::model::OrderSide::Buy);
+        assert_eq!(orders[0].price, None);
         assert_eq!(orders[0].reduce_only, Some(true));
         if let Some(id) = orders[0].client_order_id.as_deref() {
             assert!(ids.insert(id));
@@ -281,6 +300,14 @@ async fn check_continuation(
             assert_eq!(venue, "bingx", "retain each venue's caller-id support");
         }
     }
+    assert_eq!(
+        *port.writes.borrow(),
+        [
+            RecordedWrite::Order(1.0),
+            RecordedWrite::Order(1.0),
+            RecordedWrite::Order(1.0)
+        ]
+    );
     assert!(factory.active_twaps("a").is_empty());
     assert!(port.emits.borrow().iter().any(|(op, data)| {
         op == "error"
@@ -292,6 +319,8 @@ async fn check_continuation(
 
 #[tokio::test(start_paused = true)]
 async fn fresh_schedule_continues_after_failed_child() {
+    // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:80-114,249-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | scheduled-TWAP-children (audit instance.rs:499/lib.rs:221; fresh schedules, every venue)
     LocalSet::new()
         .run_until(check_continuation(
             "binance",
@@ -303,6 +332,8 @@ async fn fresh_schedule_continues_after_failed_child() {
 
 #[tokio::test(start_paused = true)]
 async fn native_rule_delegation_with_unbounded_max_continues_after_refusal() {
+    // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:117-139,167,255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | quantity/min/max/grid/notional/price preflight (including BingX unbounded maximum)
     LocalSet::new()
         .run_until(check_continuation(
             "bingx",
@@ -314,6 +345,8 @@ async fn native_rule_delegation_with_unbounded_max_continues_after_refusal() {
 
 #[tokio::test(start_paused = true)]
 async fn restored_schedule_continues_after_failed_child() {
+    // TS c78bed93d packages/safe-cex/src/webworker/handlers/TwapHandler.ts:60-100; twap/TwapInstance.ts:330-345,255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | restore/resume child preflight
     LocalSet::new()
         .run_until(check_continuation(
             "binance",
@@ -325,6 +358,8 @@ async fn restored_schedule_continues_after_failed_child() {
 
 #[tokio::test(start_paused = true)]
 async fn resumed_schedule_continues_after_failed_child() {
+    // TS c78bed93d packages/safe-cex/src/webworker/handlers/TwapHandler.ts:60-100; twap/TwapInstance.ts:330-345,255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | restore/resume child preflight
     LocalSet::new()
         .run_until(check_continuation(
             "binance",
@@ -336,6 +371,8 @@ async fn resumed_schedule_continues_after_failed_child() {
 
 #[tokio::test(start_paused = true)]
 async fn unknown_runtime_failure_continues_without_resending_that_child() {
+    // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | runtime rejected/unknown child continuation
     LocalSet::new()
         .run_until(check_continuation(
             "binance",
@@ -347,6 +384,7 @@ async fn unknown_runtime_failure_continues_without_resending_that_child() {
 
 #[derive(Default)]
 struct PolicyChasers {
+    writes: Rc<RefCell<Vec<RecordedWrite>>>,
     started: RefCell<Vec<ChaserRequest>>,
     removed: RefCell<Vec<String>>,
     refuse_first: Cell<bool>,
@@ -354,6 +392,9 @@ struct PolicyChasers {
 
 impl TwapChasers for PolicyChasers {
     fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {
+        self.writes
+            .borrow_mut()
+            .push(RecordedWrite::Chase(request.id.clone()));
         self.started.borrow_mut().push(request.clone());
         if self.refuse_first.replace(false) {
             Err("handoff refused".to_owned())
@@ -369,17 +410,25 @@ impl TwapChasers for PolicyChasers {
         })
     }
     fn remove(&self, _cx: &AlgoCx, id: &str) {
+        self.writes
+            .borrow_mut()
+            .push(RecordedWrite::CancelChase(id.to_owned()));
         self.removed.borrow_mut().push(id.to_owned());
     }
 }
 
 #[tokio::test(start_paused = true)]
 async fn chaser_handoff_failure_keeps_later_slices_scheduled() {
+    // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:142-165,181-194,213-220,255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | chaser handoff and compensating market remainder
     LocalSet::new()
         .run_until(async {
             let _clock = ClockGuard::new();
             let (port, cx, _) = fixture("binance");
-            let chasers = Rc::new(PolicyChasers::default());
+            let chasers = Rc::new(PolicyChasers {
+                writes: port.writes.clone(),
+                ..Default::default()
+            });
             chasers.refuse_first.set(true);
             let factory = TwapFactory::new("a", cx, chasers.clone());
             factory
@@ -400,6 +449,15 @@ async fn chaser_handoff_failure_keeps_later_slices_scheduled() {
             );
             advance(21).await;
             assert_eq!(chasers.started.borrow().len(), 3);
+            assert_eq!(
+                *port.writes.borrow(),
+                chasers
+                    .started
+                    .borrow()
+                    .iter()
+                    .map(|request| RecordedWrite::Chase(request.id.clone()))
+                    .collect::<Vec<_>>()
+            );
             assert!(port.commands.borrow().is_empty());
         })
         .await;
@@ -407,6 +465,8 @@ async fn chaser_handoff_failure_keeps_later_slices_scheduled() {
 
 #[tokio::test(start_paused = true)]
 async fn failed_compensating_market_remainder_keeps_next_chaser_scheduled() {
+    // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:142-165,181-194,213-220,255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | chaser handoff and compensating market remainder
     for outcome in [
         safe_cex_engine::error::Outcome::Rejected,
         safe_cex_engine::error::Outcome::Unknown,
@@ -417,7 +477,10 @@ async fn failed_compensating_market_remainder_keeps_next_chaser_scheduled() {
                 let (port, cx, _) = fixture("binance");
                 port.fail.set(true);
                 port.fail_outcome.set(Some(outcome));
-                let chasers = Rc::new(PolicyChasers::default());
+                let chasers = Rc::new(PolicyChasers {
+                    writes: port.writes.clone(),
+                    ..Default::default()
+                });
                 let factory = TwapFactory::new("a", cx, chasers.clone());
                 factory
                     .start(
@@ -455,6 +518,16 @@ async fn failed_compensating_market_remainder_keeps_next_chaser_scheduled() {
                     port.commands.borrow().len(),
                     1,
                     "do not resend the failed remainder"
+                );
+                let started = chasers.started.borrow();
+                assert_eq!(
+                    *port.writes.borrow(),
+                    [
+                        RecordedWrite::Chase(started[0].id.clone()),
+                        RecordedWrite::CancelChase(started[0].id.clone()),
+                        RecordedWrite::Order(1.0),
+                        RecordedWrite::Chase(started[1].id.clone()),
+                    ]
                 );
                 assert!(port.emits.borrow().iter().any(|(op, data)| {
                     op == "error"

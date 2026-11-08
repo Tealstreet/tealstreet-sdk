@@ -575,6 +575,8 @@ async fn refusals_reach_the_user_as_errors() {
 
 #[tokio::test(start_paused = true)]
 async fn legacy_parity_bingx_unbounded_max_does_not_gate_the_schedule() {
+    // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:117-139,167,255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | quantity/min/max/grid/notional/price preflight (including BingX unbounded maximum)
     LocalSet::new()
         .run_until(async {
             let port = Rc::new(Port::default());
@@ -603,6 +605,8 @@ async fn legacy_parity_bingx_unbounded_max_does_not_gate_the_schedule() {
 
 #[tokio::test(start_paused = true)]
 async fn legacy_parity_restored_invalid_tail_is_left_to_each_native_write() {
+    // TS c78bed93d packages/safe-cex/src/webworker/handlers/TwapHandler.ts:60-100; twap/TwapInstance.ts:330-345,255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | restore/resume child preflight
     LocalSet::new()
         .run_until(async {
             let port = Rc::new(Port::default());
@@ -713,6 +717,8 @@ async fn legacy_continues_after_child_failure(outcome: safe_cex_engine::error::O
 
 #[tokio::test(start_paused = true)]
 async fn legacy_parity_rejected_child_does_not_stop_later_children() {
+    // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | runtime rejected/unknown child continuation
     LocalSet::new()
         .run_until(legacy_continues_after_child_failure(
             safe_cex_engine::error::Outcome::Rejected,
@@ -722,6 +728,8 @@ async fn legacy_parity_rejected_child_does_not_stop_later_children() {
 
 #[tokio::test(start_paused = true)]
 async fn legacy_parity_unknown_child_does_not_stop_later_children() {
+    // TS c78bed93d packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: shared-twap | runtime rejected/unknown child continuation
     LocalSet::new()
         .run_until(legacy_continues_after_child_failure(
             safe_cex_engine::error::Outcome::Unknown,
