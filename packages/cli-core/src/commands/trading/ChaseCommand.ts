@@ -390,7 +390,13 @@ export class ChaseCommand extends TradingBaseCommand {
       return this.error('Not connected to exchange');
     }
 
+    this.assertUnambiguousOrderModifiers(ctx, 2, ['reduce', 'to'], { to: 1 });
+    if (['buy', 'sell'].includes(ctx.args._[1]?.toLowerCase())) {
+      ctx = this.resolveLeadingSymbolSlot(ctx, 2);
+    }
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
 
     // Validate side argument exists
     if (!args[1]) {
@@ -402,6 +408,8 @@ export class ChaseCommand extends TradingBaseCommand {
     // the book; the default cancels it.
     if (args[1].toLowerCase() === 'cancel') {
       const keepOrder = args[2]?.toLowerCase() === 'keep';
+      const invalid = this.refuseUnknownArgs(ctx, keepOrder ? [1, 2] : [1]);
+      if (invalid) return invalid;
       const active = chaserOrderManagerInstance.instances.filter((i) => !i.isStopped);
       if (active.length === 0) {
         this.printInfo(ctx, 'No active chasers to cancel');
@@ -427,6 +435,8 @@ export class ChaseCommand extends TradingBaseCommand {
     // resting order. We let it through. Spawning a NEW chaser is
     // gated below.
     if (this.simulationGate(ctx)) return this.success();
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['reduce'], ['to']]);
+    if (duplicate) return duplicate;
     const side = sideStr as OrderSide;
     const positionSide = side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long;
     const reduceOnly = this.hasArgValue(args, 'reduce');
@@ -482,6 +492,17 @@ export class ChaseCommand extends TradingBaseCommand {
       }
     };
 
+    const leadingSymbols = this.validateSymbols(exchange, args[2]?.split(',') || [], reduceOnly, positionSide);
+    const consumed = leadingSymbols.length > 0 ? [1, 2, 3] : [1, 2];
+    consumed.push(...skipIndices);
+    if (args.indexOf('reduce') > 0) consumed.push(args.indexOf('reduce'));
+    const invalid = this.refuseUnknownOrderArgs(ctx, consumed, {
+      allowSymbol: leadingSymbols.length === 0,
+      symbolLists: true,
+      allowAll: reduceOnly,
+      side: positionSide,
+    });
+    if (invalid) return invalid;
     const chaserIds: string[] = [];
 
     // Check for symbol at start: "chase buy SYMBOL $100"

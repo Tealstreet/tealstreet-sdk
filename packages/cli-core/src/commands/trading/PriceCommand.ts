@@ -15,7 +15,7 @@ abstract class BasePriceCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
-    const symbolsOfInterest = args[1] ? this.validateSymbols(exchange, args[1].split(',')) : [ctx.symbol];
+    const symbolsOfInterest = args[1] ? args[1].split(',').flatMap(symbol => this.validateSymbols(exchange, [symbol])) : [ctx.symbol];
 
     const resultMessages: string[] = [];
     for (const symbol of symbolsOfInterest) {
