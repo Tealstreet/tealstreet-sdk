@@ -786,6 +786,7 @@ impl BybitLinear {
 
     /// Split oversized entries into create bodies. Each spot lot owns its TP/SL;
     /// derivatives keep position-wide protection on the first lot only.
+    /// Refuse invalid lot plans before any entry in the batch can be dispatched.
     pub(crate) fn format_lots(
         &self,
         cx: &Cx<'_, Pending>,
@@ -903,11 +904,27 @@ impl BybitLinear {
         if remaining / max > 1000.0 {
             return Err("Order exceeds the safe split bound".into());
         }
+        if remaining > max && num::adjust(max, p_amount) != max {
+            return Err("Market maximum quantity is not aligned to quantity precision".into());
+        }
         while max > 0.0 && remaining > max {
             sizes.push(max);
             remaining = num::adjust(remaining - max, p_amount);
         }
         sizes.push(remaining);
+        if sizes.iter().any(|qty| *qty < market.limits.amount.min) {
+            return Err("Order split contains a lot below the market minimum".into());
+        }
+        if sizes.iter().any(|qty| {
+            !qty.is_finite() || *qty <= 0.0 || *qty > max || num::adjust(*qty, p_amount) != *qty
+        }) {
+            return Err(
+                "Order split contains a lot outside the maximum quantity or precision".into(),
+            );
+        }
+        if num::adjust(sizes.iter().sum(), p_amount) != amount {
+            return Err("Order split quantities do not preserve the requested total".into());
+        }
         let lot = |qty: f64, first: bool, category: bool| {
             let brackets = self.variant.is_spot() || first;
             let mut body = Body::new();

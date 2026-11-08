@@ -418,6 +418,117 @@ fn spot_split_limit_entries_keep_take_profit_on_every_released_lot() {
     }
 }
 
+fn spot_split_plan_market(minimum: &str, maximum: &str) -> Harness {
+    let instruments = support::INSTRUMENTS
+        .replace(
+            "\"minOrderQty\":\"0.001\"",
+            &format!("\"minOrderQty\":\"{minimum}\""),
+        )
+        .replace(
+            "\"maxOrderQty\":\"1190.000\"",
+            &format!("\"maxOrderQty\":\"{maximum}\""),
+        );
+    let h = ready_listing_with_instruments(options(Variant::Spot), EMPTY, Some(instruments));
+    let market = h.engine.store().market("BTCUSDT").expect("fixture market");
+    assert_eq!(
+        market.limits.amount.min,
+        minimum.parse::<f64>().expect("fixture minimum")
+    );
+    assert_eq!(
+        market.limits.amount.max,
+        maximum.parse::<f64>().expect("fixture maximum")
+    );
+    assert_eq!(market.precision.amount, 0.001);
+    h
+}
+
+fn protected_spot_split_order(amount: f64) -> PlaceOrderOpts {
+    let mut opts = order("BTCUSDT", amount);
+    opts.take_profit = Some(110.);
+    opts.stop_loss = Some(90.);
+    opts
+}
+
+fn assert_spot_split_plan_refused(minimum: &str, maximum: &str, amount: f64) {
+    for valid_prefix in [false, true] {
+        let mut h = spot_split_plan_market(minimum, maximum);
+        let mut orders = Vec::new();
+        if valid_prefix {
+            orders.push(protected_spot_split_order(
+                minimum.parse().expect("fixture minimum"),
+            ));
+        }
+        orders.push(protected_spot_split_order(amount));
+        place(&mut h, 91, orders);
+        assert!(
+            h.requests.is_empty(),
+            "the transport must see zero requests: {:?}",
+            h.requests
+        );
+        assert!(matches!(h.result(91), Some(Err(_))));
+        assert_eq!(outcome(&h, 91), Some(safe_cex_engine::Outcome::NotSent));
+        assert!(!h.unknown.contains(&91));
+        assert!(h.engine.store().orders().is_empty());
+    }
+}
+
+fn assert_spot_split_plan_quantities(amount: f64, quantities: &[&str]) {
+    let mut h = spot_split_plan_market("0.01", "1190");
+    place(&mut h, 92, vec![protected_spot_split_order(amount)]);
+    let mut total = 0.;
+    for (index, quantity) in quantities.iter().enumerate() {
+        let request = h.take("/v5/order/create");
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).expect("create body");
+        assert_eq!(sent["qty"], *quantity);
+        assert_eq!(sent["takeProfit"], "110");
+        assert_eq!(sent["stopLoss"], "90");
+        assert_eq!(sent["tpOrderType"], "Market");
+        assert_eq!(sent["slOrderType"], "Market");
+        let qty = quantity.parse::<f64>().expect("fixture quantity");
+        assert!((0.01..=1190.).contains(&qty));
+        assert_eq!(safe_cex_engine::num::adjust(qty, 0.001), qty);
+        total += qty;
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({
+                "retCode": 0, "result": {"orderId": format!("lot-{index}")}
+            })
+            .to_string(),
+        );
+    }
+    assert_eq!(total, amount);
+    assert!(matches!(h.result(92), Some(Ok(_))));
+    assert!(h.requests.is_empty());
+}
+
+#[test]
+fn spot_split_plan_refuses_below_minimum_tail_before_any_write() {
+    assert_spot_split_plan_refused("0.01", "1190", 1190.001);
+}
+
+#[test]
+fn spot_split_plan_exact_maximum_keeps_both_stops() {
+    assert_spot_split_plan_quantities(1190., &["1190"]);
+}
+
+#[test]
+fn spot_split_plan_exact_minimum_tail_keeps_both_stops() {
+    assert_spot_split_plan_quantities(1190.01, &["1190", "0.01"]);
+}
+
+#[test]
+fn spot_split_plan_impossible_total_refuses_before_any_write() {
+    // Two lots would need at least 1.5, while one lot cannot exceed 1.
+    assert_spot_split_plan_refused("0.75", "1", 1.001);
+}
+
+#[test]
+fn spot_split_plan_off_step_maximum_refuses_before_any_write() {
+    assert_spot_split_plan_refused("0.01", "1190.0005", 1190.02);
+    assert_spot_split_plan_refused("0.0001", "0.0004", 0.002);
+}
+
 #[test]
 fn spot_stops_use_native_filter_and_derivative_controls_fail_before_writes() {
     let mut h = ready(Variant::Spot);
