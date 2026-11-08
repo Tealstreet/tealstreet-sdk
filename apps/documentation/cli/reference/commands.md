@@ -21,7 +21,7 @@ loops, and conditionals, see [Workflow](./workflow.md).
 ### `buy` / `sell` &nbsp; _(aliases `b`, `s`)_ {#buy-sell}
 
 Place a market, limit, or `best`-priced order on the focused symbol, with
-optional reduce-only / post-only / bracket stop.
+optional reduce-only / post-only / bracket stop-loss and take-profit.
 
 | Form                         | Result                                    |
 | ---------------------------- | ----------------------------------------- |
@@ -36,6 +36,28 @@ optional reduce-only / post-only / bracket stop.
 | `buy $100 at 50000 po`       | Post-only limit                           |
 | `buy $100 best`              | Limit at best bid (buy) / best ask (sell) |
 | `buy $100 stop 49500`        | Bracketed entry with attached stop loss   |
+| `buy $100 at 50000 stop 49500 tp 51000` | Entry with both attached brackets |
+| `sell $100 at 50000 stop 50500 tp 49000` | Short entry with both brackets |
+
+**Unknown order arguments refuse the entire command before any order is sent.**
+Symbol overrides must be complete market names, base symbols, or supported
+base+quote aliases; an arbitrary prefix never selects a market. Every member
+of a buy/sell/chase symbol list must resolve. TWAP and swarm accept one symbol
+per command. Repeated targets are refused after resolving aliases, including
+`BTC,BTCUSDT` when both select the same market. A loaded alias such as `NEXT`
+is a symbol in a symbol slot; keywords belong to the command and position
+where they are parsed. Conflicting side selectors such as
+`bump buy +100 --sells` are refused before any amendment. Duplicate or
+conflicting modifiers and numeric operands with trailing text are refused. `po` requires `at PRICE` or `best`; it cannot be
+applied to a market order.
+
+Use `stop PRICE` for an attached stop loss and `tp PRICE` for an attached
+take-profit on `buy`/`sell` (market, limit, or `best`). Relative prices use the
+current ticker, just like `at`. `sl=PRICE` and `tp=PRICE` are not supported:
+they refuse with a syntax hint. Both brackets go through the existing shared
+order preparation and venue bracket handling; venue restrictions still apply.
+For a take-profit on an existing position, use `stop at PRICE`: above the mark
+for a long, below the mark for a short.
 
 **`at` is required for a limit order.** `buy 100$ 50000` is not a limit — there
 is nothing for the price to attach to, so it would be a market order with a
@@ -358,8 +380,14 @@ Source: `NukeCommand.ts`.
 | Form                  | Result                            |
 | --------------------- | --------------------------------- |
 | `leverage`            | Read (only if a position is open) |
+| `lev BTCUSDT` / `lev show BTCUSDT` | Read a named loaded symbol |
 | `lev 5`               | Set 5x on focused symbol          |
 | `leverage 10 ETHUSDT` | Set 10x on named symbol           |
+
+`lev` changes leverage only. `lev 50 isolated` and `lev 50 cross` are refused
+before changing leverage; they do not request a margin-mode change. The CLI
+has no combined leverage/margin-mode command. Use `lev <n> [SYMBOL]` and
+configure margin mode separately through the venue-supported controls.
 
 Strings like `-5`, `5x`, `2..5` are rejected loudly. Source: `LeverageCommand.ts`.
 

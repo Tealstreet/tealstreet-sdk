@@ -161,7 +161,11 @@ pub struct Account {
     payload_complete: bool,
     poll: Option<TimerId>,
     heal: Option<TimerId>,
-    seen_fills: RecentIds<8192>,
+    emitted_fills: RecentIds<8192>,
+    /// The first snapshot is history, not live executions. Keep it separate so
+    /// those identities never suppress a later live delivery.
+    startup_fill_history: RecentIds<8192>,
+    fill_history_initialized: bool,
     payloads: HashMap<String, f64>,
     snapshot_orders_revision: u64,
     snapshot_settings_revision: u64,
@@ -896,7 +900,7 @@ impl Kraken {
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return Control::Other;
         };
-        if msg.event == "pong" {
+        if msg.event == "pong" || msg.feed == "heartbeat" {
             return Control::Pong;
         }
         if refuses_private_feed(&msg) {
@@ -939,6 +943,7 @@ impl Kraken {
         self.account.acks.clear();
         self.account.payloads.clear();
         self.account.payload_complete = false;
+        cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
         if let Some(ids) = &self.identities {
             if let Some(identity) = &ids.primary {
                 cx.send_signed(
@@ -962,6 +967,9 @@ impl Kraken {
         if self.account.socket != Some(socket) {
             return false;
         }
+        // If startup's snapshot was lost, the replacement must recover fills
+        // instead of silently treating its executions as an initial baseline.
+        self.account.fill_history_initialized |= self.account.open;
         self.account.orders_revision += 1;
         self.account.positions_revision += 1;
         self.account.socket = None;
@@ -1035,7 +1043,6 @@ impl Kraken {
                             )),
                         );
                     }
-                    cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
                 }
                 return true;
             }
@@ -1051,8 +1058,6 @@ impl Kraken {
             for feed in FEEDS {
                 cx.send(socket, serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string());
             }
-            // Kraken has no ping frame; this feed is its keepalive, every 10 s.
-            cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
             return true;
         }
         if refuses_private_feed(&msg) {
@@ -1076,6 +1081,9 @@ impl Kraken {
                     let decoded = json::each::<Execution<'_>>(raw.get(), |e| executions.push(e));
                     if decoded.is_ok() {
                         self.account.payloads.insert("fills".into(), cx.now);
+                        let snapshot = msg.feed == "fills_snapshot";
+                        let seed_history = snapshot && !self.account.fill_history_initialized;
+                        self.account.fill_history_initialized |= snapshot;
                         for e in executions {
                             if e.fill_id.is_empty()
                                 || e.order_id.is_empty()
@@ -1085,12 +1093,19 @@ impl Kraken {
                             {
                                 continue;
                             }
-                            if !self.account.seen_fills.insert(e.fill_id.to_string()) {
+                            // Timestamps cannot prove delivery: reconnect snapshots may
+                            // contain unseen executions at or before the last emitted fill.
+                            if self.account.emitted_fills.contains(&e.fill_id)
+                                || cx.store.market(&e.instrument).is_none()
+                                || (snapshot
+                                    && self.account.startup_fill_history.contains(&e.fill_id))
+                            {
                                 continue;
                             }
-                            if msg.feed == "fills_snapshot"
-                                || cx.store.market(&e.instrument).is_none()
-                            {
+                            if seed_history {
+                                self.account
+                                    .startup_fill_history
+                                    .insert(e.fill_id.to_string());
                                 continue;
                             }
                             if let (Some(remaining), Some(time), Some(mut order)) = (
@@ -1128,6 +1143,7 @@ impl Kraken {
                                 price: e.price,
                                 amount: e.qty,
                             });
+                            self.account.emitted_fills.insert(e.fill_id.to_string());
                         }
                         self.account_schedule_heal(cx);
                     }
@@ -1920,15 +1936,15 @@ mod cache_tests {
     fn execution_identity_memory_is_bounded_without_forgetting_recent_duplicates() {
         let mut account = Account::new();
         for n in 0..20000 {
-            assert!(account.seen_fills.insert(format!("fill-{n}")));
+            assert!(account.emitted_fills.insert(format!("fill-{n}")));
         }
         assert!(
-            account.seen_fills.len() <= 8192,
+            account.emitted_fills.len() <= 8192,
             "execution identity cache grew without bound"
         );
-        assert!(account.seen_fills.contains("fill-19999"));
-        assert!(!account.seen_fills.insert("fill-19999".into()));
-        assert!(!account.seen_fills.contains("fill-0"));
+        assert!(account.emitted_fills.contains("fill-19999"));
+        assert!(!account.emitted_fills.insert("fill-19999".into()));
+        assert!(!account.emitted_fills.contains("fill-0"));
     }
     #[test]
     fn terminal_order_memory_is_bounded_without_forgetting_recent_fences() {

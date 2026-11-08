@@ -436,6 +436,35 @@ fn injected_custody_starts_private_rest_and_signed_ws_without_any_raw_key() {
         if request.url.contains("/accounts") && request.headers.iter().any(|(name, _)| *name == "Authent"))));
     assert!(actions.iter().any(|action| matches!(action, safe_cex_engine::Action::WsSend { text, .. }
         if text.contains("signed_challenge") && text.contains("RrIo22Xn634Pt3sq0W+1h/7OUdrAgbSG4qt+qaycGFEledqV4+k70KrF0smVdYMou8BVj/wi056PrIXGJfjRtQ=="))));
+    let private_socket = actions
+        .iter()
+        .find_map(|action| match action {
+            safe_cex_engine::Action::WsSend { socket, text }
+                if text.contains("signed_challenge") =>
+            {
+                Some(*socket)
+            }
+            _ => None,
+        })
+        .unwrap();
+    let private_messages: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            safe_cex_engine::Action::WsSend { socket, text } if *socket == private_socket => {
+                Some(text.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    let heartbeat = r#"{"event":"subscribe","feed":"heartbeat"}"#;
+    assert_eq!(private_messages.first().copied(), Some(heartbeat));
+    assert_eq!(
+        private_messages
+            .iter()
+            .filter(|text| **text == heartbeat)
+            .count(),
+        1
+    );
     assert!(actions.iter().any(|action| matches!(
         action,
         safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandDone { command: 77, .. })

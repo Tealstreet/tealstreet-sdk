@@ -117,6 +117,7 @@ pub struct Kraken {
     ticker_symbols: Vec<String>,
     ticker_revision: u64,
     ticker_sources: HashMap<String, u64>,
+    ticker_received: HashMap<String, f64>,
     ticker_in_flight: bool,
     markets_in_flight: bool,
     /// PF_ symbols the last catalogue read skipped as malformed; their rows hold snapshots.
@@ -157,6 +158,7 @@ impl Kraken {
             ticker_symbols: vec![],
             ticker_revision: 0,
             ticker_sources: HashMap::new(),
+            ticker_received: HashMap::new(),
             ticker_in_flight: false,
             markets_in_flight: false,
             skipped_markets: HashSet::new(),
@@ -775,6 +777,8 @@ impl Venue for Kraken {
             return;
         }
         self.public.open = true;
+        self.ticker_received.clear();
+        cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
         self.sync_public_interests(cx);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
@@ -782,6 +786,9 @@ impl Venue for Kraken {
             return;
         }
         if self.public.socket != Some(socket) || !self.public.open {
+            return;
+        }
+        if self.watch_public_tickers(cx) {
             return;
         }
         let Ok(msg) = serde_json::from_str::<Message<'_>>(text) else {
@@ -815,6 +822,11 @@ impl Venue for Kraken {
                     | (u16::from(row.next_funding_rate_time.is_some()) << 8)
                     | (u16::from(row.volume.is_some()) << 9)
                     | (u16::from(row.volume_quote.is_some()) << 10);
+                if (supplied & !(1 << 7) != 0 || row.relative_funding_rate.is_some())
+                    && let Some(received) = self.ticker_received.get_mut(msg.product_id.as_ref())
+                {
+                    *received = cx.now;
+                }
                 self.ticker_revision += 1;
                 self.ticker_sources
                     .insert(msg.product_id.to_string(), self.ticker_revision);
@@ -873,6 +885,7 @@ impl Venue for Kraken {
         }
         self.public.socket = None;
         self.public.open = false;
+        self.ticker_received.clear();
         self.invalidate_books(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
@@ -1416,6 +1429,7 @@ impl Venue for Kraken {
         }
         if self.poll == Some(timer) {
             self.poll = None;
+            self.watch_public_tickers(cx);
             let stale: Vec<_> = self
                 .books
                 .iter()
