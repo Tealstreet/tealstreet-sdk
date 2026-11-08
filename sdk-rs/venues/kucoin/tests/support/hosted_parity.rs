@@ -44,7 +44,7 @@ impl Parity {
         }
         let stamp = request.receipt.stamp_ms.unwrap();
         let (work, kind) = hosted_signing::prepare(
-            "kucoin",
+            &request.context.venue,
             &self.ids,
             Input::Http {
                 payload: descriptor.to_string(),

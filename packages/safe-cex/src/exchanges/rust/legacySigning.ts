@@ -143,7 +143,7 @@ export const signHostedHttp = async (
     });
     return signHttpCapture(xhr, request);
   }
-  if (name === 'kucoin') {
+  if (name === 'kucoin' || name === 'kucoinspot') {
     const xhr = axios.create({ timeout: options.extra?.recvWindow ?? 10_000,
       paramsSerializer: { serialize: (params) => qs.stringify(params) },
       headers: { 'Content-Type': 'application/json', 'X-CHANNEL-API-CODE': '3zexp' } });
