@@ -435,3 +435,7 @@ with their declarations: a declarations-only overlay onto the old NX reader
 is not a valid Position cutover. Native null liquidation prices remain unknown
 through apply and serialization; optional numeric columns are narrowed before
 use, preserving absence and reported zero.
+The null regression also runs `DisplayedPositionsPostprocessor`, transfers its
+snapshot to a receiving store, and checks the `displayedPositions` getter used
+by the web's Open Positions selector. Raw `positions` alone does not cover that
+derived display path.

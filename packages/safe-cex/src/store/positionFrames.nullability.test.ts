@@ -4,6 +4,7 @@ import { expect, it } from 'vitest';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { consumerFrame } from '../__tests__/cutover/consumerFrame';
 import { PositionSide } from '../types';
+import { DisplayedPositionsPostprocessor } from '../webworker/postProcessors/DisplayedPositionsPostprocessor';
 import { FrameApplier } from './frameApplier';
 import { DefaultStore } from './store.base';
 
@@ -13,6 +14,25 @@ const position = (liquidationPrice: number | null): Position => ({
   contracts: 2, liquidationPrice,
 });
 const frame = (row: Position) => new Frame(consumerFrame({ positions: [row] }));
+
+it('keeps liquidation null through apply and the displayedPositions selector used by the web', () => {
+  const workerStore = new DefaultStore();
+  new FrameApplier(workerStore).apply(frame(position(null)));
+  expect(workerStore.positions[0].liquidationPrice).toBeNull();
+
+  const output = workerStore.serialize();
+  new DisplayedPositionsPostprocessor('test-account', 'bybit', { key: '', secret: '' }).process(output);
+  expect(output.displayedPositions).toHaveLength(1);
+  expect(output.displayedPositions[0].liquidationPrice).toBeNull();
+
+  // The worker transfers this derived snapshot; OpenPositions selects
+  // displayedPositions from the receiving account stores.
+  const pageStore = new DefaultStore();
+  pageStore.update(structuredClone(output), true);
+  const selected = [pageStore].flatMap((store) => store.displayedPositions);
+  expect(selected).toHaveLength(1);
+  expect(selected[0].liquidationPrice).toBeNull();
+});
 
 it('preserves unknown liquidation through apply, a known price, clearing and a late snapshot', () => {
   const store = new DefaultStore();
