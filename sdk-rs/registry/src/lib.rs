@@ -266,6 +266,7 @@ fn resolved_public_data_only(venue: &str, options: &EngineOptions) -> bool {
 }
 
 fn private_custody_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
+    let _ = options;
     #[cfg(feature = "polymarket")]
     if venue == "polymarket"
         && !resolved_public_data_only(venue, options)
@@ -2649,33 +2650,6 @@ pub struct EngineOptions {
     pub key: Option<String>,
     #[serde(default)]
     pub secret: Option<String>,
-    #[cfg(any(
-        feature = "grvt",
-        feature = "coinbase",
-        feature = "binance",
-        feature = "apexomni",
-        feature = "asterdex",
-        feature = "kucoin",
-        feature = "kucoinspot",
-        feature = "blofin",
-        feature = "bybit",
-        feature = "cryptocom",
-        feature = "bingx",
-        feature = "mexc",
-        feature = "bitget",
-        feature = "bitrue",
-        feature = "backpack",
-        feature = "phemex",
-        feature = "weex",
-        feature = "hyperliquid",
-        feature = "txflow",
-        feature = "polymarket",
-        feature = "kraken",
-        feature = "lighter",
-        feature = "woo",
-        feature = "orderly",
-        feature = "okx"
-    ))]
     /// The caller signs remotely (a remote or payload signer) rather than with a local secret.
     #[serde(default)]
     pub remote_signing: bool,
