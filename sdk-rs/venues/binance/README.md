@@ -58,7 +58,7 @@ the venue's existing trailing-rate validation.
 
 | Failure path | Legacy behavior | Reference evidence |
 | --- | --- | --- |
-| Split lots / chunks: USD-M, COIN-M native batch row error | Continue later writes | `binance.exchange.ts:1997`, `binanceinverse.exchange.ts:937` |
+| Split lots / chunks: USD-M, COIN-M definite native batch row refusal | Continue later writes | `binance.exchange.ts:1997`, `binanceinverse.exchange.ts:937` |
 | Split lots / chunks: HTTP failure, including Spot and PM serial placement | Stop | `binance.exchange.ts:2012`, `binancespot.exchange.ts:586`, `binancepm.exchange.ts:1035` |
 | Attached TP/SL: HTTP failure | Stop later children | `binance.exchange.ts:2029`, `binancepm.exchange.ts:1068` |
 | Cancel-replace: cancel or replacement failure | Stop; no automatic put-back | `binance.exchange.ts:1617`, `binanceinverse.exchange.ts:808`, `binancespot.exchange.ts:459`, `binancepm.exchange.ts:834` |
@@ -82,3 +82,9 @@ to use their physical lifecycle journal.
 | Separate TP/SL children | `legacy_partial_placement::attached_algo_keeps_legacy_whole_quantity_after_split_parent`; `after_failure::children_follow_a_parent_batch_item_refusal_but_stop_after_a_child_refusal` | `binance.exchange.ts:1685-1714,1783-1816,1851-1905,2025-2040` |
 | Cancel-replace | `after_failure::a_refused_stop_replacement_ends_without_a_ts_absent_put_back`; existing unchanged `trading_lifecycle` and `audit_trading` fill-race controls | `binance.exchange.ts:1597-1618`; `binancespot.exchange.ts:445-460` |
 | Unknown parity exception: split lots, chunks, children | Three `after_failure::a_native_item_timeout_stops_*` pins for USD-M and COIN-M; `request_context::a_native_batch_item_rate_limit_stops_lots_while_definite_refusals_continue` | TS continues at `binance.exchange.ts:1997-2011,1685-1714`; `binanceinverse.exchange.ts:937-941`; Rust stops by the recorded exception |
+
+`after_failure::a_later_gateway_failure_keeps_accepted_refused_unknown_and_unissued_rows`
+also pins an accepted batch followed by a mixed refused/accepted batch, then HTTP
+503. The caller retains the complete 16-row journal and native accepted IDs,
+including five Unknown dispatched rows and the final unissued row. The engine's
+canonical unknown-after-refusal message remains unchanged.
