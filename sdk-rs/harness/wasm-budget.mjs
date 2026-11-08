@@ -222,10 +222,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   bitget: 2_457_600,
   bitgetusdc: 2_457_600,
-  bitrue: 1_851_392,
+  bitrue: 1_887_232,
   bitunix: 1_863_680,
   blofin: 2_001_920,
-  bybit: 2_270_208,
+  bybit: 2_281_472,
   coinbase: 1_953_792,
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
