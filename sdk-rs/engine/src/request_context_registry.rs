@@ -64,6 +64,7 @@ struct CommandOwner {
     /// Owner retention only. This never extends any issued logical deadline.
     last_deadline: f64,
     writes: Option<CommandWrites>,
+    engine_unknown: Option<super::unknown_outcome::UnknownOutcomeSource>,
     mutation_declared: bool,
     pending: usize,
     deliveries: usize,
@@ -452,6 +453,27 @@ impl ContextRegistry {
         *entry_owned = true;
     }
 
+    /// Retain the first engine-owned failure until this owner generation seals.
+    pub(super) fn remember_engine_unknown(&mut self, delivery: &Delivery, status: Option<u16>) {
+        if let Some(owner) = self.owner_entry_mut(delivery.context.owner()) {
+            owner
+                .engine_unknown
+                .get_or_insert(super::unknown_outcome::UnknownOutcomeSource {
+                    request: delivery.attempt.request,
+                    status,
+                });
+        }
+    }
+
+    pub(super) fn engine_unknown(
+        &self,
+        command: CommandId,
+    ) -> Option<super::unknown_outcome::UnknownOutcomeSource> {
+        self.commands
+            .get(&command)
+            .and_then(|owner| owner.engine_unknown)
+    }
+
     /// Whether this command's auth-kind failure is credential-health evidence:
     /// a tracked owner only when a Context or declared policy named a
     /// credential; an untracked (legacy) command keeps counting.
@@ -700,6 +722,7 @@ impl ContextRegistry {
                     },
                     last_deadline,
                     writes: None,
+                    engine_unknown: None,
                     mutation_declared: context.operation() == Operation::Mutation,
                     pending: 0,
                     deliveries: 0,

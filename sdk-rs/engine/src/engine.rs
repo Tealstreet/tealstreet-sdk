@@ -1907,6 +1907,7 @@ impl OrdersRefresh {
 
 struct IoCore {
     write_failure_text: Option<fn(&VenueError) -> String>,
+    unknown_outcome_telemetry: Option<crate::UnknownOutcomeTelemetry>,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2210,6 +2211,7 @@ impl Default for IoCore {
     fn default() -> Self {
         Self {
             write_failure_text: None,
+            unknown_outcome_telemetry: None,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,
@@ -3901,6 +3903,7 @@ impl crate::engine::CoreCx<'_> {
             }
         };
         // A credential-free route's auth-kind refusal is no credential evidence.
+        let engine_unknown = self.io.core.request_contexts.engine_unknown(command);
         let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
         #[cfg(feature = "order-locks")]
         let cancel = self.io.core.request_contexts.owner_intent(command)
@@ -3984,7 +3987,33 @@ impl crate::engine::CoreCx<'_> {
             }
         };
         self.io.entry_completed(command);
+        let event = match (
+            &notice,
+            engine_unknown,
+            self.io.core.unknown_outcome_telemetry,
+        ) {
+            (Notice::CommandFailed { error, .. }, Some(source), Some(telemetry))
+                if error.outcome == Some(crate::Outcome::Unknown) =>
+            {
+                Some(telemetry(&crate::EngineUnknownOutcome {
+                    now: self.now,
+                    command,
+                    request: source.request,
+                    status: source.status,
+                    error,
+                }))
+            }
+            _ => None,
+        };
         self.io.core.actions.push(Action::Notice(notice));
+        if let Some(event) = event {
+            push_event(
+                &mut self.io.core.actions,
+                &mut self.io.core.health,
+                self.io.core.min_level,
+                event,
+            );
+        }
         Ok(())
     }
 }
@@ -4078,7 +4107,21 @@ impl PublicFeedWatch {
     }
 }
 
+#[path = "unknown_outcome.rs"]
+mod unknown_outcome;
+pub use unknown_outcome::{
+    EngineUnknownOutcome, UNKNOWN_HTTP_OUTCOME_TEXT, UNKNOWN_OUTCOME_TEXT, UnknownOutcomeTelemetry,
+};
+
 pub trait Venue {
+    /// Optional static telemetry for an engine-sealed Unknown. Receives no venue,
+    /// Cx, Store, Context or journal authority; returns only a bounded log event.
+    fn unknown_outcome_telemetry() -> Option<UnknownOutcomeTelemetry>
+    where
+        Self: Sized,
+    {
+        None
+    }
     fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
         None
     }
@@ -4953,6 +4996,7 @@ impl<V: Venue> Engine<V> {
             },
         )?;
         core.write_failure_text = V::write_failure_text();
+        core.unknown_outcome_telemetry = V::unknown_outcome_telemetry();
         Ok(Self {
             venue,
             http_release,
@@ -5914,16 +5958,37 @@ impl<V: Venue> Engine<V> {
         let delivery = request
             .and_then(|request| self.io.core.managed_http.get(&request))
             .map(|managed| managed.delivery());
+        let released_unknown = (V::unknown_outcome_telemetry().is_some()
+            && matches!(event, Event::HttpFailed { .. }))
+        .then_some(delivery.as_ref())
+        .flatten()
+        .filter(|delivery| {
+            delivery.context.operation() == crate::request_context::Operation::Mutation
+                && request.is_some_and(|request| {
+                    self.io
+                        .core
+                        .managed_http
+                        .get(&request)
+                        .is_some_and(|managed| managed.released_delivery(delivery))
+                })
+        })
+        .is_some();
         if let Event::HttpFailed { error, .. } = &event
             && let Some(delivery) = delivery.as_ref()
             && delivery.context.operation() == crate::request_context::Operation::Mutation
         {
-            let _ = self.io.core.request_contexts.result(
+            let recorded = self.io.core.request_contexts.result(
                 delivery,
                 crate::request_context::WriteResult::Failed(
                     VenueError::new(*error).kind(self.io.core.http_failure_kind),
                 ),
             );
+            if recorded.is_ok() && released_unknown {
+                self.io
+                    .core
+                    .request_contexts
+                    .remember_engine_unknown(delivery, None);
+            }
         }
         if let Some(delivery) = delivery.as_ref() {
             self.io.core.request_contexts.enter_delivery(delivery);
