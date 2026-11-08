@@ -78,6 +78,8 @@ fn native_max_price_uses_rounded_wire_value_with_inclusive_bound() -> Result {
     Ok(())
 }
 
+// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1096-1142.
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | AmendOrder pre-cancel wire validation and class-A restore
 #[test]
 fn protective_rejection_never_reads_proof_or_puts_back_original_stop() -> Result {
     let stop = ORDER
@@ -219,6 +221,8 @@ fn exact_native_max_pair_control() -> Result {
     Ok(())
 }
 
+// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:980-1028.
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | sdk-rs/venues/backpack/src/trading.rs:451 separate-TP-SL-children
 #[test]
 fn valid_bracket_places_each_leg_once() -> Result {
     let mut engine = constrained(0.1, 0.95);
@@ -297,6 +301,8 @@ fn failed(out: &[Action]) -> Result<&VenueError> {
         .ok_or_else(|| "missing terminal failure".into())
 }
 
+// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1096-1142.
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | AmendOrder pre-cancel wire validation and class-A restore
 #[test]
 fn cancel_replace_reports_applied_cancel_then_unknown_without_restore() -> Result {
     let (mut engine, _) = ready_orders(&format!("[{ORDER}]"));

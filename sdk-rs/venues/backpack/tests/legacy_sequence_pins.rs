@@ -70,7 +70,7 @@ fn failed(out: &[Action]) {
     );
 }
 
-// Legacy TS: backpack.exchange.ts:1110-1141, failed cancel prevents replacement.
+// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1110-1141, failed cancel prevents replacement.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | AmendOrder pre-cancel wire validation and class-A restore
 #[test]
 fn amend_cancel_failure_stops_without_replacement_or_restore() -> Result {
@@ -93,7 +93,7 @@ fn amend_cancel_failure_stops_without_replacement_or_restore() -> Result {
     )])
 }
 
-// Legacy TS: backpack.exchange.ts:1110-1113, nonpositive total refuses before cancel.
+// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1110-1113, nonpositive total refuses before cancel.
 #[test]
 fn amend_invalid_amount_refuses_before_any_io() -> Result {
     for amount in [0., -1.] {
@@ -108,7 +108,7 @@ fn amend_invalid_amount_refuses_before_any_io() -> Result {
     Ok(())
 }
 
-// Legacy TS: backpack.exchange.ts:1203-1204, caller IDs validated before the loop.
+// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1203-1204, caller IDs validated before the loop.
 #[test]
 fn invalid_caller_id_refuses_before_any_io() -> Result {
     for id in ["0", "01", "4294967296", "-1", "1.0", "test"] {
@@ -129,7 +129,7 @@ fn invalid_caller_id_refuses_before_any_io() -> Result {
     Ok(())
 }
 
-// Legacy TS: backpack.exchange.ts:1145-1166, failed PATCH skips positions refresh.
+// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1145-1166, failed PATCH skips positions refresh.
 #[test]
 fn leverage_failure_stops_after_global_patch() -> Result {
     let (mut engine, _) = ready();
@@ -161,7 +161,36 @@ fn leverage_failure_stops_after_global_patch() -> Result {
     )])
 }
 
-// Legacy TS: backpack.exchange.ts:543-588, serial cancel/place, catch and continue.
+// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:1145-1160.
+#[test]
+fn leverage_success_sends_one_account_wide_write() -> Result {
+    let (mut engine, _) = ready();
+    let mut transport = RecordingTransport::default();
+    engine.handle(
+        2000.,
+        Event::Command(Command::SetLeverage {
+            command: 901,
+            symbol: SYMBOL.into(),
+            leverage: 20.,
+            side: None,
+        }),
+    );
+    let patch = transport.next(&mut engine)?;
+    reply(&mut engine, &patch, 200, "{}");
+    let out = transport.poll(&mut engine);
+    assert!(out.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 901, .. })
+    )));
+    transport.poll(&mut engine);
+    transport.assert_sequence(&[(
+        Method::Patch,
+        "/api/v1/account",
+        json!({"leverageLimit":"20"}),
+    )])
+}
+
+// Legacy TS: packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:543-588, serial cancel/place, catch and continue.
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: backpack | background missing-trigger-source compensating cancel/re-place
 #[test]
 fn repair_failure_continues_serially_to_next_candidate() -> Result {
