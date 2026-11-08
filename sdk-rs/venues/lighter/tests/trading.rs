@@ -1603,6 +1603,14 @@ fn parity_grouped_children_use_parent_fill_without_child_minimums() {
 }
 
 fn parity_engine_with_limits(min: f64, max: f64, min_quote: f64) -> Engine<Lighter> {
+    parity_ready_with_limits(min, max, min_quote).0
+}
+
+fn parity_ready_with_limits(
+    min: f64,
+    max: f64,
+    min_quote: f64,
+) -> (Engine<Lighter>, safe_cex_engine::SocketId) {
     let mut metadata: Value = serde_json::from_str(META).unwrap();
     let row = &mut metadata["order_book_details"][0];
     row["supported_size_decimals"] = json!(0);
@@ -1610,7 +1618,7 @@ fn parity_engine_with_limits(min: f64, max: f64, min_quote: f64) -> Engine<Light
     row["min_quote_amount"] = json!(min_quote.to_string());
     let mut options = options();
     options.testnet = true;
-    let (mut e, _) = ready_with_meta(options, &metadata.to_string());
+    let (mut e, socket) = ready_with_meta(options, &metadata.to_string());
     let mut markets = e.store().markets().to_vec();
     markets
         .iter_mut()
@@ -1620,7 +1628,7 @@ fn parity_engine_with_limits(min: f64, max: f64, min_quote: f64) -> Engine<Light
         .amount
         .max = max;
     e.store_mut().set_markets(markets);
-    e
+    (e, socket)
 }
 
 fn parity_order(kind: OrderType, amount: f64) -> PlaceOrderOpts {
@@ -2029,4 +2037,115 @@ fn unknown_exception_grouped_protection_stops_after_an_empty_hash() {
             parity_order(OrderType::Market, 1.),
         ],
     );
+}
+
+#[test]
+fn unknown_exception_prior_plain_prefix_stays_placed() {
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(1., 5., 1.),
+        vec![parity_order(OrderType::Market, 1.); 3],
+    );
+}
+
+#[test]
+fn unknown_exception_prior_unconfirmed_group_is_not_reported_placed() {
+    unknown_exception_prior_group(0);
+}
+
+#[test]
+fn unknown_exception_prior_group_keeps_only_observed_legs_placed() {
+    for observed in [1, 3] {
+        unknown_exception_prior_group(observed);
+    }
+}
+
+fn unknown_exception_prior_group(observed: usize) {
+    let (mut e, socket) = parity_ready_with_limits(1., 5., 1.);
+    let mut bracket = parity_order(OrderType::Limit, 1.);
+    bracket.stop_loss = Some(90.);
+    bracket.take_profit = Some(110.);
+    let first = begin(
+        &mut e,
+        vec![
+            bracket,
+            parity_order(OrderType::Market, 1.),
+            parity_order(OrderType::Market, 1.),
+        ],
+    );
+    assert_eq!(param(&first, "tx_type"), "28");
+    let group_ids: Vec<String> = wire(&first)["Orders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["ClientOrderIndex"].to_string())
+        .collect();
+    assert_eq!(group_ids.len(), 3);
+    let second = after_failure_next(&mut e, &first);
+    let mut unknown = group_ids[observed..].to_vec();
+    unknown.push(wire(&second)["ClientOrderIndex"].to_string());
+    if observed > 0 {
+        let rows: Vec<_> = group_ids[..observed]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                json!({"order_index":(900_001 + i).to_string(), "client_order_index":id,
+                    "market_id":1, "status":"open", "initial_base_amount":"1", "price":"100"})
+            })
+            .collect();
+        message(
+            &mut e,
+            socket,
+            NOW + 100.,
+            &json!({"channel":"account_all_orders:718895", "orders":{"1":rows}}).to_string(),
+        );
+    }
+    reply_at(
+        &mut e,
+        NOW + 100.,
+        &second,
+        200,
+        r#"{"code":200,"tx_hash":""}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx")))
+    );
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .expect("terminal Unknown");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+    let journal = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => event
+                .fields
+                .iter()
+                .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten()),
+            _ => None,
+        })
+        .expect("journal");
+    let journal: Value = serde_json::from_str(journal).unwrap();
+    assert_eq!(journal["placed"], json!(group_ids[..observed]), "{error:?}");
+    assert_eq!(journal["unknown"], json!(unknown), "{error:?}");
+    assert_eq!(journal["notSent"].as_array().unwrap().len(), 1);
+    assert!(
+        error
+            .message
+            .contains(&format!("unknown order indexes: {}", journal["unknown"]))
+    );
+    if observed == 0 {
+        assert!(!error.message.contains("previously placed"), "{error:?}");
+    } else {
+        assert!(error.message.contains(&format!(
+            "previously placed order indexes: {}",
+            journal["placed"]
+        )));
+    }
 }

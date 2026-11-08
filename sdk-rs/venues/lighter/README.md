@@ -16,3 +16,5 @@ accepted prefix. For venue-reported uncertainty, `order.outcome_unknown` telemet
 snapshots placed, unknown and unsent indexes from that journal and the dispatcher
 queue; engine-owned HTTP failures retain engine journal/telemetry. This is the approved
 stop-after-UNKNOWN parity exception; uncertain placements are never replayed.
+Acknowledged group legs remain uncertain until individually observed, including
+when a later write fails.

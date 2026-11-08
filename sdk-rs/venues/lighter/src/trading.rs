@@ -84,23 +84,22 @@ impl Job {
             .all(|id| self.group_seen.contains(id))
     }
     fn unknown_journal(&self) -> serde_json::Value {
-        let (unknown, skip) = if self.settled || self.steps.is_empty() {
-            (
-                self.group_accepted
-                    .iter()
-                    .filter(|id| !self.group_seen.contains(*id))
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                0,
-            )
+        let mut unknown: Vec<_> = self
+            .group_accepted
+            .iter()
+            .filter(|id| !self.group_seen.contains(*id))
+            .cloned()
+            .collect();
+        let skip = if self.settled || self.steps.is_empty() {
+            0
         } else {
-            (
+            unknown.extend(
                 self.steps
                     .front()
                     .map(Step::placement_ids)
                     .unwrap_or_default(),
-                1,
-            )
+            );
+            1
         };
         let placed: Vec<_> = self.ids.iter().filter(|id| !unknown.contains(id)).collect();
         let not_sent: Vec<_> = self
