@@ -331,3 +331,218 @@ fn valid_wire_rounding_and_reduce_only_caller_identity_are_preserved() {
     assert_eq!(seen[0].1["reduceOnly"], true);
     assert_eq!(seen[0].1["clOrdId"], "CallerRound");
 }
+
+fn runtime_failure(status: u16, code: &str, expected: Outcome) {
+    let mut engine = ready(instrument());
+    let mut row = limit(15.);
+    row["stopLoss"] = json!(36000);
+    row["takeProfit"] = json!(42000);
+    let mut transport = ScriptedTransport::default();
+    let first = transport.record(&submit(&mut engine, vec![row]));
+    let [entry] = first.as_slice() else {
+        panic!("first entry only")
+    };
+    assert!(entry.url.ends_with("/batch-orders"));
+    reply(
+        &mut engine,
+        &Action::Http(entry.clone()),
+        r#"{"code":"0","msg":"","data":[{"ordId":"1000","sCode":"0","sMsg":""}]}"#,
+        6.,
+    );
+    let second = transport.record(&prepared(&mut engine, 6.));
+    let [stop] = second.as_slice() else {
+        panic!("one protective write")
+    };
+    assert!(stop.url.ends_with("/order-algo"));
+    let body = json!({"code":"1","msg":"scripted failure","data":[{
+        "algoId":"","sCode":code,"sMsg":"scripted failure"
+    }]})
+    .to_string();
+    if status == 0 {
+        engine.handle(
+            7.,
+            Event::HttpFailed {
+                request: stop.id,
+                error: "lost reply",
+            },
+        );
+    } else {
+        engine.handle(
+            7.,
+            Event::HttpResponse {
+                request: stop.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+    }
+    let mut output = prepared(&mut engine, 7.);
+    output.extend(prepared(&mut engine, 8.));
+    transport.record(&output);
+    assert_eq!(
+        transport.write_count(),
+        2,
+        "no suffix, resend, cancel or rollback"
+    );
+    let results = terminals(&output, 17);
+    let [Err(error)] = results.as_slice() else {
+        panic!("one failed terminal")
+    };
+    assert!(matches!(error.outcome, None | Some(Outcome::Unknown)));
+    let elements = error.elements.as_ref().expect("complete shared journal");
+    assert_eq!(elements.len(), 9);
+    assert_eq!(
+        elements
+            .iter()
+            .map(|row| row.element.index)
+            .collect::<Vec<_>>(),
+        (0..9).collect::<Vec<_>>()
+    );
+    assert!(
+        elements
+            .iter()
+            .all(|row| row.element.client_order_id.is_some())
+    );
+    use safe_cex_engine::write_plan::ElementResult;
+    assert_eq!(
+        elements[0].result,
+        ElementResult::Placed {
+            order_ids: vec!["1000".into()]
+        }
+    );
+    match (&elements[1].result, expected) {
+        (ElementResult::NotSent { error: Some(error) }, Outcome::Rejected) => {
+            assert_eq!(error.outcome, Some(Outcome::Rejected));
+            assert_eq!(error.venue_code.as_deref(), Some(code));
+        }
+        (ElementResult::Unknown { error }, Outcome::Unknown) => {
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+        }
+        _ => panic!("native failure classification must survive"),
+    }
+    assert!(
+        elements
+            .iter()
+            .skip(2)
+            .all(|row| row.result == ElementResult::NotSent { error: None })
+    );
+    assert_eq!(
+        error.partial.as_ref().expect("accepted prefix").order_ids,
+        ["1000"]
+    );
+}
+
+#[test]
+fn runtime_rejection_reports_prefix_failed_element_and_unsent_suffix() {
+    runtime_failure(200, "51008", Outcome::Rejected);
+}
+
+#[test]
+fn runtime_ambiguous_native_reply_preserves_unknown_and_unsent_suffix() {
+    runtime_failure(200, "50004", Outcome::Unknown);
+}
+
+#[test]
+fn engine_owned_server_failure_preserves_unknown_and_unsent_suffix() {
+    runtime_failure(503, "50001", Outcome::Unknown);
+}
+
+#[test]
+fn lost_reply_preserves_unknown_and_unsent_suffix() {
+    runtime_failure(0, "", Outcome::Unknown);
+}
+
+fn mixed_batch_failure(code: &str, rejected: bool) {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut engine = ready(instrument());
+    let orders = (0..41)
+        .map(|index| {
+            let mut row = limit(5.);
+            row["clientOrderId"] = json!(format!("Batch{index}"));
+            row
+        })
+        .collect();
+    let mut transport = ScriptedTransport::default();
+    let first = transport.record(&submit(&mut engine, orders));
+    let [first] = first.as_slice() else {
+        panic!("one first batch")
+    };
+    let acks: Vec<_> = (0..20)
+        .map(|i| json!({"ordId":format!("native{i}"), "sCode":"0", "sMsg":""}))
+        .collect();
+    reply(
+        &mut engine,
+        &Action::Http(first.clone()),
+        &json!({"code":"0","data":acks}).to_string(),
+        6.,
+    );
+    let second = transport.record(&prepared(&mut engine, 6.));
+    let [second] = second.as_slice() else {
+        panic!("one second batch")
+    };
+    let acks: Vec<_> = (20..40)
+        .map(|i| {
+            if i == 20 {
+                json!({"ordId":"", "sCode":code, "sMsg":"scripted row failure"})
+            } else {
+                json!({"ordId":format!("native{i}"), "sCode":"0", "sMsg":""})
+            }
+        })
+        .collect();
+    reply(
+        &mut engine,
+        &Action::Http(second.clone()),
+        &json!({"code":"2","data":acks}).to_string(),
+        7.,
+    );
+    let mut out = prepared(&mut engine, 7.);
+    out.extend(prepared(&mut engine, 8.));
+    transport.record(&out);
+    assert_eq!(transport.write_count(), 2, "third batch must stay unsent");
+    let results = terminals(&out, 17);
+    let [Err(error)] = results.as_slice() else {
+        panic!("one partial terminal")
+    };
+    let elements = error.elements.as_ref().expect("complete row journal");
+    assert_eq!(elements.len(), 41);
+    for (i, element) in elements.iter().enumerate() {
+        assert_eq!(element.element.index, i);
+        assert_eq!(
+            element.element.client_order_id.as_deref(),
+            Some(format!("Batch{i}").as_str())
+        );
+        if i == 20 {
+            if rejected {
+                assert!(
+                    matches!(&element.result, ElementResult::NotSent { error: Some(e) } if e.outcome == Some(Outcome::Rejected) && e.venue_code.as_deref() == Some(code))
+                );
+            } else {
+                assert!(
+                    matches!(&element.result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown))
+                );
+            }
+        } else if i == 40 {
+            assert_eq!(element.result, ElementResult::NotSent { error: None });
+        } else {
+            assert_eq!(
+                element.result,
+                ElementResult::Placed {
+                    order_ids: vec![format!("native{i}")]
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn native_batch_rejection_keeps_successful_rows_and_only_stops_unsent_writes() {
+    mixed_batch_failure("51008", true);
+}
+
+#[test]
+fn ambiguous_native_batch_row_keeps_other_proven_rows() {
+    mixed_batch_failure("50004", false);
+}

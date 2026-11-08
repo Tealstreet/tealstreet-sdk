@@ -1069,53 +1069,36 @@ fn failures(output: &[Action]) -> Vec<&safe_cex_engine::VenueError> {
 }
 
 #[test]
-fn a_signature_rejected_write_is_re_signed_and_resent_once() {
+fn a_signature_rejected_placement_stops_without_resending() {
     let mut engine = trading_engine();
     place(&mut engine, vec![order(1)]);
     let first = prepared(&mut engine, 5.);
     refuse(&mut engine, post(&first), 401, SIGNATURE_REJECTED, 6.);
-    let second = prepared(&mut engine, 6.);
+    let output = prepared(&mut engine, 6.);
     assert!(
-        failures(&second).is_empty(),
-        "the resend decides the outcome"
-    );
-    let (Action::Http(a), Action::Http(b)) = (post(&first), post(&second)) else {
-        unreachable!()
-    };
-    assert_ne!(a.id, b.id, "a fresh physical attempt");
-    assert_eq!(a.body, b.body, "the same native write");
-    reply(
-        &mut engine,
-        post(&second),
-        r#"{"code":"0","msg":"","data":[{"ordId":"777","clOrdId":"","sCode":"0","sMsg":""}]}"#,
-        7.,
-    );
-    let output = prepared(&mut engine, 7.);
-    assert!(output.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { command: OWNER, result }) if result.contains("777")
-    )));
-}
-
-#[test]
-fn a_second_signature_rejection_fails_without_a_third_send() {
-    let mut engine = trading_engine();
-    place(&mut engine, vec![order(1)]);
-    let first = prepared(&mut engine, 5.);
-    refuse(&mut engine, post(&first), 401, SIGNATURE_REJECTED, 6.);
-    let second = prepared(&mut engine, 6.);
-    refuse(&mut engine, post(&second), 401, SIGNATURE_REJECTED, 7.);
-    let output = prepared(&mut engine, 7.);
-    assert!(
-        !output
+        output
             .iter()
-            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
-        "no third send"
+            .all(|a| !matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
     );
     let errors = failures(&output);
-    assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].kind, Some(ErrorKind::AuthInvalid));
-    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Rejected));
+    let [error] = errors.as_slice() else {
+        panic!("one signature failure")
+    };
+    assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    let elements = error.elements.as_ref().expect("shared write journal");
+    assert_eq!(elements.len(), 1);
+    assert!(
+        matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.venue_code.as_deref() == Some("50113"))
+    );
+    refuse(&mut engine, post(&first), 401, SIGNATURE_REJECTED, 7.);
+    let duplicate = prepared(&mut engine, 7.);
+    assert!(failures(&duplicate).is_empty());
+    assert!(
+        duplicate
+            .iter()
+            .all(|a| !matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
+    );
 }
 
 #[test]

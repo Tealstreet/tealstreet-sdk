@@ -946,6 +946,17 @@ impl Venue for Okx {
         }
     }
 
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        _response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Pending::Trade(request) = pending {
+            self.trading_unproven_evidence(request, evidence);
+        }
+    }
+
     fn on_http_owner_retired(
         &mut self,
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,

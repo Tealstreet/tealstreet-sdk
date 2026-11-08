@@ -12,6 +12,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{Element, ElementResult, PlannedWrite, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -20,8 +21,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const BROKER: &str = "e847386590ce4dBC";
 
-/// Every write is one call with its own 20 s bound; only a 50113 signature
-/// refusal, which executed nothing, is re-signed and sent once more.
+/// Each write has its own 20 s bound. Non-placement calls retain a proven
+/// 50113 re-sign grant; journaled placements stop at their first failure.
 const SERIAL: SerialCall = SerialCall {
     auth: safe_cex_engine::request_context::plan::CallAuth::Preflight,
     operation: Operation::Mutation,
@@ -155,6 +156,8 @@ struct Step {
     body: String,
     expected: usize,
     collect_ids: bool,
+    placement: Option<PlannedPlacement>,
+    write_index: Option<usize>,
 }
 #[derive(Default)]
 pub struct TradingState {
@@ -177,6 +180,8 @@ struct Job {
     preflight: Option<Preflight>,
     plan: Option<Plan>,
     steps: VecDeque<Step>,
+    writes: Option<WritePlan<PlannedPlacement>>,
+    pending_write: Option<usize>,
     ids: Vec<String>,
     finish: Finish,
     optimistic: Vec<(String, OrderStatus)>,
@@ -276,14 +281,11 @@ impl TrailingOrder {
 enum TrailingPhase {
     Cancel,
     Replace,
-    Restore,
 }
 struct TrailingAmend {
     original: ObservedAlgo,
     replacement: TrailingOrder,
     phase: TrailingPhase,
-    restore: Option<Step>,
-    refusal: Option<VenueError>,
     quote: Option<(f64, f64)>,
 }
 enum Finish {
@@ -344,6 +346,64 @@ struct OrderPayload {
     callback_ratio: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     callback_spread: Option<String>,
+}
+
+struct PlannedPlacement {
+    path: &'static str,
+    body: String,
+    payload: PlacementPayload,
+}
+enum PlacementPayload {
+    Orders(Vec<OrderPayload>),
+    Trailing {
+        order: Box<TrailingOrder>,
+        rules: OrderWireRules,
+    },
+}
+impl PlannedPlacement {
+    fn client_ids(&self) -> Vec<Option<String>> {
+        match &self.payload {
+            PlacementPayload::Orders(orders) => orders
+                .iter()
+                .map(|order| {
+                    order
+                        .cl_ord_id
+                        .clone()
+                        .or_else(|| order.algo_cl_ord_id.clone())
+                })
+                .collect(),
+            PlacementPayload::Trailing { order, .. } => vec![Some(order.algo_cl_ord_id.clone())],
+        }
+    }
+}
+impl Job {
+    fn validate_writes(&mut self) -> Result<(), VenueError> {
+        let mut writes = Vec::new();
+        let mut element_index = 0;
+        for step in &mut self.steps {
+            let Some(payload) = step.placement.take() else {
+                continue;
+            };
+            step.write_index = Some(writes.len());
+            let elements = payload
+                .client_ids()
+                .into_iter()
+                .map(|client_order_id| {
+                    let index = element_index;
+                    element_index += 1;
+                    Element {
+                        index,
+                        client_order_id,
+                    }
+                })
+                .collect();
+            writes.push(PlannedWrite { payload, elements });
+        }
+        if !writes.is_empty() {
+            self.writes = Some(WritePlan::validate(writes, validate_planned_placement)?);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize)]
@@ -536,6 +596,10 @@ impl Okx {
         }) else {
             return;
         };
+        if let Err(error) = job.validate_writes() {
+            let _ = cx.fail_preflight(&preflight, error);
+            return;
+        }
         if job.steps.is_empty() {
             let _ = match self.finish_effects(cx, &mut job) {
                 Ok(data) => cx.done_empty_plan(&preflight, data),
@@ -1182,19 +1246,15 @@ impl Okx {
                 }
             }
             replacement.algo_cl_ord_id = generated_order_id(cx)?;
-            let mut restored = native.clone();
-            restored.algo_cl_ord_id = generated_order_id(cx)?;
-            let restore = trailing_step(&o.symbol, &restored)?;
+            let rules = self.order_wire_rules(m, OrderType::TrailingStopLoss)?;
             let mut result = self.plan_cancel(cx, vec![id.into()])?;
             result
                 .steps
-                .push_back(trailing_step(&o.symbol, &replacement)?);
+                .push_back(trailing_step(&o.symbol, &replacement, rules)?);
             result.trailing = Some(TrailingAmend {
                 original,
                 replacement,
                 phase: TrailingPhase::Cancel,
-                restore: Some(restore),
-                refusal: None,
                 quote: None,
             });
             result.replacing_stop = Some((o.symbol.clone(), o.side, o.kind));
@@ -1331,16 +1391,37 @@ impl Okx {
         slot: Slot,
         context: Context,
     ) {
-        let Some(job) = self.trading.jobs.get(&command) else {
+        let rest = self.rest();
+        let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
-        let step = job.steps.front().expect("issued step");
+        let Some(step) = job.steps.front() else {
+            return;
+        };
+        if let Some(expected) = step.write_index {
+            let next = job.writes.as_mut().and_then(WritePlan::next_write);
+            match next {
+                Some((index, write))
+                    if index == expected
+                        && write.payload.path == step.path
+                        && write.payload.body == step.body =>
+                {
+                    job.pending_write = Some(index);
+                }
+                _ => {
+                    let error = VenueError::new("OKX validated write schedule is unavailable")
+                        .kind(ErrorKind::Internal)
+                        .outcome(Outcome::NotSent);
+                    return self.end(cx, command, None, error, false);
+                }
+            }
+        }
         let read = step.query.is_some();
         let path = step.query.as_ref().map_or_else(
             || step.path.to_owned(),
             |query| format!("{}?{query}", step.path),
         );
-        let url = format!("{}{path}", self.rest());
+        let url = format!("{rest}{path}");
         let recipe = sign::Http::new(self.credentials.clone(), path).demo(self.options.testnet);
         let body = (!read).then(|| step.body.clone());
         let request = Request {
@@ -1572,6 +1653,9 @@ impl Okx {
                 );
             }
         };
+        if let Err(error) = next.validate_writes() {
+            return self.end(cx, request.command, Some(&request), error, false);
+        }
         let previous = self
             .trading
             .jobs
@@ -1671,6 +1755,21 @@ impl Okx {
             return;
         };
         let step = job.steps.front().expect("inflight step");
+        if let (Some(writes), Some(index)) = (&mut job.writes, job.pending_write)
+            && acks.len() == step.expected
+        {
+            let results = placement_results(cx, &request.context, &acks);
+            match results.and_then(|results| {
+                writes.settle(index, results).map_err(|error| {
+                    VenueError::new(error.to_string())
+                        .kind(ErrorKind::Internal)
+                        .outcome(Outcome::Unknown)
+                })
+            }) {
+                Ok(()) => job.pending_write = None,
+                Err(error) => return self.end(cx, request.command, Some(&request), error, true),
+            }
+        }
         if step.collect_ids && matches!(envelope.code, "0" | "2") {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -1898,22 +1997,7 @@ impl Okx {
         }
         job.effective = true;
         if job.steps.is_empty() {
-            let restored = job
-                .trailing
-                .as_mut()
-                .filter(|a| a.phase == TrailingPhase::Restore)
-                .and_then(|a| a.refusal.take());
-            if let Some(mut refusal) = restored {
-                refusal.message = format!(
-                    "{}; the original OKX trailing stop was restored",
-                    refusal.message
-                );
-                refusal.protection = Some(safe_cex_engine::error::Protection::Restored);
-                refusal.presents = true;
-                self.end(cx, request.command, Some(&request), refusal, false);
-            } else {
-                self.finish(cx, request);
-            }
+            self.finish(cx, request);
         } else {
             match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
                 Ok(slot) => self.issue(cx, request.command, slot),
@@ -1960,8 +2044,13 @@ impl Okx {
             Ok((verdict, grant)) => (Ok(verdict), grant),
             Err(error) => (Err(error), None),
         };
-        // One re-signed resend of a 50113 refusal; the journal refuses a second.
-        if let Some(grant) = grant {
+        // Journaled placements stop even on a proven signature refusal.
+        let journaled = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .is_some_and(|job| job.pending_write.is_some());
+        if let Some(grant) = grant.filter(|_| !journaled) {
             let plan = self
                 .trading
                 .jobs
@@ -2028,38 +2117,21 @@ impl Okx {
         mut error: VenueError,
         uncertain: bool,
     ) {
-        if !uncertain
-            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-            && let Some(request) = current
-        {
-            let restore = self.trading.jobs.get_mut(&command).and_then(|job| {
-                let trailing = job.trailing.as_mut()?;
-                if trailing.phase != TrailingPhase::Replace {
-                    return None;
-                }
-                let restore = trailing.restore.take()?;
-                trailing.phase = TrailingPhase::Restore;
-                trailing.refusal = Some(error.clone());
-                job.steps.clear();
-                job.steps.push_back(restore);
-                Some(job.plan.clone().expect("admitted trailing Plan"))
-            });
-            if let Some(plan) = restore {
-                match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
-                    Ok(slot) => {
-                        self.issue(cx, command, slot);
-                        return;
-                    }
-                    Err(reason) => {
-                        error.message =
-                            format!("{}; restore admission failed: {reason}", error.message)
-                    }
-                }
-            }
-        }
-        let Some(job) = self.trading.jobs.remove(&command) else {
+        let Some(mut job) = self.trading.jobs.remove(&command) else {
             return;
         };
+        if let (Some(writes), Some(index)) = (&mut job.writes, job.pending_write.take()) {
+            let classified = if uncertain {
+                error.clone().outcome(Outcome::Unknown)
+            } else {
+                error.clone()
+            };
+            if writes.fail(index, classified).is_err() {
+                error = VenueError::new("OKX write journal could not settle its pending write")
+                    .kind(ErrorKind::Internal)
+                    .outcome(Outcome::Unknown);
+            }
+        }
         if !uncertain
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             && current.is_some_and(|request| request.path == "/api/v5/trade/amend-algos")
@@ -2100,9 +2172,10 @@ impl Okx {
                 safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
             });
         let stop_gone = note.is_some();
-        // A sibling rests: the caller must be told even though this call failed.
-        if !job.ids.is_empty() {
-            error = error.partial_ids(&job.ids);
+        // Preserve native identities even when a malformed reply prevents row attribution.
+        error = error.partial_ids(&job.ids);
+        if let Some(writes) = &mut job.writes {
+            error = writes.failure(error);
         }
         for (id, status) in job.optimistic {
             if !uncertain
@@ -2133,6 +2206,21 @@ impl Okx {
             (None, Some(preflight)) => cx.fail_preflight(preflight, error),
             (None, None) => Ok(()),
         };
+    }
+
+    pub(crate) fn trading_unproven_evidence(
+        &self,
+        request: &Request,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Some(writes) = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .and_then(|job| job.writes.as_ref())
+        {
+            evidence.write_plan(writes);
+        }
     }
 
     /// The engine retired a write owner itself (for example an unproven 408/5xx):
@@ -2183,6 +2271,58 @@ fn rejection(message: String, code: Option<&str>, status: u16) -> VenueError {
     error
 }
 
+fn placement_results(
+    cx: &Cx<'_, Pending>,
+    context: &Context,
+    acks: &[Ack<'_>],
+) -> Result<Vec<ElementResult>, VenueError> {
+    acks.iter()
+        .map(|ack| {
+            if matches!(ack.s_code, "" | "0") {
+                let id = if ack.algo_id.is_empty() {
+                    ack.ord_id
+                } else {
+                    ack.algo_id
+                };
+                return Ok(if id.is_empty() {
+                    ElementResult::Unknown {
+                        error: Box::new(
+                            VenueError::new(
+                                "OKX placement acknowledgement omitted native identity",
+                            )
+                            .kind(ErrorKind::Internal)
+                            .outcome(Outcome::Unknown),
+                        ),
+                    }
+                } else {
+                    ElementResult::Placed {
+                        order_ids: vec![id.into()],
+                    }
+                });
+            }
+            let fact = cx
+                .classify_write(
+                    context,
+                    &CODES,
+                    Some(&native(ack.s_code, ack.s_msg)),
+                    ack.s_msg,
+                )
+                .map_err(|error| error.venue_error())?;
+            let error = Box::new(fact.error().clone());
+            Ok(
+                if matches!(
+                    fact.verdict(),
+                    Verdict::Refused(_) | Verdict::RefusedResend(_)
+                ) {
+                    ElementResult::NotSent { error: Some(error) }
+                } else {
+                    ElementResult::Unknown { error }
+                },
+            )
+        })
+        .collect()
+}
+
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
@@ -2231,6 +2371,8 @@ fn step<T: Serialize + ?Sized>(
         body: serde_json::to_string(body).map_err(|e| e.to_string())?,
         expected,
         collect_ids,
+        placement: None,
+        write_index: None,
     })
 }
 fn next_call(job: &Job) -> SerialCall {
@@ -2288,8 +2430,20 @@ fn generated_order_id(cx: &Cx<'_, Pending>) -> Result<String, String> {
     safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
         .map(|id| format!("{BROKER}{id}").chars().take(32).collect::<String>())
 }
-fn trailing_step(symbol: &str, payload: &TrailingOrder) -> Result<Step, String> {
+fn trailing_step(
+    symbol: &str,
+    payload: &TrailingOrder,
+    rules: OrderWireRules,
+) -> Result<Step, String> {
     let mut write = step("/api/v5/trade/order-algo", payload, 1, true)?;
+    write.placement = Some(PlannedPlacement {
+        path: write.path,
+        body: write.body.clone(),
+        payload: PlacementPayload::Trailing {
+            order: Box::new(payload.clone()),
+            rules,
+        },
+    });
     if !payload.algo_cl_ord_id.is_empty() {
         write.receipts.push(OrderIdentityReceipt {
             symbol: symbol.into(),
@@ -2304,6 +2458,8 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         preflight: None,
         plan: None,
         steps: steps.into(),
+        writes: None,
+        pending_write: None,
         ids: Vec::new(),
         finish,
         optimistic: Vec::new(),
@@ -2422,6 +2578,11 @@ fn placement_step<T: Serialize + ?Sized + PlacementBody>(
     .map_err(|error| error.message)?;
     let mut write = step(path, body, expected, collect_ids)?;
     write.receipts = body.identities();
+    write.placement = Some(PlannedPlacement {
+        path,
+        body: write.body.clone(),
+        payload: PlacementPayload::Orders(body.orders().into_iter().cloned().collect()),
+    });
     Ok(write)
 }
 trait PlacementBody {
@@ -2496,6 +2657,54 @@ fn validate_write(write: &PlacementWrite<'_>) -> Result<(), VenueError> {
             ));
         }
         validate_order_payload(payload).map_err(reject)?;
+    }
+    Ok(())
+}
+
+fn validate_planned_placement(write: &PlannedPlacement) -> Result<(), VenueError> {
+    let reject = |message| not_sent(message).kind(ErrorKind::InvalidInput);
+    let body = match &write.payload {
+        PlacementPayload::Orders(orders) => {
+            validate_write(&PlacementWrite {
+                path: write.path,
+                orders: orders.iter().collect(),
+            })?;
+            if write.path == "/api/v5/trade/batch-orders" {
+                serde_json::to_string(orders)
+            } else {
+                let Some(order) = orders.first() else {
+                    return Err(reject("OKX placement has no native row".into()));
+                };
+                serde_json::to_string(order)
+            }
+        }
+        PlacementPayload::Trailing { order, rules } => {
+            if write.path != "/api/v5/trade/order-algo" || !order.valid() {
+                return Err(reject("Invalid OKX trailing replacement payload".into()));
+            }
+            let size = wire_multiple(&order.sz, rules.step).map_err(reject)?;
+            if !rules.min.is_finite()
+                || rules.min <= 0.
+                || !rules.max.is_finite()
+                || rules.max < rules.min
+                || size < rules.min
+                || size > rules.max
+            {
+                return Err(reject("OKX trailing size is outside native limits".into()));
+            }
+            for price in [&order.active_px, &order.callback_spread] {
+                if !price.is_empty() {
+                    wire_multiple(price, rules.tick).map_err(reject)?;
+                }
+            }
+            serde_json::to_string(order)
+        }
+    }
+    .map_err(|error| reject(error.to_string()))?;
+    if body != write.body {
+        return Err(reject(
+            "OKX placement bytes differ from the validated native payload".into(),
+        ));
     }
     Ok(())
 }

@@ -22,3 +22,17 @@ preserved. The planner refuses an invalid split tail rather than resizing lots.
 Explicit zero-size SL/TP still uses `closeFraction=1`; positive sizes cannot use
 that exemption, and trailing stops still require an explicit size. Ambiguous
 released writes retain the existing no-resend and reconciliation behavior.
+
+Placement dispatch uses `safe_cex_engine::write_plan`: the complete set of owned
+native payloads and rule snapshots passes the pure gate before the first write.
+Each native batch row and separately sent protective child retains its client ID
+and ordered outcome. A runtime refusal stops the unissued suffix; an ambiguous
+reply or lost response stays unknown. Mixed batches retain their proven row
+successes. Terminal partial-ID errors include the shared element journal,
+including when the engine seals an HTTP server failure before venue decoding.
+Journaled placements do not resend on a signature refusal, and a refused trailing
+replacement reports lost protection without automatically restoring the old stop.
+
+This adoption is stacked on engine PR #3348. Accepted cancels, native amendments
+and settings currently remain under the existing engine lifecycle while its
+shared `Applied` result is pending; they are not mislabeled as placed orders.
