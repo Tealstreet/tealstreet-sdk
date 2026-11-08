@@ -24,9 +24,10 @@ There is no automatic cancel or rollback. Explicit caller recovery and existing
 custody, signing, nonce and reconciliation ownership remain with the venue.
 
 Accepted effects without a newly created native order ID remain outside this
-adoption, as required by the lead's known API-gap exception. Trading-stop,
-partial-stop cancel/recreate, ordinary amend, cancel and settings paths retain
-their existing lifecycle until the shared result type can represent Applied.
+adoption under the lead's explicit API-gap exception. Trading-stop, partial-stop
+cancel/recreate, ordinary amend, cancel and settings paths retain their existing
+lifecycle and are tracked as NEEDS-APPLIED. The stacked helper now provides
+Applied; these call sites still need their own outcome mapping and tests.
 No canceled target or client ID is presented as a newly created native order.
 
 See the [split-plan invariant](https://github.com/Tealstreet/tealstreet-sdk/blob/docs/split-plan-invariant/docs/plans/SPLIT_PLAN_INVARIANT.md).
