@@ -3,12 +3,12 @@ import type { Candle, FetchedLeverage, OrderBook, OrderFillEvent, Writable } fro
 import type { Store, StoreUpdate } from './store.interface';
 
 import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
-import { MarginType, PositionMode } from '../types';
 import { readFillFrame } from './fillFrames';
 import { readBalanceFrame } from './balanceFrames';
 import { readMarketFrame } from './marketFrames';
 import { readOrderFrame } from './orderFrames';
 import { readPositionFrame } from './positionFrames';
+import { readStoreStatus, readStoreSettings } from './storeFrames';
 import { readTickerFrame, readTickerDeltaFrame, readTickerObservationFrame } from './tickerFrames';
 
 export type FrameBook = { symbol: string; orderbook: OrderBook };
@@ -18,7 +18,6 @@ export type FrameCandle = { symbol: string; interval: string; candle: Candle };
 
 export class FrameApplyError extends Error {}
 
-const finite = (value: number) => (Number.isFinite(value) ? value : undefined);
 /**
  * Applies the Rust engine's flush frames to a `DefaultStore`, so every reader
  * of the store keeps working: one `store.update` per frame, tickers patched in
@@ -135,17 +134,10 @@ export class FrameApplier {
     attempt(() => {
       const status = frame.status();
       if (status) {
-        const loaded = status.loaded;
-        update.loaded = {
-          ...this.store.loaded,
-          balance: (loaded & LOADED_FLAG.BALANCE) !== 0,
-          orders: (loaded & LOADED_FLAG.ORDERS) !== 0,
-          markets: (loaded & LOADED_FLAG.MARKETS) !== 0,
-          tickers: (loaded & LOADED_FLAG.TICKERS) !== 0,
-          positions: (loaded & LOADED_FLAG.POSITIONS) !== 0,
-        };
-        update.latency = status.latency;
-        update.options = { ...this.store.options, isHedged: status.hedged };
+        const statusUpdate = readStoreStatus(status);
+        update.loaded = { ...this.store.loaded, ...statusUpdate.loaded };
+        update.latency = statusUpdate.latency;
+        update.options = { ...this.store.options, ...statusUpdate.options };
       }
     });
 
@@ -155,22 +147,8 @@ export class FrameApplier {
       // `fetchedLeverage` when a market has no position.
       const settings = frame.settings();
       if (settings) {
-        const hedged = (update.options ?? this.store.options).isHedged;
-        const leverage: Record<string, FetchedLeverage> = {};
-        for (let i = 0; i < settings.count; i++) {
-          const value = finite(settings.leverage[i]);
-          const buyLeverage = finite(settings.buyLeverage?.[i] ?? NaN) ?? value;
-          const sellLeverage = finite(settings.sellLeverage?.[i] ?? NaN) ?? value;
-          // An unknown side omits the symbol: UiStateHandler copies these onto positions.
-          if (buyLeverage === undefined || sellLeverage === undefined) continue;
-          leverage[resolveSymbol(settings.market[i], settings.symbol?.(i))] = {
-            buyLeverage,
-            sellLeverage,
-            marginType: settings.marginType(i) as MarginType | undefined,
-            positionMode: hedged ? PositionMode.Hedged : PositionMode.OneWay,
-          };
-        }
-        this.writeFetchedLeverage(update, leverage);
+        this.writeFetchedLeverage(update, readStoreSettings(settings,
+          (update.options ?? this.store.options).isHedged, resolveSymbol));
       }
     });
 

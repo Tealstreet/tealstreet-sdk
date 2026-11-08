@@ -607,64 +607,6 @@ pub struct OrderHistoryOptions {
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
-pub struct StoreDataLoaded {
-    pub balance: bool,
-    pub orders: bool,
-    pub markets: bool,
-    pub tickers: bool,
-    pub positions: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct StoreOptions {
-    pub is_hedged: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct FetchedLeverage {
-    /// @ts-mutable
-    pub buy_leverage: f64,
-    /// @ts-mutable
-    pub sell_leverage: f64,
-    /// @ts-mutable
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub margin_type: Option<MarginType>,
-    /// @ts-mutable
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub position_mode: Option<PositionMode>,
-    /// @ts-mutable
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub is_fetching: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct DisplayedMargin {
-    pub long_exposure: f64,
-    pub short_exposure: f64,
-    pub total_notional: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
 pub struct IncomeHistoryOptions {
     /// @ts-mutable
     #[serde(
@@ -952,17 +894,6 @@ pub enum AnyTimeframe {
     Variant0(SecondsTimeframe),
     Variant1(Timeframe),
     Variant2(ExtendedTimeframe),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[ts(optional_fields)]
-pub struct StoreUpdateIds {
-    /// @ts-mutable
-    #[serde(rename = "positions")]
-    pub positions: f64,
-    /// @ts-mutable
-    #[serde(rename = "orders")]
-    pub orders: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -1395,7 +1326,10 @@ impl Serialize for OrderRiskProfile {
 }
 
 pub mod store_model;
-pub use store_model::{ActiveChaser, ActiveTWAP, DisplayedPosition, StoreData};
+pub use store_model::{
+    ActiveChaser, ActiveTWAP, DisplayedMargin, DisplayedPosition, FetchedLeverage, StoreData,
+    StoreDataLoaded, StoreOptions, StoreUpdateIds,
+};
 
 pub mod extra_model;
 pub mod model_utils;
@@ -1422,22 +1356,21 @@ mod strict_codecs {
     use super::OrderFillEvent;
     #[cfg(test)]
     use super::{
-        AccountGreeks, BothPositionSide, Candle, ClosedPnlEntry, DisplayedMargin, Execution,
-        ExecutionsOptions, ExtendedTimeframe, FetchedLeverage, HistoricalOrder, HistoricalTrade,
-        HistoricalTradeOptions, IncomeHistoryOptions, IncomeRecord, MessageHandlerStatsType,
-        OHLCVOptions, OHLCVSOptions, OptionChainQuery, OptionChainRow, OptionGreeks, OptionQuote,
-        OrderBook, OrderHistoryOptions, OrderRiskProfile, PublicExchangeOptions, PublicTrade,
-        RequestOutcome, RequestOutcomeCounts, SecondsTimeframe, StoreDataLoaded, StoreOptions,
-        StoreUpdateIds, Ticker, ValidateAccountResult,
+        AccountGreeks, BothPositionSide, Candle, ClosedPnlEntry, Execution, ExecutionsOptions,
+        ExtendedTimeframe, HistoricalOrder, HistoricalTrade, HistoricalTradeOptions,
+        IncomeHistoryOptions, IncomeRecord, MarginType, MessageHandlerStatsType, OHLCVOptions,
+        OHLCVSOptions, OptionChainQuery, OptionChainRow, OptionGreeks, OptionQuote, OrderBook,
+        OrderHistoryOptions, OrderRiskProfile, PositionMode, PublicExchangeOptions, PublicTrade,
+        RequestOutcome, RequestOutcomeCounts, SecondsTimeframe, Ticker, ValidateAccountResult,
     };
     use super::{
         AccountValidationError, AnyTimeframe, Balance, ExchangeOptionsAuth,
         ExchangeOptionsBybitSiteId, ExchangeOptionsExternalPublicData, ExchangeOptionsExtra,
-        ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, MarginType, Market, MarketLimits,
+        ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, Market, MarketLimits,
         MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice, MarketPrecision, ModelField,
         OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, OrderBookOrders,
-        OrderSide, OrderStatus, PayloadSignerCapability, PositionMode, PositionSide,
-        RemoteSignerCapability, Timeframe, TransportCapability, True, deserialize_present,
+        OrderSide, OrderStatus, PayloadSignerCapability, PositionSide, RemoteSignerCapability,
+        Timeframe, TransportCapability, True, deserialize_present,
     };
     use super::{
         ExchangeOptionsEngine, ExchangeOptionsPolymarket, LocalSignerMetadataCapability,
@@ -2220,83 +2153,6 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
-    #[serde(remote = "super::StoreDataLoaded")]
-    #[serde(rename_all = "camelCase")]
-    struct WireStoreDataLoaded {
-        balance: bool,
-        orders: bool,
-        markets: bool,
-        tickers: bool,
-        positions: bool,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::StoreDataLoaded {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireStoreDataLoaded::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::StoreOptions")]
-    #[serde(rename_all = "camelCase")]
-    struct WireStoreOptions {
-        is_hedged: bool,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::StoreOptions {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireStoreOptions::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::FetchedLeverage")]
-    #[serde(rename_all = "camelCase")]
-    struct WireFetchedLeverage {
-        buy_leverage: f64,
-        sell_leverage: f64,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        margin_type: Option<MarginType>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        position_mode: Option<PositionMode>,
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        is_fetching: Option<bool>,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::FetchedLeverage {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireFetchedLeverage::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::DisplayedMargin")]
-    #[serde(rename_all = "camelCase")]
-    struct WireDisplayedMargin {
-        long_exposure: f64,
-        short_exposure: f64,
-        total_notional: f64,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::DisplayedMargin {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireDisplayedMargin::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
     #[serde(remote = "super::IncomeHistoryOptions")]
     #[serde(rename_all = "camelCase")]
     struct WireIncomeHistoryOptions {
@@ -2636,21 +2492,6 @@ mod strict_codecs {
             WireExtendedTimeframe::deserialize(
                 serde::de::value::StringDeserializer::<D::Error>::new(value),
             )
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::StoreUpdateIds")]
-    struct WireStoreUpdateIds {
-        #[serde(rename = "positions")]
-        positions: f64,
-        #[serde(rename = "orders")]
-        orders: f64,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::StoreUpdateIds {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireStoreUpdateIds::deserialize(crate::strict_decode::object(deserializer))
         }
     }
 
@@ -3170,10 +3011,6 @@ mod strict_codecs {
             crate::strict_decode::tests::record::<ExecutionsOptions>("ExecutionsOptions");
             crate::strict_decode::tests::record::<OrderHistoryOptions>("OrderHistoryOptions");
             crate::strict_decode::tests::record::<HistoricalOrder>("HistoricalOrder");
-            crate::strict_decode::tests::record::<StoreDataLoaded>("StoreDataLoaded");
-            crate::strict_decode::tests::record::<StoreOptions>("StoreOptions");
-            crate::strict_decode::tests::record::<FetchedLeverage>("FetchedLeverage");
-            crate::strict_decode::tests::record::<DisplayedMargin>("DisplayedMargin");
             crate::strict_decode::tests::record::<IncomeHistoryOptions>("IncomeHistoryOptions");
             crate::strict_decode::tests::string_union::<BothPositionSide>(
                 "BothPositionSide",
@@ -3690,7 +3527,6 @@ mod strict_codecs {
                         .to_owned(),
                 ],
             );
-            crate::strict_decode::tests::record::<StoreUpdateIds>("StoreUpdateIds");
             crate::strict_decode::tests::record::<PublicExchangeOptions>("PublicExchangeOptions");
             crate::strict_decode::tests::record::<OrderRiskProfile>("OrderRiskProfile");
         }

@@ -1698,29 +1698,26 @@ impl Store {
         let mut rows: Vec<_> = self
             .settings
             .iter()
-            .map(|(symbol, setting)| (self.market_ref(symbol), symbol, setting))
+            .filter_map(|(symbol, setting)| {
+                crate::store_output::rails(setting)
+                    .map(|rails| (self.market_ref(symbol), symbol, setting, rails))
+            })
             .collect();
-        rows.sort_unstable_by(|(a_index, a_symbol, _), (b_index, b_symbol, _)| {
+        rows.sort_unstable_by(|(a_index, a_symbol, _, _), (b_index, b_symbol, _, _)| {
             a_index.cmp(b_index).then(a_symbol.cmp(b_symbol))
         });
         w.begin_revision(section::SETTINGS, 1);
         w.u32(rows.len() as u32);
-        w.u32s(rows.iter().map(|(market, _, _)| *market));
+        w.u32s(rows.iter().map(|(market, _, _, _)| *market));
         w.u32s(
             rows.iter()
-                .map(|(_, _, s)| s.margin_type.map_or(0, |m| m as u32 + 1)),
+                .map(|(_, _, s, _)| s.margin_type.map_or(0, |m| m as u32 + 1)),
         );
         w.pad();
-        w.f64s(rows.iter().map(|(_, _, s)| s.leverage));
-        w.f64s(
-            rows.iter()
-                .map(|(_, _, s)| s.buy_leverage.unwrap_or(s.leverage)),
-        );
-        w.f64s(
-            rows.iter()
-                .map(|(_, _, s)| s.sell_leverage.unwrap_or(s.leverage)),
-        );
-        for (_, symbol, _) in &rows {
+        w.f64s(rows.iter().map(|(_, _, s, _)| s.leverage));
+        w.f64s(rows.iter().map(|(_, _, _, rails)| rails[0]));
+        w.f64s(rows.iter().map(|(_, _, _, rails)| rails[1]));
+        for (_, symbol, _, _) in &rows {
             let symbol = w.string(symbol);
             w.u32(symbol);
         }

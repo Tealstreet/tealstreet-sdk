@@ -54,6 +54,7 @@ mod signing_dispatch;
 pub mod signing_headers;
 pub mod signing_policy;
 mod signing_release;
+mod store_output;
 pub mod text;
 pub use signing_dispatch::{DispatchContext, SignStep};
 pub use signing_release::{SigningRelease, StampFloor};

@@ -85,7 +85,7 @@
     "rust:wasm-budget": "node sdk-rs/harness/wasm-budget.mjs",
     "rust:private-tape-bitgetusdc": "node sdk-rs/harness/private-tape-bitgetusdc.mjs",
     "rust:public-tape-bitgetusdc": "node sdk-rs/harness/private-tape-bitgetusdc.mjs --public",
-    "types:generate": "cargo run -j2 --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-types --example generate && node sdk-rs/safe-cex-types/generate.cjs && cargo run -j2 --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-types --example history && node sdk-rs/safe-cex-types/history-generate.cjs"
+    "types:generate": "cargo run -j2 --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-types --example generate && node sdk-rs/safe-cex-types/generate.cjs && cargo run -j2 --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-types --example history && node sdk-rs/safe-cex-types/history-generate.cjs && cargo run -j2 --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-types --example store && node sdk-rs/safe-cex-types/store-generate.cjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

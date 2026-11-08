@@ -409,6 +409,17 @@ Position enum-word bits 24 and 25 declare the presence of native contracts and
 native PnL columns. A present non-finite native size is rejected, never treated
 as absent (which could select an unsafe base-unit fallback).
 
+## Store type ownership
+
+`defaultStore` is the Rust-generated `initialStoreData`; constructors clone it
+before mutation. Generated defaults are unloaded host state, never evidence of
+a successful venue read. `storeFrames.ts` decodes STATUS and finite native
+SETTINGS without number repair. Rust `store_output` applies the legacy scalar
+fallback and omits unusable rails before writing SETTINGS; zero is preserved.
+The Store runtime still owns update IDs, including worker-side edits. Worker
+snapshots must carry those IDs unchanged; native frames do not invent a second
+counter domain. Serialization and late snapshot tests cover that boundary.
+
 Market decoding lives in `marketFrames.ts`, using the generated Market contract.
 The native `market_output` module owns optional numeric display policy and
 contract-count labels. NaN encodes absence; zero limits and zero option terms

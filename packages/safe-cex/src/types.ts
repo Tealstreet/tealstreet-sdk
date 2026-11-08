@@ -9,7 +9,17 @@ export type { IncomeCategory } from './generated/IncomeCategory';
 import { OrderStatus } from './generated/OrderStatus';
 import { OrderSide } from './generated/OrderSide';
 import type { Order } from './generated/Order';
-import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
+import type { StoreData } from './generated/StoreData';
+export type { StoreData } from './generated/StoreData';
+import type { StoreOptions } from './generated/StoreOptions';
+export type { StoreOptions } from './generated/StoreOptions';
+import type { StoreDataLoaded } from './generated/StoreDataLoaded';
+export type { StoreDataLoaded } from './generated/StoreDataLoaded';
+export type { StoreUpdateIds } from './generated/StoreUpdateIds';
+import type { FetchedLeverage } from './generated/FetchedLeverage';
+export type { FetchedLeverage } from './generated/FetchedLeverage';
+export type { DisplayedMargin } from './generated/DisplayedMargin';
+
 import type { ExchangeErrorKind } from './commandOutcome';
 import type { Market } from './generated/Market';
 import type { OptionRight } from './generated/OptionRight';
@@ -23,7 +33,6 @@ import type { TwapInstance } from './webworker/twap/TwapInstance';
 import type { TwapOptions } from './webworker/twap/TwapOptions';
 import type { TwapState } from './webworker/twap/TwapState';
 
-import { MessageHandlersStats } from './exchanges/types';
 import { MarginType } from './generated/MarginType';
 import { PositionMode } from './generated/PositionMode';
 import { PositionSide } from './generated/PositionSide';
@@ -286,19 +295,6 @@ export type OrderBook = {
   asks: OrderBookOrders[];
 };
 
-export type StoreDataLoaded = {
-  readonly balance: boolean;
-  readonly orders: boolean;
-  readonly markets: boolean;
-  readonly tickers: boolean;
-  readonly positions: boolean;
-};
-
-export type StoreOptions = {
-  //TODO: deprecate for positionMode
-  readonly isHedged: boolean;
-};
-
 export type ActiveChaser = {
   id: string;
   symbol: string;
@@ -327,14 +323,6 @@ export type OrderRiskProfile = {
 };
 
 export type ActiveTWAP = TwapOptions & TwapState & Pick<TwapInstance, 'id'> & { symbol: string };
-
-export type FetchedLeverage = {
-  buyLeverage: number;
-  sellLeverage: number;
-  marginType?: MarginType;
-  positionMode?: PositionMode;
-  isFetching?: boolean;
-};
 
 /**
  * A historical order, including ones that never filled. Distinct from `Order` (open
@@ -376,105 +364,6 @@ export type MessageHandlerStatsType = 'public' | 'private' | 'futures' | 'busine
 export type RequestOutcome = 'ok' | 'rateLimit' | 'auth' | 'network' | 'other';
 
 export type RequestOutcomeCounts = Record<RequestOutcome, number>;
-
-export type StoreUpdateIds = {
-  positions: number;
-  orders: number;
-};
-
-export type DisplayedMargin = {
-  readonly longExposure: number;
-  readonly shortExposure: number;
-  readonly totalNotional: number;
-};
-
-export type StoreData = {
-  readonly latency: number | null;
-  readonly balance: Balance;
-  readonly markets: Market[];
-  readonly tickers: Ticker[];
-  readonly orders: Order[];
-  readonly starkConfig?: {
-    usdtConfig?: any;
-    usdcConfig?: any;
-    positionId?: any;
-    takerFeePerToken?: any;
-  };
-  readonly zkLinkConfig?: {
-    contractConfig?: any;
-    l2Key?: any;
-    ethereumAddress?: any;
-    id?: any;
-    spotAccount?: any;
-    spotWallets?: any;
-    contractAccount?: any;
-    contractWallets?: any;
-  };
-  readonly userData?: any;
-  readonly positions: Position[];
-  readonly displayedPositions: DisplayedPosition[];
-  readonly displayedMargin?: DisplayedMargin;
-  readonly ordersRisk: { [orderId: string]: OrderRiskProfile[] };
-  readonly activeChasers: ActiveChaser[];
-  readonly activeTWAPs: ActiveTWAP[];
-  readonly loaded: StoreDataLoaded;
-  readonly options: StoreOptions;
-  readonly updateIds: StoreUpdateIds;
-  readonly messageHandlerStats?: Partial<Record<MessageHandlerStatsType, MessageHandlersStats>>;
-  /**
-   * Cumulative REST request counts for this exchange instance, by outcome.
-   *
-   * Rides the store for the same reason `socketHealth` does: safe-cex ships in
-   * the OSS mirror and must not gain a dependency on any app's telemetry, so
-   * the store is the only channel out. The consuming app diffs these against
-   * its own last-sent snapshot and reports; the package only counts.
-   *
-   * Monotonic per exchange-instance lifetime, and deliberately NOT reset on
-   * reconnect — a counter that resets is indistinguishable from one that never
-   * moved, which is the failure this whole surface exists to avoid.
-   */
-  readonly requestStats?: RequestOutcomeCounts;
-  readonly fetchedLeverage: Record<string, FetchedLeverage>;
-  readonly socketHealth?: {
-    publicHealthy: boolean;
-    privateHealthy: boolean;
-    publicInitialized: boolean;
-    privateInitialized: boolean;
-    publicLastMessage?: number;
-    privateLastMessage?: number;
-    /**
-     * Reconnect diagnostics. All optional so every existing construction site
-     * and the OSS-mirror slice keep compiling untouched.
-     *
-     * `*CloseCode` is the last WebSocket close code — the single most
-     * diagnostic reconnect field (1006 network/middlebox, 1000 clean,
-     * 4xxx app/auth). `*CloseCountTotal` is monotonic; `*CloseStreak` is the
-     * streak-scoped counter that resets on healthy traffic, so it reads 0
-     * after recovery and only the total survives.
-     *
-     * `*ReconnectPaused` is a boolean rather than a remaining-ms countdown on
-     * purpose: a live countdown would mutate socketHealth on every watchdog
-     * tick, manufacturing store deltas throughout a pause. It is also
-     * clock-free, which matters because hosted exchange-server stamps these
-     * on the server's clock.
-     */
-    reconnectDiagnostics?: AccountReconnectDiagnostics;
-    publicCloseCode?: number;
-    privateCloseCode?: number;
-    publicCloseCountTotal?: number;
-    privateCloseCountTotal?: number;
-    publicCloseStreak?: number;
-    privateCloseStreak?: number;
-    publicReconnectPaused?: boolean;
-    privateReconnectPaused?: boolean;
-    /**
-     * Optional exchange-specific private stream degradation reason. This covers
-     * cases where the socket itself is alive but the authenticated account/order
-     * stream is not delivering the data users depend on.
-     */
-    privateDegradedReason?: string;
-  };
-};
 
 export type Writable<T> =
   // check for things that are objects but don't need changing

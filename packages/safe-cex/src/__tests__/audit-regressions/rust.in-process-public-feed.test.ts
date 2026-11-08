@@ -1,5 +1,5 @@
 // @vitest-environment node
-import type { Candle, Market, OHLCVOptions, OrderBook, PublicDataSource, StoreData, Ticker } from '../../types';
+import type { Candle, Market, OHLCVOptions, OrderBook, PublicDataSource, StoreData, Ticker, Writable } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -250,7 +250,7 @@ it('forwards genuine unchanged source observations, never polling time, to every
   vi.useFakeTimers();
   try {
     const venue = restartableSource();
-    const row: Ticker = { ...ticker('BTCUSDT', 100), observedAt: [1_000, 1_000, 1_000] };
+    const row: Writable<Ticker> = { ...ticker('BTCUSDT', 100), observedAt: [1_000, 1_000, 1_000] };
     venue.load([market('BTCUSDT')], [row]);
     const first = account(venue.source, true);
     const second = account(venue.source, true);

@@ -1983,3 +1983,13 @@ and artifact changes before this cutover. See `docs/plans/TYPE_OWNERSHIP_P1.md`.
 Position enum-word bits 24 and 25 declare the presence of native contracts and
 native PnL columns. A present non-finite native size is rejected, never treated
 as absent (which could select an unsafe base-unit fallback).
+
+## Generated Store contracts (P1)
+
+StoreData, StoreOptions, StoreDataLoaded, StoreUpdateIds, FetchedLeverage and
+DisplayedMargin come from `sdk-rs/safe-cex-types/src/store_model.rs`. The scoped
+generator emits their modules and the initial Store value; never hand-edit them.
+Other models and host-owned capabilities retain their owning modules. Regenerate
+with `corepack yarn types:generate`; the scoped compiler gate is
+`node --test sdk-rs/safe-cex-types/tests/store-contract.cjs`.
+Opaque legacy config members and userData are unknown and require narrowing.

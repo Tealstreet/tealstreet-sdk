@@ -126,20 +126,25 @@ const withSettings = (leverage: number, buy?: number, sell?: number) => {
   } as unknown as Frame;
 };
 
-it('omits a symbol whose settings leverage is not finite', () => {
+it('refuses absent or non-finite native rails without replacing confirmed leverage', () => {
   const store = new DefaultStore();
-  new FrameApplier(store).apply(withSettings(NaN));
-  expect(store.fetchedLeverage).not.toHaveProperty('BTCUSDT');
-  new FrameApplier(store).apply(withSettings(Infinity, 3));
-  expect(store.fetchedLeverage).not.toHaveProperty('BTCUSDT');
+  const applier = new FrameApplier(store);
+  applier.apply(withSettings(5, 3, 4));
+  const previous = store.fetchedLeverage;
+  expect(() => applier.apply(withSettings(NaN))).toThrow('Native Store leverage rails are required');
+  expect(() => applier.apply(withSettings(Infinity, 3, Infinity))).toThrow('Invalid native Store leverage rails');
+  expect(store.fetchedLeverage).toBe(previous);
 });
 
-it('keeps finite settings leverage, with a finite side overriding a non-finite total', () => {
+it('preserves finite native rails independently of the legacy scalar, including zero', () => {
   const store = new DefaultStore();
-  new FrameApplier(store).apply(withSettings(NaN, 3, 4));
+  const applier = new FrameApplier(store);
+  applier.apply(withSettings(NaN, 3, 4));
   expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 3, sellLeverage: 4 });
-  new FrameApplier(store).apply(withSettings(10, NaN));
+  applier.apply(withSettings(10, 10, 10));
   expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 10, sellLeverage: 10 });
+  applier.apply(withSettings(NaN, 0, 0));
+  expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 0, sellLeverage: 0 });
 });
 
 it.each([NaN, Infinity, -Infinity, 0, -0, -1])(

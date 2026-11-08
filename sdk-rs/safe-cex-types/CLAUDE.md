@@ -318,3 +318,12 @@ an explicit required nullable field reader. Run the scoped compiler/freshness
 gate `node --test sdk-rs/safe-cex-types/tests/position-contract.cjs` after generation.
 The legacy broad parity script still has unrelated missing capability-declaration
 coverage on this baseline; do not mistake it for the Position cutover gate.
+
+## Generated Store cutover
+
+`store_model.rs` owns StoreData and its five scalar dependencies and private
+strict codecs. `initial_store_data` owns unloaded Store defaults. The scoped
+`store` example exports only this slice to `bindings/store`; `store-generate.cjs`
+publishes six modules and the initial value without overwriting other slices.
+Composed model imports use their owning public generated identities. Opaque
+config/user data projects to unknown; its native retained/JSON policy is unchanged.
