@@ -10,46 +10,40 @@ impl Visit for Reject {
     }
 }
 
-struct PublicOnly;
-impl Visit for PublicOnly {
-    type Output = ();
-    fn visit<V: Venue + 'static>(self, engine: Engine<V>) {
-        assert!(!engine.account_startup());
-    }
-}
-
-fn construct_public(value: serde_json::Value) {
+fn refuse_public(value: serde_json::Value) {
     for injected in [false, true] {
         let options = serde_json::from_value(value.clone()).unwrap();
         let entropy = Some(safe_cex_engine::test_support::seeded_entropy(17));
-        if injected {
-            build_with_signer("polymarket", options, entropy, None, PublicOnly)
+        let error = if injected {
+            build_with_signer("polymarket", options, entropy, None, Reject)
         } else {
-            build("polymarket", options, entropy, PublicOnly)
+            build("polymarket", options, entropy, Reject)
         }
-        .unwrap();
+        .expect_err("Polymarket remains outside beta admission");
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
     }
 }
 
 #[test]
-fn inferred_public_mode_ignores_unused_remote_signing() {
-    construct_public(serde_json::json!({
+fn inferred_public_mode_keeps_beta_refusal_with_unused_remote_signing() {
+    refuse_public(serde_json::json!({
         "key": "", "accountStartup": true, "remoteSigning": true,
         "publicMode": {"requested": null, "remoteSigner": true}
     }));
 }
 
 #[test]
-fn inferred_public_mode_ignores_unused_payload_signer() {
-    construct_public(serde_json::json!({
+fn inferred_public_mode_keeps_beta_refusal_with_unused_payload_signer() {
+    refuse_public(serde_json::json!({
         "key": "", "accountStartup": true, "payloadSigner": true,
         "publicMode": {"requested": null, "payloadSigner": true}
     }));
 }
 
 #[test]
-fn inferred_public_mode_without_signing_flags_constructs() {
-    construct_public(serde_json::json!({"key": "", "publicMode": {"requested": null}}));
+fn inferred_public_mode_without_signing_flags_keeps_beta_refusal() {
+    refuse_public(serde_json::json!({"key": "", "publicMode": {"requested": null}}));
 }
 
 #[test]
@@ -119,7 +113,7 @@ fn construction_policy_explicitly_refuses_both_callback_modes() {
 }
 
 #[test]
-fn explicit_public_mode_still_constructs_without_signing_material() {
+fn explicit_public_mode_keeps_beta_refusal_without_signing_material() {
     for public in [
         serde_json::json!({"publicDataOnly": true}),
         serde_json::json!({"publicMode": {"requested": true}}),
@@ -127,7 +121,7 @@ fn explicit_public_mode_still_constructs_without_signing_material() {
         for flag in ["remoteSigning", "payloadSigner"] {
             let mut value = public.clone();
             value[flag] = true.into();
-            construct_public(value);
+            refuse_public(value);
         }
     }
 }

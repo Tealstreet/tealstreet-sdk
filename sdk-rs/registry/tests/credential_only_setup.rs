@@ -48,7 +48,12 @@ fn k4_non_validating_crates_without_dispatch_signing_refuse_injected_identities(
             )
             .expect_err("injected identities are refused");
             assert_eq!(
-                error.message, "Injected signing is not supported for this venue yet",
+                error.message,
+                if venue == "polymarket" {
+                    "unsupported venue: polymarket"
+                } else {
+                    "Injected signing is not supported for this venue yet"
+                },
                 "{venue}"
             );
         }

@@ -14,32 +14,10 @@ const modes = [
   { payloadSigner: true, publicMode: { requested: null, payloadSigner: true } },
 ];
 
-it.each(modes)('native public construction ignores unused signing intent: %j', (mode) => {
-  for (const publicOptions of [
-    { key: '', accountStartup: true, ...mode },
-    { key: 'unused-key', ...mode, publicMode: undefined, publicDataOnly: true },
-    { key: 'unused-key', accountStartup: true, ...mode, publicMode: { ...mode.publicMode, requested: true } },
-  ]) {
-    const engine = new wasm.WasmEngine('polymarket', JSON.stringify(publicOptions));
-    try {
-      if (typeof engine.construction !== 'function') throw new Error('Missing native construction record');
-      const construction: unknown = JSON.parse(engine.construction());
-      if (publicOptions.publicMode) {
-        expect(construction).toMatchObject({ publicDataOnly: true, canSign: publicOptions.key.length > 0 });
-      } else {
-        // Legacy options have no resolved-mode record; successful construction covers the flag.
-        expect(construction).toHaveProperty('bridge');
-      }
-    } finally {
-      engine.free?.();
-    }
-  }
-});
-
-it.each(modes)('native private construction retains the typed custody refusal: %j', (mode) => {
+const expectRefused = (options: unknown, protocol = false) => {
   let failure: unknown;
   try {
-    const engine = new wasm.WasmEngine('polymarket', JSON.stringify({ key: '12'.repeat(32), ...mode }));
+    const engine = new wasm.WasmEngine('polymarket', JSON.stringify(options));
     engine.free?.();
   } catch (error) {
     failure = error;
@@ -50,12 +28,24 @@ it.each(modes)('native private construction retains the typed custody refusal: %
     'venueError' in failure === false ||
     typeof failure.venueError !== 'string'
   ) {
-    throw new Error('Expected the native typed custody refusal');
+    throw new Error('Expected the native typed beta refusal');
   }
   const refusal: unknown = JSON.parse(failure.venueError);
-  expect(refusal).toMatchObject({
-    kind: 'unsupported',
-    outcome: 'notSent',
-    message: expect.stringContaining('user WebSocket requires the API secret'),
-  });
+  expect(refusal).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+  if (protocol)
+    expect(refusal).toMatchObject({ message: expect.stringContaining('user WebSocket requires the API secret') });
+};
+
+it.each(modes)('native public construction keeps SDK OUT admission: %j', (mode) => {
+  for (const publicOptions of [
+    { key: '', accountStartup: true, ...mode },
+    { key: 'unused-key', ...mode, publicMode: undefined, publicDataOnly: true },
+    { key: 'unused-key', accountStartup: true, ...mode, publicMode: { ...mode.publicMode, requested: true } },
+  ]) {
+    expectRefused(publicOptions);
+  }
+});
+
+it.each(modes)('native private construction retains the typed custody refusal: %j', (mode) => {
+  expectRefused({ key: '12'.repeat(32), ...mode }, true);
 });

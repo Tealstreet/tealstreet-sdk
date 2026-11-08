@@ -23,6 +23,7 @@ enum Input {
 }
 
 struct Rule {
+    beta_admitted: bool,
     can_sign: Option<Conditions>,
     private_eligible: Option<Conditions>,
     explicit_private_error: Option<&'static str>,
@@ -161,6 +162,10 @@ pub fn remote_signing_policy(venue: &str) -> RemoteSigningPolicy {
     venue_rule(venue).unwrap_or(&DEFAULT_RULE).remote_signing
 }
 
+pub fn beta_admitted(venue: &str) -> bool {
+    venue_rule(venue).unwrap_or(&DEFAULT_RULE).beta_admitted
+}
+
 /// Trusted setup uses explicit caller intent before keys are stripped/resolved.
 /// An explicit shared publicMode request takes precedence over the legacy flag.
 pub fn signer_setup_public_data_only(options: &EngineOptions) -> bool {
@@ -183,6 +188,12 @@ pub struct PublicMode {
     payload_signer: bool,
     #[serde(default)]
     api_key_index_present: bool,
+}
+
+impl PublicMode {
+    pub(crate) fn callback_intent(&self) -> (bool, bool) {
+        (self.remote_signer, self.payload_signer)
+    }
 }
 
 pub struct Resolved {

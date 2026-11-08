@@ -14,9 +14,9 @@ keeping secret material on the device. Wallet signing and L2 HMAC also use
 different key types; enabling just one would not provide private-account
 parity. SDK and native construction refuse these modes with `unsupported` /
 `notSent` before credentials are decoded, callbacks run or transport starts.
-Native construction resolves public-only mode before this private-custody
-check. Explicit public accounts and empty-key accounts inferred public from
-`publicMode` ignore unused signing flags and skip private account startup.
+The native registry also enforces SDK beta admission. Polymarket stays OUT
+for public and private construction alike; public mode never bypasses that
+venue gate. Independent venue codecs and their signing vectors remain tested.
 
 The existing local connector supports its wallet/proxy/Safe/deposit-wallet
 account types. Those account forms do not substitute for the user-channel

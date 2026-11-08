@@ -22,6 +22,7 @@ enum Input {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Rule {
+    beta_admitted: Option<bool>,
     can_sign: Option<Vec<Vec<Input>>>,
     private_eligible: Option<Vec<Vec<Input>>>,
     explicit_private_error: Option<String>,
@@ -345,7 +346,8 @@ fn rule(value: &Rule) -> String {
         |mapping| format!("Some(SetupMapping::{mapping:?})"),
     );
     format!(
-        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing}, setup_mapping: {setup_mapping} }}",
+        "Rule {{ beta_admitted: {}, can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing}, setup_mapping: {setup_mapping} }}",
+        value.beta_admitted.unwrap_or(true),
         conditions(&value.can_sign),
         conditions(&value.private_eligible),
     )
