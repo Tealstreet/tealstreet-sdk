@@ -675,3 +675,87 @@ fn normalized_nested_reference_replacement_reports_final_unknown() {
     );
     assert_unknown_halt(&mut h, &["cancel-algo", "order-algo"], 1, &[]);
 }
+
+fn engine_sealed_unknown_batch(grouped: bool) {
+    use safe_cex_engine::write_plan::ElementResult;
+    for status in [408, 503] {
+        let mut h = setup(if grouped { 5 } else { 1 });
+        place(
+            &mut h,
+            if grouped {
+                json!(vec![normal(1); 21])
+            } else {
+                json!([normal(21)])
+            },
+        );
+        let request = h.take("batch-orders");
+        h.respond_status(request, status, "{}");
+        assert_eq!(writes(&h), ["batch-orders"]);
+        assert_eq!(h.failures.len(), 1);
+        let error = &h.failures[0];
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT)
+            || error.message.contains("outcome of this order change is unknown: a later request was not confirmed. Check Open Orders"));
+        let rows = error
+            .elements
+            .as_ref()
+            .expect("engine seal retains indexed outcomes");
+        assert_eq!(rows.len(), 21);
+        assert!(
+            rows[..20]
+                .iter()
+                .all(|row| matches!(&row.result, ElementResult::Unknown { error }
+            if error.message.contains(ENGINE_UNKNOWN_TEXT)))
+        );
+        assert!(matches!(
+            rows[20].result,
+            ElementResult::NotSent { error: None }
+        ));
+        let telemetry = || {
+            h.actions.iter().filter(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
+                && event.message.contains(ENGINE_UNKNOWN_TEXT)
+                && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+        )).count()
+        };
+        assert_eq!(telemetry(), 1, "HTTP {status} must emit Unknown telemetry");
+        let timers: Vec<_> = h
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms > h.now && *at_ms <= h.now + 1000. => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .collect();
+        for (timer, at) in timers {
+            h.handle(at, Event::TimerFired { timer });
+            h.collect();
+        }
+        assert_eq!(
+            writes(&h),
+            ["batch-orders"],
+            "no retry or suffix after engine seal"
+        );
+        assert_eq!(h.failures.len(), 1);
+        assert_eq!(h.actions.iter().filter(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
+                && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+        )).count(), 1, "retirement must not duplicate telemetry");
+    }
+}
+
+#[test]
+fn engine_sealed_unknown_native_lots_emit_telemetry_and_halt() {
+    // HTTP failures stop TS:2232-2257 too; the engine-owned seal must retain telemetry.
+    engine_sealed_unknown_batch(false);
+}
+
+#[test]
+fn engine_sealed_unknown_grouped_batches_emit_telemetry_and_halt() {
+    // HTTP failures also stop TS:2232-2257; engine-sealed Unknown still needs journal and telemetry.
+    engine_sealed_unknown_batch(true);
+}

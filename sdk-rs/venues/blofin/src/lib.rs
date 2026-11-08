@@ -514,6 +514,11 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn observe_unproven_http_response(&mut self, _: f64, pending: &Pending, _: Response<'_>) {
+        if let Pending::Trade(request) = pending {
+            self.observe_unproven_trade(request);
+        }
+    }
     fn unproven_http_evidence(
         &self,
         pending: &Pending,
@@ -621,6 +626,7 @@ impl Venue for Blofin {
     /// An uncertain or absent-order seal: a fresh order snapshot reports
     /// through `orders_reconciled`.
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_retired_trade(cx);
         self.reconcile_uncertain_orders(cx);
     }
     fn refreshes_orders(&self) -> bool {

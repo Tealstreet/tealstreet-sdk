@@ -152,6 +152,8 @@ struct Job {
     steps: VecDeque<Step>,
     writes: Option<WritePlan>,
     pending_write: Option<(usize, usize)>,
+    // The engine seals this reply itself; emit telemetry at the next Cx callback.
+    unproven_notice_owed: bool,
     ids: Vec<String>,
     /// Store rows issued so far, restored on every terminal.
     creating: Vec<String>,
@@ -579,15 +581,7 @@ impl Job {
         if uncertain {
             error = unknown_guidance(error.outcome(Outcome::Unknown));
             error.presents = true;
-            cx.event(
-                Level::Warn,
-                code::CHILD_LEG_FAILED,
-                &error.message,
-                vec![
-                    ("command", self.command.into()),
-                    ("outcome", safe_cex_engine::Value::StaticStr("unknown")),
-                ],
-            );
+            unknown_event(cx, self.command, &error.message);
         }
         error
     }
@@ -599,6 +593,7 @@ impl Job {
             steps: VecDeque::new(),
             writes: None,
             pending_write: None,
+            unproven_notice_owed: false,
             ids: vec![],
             creating: vec![],
             canceling: vec![],
@@ -686,6 +681,14 @@ impl Blofin {
             && let Some(writes) = active.job.writes.as_ref()
         {
             evidence.write_plan(writes);
+        }
+    }
+
+    pub(crate) fn observe_unproven_trade(&mut self, request: &Request) {
+        if let Some(active) = self.trading.active.as_mut()
+            && active.job.command == request.command
+        {
+            active.job.unproven_notice_owed = true;
         }
     }
 
@@ -995,16 +998,18 @@ impl Blofin {
         };
         let quantities = if family == 0 && amount > m.limits.amount.max {
             positive(m.limits.amount.max, "maximum size")?;
-            let lots = (1..=1000_u32)
-                .find(|count| amount <= f64::from(*count) * m.limits.amount.max)
-                .ok_or("BloFin order requires too many splits")?;
-            let step = m.precision.amount;
-            let units = (amount / step).round();
-            let each = (units / f64::from(lots)).floor();
-            let remainder = units - each * f64::from(lots);
-            (0..lots)
-                .map(|index| (each + f64::from(u8::from(f64::from(index) < remainder))) * step)
-                .collect::<Vec<_>>()
+            let lots = (amount / m.limits.amount.max).ceil();
+            if lots > 1000.0 {
+                return Err("BloFin order requires too many splits".into());
+            }
+            // TS:2199-2220 rounds equal lots, then appends its native remainder.
+            let rest = num::adjust(amount % m.limits.amount.max, m.precision.amount);
+            let each = num::adjust((amount - rest) / lots, m.precision.amount);
+            let mut quantities = vec![each; lots as usize];
+            if rest != 0.0 {
+                quantities.push(rest);
+            }
+            quantities
         } else {
             vec![amount]
         };
@@ -2593,9 +2598,17 @@ impl Blofin {
             self.refresh_retired(cx, join);
         }
     }
+    pub(crate) fn reconcile_retired_trade(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.restore_retired(cx) == Some(true) {
+            self.refresh_account(cx);
+        }
+    }
     /// The I/O-free half of the settle. `Some(join)` when a refresh is owed.
     fn restore_retired(&mut self, cx: &mut Cx<'_, Pending>) -> Option<bool> {
         let job = self.trading.retired.take()?;
+        if job.unproven_notice_owed {
+            unknown_event(cx, job.command, &unknown("").message);
+        }
         self.cleanup_job(cx, &job);
         cx.store.invalidate_order_snapshots();
         Some(job.join)
@@ -3438,6 +3451,18 @@ fn http_failure(status: u16, body: &str) -> VenueError {
 }
 
 // PARITY-EXCEPTION wording follows the engine without changing its fence.
+fn unknown_event(cx: &mut Cx<'_, Pending>, command: CommandId, message: &str) {
+    cx.event(
+        Level::Warn,
+        code::CHILD_LEG_FAILED,
+        message,
+        vec![
+            ("command", command.into()),
+            ("outcome", safe_cex_engine::Value::StaticStr("unknown")),
+        ],
+    );
+}
+
 fn unknown_guidance(mut error: VenueError) -> VenueError {
     if error.outcome == Some(Outcome::Unknown) {
         error.message = "The outcome is unknown. Check Open Orders".into();

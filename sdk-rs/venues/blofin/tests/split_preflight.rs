@@ -98,7 +98,7 @@ fn positional_zero_protection_remains_explicit() {
     assert_eq!(h.pending.len(), 0);
 }
 #[test]
-fn exact_minimum_balanced_control() {
+fn legacy_split_preserves_attachments_and_distinct_ids() {
     let mut h = harness(4.0, 5.0, 1.0);
     let mut intent = order(12.0);
     intent["takeProfit"] = json!(65000.04);
@@ -106,10 +106,11 @@ fn exact_minimum_balanced_control() {
     intent["reduceOnly"] = json!(true);
     place(&mut h, json!([intent]));
     let rows = accept_batch(&mut h, 100);
-    assert_eq!(rows.len(), 3);
+    // TS:2199-2220 rounds each of three lots to 3, then appends remainder 2.
+    assert_eq!(rows.len(), 4);
     let mut ids = std::collections::HashSet::new();
-    for row in rows {
-        assert_eq!(row["size"], "4");
+    for (row, size) in rows.into_iter().zip(["3", "3", "3", "2"]) {
+        assert_eq!(row["size"], size);
         assert_eq!(row["reduceOnly"], true);
         assert_eq!(row["attachAlgoOrders"][0]["tpTriggerPrice"], "65000");
         assert_eq!(row["attachAlgoOrders"][0]["slTriggerPrice"], "55000");
@@ -250,6 +251,11 @@ fn ambiguous_http_reply_keeps_pending_element_unknown_and_suffix_unsent() {
     let request = h.take("batch-orders");
     h.respond_status(request, 503, "{}");
     assert_outcomes(&h, true);
+    assert_eq!(h.actions.iter().filter(|action| matches!(action,
+        Action::Notice(Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
+                && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    )).count(), 1, "accepted prefix does not hide engine-sealed Unknown telemetry");
 }
 
 #[test]
@@ -492,7 +498,7 @@ fn legacy_native_bounds_are_left_to_the_venue() {
             if amount == 3.0 {
                 vec![json!("3")]
             } else {
-                vec![json!("4"), json!("4"), json!("3")]
+                vec![json!("3"), json!("3"), json!("3"), json!("1")]
             }
         );
         assert_eq!(h.requests.len(), 1);

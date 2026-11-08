@@ -485,13 +485,15 @@ fn partially_accepted_split_replacement_never_puts_back_the_old_remainder() {
     edit_stop(&mut h, 56000.0);
     let replacement = to_replacement(&mut h);
     let rows = body(&replacement);
-    assert_eq!(rows.as_array().unwrap().len(), 2);
+    // TS:2199-2220 rounds (6 - 1) / 2 to 3 and appends remainder 1.
+    assert_eq!(rows.as_array().unwrap().len(), 3);
     assert_eq!(rows[0]["size"], "3");
     assert_eq!(rows[1]["size"], "3");
-    h.respond(replacement, r#"{"code":"2","data":[{"orderId":"100","code":"0"},{"orderId":"0","code":"103003","msg":"refused"}]}"#);
+    assert_eq!(rows[2]["size"], "1");
+    h.respond(replacement, r#"{"code":"2","data":[{"orderId":"100","code":"0"},{"orderId":"0","code":"103003","msg":"refused"},{"orderId":"0","code":"103003","msg":"refused"}]}"#);
     let error = failure(&h).expect("partial replacement");
     let outcomes = error.elements.as_ref().expect("all replacement effects");
-    assert_eq!(outcomes.len(), 3);
+    assert_eq!(outcomes.len(), 4);
     assert_eq!(
         outcomes[0].result,
         ElementResult::Applied {
@@ -508,6 +510,9 @@ fn partially_accepted_split_replacement_never_puts_back_the_old_remainder() {
     );
     assert!(
         matches!(&outcomes[2].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert!(
+        matches!(&outcomes[3].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
     );
     assert_eq!(
         error.partial.as_ref().expect("accepted lot").order_ids,

@@ -27,6 +27,10 @@ Normal split lots and grouped rows do not gain a whole-plan native min/max gate;
 legacy partial-placement cases remain known issues. Existing zero-size and
 opening-trigger shape/provenance checks remain in the venue driver. Unknown
 stored protection references normalize to the TS default `last`.
+Split allocation also follows TS: round equal lots and append the rounded native
+remainder. For amount 11/12 with maximum 5 and step 1, the payload sizes are
+`[3,3,3,1]`/`[3,3,3,2]`, including TS's quantity shortfall. Rounding can also
+overshoot: amount 6 with those bounds yields `[3,3,1]`.
 
 `WritePlan` reports per-element outcomes without selecting execution policy.
 The existing native amendment fast path retains its cancel/re-place fallback
@@ -52,3 +56,5 @@ including native lots, grouped batches, protective children, cancellation,
 replacement and sibling compensation. Failures retain placed IDs and indexed
 Unknown/notSent outcomes, show "The outcome is unknown. Check Open Orders",
 and emit an Unknown telemetry event. The engine fence remains unchanged.
+Engine-sealed HTTP Unknowns retain the same telemetry through the venue's
+retirement/reconciliation callback, without routing the reply through its decoder.

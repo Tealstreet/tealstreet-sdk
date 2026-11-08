@@ -514,7 +514,8 @@ fn settings_rejections_preserve_known_leverage() {
     assert_eq!(h.e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
 }
 #[test]
-fn split_sizing_preserves_native_quantity_and_stays_below_maximum() {
+fn legacy_split_sizing_uses_rounded_equal_lots_and_native_remainder() {
+    // TS:2199-2220 yields 333.3 * 3 + 1, retaining its 0.1 quantity shortfall.
     let mut h = Harness::new();
     h.seed();
     place(
@@ -529,10 +530,7 @@ fn split_sizing_preserves_native_quantity_and_stays_below_maximum() {
         .iter()
         .map(|p| p["size"].as_str().unwrap().parse::<f64>().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(
-        sizes.iter().map(|s| (s * 10.0).round() as u64).sum::<u64>(),
-        10010
-    );
+    assert_eq!(sizes, [333.3, 333.3, 333.3, 1.0]);
     assert!(sizes.iter().all(|s| *s <= 500.0));
 }
 #[test]
