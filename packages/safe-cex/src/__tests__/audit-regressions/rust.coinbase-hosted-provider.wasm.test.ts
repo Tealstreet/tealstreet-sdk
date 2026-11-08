@@ -55,6 +55,39 @@ const input = (uri?: string) =>
     .join('.');
 
 it.each(['coinbase', 'coinbasespot'] as ExchangeName[])(
+  'direct WASM %s keeps keyless and explicit public construction independent of signer credentials',
+  async (name) => {
+    const { WasmEngine } = await loadNodeEngine();
+    const stale = { key: 'stale', secret: 'malformed' };
+    const cases = [
+      { options: {} },
+      { options: { secret: 'malformed', readCredentials: stale } },
+      { options: { key: '', secret: 'malformed', readCredentials: stale } },
+      { options: { publicDataOnly: true, ...stale, readCredentials: stale } },
+      { options: { publicDataOnly: true }, capsule: { primary: stale, secondary: stale } },
+      { options: {}, capsule: { secondary: stale } },
+      { options: {}, capsule: { primary: { key: '', secret: 'malformed' }, secondary: stale } },
+    ];
+    for (const { options, capsule } of cases) {
+      const engine = new WasmEngine(name, JSON.stringify(options), capsule && JSON.stringify(capsule));
+      try {
+        expect(JSON.parse(engine.coinbaseSigningMetadata!())).toBeNull();
+        const actions = JSON.parse(engine.start(now)) as { type: string; url?: string; headers?: [string, string][] }[];
+        const requests = actions.filter((action) => action.type === 'http');
+        expect(requests.length).toBeGreaterThan(0);
+        for (const request of requests) {
+          expect(request.url).toContain(name === 'coinbasespot' ? '/market/products' : 'drb.coinbase.com');
+          expect(request.headers?.some(([header]) => header.toLowerCase() === 'authorization')).toBe(false);
+        }
+        expect(actions.some((action) => action.type === 'sign')).toBe(false);
+      } finally {
+        engine.free?.();
+      }
+    }
+  },
+);
+
+it.each(['coinbase', 'coinbasespot'] as ExchangeName[])(
   'actual WASM %s signs exact native REST and WS JWS through device custody',
   async (name) => {
     const browser = fixture(name);

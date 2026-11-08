@@ -125,6 +125,94 @@ impl Visit for Start {
         safe_cex_engine::test_support::prepared_actions(&mut engine, 1700000000000.)
     }
 }
+fn assert_public_start(venue: &str, actions: &[Action]) {
+    let requests: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Http(http) => Some(http),
+            _ => None,
+        })
+        .collect();
+    assert!(!requests.is_empty(), "{venue} must start public discovery");
+    for http in requests {
+        assert!(!http.url.contains("/portfolios"));
+        assert!(
+            !http
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        );
+        assert!(
+            if venue == "coinbasespot" {
+                http.url.contains("/market/products")
+            } else {
+                http.url.contains("drb.coinbase.com")
+            },
+            "unexpected public URL: {}",
+            http.url
+        );
+    }
+}
+#[test]
+fn keyless_aliases_ignore_stale_signing_material_and_start_publicly() {
+    for venue in ["coinbase", "coinbasespot"] {
+        for json in [
+            "{}",
+            r#"{"secret":"not a key","readCredentials":{"key":"stale","secret":"malformed"}}"#,
+            r#"{"key":"","secret":"malformed","readCredentials":{"key":"stale","secret":"malformed"}}"#,
+        ] {
+            let actions = build(venue, serde_json::from_str(json).unwrap(), None, Start).unwrap();
+            assert_public_start(venue, &actions);
+        }
+    }
+}
+#[test]
+fn explicit_public_aliases_ignore_both_raw_credential_slots() {
+    for venue in ["coinbase", "coinbasespot"] {
+        let options = serde_json::from_str(r#"{"publicDataOnly":true,"key":"stale","secret":"malformed","readCredentials":{"key":"stale","secret":"malformed"}}"#).unwrap();
+        assert_public_start(venue, &build(venue, options, None, Start).unwrap());
+    }
+}
+#[test]
+fn public_and_keyless_capsules_ignore_unused_credential_slots() {
+    for venue in ["coinbase", "coinbasespot"] {
+        for (options, capsule) in [
+            (
+                r#"{"publicDataOnly":true}"#,
+                r#"{"primary":{"key":"stale","secret":"malformed"},"secondary":{"key":"stale","secret":"malformed"}}"#,
+            ),
+            (
+                "{}",
+                r#"{"secondary":{"key":"stale","secret":"malformed"}}"#,
+            ),
+            (
+                "{}",
+                r#"{"primary":{"key":"","secret":"malformed"},"secondary":{"key":"stale","secret":"malformed"}}"#,
+            ),
+        ] {
+            let mut options: EngineOptions = serde_json::from_str(options).unwrap();
+            let (provider, ids) =
+                local_signer_from_capsule(venue, capsule.into(), &mut options).unwrap();
+            assert!(ids.primary.is_none() && ids.secondary.is_none());
+            assert!(options.coinbase_signing.is_none() && options.coinbase_read_signing.is_none());
+            options.signing = Some(ids);
+            let actions =
+                safe_cex_venues::build_with_signer(venue, options, None, Some(provider), Start)
+                    .unwrap();
+            assert_public_start(venue, &actions);
+        }
+    }
+}
+#[test]
+fn private_authority_still_requires_valid_material_and_a_bound_provider() {
+    for venue in ["coinbase", "coinbasespot"] {
+        let malformed = serde_json::from_str(r#"{"key":"stale","secret":"malformed"}"#).unwrap();
+        assert!(build(venue, malformed, None, Start).is_err());
+        let (_, ids, mut options) = setup();
+        options.signing = Some(ids);
+        assert!(safe_cex_venues::build_with_signer(venue, options, None, None, Start).is_err());
+    }
+}
 #[test]
 fn aliases_construct_with_owned_local_keys_and_payload_mode_refuses_before_io() {
     for venue in ["coinbase", "coinbasespot"] {
