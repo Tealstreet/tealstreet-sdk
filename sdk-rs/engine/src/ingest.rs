@@ -742,9 +742,26 @@ fn positions(
         ids.push(strings.required(c.u32()?)?.to_owned());
     }
     let mut positions = Vec::with_capacity(count);
+    let mut native_extras = Vec::with_capacity(count);
     for (i, id) in ids.into_iter().enumerate() {
         let packed = enums[i];
         let column = |n: usize| columns[n][i];
+        // Presence, not the payload sentinel, decides absence. Match the JS
+        // decoder: ignore absent payloads, refuse every non-finite present one.
+        let native = |n: usize, bit: u32| {
+            if packed & (1_u32 << bit) == 0_u32 {
+                Ok(None)
+            } else if column(n).is_finite() {
+                Ok(Some(column(n)))
+            } else {
+                Err(IngestError(if n == 9 {
+                    "invalid Position contractsNative"
+                } else {
+                    "invalid Position unrealizedPnlNative"
+                }))
+            }
+        };
+        native_extras.push([native(9, 24)?, native(10, 25)?]);
         positions.push(Position {
             id,
             symbol: strings.required(c.u32()?)?.to_owned(),
@@ -762,7 +779,7 @@ fn positions(
             last_update: present(column(8)),
         });
     }
-    store.set_positions(positions);
+    store.set_frame_positions(positions, native_extras);
     Ok(())
 }
 
@@ -1566,6 +1583,227 @@ pub(crate) mod tests {
         assert!(applied.orders && applied.positions);
         assert_eq!(store.orders(), source.orders());
         assert_eq!(store.positions(), source.positions());
+    }
+
+    fn native_position() -> crate::model::Position {
+        use crate::model::{Position, PositionSide};
+        Position {
+            id: "native-position".into(),
+            symbol: "BTCUSDT".into(),
+            side: PositionSide::Long,
+            entry_price: 100.,
+            notional: 30.,
+            leverage: 2.,
+            margin_type: None,
+            position_mode: None,
+            unrealized_pnl: -1.25,
+            realized_pnl: None,
+            contracts: 0.3,
+            liquidation_price: 80.,
+            margin_size: None,
+            last_update: None,
+        }
+    }
+
+    fn position_native_columns(store: &Store) -> Vec<(u32, [Option<f64>; 2])> {
+        let payload = sections_of(store, section::POSITIONS).remove(0);
+        let mut c = Cursor::new(&payload);
+        let count = c.u32().unwrap() as usize;
+        for _ in 0..count {
+            c.u32().unwrap();
+        }
+        let enums: Vec<_> = (0..count).map(|_| c.u32().unwrap()).collect();
+        c.align8();
+        for _ in 0..count * 9 {
+            c.f64().unwrap();
+        }
+        let sizes: Vec<_> = (0..count).map(|_| c.f64().unwrap()).collect();
+        (0..count)
+            .map(|i| {
+                let pnl = c.f64().unwrap();
+                (
+                    enums[i] >> 24,
+                    [
+                        (!sizes[i].is_nan()).then_some(sizes[i]),
+                        (!pnl.is_nan()).then_some(pnl),
+                    ],
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn position_frame_native_metadata_survives_missing_and_stale_target_markets() {
+        use crate::QuantityUnits;
+        for units in [
+            QuantityUnits::Base,
+            QuantityUnits::NativePlacement,
+            QuantityUnits::InverseNative,
+            QuantityUnits::InverseContractSized,
+        ] {
+            let mut source = Store::default();
+            let mut source_market = market("BTCUSDT");
+            source_market.contract_size = Some(0.1);
+            source_market.is_inverse = Some(matches!(
+                units,
+                QuantityUnits::InverseNative | QuantityUnits::InverseContractSized
+            ));
+            source.set_quantity_units(units);
+            source.set_markets(vec![source_market]);
+            source.set_positions(vec![native_position()]);
+            let expected = position_native_columns(&source);
+            for target_size in [None, Some(0.1), Some(0.01)] {
+                let mut target = Store::default();
+                target.set_quantity_units(QuantityUnits::InverseNative);
+                if let Some(size) = target_size {
+                    let mut m = market("BTCUSDT");
+                    m.contract_size = Some(size);
+                    m.is_inverse = Some(true);
+                    target.set_markets(vec![m]);
+                }
+                let mut writer = FrameWriter::new(Vec::new(), 0.0);
+                source.write(&source.account_snapshot(), &mut writer);
+                let bytes = writer.finish();
+                apply(
+                    &mut target,
+                    &mut IngestState::default(),
+                    &parse(&bytes).unwrap(),
+                    true,
+                )
+                .unwrap();
+                assert_eq!(
+                    position_native_columns(&target),
+                    expected,
+                    "units={units:?}, target size={target_size:?}"
+                );
+            }
+        }
+    }
+
+    fn explicit_position_frame(native: [f64; 2], presence: u32) -> Vec<u8> {
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        let id = writer.string("incoming");
+        let symbol = writer.string("BTCUSDT");
+        writer.begin_revision(section::POSITIONS, 2);
+        writer.u32(1);
+        writer.u32(u32::MAX);
+        writer.u32(1 | presence << 24);
+        writer.pad();
+        writer.f64s([
+            100.,
+            30.,
+            2.,
+            -1.25,
+            f64::NAN,
+            0.3,
+            80.,
+            f64::NAN,
+            f64::NAN,
+            native[0],
+            native[1],
+        ]);
+        writer.u32(id);
+        writer.u32(symbol);
+        writer.end();
+        writer.finish()
+    }
+
+    #[test]
+    fn position_frame_refuses_each_present_nonfinite_native_column_before_replacing_rows() {
+        for column in 0..2 {
+            for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut target = Store::default();
+                target.set_positions(vec![native_position()]);
+                let before = target.positions().to_vec();
+                let mut values = [3., -1.25];
+                values[column] = invalid;
+                let bytes = explicit_position_frame(values, 3);
+                assert!(
+                    apply(
+                        &mut target,
+                        &mut IngestState::default(),
+                        &parse(&bytes).unwrap(),
+                        false
+                    )
+                    .is_err(),
+                    "column={column}, invalid={invalid}"
+                );
+                assert_eq!(target.positions(), before);
+                // Just like JS, an unset presence bit makes even a non-finite payload absent.
+                let bytes = explicit_position_frame(values, 3 & !(1 << column));
+                apply(
+                    &mut target,
+                    &mut IngestState::default(),
+                    &parse(&bytes).unwrap(),
+                    false,
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn position_frame_presence_is_authoritative_and_native_updates_clear_it() {
+        let mut target = Store::default();
+        target.set_quantity_units(crate::QuantityUnits::NativePlacement);
+        target.set_markets(vec![market("BTCUSDT")]);
+        for presence in 0..4 {
+            // Zero and negative finite values are valid, and must not trigger fallback.
+            let bytes = explicit_position_frame([0., -2.5], presence);
+            apply(
+                &mut target,
+                &mut IngestState::default(),
+                &parse(&bytes).unwrap(),
+                false,
+            )
+            .unwrap();
+            assert_eq!(
+                position_native_columns(&target),
+                vec![(
+                    presence,
+                    [
+                        (presence & 1 != 0).then_some(0.),
+                        (presence & 2 != 0).then_some(-2.5)
+                    ]
+                )]
+            );
+        }
+        // Replacements, in-place updates, removals, reset and reinsertion must
+        // retire imported metadata and keep row alignment intact.
+        for operation in ["replace", "upsert", "update", "remove", "reset"] {
+            let bytes = explicit_position_frame([99., -99.], 3);
+            apply(
+                &mut target,
+                &mut IngestState::default(),
+                &parse(&bytes).unwrap(),
+                false,
+            )
+            .unwrap();
+            let mut row = target.positions()[0].clone();
+            row.contracts = 0.7;
+            match operation {
+                "replace" => target.set_positions(vec![row]),
+                "upsert" => target.upsert_position(row),
+                "update" => target.update_positions(|p| p.contracts = 0.7),
+                "remove" => {
+                    target.upsert_position(crate::model::Position {
+                        contracts: 0.,
+                        ..row.clone()
+                    });
+                    target.upsert_position(row);
+                }
+                "reset" => {
+                    target.reset_account();
+                    target.upsert_position(row);
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                position_native_columns(&target),
+                vec![(1, [Some(0.7), None])],
+                "{operation}"
+            );
+        }
     }
 
     /// ORDERS' trigger word: bit 16 carries `native_algo` both ways, a word without it

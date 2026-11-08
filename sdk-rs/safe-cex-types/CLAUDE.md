@@ -307,6 +307,9 @@ the private companions, so the strict metadata inventory remains exact.
 
 ## Generated Position cutover
 
+`src/position.rs` owns Position, PositionExtra, PositionOption, their strict
+private codecs and the Position serializer; `lib.rs` only re-exports the contract.
+Keep Position edits in that module so later type slices do not touch shared codecs.
 Position now owns the SDK declaration (and PositionSide/PositionMode/MarginType/
 OptionGreeks dependencies), published by `generate.cjs` into
 `packages/safe-cex/src/generated`. `liquidation_price` is `Option<f64>` but the
