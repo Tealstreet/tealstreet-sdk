@@ -37,7 +37,8 @@ The existing native amendment fast path retains its cancel/re-place fallback
 for a surviving TP/SL sibling after a definite refusal or failed verification.
 Fallback steps are registered in the same journal, while unused branches remain
 notSent. Master's original-order protective put-back requires a proven refusal
-and no accepted replacement IDs: class-A put-back kept pending Sam's policy answer.
+and no accepted replacement IDs: protective put-back kept per Sam's decision,
+SPLIT_PLAN_INVARIANT.md exception 2.
 Its planned and dispatched effects use the same journal. Accepted cancels, settings and amendments use
 `Applied` with known target references. Cancel targets never become created IDs;
 engine classification, reconciliation fences, custody and signing remain intact.

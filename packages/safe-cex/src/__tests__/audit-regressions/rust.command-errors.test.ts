@@ -177,6 +177,45 @@ it('retains applied cancel batch counts and the unknown index without created or
   expect(r.errors).toHaveBeenCalledTimes(1);
 });
 
+it.each(['placement', 'cancellation'] as const)('retains BloFin %s facts and attempted counts at the JS boundary after Unknown', async (intent) => {
+  const r = await fixture('blofin');
+  const message = 'The outcome is unknown. Check Open Orders';
+  const orderIds = intent === 'placement' ? ['accepted'] : [];
+  const detail: VenueErrorDetail = {
+    message,
+    kind: 'internal',
+    outcome: 'unknown',
+    partial: { orderIds, total: 3, failedIndex: 1 },
+    elements: [
+      intent === 'placement'
+        ? { index: 0, status: 'placed', orderIds: ['accepted'] }
+        : { index: 0, status: 'applied', effect: 'cancel', targetOrderId: 'accepted-cancel' },
+      { index: 1, status: 'unknown', error: { message, outcome: 'unknown' } },
+      { index: 2, status: 'notSent' },
+    ],
+  };
+  r.onCommand(({ command }) => [{ op: 'done', command, error: message, detail }]);
+  const result = intent === 'placement'
+    ? r.exchange.placeOrders(['first', 'second', 'third'].map((clientOrderId) => ({ ...order, clientOrderId })))
+    : r.exchange.cancelOrders(['accepted-cancel', 'unknown-cancel', 'untouched'].map((id) => ({
+      ...order, id, status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+    })));
+  const error = await result.catch((error: unknown) => error);
+  const expected = {
+    message,
+    outcome: 'unknown',
+    elements: detail.elements,
+    partialOrderIds: orderIds,
+    partialOrderCount: orderIds.length,
+    totalOrderCount: 3,
+    failedOrderIndex: 1,
+  };
+  expect(error).toBeInstanceOf(ExchangeError);
+  expect(error).toMatchObject(expected);
+  expect(serializeCommandError(error)).toMatchObject(expected);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+});
+
 it('keeps populated placement error output byte-identical to master 343e38cbe96', () => {
   const detail: VenueErrorDetail = {
     message: 'Second placement acknowledgement lost',
