@@ -146,16 +146,11 @@ async fn backpack_hosted_startup_uses_primary_device_custody() -> Result {
     let mut device = Device::new()?;
     let (remote, options) = device.remote()?;
     let value: Value = serde_json::from_str(&options)?;
-    for field in [
-        "key",
-        "secret",
-        "passphrase",
-        "remoteSigner",
-        "payloadSigner",
-    ] {
+    for field in ["key", "secret", "passphrase", "remoteSigner"] {
         assert!(value.get(field).is_none());
     }
     assert_eq!(value["remoteSigning"], true);
+    assert_eq!(value["payloadSigner"], false);
     assert_eq!(
         value["signing"].as_object().ok_or("missing signing")?.len(),
         1
@@ -182,6 +177,38 @@ async fn backpack_hosted_startup_uses_primary_device_custody() -> Result {
         )
         .is_err()
     );
+    assert!(safe_cex_native::resolve::rest_base_url("binance", false).is_ok());
+    assert!(safe_cex_venues::supported("backpack"));
+    assert!(safe_cex_native::resolve::rest_base_url("backpack", true).is_err());
+    let ws_goldens: Vec<String> =
+        serde_json::from_str(include_str!("fixtures/backpack-hosted-ws-goldens.json"))?;
+    for (time_index, offset) in [0., 1000.].into_iter().enumerate() {
+        for (raw, expected) in [(None, 60000), (Some(20000.9), 20000), (Some(90000.), 60000)] {
+            let mut device = Device::new()?;
+            let (mut driver, actions) = ready_at(&mut device, "[]", raw, NOW + offset).await?;
+            let timestamp = safe_cex_engine::num::format((NOW + offset).floor());
+            let ws = device
+                .payloads
+                .iter()
+                .position(|payload| {
+                    payload == &format!("instruction=subscribe&timestamp={timestamp}&window=5000")
+                })
+                .ok_or("missing WS auth")?;
+            assert_eq!(device.signatures[ws], ws_goldens[time_index]);
+            assert!(actions.iter().any(|action|matches!(action,Action::Http(request) if request.url.ends_with("/account")&&request.headers.iter().any(|(name,value)|*name=="X-Window"&&value==&expected.to_string()))));
+            command(&mut *driver, json!({"op":"fetchAccount","command":31}))?;
+            let packets = requests(driver.pump(&mut device).await?);
+            assert!(!packets.is_empty());
+            for packet in packets {
+                assert!(
+                    packet
+                        .headers
+                        .iter()
+                        .any(|(name, value)| *name == "X-Window" && value == &expected.to_string())
+                );
+            }
+        }
+    }
     assert_eq!(
         remote.provider.can_sign(
             &safe_cex_engine::signing::KeyRef("foreign".into()),
@@ -314,17 +341,15 @@ async fn backpack_hosted_unknown_write_never_replays() -> Result {
                 );
             }
             let out = driver.pump(&mut device).await?;
-            assert_eq!(writes(&out), 0, "ambiguous leg replayed");
+            assert_eq!(writes(&out), 0, "ambiguous leg replayed: {op} {status}");
             let error = failure(&out, 51)?;
             assert_eq!(error.outcome, Some(Outcome::Unknown), "{op} {status}");
-            assert!(
-                error.legacy_text().contains("Check Open Orders")
-                    || error
-                        .legacy_text()
-                        .to_lowercase()
-                        .contains("check your open orders"),
-                "{op} {status}"
-            );
+            if op == "put-back" || op == "amend-replace" {
+                assert!(
+                    error.legacy_text().contains("Check Open Orders"),
+                    "{op} {status}"
+                );
+            }
             if op == "protective-child" {
                 assert_eq!(
                     error.partial.as_ref().ok_or("lost prior ids")?.order_ids,
@@ -416,11 +441,7 @@ async fn backpack_private_payload_and_undeclared_venue_stay_refused() -> Result 
     .ok_or("PayloadSigner admitted")?;
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
-    assert!(
-        error
-            .message
-            .contains("Backpack requires RemoteSigner Ed25519 custody")
-    );
+    assert!(error.message == "Rust backpack has no REST-only PayloadSigner lifecycle");
     assert!(
         safe_cex_remote_signer::remote_account(
             device.link,

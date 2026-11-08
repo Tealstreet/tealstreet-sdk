@@ -315,6 +315,9 @@ impl safe_cex_venues::Visit for Build {
     }
 }
 pub fn build(device: &Device, public: bool) -> Result<Box<dyn Driver>> {
+    build_window(device, public, None)
+}
+fn build_window(device: &Device, public: bool, window: Option<f64>) -> Result<Box<dyn Driver>> {
     let init = init(if public { "" } else { "fixture-key" });
     let prepared = accounts::prepare(
         &init,
@@ -326,9 +329,11 @@ pub fn build(device: &Device, public: bool) -> Result<Box<dyn Driver>> {
         },
     )?;
     let provider = prepared.remote.map(|remote| remote.provider);
+    let mut options: safe_cex_venues::EngineOptions = serde_json::from_str(&prepared.options)?;
+    options.recv_window = window;
     Ok(safe_cex_venues::build_with_signer(
         "backpack",
-        serde_json::from_str(&prepared.options)?,
+        options,
         Some(safe_cex_engine::test_support::seeded_entropy(5)),
         provider,
         Build,
@@ -362,7 +367,16 @@ pub fn startup_body(url: &str, orders: &str) -> String {
     }
 }
 pub async fn ready(device: &mut Device, orders: &str) -> Result<(Box<dyn Driver>, Vec<Action>)> {
-    let mut driver = build(device, false)?;
+    ready_at(device, orders, None, NOW).await
+}
+pub async fn ready_at(
+    device: &mut Device,
+    orders: &str,
+    window: Option<f64>,
+    now: f64,
+) -> Result<(Box<dyn Driver>, Vec<Action>)> {
+    let mut driver = build_window(device, false, window)?;
+    driver.set_time(now);
     driver.start();
     let mut all = vec![];
     for _ in 0..12 {
