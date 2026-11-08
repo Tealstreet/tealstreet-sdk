@@ -40,7 +40,8 @@ const prepareMexcRequest = (config: InternalAxiosRequestConfig, key: string, sta
   const body = typeof config.data === 'string' ? config.data : config.data == null ? '' : JSON.stringify(config.data);
   const query = config.params ? qs.stringify(config.params, { arrayFormat: 'repeat', sort: (a, b) => a.localeCompare(b) })
     : (config.url ?? '').split('?')[1] ?? '';
-  return { config: { ...config, ...(method === 'GET' ? {} : { data: body || config.data }) }, stamp,
+  // The body is already serialized. A second JSON transform would trim replay bytes.
+  return { config: { ...config, ...(method === 'GET' ? {} : { data: body || config.data, transformRequest: [(data: unknown) => data] }) }, stamp,
     payload: `${key}${stamp}${method === 'GET' ? query : body}` };
 };
 
@@ -264,10 +265,13 @@ export const signHostedHttp = async (
     const prepared = prepareMexcRequest(config, credential, now());
     const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
     if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
-    return { ...prepared.config, headers: new AxiosHeaders({ ...config.headers, ApiKey: credential,
+    const headers = new AxiosHeaders(config.headers);
+    for (const [name, value] of output.headers ?? []) headers.set(name, value);
+    headers.set({ ApiKey: credential,
       'Request-Time': prepared.stamp, Signature: output.signature,
       'Recv-Window': String(Math.max(1, Math.min(20_000, options.extra?.recvWindow ?? 20_000))),
-      'Content-Type': 'application/json' }) };
+      'Content-Type': 'application/json' });
+    return { ...prepared.config, headers };
   } : okx ? async (config) => {
     // Market paths keep the existing local signing behavior. The skip flag
     // concerns the keyless transport roundtrip, not browser-held signing.

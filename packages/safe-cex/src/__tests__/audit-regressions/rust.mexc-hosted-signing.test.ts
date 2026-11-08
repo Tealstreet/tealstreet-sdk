@@ -69,3 +69,21 @@ it('keeps public endpoints unsigned and refuses a changed signing identity', asy
     : { credential: 'rotated-key', signature: '00'.repeat(32) });
   await expect(signHostedHttp('mexc', { key: '', secret: '' }, true, host, request(vectors[0]))).rejects.toThrow('Signing identity changed');
 });
+
+it.each([' \n { "vol": 1 } \t ', '\n["739113577038255616"]\r\n'])('authenticates the exact Axios adapter body for replay JSON %j', async (body) => {
+  const input = request(vectors[2]); input.config!.data = body;
+  const { host } = owned();
+  const result = await signHostedHttp('mexc', { key: '', secret: '' }, true, host, input);
+  expect(result.error).toBeUndefined();
+  expect(result.config?.headers.Signature).toBe(mac(`replay-key${stamp}${result.config?.data}`));
+  expect(result.config?.data).toBe(body);
+});
+
+it('retains permitted callback headers while native authentication headers take precedence', async () => {
+  const { host, hostedSigning } = owned();
+  hostedSigning.mockImplementation(async (input) => input.kind === 'credential' ? { credential: 'replay-key' }
+    : { credential: 'replay-key', signature: mac(input.payload!), headers: [['X-Trace', 'fixture-trace']] });
+  const result = await signHostedHttp('mexc', { key: '', secret: '' }, true, host, request(vectors[2]));
+  expect(result.config?.headers['X-Trace']).toBe('fixture-trace');
+  expect(result.config?.headers.ApiKey).toBe('replay-key');
+});

@@ -62,6 +62,17 @@ it('actual WASM MEXC WS signing matches the local key and the native auth recipe
   expect(sign).toHaveBeenCalledOnce();
 });
 
+it.each([' \n { "vol": 1 } \t ', '\n["739113577038255616"]\r\n'])('actual WASM authenticates exact replay body bytes %j', async (body) => {
+  const browser = fixture(); const { remoteSigner } = signer(browser.exchange);
+  const server = fixture({ secret: '', remoteSigner });
+  const input = request(vectors[2]); input.config!.data = body;
+  const result = await server.exchange.signHttpRequest(input);
+  expect(result.error).toBeUndefined();
+  expect(result.config?.data).toBe(body);
+  expect(result.config?.headers.Signature).toBe(mac(`replay-key${stamp}${result.config?.data}`));
+  expect(server.io).not.toHaveBeenCalled();
+});
+
 it('provider failures and malformed results cannot leak material, send I/O or fall back', async () => {
   const logs = [vi.spyOn(console, 'error').mockImplementation(() => {}), vi.spyOn(console, 'warn').mockImplementation(() => {}), vi.spyOn(console, 'log').mockImplementation(() => {})];
   for (const mode of ['error', 'malformed', 'unavailable'] as const) {
@@ -103,9 +114,9 @@ const markets = {"success":true,"code":0,"data":[{"symbol":"BTC_USDT","baseCoin"
 
 const tickers = {"success":true,"code":0,"data":[{"symbol":"BTC_USDT","lastPrice":60000,"fairPrice":60001,"indexPrice":59999,"bid1":59999.9,"ask1":60000,"riseFallRate":0.01,"holdVol":10000,"fundingRate":0.0001,"volume24":50000,"amount24":300000}]};
 
-it.each(['remote', 'payload', 'remote-trimmed'] as const)('actual WASM MEXC %s startup signs REST, retains identity and selects the private feed policy', async (mode) => {
+it.each(['remote', 'payload', 'payload-headers', 'remote-trimmed'] as const)('actual WASM MEXC %s startup signs REST, retains identity and selects the private feed policy', async (mode) => {
   const browser = fixture(); const { sign, remoteSigner } = signer(browser.exchange);
-  const payloadSigner = vi.fn(({ payload }: { payload: string }) => ({ signature: mac(payload) }));
+  const payloadSigner = vi.fn(({ payload }: { payload: string }) => ({ signature: mac(payload), ...(mode === 'payload-headers' ? { headers: { 'X-Trace': 'fixture-trace', apikey: 'spoofed', signature: 'spoofed', 'request-time': '1', 'recv-window': '1', 'content-type': 'spoofed' } } : {}) }));
   const logins: string[] = [];
   const requests: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> = [];
   setRustEngineTransport(() => ({ prepareHttp: prepareRecordedHttp, now: () => stamp,
@@ -126,7 +137,7 @@ it.each(['remote', 'payload', 'remote-trimmed'] as const)('actual WASM MEXC %s s
     setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
   }));
   const server = new RustEngineExchange('mexc', { engine: 'rust', key: 'replay-key', secret: '',
-    applicationId: 'fixture-app', ...(mode === 'payload' ? { payloadSigner } : { remoteSigner }),
+    applicationId: 'fixture-app', ...(mode.startsWith('payload') ? { payloadSigner } : { remoteSigner }),
     ...(mode === 'remote-trimmed' ? { key: ' replay-key ' } : {}) }, new DefaultStore()); live.push(server);
   const errors: unknown[] = [];
   void server.start().catch((error) => errors.push(error));
@@ -140,9 +151,12 @@ it.each(['remote', 'payload', 'remote-trimmed'] as const)('actual WASM MEXC %s s
     const url = new URL(r.url);
     expect(r.headers.Signature).toBe(mac(`replay-key${stamp}${r.method === 'GET' ? url.search.slice(1) : r.body ?? ''}`));
     expect(r.headers.ApiKey).toBe('replay-key');
+    if (mode === 'payload-headers') expect(r.headers['X-Trace']).toBe('fixture-trace');
+    expect(r.headers['Content-Type']).toBe('application/json');
+    expect(r.headers['Recv-Window']).toBe('20000');
     expect(r.headers['Request-Time']).toBe(String(stamp));
   }
-  if (mode !== 'payload') {
+  if (!mode.startsWith('payload')) {
     await vi.waitFor(() => expect(logins).toHaveLength(1));
     expect(JSON.parse(logins[0])).toEqual({ method: 'login', param: { apiKey: 'replay-key', reqTime: String(stamp), signature: mac(`replay-key${stamp}`) } });
     expect(sign.mock.calls.some(([input]) => input.wsAuth?.toSign === `replay-key${stamp}`)).toBe(true);

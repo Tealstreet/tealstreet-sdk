@@ -128,8 +128,9 @@ impl MexcFutures {
             retried: false,
         };
         let window = self.options.recv_window;
+        let header_policy = self.options.signing_policy.header_policy();
         let recipe = move |identity: &safe_cex_engine::signing::Identity| -> Box<dyn safe_cex_engine::SignStep> {
-            Box::new(sign::dispatch::Http::new(identity.clone(), method, recipe_path, recipe_payload, window))
+            Box::new(sign::dispatch::Http::new(identity.clone(), method, recipe_path, recipe_payload, window).with_header_policy(header_policy))
         };
         let caller = matches!(
             pending,
@@ -279,8 +280,9 @@ impl MexcFutures {
         let path = replay.path.clone();
         let payload = replay.payload.clone();
         let window = self.options.recv_window;
+        let header_policy = self.options.signing_policy.header_policy();
         let recipe = move |identity: &safe_cex_engine::signing::Identity| -> Box<dyn safe_cex_engine::SignStep> {
-            Box::new(sign::dispatch::Http::new(identity.clone(), Method::Get, path, payload, window))
+            Box::new(sign::dispatch::Http::new(identity.clone(), Method::Get, path, payload, window).with_header_policy(header_policy))
         };
         let result = match owner {
             Owner::Background(read) => read.queue(cx, request, recipe, |read| Pending::Private {
