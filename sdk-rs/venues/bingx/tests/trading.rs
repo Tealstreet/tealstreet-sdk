@@ -613,6 +613,228 @@ fn price_replace_is_atomic_and_uses_successful_new_id() {
     );
     assert!(h.engine.store().order("9223372036854775807").is_none());
 }
+
+fn assert_foldin_not_sent(h: &mut Harness) {
+    for _ in 0..3 {
+        h.collect();
+    }
+    assert!(
+        h.requests.is_empty(),
+        "invalid write plan reached transport"
+    );
+    assert_eq!(h.failures.len(), 1);
+    assert_eq!(
+        h.failures[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+}
+
+#[test]
+fn foldin_quantity_amend_checks_notional_before_mutation() {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: None,
+        amount: Some(0.01),
+    });
+    assert_foldin_not_sent(&mut h);
+    assert_eq!(h.engine.store().order(&order().id), Some(&order()));
+}
+
+#[test]
+fn foldin_replace_checks_new_price_notional_before_cancel() {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(1.04),
+        amount: None,
+    });
+    assert_foldin_not_sent(&mut h);
+    assert_eq!(h.engine.store().order(&order().id), Some(&order()));
+}
+
+#[test]
+fn foldin_replace_checks_current_quantity_bounds_before_cancel() {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    let mut native = market();
+    native.limits.amount.max = 0.5;
+    h.engine.store_mut().set_markets(vec![native]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.),
+        amount: None,
+    });
+    assert_foldin_not_sent(&mut h);
+    assert_eq!(h.engine.store().order(&order().id), Some(&order()));
+}
+
+#[test]
+fn foldin_replace_checks_exact_quantity_step_before_cancel() {
+    let mut original = order();
+    original.amount = 1.0004;
+    original.remaining = original.amount;
+    let mut h = Harness::new(Some((original.clone(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: original.id.clone(),
+        price: Some(96.),
+        amount: None,
+    });
+    assert_foldin_not_sent(&mut h);
+    assert_eq!(h.engine.store().order(&original.id), Some(&original));
+}
+
+#[test]
+fn foldin_serial_batch_missing_or_nonpositive_last_discards_valid_prefix() {
+    for last in [None, Some(0.), Some(-1.)] {
+        let mut h = Harness::new(None);
+        if let Some(last) = last {
+            h.quote(Some(last), None);
+        } else {
+            h.engine.store_mut().set_tickers(vec![]);
+        }
+        h.place(vec![
+            opts(),
+            PlaceOrderOpts {
+                amount: 11.,
+                kind: OrderType::Market,
+                price: Some(100.),
+                ..opts()
+            },
+        ]);
+        assert_foldin_not_sent(&mut h);
+    }
+}
+
+#[test]
+fn foldin_serial_plan_count_is_checked_across_all_rows() {
+    for rows in [
+        vec![split_order(50_000.), split_order(50_010.)],
+        vec![PlaceOrderOpts {
+            amount: 33_340.,
+            stop_loss: Some(90.),
+            take_profit: Some(110.),
+            ..opts()
+        }],
+    ] {
+        let mut h = Harness::new(None);
+        h.place(rows);
+        assert_foldin_not_sent(&mut h);
+    }
+}
+
+#[test]
+fn foldin_bracket_notional_is_checked_at_its_own_trigger() {
+    let mut h = Harness::new(None);
+    h.place(vec![
+        opts(),
+        PlaceOrderOpts {
+            stop_loss: Some(0.1),
+            ..opts()
+        },
+    ]);
+    assert_foldin_not_sent(&mut h);
+}
+
+#[test]
+fn foldin_market_entry_bracket_requires_a_positive_price_tick() {
+    let mut h = Harness::new(None);
+    let mut native = market();
+    native.precision.price = 0.;
+    h.engine.store_mut().set_markets(vec![native]);
+    h.place(vec![PlaceOrderOpts {
+        kind: OrderType::Market,
+        stop_loss: Some(90.),
+        ..opts()
+    }]);
+    assert_foldin_not_sent(&mut h);
+}
+
+#[test]
+fn foldin_invalid_price_tick_refuses_the_whole_batch() {
+    for tick in [0., f64::NAN] {
+        let mut h = Harness::new(None);
+        let mut native = market();
+        native.precision.price = tick;
+        h.engine.store_mut().set_markets(vec![native]);
+        h.place(vec![opts(), opts()]);
+        assert_foldin_not_sent(&mut h);
+    }
+}
+
+#[test]
+fn foldin_valid_serial_limit_and_market_rows_place_once() {
+    let mut h = Harness::new(None);
+    h.place(vec![
+        opts(),
+        PlaceOrderOpts {
+            kind: OrderType::Market,
+            ..opts()
+        },
+    ]);
+    for (id, kind) in [("foldin_limit", "LIMIT"), ("foldin_market", "MARKET")] {
+        assert_eq!(h.requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_str(h.body()).expect("order body");
+        assert_eq!(body["type"], kind);
+        assert_eq!(body["quantity"], 1.);
+        h.reply(&serde_json::json!({"code":0,"data":{"orderId":id}}).to_string());
+    }
+    assert!(h.requests.is_empty());
+    assert!(h.failures.is_empty());
+    assert_eq!(h.done.len(), 1);
+    let ids: Vec<String> =
+        serde_json::from_str(h.done[0].as_ref().expect("serial success")).expect("native IDs");
+    assert_eq!(ids, ["foldin_limit", "foldin_market"]);
+}
+
+#[test]
+fn foldin_valid_amend_and_replace_accept_exact_notional_boundary() {
+    let mut original = order();
+    original.price = 20.;
+    let mut h = Harness::new(Some((original.clone(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: original.id.clone(),
+        price: None,
+        amount: Some(0.1),
+    });
+    assert_eq!(h.requests.len(), 1);
+    assert!(h.requests[0].url.ends_with("/trade/amend"));
+    let body: serde_json::Value = serde_json::from_str(h.body()).expect("amend body");
+    assert_eq!(body["quantity"], 0.1);
+    h.reply(
+        &serde_json::json!({"code":0,"data":{"orderId":original.id,
+        "symbol":"BTC-USDT","quantity":"0.1"}})
+        .to_string(),
+    );
+    assert!(h.requests.is_empty());
+    assert!(h.failures.is_empty());
+    assert_eq!(h.done.len(), 1);
+
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(2.),
+        amount: None,
+    });
+    assert_eq!(h.requests.len(), 1);
+    assert!(h.requests[0].url.ends_with("/trade/cancelReplace"));
+    let body: serde_json::Value = serde_json::from_str(h.body()).expect("replacement body");
+    assert_eq!(body["quantity"], 1.);
+    assert_eq!(body["price"], 2.);
+    h.reply(r#"{"code":0,"data":{"cancelResult":"true","replaceResult":"true","newOrderResponse":{"orderId":9223372036854775807}}}"#);
+    assert!(h.requests.is_empty());
+    assert!(h.failures.is_empty());
+    assert_eq!(h.done.len(), 1);
+}
 #[test]
 fn cancel_continues_after_failure_and_marks_only_successes() {
     let mut second = order();
@@ -1147,7 +1369,7 @@ fn split_plan_valid_lots_place_once_with_their_original_attributes() {
 fn split_plan_preserves_attached_take_profit_and_stop_loss_per_lot() {
     let mut h = Harness::new(None);
     h.place(vec![PlaceOrderOpts {
-        amount: 21.,
+        amount: 22.,
         price: Some(2.),
         stop_loss: Some(1.),
         take_profit: Some(3.),
@@ -1156,7 +1378,7 @@ fn split_plan_preserves_attached_take_profit_and_stop_loss_per_lot() {
         ..opts()
     }]);
     for family in 0..3 {
-        for (i, quantity) in [10., 10., 1.].into_iter().enumerate() {
+        for (i, quantity) in [10., 10., 2.].into_iter().enumerate() {
             assert_eq!(h.requests.len(), 1);
             let body: serde_json::Value = serde_json::from_str(h.body()).expect("order body");
             assert_eq!(body["quantity"], quantity);

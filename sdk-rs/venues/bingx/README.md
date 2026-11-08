@@ -39,6 +39,15 @@ per-lot values. Explicit reduce-only quantities also obey these minima, so a
 below-minimum dust intent refuses locally. The separate native full-position
 close path keeps its existing position-derived quantity and close flag.
 
+Serial placement preflights every row, including a market row with a missing
+last-price reference, before any earlier row can write. A placement plan is
+bounded to 10,000 native writes across all rows and TP/SL children. Submitted
+limit/trigger prices must also match a positive native tick, and each TP/SL
+child satisfies minimum notional at its own trigger price. Ordinary quantity
+amendments validate their new wire quantity at the existing order price;
+ordinary atomic cancel-replace validates its unchanged quantity at the new
+wire price before it can cancel anything. Both reuse the placement validator.
+
 An ordinary cancel answered `109400` with exactly `order not exist`, or `109421`,
 uses the same satisfied-cancel path as `80016`: the command completes, but its
 symbols remain fenced until a fresh primary-key order snapshot reconciles them.
