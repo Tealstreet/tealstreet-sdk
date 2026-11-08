@@ -275,6 +275,8 @@ function writePlanErrorOf(value, active, depth) {
   } finally { active.delete(value); }
 }
 
+const APPLIED_EFFECTS = new Set(['cancel', 'amend', 'tradingStop', 'settings', 'deferredChild', 'positionTrigger']);
+
 function parseWritePlanElements(value, active, depth) {
   if (!Array.isArray(value) || active.has(value) || depth > 32) return undefined;
   active.add(value);
@@ -286,12 +288,25 @@ function parseWritePlanElements(value, active, depth) {
       const element = { index: row.index };
       if (row.clientOrderId !== undefined) element.clientOrderId = row.clientOrderId;
       if (row.status === 'placed') {
-        if (!Array.isArray(row.orderIds) || !row.orderIds.every((id) => typeof id === 'string')) return undefined;
+        if (!Array.isArray(row.orderIds) || !row.orderIds.length
+          || !Array.from(row.orderIds).every((id) => typeof id === 'string' && id.length > 0)) return undefined;
         elements.push({ ...element, status: 'placed', orderIds: [...row.orderIds] });
+      } else if (row.status === 'applied') {
+        if (!APPLIED_EFFECTS.has(row.effect) || 'orderIds' in row || 'orderId' in row) return undefined;
+        const result = { ...element, status: 'applied', effect: row.effect };
+        for (const key of ['targetOrderId', 'positionKey']) {
+          if (row[key] === undefined) continue;
+          if (typeof row[key] !== 'string' || !row[key].length) return undefined;
+          result[key] = row[key];
+        }
+        elements.push(result);
       } else if (row.status === 'notSent' || row.status === 'unknown') {
         const error = row.error === undefined ? undefined : writePlanErrorOf(row.error, active, depth + 1);
         if ((row.error !== undefined && !error) || (row.status === 'unknown' && !error)) return undefined;
-        elements.push({ ...element, status: row.status, ...(error ? { error } : {}) });
+        const uncertain = error && (row.status === 'unknown' || !['notSent', 'rejected'].includes(error.outcome)
+          || error.partial?.orderIds.length > 0);
+        elements.push({ ...element, status: uncertain ? 'unknown' : row.status,
+          ...(error ? { error: uncertain ? { ...error, outcome: 'unknown' } : error } : {}) });
       } else return undefined;
     }
     return elements;
