@@ -1,6 +1,6 @@
 mod support;
 
-use safe_cex_engine::write_plan::ElementResult;
+use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
 use safe_cex_engine::{
     Action, Command, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, VenueError,
 };
@@ -481,5 +481,56 @@ fn mixed_pair_keeps_correlated_row_evidence_and_never_dispatches_next_pair() -> 
     );
     assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
     assert!(requests(&mut engine).is_empty());
+    Ok(())
+}
+
+#[test]
+fn accepted_cancel_prefix_is_applied_without_created_ids() -> Result {
+    let rows = ["123", "456", "789"].map(|id| ORDER.replace("\"123\"", &format!("\"{id}\"")));
+    let (mut engine, _) = ready_orders(&format!("[{}]", rows.join(",")));
+    engine.handle(2000., Event::Command(Command::CancelOrders {
+        command: 901, ids: vec!["123".into(), "456".into(), "789".into()],
+    }));
+    let mut transport = ScriptedTransport {
+        responses: [(200, r#"{"id":"123"}"#.into()), (400, r#"{"code":"UNKNOWN","message":"scripted failure"}"#.into())].into(),
+        ..Default::default()
+    };
+    transport.poll(&mut engine);
+    transport.poll(&mut engine);
+    let out = transport.poll(&mut engine);
+    let error = failed(&out)?;
+    let elements = error.elements.as_ref().ok_or("missing cancel outcomes")?;
+    assert_eq!(elements.len(), 3);
+    assert!(matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), position_key: None } if id == "123"));
+    assert!(matches!(elements[1].result, ElementResult::Unknown { .. }));
+    assert!(matches!(elements[2].result, ElementResult::NotSent { error: None }));
+    assert!(error.partial.as_ref().is_none_or(|partial| partial.order_ids.is_empty()));
+    transport.poll(&mut engine);
+    assert_eq!(transport.requests.len(), 2);
+    assert!(transport.requests.iter().all(|request| request.method == Method::Delete));
+    Ok(())
+}
+
+#[test]
+fn cancel_replace_reports_applied_cancel_then_unknown_without_restore() -> Result {
+    let (mut engine, _) = ready_orders(&format!("[{ORDER}]"));
+    engine.handle(2000., Event::Command(Command::AmendOrder {
+        command: 901, id: "123".into(), price: Some(142.), amount: None,
+    }));
+    let mut transport = ScriptedTransport {
+        responses: [(200, r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#.into()), (400, r#"{"code":"INVALID_ORDER","message":"scripted failure"}"#.into())].into(),
+        ..Default::default()
+    };
+    transport.poll(&mut engine);
+    transport.poll(&mut engine);
+    let out = transport.poll(&mut engine);
+    let error = failed(&out)?;
+    let elements = error.elements.as_ref().ok_or("missing amend outcomes")?;
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == "123"));
+    assert!(matches!(elements[1].result, ElementResult::Unknown { .. }));
+    assert!(error.partial.as_ref().is_none_or(|partial| partial.order_ids.is_empty()));
+    transport.poll(&mut engine);
+    assert_eq!(transport.requests.len(), 2);
     Ok(())
 }
