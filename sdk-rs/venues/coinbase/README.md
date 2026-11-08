@@ -10,6 +10,16 @@ automatic resend. `KNOWN-ISSUE: TS sends above-max; venue refuses`.
 Reference: `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts:1659`
 (normalization), `:1772` (single request) and `:1573` (native edit maximum).
 Native edit and INTX replacement checks retain their existing bounds.
+Placement batches dispatch serially and stop on the first refusal or uncertain
+response, matching `packages/safe-cex/src/exchanges/base.ts:1111-1114` and the
+Coinbase reference's `placeOrder` at `:1612-1641`. A terminal failure preserves
+accepted prefix IDs and an indexed outcome journal: accepted rows are `placed`,
+a documented refusal is `notSent` with the venue message, and the untouched
+suffix remains `notSent`. Uncertain rows say exactly "The outcome is unknown.
+Check Open Orders", retain diagnostic text in `venueMessage` and emit an
+`order.outcome_unknown` event attributed to the command and client order ID.
+`tests/trading.rs::above_max_batch_*` pins `[1,26,1]` at max 5 / step 1,
+including both refusal envelopes and a native rate-limit Unknown response.
 `tests/trading.rs::legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal`
 pins the six above-max cases and refusal propagation.
 

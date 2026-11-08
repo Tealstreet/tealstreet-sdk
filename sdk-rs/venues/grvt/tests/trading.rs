@@ -319,6 +319,133 @@ struct WireTriggerDetails {
 fn body(r: &HttpRequest) -> Create {
     serde_json::from_str(r.body.as_deref().unwrap()).unwrap()
 }
+#[test]
+fn legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal() {
+    // TS reference: packages/safe-cex/src/__tests__/reference/grvt/grvt.exchange.ts:1415,1556.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses.
+    for (amount, maximum, step, expected) in [
+        (26., 5., 1., "26"),
+        (11., 5., 1., "11"),
+        (12., 5., 1., "12"),
+        (10., 5., 1., "10"),
+        (7., 3., 0.5, "7"),
+        (1.0005, 0.3, 0.001, "1.001"),
+    ] {
+        let mut e = boot();
+        e.store_mut().update_markets(|market| {
+            market.precision.amount = step;
+            market.limits.amount.min = step;
+            market.limits.amount.max = maximum;
+        });
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 91,
+                orders: vec![PlaceOrderOpts {
+                    amount,
+                    client_order_id: None,
+                    ..opts()
+                }],
+            },
+        );
+        assert!(
+            done(&actions, 91).is_none(),
+            "pre-HTTP refusal for {amount}/{maximum}/{step}"
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Http(_)))
+                .count(),
+            1
+        );
+        let request = http(actions, "create_order");
+        let order = body(&request).o;
+        assert_eq!(order.l.len(), 1);
+        assert_eq!(order.l[0].s, expected);
+        let sum: f64 = order
+            .l
+            .iter()
+            .map(|leg| leg.s.parse::<f64>().unwrap())
+            .sum();
+        assert_eq!(sum, expected.parse::<f64>().unwrap());
+        let actions = reply(
+            &mut e,
+            &request,
+            400,
+            r#"{"c":1001,"m":"venue maximum exceeded"}"#,
+        );
+        let error = done(&actions, 91).unwrap().unwrap_err();
+        assert!(error.contains("venue maximum exceeded"), "{error}");
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("create_order")))
+        );
+    }
+}
+#[test]
+fn above_max_caller_id_refuses_the_whole_batch_before_any_write() {
+    // TS grvt.exchange.ts:1351 calls the legacy base exchange's rounded maximum guard first (:1211-1225).
+    for valid_prefix in [false, true] {
+        let mut e = boot();
+        e.store_mut().update_markets(|market| {
+            market.precision.amount = 1.;
+            market.limits.amount.min = 1.;
+            market.limits.amount.max = 5.;
+        });
+        let mut orders = Vec::new();
+        if valid_prefix {
+            orders.push(PlaceOrderOpts {
+                client_order_id: Some("123456789".into()),
+                ..opts()
+            });
+        }
+        orders.push(PlaceOrderOpts {
+            amount: 26.,
+            ..opts()
+        });
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 93,
+                orders,
+            },
+        );
+        let error = done(&actions, 93).unwrap().unwrap_err();
+        assert!(error.contains("outside market limits"), "{error}");
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "caller-ID maximum preflight must precede every HTTP request"
+        );
+    }
+}
+#[test]
+fn above_max_amendment_still_refuses_before_cancel() {
+    // TS replacement preflight: packages/safe-cex/src/__tests__/reference/grvt/grvt.exchange.ts:2007.
+    let mut e = boot();
+    seed(&mut e);
+    e.store_mut()
+        .update_markets(|market| market.limits.amount.max = 0.5);
+    let get = http(
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 92,
+                id: "42".into(),
+                price: Some(110.),
+                amount: None,
+            },
+        ),
+        "/order",
+    );
+    let actions = reply(&mut e, &get, 200, OPEN);
+    let error = done(&actions, 92).unwrap().unwrap_err();
+    assert!(error.contains("outside market limits"), "{error}");
+    assert!(!actions.iter().any(
+        |a| matches!(a, Action::Http(r) if r.url.ends_with("cancel_order") || r.url.ends_with("create_order"))
+    ));
+}
 fn seed(e: &mut Engine<Grvt>) {
     e.store_mut().upsert_order(Order {
         id: "42".into(),
