@@ -49,9 +49,7 @@ export class ScaleCommand extends TradingBaseCommand {
   private parseCommand(input: string): ParsedScaleCommand | string {
     const sizeRe = String.raw`(?:\$\d+(?:\.\d+)?|\d+(?:\.\d+)?\$|\d+(?:\.\d+)?%(?:bal|pos)?)`;
     const priceRe = String.raw`(?:[-+]?[\d.]+%?|\d+%?)`;
-    const core = new RegExp(
-      String.raw`^scale (?:buy|sell) ${sizeRe} into \d+ from ${priceRe} to ${priceRe}( .*)?$`,
-    );
+    const core = new RegExp(String.raw`^scale (?:buy|sell) ${sizeRe} into \d+ from ${priceRe} to ${priceRe}( .*)?$`);
     const match = core.exec(input);
     if (!match) {
       return `Invalid syntax "${input}"`;
@@ -98,6 +96,13 @@ export class ScaleCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    this.assertUnambiguousOrderModifiers(
+      ctx,
+      -1,
+      SUPPORTED_MODIFIERS,
+      { into: 1, from: 1, to: 1 },
+      args.indexOf('to') + 1,
+    );
     const assignment = this.refuseOrderAssignments(ctx);
     if (assignment) return assignment;
     const commandStr = args.join(' ');

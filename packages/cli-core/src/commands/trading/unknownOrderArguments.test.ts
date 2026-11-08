@@ -1,11 +1,103 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { executeCommand } from '../CommandExecutor';
+import { ensureCommandsRegistered, executeCommand } from '../CommandExecutor';
+import { commandRegistry } from '../CommandRegistry';
+import type { CommandContext } from '../Command';
+import type { ChaserTerminate } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderOptions';
 import { WorkerPlatformAdapter } from '../../worker-host/WorkerPlatformAdapter';
 import type { ExchangeLike } from '../../types';
-import { PositionSide } from '@tealstreet/safe-cex/src/types';
+import {
+  OrderSide,
+  OrderStatus,
+  OrderType,
+  PositionSide,
+  type Market,
+  type Ticker,
+  type Position,
+  type PlaceOrderOpts,
+  type UpdateOrderOpts,
+  type Order,
+} from '@tealstreet/safe-cex/src/types';
 import { ChaseCommand } from './ChaseCommand';
 
+class TestChaseCommand extends ChaseCommand {
+  override chaseBuySellSymbol = vi
+    .fn<
+      (
+        ctx: CommandContext,
+        exchange: ExchangeLike,
+        symbol: string,
+        side: OrderSide,
+        size: string,
+        reduceOnly: boolean,
+        terminate?: ChaserTerminate,
+      ) => Promise<string>
+    >()
+    .mockResolvedValue('chase');
+}
+
+function position(symbol = 'BTCUSDT', side = PositionSide.Long): Position {
+  return {
+    id: symbol + side,
+    symbol,
+    side,
+    contracts: 1,
+    entryPrice: 75000,
+    notional: 75800,
+    leverage: 1,
+    unrealizedPnl: 0,
+    liquidationPrice: null,
+  };
+}
+
+function market(symbol: string): Market {
+  return {
+    id: symbol,
+    symbol,
+    base: symbol.slice(0, -4),
+    quote: 'USDT',
+    active: true,
+    contractSize: 1,
+    precision: { amount: 0.001, price: 0.1 },
+    limits: { amount: { min: 0.001, max: 1000000 }, leverage: { min: 1, max: 100 } },
+  };
+}
+
+function ticker(symbol: string): Ticker {
+  return {
+    id: symbol,
+    symbol,
+    last: 75800,
+    mark: 75800,
+    bid: 75800,
+    ask: 75800,
+    index: 75800,
+    percentage: 0,
+    openInterest: 0,
+    fundingRate: 0,
+    fundingTime: 0,
+    volume: 0,
+    quoteVolume: 0,
+  };
+}
+
+function openOrder(symbol = 'BTCUSDT', side = OrderSide.Buy): Order {
+  return {
+    id: 'order-1',
+    symbol,
+    status: OrderStatus.Open,
+    type: OrderType.Limit,
+    side,
+    price: 75000,
+    remaining: 1,
+    amount: 1,
+    filled: 0,
+    reduceOnly: false,
+    lastUpdate: 0,
+  };
+}
+
+type WriteInput = PlaceOrderOpts | PlaceOrderOpts[] | UpdateOrderOpts | Order[] | string | undefined;
 function fixture(extraMarkets = false) {
   const symbols = extraMarkets
     ? [
@@ -18,47 +110,67 @@ function fixture(extraMarkets = false) {
         'REDUCEUSDT',
         'BUYUSDT',
         'SELLUSDT',
+        'SELLCOINUSDT',
+        'SHORTUSDT',
         'NEXTUSDT',
         'TOPUSDT',
         'LONGUSDT',
         'SHOWUSDT',
       ]
     : ['BTCUSDT', 'SOLUSDT'];
-  const write = vi.fn().mockResolvedValue(['entry']);
+  const write = vi.fn<(input: WriteInput, ...rest: unknown[]) => Promise<string[]>>().mockResolvedValue(['entry']);
   const exchange = {
     name: 'bybit',
     store: {
-      markets: symbols.map((symbol) => ({
-        symbol,
-        base: symbol.slice(0, -4),
-        quote: 'USDT',
-        contractSize: 1,
-        precision: { amount: 0.001, price: 0.1 },
-      })),
-      tickers: symbols.map((symbol) => ({ symbol, last: 75800, mark: 75800, bid: 75800, ask: 75800 })),
-      positions: [{ symbol: 'BTCUSDT', side: 'long', contracts: 1, entryPrice: 75000, notional: 75800, leverage: 1 }],
-      orders: [
-        { id: 'order-1', symbol: 'BTCUSDT', status: 'open', type: 'limit', side: 'buy', price: 75000, remaining: 1 },
-      ],
-      balance: { free: 1000, total: 1000, used: 0 },
+      markets: symbols.map(market),
+      tickers: symbols.map(ticker),
+      positions: [position()],
+      orders: [openOrder()],
+      balance: { free: 1000, total: 1000, used: 0, upnl: 0 },
     },
     placeOrder: write,
     placeOrders: write,
     updateOrder: write,
-    cancelOrders: write,
-    setLeverage: write,
-    changeMarginType: write,
-    nuke: write,
-    nukePositions: write,
-    nukeOrders: write,
+    cancelOrders: async (orders: Order[]) => {
+      await write(orders);
+    },
+    setLeverage: async (symbol: string, leverage: number) => {
+      await write(symbol, leverage);
+    },
+    nuke: async () => {
+      await write(undefined);
+    },
+    nukePositions: async () => {
+      await write(undefined);
+    },
+    nukeOrders: async () => {
+      await write(undefined);
+    },
     emitter: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
-  } as unknown as ExchangeLike;
-  const startChase = vi.spyOn(ChaseCommand.prototype as any, 'chaseBuySellSymbol').mockResolvedValue('chase');
+  } satisfies ExchangeLike;
+  ensureCommandsRegistered();
+  const chase = new TestChaseCommand();
+  commandRegistry.register(chase);
+  const startChase = chase.chaseBuySellSymbol;
   const adapter = new WorkerPlatformAdapter(exchange);
   const run = (raw: string) => executeCommand(raw, 'BTCUSDT', undefined, exchange, adapter);
-  return { run, write, startChase, exchange };
+  const placedOrders = () =>
+    write.mock.calls.flatMap(([input]) => {
+      if (typeof input !== 'object' || input === null) return [];
+      if (Array.isArray(input))
+        return input.filter((order): order is PlaceOrderOpts => 'symbol' in order && 'amount' in order);
+      return 'symbol' in input && 'type' in input ? [input] : [];
+    });
+  const updatedOrders = () =>
+    write.mock.calls.flatMap(([input]) =>
+      typeof input === 'object' && input !== null && 'order' in input ? [input] : [],
+    );
+  return { run, write, startChase, exchange, placedOrders, updatedOrders };
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  commandRegistry.register(new ChaseCommand());
+  vi.restoreAllMocks();
+});
 
 const orders = [
   'buy $500',
@@ -128,10 +240,10 @@ describe('unknown order arguments', () => {
   it.each(['buy $500', 'sell $500 best', 'buy BTCUSDT,SOLUSDT $500 at 75800'])(
     'attaches both brackets through the existing entry path: %s',
     async (command) => {
-      const { run, write } = fixture();
+      const { run, write, placedOrders } = fixture();
       expect((await run(`${command} stop 75700 tp 76100.04`)).success).toBe(true);
       expect(write).toHaveBeenCalledWith(expect.objectContaining({ stopLoss: 75700, takeProfit: 76100 }));
-      expect(write.mock.calls.every(([order]) => order.takeProfit === 76100)).toBe(true);
+      expect(placedOrders().every((order) => order.takeProfit === 76100)).toBe(true);
     },
   );
 
@@ -229,11 +341,11 @@ describe('complete order argument parsing', () => {
     it.each(['b $500', 's $500 at 75800', 'buy btc $500 best', 'sell $500 BTC', 'buy $500 SOLUSDT'])(
       'preserves complete symbol and alias forms: %s',
       async (command) => {
-        const { run, write, exchange } = fixture(true);
+        const { run, write, exchange, placedOrders } = fixture(true);
         exchange.name = name;
         expect((await run(command)).success).toBe(true);
         expect(write).toHaveBeenCalledTimes(1);
-        expect(write.mock.calls[0][0].symbol).toBe(command.endsWith('SOLUSDT') ? 'SOLUSDT' : 'BTCUSDT');
+        expect(placedOrders()[0]?.symbol).toBe(command.endsWith('SOLUSDT') ? 'SOLUSDT' : 'BTCUSDT');
       },
     );
   });
@@ -320,20 +432,20 @@ describe('resolved target and selector validation', () => {
   it.each(['bump buy +100', 'bump buys +100', 'bump +100 --buys', 'bump buy +100 --buys', 'bump top 1 +100'])(
     'preserves supported bump selectors even with matching market names: %s',
     async (command) => {
-      const { run, write } = fixture(true);
+      const { run, write, updatedOrders } = fixture(true);
       expect((await run(command)).success).toBe(true);
       expect(write).toHaveBeenCalledTimes(1);
-      expect(write.mock.calls[0][0].order.symbol).toBe('BTCUSDT');
+      expect(updatedOrders()[0]?.order.symbol).toBe('BTCUSDT');
     },
   );
 
   it.each(['buy NEXT $500', 'buy $500 NEXT', 'sell NEXT $500 at 75800', 'buy $500 NEXT best', 'buy $500 "reduce "'])(
     'accepts a loaded base alias in a symbol position: %s',
     async (command) => {
-      const { run, write } = fixture(true);
+      const { run, write, placedOrders } = fixture(true);
       expect((await run(command)).success).toBe(true);
       expect(write).toHaveBeenCalledTimes(1);
-      expect(write.mock.calls[0][0].symbol).toBe(command.includes('reduce') ? 'REDUCEUSDT' : 'NEXTUSDT');
+      expect(placedOrders()[0]?.symbol).toBe(command.includes('reduce') ? 'REDUCEUSDT' : 'NEXTUSDT');
     },
   );
 
@@ -364,29 +476,29 @@ describe('resolved target and selector validation', () => {
   it.each(['buy BTC,SOLUSDT $500', 'sell $500 best BTC,SOLUSDT'])(
     'preserves distinct resolved targets: %s',
     async (command) => {
-      const { run, write } = fixture(true);
+      const { run, write, placedOrders } = fixture(true);
       expect((await run(command)).success).toBe(true);
-      expect(write.mock.calls.map(([order]) => order.symbol)).toEqual(['BTCUSDT', 'SOLUSDT']);
+      expect(placedOrders().map((order) => order.symbol)).toEqual(['BTCUSDT', 'SOLUSDT']);
     },
   );
 
   it('closes distinct symbols once each after resolving aliases', async () => {
-    const { run, write, exchange } = fixture(true);
-    const positions = exchange.store!.positions!;
+    const { run, write, exchange, placedOrders } = fixture(true);
+    const positions = exchange.store.positions;
     positions.push({ ...positions[0], symbol: 'SOLUSDT' });
     expect((await run('close 50% BTC SOLUSDT')).success).toBe(true);
-    expect(write.mock.calls.map(([order]) => [order.symbol, order.amount])).toEqual([
+    expect(placedOrders().map((order) => [order.symbol, order.amount])).toEqual([
       ['BTCUSDT', 0.5],
       ['SOLUSDT', 0.5],
     ]);
   });
 
   it('preserves global closing of both hedge positions on the same market', async () => {
-    const { run, write, exchange } = fixture(true);
-    const positions = exchange.store!.positions!;
+    const { run, write, exchange, placedOrders } = fixture(true);
+    const positions = exchange.store.positions;
     positions.push({ ...positions[0], side: PositionSide.Short });
     expect((await run('close all')).success).toBe(true);
-    expect(write.mock.calls.map(([order]) => [order.symbol, order.side])).toEqual([
+    expect(placedOrders().map((order) => [order.symbol, order.side])).toEqual([
       ['BTCUSDT', 'sell'],
       ['BTCUSDT', 'buy'],
     ]);
@@ -405,16 +517,16 @@ describe('resolved target and selector validation', () => {
 
 describe('symbols and grammar occupy separate parsed slots', () => {
   it('does not apply a leading symbol as a buy modifier', async () => {
-    const { run, write, exchange } = fixture(true);
-    const positions = exchange.store!.positions!;
+    const { run, write, exchange, placedOrders } = fixture(true);
+    const positions = exchange.store.positions;
     positions.push({ ...positions[0], symbol: 'REDUCEUSDT' });
     expect((await run('buy reduce $500')).success).toBe(true);
     expect(write).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'REDUCEUSDT', reduceOnly: false }));
   });
 
   it('permits a real modifier after a leading symbol with the same name', async () => {
-    const { run, write, exchange } = fixture(true);
-    const positions = exchange.store!.positions!;
+    const { run, write, exchange, placedOrders } = fixture(true);
+    const positions = exchange.store.positions;
     positions.push({ ...positions[0], symbol: 'REDUCEUSDT' });
     expect((await run('sell reduce $500 reduce')).success).toBe(true);
     expect(write).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'REDUCEUSDT', reduceOnly: true }));
@@ -436,17 +548,17 @@ describe('symbols and grammar occupy separate parsed slots', () => {
   });
 
   it('permits a swarm modifier after a symbol with the same name', async () => {
-    const { run, write, exchange } = fixture(true);
-    const positions = exchange.store!.positions!;
+    const { run, write, exchange, placedOrders } = fixture(true);
+    const positions = exchange.store.positions;
     positions.push({ ...positions[0], symbol: 'REDUCEUSDT' });
     expect((await run('swarm sell reduce $500 into 2 reduce')).success).toBe(true);
     expect(write).toHaveBeenCalledTimes(2);
-    expect(write.mock.calls.every(([order]) => order.symbol === 'REDUCEUSDT' && order.reduceOnly)).toBe(true);
+    expect(placedOrders().every((order) => order.symbol === 'REDUCEUSDT' && order.reduceOnly)).toBe(true);
   });
 
   it('does not skip a stop symbol because another slot uses that word as grammar', async () => {
-    const { run, write, exchange } = fixture(true);
-    const positions = exchange.store!.positions!;
+    const { run, write, exchange, placedOrders } = fixture(true);
+    const positions = exchange.store.positions;
     positions.push({ ...positions[0], symbol: 'BUYUSDT' });
     expect((await run('stop at 75700 BUY')).success).toBe(true);
     expect(write).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'BUYUSDT' }));
@@ -470,13 +582,13 @@ describe('leverage symbol reads and scale leftover diagnostics', () => {
     ['lev show BTCUSDT', 'BTCUSDT', 1],
     ['lev 1000PEPEUSDT', '1000PEPEUSDT', 3],
   ])('reads the resolved loaded symbol without writes: %s', async (command, symbol, leverage) => {
-    const { run, write, exchange } = fixture(true);
-    const store = exchange.store!;
-    store.markets!.push({ ...store.markets![0], symbol: '1000PEPEUSDT', base: '1000PEPE' });
-    store.tickers!.push({ ...store.tickers![0], symbol: '1000PEPEUSDT' });
-    store.positions!.push(
-      { ...store.positions![0], symbol: 'SOLUSDT', leverage: 7 },
-      { ...store.positions![0], symbol: '1000PEPEUSDT', leverage: 3 },
+    const { run, write, exchange, placedOrders } = fixture(true);
+    const store = exchange.store;
+    store.markets.push({ ...store.markets[0], symbol: '1000PEPEUSDT', base: '1000PEPE' });
+    store.tickers.push({ ...store.tickers[0], symbol: '1000PEPEUSDT' });
+    store.positions.push(
+      { ...store.positions[0], symbol: 'SOLUSDT', leverage: 7 },
+      { ...store.positions[0], symbol: '1000PEPEUSDT', leverage: 3 },
     );
     expect((await run(command)).success).toBe(true);
     expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-log', { message: `${symbol}: ${leverage}x` });
@@ -513,4 +625,184 @@ describe('leverage symbol reads and scale leftover diagnostics', () => {
     expect(write).toHaveBeenCalledTimes(1);
     expect(write.mock.calls[0][0]).toHaveLength(5);
   });
+});
+
+describe('order symbol slots beat side words', () => {
+  it.each(['BUY', 'buy', 'BUYUSDT', 'buyusdt', 'SELL', 'sell', 'SELLCOIN', 'sellcoin'])(
+    'stops the trailing %s market instead of the focused short',
+    async (alias) => {
+      const { run, exchange, placedOrders } = fixture(true);
+      const symbol = alias.toUpperCase().endsWith('USDT') ? alias.toUpperCase() : alias.toUpperCase() + 'USDT';
+      exchange.store.positions = [position('BTCUSDT', PositionSide.Short), position(symbol)];
+      const result = await run(`stop at 75700 ${alias}`);
+      expect(result.success).toBe(true);
+      expect(placedOrders()).toEqual([expect.objectContaining({ symbol, side: OrderSide.Sell })]);
+    },
+  );
+
+  it.each(['buy', 'BUY', 'sell', 'SELL'])('retains leading %s as the stop side', async (side) => {
+    const { run, exchange, placedOrders } = fixture(true);
+    exchange.store.positions = [
+      position('BTCUSDT', side.toLowerCase() === 'buy' ? PositionSide.Short : PositionSide.Long),
+    ];
+    expect((await run(`stop ${side} at 75700`)).success).toBe(true);
+    expect(placedOrders()).toEqual([expect.objectContaining({ symbol: 'BTCUSDT', side: side.toLowerCase() })]);
+  });
+
+  it.each(['long', 'LONG', 'short', 'SHORT'])(
+    'closes the trailing %s market instead of the focused position',
+    async (alias) => {
+      const { run, exchange, placedOrders } = fixture(true);
+      const symbol = alias.toUpperCase() + 'USDT';
+      exchange.store.positions = [position(), position(symbol)];
+      expect((await run(`close 50% ${alias}`)).success).toBe(true);
+      expect(placedOrders()).toEqual([expect.objectContaining({ symbol })]);
+    },
+  );
+
+  it.each([
+    'buy $500 SYMBOL',
+    'sell $500 SYMBOL',
+    'buy $500 at 75800 SYMBOL',
+    'sell $500 best SYMBOL',
+    'buy $500 stop 75700 tp 76100 SYMBOL',
+    'sell $500 stop 75900 tp 75000 SYMBOL',
+    'scale buy $500 into 2 from 75700 to 75800 SYMBOL',
+    'swarm buy $500 into 2 SYMBOL',
+    'trail 1% SYMBOL',
+    'be +100 SYMBOL',
+    'close 50% SYMBOL',
+  ])('keeps the trailing side-word alias in %s', async (template) => {
+    for (const alias of ['BUY', 'buy', 'SELL', 'sell', 'SELLCOIN', 'sellcoin']) {
+      const { run, exchange, placedOrders } = fixture(true);
+      const symbol = alias.toUpperCase() + 'USDT';
+      exchange.store.positions.push(position(symbol));
+      expect((await run(template.replace('SYMBOL', template.startsWith('scale ') ? symbol : alias))).success).toBe(
+        true,
+      );
+      expect(placedOrders().length).toBeGreaterThan(0);
+      expect(placedOrders().every((order) => order.symbol === symbol)).toBe(true);
+    }
+  });
+
+  it.each(['chase buy $500 SYMBOL', 'chase sell $500 SYMBOL'])('keeps the chase symbol in %s', async (template) => {
+    for (const alias of ['BUY', 'buy', 'SELL', 'sell']) {
+      const { run, startChase } = fixture(true);
+      expect((await run(template.replace('SYMBOL', alias))).success).toBe(true);
+      expect(startChase.mock.calls.map((call) => call[2])).toEqual([alias.toUpperCase() + 'USDT']);
+    }
+  });
+
+  it.each(['twap buy $500 into 2 over 10 SYMBOL', 'twap chase sell $500 into 2 over 10 SYMBOL'])(
+    'keeps the task symbol in %s',
+    async (template) => {
+      for (const alias of ['BUY', 'buy', 'SELL', 'sell']) {
+        const { run } = fixture(true);
+        const result = await run(template.replace('SYMBOL', alias));
+        expect(result.success).toBe(true);
+        expect(result.taskAction?.params?.symbol).toBe(alias.toUpperCase() + 'USDT');
+      }
+    },
+  );
+
+  it.each(['BUY', 'buy', 'SELL', 'sell'])(
+    'bumps orders on trailing %s without changing the selector',
+    async (alias) => {
+      const { run, exchange, updatedOrders } = fixture(true);
+      const symbol = alias.toUpperCase() + 'USDT';
+      exchange.store.orders.push({ ...exchange.store.orders[0], id: 'target', symbol });
+      expect((await run(`bump +100 ${alias}`)).success).toBe(true);
+      expect(updatedOrders().map((update) => update.order.symbol)).toEqual([symbol]);
+    },
+  );
+});
+
+describe('ambiguous trailing modifier aliases refuse before dispatch', () => {
+  it.each([
+    'buy $500 reduce',
+    'buy $500 reduce best',
+    'buy $500 reduce stop 75700',
+    'chase buy $500 reduce to 1%',
+    'twap buy $500 reduce into 2 over 10',
+    'twap chase buy $500 into 2 over 10 timeout 30% next reduce',
+    'swarm buy $500 into 2 reduce irregular',
+    'scale buy $500 into 2 from 75700 to 75800 reduce taker',
+    'sell $500 at 75800 reduce',
+    'buy $500 best reduce',
+    'chase buy $500 reduce',
+    'twap buy $500 into 2 over 10 reduce',
+    'twap chase buy $500 into 2 over 10 reduce',
+    'swarm buy $500 into 2 reduce',
+    'scale buy $500 into 2 from 75700 to 75800 reduce',
+  ])('refuses %s with a typed notSent error when REDUCE is a loaded alias', async (command) => {
+    const { run, write, startChase } = fixture(true);
+    for (const token of ['reduce', 'REDUCE']) {
+      const result = await run(command.replace('reduce', token));
+      expect(result.success).toBe(false);
+      expect(result.errorDetails).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+      expect(write).not.toHaveBeenCalled();
+      expect(startChase).not.toHaveBeenCalled();
+      expect(result.taskAction).toBeUndefined();
+    }
+  });
+});
+
+it.each(['buy REDUCEUSDT $500 reduce', 'sell $500 REDUCEUSDT reduce', 'buy $500 at 75800 REDUCEUSDT reduce'])(
+  'retains an unambiguous explicit scope before a modifier: %s',
+  async (command) => {
+    const { run, exchange, placedOrders } = fixture(true);
+    exchange.store.positions.push(position('REDUCEUSDT'));
+    expect((await run(command)).success).toBe(true);
+    expect(placedOrders()).toEqual([expect.objectContaining({ symbol: 'REDUCEUSDT', reduceOnly: true })]);
+  },
+);
+
+it.each(['buy', 'BUY', 'sell', 'SELL'])(
+  'separates leading stop side %s from the trailing matching alias',
+  async (side) => {
+    const { run, exchange, placedOrders } = fixture(true);
+    const symbol = side.toUpperCase() + 'USDT';
+    exchange.store.positions = [
+      position(),
+      position(symbol, side.toLowerCase() === 'buy' ? PositionSide.Short : PositionSide.Long),
+    ];
+    expect((await run(`stop ${side} at 75700 ${side}`)).success).toBe(true);
+    expect(placedOrders()).toEqual([expect.objectContaining({ symbol, side: side.toLowerCase() })]);
+  },
+);
+
+it.each(['long', 'LONG', 'short', 'SHORT'])(
+  'retains leading close selector %s with colliding loaded aliases',
+  async (side) => {
+    const { run, exchange, placedOrders } = fixture(true);
+    exchange.store.positions = [position('BTCUSDT', PositionSide.Long), position('BTCUSDT', PositionSide.Short)];
+    expect((await run(`close ${side} 50%`)).success).toBe(true);
+    expect(placedOrders()).toEqual([
+      expect.objectContaining({
+        symbol: 'BTCUSDT',
+        side: side.toLowerCase() === 'long' ? OrderSide.Sell : OrderSide.Buy,
+      }),
+    ]);
+  },
+);
+
+it.each(['buy', 'BUY', 'sell', 'SELL'])('keeps leading bump side %s in its selector slot', async (side) => {
+  const { run, exchange, updatedOrders } = fixture(true);
+  const order = exchange.store.orders[0];
+  const orderSide = side.toLowerCase() === 'buy' ? OrderSide.Buy : OrderSide.Sell;
+  exchange.store.orders = [
+    { ...order, side: orderSide },
+    { ...order, id: 'alias', symbol: side.toUpperCase() + 'USDT', side: orderSide },
+  ];
+  expect((await run(`bump ${side} +100`)).success).toBe(true);
+  expect(updatedOrders().map((update) => update.order.symbol)).toEqual(['BTCUSDT']);
+});
+
+it.each(['BUY', 'buy', 'SELL', 'sell'])('reads a complete side-word leverage alias %s', async (alias) => {
+  const { run, exchange, write } = fixture(true);
+  const symbol = alias.toUpperCase() + 'USDT';
+  exchange.store.positions.push(position(symbol));
+  expect((await run(`lev ${alias}`)).success).toBe(true);
+  expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-log', { message: `${symbol}: 1x` });
+  expect(write).not.toHaveBeenCalled();
 });

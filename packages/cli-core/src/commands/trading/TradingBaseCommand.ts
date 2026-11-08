@@ -9,6 +9,12 @@ import { resolveCompleteMarketSymbol, resolveMarketSymbol } from '../../utils/re
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
 import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
 
+class OrderArgumentError extends Error {
+  override name = 'OrderArgumentError';
+  readonly kind = 'invalidInput';
+  readonly outcome = 'notSent';
+}
+
 /**
  * Base class for trading commands with utility methods for size/price processing
  */
@@ -25,11 +31,62 @@ export abstract class TradingBaseCommand extends BaseCommand {
     return { ...ctx, args: { ...ctx.args, _: args } };
   }
 
+  protected refuseAmbiguousOrderToken(token: string): never {
+    const message = `Ambiguous argument "${token}": use a full market symbol or an explicit leading symbol. Nothing was sent.`;
+    throw new OrderArgumentError(message);
+  }
+
+  // Modifier aliases need a resolved scope. Operand slots (including TWAP's
+  // two-token timeout policy) cannot establish that scope or become symbols.
+  protected assertUnambiguousOrderModifiers(
+    ctx: CommandContext,
+    leadingSymbolIndex: number,
+    modifiers: readonly string[],
+    operands: Readonly<Record<string, number>> = {},
+    symbolAfter = leadingSymbolIndex,
+  ): void {
+    if (ctx.exchange === null) return;
+    const args = ctx.args._;
+    if (args[leadingSymbolIndex] === '%all%') return;
+    if (this.validateSymbols(ctx.exchange, args[leadingSymbolIndex]?.split(',')).length > 0) return;
+    const operandSlots = new Set<number>();
+    const keywordSlots = new Set<number>();
+    for (let index = 1; index < args.length; index++) {
+      if (operandSlots.has(index)) continue;
+      const count = operands[args[index].toLowerCase()] ?? 0;
+      if (count > 0 && args[index + 1] !== undefined) {
+        keywordSlots.add(index);
+        for (let offset = 1; offset <= count; offset++) operandSlots.add(index + offset);
+      }
+    }
+    const candidates: string[] = [];
+    for (let index = Math.max(1, symbolAfter + 1); index < args.length; index++) {
+      if (operandSlots.has(index) || keywordSlots.has(index)) continue;
+      const token = args[index];
+      if (token === '%all%') return;
+      if (this.validateSymbols(ctx.exchange, token.split(',')).length === 0) continue;
+      if (modifiers.includes(token.toLowerCase())) candidates.push(token);
+      else return;
+    }
+    const ambiguous = candidates[0];
+    if (ambiguous !== undefined) this.refuseAmbiguousOrderToken(ambiguous);
+  }
+
   protected refuseUnknownOrderArgs(
     ctx: CommandContext,
     consumed: number[],
-    { allowSymbol = true, symbolLists = false, symbolAfter = 0, allowAll = false, side }: {
-      allowSymbol?: boolean; symbolLists?: boolean; symbolAfter?: number; allowAll?: boolean; side?: PositionSide;
+    {
+      allowSymbol = true,
+      symbolLists = false,
+      symbolAfter = 0,
+      allowAll = false,
+      side,
+    }: {
+      allowSymbol?: boolean;
+      symbolLists?: boolean;
+      symbolAfter?: number;
+      allowAll?: boolean;
+      side?: PositionSide;
     } = {},
   ): CommandResult | undefined {
     if (allowSymbol && ctx.exchange) {
@@ -289,10 +346,10 @@ export abstract class TradingBaseCommand extends BaseCommand {
     if (symbols.includes('%all%')) {
       if (!allowAll || symbols.length !== 1) return [];
       return (exchange.store?.positions ?? [])
-        .filter(position => position.side === side)
-        .map(position => position.symbol);
+        .filter((position) => position.side === side)
+        .map((position) => position.symbol);
     }
-    const resolved = symbols.map(symbol => {
+    const resolved = symbols.map((symbol) => {
       if (this.tokenLooksLikeNonSymbol(symbol)) return undefined;
       const complete = resolveCompleteMarketSymbol(exchange.store?.markets, symbol);
       return complete !== undefined && this.validateSymbol(exchange, complete) ? complete : undefined;

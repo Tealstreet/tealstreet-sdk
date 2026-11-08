@@ -27,6 +27,11 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       return this.error('Exchange does not support placing orders');
     }
 
+    this.assertUnambiguousOrderModifiers(ctx, 1, ['reduce', 'po', 'best', 'at', 'stop', 'tp'], {
+      at: 1,
+      stop: 1,
+      tp: 1,
+    });
     ctx = this.resolveLeadingSymbolSlot(ctx, 1);
     const duplicate = this.refuseDuplicateModifiers(ctx, [['reduce'], ['po'], ['best', 'at'], ['stop'], ['tp']]);
     if (duplicate) return duplicate;
@@ -58,7 +63,8 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       }
     }
     const invalid = this.refuseUnknownOrderArgs(ctx, consumed, {
-      allowSymbol: !leadingSymbol, symbolLists: true,
+      allowSymbol: !leadingSymbol,
+      symbolLists: true,
       symbolAfter: args.includes('at') && !args.includes('best') ? args.indexOf('at') + 1 : 1,
     });
     if (invalid) {
@@ -86,7 +92,12 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
    * stop price (after `processPrice` for relative forms), or undefined
    * if not present. Throws on malformed args.
    */
-  protected resolveBracketPrice(ctx: CommandContext, symbol: string, args: string[], modifier = 'stop'): number | undefined {
+  protected resolveBracketPrice(
+    ctx: CommandContext,
+    symbol: string,
+    args: string[],
+    modifier = 'stop',
+  ): number | undefined {
     const stopIdx = this.findArgIndex(args, modifier);
     if (stopIdx === -1) return undefined;
     const arg = args[stopIdx + 1];
@@ -154,7 +165,8 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     // Check for symbol at end: "buy $100 SYMBOL" or "buy $100 reduce SYMBOL"
     let trailingSymbols: string[] = [];
     for (let i = args.length - 1; i >= 2; i--) {
-      if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'stop' || args[i] === 'tp' || args[i] === 'best') continue;
+      if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'stop' || args[i] === 'tp' || args[i] === 'best')
+        continue;
       // Skip the price token immediately after `stop`
       if (i > 0 && (args[i - 1] === 'stop' || args[i - 1] === 'tp')) continue;
       trailingSymbols = this.validateSymbols(exchange, args[i].split(','));
@@ -215,7 +227,8 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     } else {
       // Look for trailing symbol; skip best/reduce/stop and the price after stop.
       for (let i = args.length - 1; i >= 2; i--) {
-        if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'best' || args[i] === 'stop' || args[i] === 'tp') continue;
+        if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'best' || args[i] === 'stop' || args[i] === 'tp')
+          continue;
         if (i > 0 && (args[i - 1] === 'stop' || args[i - 1] === 'tp')) continue;
         const t = this.validateSymbols(exchange, args[i].split(','));
         if (t.length > 0) {
@@ -278,7 +291,8 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       // the user never named.
       const atIndex = this.findArgIndex(args, 'at');
       for (let i = args.length - 1; i > atIndex + 1; i--) {
-        if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'best' || args[i] === 'stop' || args[i] === 'tp') continue;
+        if (args[i] === 'reduce' || args[i] === 'po' || args[i] === 'best' || args[i] === 'stop' || args[i] === 'tp')
+          continue;
         if (i > 0 && (args[i - 1] === 'stop' || args[i - 1] === 'tp')) continue;
         const trailingSymbols = this.validateSymbols(exchange, args[i].split(','));
         if (trailingSymbols.length > 0) {
