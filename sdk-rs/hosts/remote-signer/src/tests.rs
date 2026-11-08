@@ -1015,3 +1015,5 @@ async fn a_timeout_on_a_socket_silent_since_the_send_is_a_suspension() {
         "a silent socket never trips the fatal streak"
     );
 }
+
+mod kucoin;

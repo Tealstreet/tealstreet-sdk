@@ -390,6 +390,7 @@ export class ChaseCommand extends TradingBaseCommand {
       return this.error('Not connected to exchange');
     }
 
+    this.assertUnambiguousOrderModifiers(ctx, 2, ['reduce', 'to'], { to: 1 });
     if (['buy', 'sell'].includes(ctx.args._[1]?.toLowerCase())) {
       ctx = this.resolveLeadingSymbolSlot(ctx, 2);
     }
@@ -495,7 +496,12 @@ export class ChaseCommand extends TradingBaseCommand {
     const consumed = leadingSymbols.length > 0 ? [1, 2, 3] : [1, 2];
     consumed.push(...skipIndices);
     if (args.indexOf('reduce') > 0) consumed.push(args.indexOf('reduce'));
-    const invalid = this.refuseUnknownOrderArgs(ctx, consumed, { allowSymbol: leadingSymbols.length === 0, symbolLists: true, allowAll: reduceOnly, side: positionSide });
+    const invalid = this.refuseUnknownOrderArgs(ctx, consumed, {
+      allowSymbol: leadingSymbols.length === 0,
+      symbolLists: true,
+      allowAll: reduceOnly,
+      side: positionSide,
+    });
     if (invalid) return invalid;
     const chaserIds: string[] = [];
 

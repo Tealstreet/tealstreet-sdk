@@ -42,12 +42,14 @@ export class StopCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
-    const duplicate = this.refuseDuplicateModifiers(ctx, [['buy', 'sell'], ['at'], ['trigger']]);
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['at'], ['trigger']]);
     if (duplicate) return duplicate;
     const assignment = this.refuseOrderAssignments(ctx);
     if (assignment) return assignment;
 
-    const isBuySellFirstArg = ['buy', 'sell'].includes(String(args[1]));
+    const sideWord = args[1]?.toLowerCase();
+    const side = sideWord === 'buy' ? OrderSide.Buy : sideWord === 'sell' ? OrderSide.Sell : undefined;
+    const isBuySellFirstArg = side !== undefined;
     const sizePosition = this.looksLikeSize(args[1]) ? 1 : isBuySellFirstArg && this.looksLikeSize(args[2]) ? 2 : -1;
 
     // `at` is OPTIONAL. The price is whatever follows it, or -- when it is
@@ -74,7 +76,8 @@ export class StopCommand extends TradingBaseCommand {
         (this.looksLikeSize(arg) || this.looksLikePrice(arg)),
     );
     const consumed = [sizePosition, pricePosition];
-    for (const keyword of ['buy', 'sell', 'at', 'trigger']) {
+    if (isBuySellFirstArg) consumed.push(1);
+    for (const keyword of ['at', 'trigger']) {
       const index = args.indexOf(keyword);
       if (index > 0) {
         consumed.push(index);
@@ -85,7 +88,9 @@ export class StopCommand extends TradingBaseCommand {
     const invalid = this.refuseUnknownOrderArgs(ctx, consumed);
     if (invalid && stray === undefined) {
       if (pricePosition <= 0) {
-        return this.error(`${invalid.error} stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`.`);
+        return this.error(
+          `${invalid.error} stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`.`,
+        );
       }
       return invalid;
     }
@@ -95,9 +100,9 @@ export class StopCommand extends TradingBaseCommand {
       return this.error(refusal);
     }
 
-    const targetSymbol = symbolIndex > 0
-      ? this.validateSymbols(exchange, [args[symbolIndex]])[0] ?? ctx.symbol
-      : ctx.symbol;
+    if (symbolIndex > 0 && symbolIndex <= pricePosition) this.refuseAmbiguousOrderToken(args[symbolIndex]);
+    const targetSymbol = symbolIndex > 0 ? this.validateSymbols(exchange, [args[symbolIndex]])[0] : ctx.symbol;
+    if (targetSymbol === undefined) return this.error(this.unknownOrderArgument(args[symbolIndex]));
     if (pricePosition > 0 && args[pricePosition] !== undefined) {
       const ticker = exchange.store?.tickers?.find((ticker) => ticker.symbol === targetSymbol);
       const currentPrice = ticker?.last;
@@ -105,11 +110,6 @@ export class StopCommand extends TradingBaseCommand {
         return this.error(`Current price is not available for ticker ${targetSymbol}, try again.`);
       }
 
-      const side = this.hasArgValue(args, 'buy')
-        ? OrderSide.Buy
-        : this.hasArgValue(args, 'sell')
-          ? OrderSide.Sell
-          : undefined;
       const limitPrice = Number(this.processPrice(args[pricePosition], currentPrice));
 
       // Optional `trigger <abs>` keyword turns this into a true limit

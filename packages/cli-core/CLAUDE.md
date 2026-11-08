@@ -662,3 +662,16 @@ This outer-executor contract covers errors that propagate from awaited order
 calls. Commands which aggregate or log errors internally (global close, swarm,
 and fire-and-forget nuke) keep their existing result semantics; the outer
 executor cannot recover metadata those command implementations have discarded.
+
+
+## Side words and market aliases
+
+Stop `buy`/`sell`, close `long`/`short`, and bump side selectors belong to
+leading selector positions, case-insensitively. A trailing symbol such as `buy`
+after a stop price resolves to its loaded market alias, without changing side
+or falling back to the focused market. A modifier that also names a market
+(e.g. trailing `reduce`) needs an explicit scope; otherwise order commands
+refuse with `invalidInput` / `notSent`. Collision detection reads the market
+catalog independently of ticker readiness; missing tickers cannot authorize
+a write on the focused market. Use the full market symbol or the
+command's supported leading-symbol form to disambiguate.

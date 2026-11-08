@@ -74,6 +74,47 @@ describe('CallMethodHandler', () => {
 
   describe('handle', () => {
     describe('callMethod', () => {
+      it.each([
+        { method: 'setLeverage', args: null },
+        { method: 'setLeverage', args: {} },
+        { method: 'setLeverage' },
+        { method: 7, args: ['BTCUSDT', 10] },
+      ])('refuses an unusable call envelope before dispatch (%j)', async (data) => {
+        handler.handle({ op: 'callMethod', data: { requestId: 'invalid-envelope', ...data } });
+        expect(mockExchange.setLeverage).not.toHaveBeenCalled();
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: { requestId: 'invalid-envelope', success: false, result: expect.objectContaining({
+            message: 'Invalid worker method envelope', kind: 'unsupported', outcome: 'notSent',
+          }) },
+        });
+      });
+
+      it.each([null, undefined, [], {}, { requestId: 7 }])('ignores an uncorrelatable call envelope (%j)', (data) => {
+        handler.handle({ op: 'callMethod', data });
+        expect(mockExchange.setLeverage).not.toHaveBeenCalled();
+        expect(mockPostMessage).not.toHaveBeenCalled();
+      });
+
+      it('preserves detached forwarded calls and receiver-bound legacy calls', async () => {
+        mockExchange.setLeverage = async function (this: unknown) {
+          expect(this).toBeUndefined();
+        };
+        mockExchange.fetchAndSetOrders = async function (this: unknown) {
+          expect(this).toBe(mockExchange);
+          return [];
+        };
+        await handler.handleCallMethod('forwarded-receiver', 'setLeverage', ['BTCUSDT', 10]);
+        await handler.handleCallMethod('legacy-receiver', 'fetchAndSetOrders', []);
+        expect(mockPostMessage).toHaveBeenCalledTimes(2);
+        expect(mockPostMessage).toHaveBeenNthCalledWith(1, {
+          op: 'callMethod:done', data: { requestId: 'forwarded-receiver', success: true, result: undefined },
+        });
+        expect(mockPostMessage).toHaveBeenNthCalledWith(2, {
+          op: 'callMethod:done', data: { requestId: 'legacy-receiver', success: true, result: [] },
+        });
+      });
+
       it('answers the Rust native account reads a main-thread mirror forwards', async () => {
         const reads = {
           fetchPositions: vi.fn().mockResolvedValue([{ symbol: 'BTCUSDT' }]),
