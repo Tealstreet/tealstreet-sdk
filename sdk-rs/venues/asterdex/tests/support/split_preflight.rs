@@ -306,3 +306,22 @@ fn ambiguous_first_lot_never_releases_or_replays_later_lots() {
         assert!(!h.requests.iter().any(|r| r.method == Method::Post));
     }
 }
+
+#[test]
+fn replacement_notional_uses_its_normalized_wire_quantity() {
+    let mut h = configured(1.0, 5.0, 1.0, 5.0, 10);
+    let mut live = order("10", OrderType::Limit);
+    live.reduce_only = false;
+    h.engine.store_mut().set_orders(vec![live]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "10".into(),
+        price: Some(1.0),
+        amount: Some(4.6),
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":10,"status":"CANCELED"}"#);
+    assert_eq!(quantities(&mut h), ["5"]);
+    assert_eq!(h.sent_writes, 2);
+    assert!(h.result(1).is_ok());
+}
