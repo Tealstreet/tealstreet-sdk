@@ -1,11 +1,12 @@
 //! Shared store models used by the Store contract; source: packages/safe-cex/src/types.ts.
 use crate::{
-    Balance, DisplayedMargin, FetchedLeverage, Market, Order, OrderRiskProfile, OrderSide,
-    Position, RequestOutcomeCounts, StoreDataLoaded, StoreOptions, StoreUpdateIds, Ticker,
+    Balance, MarginType, Market, Order, OrderRiskProfile, OrderSide, Position, PositionMode,
+    RequestOutcomeCounts, Ticker, deserialize_present,
 };
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::Value;
+use ts_rs::TS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -175,10 +176,81 @@ pub struct ActiveTWAP {
     pub started_at: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct StoreDataLoaded {
+    pub balance: bool,
+    pub orders: bool,
+    pub markets: bool,
+    pub tickers: bool,
+    pub positions: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct StoreOptions {
+    pub is_hedged: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct FetchedLeverage {
+    /// @ts-mutable
+    pub buy_leverage: f64,
+    /// @ts-mutable
+    pub sell_leverage: f64,
+    /// @ts-mutable
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub margin_type: Option<MarginType>,
+    /// @ts-mutable
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub position_mode: Option<PositionMode>,
+    /// @ts-mutable
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub is_fetching: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct DisplayedMargin {
+    pub long_exposure: f64,
+    pub short_exposure: f64,
+    pub total_notional: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(optional_fields)]
+pub struct StoreUpdateIds {
+    /// @ts-mutable
+    #[serde(rename = "positions")]
+    pub positions: f64,
+    /// @ts-mutable
+    #[serde(rename = "orders")]
+    pub orders: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub struct StoreData {
     #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    #[ts(type = "number | null")]
     pub latency: Option<f64>,
     pub balance: Balance,
     pub markets: Vec<Market>,
@@ -190,6 +262,10 @@ pub struct StoreData {
         skip_serializing_if = "Option::is_none"
     )]
     #[serde(rename = "starkConfig")]
+    #[ts(
+        type = "{ usdtConfig?: unknown; usdcConfig?: unknown; positionId?: unknown; takerFeePerToken?: unknown }",
+        optional
+    )]
     pub stark_config: Option<Value>,
     #[serde(
         default,
@@ -197,6 +273,10 @@ pub struct StoreData {
         skip_serializing_if = "Option::is_none"
     )]
     #[serde(rename = "zkLinkConfig")]
+    #[ts(
+        type = "{ contractConfig?: unknown; l2Key?: unknown; ethereumAddress?: unknown; id?: unknown; spotAccount?: unknown; spotWallets?: unknown; contractAccount?: unknown; contractWallets?: unknown }",
+        optional
+    )]
     pub zk_link_config: Option<crate::retained_json::RetainedJsonInput>,
     #[serde(
         default,
@@ -204,9 +284,11 @@ pub struct StoreData {
         skip_serializing_if = "Option::is_none"
     )]
     #[serde(rename = "userData")]
+    #[ts(type = "unknown", optional)]
     pub user_data: Option<Value>,
     pub positions: Vec<Position>,
     #[serde(rename = "displayedPositions")]
+    #[ts(type = "DisplayedPosition[]")]
     pub displayed_positions: Vec<DisplayedPosition>,
     #[serde(
         default,
@@ -216,10 +298,13 @@ pub struct StoreData {
     #[serde(rename = "displayedMargin")]
     pub displayed_margin: Option<DisplayedMargin>,
     #[serde(rename = "ordersRisk")]
+    #[ts(type = "Record<string, OrderRiskProfile[]> ")]
     pub orders_risk: IndexMap<String, Vec<OrderRiskProfile>>,
     #[serde(rename = "activeChasers")]
+    #[ts(type = "ActiveChaser[]")]
     pub active_chasers: Vec<ActiveChaser>,
     #[serde(rename = "activeTWAPs")]
+    #[ts(type = "ActiveTWAP[]")]
     pub active_twaps: Vec<ActiveTWAP>,
     pub loaded: StoreDataLoaded,
     pub options: StoreOptions,
@@ -231,6 +316,10 @@ pub struct StoreData {
         skip_serializing_if = "Option::is_none"
     )]
     #[serde(rename = "messageHandlerStats")]
+    #[ts(
+        type = "Partial<Record<MessageHandlerStatsType, MessageHandlersStats>>",
+        optional
+    )]
     pub message_handler_stats: Option<Value>,
     #[serde(
         default,
@@ -240,6 +329,7 @@ pub struct StoreData {
     #[serde(rename = "requestStats")]
     pub request_stats: Option<RequestOutcomeCounts>,
     #[serde(rename = "fetchedLeverage")]
+    #[ts(type = "Record<string, FetchedLeverage> ")]
     pub fetched_leverage: IndexMap<String, FetchedLeverage>,
     #[serde(
         default,
@@ -247,11 +337,166 @@ pub struct StoreData {
         skip_serializing_if = "Option::is_none"
     )]
     #[serde(rename = "socketHealth")]
+    #[ts(
+        type = "{ publicHealthy: boolean; privateHealthy: boolean; publicInitialized: boolean; privateInitialized: boolean; publicLastMessage?: number; privateLastMessage?: number; reconnectDiagnostics?: AccountReconnectDiagnostics; publicCloseCode?: number; privateCloseCode?: number; publicCloseCountTotal?: number; privateCloseCountTotal?: number; publicCloseStreak?: number; privateCloseStreak?: number; publicReconnectPaused?: boolean; privateReconnectPaused?: boolean; privateDegradedReason?: string; }",
+        optional
+    )]
     pub socket_health: Option<crate::retained_json::RetainedJsonInput>,
+}
+
+/// The initial host Store. Native account frames replace its unloaded exchange state.
+pub fn initial_store_data() -> StoreData {
+    StoreData {
+        latency: None,
+        balance: Balance {
+            used: 0.0,
+            free: 0.0,
+            total: 0.0,
+            upnl: 0.0,
+            info: None,
+            currencies: None,
+            coins: None,
+        },
+        markets: vec![],
+        tickers: vec![],
+        orders: vec![],
+        positions: vec![],
+        displayed_positions: vec![],
+        stark_config: None,
+        zk_link_config: None,
+        user_data: None,
+        displayed_margin: Some(DisplayedMargin {
+            long_exposure: 0.0,
+            short_exposure: 0.0,
+            total_notional: 0.0,
+        }),
+        orders_risk: IndexMap::new(),
+        active_chasers: vec![],
+        active_twaps: vec![],
+        loaded: StoreDataLoaded {
+            balance: false,
+            orders: false,
+            markets: false,
+            tickers: false,
+            positions: false,
+        },
+        options: StoreOptions { is_hedged: false },
+        update_ids: StoreUpdateIds {
+            positions: 0.0,
+            orders: 0.0,
+        },
+        message_handler_stats: Some(serde_json::json!({})),
+        request_stats: Some(RequestOutcomeCounts {
+            ok: 0.0,
+            rate_limit: 0.0,
+            auth: 0.0,
+            network: 0.0,
+            other: 0.0,
+        }),
+        fetched_leverage: IndexMap::new(),
+        socket_health: Some(crate::retained_json::RetainedJsonInput::from(
+            serde_json::json!({
+                "publicHealthy": false, "privateHealthy": false, "publicInitialized": false, "privateInitialized": false
+            }),
+        )),
+    }
 }
 
 // Private wire companions keep serde metadata without exposing permissive decoders.
 mod strict_codecs {
+    use super::{MarginType, PositionMode, deserialize_present};
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::StoreDataLoaded")]
+    #[serde(rename_all = "camelCase")]
+    struct WireStoreDataLoaded {
+        balance: bool,
+        orders: bool,
+        markets: bool,
+        tickers: bool,
+        positions: bool,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::StoreDataLoaded {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireStoreDataLoaded::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::StoreOptions")]
+    #[serde(rename_all = "camelCase")]
+    struct WireStoreOptions {
+        is_hedged: bool,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::StoreOptions {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireStoreOptions::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::FetchedLeverage")]
+    #[serde(rename_all = "camelCase")]
+    struct WireFetchedLeverage {
+        buy_leverage: f64,
+        sell_leverage: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        margin_type: Option<MarginType>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        position_mode: Option<PositionMode>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        is_fetching: Option<bool>,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::FetchedLeverage {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireFetchedLeverage::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::DisplayedMargin")]
+    #[serde(rename_all = "camelCase")]
+    struct WireDisplayedMargin {
+        long_exposure: f64,
+        short_exposure: f64,
+        total_notional: f64,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::DisplayedMargin {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireDisplayedMargin::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::StoreUpdateIds")]
+    struct WireStoreUpdateIds {
+        #[serde(rename = "positions")]
+        positions: f64,
+        #[serde(rename = "orders")]
+        orders: f64,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::StoreUpdateIds {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireStoreUpdateIds::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
     #[cfg(test)]
     use super::StoreData;
     use super::{
@@ -658,7 +903,7 @@ mod strict_codecs {
         assert_eq!(wire.position.notional, 2.5);
         assert_eq!(wire.position.leverage, 3.75);
         assert_eq!(wire.position.contracts, 4.125);
-        assert_eq!(wire.position.liquidation_price, 5.5);
+        assert_eq!(wire.position.liquidation_price, Some(5.5));
         assert_eq!(wire.position.unrealized_pnl.to_bits(), (-0.0_f64).to_bits());
         assert_eq!(wire.one_min_upnl.unwrap().to_bits(), (-0.0_f64).to_bits());
         let mut wrong = serde_json::Deserializer::from_str("[]");
@@ -990,6 +1235,11 @@ mod strict_codecs {
             crate::strict_decode::tests::record::<ActiveChaser>("ActiveChaser");
             crate::strict_decode::tests::record::<ActiveTWAP>("ActiveTWAP");
             crate::strict_decode::tests::record::<StoreData>("StoreData");
+            crate::strict_decode::tests::record::<StoreDataLoaded>("StoreDataLoaded");
+            crate::strict_decode::tests::record::<StoreOptions>("StoreOptions");
+            crate::strict_decode::tests::record::<FetchedLeverage>("FetchedLeverage");
+            crate::strict_decode::tests::record::<DisplayedMargin>("DisplayedMargin");
+            crate::strict_decode::tests::record::<StoreUpdateIds>("StoreUpdateIds");
         }
     }
 }

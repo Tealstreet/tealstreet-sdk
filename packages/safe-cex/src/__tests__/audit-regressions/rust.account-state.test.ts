@@ -250,7 +250,7 @@ describe('Rust native current-account reads', () => {
     await r.start();
     r.update({
       orders: [order()],
-      positions: [position()],
+      positions: [{ ...position(), extra: { contractsNative: 20 } }],
       balance: { free: 70, used: 30, total: 100, upnl: 2 },
       options: { isHedged: true },
       fetchedLeverage: { BTCUSDT: { buyLeverage: 3, sellLeverage: 7, marginType: MarginType.Isolated } },
@@ -612,7 +612,8 @@ describe('Rust native current-account reads', () => {
       const result = await nuking;
       const ops = r.commands.map((c) => c.op);
       expect(ops).toContain('cancelAccountOrders');
-      if (ops.includes('placeOrders')) expect(ops.indexOf('cancelAccountOrders')).toBeLessThan(ops.indexOf('placeOrders'));
+      if (ops.includes('placeOrders'))
+        expect(ops.indexOf('cancelAccountOrders')).toBeLessThan(ops.indexOf('placeOrders'));
       expect(result.warning).toBeUndefined();
     },
   );

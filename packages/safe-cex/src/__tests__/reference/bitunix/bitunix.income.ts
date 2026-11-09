@@ -1,6 +1,5 @@
-import type { ClosedPnlEntry, IncomeRecord } from '../../types';
+import type { IncomeRecord } from '../../../types';
 
-import { PositionSide } from '../../types';
 
 /**
  * BitUnix ledger and closed positions — two different endpoints, so the second can
@@ -27,7 +26,7 @@ const toNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const mapBitunixTradeToIncomeRecords = (row: Record<string, any>): IncomeRecord[] => {
+export const mapBitunixTradeToIncomeRecords = (row: Record<string, unknown>): IncomeRecord[] => {
   const timestamp = parseInt(String(row.ctime ?? '0'), 10);
   const symbol = String(row.symbol ?? '');
   if (!timestamp || !symbol) {
@@ -68,33 +67,4 @@ export const mapBitunixTradeToIncomeRecords = (row: Record<string, any>): Income
   }
 
   return records;
-};
-
-export const mapBitunixClosedPosition = (row: Record<string, any>, accountName: string): ClosedPnlEntry | null => {
-  const openTime = parseInt(String(row.ctime ?? '0'), 10);
-  const symbol = String(row.symbol ?? '');
-  if (!openTime || !symbol) {
-    return null;
-  }
-
-  const closePrice = toNumber(row.closePrice);
-  const contracts = toNumber(row.qty);
-
-  return {
-    provenance: 'venue',
-    symbol,
-    notional: contracts * closePrice,
-    contracts,
-    entryPrice: toNumber(row.entryPrice),
-    exitPrice: closePrice,
-    // Legacy field name; carries realized PnL. NET of `fee`.
-    unrealizedPnl: toNumber(row.realizedPNL),
-    // `side` here is the position's own side, not a closing order's — no inversion.
-    side: String(row.side ?? '').toUpperCase() === 'SELL' ? PositionSide.Short : PositionSide.Long,
-    fees: toNumber(row.fee),
-    time: openTime,
-    closedTime: parseInt(String(row.mtime ?? '0'), 10) || openTime,
-    account: accountName,
-    leverage: toNumber(row.leverage),
-  };
 };

@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { CallableMethodsInWorker, EngineSnapshot } from '../../exchanges/base';
 import type { OrderFillEvent } from '../../types';
 
@@ -16,6 +11,11 @@ import { DefaultStore } from '../../store/store.base';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { CallMethodHandler } from '../../webworker/handlers/CallMethodHandler';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const align8 = (value: number) => Math.ceil(value / 8) * 8;
 type FixtureOptions = {
@@ -51,19 +51,22 @@ const fixture = ({
   markets = true,
   secondaryMarket = false,
   reversedMarkets = false,
-  fillSymbol,
+  fillSymbol = 'BTCUSDT',
   loaded,
 }: FixtureOptions = {}) => {
-  const strings = ['BTCUSDT', 'BTC', 'USDT', 'order-1', '1m', 'ETHUSDT', 'ETH'];
+  const fillIds = Array.from({ length: fills }, (_, i) => `execution-${i + 1}`);
+  const strings = ['BTCUSDT', 'BTC', 'USDT', 'order-1', '1m', 'ETHUSDT', 'ETH', ...fillIds];
   const sections: Array<{ kind: number; bytes: Uint8Array; revision?: number }> = [];
-  const table = (kind: number, words: number[], numbers: number[], tail: number[] = []) => {
+  const table = (kind: number, words: number[], numbers: number[], tail: number[] = [], financials: number[] = []) => {
     const numericOffset = align8(words.length * 4);
-    const bytes = new Uint8Array(align8(numericOffset + numbers.length * 8 + tail.length * 4));
+    const financialOffset = align8(numericOffset + numbers.length * 8 + tail.length * 4);
+    const bytes = new Uint8Array(financialOffset + financials.length * 8);
     const view = new DataView(bytes.buffer);
     words.forEach((word, i) => view.setUint32(i * 4, word, true));
     numbers.forEach((number, i) => view.setFloat64(numericOffset + i * 8, number, true));
     tail.forEach((word, i) => view.setUint32(numericOffset + numbers.length * 8 + i * 4, word, true));
-    sections.push({ kind, bytes, revision: tail.length ? 1 : 0 });
+    financials.forEach((number, i) => view.setFloat64(financialOffset + i * 8, number, true));
+    sections.push({ kind, bytes, revision: kind === SECTION.POSITIONS || kind === SECTION.FILLS ? 2 : tail.length ? 1 : 0 });
   };
   if (markets) {
     const columns = [0.001, 1, 0.001, 100, 1, 100, NaN, 1, NaN, NaN];
@@ -75,7 +78,7 @@ const fixture = ({
     );
   }
   table(SECTION.ORDERS, [1, 3, 0xffffffff, 0xffffffff, 0, 256], [100, 1, 0, 1, 1234, NaN, NaN]);
-  table(SECTION.POSITIONS, [1, 0, 2 << 16], [100, 50, 5, 0, 0, 0.5, 80, 10, 1234]);
+  table(SECTION.POSITIONS, [1, 0, 2 << 16], [100, 50, 5, 0, 0, 0.5, 80, 10, 1234, NaN, NaN], [0, 0]);
   table(SECTION.BALANCE, [], [total - 30, 30, total, 0]);
   if (!omitSettings)
     table(SECTION.SETTINGS, settings ? [1, 0, 2] : [0], settings ? [leverage, buyLeverage, sellLeverage] : []);
@@ -83,7 +86,8 @@ const fixture = ({
     SECTION.FILLS,
     [fills, ...Array(fills).fill(3), ...Array(fills).fill(0), ...Array(fills).fill(0)],
     Array.from({ length: fills }, () => [100, 0.25]).flat(),
-    fillSymbol === undefined ? [] : Array(fills).fill(strings.indexOf(fillSymbol)),
+    [...Array(fills).fill(strings.indexOf(fillSymbol)), ...fillIds.map((id) => strings.indexOf(id))],
+    Array(fills * 2).fill(NaN),
   );
   table(SECTION.CANDLES, [1, 0, 4], [1234, 100, 101, 99, 100, 5]);
   if (book) table(SECTION.BOOK, [0, brokenBook ? 2 : 1, 0, 0], [100, 1, 1]);
@@ -136,12 +140,18 @@ describe('Rust frame recovery callers', () => {
     const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, new DefaultStore());
     adoptEngineCapabilities(exchange, { isolatedBookSubscriptions: true });
     const observed: number[] = [];
-    exchange.listenOrderBook('BTCUSDT', (book) => { book.bids[0].price = 999; });
-    exchange.listenOrderBook('BTCUSDT', (book) => { observed.push(book.bids[0].price); });
+    exchange.listenOrderBook('BTCUSDT', (book) => {
+      book.bids[0].price = 999;
+    });
+    exchange.listenOrderBook('BTCUSDT', (book) => {
+      observed.push(book.bids[0].price);
+    });
     try {
       receive(exchange, fixture());
       expect(observed).toEqual([100]);
-    } finally { exchange.dispose(); }
+    } finally {
+      exchange.dispose();
+    }
   });
 
   beforeEach(() => {
@@ -169,7 +179,12 @@ describe('Rust frame recovery callers', () => {
 
     expect(() => receive(exchange, fixture({ brokenBook: true }))).not.toThrow();
     expect(fills).toHaveLength(2);
+    expect(fills.map((fill) => fill.id)).toEqual(['execution-1', 'execution-2']);
     expect(fills.map((fill) => fill.orderId)).toEqual(['order-1', 'order-1']);
+    for (const fill of fills) {
+      expect(fill).not.toHaveProperty('fee');
+      expect(fill).not.toHaveProperty('realizedPnl');
+    }
     expect(accountAtFill).toEqual(Array(2).fill({ total: 42, orderId: 'order-1', contracts: 0.5, leverage: 5 }));
     expect(snapshot).toHaveBeenCalledTimes(1);
     expect(store.balance.total).toBe(100);
@@ -215,7 +230,7 @@ describe('Rust frame recovery callers', () => {
       marketIds: kind === SECTION.MARKETS ? [] : ['BTCUSDT'],
       orderIds: kind === SECTION.FILLS ? ['order-1'] : [],
     });
-    expect(fills.map((fill) => fill.orderId)).toEqual(kind === SECTION.ORDERS ? ['order-1'] : []);
+    expect(fills.map((fill) => fill.orderId)).toEqual(kind === SECTION.FILLS ? [] : ['order-1']);
     exchange.dispose();
   });
 
@@ -295,7 +310,7 @@ describe('Rust frame recovery callers', () => {
       send(fixture({ markets: false, fills: 1, book: false, fillSymbol: 'ETHUSDT' }));
       expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT']);
       send(fixture({ markets: false, fills: 1, book: false }));
-      expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT']);
+      expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT', 'BTCUSDT']);
 
       const recovered = fixture({ fills: 0, secondaryMarket: true, reversedMarkets: true });
       if (exchange instanceof RustEngineExchange) {
@@ -306,8 +321,8 @@ describe('Rust frame recovery callers', () => {
         resolve(bundle(recovered));
         await settle();
       }
-      send(fixture({ markets: false, fills: 1, book: false }));
-      expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT', 'ETHUSDT']);
+      send(fixture({ markets: false, fills: 1, book: false, fillSymbol: 'ETHUSDT' }));
+      expect(fills.map((fill) => fill.symbol)).toEqual(['ETHUSDT', 'BTCUSDT', 'ETHUSDT']);
       exchange.dispose();
     },
   );
@@ -476,7 +491,14 @@ describe('Rust frame recovery callers', () => {
       bookListeners: Map<string, Map<number, () => void>>;
       feedBookListeners: Set<() => void>;
     };
-    internal.bookListeners.set('BTCUSDT', new Map([[1, provider], [2, laterProvider], [3, ordinary]]));
+    internal.bookListeners.set(
+      'BTCUSDT',
+      new Map([
+        [1, provider],
+        [2, laterProvider],
+        [3, ordinary],
+      ]),
+    );
     internal.feedBookListeners.add(provider);
     internal.feedBookListeners.add(laterProvider);
     const fills: OrderFillEvent[] = [];
@@ -503,7 +525,8 @@ describe('Rust frame recovery callers', () => {
     expect(store.positions[0].contracts).toBe(0.5);
     expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes, false);
     expect(bytes.byteLength).toBe(0);
-    expect(new Frame(forwarded!).balance()?.total).toBe(42);
+    if (forwarded === undefined) throw new Error('Expected the transferred frame');
+    expect(new Frame(forwarded).balance()?.total).toBe(42);
     expect(snapshot).not.toHaveBeenCalled();
     expect(exchange.isDisposed).toBe(false);
     exchange.dispose();
@@ -644,6 +667,7 @@ describe('Rust frame recovery callers', () => {
     receive(worker, new ArrayBuffer(0));
     receive(worker, new ArrayBuffer(0));
     expect(snapshot).toHaveBeenCalledTimes(2);
+    const recoveryClock = vi.spyOn(performance, 'now').mockReturnValue(1000);
     const main = new BaseExchange('binance', { key: '', secret: '' }, new DefaultStore());
     const rpc = vi
       .spyOn(main, 'callMethodInWorker')
@@ -651,6 +675,7 @@ describe('Rust frame recovery callers', () => {
       .mockResolvedValue(bundle(fixture({ fills: 0 })) as never);
     main.applyWorkerFrame(new ArrayBuffer(0));
     await settle();
+    recoveryClock.mockReturnValue(1500);
     main.applyWorkerFrame(new ArrayBuffer(0));
     await settle();
     expect(rpc).toHaveBeenCalledTimes(2);
@@ -675,27 +700,31 @@ describe('Rust frame recovery callers', () => {
     exchange.dispose();
   });
 
-  it.each([true, false])('flushes pending authoritative SETTINGS before local recovery (settings present: %s)', (settings) => {
-    const store = new DefaultStore();
-    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
-    receive(exchange, fixture({ fills: 0 }));
-    (exchange as unknown as { applier: FrameApplier }).applier.applyLeverage('DELISTED', {
-      buyLeverage: 9, sellLeverage: 9,
-    });
-    const pending = fixture({ fills: 0, leverage: 12, settings });
-    const flush = vi.fn(() => receive(exchange, pending));
-    const snapshot = vi.fn(() => pending);
-    (exchange as unknown as { host: unknown }).host = { flush, snapshot, dispose: vi.fn() };
-    receive(exchange, new ArrayBuffer(0));
-    expect(flush).toHaveBeenCalledTimes(1);
-    expect(snapshot).toHaveBeenCalledTimes(1);
-    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(snapshot.mock.invocationCallOrder[0]);
-    expect(store.fetchedLeverage.DELISTED).toBeUndefined();
-    if (settings) {
-      expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 12, sellLeverage: 12 });
-    } else expect(store.fetchedLeverage).toEqual({});
-    exchange.dispose();
-  });
+  it.each([true, false])(
+    'flushes pending authoritative SETTINGS before local recovery (settings present: %s)',
+    (settings) => {
+      const store = new DefaultStore();
+      const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
+      receive(exchange, fixture({ fills: 0 }));
+      (exchange as unknown as { applier: FrameApplier }).applier.applyLeverage('DELISTED', {
+        buyLeverage: 9,
+        sellLeverage: 9,
+      });
+      const pending = fixture({ fills: 0, leverage: 12, settings });
+      const flush = vi.fn(() => receive(exchange, pending));
+      const snapshot = vi.fn(() => pending);
+      (exchange as unknown as { host: unknown }).host = { flush, snapshot, dispose: vi.fn() };
+      receive(exchange, new ArrayBuffer(0));
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(snapshot).toHaveBeenCalledTimes(1);
+      expect(flush.mock.invocationCallOrder[0]).toBeLessThan(snapshot.mock.invocationCallOrder[0]);
+      expect(store.fetchedLeverage.DELISTED).toBeUndefined();
+      if (settings) {
+        expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 12, sellLeverage: 12 });
+      } else expect(store.fetchedLeverage).toEqual({});
+      exchange.dispose();
+    },
+  );
 
   it('restores forwarded query-only leverage from the RPC bundle when engine SETTINGS is empty', async () => {
     const workerStore = new DefaultStore();
@@ -709,7 +738,9 @@ describe('Rust frame recovery callers', () => {
       vi.fn(() => frame),
     );
     const snapshot = await worker.fetchEngineSnapshot();
-    expect(new Frame(snapshot.frame).settings()!.count).toBe(0);
+    const settings = new Frame(snapshot.frame).settings();
+    if (settings === undefined) throw new Error('Expected the SETTINGS snapshot');
+    expect(settings.count).toBe(0);
     expect(snapshot.fetchedLeverage).toEqual({ BTCUSDT: rails });
     expect(snapshot.fetchedLeverage).not.toBe(workerStore.fetchedLeverage);
     expect(snapshot.fetchedLeverage.BTCUSDT).not.toBe(workerStore.fetchedLeverage.BTCUSDT);
@@ -746,7 +777,9 @@ describe('Rust frame recovery callers', () => {
     expect(flush).toHaveBeenCalledTimes(1);
     expect(snapshot).toHaveBeenCalledTimes(1);
     expect(flush.mock.invocationCallOrder[0]).toBeLessThan(snapshot.mock.invocationCallOrder[0]);
-    expect(new Frame(result.frame).settings()!.buyLeverage![0]).toBe(12);
+    const buyLeverage = new Frame(result.frame).settings()?.buyLeverage;
+    if (buyLeverage === undefined) throw new Error('Expected the buy leverage column');
+    expect(buyLeverage[0]).toBe(12);
     expect(result.fetchedLeverage.BTCUSDT.buyLeverage).toBe(12);
     expect(result.fetchedLeverage.BTCUSDT.sellLeverage).toBe(12);
     expect(result.fetchedLeverage.DELISTED).toBeUndefined();
@@ -789,7 +822,9 @@ describe('Rust frame recovery callers', () => {
     expect(snapshot).toHaveBeenCalledTimes(1);
     expect(store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(12);
     expect(main.store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(12);
-    expect(postMessage.mock.calls.at(-1)![0]).toMatchObject({
+    const lastMessage = postMessage.mock.calls.at(-1);
+    if (lastMessage === undefined) throw new Error('Expected the worker snapshot message');
+    expect(lastMessage[0]).toMatchObject({
       op: 'store',
       data: { fetchedLeverage: { BTCUSDT: { buyLeverage: 12, sellLeverage: 12 } } },
     });
@@ -799,7 +834,11 @@ describe('Rust frame recovery callers', () => {
 
   it('publishes KuCoin Spot leverage acknowledgements from engine SETTINGS and keeps them authoritative', async () => {
     const store = new DefaultStore();
-    const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret', passphrase: 'fixture-passphrase' }, store);
+    const exchange = new RustEngineExchange(
+      'kucoinspot',
+      { key: 'key', secret: 'secret', passphrase: 'fixture-passphrase' },
+      store,
+    );
     receive(exchange, fixture({ fills: 0 }));
     const command = vi.fn().mockResolvedValue(undefined);
     (exchange as unknown as { command: unknown }).command = command;
