@@ -71,6 +71,10 @@ export class DelegatedSignerSetup {
     const setupPolicy = deriveSignerSetupPolicy(name);
     const primaryMetadata = effectiveIdentityMetadata(metadata.primary, setupPolicy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
+    if (name === 'kraken' && this.usesPayloadSigner) {
+      const message = 'Kraken Futures requires RemoteSigner SHA256/HMAC-SHA512 custody; PayloadSigner is unsupported';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     if (name === 'grvt' && this.usesPayloadSigner) {
       const message = 'GRVT PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });

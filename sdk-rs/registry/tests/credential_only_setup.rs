@@ -47,10 +47,21 @@ fn k4_non_validating_crates_without_dispatch_signing_refuse_injected_identities(
                 Accept,
             )
             .expect_err("injected identities are refused");
-            assert_eq!(
-                error.message, "Injected signing is not supported for this venue yet",
-                "{venue}"
-            );
+            if venue == "orderly" {
+                assert_eq!(
+                    error.message,
+                    "Orderly injected private signing admission is closed"
+                );
+                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+                assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+            } else {
+                assert_eq!(
+                    error.message, "Injected signing is not supported for this venue yet",
+                    "{venue}"
+                );
+                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+                assert_eq!(error.outcome, None);
+            }
         }
     }
 }

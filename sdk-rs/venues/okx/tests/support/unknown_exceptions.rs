@@ -442,12 +442,7 @@ fn unknown_exception_cancel_rows() {
         let first = mutation(&prepared(&mut e, 5.));
         let rows: Vec<Value> = serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
         let field = if algo { "algoId" } else { "ordId" };
-        // The existing engine call journal retains accepted cancel targets;
-        // they are not newly placed orders and do not increase placedCount.
-        let mut accepted: Vec<String> = rows
-            .iter()
-            .map(|r| r[field].as_str().unwrap().to_owned())
-            .collect();
+        // Applied cancellation targets are not newly created order IDs.
         let acks: Vec<_> = rows
             .iter()
             .map(|r| json!({field:r[field],"sCode":"0"}))
@@ -461,11 +456,6 @@ fn unknown_exception_cancel_rows() {
         let second = mutation(&prepared(&mut e, 6.));
         let rows: Vec<Value> = serde_json::from_str(second.body.as_deref().unwrap()).unwrap();
         let identity = rows[0][field].as_str().unwrap().to_owned();
-        accepted.extend(
-            rows.iter()
-                .skip(1)
-                .map(|r| r[field].as_str().unwrap().to_owned()),
-        );
         let acks:Vec<_>=rows.iter().enumerate().map(|(i,r)|json!({field:r[field],"sCode":if i==0 {"51412"} else {"0"},"sMsg":if i==0 {"uncertain cancel"} else {""}})).collect();
         reply(
             &mut e,
@@ -474,11 +464,20 @@ fn unknown_exception_cancel_rows() {
             7.,
         );
         let mut out = prepared(&mut e, 7.);
-        let error = pin(&out, 2, &accepted, &identity, true, 0);
-        assert!(
-            error.elements.is_none(),
-            "cancel journal omission remains unchanged"
-        );
+        let error = pin(&out, 2, &[], &identity, true, 0);
+        let elements = &error.elements.as_ref().expect("indexed cancel journal").0;
+        assert_eq!(elements.len(), rows.len());
+        assert!(matches!(elements[0].result, ElementResult::Unknown { .. }));
+        for (element, row) in elements.iter().zip(&rows).skip(1) {
+            assert!(matches!(
+                &element.result,
+                ElementResult::Applied {
+                    effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
+                    target_order_id: Some(target),
+                    ..
+                } if target == row[field].as_str().unwrap()
+            ));
+        }
         reply(
             &mut e,
             &Action::Http(second),
@@ -487,7 +486,7 @@ fn unknown_exception_cancel_rows() {
         );
         out.extend(prepared(&mut e, 8.));
         out.extend(fire_armed(&mut e, &out.clone(), 30_000.));
-        pin(&out, 2, &accepted, &identity, true, 0);
+        pin(&out, 2, &[], &identity, true, 0);
     }
 }
 

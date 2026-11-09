@@ -3235,16 +3235,20 @@ fn metadata_write_provider_refusal_releases_pending_owner_before_next_read() {
             requests,
             "provider refusal releases no HTTP"
         );
-        assert_eq!(
-            h.failures
-                .iter()
-                .filter(|(id, _)| *id == 944)
-                .collect::<Vec<_>>(),
-            vec![&(
-                944,
-                safe_cex_engine::signing::SignError::Refused.venue_error()
-            )]
-        );
+        let failures = h
+            .failures
+            .iter()
+            .filter(|(id, _)| *id == 944)
+            .collect::<Vec<_>>();
+        assert_eq!(failures.len(), 1);
+        let mut actual = failures[0].1.clone();
+        let expected = safe_cex_engine::signing::SignError::Refused.venue_error();
+        let elements = actual.elements.take().expect("unsent setting outcome");
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0].result,
+            safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) }
+            if error.as_ref() == &expected));
+        assert_eq!(actual, expected);
         assert_eq!(
             h.engine.health().auth_failures,
             auth_failures,

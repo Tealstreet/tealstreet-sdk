@@ -36,7 +36,7 @@ fn pure_spot_u64_vectors_preserve_decimal_body_receipt_and_mac_without_reservati
         ),
     ] {
         // Pure work only: no Cx, dispatcher reserve, transport, or WASM claim.
-        let (body, work) = recipe.work(nonce, 1_700_000_000_000.).unwrap();
+        let (body, work) = recipe.work(Some(nonce), 1_700_000_000_000.).unwrap();
         assert_eq!(body, Some(format!("nonce={nonce}")));
         assert_eq!(work.receipt.nonce, Some(nonce));
         let json = serde_json::to_string(&work.receipt).unwrap();
