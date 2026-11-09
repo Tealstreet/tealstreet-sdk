@@ -1,6 +1,6 @@
-import type { ClosedPnlEntry, Market } from '../../types';
+import type { ClosedPnlEntry, Market } from '../../../types';
 
-import { PositionSide } from '../../types';
+import { PositionSide } from '../../../types';
 
 /**
  * OKX `/api/v5/account/positions-history` row -> `ClosedPnlEntry`.
@@ -30,7 +30,7 @@ const toNumber = (value: unknown) => {
 };
 
 export const mapOkxClosedPosition = (
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   market: Market | undefined,
   contractsToBase: (contracts: number, market: Market, price: number) => number,
   accountName: string,

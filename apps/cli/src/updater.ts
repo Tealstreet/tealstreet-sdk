@@ -3,6 +3,7 @@ import { join } from 'path';
 import { execSync } from 'child_process';
 import chalk from 'chalk';
 import { getConfigDir } from './config';
+import { captureStorageSession, assertStorageSession } from './storage-context';
 import { swapInPlace, updatePaths } from './windows-update';
 import packageJson from '../package.json';
 import { BRAND, releaseAssetName } from './brand';
@@ -22,6 +23,7 @@ interface UpdateCheckState {
 }
 
 function getUpdateState(): UpdateCheckState {
+  assertStorageSession();
   try {
     if (existsSync(UPDATE_CHECK_FILE())) {
       return JSON.parse(readFileSync(UPDATE_CHECK_FILE(), 'utf-8'));
@@ -31,6 +33,7 @@ function getUpdateState(): UpdateCheckState {
 }
 
 function saveUpdateState(state: UpdateCheckState): void {
+  assertStorageSession();
   try {
     const dir = getConfigDir();
     if (!existsSync(dir)) {
@@ -129,8 +132,10 @@ async function fetchLatestVersion(): Promise<ReleaseInfo | null> {
  * Shows a notification if a new version is available
  */
 export function checkForUpdatesBackground(): void {
+  const ownerSession = captureStorageSession();
   // Run check in background without blocking
   setImmediate(async () => {
+    if (!ownerSession.isCurrent()) return;
     try {
       const state = getUpdateState();
       const now = Date.now();
@@ -156,6 +161,7 @@ export function checkForUpdatesBackground(): void {
       }
 
       const releaseInfo = await fetchLatestVersion();
+      if (!ownerSession.isCurrent()) return;
       state.lastCheck = now;
 
       if (releaseInfo) {
@@ -411,9 +417,11 @@ async function downloadLatestBinary(version: string): Promise<void> {
  * Force a version check (ignores cooldown)
  */
 export async function forceCheckForUpdates(): Promise<void> {
+  const ownerSession = captureStorageSession();
   console.log(chalk.cyan('Checking for updates...'));
 
   const releaseInfo = await fetchLatestVersion();
+  if (!ownerSession.isCurrent()) return;
   const currentVersion = getCurrentVersion();
 
   if (!releaseInfo) {
