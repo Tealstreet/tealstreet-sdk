@@ -4151,10 +4151,12 @@ pub trait Venue {
     }
 
     /// Rate-limit bookkeeping for a validated delivery, before its Unknown seal.
+    /// Use raw `now` for scheduling, calibrated `protocol_now` for absolute dates.
     /// No Cx: this cannot send, publish financial rows or complete a command.
     fn observe_unproven_http_response(
         &mut self,
         _now: f64,
+        _protocol_now: f64,
         _pending: &Self::Pending,
         _response: Response<'_>,
     ) {
@@ -4163,6 +4165,10 @@ pub trait Venue {
     /// Drop only this generation's native command planning after the engine
     /// has sealed and retired it. No Store, response or completion authority.
     fn discard_unproven_http_command(&mut self, _owner: crate::request_context::Owner) {}
+
+    /// Finish retained queues outside another command's HTTP delivery.
+    /// Context validation and journal projection still govern every completion.
+    fn finish_deferred_commands(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
 
     /// The engine retired this tracked Read root at its deadline. `pending`
     /// holds the continuations of its outstanding requests, already discarded
@@ -6719,8 +6725,6 @@ impl<V: Venue> Engine<V> {
 
     #[inline(never)]
     fn finish_deferred_commands(&mut self, now: f64) {
-        #[cfg(not(feature = "order-locks"))]
-        let _ = now;
         // Deferred commands are engine-owned work, not part of the HTTP codec
         // whose callback just released the lock. Do not lend that codec's
         // attempt authority to an unrelated internal finalization.
@@ -6732,6 +6736,11 @@ impl<V: Venue> Engine<V> {
         let entry = self.io.core.command_entry.take();
         #[cfg(feature = "order-locks")]
         let order_response = self.io.core.order_response_token.take();
+        self.venue.finish_deferred_commands(&mut Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        });
         #[cfg(feature = "order-locks")]
         let ready = self.io.core.order_locks.ready();
         #[cfg(feature = "order-locks")]

@@ -256,7 +256,7 @@ impl Job {
     pub(super) fn unknown_words(&self) -> Option<String> {
         self.guard.as_ref().map(|guard| {
             format!(
-                "Your {} {} outcome is unknown; check Open Orders before re-placing protection",
+                "{UNKNOWN_WORDS}. Your {} {} was not confirmed; check protection before re-placing it",
                 guard.order.symbol,
                 if self.restoring {
                     "original stop put-back"

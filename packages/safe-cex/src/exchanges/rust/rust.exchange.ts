@@ -871,6 +871,22 @@ export class RustEngineExchange extends BaseExchange {
       options = primaryOnly;
     }
     options = withSecondaryReadKeyPolicy(options);
+    const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
+      ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
+      : [];
+    // Empty saved fields are stripped too, but only an actual read key is worth a warning.
+    const ignoredCoinbaseReadOptions = coinbaseReadOptions.some(Boolean);
+    if (coinbaseReadOptions.some((value) => value !== undefined)) {
+      // The native JWT signer uses primary credentials; its egress must use the same account policy.
+      const {
+        secondary_key: _readKey,
+        secondary_secret: _readSecret,
+        secondary_passphrase: _readPassphrase,
+        secondaryProxyUrl: _readProxy,
+        ...effectiveOptions
+      } = options;
+      options = effectiveOptions;
+    }
     const lighterL1Address =
       deriveSignerSetupMapping(exchangeName) === 'lighter' && typeof options.key === 'string'
         ? options.key.match(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/)?.[0]
@@ -963,22 +979,6 @@ export class RustEngineExchange extends BaseExchange {
     if (signerSetup || setupError)
       options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
     if (hyperliquid && (signerSetup || setupError)) options = { ...options, key: hyperliquidAccount };
-    const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
-      ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
-      : [];
-    // Empty saved fields are stripped too, but only an actual read key is worth a warning.
-    const ignoredCoinbaseReadOptions = coinbaseReadOptions.some(Boolean);
-    if (coinbaseReadOptions.some((value) => value !== undefined)) {
-      // The native JWT signer uses primary credentials; its egress must use the same account policy.
-      const {
-        secondary_key: _readKey,
-        secondary_secret: _readSecret,
-        secondary_passphrase: _readPassphrase,
-        secondaryProxyUrl: _readProxy,
-        ...effectiveOptions
-      } = options;
-      options = effectiveOptions;
-    }
     const commandTimeoutMs = options.extra?.rustCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647) {
       signerSetup?.dispose();

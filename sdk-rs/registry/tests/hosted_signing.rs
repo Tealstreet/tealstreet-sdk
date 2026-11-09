@@ -247,17 +247,19 @@ fn closed_schema_rejects_caller_refs_secret_exports_and_unknown_families() {
     ] {
         assert!(serde_json::from_str::<Input>(input).is_err());
     }
-    // MEXC captures are supported only when its family is compiled.
+    // MEXC, Bitrue and Kraken HTTP captures follow their compiled families.
     for venue in [
         #[cfg(not(feature = "mexc"))]
         "mexc",
         "apexomni",
+        #[cfg(not(feature = "bitrue"))]
         "bitrue",
         "coinbase",
         "coinbasespot",
         "grvt",
         "hyperliquid",
         "hyperliquidspot",
+        #[cfg(not(feature = "kraken"))]
         "kraken",
         "krakenspot",
         "lighter",
