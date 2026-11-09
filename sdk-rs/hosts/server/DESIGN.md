@@ -546,6 +546,50 @@ Socket keepalive: the server sends a protocol-level WebSocket ping every 10s.
 With no inbound data for 30s, either a message or a pong, the socket is
 dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
+### DELEGATED handover
+
+When the shared Bybit opt-in declaration is enabled, authenticated connections
+may request a handover with `msg` data
+`{op:"delegated-key-req", accountName}`. The `msg` response has
+`{op:"delegated-key", accountName, attemptId, publicKey, bootId, expiresAtMs}`.
+The public key uses padded standard base64. An offer lasts 30 seconds, belongs
+to that connection and saved account name, and is replaced by another request
+for the same name. Each connection retains at most 64 unexpired offers.
+
+The matching init adds `signingMode:"delegated"` and
+`sealed:{attemptId, enc, ciphertext}`. This path checks the shared venue opt-in
+declaration and is limited to Bybit. Existing LOCAL/COSIGNED settings and engine
+options retain their original behavior. Plaintext credentials are never init
+settings or account fingerprints.
+
+The handover uses RFC 9180 base mode with X25519/HKDF-SHA256,
+HKDF-SHA256 and ChaCha20-Poly1305. The application info is
+`tealstreet/delegated-handover/v1`; associated data joins the attempt ID, process
+boot ID, exchange name and init key with `|`. `enc` and `ciphertext` are padded
+standard base64. Decrypted JSON contains `key`, `secret` and optional
+`passphrase`; its key must match the init key. The opener and parsed credential
+fields erase their owned buffers on drop. Handover parsing retains the JSON
+string contract, including escaped strings and optional or null `passphrase`.
+JSON input is limited to 12,272 bytes, consistent with the envelope limit.
+Opening fills the shared `delegated_memory::CandidateCopy` directly after its
+Bybit preparation succeeds. Handover replies use the current init registration,
+including its optional `instanceId`; clients without an ID retain the same bytes.
+
+Opening and subsequent join verification run in a spawned task. The existing
+socket select loop handles its completion, while continuing ping, close and
+drain handling. Until verification completes, commands for that account receive
+`verifying`, and the account is not joined or subscribed. Completion belongs to
+the captured user, socket and init generation; dispose, another init, another
+key request or socket close retires pending work. Verification failure leaves
+any running account unchanged.
+
+The handover slice does not by itself attach an account: successful opening
+still returns an `initRefused` error of `kind:"unverified"`, with
+`transient:true`, until the venue-probe integration is present. A failed opening
+uses `transient:false`. Existing rebuild refusal, settings replacement and
+early-subscription handling remain on the existing COSIGNED init path. Fixed
+synthetic interoperability and RFC test data live in `tests/data/`.
+
 ## Frames (claude-19pt8s, web hosted client)
 
 The browser host (`ExchangeServerWorker.ts`) forwards only TEXT frames to the
