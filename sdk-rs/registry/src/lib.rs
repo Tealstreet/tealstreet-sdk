@@ -273,13 +273,10 @@ fn public_custody_discard_allowed(venue: &str, options: &EngineOptions) -> bool 
     construction::bridge(venue, options).dispatch_signing
         && construction::read_credentials_policy(venue)
             == construction::ReadCredentialsPolicy::Install
-        && match construction::signer_setup_mapping(venue) {
-            Some(construction::SetupMapping::Hyperliquid | construction::SetupMapping::Txflow) => {
-                true
-            }
-            None => options.read_credentials.is_none(),
-            _ => false,
-        }
+        && matches!(
+            construction::signer_setup_mapping(venue),
+            Some(construction::SetupMapping::Hyperliquid | construction::SetupMapping::Txflow)
+        )
 }
 
 #[cfg(feature = "dispatch-signing")]
@@ -309,13 +306,7 @@ fn empty_local_signer() -> (
 }
 
 #[cfg(feature = "dispatch-signing")]
-fn discard_private_custody(venue: &str, options: &mut EngineOptions) {
-    if !matches!(
-        construction::signer_setup_mapping(venue),
-        Some(construction::SetupMapping::Hyperliquid | construction::SetupMapping::Txflow)
-    ) {
-        safe_cex_crypto::secrets::erase(&mut options.key);
-    }
+fn discard_private_custody(options: &mut EngineOptions) {
     for value in [&mut options.secret, &mut options.passphrase] {
         safe_cex_crypto::secrets::erase(value);
     }
@@ -759,7 +750,7 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     if unused_public_custody(venue, options) {
-        discard_private_custody(venue, options);
+        discard_private_custody(options);
         return Ok(empty_local_signer());
     }
     let public_data_only = construction::signer_setup_public_data_only(options);
@@ -1505,7 +1496,7 @@ pub fn build_with_signer<T: Visit>(
     }
     #[cfg(feature = "dispatch-signing")]
     let signer = if unused_public_custody(venue, &options) {
-        discard_private_custody(venue, &mut options);
+        discard_private_custody(&mut options);
         None
     } else {
         signer

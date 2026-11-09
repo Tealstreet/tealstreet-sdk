@@ -52,25 +52,30 @@ fn preserves_private_capsule(venue: &str) {
             build_with_signer(venue, options, entropy, Some(provider), PrivateOnly).unwrap();
         }
     }
-    // Pending credentials must neither override explicit public intent nor
-    // manufacture private capability when the parsed capsule has no primary.
-    for (mode, capsule) in [
-        (json!({"publicDataOnly": true}), "invalid-json"),
-        (json!({"publicMode": {"requested": true}}), "invalid-json"),
-        (json!({"publicMode": {"requested": null}}), "{}"),
+    // Public intent cannot bypass another family's capsule validation.
+    for mode in [
+        json!({"publicDataOnly": true}),
+        json!({"publicMode": {"requested": true}}),
     ] {
         let mut options: EngineOptions = serde_json::from_value(mode).unwrap();
-        let (_, identities) =
-            local_signer_from_capsule(venue, capsule.into(), &mut options).unwrap();
-        assert!(identities.primary.is_none() && identities.secondary.is_none());
-        options.signing = Some(identities);
-        assert!(
-            options
-                .construction(venue)
-                .public_data_only
-                .unwrap_or(options.public_data_only)
-        );
+        let error = local_signer_from_capsule(venue, "invalid-json".into(), &mut options)
+            .err()
+            .expect("public intent must retain capsule validation");
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+        assert_eq!(error.message, "Invalid local signer setup");
     }
+    // An empty valid capsule cannot manufacture private capability.
+    let mut options: EngineOptions =
+        serde_json::from_value(json!({"publicMode": {"requested": null}})).unwrap();
+    let (_, identities) = local_signer_from_capsule(venue, "{}".into(), &mut options).unwrap();
+    assert!(identities.primary.is_none() && identities.secondary.is_none());
+    options.signing = Some(identities);
+    assert!(
+        options
+            .construction(venue)
+            .public_data_only
+            .unwrap_or(options.public_data_only)
+    );
 }
 
 macro_rules! capsule_test {
