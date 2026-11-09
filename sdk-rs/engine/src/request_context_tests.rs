@@ -1235,10 +1235,12 @@ fn host_tokens_round_trip_wide_generations_without_js_number_conversion() {
         generation: u64::MAX,
     };
     let preparation = Preparation {
+        issuer: u64::MAX,
         attempt,
         sequence: u64::MAX,
     };
     let permit = Permit {
+        issuer: u64::MAX,
         attempt,
         preparation: u64::MAX,
         sequence: u64::MAX,
@@ -1259,20 +1261,26 @@ fn host_tokens_round_trip_wide_generations_without_js_number_conversion() {
 #[test]
 fn host_tokens_reject_noncanonical_aliases_overflow_and_truncation() {
     for token in [
-        "p1:0:1:0",
-        "p1:1:0:0",
-        "p1:01:1:0",
-        "p1:+1:1:0",
-        "p1:1:1:00",
-        "p1:1:1:-1",
-        "p1:1:1:0 ",
-        "p1:1:1:０",
-        "p1:1:1:0:",
-        "p1:1:1",
-        "p1:1::0",
+        "p1:1:1:0",
+        "p2:0:1:1:0",
+        "p2:01:1:1:0",
+        "p2:+1:1:1:0",
+        "p2:1:0:1:0",
+        "p2:1:1:0:0",
+        "p2:1:01:1:0",
+        "p2:1:1:1:00",
+        "p2:1:1:1:-1",
+        "p2:1:1:1:0 ",
+        "p2:1:1:1:０",
+        "p2:1:1:1:0:",
+        "p2:18446744073709551616:1:1:0",
+        "p2:1:9007199254740992:1:0",
+        "p2:1:1:18446744073709551616:0",
+        "p2:1:+1:1:0",
+        "p2:1:1:1",
+        "p2:1:1::0",
         "p2:1:1:0",
-        "p1:9007199254740992:1:0",
-        "p1:1:18446744073709551616:0",
+        "p3:1:1:1:0",
     ] {
         assert_eq!(
             Preparation::from_wire(token),
@@ -1281,13 +1289,18 @@ fn host_tokens_reject_noncanonical_aliases_overflow_and_truncation() {
         );
     }
     for token in [
-        "r1:1:1:0:0",
-        "r1:1:1:0:01",
-        "r1:1:1:+0:1",
-        "r1:1:1:0:1:",
-        "r1:1:1:0",
-        "r1:1:1:18446744073709551616:1",
+        "r1:1:1:0:1",
+        "r2:0:1:1:0:1",
+        "r2:01:1:1:0:1",
+        "r2:1:1:1:0:0",
+        "r2:1:1:1:0:01",
+        "r2:1:1:1:+0:1",
+        "r2:1:1:1:0:1:",
+        "r2:1:1:1:18446744073709551616:1",
+        "r2:18446744073709551616:1:1:0:1",
+        "r2:1:1:1:0",
         "r2:1:1:0:1",
+        "r3:1:1:1:0:1",
     ] {
         assert_eq!(Permit::from_wire(token), Err(Error::Invalid), "{token}");
     }
