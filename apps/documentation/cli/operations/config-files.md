@@ -27,6 +27,10 @@ old login with a message. This includes queued exit/quit commands. In-flight
 scripts cannot make further adapter calls after their starting session ends. A new login reconnects the listener with that user's identity;
 browser approval is specific to that user.
 
+Changing login stops the old user's in-process chasers and removes them from
+chase listings before disconnecting exchanges. Late chase results are discarded;
+they do not appear in the next user's chase watch or one-shot command result.
+
 Pending account starts, retries, script captures, recorder completions and
 background update checks also stay bound to their starting login. Cross-trade
 startup stops its remaining account list on cancellation and disposes old

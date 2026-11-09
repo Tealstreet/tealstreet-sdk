@@ -259,6 +259,38 @@ test('#2351 managed ingress (run 42402512142) retains Kraken headroom and equal 
   }
 });
 
+test('#3304 restage (run 42558782819 at merge a068e6cb0876) retains Kraken CI headroom and equal siblings', () => {
+  // Family job 128970669128 and replay jobs 128970669384/128970669374 agree on web/node size.
+  const measured = 2_228_472;
+  const minimumCap = 2_239_488;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['kraken', 'krakenspot']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap + 1, 'venue', venue), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
+
+test('#3304 refusal ordering at 0b7e6ccf60f3 retains optimized Kraken headroom and equal siblings', () => {
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue kraken;
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132: web/node both 2,234,008 B.
+  const measured = 2_234_008;
+  const minimumCap = 2_244_608;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['kraken', 'krakenspot']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap + 1, 'venue', venue), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
+
 test('#3259 KuCoin/Kraken ambiguous writes (run 42401545356 at f9ec901182f) retain headroom and siblings match', () => {
   for (const [venue, measured, minimumCap] of [
     ['kraken', 2_136_165, 2_147_328],
@@ -1345,6 +1377,19 @@ test('#3383 (run 42493810742 at 1e85d49cc13) retains measured wasm headroom', ()
   }
 });
 
+test('#3344 (run 42479985723 at 51005ee6d89) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['hyperliquid', 2_210_524, 2_221_056],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('#3373 (run 42483155921 at f62df98ad32) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['bitunix', 1_877_328, 1_888_256],
@@ -1408,4 +1453,30 @@ test('#3297 post-#3306 (run 42556682443 at e5ae4d9a8db) retains current measured
   assert.equal(wasmBudgetError(measured, 'venue', 'bitrue'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'bitrue'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bitrue'), /exceeds/);
+});
+
+test('#3344 restage (optimized head 2cc05051503) retains measured headroom for both aliases', () => {
+  const measured = 2_225_418;
+  const minimumCap = 2_236_416;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3344 current CI (run 42565604601 at merge ec8633c44e98) retains both alias floors', () => {
+  const measured = 2_225_586;
+  const minimumCap = 2_236_416;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
