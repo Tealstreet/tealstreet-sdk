@@ -22,6 +22,9 @@ enum Input {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Rule {
+    // Hosted admission is read by the host, not emitted into LOCAL construction.
+    #[serde(default, rename = "delegated")]
+    _delegated: Option<DelegatedPolicy>,
     can_sign: Option<Vec<Vec<Input>>>,
     private_eligible: Option<Vec<Vec<Input>>>,
     explicit_private_error: Option<String>,
@@ -34,6 +37,13 @@ struct Rule {
     /// Family-specific trusted setup mapping, declared rather than name-matched.
     #[serde(default)]
     setup_mapping: Option<SetupMapping>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DelegatedPolicy {
+    #[serde(default, rename = "enabled")]
+    _enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]

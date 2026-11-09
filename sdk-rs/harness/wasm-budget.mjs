@@ -210,6 +210,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3111 historical run 42096897919 measured HL siblings at 2,106,939 B; current larger caps retained.
 // #3306 CI3 run 42490856791, merge 331730698740: Bitunix 1,905,582 B; OKX 2,035,284 B.
 // CI bytes plus 10 KiB rounded up to KiB; never below either incoming parent cap.
+// #3281 merge: max(d9b5310e7d1, 6c158931c59) for every parent cap.
+// Current master dominates; retain both parents' measurement provenance
+// and the #3281 measured-headroom regression (run 42422693183, 5025f1670c7).
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_056_192,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.

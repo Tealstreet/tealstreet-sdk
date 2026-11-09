@@ -132,6 +132,14 @@ impl SecretCopy {
         self.locked
     }
 
+    /// Finish an in-place opening without retaining its unused suffix.
+    pub fn truncate(&mut self, len: usize) {
+        if let Some(tail) = self.as_bytes_mut().get_mut(len..) {
+            tail.zeroize();
+            self.len = len;
+        }
+    }
+
     /// Each additional copy owns separate pages and releases only those pages.
     pub fn try_clone(&self) -> io::Result<ResidentCopy> {
         let mut copy = Self::allocate(self.len)?;
@@ -203,6 +211,26 @@ fn prepare_process() -> io::Result<()> {
     #[cfg(not(unix))]
     {
         Err(io::ErrorKind::Unsupported.into())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod opening_tests {
+    use super::*;
+
+    #[test]
+    fn truncation_preserves_prefix_and_erases_suffix() {
+        let mut copy = SecretCopy::allocate(9).unwrap();
+        copy.as_bytes_mut().copy_from_slice(b"synthetic");
+        copy.truncate(4);
+        assert_eq!(copy.as_bytes(), b"synt");
+        // Restore the original in-bounds view to observe the removed bytes.
+        copy.len = 9;
+        assert_eq!(copy.as_bytes(), b"synt\0\0\0\0\0");
+        copy.truncate(usize::MAX);
+        assert_eq!(copy.as_bytes().len(), 9);
+        copy.truncate(0);
+        assert!(copy.as_bytes().is_empty());
     }
 }
 

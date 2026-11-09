@@ -83,6 +83,25 @@ fn reference(reference: StopTriggerType) -> &'static str {
     }
 }
 
+fn cancelled_terminal(status: &str) -> bool {
+    matches!(status, "Cancelled" | "Deactivated")
+}
+
+fn matches_partial_kind(row: &NativeStop, kind: OrderType) -> bool {
+    row.tpsl_mode.as_deref() == Some("Partial")
+        && match kind {
+            OrderType::StopLoss => matches!(
+                row.stop_order_type.as_deref(),
+                Some("StopLoss" | "PartialStopLoss")
+            ),
+            OrderType::TakeProfit => matches!(
+                row.stop_order_type.as_deref(),
+                Some("TakeProfit" | "PartialTakeProfit")
+            ),
+            _ => false,
+        }
+}
+
 fn matches_original(row: &NativeStop, guard: &PartialStopGuard) -> bool {
     let order = &guard.original;
     let limit = order
@@ -101,13 +120,7 @@ fn matches_original(row: &NativeStop, guard: &PartialStopGuard) -> bool {
         && row.order_type == if limit.is_some() { "Limit" } else { "Market" }
         && equals(&row.price, limit.unwrap_or(0.0))
         && row.position_idx == guard.position_idx
-        && row.tpsl_mode.as_deref() == Some("Partial")
-        && row.stop_order_type.as_deref()
-            == Some(if order.kind == OrderType::StopLoss {
-                "StopLoss"
-            } else {
-                "TakeProfit"
-            })
+        && matches_partial_kind(row, order.kind)
 }
 
 /// Missing native lineage or an incomplete peer census never authorizes put-back.
@@ -141,13 +154,7 @@ fn standalone_provenance(
         && matches_original(target, guard)
         && guard.original.parent_id.is_none()
         && target.parent_order_link_id.as_deref() == Some("")
-        && target.tpsl_mode.as_deref() == Some("Partial")
-        && target.stop_order_type.as_deref()
-            == Some(if guard.original.kind == OrderType::StopLoss {
-                "StopLoss"
-            } else {
-                "TakeProfit"
-            })
+        && matches_partial_kind(target, guard.original.kind)
         && peers.iter().all(|peer| {
             peer.order_id == target.order_id
                 || (peer.order_link_id.is_some()
@@ -282,7 +289,7 @@ impl Flow {
             {
                 return Ok(Observation::Retry(retry));
             }
-            if row.order_status != "Cancelled" || !matches_original(&row, &self.guard) {
+            if !cancelled_terminal(&row.order_status) || !matches_original(&row, &self.guard) {
                 return Err(failed());
             }
             self.terminal = Some(row);
@@ -290,7 +297,8 @@ impl Flow {
             if page.list.iter().any(|row| {
                 row.symbol != self.guard.symbol
                     || (row.order_id == self.guard.original.id
-                        && (row.order_status != "Cancelled" || !matches_original(row, &self.guard)))
+                        && (!cancelled_terminal(&row.order_status)
+                            || !matches_original(row, &self.guard)))
             }) {
                 return Err(failed());
             }

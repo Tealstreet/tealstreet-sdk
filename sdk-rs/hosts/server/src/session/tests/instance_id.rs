@@ -1132,3 +1132,113 @@ async fn disposal_after_a_refused_registration_cannot_restore_the_old_reply_id()
         })
         .await;
 }
+
+async fn delegated_mode_refusal_reply(
+    joined: bool,
+    previous_id: Option<&str>,
+    requested_id: Option<&str>,
+) {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let payload = init(requested_id);
+            let pair = || {
+                crate::delegated::DelegatedPair::new(
+                    payload.key.clone(),
+                    safe_cex_crypto::signer::Secret::new("synthetic-registration-fixture".into()),
+                    None,
+                )
+            };
+            let prepared = crate::delegated::prepare_delegated(&payload, pair())
+                .unwrap_or_else(|_| panic!("synthetic fixture prepares"));
+            let (mut account, _inbox) = crate::accounts::testing::account_on(
+                crate::accounts::testing::HeldLoad {
+                    placed: Arc::default(),
+                    load_after_ms: Some(0.),
+                    ticker: true,
+                },
+                ("u", "acct", "bybit"),
+                Some(safe_cex_remote_signer::SignerLink::new(
+                    0,
+                    Arc::new(|_| true),
+                )),
+                crate::delegated::fingerprint(&payload),
+                Arc::default(),
+            );
+            let inner = Arc::get_mut(&mut account).unwrap();
+            inner.link = None;
+            inner.delegated = Some(prepared.resident);
+            crate::accounts::testing::register(&registry, &account);
+            let (mut session, mut sent) = user_session(registry.clone(), "u");
+            if joined {
+                let previous = session.out.with_instance_id(previous_id);
+                let held = registry
+                    .obtain_delegated(
+                        "u",
+                        &payload,
+                        session.socket,
+                        None,
+                        previous.outbox(),
+                        pair(),
+                    )
+                    .await
+                    .unwrap_or_else(|_| panic!("same-mode hold succeeds"));
+                session.join(held, previous).await;
+                assert!(session.joined.contains_key("acct"));
+                ready().await;
+                while sent.try_recv().is_ok() {}
+            }
+            session.init(payload).await.unwrap();
+            let expected = envelope::init_refused(
+                "acct",
+                "Account signing mode differs; account not attached",
+            );
+            let actual = matching(&mut sent, &expected).await;
+            let expected = match requested_id.filter(|id| !id.is_empty()) {
+                Some(id) => envelope::with_instance_id(expected, id),
+                None => expected,
+            };
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+            assert_eq!(
+                actual, expected,
+                "mode refusal belongs to the current registration, including legacy bytes"
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn delegated_mode_refusal_uses_the_requested_registration_after_join() {
+    delegated_mode_refusal_reply(
+        true,
+        Some("prior-registration"),
+        Some("current-registration"),
+    )
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn delegated_mode_refusal_preserves_no_id_bytes_after_a_tagged_join() {
+    delegated_mode_refusal_reply(true, Some("prior-registration"), None).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn delegated_mode_refusal_uses_a_fresh_registration() {
+    delegated_mode_refusal_reply(false, None, Some("current-registration")).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn delegated_mode_refusal_preserves_legacy_bytes() {
+    delegated_mode_refusal_reply(true, None, None).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn delegated_mode_refusal_preserves_empty_id_bytes_after_a_tagged_join() {
+    delegated_mode_refusal_reply(true, Some("prior-registration"), Some("")).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn delegated_mode_refusal_preserves_fresh_legacy_bytes() {
+    delegated_mode_refusal_reply(false, None, None).await;
+}

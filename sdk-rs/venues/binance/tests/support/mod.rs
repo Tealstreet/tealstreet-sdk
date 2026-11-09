@@ -52,6 +52,42 @@ pub const DAILY: &str = r#"[{"symbol":"BTCUSDT","lastPrice":"100","priceChangePe
 pub const BOOK_TICKERS: &str = r#"[{"symbol":"BTCUSDT","bidPrice":"99.9","askPrice":"100.1"}]"#;
 pub const PREMIUM: &str = r#"[{"symbol":"BTCUSDT","markPrice":"100","indexPrice":"100","lastFundingRate":"0.0001","nextFundingTime":1700000000000}]"#;
 
+/// Exact wire quantities from a single placement or an ordered native batch.
+pub fn quantities(request: &HttpRequest) -> Vec<f64> {
+    let (name, value) = request
+        .url
+        .split_once('?')
+        .unwrap()
+        .1
+        .split('&')
+        .find_map(|part| {
+            let (name, value) = part.split_once('=')?;
+            matches!(name, "quantity" | "batchOrders").then_some((name, value))
+        })
+        .unwrap();
+    let mut decoded = Vec::new();
+    let mut at = 0;
+    while at < value.len() {
+        if value.as_bytes()[at] == b'%' {
+            decoded.push(u8::from_str_radix(&value[at + 1..at + 3], 16).unwrap());
+            at += 3;
+        } else {
+            decoded.push(value.as_bytes()[at]);
+            at += 1;
+        }
+    }
+    let text = String::from_utf8(decoded).unwrap();
+    if name == "quantity" {
+        vec![text.parse().unwrap()]
+    } else {
+        serde_json::from_str::<Vec<serde_json::Value>>(&text)
+            .unwrap()
+            .iter()
+            .map(|row| row["quantity"].as_str().unwrap().parse().unwrap())
+            .collect()
+    }
+}
+
 pub struct Harness {
     /// The latest body answered per path, to repeat for the first open's position read.
     answered: Vec<(String, String)>,
