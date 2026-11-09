@@ -181,8 +181,10 @@ it('admits Crypto.com RemoteSigner and canonical PayloadSigner while retaining u
   expect(deriveBridgeConstruction('cryptocom', {} as ExchangeOptions).dispatchSigning).toBe(true);
   expect(() => assertBetaAccount('cryptocom', { key: 'replay-key', remoteSigner })).not.toThrow();
   expect(() => assertBetaAccount('cryptocom', { key: 'replay-key', payloadSigner: vi.fn() })).not.toThrow();
-  expect(() => assertBetaAccount('kraken', { key: 'replay-key', remoteSigner })).toThrow(
-    expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }),
+  expect(deriveRemoteSigningPolicy('krakenspot')).toBeUndefined();
+  expect(() => assertBetaAccount('krakenspot', { key: 'replay-key', remoteSigner })).toThrow(
+    expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
+      message: expect.stringContaining("isn't available on the Hosted Server") }),
   );
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });

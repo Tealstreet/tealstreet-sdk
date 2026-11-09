@@ -71,6 +71,10 @@ export class DelegatedSignerSetup {
     const setupPolicy = deriveSignerSetupPolicy(name);
     const primaryMetadata = effectiveIdentityMetadata(metadata.primary, setupPolicy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
+    if (name === 'kraken' && this.usesPayloadSigner) {
+      const message = 'Kraken Futures requires RemoteSigner SHA256/HMAC-SHA512 custody; PayloadSigner is unsupported';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     if (name === 'grvt' && this.usesPayloadSigner) {
       const message = 'GRVT PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
@@ -89,8 +93,8 @@ export class DelegatedSignerSetup {
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
       || options.secondary_passphrase !== undefined || metadata.secondary !== undefined;
     // Raw HMAC callbacks have no slot selector; never install unusable read refs.
-    if ((name === 'woo' || name === 'cryptocom') && remoteSigner && secondaryRequested) {
-      const venue = name === 'woo' ? 'WOO X' : 'Crypto.com';
+    if ((name === 'woo' || name === 'bitrue' || name === 'cryptocom') && remoteSigner && secondaryRequested) {
+      const venue = name === 'woo' ? 'WOO X' : name === 'bitrue' ? 'Bitrue' : 'Crypto.com';
       const message = `${venue} secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }

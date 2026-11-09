@@ -1016,7 +1016,8 @@ fn implemented(algorithm: Algorithm) -> bool {
         Algorithm::SchnorrDigest => cfg!(feature = "schnorr"),
         Algorithm::Secp256k1Digest => cfg!(feature = "secp256k1"),
         Algorithm::StarkDigest => cfg!(feature = "stark"),
-        Algorithm::Ed25519 | Algorithm::Es256 => false,
+        Algorithm::Ed25519 => cfg!(feature = "ed25519"),
+        Algorithm::Es256 => false,
     }
 }
 
