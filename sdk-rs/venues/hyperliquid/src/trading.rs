@@ -2,6 +2,7 @@
 mod custody;
 mod protective;
 mod schedule;
+mod write_plan;
 pub(crate) use custody::PACING;
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
@@ -18,6 +19,24 @@ use safe_cex_engine::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
+
+// Canonical engine wording copied under the lead's venue-local literal rule.
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
+    if error.elements.as_ref().is_some_and(|rows| {
+        rows.iter().any(|row| {
+            matches!(
+                row.result,
+                safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+            )
+        })
+    }) {
+        ENGINE_UNKNOWN_TEXT.into()
+    } else {
+        error.message.clone()
+    }
+}
 
 #[derive(Default)]
 pub struct Trading {
@@ -46,6 +65,7 @@ struct Job {
     command: CommandId,
     steps: VecDeque<Step>,
     ids: Vec<String>,
+    journal: write_plan::Journal,
     replacement: Option<String>,
     amend_source: Option<String>,
     amend_filled: bool,
@@ -556,6 +576,7 @@ impl Hyperliquid {
                 command,
                 steps,
                 ids: Vec::new(),
+                journal: Default::default(),
                 replacement,
                 amend_deadline: None,
                 amend_source,
@@ -591,7 +612,9 @@ impl Hyperliquid {
                 if !seen.insert(id) {
                     return Err("Duplicate Hyperliquid client order ID in batch".into());
                 }
-                if o.amount > m.limits.amount.max {
+                if m.limits.amount.max > 0.
+                    && num::adjust(o.amount, m.precision.amount) > m.limits.amount.max
+                {
                     return Err(
                         "Caller client order ID cannot be split across native orders".into(),
                     );
@@ -873,6 +896,9 @@ impl Hyperliquid {
             .steps
             .pop_front()
             .unwrap();
+        if let Some(job) = self.trading.active.as_mut() {
+            job.journal.begin(&step);
+        }
         let prepared = self.prepare_write(cx, step);
         let (action, effect) = match prepared {
             Ok(v) => v,
@@ -884,6 +910,9 @@ impl Hyperliquid {
         if matches!(&effect,Effect::Cancel(orders) if orders.is_empty()) {
             self.pump_trades(cx);
             return;
+        }
+        if let Some(job) = self.trading.active.as_mut() {
+            job.journal.prepared(&effect);
         }
         if let Err(error) = self.submit_trade(cx, &action, effect) {
             self.finish_trade(cx, Err(error));
@@ -1152,6 +1181,7 @@ impl Hyperliquid {
         }
         self.trading.inflight = false;
         if request.effect.is_schedule_control() {
+            let status = result.as_ref().ok().map(|response| response.status);
             let outcome = schedule::reply(result);
             let reported = match &outcome {
                 Ok(()) => self.report_trade_batch(cx, &request, &[], "", false),
@@ -1169,11 +1199,14 @@ impl Hyperliquid {
                 self.finish_trade(cx, Err(error.venue_error()));
                 return;
             }
+            if outcome.is_ok() {
+                self.settle_write_rows(&request, &[], status);
+            }
             self.finish_trade(cx, outcome);
             return;
         }
 
-        let idempotent_cancel = self.trading.active.as_ref().unwrap().amend_source.is_none();
+        let idempotent_cancel = !self.spot;
         let status = result.as_ref().ok().map(|r| r.status);
         let parsed = result.map_err(ReplyError::uncertain).and_then(|r| {
             if (200..300).contains(&r.status) {
@@ -1303,6 +1336,7 @@ impl Hyperliquid {
             self.finish_trade(cx, Err(error.venue_error()));
             return;
         }
+        self.settle_write_rows(&request, &statuses, status);
         let full_position = request.order_reply == OrderReply::FullPosition;
         match request.effect {
             Effect::ScheduleCancel => unreachable!(),
@@ -1524,6 +1558,11 @@ impl Hyperliquid {
             cx.clear_timer(timer);
         }
         self.trading.inflight = false;
+        if let Err(error) = &result
+            && let Some(job) = self.trading.active.as_mut()
+        {
+            job.journal.record_failure(error.clone());
+        }
         let result = match result {
             Err(error) => match self.protective_trade_failure(cx, error) {
                 Some(error) => Err(error),

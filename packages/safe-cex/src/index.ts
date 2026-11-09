@@ -41,6 +41,9 @@ export type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 export { createEngineTransport, resolveEngineRoutingPlan } from './transport/engine';
 export type { EngineRoutingPlan } from './transport/engine';
 
+export { sealDelegatedHandover } from './delegatedHandover';
+export type { DelegatedHandoverInput, SealedDelegatedHandover } from './delegatedHandover';
+
 // Cache for loaded exchange classes
 const exchangeCache = new Map<ExchangeName, typeof BaseExchange>();
 

@@ -2,8 +2,10 @@
 //! non-retried writes, each call bounded on its own.
 use crate::{Okx, Pending, sign, wire};
 use safe_cex_engine::classify::{
-    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict, WriteFact,
+    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Released, Row, SatisfiedIntent, Verdict,
+    WriteFact,
 };
+use safe_cex_engine::log::Level;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
@@ -12,7 +14,9 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
-use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
+use safe_cex_engine::write_plan::{
+    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult, WritePlan,
+};
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -1905,14 +1909,28 @@ impl Okx {
                     }
                 })
                 .collect();
-            cx.http_write_batch(
-                &request.context,
-                &CODES,
-                expected,
-                &items,
-                errors.join_with("; "),
-                None,
-            )
+            if matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            ) {
+                cx.http_write_applied_batch(
+                    &request.context,
+                    &CODES,
+                    expected,
+                    &items,
+                    errors.join_with("; "),
+                    None,
+                )
+            } else {
+                cx.http_write_batch(
+                    &request.context,
+                    &CODES,
+                    expected,
+                    &items,
+                    errors.join_with("; "),
+                    None,
+                )
+            }
         } else {
             let accepted = WriteFact::Accepted { order_ids: vec![] };
             cx.http_write_fact(&request.context, accepted, None)
@@ -1935,7 +1953,16 @@ impl Okx {
             } else {
                 errors.join_with("; ")
             };
-            let error = VenueError::new(message).outcome(Outcome::Unknown);
+            let mut error = VenueError::new(message).outcome(Outcome::Unknown);
+            if matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            ) {
+                error.message = format!("{}. {UNKNOWN_OUTCOME_TEXT}", error.message);
+                // Native facts still supply kind/code/partial; retain the venue's guidance.
+                error.presents = true;
+                error.elements = Some(Box::new(cancel_outcomes(&response, &acks, &requested)));
+            }
             return self.end(cx, request.command, Some(&request), error, true);
         }
         let read_after =
@@ -2230,27 +2257,47 @@ impl Okx {
                 Some(note) => format!("{note}; {unknown}"),
                 None => unknown,
             });
+            let indexed_unknown = error.elements.as_ref().and_then(|elements| {
+                elements
+                    .0
+                    .iter()
+                    .find(|element| matches!(element.result, ElementResult::Unknown { .. }))
+            });
+            let identity =
+                reporting_identity(step, indexed_unknown.map(|element| element.element.index));
+            let mut fields = vec![
+                ("command", command.into()),
+                (
+                    "placedCount",
+                    job.ids.iter().map(|_| 1.0).sum::<f64>().into(),
+                ),
+                // Put the unconfirmed identity before the body so the
+                // engine's 512-byte log cap cannot hide a later batch row.
+                (
+                    "unknownRequest",
+                    match &identity {
+                        Some(identity) => format!("{identity}; {}", step.body),
+                        None => step.body.clone(),
+                    }
+                    .into(),
+                ),
+            ];
+            if let Some(element) = indexed_unknown
+                && let ElementResult::Unknown { error } = &element.result
+            {
+                fields.push(("index", (element.element.index as f64).into()));
+                if let Some(identity) = identity {
+                    fields.push(("targetOrderId", identity.into()));
+                }
+                if let Some(code) = &error.venue_code {
+                    fields.push(("venueCode", code.to_string().into()));
+                }
+            }
             cx.event(
-                safe_cex_engine::Level::Warn,
+                Level::Warn,
                 "order.outcome_unknown",
                 UNKNOWN_OUTCOME_TEXT,
-                vec![
-                    ("command", command.into()),
-                    (
-                        "placedCount",
-                        job.ids.iter().map(|_| 1.0).sum::<f64>().into(),
-                    ),
-                    // Put the unconfirmed identity before the body so the
-                    // engine's 512-byte log cap cannot hide a later batch row.
-                    (
-                        "unknownRequest",
-                        match reporting_identity(step) {
-                            Some(identity) => format!("{identity}; {}", step.body),
-                            None => step.body.clone(),
-                        }
-                        .into(),
-                    ),
-                ],
+                fields,
             );
         }
         // A sibling rests: the caller must be told even though this call failed.
@@ -2323,6 +2370,69 @@ pub(crate) fn trade_reconciliation(
     request: &Request,
 ) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
     ReconciliationData::new(request.path.to_owned())
+}
+
+/// Passive outcomes for an identity-validated native cancellation batch.
+/// Indices match the batch's request rows and its partial.failed_index.
+/// Use the engine's released-write verdict, including rate-limit uncertainty.
+fn cancel_outcomes(
+    response: &Response<'_>,
+    acks: &[Ack<'_>],
+    requested: &[Requested],
+) -> ElementOutcomes {
+    ElementOutcomes(
+        acks.iter()
+            .zip(requested)
+            .enumerate()
+            .map(|(index, (ack, target))| {
+                let verdict = safe_cex_engine::classify::verdict(
+                    &CODES,
+                    Intent::Cancel,
+                    Released::Response(response),
+                    Some(&native(ack.s_code, ack.s_msg)),
+                );
+                let result = if matches!(ack.s_code, "" | "0")
+                    || verdict == Verdict::Satisfied(SatisfiedIntent::Cancel)
+                {
+                    ElementResult::Applied {
+                        effect: AppliedEffect::Cancel,
+                        target_order_id: Some(target.id().into()),
+                        position_key: None,
+                    }
+                } else {
+                    let mut error = VenueError::new(format!(
+                        "OKX cancellation target {}: {} (code {})",
+                        target.id(),
+                        ack.s_msg,
+                        ack.s_code
+                    ))
+                    .venue_code(ack.s_code)
+                    .venue_message(ack.s_msg);
+                    if let Some(kind) = verdict.kind() {
+                        error.kind = Some(kind);
+                    }
+                    if verdict.is_refusal() {
+                        ElementResult::NotSent {
+                            error: Some(Box::new(error.outcome(Outcome::Rejected))),
+                        }
+                    } else {
+                        error.outcome = Some(Outcome::Unknown);
+                        error.message = format!("{}. {UNKNOWN_OUTCOME_TEXT}", error.message);
+                        ElementResult::Unknown {
+                            error: Box::new(error),
+                        }
+                    }
+                };
+                ElementOutcome {
+                    element: Element {
+                        index,
+                        client_order_id: None,
+                    },
+                    result,
+                }
+            })
+            .collect(),
+    )
 }
 
 /// A definitive OKX refusal. Its kind comes from the table (the native code,
@@ -2482,7 +2592,7 @@ fn step<T: Serialize + ?Sized>(
 }
 
 /// Presentation metadata only; never a dispatch, validation or retry decision.
-fn reporting_identity(step: &Step) -> Option<String> {
+fn reporting_identity(step: &Step, index: Option<usize>) -> Option<String> {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Identity {
@@ -2498,7 +2608,9 @@ fn reporting_identity(step: &Step) -> Option<String> {
         Row(Identity),
     }
     let row = match serde_json::from_str::<Payload>(&step.body).ok()? {
-        Payload::Rows(rows) => rows.into_iter().nth(step.unknown_row.unwrap_or(0))?,
+        Payload::Rows(rows) => rows
+            .into_iter()
+            .nth(index.or(step.unknown_row).unwrap_or(0))?,
         Payload::Row(row) => row,
     };
     row.cl_ord_id

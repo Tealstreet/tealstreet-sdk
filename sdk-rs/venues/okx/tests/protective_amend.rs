@@ -358,8 +358,8 @@ fn trailing_replacement_refusal_restores_exact_native_parameters_once() {
         .expect("restored native order identity accompanies the failed edit");
     assert_eq!(
         restored.order_ids,
-        ["91", "92"],
-        "canceled and newly restored native identities are both recorded"
+        ["92"],
+        "only the newly restored native identity is created-order evidence"
     );
     assert!(
         !out.iter()
