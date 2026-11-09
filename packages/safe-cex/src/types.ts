@@ -436,6 +436,7 @@ export interface RemoteSignerRequest {
       | 'base64'
       | 'hex-base64'
       | 'kraken-challenge'
+      | 'kraken-sha512'
       | 'apexomni-base64'
       | 'bitunix-double-sha256'
       | 'backpack-ed25519'

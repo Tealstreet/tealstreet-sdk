@@ -42,6 +42,7 @@ const privateRefusal = ({ name, version }: VenueCase, kind: 'remote' | 'payload'
   if (kind === 'remote') return undefined;
   if (name === 'asterdex' && version === 'v3') return 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only';
   if (policy.payloadSupported === true) return undefined;
+  if (name === 'kraken') return 'Kraken Futures requires RemoteSigner SHA256/HMAC-SHA512 custody; PayloadSigner is unsupported';
   if (name === 'grvt') return 'GRVT PayloadSigner is unsupported';
   if (name === 'kucoin' || name === 'kucoinspot') return 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
   if (name === 'backpack') return 'Backpack requires RemoteSigner Ed25519 custody';
@@ -154,7 +155,7 @@ it('a private Polymarket account keeps its protocol-specific custody refusal', (
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it.each(['kucoin', 'kucoinspot'] as const)('%s constructs explicitly public-only accounts with an unused PayloadSigner', (name) => {
+it.each(['kucoin', 'kucoinspot', 'kraken'] as const)('%s constructs explicitly public-only accounts with an unused PayloadSigner', (name) => {
   const payloadSigner = vi.fn();
   for (const key of ['', 'unused-public-key']) {
     const exchange = new RustEngineExchange(name, { key, secret: '', publicDataOnly: true, payloadSigner }, new DefaultStore());
@@ -281,7 +282,7 @@ const falsyCallbacks = callbackFields.flatMap((field) => [null, false, ''].map((
 it('covers every disabled-delegation beta venue', () => {
   expect(venues).toContain('cryptocom');
   expect(disabledDelegation.map(({ label }) => label).sort()).toEqual([
-    'apexomni', 'asterdex-v1', 'asterdex-v3', 'kodiakfi', 'kraken', 'krakenspot',
+    'apexomni', 'asterdex-v1', 'asterdex-v3', 'kodiakfi', 'krakenspot',
     'mexc', 'mode', 'what', 'woofi',
   ].sort());
 });
@@ -318,9 +319,12 @@ it('keeps the review controls for configured callbacks', () => {
   Reflect.set(binance, 'remoteSigner', null);
   expect(() => new RustEngineExchange('binance', binance, new DefaultStore()))
     .toThrowError(expect.objectContaining({ kind: 'invalidInput', outcome: 'notSent' }));
-  expect(() => new RustEngineExchange('kraken', { key: 'fixture-key', secret: '', remoteSigner }, new DefaultStore()))
+  expect(() => new RustEngineExchange('krakenspot', { key: 'fixture-key', secret: '', remoteSigner }, new DefaultStore()))
     .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
-      message: `${exchangeMetadata.kraken.prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser` }));
+      message: `${exchangeMetadata.krakenspot.prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser` }));
+  const privateKraken = new RustEngineExchange('kraken', { key: 'fixture-key', secret: '', remoteSigner }, new DefaultStore());
+  try { expect(privateKraken.isPublicDataOnly).toBe(false); }
+  finally { privateKraken.dispose(); }
   const keylessKraken: ExchangeOptions = { key: '', secret: '' };
   Reflect.set(keylessKraken, 'remoteSigner', null);
   const exchange = new RustEngineExchange('kraken', keylessKraken, new DefaultStore());

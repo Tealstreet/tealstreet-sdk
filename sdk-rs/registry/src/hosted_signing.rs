@@ -11,6 +11,8 @@ mod backpack;
 #[cfg(feature = "coinbase")]
 mod coinbase;
 
+#[cfg(feature = "kraken")]
+mod kraken;
 #[cfg(feature = "orderly")]
 mod orderly;
 
@@ -22,6 +24,12 @@ pub enum OutputFormat {
     #[cfg(feature = "coinbase")]
     #[serde(rename = "coinbase-jws")]
     CoinbaseJws,
+    #[cfg(feature = "kraken")]
+    #[serde(rename = "kraken-sha512")]
+    KrakenSha512,
+    #[cfg(feature = "kraken")]
+    #[serde(rename = "kraken-challenge")]
+    KrakenChallenge,
     #[cfg(feature = "orderly")]
     #[serde(rename = "orderly-ed25519")]
     OrderlyEd25519,
@@ -165,6 +173,10 @@ impl<'de> Deserialize<'de> for Input {
 pub enum OutputKind {
     #[cfg(feature = "coinbase")]
     Coinbase,
+    #[cfg(feature = "kraken")]
+    Kraken {
+        batch: bool,
+    },
     #[cfg(feature = "orderly")]
     Orderly {
         ws: bool,
@@ -325,6 +337,7 @@ fn family(venue: &str) -> bool {
         || (cfg!(feature = "coinbase") && matches!(venue, "coinbase" | "coinbasespot"))
         || (cfg!(feature = "backpack") && venue == "backpack")
         || (cfg!(feature = "kucoin") && venue == "kucoin")
+        || (cfg!(feature = "kraken") && venue == "kraken")
         || (cfg!(feature = "kucoinspot") && venue == "kucoinspot")
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
@@ -358,6 +371,52 @@ pub fn prepare(
         ) {
             return Err(SignError::Unsupported);
         }
+    }
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => {
+                return kraken::prepare(
+                    identities,
+                    &payload,
+                    SignReceipt {
+                        stamp_ms: Some(stamp_ms),
+                        ..Default::default()
+                    },
+                    false,
+                );
+            }
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::KrakenSha512,
+            } => return kraken::prepare(identities, &to_sign, SignReceipt::default(), true),
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::KrakenChallenge,
+            } => {
+                #[derive(Serialize)]
+                struct Challenge<'a> {
+                    payload: &'a str,
+                }
+                let descriptor = serde_json::to_string(&Challenge { payload: &to_sign })
+                    .map_err(|_| SignError::InvalidRequest)?;
+                return kraken::prepare(identities, &descriptor, SignReceipt::default(), false);
+            }
+            Input::WsAuth { .. } => return Err(SignError::Unsupported),
+            Input::Credential {} => {}
+        }
+    }
+    #[cfg(feature = "kraken")]
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::KrakenSha512 | OutputFormat::KrakenChallenge,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
     }
     #[cfg(feature = "orderly")]
     if orderly::family(venue) {
@@ -546,6 +605,10 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
     if let OutputKind::Coinbase = kind {
         return coinbase::finish(result);
     }
+    #[cfg(feature = "kraken")]
+    if let OutputKind::Kraken { batch } = kind {
+        return kraken::finish(batch, result);
+    }
     #[cfg(feature = "orderly")]
     if let OutputKind::Orderly { ws } = kind {
         return orderly::finish(ws, result);
@@ -600,6 +663,12 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
     let signature = match kind {
         #[cfg(feature = "coinbase")]
         OutputKind::Coinbase | OutputKind::WsAuth(OutputFormat::CoinbaseJws) => {
+            return Err(SignError::Unsupported);
+        }
+        #[cfg(feature = "kraken")]
+        OutputKind::Kraken { .. } => unreachable!(),
+        #[cfg(feature = "kraken")]
+        OutputKind::WsAuth(OutputFormat::KrakenSha512 | OutputFormat::KrakenChallenge) => {
             return Err(SignError::Unsupported);
         }
         #[cfg(feature = "orderly")]
@@ -998,6 +1067,20 @@ mod input_parse_tests {
             ));
         }
         for (format, input) in [
+            #[cfg(feature = "kraken")]
+            (
+                "kraken-sha512",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"kraken-sha512"}"#,
+            ),
+            #[cfg(feature = "kraken")]
+            ("kraken-sha512", r#"["wsAuth","x","kraken-sha512"]"#),
+            #[cfg(feature = "kraken")]
+            (
+                "kraken-challenge",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"kraken-challenge"}"#,
+            ),
+            #[cfg(feature = "kraken")]
+            ("kraken-challenge", r#"["wsAuth","x","kraken-challenge"]"#),
             #[cfg(feature = "orderly")]
             (
                 "orderly-ed25519",
@@ -1043,6 +1126,10 @@ mod input_parse_tests {
                 match output_format {
                     #[cfg(feature = "coinbase")]
                     OutputFormat::CoinbaseJws => "coinbase-jws",
+                    #[cfg(feature = "kraken")]
+                    OutputFormat::KrakenSha512 => "kraken-sha512",
+                    #[cfg(feature = "kraken")]
+                    OutputFormat::KrakenChallenge => "kraken-challenge",
                     #[cfg(feature = "orderly")]
                     OutputFormat::OrderlyEd25519 => "orderly-ed25519",
                     #[cfg(feature = "backpack")]
