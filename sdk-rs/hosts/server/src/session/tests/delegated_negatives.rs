@@ -327,7 +327,9 @@ async fn remote_proof(f: &Fixture, answer: DeviceAnswer, proofs: Arc<Mutex<Proof
     .await
     .expect("isolated proof settles");
     responder.abort();
-    let _ = responder.await;
+    if let Err(error) = responder.await {
+        assert!(error.is_cancelled(), "proof responder panicked");
+    }
     result.is_ok()
 }
 
