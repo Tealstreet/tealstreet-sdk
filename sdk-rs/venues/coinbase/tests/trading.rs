@@ -36,6 +36,7 @@ struct Session {
     key_permission_failures: u32,
     deactivated: bool,
     warnings: Vec<String>,
+    events: Vec<safe_cex_engine::LogEvent>,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
@@ -73,6 +74,7 @@ impl Session {
             key_permission_failures: 0,
             deactivated: false,
             warnings: vec![],
+            events: vec![],
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -104,11 +106,12 @@ impl Session {
                     self.results.push((command, Err(error.message)))
                 }
                 Action::Notice(safe_cex_engine::Notice::Deactivate) => self.deactivated = true,
-                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
-                    level: safe_cex_engine::Level::Warn,
-                    message,
-                    ..
-                })) => self.warnings.push(message.to_string()),
+                Action::Notice(safe_cex_engine::Notice::Event(event)) => {
+                    if event.level == safe_cex_engine::Level::Warn {
+                        self.warnings.push(event.message.clone());
+                    }
+                    self.events.push(event);
+                }
                 Action::Http(r) => {
                     self.urls.push(r.url.clone());
                     self.requests.push(r.clone());
@@ -705,6 +708,264 @@ fn create_wire(request: &HttpRequest) -> CreateWire {
 }
 
 #[test]
+fn legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal() {
+    // TS reference: packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts:1659,1772.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses.
+    for (amount, maximum, step, expected) in [
+        (26., 5., 1., "26"),
+        (11., 5., 1., "11"),
+        (12., 5., 1., "12"),
+        (10., 5., 1., "10"),
+        (7., 3., 0.5, "7"),
+        (1.0005, 0.3, 0.001, "1.001"),
+    ] {
+        let mut s = Session::new("DEFAULT", false).ready();
+        s.e.store_mut().update_markets(|market| {
+            market.precision.amount = step;
+            market.limits.amount.min = step;
+            market.limits.amount.max = maximum;
+        });
+        s.command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![opts("BTC-USD", OrderType::Limit, OrderSide::Buy, amount)],
+        });
+        let mut request = None;
+        for _ in 0..100 {
+            for r in s.collect() {
+                if r.method == safe_cex_engine::Method::Post {
+                    assert!(request.is_none(), "multiple placement payloads");
+                    request = Some(r);
+                } else {
+                    s.answer(r);
+                }
+            }
+            assert!(
+                s.results.iter().all(|(id, _)| *id != 91),
+                "pre-HTTP refusal for {amount}/{maximum}/{step}: {:?}",
+                s.results
+            );
+            if request.is_some() {
+                break;
+            }
+            s.fire();
+        }
+        let request = request.expect("one placement payload");
+        assert!(request.url.ends_with("/orders"));
+        let config = create_wire(&request).order_configuration;
+        assert!(config.market_market_ioc.is_none());
+        assert!(config.stop_limit_stop_limit_gtc.is_none());
+        let sizes = [config.limit_limit_gtc.unwrap().base_size];
+        assert_eq!(sizes, [expected]);
+        let sum: f64 = sizes.iter().map(|s| s.parse::<f64>().unwrap()).sum();
+        assert_eq!(sum, expected.parse::<f64>().unwrap());
+        s.reply(
+            request,
+            400,
+            r#"{"error":"INVALID_ARGUMENT","message":"venue maximum exceeded"}"#,
+        );
+        assert!(s.done(91).unwrap_err().contains("venue maximum exceeded"));
+        assert_eq!(
+            s.failures[&91].outcome,
+            Some(safe_cex_engine::Outcome::Rejected)
+        );
+        s.advance(35_000.);
+        assert_eq!(
+            s.requests
+                .iter()
+                .filter(|r| r.method == safe_cex_engine::Method::Post)
+                .count(),
+            1
+        );
+    }
+}
+
+fn above_max_partial_batch(status: u16, body: &str, unknown: bool) {
+    use safe_cex_engine::Outcome;
+    use safe_cex_engine::write_plan::ElementResult;
+    // TS serial stop: exchanges/base.ts:1111-1114; Coinbase native refusal: reference/coinbase/coinbase.exchange.ts:1614-1639.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses.
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.e.store_mut().update_markets(|market| {
+        market.precision.amount = 1.;
+        market.limits.amount.min = 1.;
+        market.limits.amount.max = 5.;
+    });
+    let orders = [1., 26., 1.]
+        .into_iter()
+        .enumerate()
+        .map(|(index, amount)| {
+            let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, amount);
+            order.client_order_id = Some(format!("prefix-row-{index}"));
+            order
+        })
+        .collect();
+    s.command(Command::PlaceOrders {
+        command: 93,
+        orders,
+    });
+    let first = s.write();
+    assert_eq!(
+        create_wire(&first)
+            .order_configuration
+            .limit_limit_gtc
+            .unwrap()
+            .base_size,
+        "1"
+    );
+    s.reply(
+        first,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"accepted-prefix"}}"#,
+    );
+    let second = s.write();
+    assert_eq!(
+        create_wire(&second)
+            .order_configuration
+            .limit_limit_gtc
+            .unwrap()
+            .base_size,
+        "26"
+    );
+    assert_eq!(create_wire(&second).client_order_id, "prefix-row-1");
+    s.reply(second, status, body);
+    let message = s.done(93).unwrap_err();
+    assert!(s.e.store().order("accepted-prefix").is_some());
+    let failure = &s.failures[&93];
+    let partial = failure
+        .partial
+        .as_ref()
+        .expect("acknowledged prefix survives terminal failure");
+    assert_eq!(partial.order_ids, ["accepted-prefix"]);
+    assert_eq!(partial.total, Some(3));
+    assert_eq!(partial.failed_index, Some(1));
+    let rows = failure.elements.as_ref().expect("indexed venue outcomes");
+    assert_eq!(rows.len(), 3);
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row.element.index, index);
+        assert_eq!(
+            row.element.client_order_id,
+            Some(format!("prefix-row-{index}"))
+        );
+    }
+    assert_eq!(
+        rows[0].result,
+        ElementResult::Placed {
+            order_ids: vec!["accepted-prefix".into()]
+        }
+    );
+    assert_eq!(rows[2].result, ElementResult::NotSent { error: None });
+    let telemetry: Vec<_> = s
+        .events
+        .iter()
+        .filter(|event| event.code == "order.outcome_unknown")
+        .collect();
+    if unknown {
+        assert_eq!(failure.outcome, Some(Outcome::Unknown));
+        assert_eq!(message, "The outcome is unknown. Check Open Orders");
+        let ElementResult::Unknown { error } = &rows[1].result else {
+            panic!("uncertain row must remain Unknown")
+        };
+        assert_eq!(error.message, message);
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.venue_code.as_deref(), Some("RESOURCE_EXHAUSTED"));
+        assert_eq!(telemetry.len(), 1);
+        assert_eq!(telemetry[0].message, message);
+        assert_eq!(telemetry[0].level, safe_cex_engine::Level::Warn);
+        assert!(telemetry[0].fields.contains(&("command", 93_u32.into())));
+        assert!(
+            telemetry[0]
+                .fields
+                .contains(&("elementIndex", 1_u32.into()))
+        );
+        assert!(
+            telemetry[0]
+                .fields
+                .contains(&("clientOrderId", "prefix-row-1".into()))
+        );
+        assert!(telemetry[0].fields.contains(&("placedCount", 1_u32.into())));
+    } else {
+        assert_eq!(
+            failure.outcome, None,
+            "accepted effects preclude whole-command rejection"
+        );
+        assert!(message.contains("venue maximum exceeded"), "{message}");
+        let ElementResult::NotSent { error: Some(error) } = &rows[1].result else {
+            panic!("venue refusal must be reported notSent")
+        };
+        assert_eq!(error.outcome, Some(Outcome::Rejected));
+        assert_eq!(error.message, message);
+        assert!(telemetry.is_empty());
+    }
+    s.advance(35_000.);
+    let writes: Vec<_> = s
+        .requests
+        .iter()
+        .filter(|request| request.method == safe_cex_engine::Method::Post)
+        .collect();
+    assert_eq!(
+        writes.len(),
+        2,
+        "TS stops at refusal/uncertainty; no suffix or resend"
+    );
+    assert_eq!(
+        writes
+            .iter()
+            .map(|request| create_wire(request).client_order_id)
+            .collect::<Vec<_>>(),
+        ["prefix-row-0", "prefix-row-1"]
+    );
+}
+
+#[test]
+fn above_max_batch_keeps_accepted_prefix_when_next_row_is_refused() {
+    for (status, body) in [
+        (
+            400,
+            r#"{"error":"INVALID_ARGUMENT","message":"venue maximum exceeded"}"#,
+        ),
+        (
+            200,
+            r#"{"success":false,"error_response":{"new_order_failure_reason":"venue maximum exceeded"}}"#,
+        ),
+    ] {
+        above_max_partial_batch(status, body, false);
+    }
+}
+
+#[test]
+fn above_max_batch_keeps_prefix_and_publishes_unknown_row_without_sending_suffix() {
+    above_max_partial_batch(
+        200,
+        r#"{"success":false,"failure_reason":"RESOURCE_EXHAUSTED"}"#,
+        true,
+    );
+}
+
+#[test]
+fn above_max_amendments_still_refuse_before_any_write() {
+    // TS native edit bound: packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts:1573.
+    for (kind, symbol) in [("DEFAULT", "BTC-USD"), ("INTX", "BTC-PERP-INTX")] {
+        let mut s = Session::new(kind, false).ready();
+        s.seed("old", symbol, "1", "100");
+        s.e.store_mut()
+            .update_markets(|market| market.limits.amount.max = 5.);
+        s.command(Command::AmendOrder {
+            command: 92,
+            id: "old".into(),
+            price: None,
+            amount: Some(26.),
+        });
+        assert!(s.done(92).unwrap_err().contains("outside market limits"));
+        assert!(
+            !s.requests
+                .iter()
+                .any(|r| r.method == safe_cex_engine::Method::Post)
+        );
+        assert_eq!(s.e.store().order("old").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
 fn caller_and_generated_batch_identities_precede_each_native_placement() {
     fn placement(s: &mut Session) -> HttpRequest {
         let mut receipts = Vec::new();
@@ -972,7 +1233,17 @@ fn missing_create_id_is_ambiguous_and_never_retried_or_followed_by_second_order(
     });
     let r = s.write();
     s.reply(r, 200, r#"{"success":true}"#);
-    assert!(s.done(4).unwrap_err().contains("order ID"));
+    assert_eq!(
+        s.done(4).unwrap_err(),
+        "The outcome is unknown. Check Open Orders"
+    );
+    assert!(
+        s.failures[&4]
+            .venue_message
+            .as_deref()
+            .unwrap()
+            .contains("order ID")
+    );
     assert_eq!(s.unknown, [4]);
 }
 
@@ -992,9 +1263,13 @@ fn transport_failure_never_resends_a_write() {
         },
     );
     let error = s.done(5).unwrap_err();
+    assert_eq!(error, "The outcome is unknown. Check Open Orders");
     assert!(
-        error.starts_with("Coinbase write outcome requires reconciliation"),
-        "{error}"
+        s.failures[&5]
+            .venue_message
+            .as_deref()
+            .unwrap()
+            .starts_with("Coinbase write outcome requires reconciliation")
     );
     assert_eq!(s.unknown, [5]);
 }
@@ -2022,8 +2297,13 @@ fn ambiguous_placement_blocks_cancel_symbol_until_bounded_reconciliation() {
     let r = s.place(303, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
     s.reply(r, 503, r#"{"error":"UNAVAILABLE","message":"try again"}"#);
     let error = s.done(303).unwrap_err();
-    assert!(error.contains("requires reconciliation"), "{error}");
-    assert!(error.contains("try again"), "{error}");
+    assert_eq!(error, "The outcome is unknown. Check Open Orders");
+    let diagnostic = s.failures[&303].venue_message.as_deref().unwrap();
+    assert!(
+        diagnostic.contains("requires reconciliation"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("try again"), "{diagnostic}");
     assert!(s.cancel_symbol(304).unwrap_err().contains("unresolved"));
     s.advance(31_000.0);
     assert!(s.cancel_symbol(305).is_ok());

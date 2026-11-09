@@ -121,6 +121,12 @@ impl Journal {
         self.pending = None;
     }
 
+    pub(super) fn settle_native(&mut self, journal: WritePlan) {
+        if let Some(index) = self.pending.take() {
+            self.writes[index] = journal;
+        }
+    }
+
     pub(super) fn pending(&self) -> bool {
         self.pending.is_some()
     }
@@ -178,6 +184,7 @@ impl Journal {
             message,
             vec![
                 ("command", command.to_string().into()),
+                ("commandId", command.into()),
                 ("outcome", "unknown".into()),
                 ("placedOrderIds", placed.join(",").into()),
                 ("unknownIndices", unknown.join(",").into()),

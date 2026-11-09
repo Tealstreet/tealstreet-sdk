@@ -335,7 +335,7 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
   private handleDepthSnapshot(data: AsterDEXStreamDepth): void {
     const parseLevels = (levels: unknown) => {
       if (!Array.isArray(levels)) return undefined;
-      const parsed = [] as OrderBook['bids'];
+      const parsed: OrderBook['bids'] = [];
       for (let i = 0; i < levels.length; i++) {
         const level = levels[i];
         if (

@@ -8,6 +8,7 @@ mod managed;
 pub mod paths;
 pub mod sign;
 mod socket_codec;
+pub mod spot;
 mod trading;
 mod wire;
 

@@ -622,6 +622,13 @@ pub enum VenueAction {
         from_ms: Option<f64>,
         to_ms: Option<f64>,
     },
+    /// Generated reported closed-PnL rows; raw journal reads use FetchClosedPositions.
+    FetchClosedPnl {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        account: String,
+    },
     /// The venue's raw account balance payload as JSON, or `null` before one
     /// is read, for hosts that expose it as `balance.info`.
     FetchBalanceInfo,
@@ -1907,6 +1914,7 @@ impl OrdersRefresh {
 
 struct IoCore {
     write_failure_text: Option<fn(&VenueError) -> String>,
+    unknown_outcome_telemetry: Option<crate::UnknownOutcomeTelemetry>,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2210,6 +2218,7 @@ impl Default for IoCore {
     fn default() -> Self {
         Self {
             write_failure_text: None,
+            unknown_outcome_telemetry: None,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,
@@ -3901,6 +3910,7 @@ impl crate::engine::CoreCx<'_> {
             }
         };
         // A credential-free route's auth-kind refusal is no credential evidence.
+        let engine_unknown = self.io.core.request_contexts.engine_unknown(command);
         let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
         #[cfg(feature = "order-locks")]
         let cancel = self.io.core.request_contexts.owner_intent(command)
@@ -3984,7 +3994,33 @@ impl crate::engine::CoreCx<'_> {
             }
         };
         self.io.entry_completed(command);
+        let event = match (
+            &notice,
+            engine_unknown,
+            self.io.core.unknown_outcome_telemetry,
+        ) {
+            (Notice::CommandFailed { error, .. }, Some(source), Some(telemetry))
+                if error.outcome == Some(crate::Outcome::Unknown) =>
+            {
+                Some(telemetry(&crate::EngineUnknownOutcome {
+                    now: self.now,
+                    command,
+                    request: source.request,
+                    status: source.status,
+                    error,
+                }))
+            }
+            _ => None,
+        };
         self.io.core.actions.push(Action::Notice(notice));
+        if let Some(event) = event {
+            push_event(
+                &mut self.io.core.actions,
+                &mut self.io.core.health,
+                self.io.core.min_level,
+                event,
+            );
+        }
         Ok(())
     }
 }
@@ -4078,7 +4114,21 @@ impl PublicFeedWatch {
     }
 }
 
+#[path = "unknown_outcome.rs"]
+mod unknown_outcome;
+pub use unknown_outcome::{
+    EngineUnknownOutcome, UNKNOWN_HTTP_OUTCOME_TEXT, UNKNOWN_OUTCOME_TEXT, UnknownOutcomeTelemetry,
+};
+
 pub trait Venue {
+    /// Optional static telemetry for an engine-sealed Unknown. Receives no venue,
+    /// Cx, Store, Context or journal authority; returns only a bounded log event.
+    fn unknown_outcome_telemetry() -> Option<UnknownOutcomeTelemetry>
+    where
+        Self: Sized,
+    {
+        None
+    }
     fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
         None
     }
@@ -4953,6 +5003,7 @@ impl<V: Venue> Engine<V> {
             },
         )?;
         core.write_failure_text = V::write_failure_text();
+        core.unknown_outcome_telemetry = V::unknown_outcome_telemetry();
         Ok(Self {
             venue,
             http_release,
@@ -5914,16 +5965,37 @@ impl<V: Venue> Engine<V> {
         let delivery = request
             .and_then(|request| self.io.core.managed_http.get(&request))
             .map(|managed| managed.delivery());
+        let released_unknown = (V::unknown_outcome_telemetry().is_some()
+            && matches!(event, Event::HttpFailed { .. }))
+        .then_some(delivery.as_ref())
+        .flatten()
+        .filter(|delivery| {
+            delivery.context.operation() == crate::request_context::Operation::Mutation
+                && request.is_some_and(|request| {
+                    self.io
+                        .core
+                        .managed_http
+                        .get(&request)
+                        .is_some_and(|managed| managed.released_delivery(delivery))
+                })
+        })
+        .is_some();
         if let Event::HttpFailed { error, .. } = &event
             && let Some(delivery) = delivery.as_ref()
             && delivery.context.operation() == crate::request_context::Operation::Mutation
         {
-            let _ = self.io.core.request_contexts.result(
+            let recorded = self.io.core.request_contexts.result(
                 delivery,
                 crate::request_context::WriteResult::Failed(
                     VenueError::new(*error).kind(self.io.core.http_failure_kind),
                 ),
             );
+            if recorded.is_ok() && released_unknown {
+                self.io
+                    .core
+                    .request_contexts
+                    .remember_engine_unknown(delivery, None);
+            }
         }
         if let Some(delivery) = delivery.as_ref() {
             self.io.core.request_contexts.enter_delivery(delivery);
@@ -7778,9 +7850,9 @@ impl<V: Venue> Engine<V> {
             if let Some(market) = self.store.market_index(symbol) {
                 // Recovering consumers may have missed the original invalidation frame.
                 if self.book(symbol).is_some() {
-                    book.write(market, &mut w);
+                    crate::book_output::write(book, market, &mut w);
                 } else {
-                    Book::default().write(market, &mut w);
+                    crate::book_output::write(&Book::default(), market, &mut w);
                 }
             }
         }
@@ -7904,11 +7976,11 @@ impl<V: Venue> Engine<V> {
                                 && &baseline.id == id
                                 && baseline.book.reset_generation() == book.reset_generation() =>
                         {
-                            book.write_delta(&baseline.book, market, &mut w);
+                            crate::book_output::write_delta(book, &baseline.book, market, &mut w);
                             baseline.book.clone_from(book);
                         }
                         baseline => {
-                            book.write(market, &mut w);
+                            crate::book_output::write(book, market, &mut w);
                             if let Some(baseline) = baseline {
                                 baseline.market = market;
                                 baseline.id.clone_from(id);
@@ -7927,10 +7999,10 @@ impl<V: Venue> Engine<V> {
                     }
                     continue;
                 }
-                book.write(market, &mut w);
+                crate::book_output::write(book, market, &mut w);
             } else {
                 // A lost sequence makes the old consumer book unusable immediately.
-                Book::default().write(market, &mut w);
+                crate::book_output::write(&Book::default(), market, &mut w);
                 #[cfg(feature = "book-deltas")]
                 self.book_baselines.remove(symbol);
             }
@@ -7944,42 +8016,9 @@ impl<V: Venue> Engine<V> {
                 Some((self.store.market_index(symbol)?, interval.as_str(), *candle))
             })
             .collect();
-        w.candles(&candles);
+        crate::candle_output::write(&mut w, &candles);
         let mut fills = std::mem::take(&mut self.io.core.fills);
-        if !fills.is_empty() {
-            w.begin_revision(section::FILLS, 2);
-            w.u32(fills.len() as u32);
-            let orders: Vec<u32> = fills.iter().map(|(f, _)| w.string(&f.order_id)).collect();
-            w.u32s(orders);
-            w.u32s(fills.iter().map(|(f, _)| {
-                self.store
-                    .market_index(&f.symbol)
-                    .unwrap_or(crate::wire::NONE)
-            }));
-            w.u32s(fills.iter().map(|(f, _)| f.side as u32));
-            w.pad();
-            for (f, _) in &fills {
-                w.f64s([f.price, f.amount]);
-            }
-            for (fill, _) in &fills {
-                let symbol = w.string(&fill.symbol);
-                w.u32(symbol);
-            }
-            for (fill, _) in &fills {
-                let id = w.optional_string(fill.id.as_deref());
-                w.u32(id);
-            }
-            w.pad();
-            w.f64s(fills.iter().map(|(_, financials)| {
-                financials.and_then(|v| v.realized_pnl).unwrap_or(f64::NAN)
-            }));
-            w.f64s(
-                fills
-                    .iter()
-                    .map(|(_, financials)| financials.and_then(|v| v.fee).unwrap_or(f64::NAN)),
-            );
-            w.end();
-        }
+        crate::fill_output::write_fills(&mut w, &fills, |symbol| self.store.market_index(symbol));
         let empty = w.is_empty();
         let frame = w.finish();
         #[cfg(feature = "book-deltas")]
@@ -8354,7 +8393,7 @@ mod streaming_tests {
     }
 
     #[test]
-    fn revision_two_fills_preserve_absent_identity_and_financial_values() {
+    fn revision_two_fills_emit_public_identity_and_absent_financial_values() {
         for financials in [
             None,
             Some(FillFinancials::default()),
@@ -8389,16 +8428,19 @@ mod streaming_tests {
                 expected.extend(value.to_le_bytes());
             }
             expected.extend(1u32.to_le_bytes()); // Stable raw symbol reference.
-            expected.extend(crate::wire::NONE.to_le_bytes()); // Missing execution identity.
+            expected.extend(0u32.to_le_bytes()); // Native-computed public event identity.
             expected.extend(f64::NAN.to_le_bytes());
             expected.extend(f64::NAN.to_le_bytes());
             assert_eq!(
                 fills, expected,
-                "revision two represents absent financials and identity explicitly"
+                "revision two represents public identity and absent financials explicitly"
             );
             assert_eq!(
                 crate::wire::fills(frame),
-                Some(vec![execution()]),
+                Some(vec![Fill {
+                    id: Some("9007199254740995".into()),
+                    ..execution()
+                }]),
                 "the native reader returns what the writer wrote"
             );
             assert!(engine.take_frame(1.).is_none(), "fill must flush once");
@@ -8451,7 +8493,7 @@ mod streaming_tests {
             .collect();
         assert_eq!(rows, [99., 1., 99., 1., 99., 1.]);
         assert_eq!(&fills[88..100], &[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
-        assert_eq!(&fills[100..112], &[255; 12]);
+        assert_eq!(&fills[100..112], &[0; 12]);
         let floats: Vec<_> = fills[112..]
             .as_chunks::<8>()
             .0

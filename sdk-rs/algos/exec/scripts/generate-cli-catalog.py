@@ -56,8 +56,8 @@ def property_value(name, field):
     return property_value(parent, field) if parent else None
 mapping = metadata.split("export const exchangeMetadata:",1)[1].split("} = {",1)[1].split("};",1)[0]
 venues = re.findall(r"^\s*['\"]?([a-z0-9-]+)['\"]?: (\w+),", mapping, re.M)
-# Retired venue entries were deleted; keep the complete metadata extraction pinned.
-assert len(venues) == 47
+# Include fixture-only BingX Spot in the full roster; enabled filtering remains below.
+assert len(venues) == 48
 exchanges = []
 for venue, name in venues:
     if not property_value(name, "enabled") or property_value(name,"hiddenFromNewAccountPicker"):
