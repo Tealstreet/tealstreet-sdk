@@ -23,6 +23,22 @@ test('#3397 exact-head CI (run 42552867793 at 2cfc2f3a0ce) retains measured wasm
   }
 });
 
+// CI merge be4ca1f8a99c matches head f4223be642f5 exactly; web/node hashes match.
+for (const [venue, measured, minimumCap, job] of [
+  ['bybit', 2_316_667, 2_327_552, '129025076016'],
+  ['coinbase', 1_968_376, 1_979_392, '129025075890'],
+  ['mexc', 1_888_209, 1_898_496, '129025075967'],
+]) {
+  test(`#3397 run 42571903722 attempt 2 job ${job}: ${venue} retains measured headroom`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, venue);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
+
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
   assert.equal(WASM_BUDGETS.venue, 1_343_488);
   assert.equal(WASM_BUDGETS.combined, 17 * 1024 * 1024);

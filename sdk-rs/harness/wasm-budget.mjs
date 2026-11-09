@@ -233,9 +233,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitunix: 1_927_168,
   blofin: 2_049_024,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
-  bybit: 2_326_528,
+  // #3397 run 42571903722 attempt 2, job 129025076016: 2,316,667 B + 10 KiB rounded up.
+  bybit: 2_327_552,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
-  coinbase: 1_978_368,
+  // #3397 run 42571903722 attempt 2, job 129025075890: 1,968,376 B + 10 KiB rounded up.
+  coinbase: 1_979_392,
   cryptocom: 1_803_264,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
@@ -263,6 +265,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   lighter: 2_124_800,
   'lighter-robinhood': 2_124_800,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
+  // #3397 run 42571903722 attempt 2, job 129025075967: 1,888,209 B + 10 KiB rounded up.
   mexc: 1_898_496,
   okx: 2_045_952,
   orderly: 1_771_520,
