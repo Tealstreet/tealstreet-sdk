@@ -224,9 +224,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   bitget: 2_492_416,
   bitgetusdc: 2_492_416,
-  // Post-#3306 restage of #3297: retain max(PR 1,887,232 B, master 1,886,208 B).
-  // The #3297 CI provenance and regression pins remain in wasm-budget.test.mjs.
-  bitrue: 1_887_232,
+  // #3297 initial post-#3306 restage retained parent-max 1,887,232 B (master 1,886,208 B).
+  // Current CI run 42556682443 at e5ae4d9a8db, WASM job 128964311836: Bitrue 1,895,658 B.
+  // Replay job 128964312205 confirms it; measured size + 10 KiB, rounded up to KiB.
+  bitrue: 1_906_688,
   bitunix: 1_915_904,
   blofin: 2_049_024,
   bybit: 2_320_384,
