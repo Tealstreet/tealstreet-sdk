@@ -1915,6 +1915,7 @@ impl OrdersRefresh {
 struct IoCore {
     write_failure_text: Option<fn(&VenueError) -> String>,
     unknown_outcome_telemetry: Option<crate::UnknownOutcomeTelemetry>,
+    command_failure_summary: fn(&VenueError) -> Option<String>,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2219,6 +2220,7 @@ impl Default for IoCore {
         Self {
             write_failure_text: None,
             unknown_outcome_telemetry: None,
+            command_failure_summary: |_| None,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,
@@ -3879,7 +3881,8 @@ impl crate::engine::CoreCx<'_> {
         seal: request_context_registry::Seal,
     ) -> Result<(), crate::request_context::Error> {
         let mut write_sealed = false;
-        let result = match seal {
+        let mut reports = Vec::new();
+        let mut result = match seal {
             request_context_registry::Seal::Stale => {
                 return Err(crate::request_context::Error::Revoked);
             }
@@ -3900,7 +3903,7 @@ impl crate::engine::CoreCx<'_> {
                         }
                         None => message,
                     };
-                    self.command_error(command, message);
+                    reports.push(message);
                 }
                 let mut error = error;
                 if let Some(present) = self.io.core.write_failure_text {
@@ -3909,6 +3912,27 @@ impl crate::engine::CoreCx<'_> {
                 Err(error)
             }
         };
+        // Presentation sees the final journal outcome, including engine-owned
+        // failures; it cannot change evidence, partial IDs or reconciliation.
+        if let Err(error) = &mut result
+            && let Some(summary) = (self.io.core.command_failure_summary)(error)
+        {
+            error.message = if error.message.is_empty() {
+                summary.clone()
+            } else {
+                format!("{summary}\nContext: {}", error.message)
+            };
+            for report in &mut reports {
+                *report = if report.is_empty() {
+                    summary.clone()
+                } else {
+                    format!("{summary}\nContext: {report}")
+                };
+            }
+        }
+        for message in reports {
+            self.command_error(command, message);
+        }
         // A credential-free route's auth-kind refusal is no credential evidence.
         let engine_unknown = self.io.core.request_contexts.engine_unknown(command);
         let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
@@ -4121,6 +4145,15 @@ pub use unknown_outcome::{
 };
 
 pub trait Venue {
+    /// Optional summary after outcome projection, preceding the command failure
+    /// and its warnings. Their original detail remains as context; facts are read-only.
+    fn command_failure_summary(_error: &VenueError) -> Option<String>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
     /// Optional static telemetry for an engine-sealed Unknown. Receives no venue,
     /// Cx, Store, Context or journal authority; returns only a bounded log event.
     fn unknown_outcome_telemetry() -> Option<UnknownOutcomeTelemetry>
@@ -4129,6 +4162,7 @@ pub trait Venue {
     {
         None
     }
+
     fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
         None
     }
@@ -5010,6 +5044,7 @@ impl<V: Venue> Engine<V> {
         )?;
         core.write_failure_text = V::write_failure_text();
         core.unknown_outcome_telemetry = V::unknown_outcome_telemetry();
+        core.command_failure_summary = V::command_failure_summary;
         Ok(Self {
             venue,
             http_release,
@@ -8628,6 +8663,42 @@ mod streaming_tests {
         assert!(matches!(engine.drain_actions().next(), Some(Action::Notice(
             Notice::CommandFailed { command: 8, error }
         )) if error.message == "read response lost" && error.outcome.is_none()));
+    }
+
+    #[test]
+    fn write_failure_text_and_summary_compose_once_without_changing_facts() {
+        let mut engine = frame_engine();
+        engine.io.core.write_failure_text = Some(|error| format!("MASTER: {}", error.message));
+        engine.io.core.command_failure_summary =
+            |error| (error.outcome == Some(crate::Outcome::Unknown)).then(|| "SUMMARY".to_owned());
+        let expected = VenueError::new("journal failure")
+            .kind(ErrorKind::Network)
+            .outcome(crate::Outcome::Unknown)
+            .venue_code("native-code")
+            .venue_message("native diagnostic");
+        Cx {
+            now: 1.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .core()
+        .finish_sealed_command(
+            7,
+            None,
+            request_context_registry::Seal::Failure(
+                expected.clone(),
+                vec!["journal warning".into()],
+            ),
+        )
+        .unwrap();
+        let mut presented = expected;
+        presented.message = "SUMMARY\nContext: MASTER: journal failure".into();
+        assert!(
+            matches!(engine.drain_actions().collect::<Vec<_>>().as_slice(), [
+            Action::Notice(Notice::CommandError { command: 7, message }),
+            Action::Notice(Notice::CommandFailed { command: 7, error }),
+        ] if message == "SUMMARY\nContext: MASTER: journal warning" && *error == presented)
+        );
     }
 
     #[test]
