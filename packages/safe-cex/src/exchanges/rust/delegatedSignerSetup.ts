@@ -37,6 +37,7 @@ export class DelegatedSignerSetup {
   #provider: Signer | undefined;
   #identities: SigningIdentities | undefined;
   #consumed = false;
+  #coinbaseSigning: { keyName: string; algorithm: 'es256' | 'edDsa' } | undefined;
   #abort = new AbortController();
   #pending = new Set<AbortController>();
   #venue: ExchangeName;
@@ -79,6 +80,12 @@ export class DelegatedSignerSetup {
       const message = 'GRVT PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
+    const coinbase = name === 'coinbase' || name === 'coinbasespot';
+    if (coinbase && options.publicDataOnly !== true) {
+      if (typeof options.key !== 'string' || !/^organizations\/[^/\s]+\/apiKeys\/[^/\s]+$/.test(options.key)) invalid('Coinbase requires a CDP API key name');
+      if (options.coinbaseJwtAlgorithm !== undefined && !['es256', 'edDsa'].includes(options.coinbaseJwtAlgorithm)) invalid('Coinbase unsupported JWT algorithm');
+      this.#coinbaseSigning = { keyName: options.key, algorithm: options.coinbaseJwtAlgorithm ?? 'es256' };
+    }
     const kucoin = name === 'kucoin' || name === 'kucoinspot';
     if (kucoin && this.usesPayloadSigner) {
       const message = 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
@@ -92,6 +99,10 @@ export class DelegatedSignerSetup {
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
       || options.secondary_passphrase !== undefined || metadata.secondary !== undefined;
+    if (coinbase && secondaryRequested) {
+      const message = 'Coinbase Hosted secondary signing is unsupported; remove the secondary credentials';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     // Raw HMAC callbacks have no slot selector; never install unusable read refs.
     if ((name === 'woo' || name === 'bitrue' || name === 'cryptocom') && remoteSigner && secondaryRequested) {
       const venue = name === 'woo' ? 'WOO X' : name === 'bitrue' ? 'Bitrue' : 'Crypto.com';
@@ -183,6 +194,7 @@ export class DelegatedSignerSetup {
         remoteSigner: _remote, payloadSigner: _payload, signing: _signing, readCredentials: _readCredentials, ...safe
       } = withoutSigningCredentials(parsed as ExchangeOptions) as ExchangeOptions & { signing?: unknown; readCredentials?: unknown };
       return new Constructor(venue, JSON.stringify({ ...safe, ...(this.#publicOnly ? { publicDataOnly: true } : {}), signing: this.#identities,
+        ...(this.#coinbaseSigning && { coinbaseSigning: this.#coinbaseSigning }),
         remoteSigning: !this.#publicOnly, payloadSigner: this.usesPayloadSigner, publicMode: this.#publicMode }));
     } catch (error) {
       this.dispose();

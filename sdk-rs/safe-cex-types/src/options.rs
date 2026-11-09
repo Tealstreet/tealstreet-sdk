@@ -15,6 +15,15 @@ pub enum RustPublicFeedCapability {}
 
 /// @ts-union
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
+pub enum CoinbaseJwtAlgorithm {
+    #[serde(rename = "es256")]
+    Es256,
+    #[serde(rename = "edDsa")]
+    EdDsa,
+}
+
+/// @ts-union
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 pub enum ExchangeAccountConfigBybitSiteId {
     #[serde(rename = "BRA_BTL")]
     BraBtl,
@@ -203,6 +212,16 @@ pub struct ExchangeAccountConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub grvt_trading_account_id: Option<String>,
+    /// Hosted CDP key algorithm; local custody infers it from key material.
+    /// @ts-mutable
+    #[serde(rename = "coinbaseJwtAlgorithm")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub coinbase_jwt_algorithm: Option<CoinbaseJwtAlgorithm>,
     /// @ts-mutable
     #[serde(rename = "tealstreetProxy")]
     #[serde(
@@ -705,6 +724,15 @@ pub struct ExchangeOptions {
         skip_serializing_if = "Option::is_none"
     )]
     pub grvt_trading_account_id: Option<String>,
+    /// Hosted CDP key algorithm; local custody infers it from key material.
+    #[serde(rename = "coinbaseJwtAlgorithm")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub coinbase_jwt_algorithm: Option<CoinbaseJwtAlgorithm>,
     #[serde(rename = "starkPrivateKey")]
     #[serde(
         default,
@@ -1036,6 +1064,23 @@ pub struct ExchangeOptionsPolymarket {
 mod strict_codecs {
     use super::*;
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::CoinbaseJwtAlgorithm")]
+    enum WireCoinbaseJwtAlgorithm {
+        #[serde(rename = "es256")]
+        Es256,
+        #[serde(rename = "edDsa")]
+        EdDsa,
+    }
+    impl<'de> Deserialize<'de> for CoinbaseJwtAlgorithm {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireCoinbaseJwtAlgorithm::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(String::deserialize(
+                    deserializer,
+                )?),
+            )
+        }
+    }
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::ExchangeOptionsEngine")]
     enum WireExchangeOptionsEngine {
         #[serde(rename = "rust")]
@@ -1234,6 +1279,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         grvt_trading_account_id: Option<String>,
+        #[serde(rename = "coinbaseJwtAlgorithm")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        coinbase_jwt_algorithm: Option<CoinbaseJwtAlgorithm>,
         #[serde(rename = "tealstreetProxy")]
         #[serde(
             default,
@@ -1791,6 +1843,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         grvt_trading_account_id: Option<String>,
+        #[serde(rename = "coinbaseJwtAlgorithm")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        coinbase_jwt_algorithm: Option<CoinbaseJwtAlgorithm>,
         #[serde(rename = "starkPrivateKey")]
         #[serde(
             default,
