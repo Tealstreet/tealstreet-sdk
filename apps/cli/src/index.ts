@@ -25,7 +25,7 @@ import {
   type AccountConfig,
 } from './config';
 import { interceptConsole, logger } from './logger';
-import { isCliExitKey, getCliExitMessage } from './utils/exit-keys';
+
 import { cleanupStaleUpdate } from './windows-update';
 import { fireCheckin } from './checkin';
 import { getAuthState, login, logout, showAuthStatus } from './auth';
@@ -360,7 +360,7 @@ accountCmd
     try {
       content = readFileSync(filePath, 'utf-8');
     } catch (error) {
-      console.log(chalk.red(`Failed to read file: ${(error as Error).message}`));
+      console.log(chalk.red(`Failed to read file: ${error instanceof Error ? error.message : String(error)}`));
       return;
     }
 
@@ -430,7 +430,7 @@ accountCmd
       chmodSync(outputFile, 0o600);
       console.log(chalk.green(`Exported ${accounts.length} account(s) to ${outputFile}`));
     } catch (error) {
-      console.log(chalk.red(`Failed to write file: ${(error as Error).message}`));
+      console.log(chalk.red(`Failed to write file: ${error instanceof Error ? error.message : String(error)}`));
     }
   });
 
@@ -577,7 +577,9 @@ recordCmd
         process.on('SIGTERM', shutdown);
       });
     } catch (error) {
-      console.error(chalk.red(`\n${G.error} Failed to start recorder: ${(error as Error).message}`));
+      console.error(
+        chalk.red(`\n${G.error} Failed to start recorder: ${error instanceof Error ? error.message : String(error)}`),
+      );
       process.exit(1);
     }
   });
@@ -770,7 +772,9 @@ recordCmd
         process.on('SIGTERM', shutdown);
       });
     } catch (error) {
-      console.error(chalk.red(`\n${G.error} Failed to start recorder: ${(error as Error).message}`));
+      console.error(
+        chalk.red(`\n${G.error} Failed to start recorder: ${error instanceof Error ? error.message : String(error)}`),
+      );
       process.exit(1);
     }
   });
@@ -798,10 +802,9 @@ program
   .action(async (options) => {
     const { spawn } = await import('child_process');
     const { existsSync, writeFileSync } = await import('fs');
-    const { join } = await import('path');
-    const { homedir } = await import('os');
+    const { getStoragePath } = await import('./storage-context');
 
-    const logFile = join(homedir(), BRAND.configDirName, 'cli.log');
+    const logFile = getStoragePath('cli.log');
 
     if (options.clear) {
       if (existsSync(logFile)) {

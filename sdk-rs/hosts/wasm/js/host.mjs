@@ -334,7 +334,8 @@ export class ExchangeError extends Error {
     const elements = writePlanElementsOf(detail.elements);
     if (elements) this.elements = elements;
     const ids = detail.partial?.orderIds;
-    if (Array.isArray(ids) && ids.length && ids.every((id) => typeof id === 'string')) {
+    // Applied writes can carry partial counts without creating any order IDs.
+    if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
       this.partialOrderIds = [...ids];
       this.partialOrderCount = ids.length;
       const total = count(detail.partial.total);

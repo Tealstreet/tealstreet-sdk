@@ -756,7 +756,6 @@ impl PhemexPerpetuals {
             if offset.is_some() && amount > max {
                 return Err("Phemex trailing full-position quantity exceeds maximum".into());
             }
-            // Use integral precision units so splitting never over-orders through rounding.
             let units = if full_close {
                 1.0
             } else {
@@ -778,14 +777,24 @@ impl PhemexPerpetuals {
             if !max_units.is_finite() || max_units > 9_007_199_254_740_991.0 {
                 return Err("Phemex market maximum cannot be represented safely".into());
             }
-            let mut left = units;
-            while left > 0.0 {
-                let qty = if full_close {
-                    0.0
-                } else {
-                    num::adjust(left.min(max_units) * m.precision.amount, m.precision.amount)
-                };
-                left -= left.min(max_units);
+            // reference/phemex/phemex.exchange.ts:1372-1384: preserve equal-lot
+            // rounding and the remainder even when their total drifts from the input.
+            let lots = if amount > max {
+                (amount / max).ceil() as usize
+            } else {
+                1
+            };
+            let rest = if amount > max {
+                num::adjust(amount % max, m.precision.amount)
+            } else {
+                0.0
+            };
+            let lot_size = num::adjust((amount - rest) / lots as f64, m.precision.amount);
+            let mut quantities = vec![lot_size; lots];
+            if rest != 0.0 {
+                quantities.push(rest);
+            }
+            for qty in quantities {
                 if qty > max {
                     return Err("Phemex split lot exceeds market maximum".into());
                 }

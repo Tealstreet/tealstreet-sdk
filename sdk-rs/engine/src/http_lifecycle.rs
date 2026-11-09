@@ -357,7 +357,15 @@ impl Managed {
         &self,
         registry: &request_context_registry::ContextRegistry,
         now: f64,
+        provider_floor: u64,
     ) -> Result<(), Error> {
+        if self
+            .recipe
+            .as_ref()
+            .is_some_and(|recipe| !recipe.provider_current(provider_floor))
+        {
+            return Err(Error::Revoked);
+        }
         self.validate(registry, now)?;
         registry.egress_live(self.lifecycle.context())
     }
@@ -369,7 +377,6 @@ impl Managed {
         }
     }
 
-    #[cfg(feature = "http-plans")]
     pub(super) fn released_delivery(&self, delivery: &request_context_registry::Delivery) -> bool {
         self.delivery() == *delivery
             && self.lifecycle.release().is_some()
@@ -1680,7 +1687,11 @@ impl<V: Venue> Engine<V> {
             return;
         }
         let prepared_result = managed
-            .validate_send(&self.io.core.request_contexts, now)
+            .validate_send(
+                &self.io.core.request_contexts,
+                now,
+                self.io.core.signing.provider_floor(),
+            )
             .and_then(|()| {
                 if prepared.expires_at.is_some_and(|at| at <= now) {
                     return Err(Error::TimedOut);
@@ -2197,7 +2208,11 @@ impl<V: Venue> Engine<V> {
             );
             return Err(Error::Revoked);
         }
-        if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
+        if let Err(error) = managed.validate_send(
+            &self.io.core.request_contexts,
+            now,
+            self.io.core.signing.provider_floor(),
+        ) {
             self.http_preparation_failed(
                 now,
                 preparation,
@@ -2768,6 +2783,12 @@ impl<V: Venue> Engine<V> {
                     },
                 );
                 if recorded.is_ok() {
+                    if self.io.core.unknown_outcome_telemetry.is_some() {
+                        self.io
+                            .core
+                            .request_contexts
+                            .remember_engine_unknown(&delivery, Some(response.status));
+                    }
                     self.venue
                         .observe_unproven_http_response(now, &pending.value, response);
                     #[cfg(feature = "http-plans")]
@@ -2984,7 +3005,9 @@ impl crate::engine::IoCore {
         };
         let token = managed.lifecycle.preparation();
         completion.preparation = Some(token);
-        if let Err(reason) = managed.validate_send(&self.request_contexts, now) {
+        if let Err(reason) =
+            managed.validate_send(&self.request_contexts, now, self.signing.provider_floor())
+        {
             if let Some(action) = completion.outbound.as_mut() {
                 crate::signing_dispatch::wipe(action);
             }
@@ -3097,7 +3120,9 @@ impl crate::engine::IoCore {
         // However it leaves, a re-prepared call is no longer parked.
         #[cfg(feature = "session-bearer")]
         self.bearer_parked.retain(|(_, parked)| *parked != request);
-        if let Err(error) = managed.validate_send(&self.request_contexts, now) {
+        if let Err(error) =
+            managed.validate_send(&self.request_contexts, now, self.signing.provider_floor())
+        {
             return Err(Box::new((
                 error,
                 VenueError::new("HTTP preparation window expired"),
@@ -3240,7 +3265,10 @@ impl crate::engine::IoCore {
         managed.lifecycle.begin_signing().and_then(|_| {
             self.signing
                 .activate_managed(attempt, managed.lifecycle.deadline())
-                .map_err(|_| Error::State)
+                .map_err(|error| match error {
+                    crate::signing::SignError::Refused => Error::Revoked,
+                    _ => Error::State,
+                })
         })?;
         if was_waiting {
             self.actions.push(Action::SetTimer {
