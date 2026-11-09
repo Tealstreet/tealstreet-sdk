@@ -2124,6 +2124,90 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn retained_stop_notice_survives_replacement_registry_gap() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for unregister_b in [false, true] {
+                    let registry = crate::accounts::tests::registry();
+                    let first = acct_init();
+                    let account_a =
+                        crate::accounts::testing::trading_account(&registry, "u", &first);
+                    let (mut owner, mut owner_sent) = user_session(registry.clone(), "u");
+                    owner.init(first.clone()).await.unwrap();
+                    while owner_sent.try_recv().is_ok() {}
+                    let keep_a = registry.keep_notice(&account_a, &owner.resume_id);
+                    let old_end = envelope::msg("acct", "chaser:end", json!({"id":"gap-owner-A"}));
+                    let mut kept_a: crate::algos::Kept = "gap retired owner A".into();
+                    kept_a.ends.push(old_end.clone());
+                    let (release, wait) = tokio::sync::oneshot::channel();
+                    let callback = tokio::spawn(async move {
+                        wait.await.unwrap();
+                        keep_a(kept_a);
+                    });
+
+                    let second = InitPayload {
+                        key: "gap-owner-B".into(),
+                        ..first
+                    };
+                    let account_b =
+                        crate::accounts::testing::trading_account(&registry, "u", &second);
+                    owner.init(second.clone()).await.unwrap();
+                    assert!(Arc::ptr_eq(&owner.joined["acct"].account, &account_b));
+                    let current_end =
+                        envelope::msg("acct", "chaser:end", json!({"id":"gap-owner-B"}));
+                    let mut kept_b: crate::algos::Kept = "gap owed owner B".into();
+                    kept_b.ends.push(current_end.clone());
+                    (registry.keep_notice(&account_b, &owner.resume_id))(kept_b);
+                    if unregister_b {
+                        owner
+                            .handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+                            .await
+                            .unwrap();
+                        assert!(!owner.joined.contains_key("acct"));
+                    }
+
+                    release.send(()).unwrap();
+                    callback.await.unwrap();
+                    if unregister_b {
+                        let rebuilt =
+                            crate::accounts::testing::trading_account(&registry, "u", &second);
+                        assert!(!Arc::ptr_eq(&account_b, &rebuilt));
+                    }
+                    let (mut next, mut sent) = user_session(registry.clone(), "u");
+                    next.init(second.clone()).await.unwrap();
+                    let mut frames = Vec::new();
+                    while let Ok(frame) = sent.try_recv() {
+                        assert!(!frame.contains("gap retired owner A"));
+                        assert_ne!(frame, old_end);
+                        frames.push(frame);
+                    }
+                    assert_eq!(
+                        frames
+                            .iter()
+                            .filter(|frame| frame.contains("gap owed owner B"))
+                            .count(),
+                        1,
+                        "B's owed notice must survive unregister_b={unregister_b}: {frames:?}"
+                    );
+                    assert_eq!(
+                        frames.iter().filter(|frame| **frame == current_end).count(),
+                        1
+                    );
+
+                    let (mut again, mut sent) = user_session(registry.clone(), "u");
+                    again.init(second).await.unwrap();
+                    while let Ok(frame) = sent.try_recv() {
+                        assert!(!frame.contains("gap owed owner B"));
+                        assert!(!frame.contains("gap retired owner A"));
+                        assert_ne!(frame, current_end);
+                        assert_ne!(frame, old_end);
+                    }
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn retained_stop_replay_requires_same_account_fingerprint() {
         tokio::task::LocalSet::new()
             .run_until(async {

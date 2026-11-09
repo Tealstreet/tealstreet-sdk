@@ -575,9 +575,11 @@ generation and discard stale output, including delayed algo stop notices and
 already-queued frames. Repeated init and re-snapshot of the same account keep
 their generation. Other accounts and session envelopes are unaffected.
 
-Retained stop notices and chase ends also keep their source account fingerprint.
-A delayed retention callback refuses a registered replacement with different
-settings, and replay checks the joined account's fingerprint before enqueue.
+Retained stop notices and chase ends are keyed by user, account name and source
+account fingerprint. A delayed retention callback refuses a registered replacement
+with different settings; while the registry slot is empty, its separate record
+cannot overwrite another fingerprint's owed notice. Replay selects only the
+joined account's fingerprint before enqueue.
 Rebuilding the same credentials after a disconnect preserves the existing
 resume-owner, once-only and 24-hour retention behavior; changed credentials
 cannot inherit the old account's output.

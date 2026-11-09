@@ -469,7 +469,6 @@ struct OpenSession {
 /// Why an account's algos stopped, until its owning session has been told.
 struct StopRecord {
     kept: crate::algos::Kept,
-    fingerprint: String,
     at: tokio::time::Instant,
     /// The resume id of the session whose expiry stopped them.
     owner: String,
@@ -477,8 +476,9 @@ struct StopRecord {
     told_other: bool,
 }
 
-/// Stop notices by (user, account).
-type Notices = Arc<Mutex<HashMap<(String, String), StopRecord>>>;
+/// Stop notices by (user, account, source fingerprint), even while unregistered.
+type NoticeKey = (String, String, String);
+type Notices = Arc<Mutex<HashMap<NoticeKey, StopRecord>>>;
 
 /// How long an undelivered stop notice waits for the account's next init.
 pub const NOTICE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -1218,9 +1218,9 @@ impl Registry {
         from: Option<&str>,
     ) -> Option<crate::algos::Kept> {
         let mut notices = self.notices.lock().unwrap();
-        let key = (user.to_owned(), name.to_owned());
+        let key = (user.to_owned(), name.to_owned(), fingerprint.to_owned());
         let record = notices.get_mut(&key)?;
-        if record.at.elapsed() >= NOTICE_TTL || record.fingerprint != fingerprint {
+        if record.at.elapsed() >= NOTICE_TTL {
             notices.remove(&key);
             return None;
         }
@@ -1240,6 +1240,7 @@ impl Registry {
         let accounts = Arc::downgrade(&self.accounts);
         let key = (account.user.clone(), account.name.clone());
         let fingerprint = account.fingerprint.clone();
+        let notice_key = (key.0.clone(), key.1.clone(), fingerprint.clone());
         let owner = owner.to_owned();
         Box::new(move |kept| {
             let Some(accounts) = accounts.upgrade() else {
@@ -1256,10 +1257,9 @@ impl Registry {
             let mut notices = notices.lock().unwrap();
             notices.retain(|_, record| record.at.elapsed() < NOTICE_TTL);
             notices.insert(
-                key.clone(),
+                notice_key.clone(),
                 StopRecord {
                     kept,
-                    fingerprint: fingerprint.clone(),
                     at: tokio::time::Instant::now(),
                     owner: owner.clone(),
                     told_other: false,
