@@ -1324,6 +1324,17 @@ test('#3383 (run 42493810742 at 1e85d49cc13) retains measured wasm headroom', ()
   }
 });
 
+test('#3302 merged 207b88974ec retains current measured wasm headroom', () => {
+  const measured = 2_218_910;
+  const minimumCap = 2_229_248;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
+
 test('#3302 (run 42435433699 at 080ed4b51ae) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['asterdex', 2_193_230, 2_203_648],

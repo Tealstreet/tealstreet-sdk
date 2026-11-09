@@ -212,7 +212,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI bytes plus 10 KiB rounded up to KiB; never below either incoming parent cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_056_192,
-  asterdex: 2_203_648,
+  // #3302 merged source 207b88974ec: web/Node each 2,218,910 B, standard AsterDEX build.
+  // Rule 17: measured bytes + 10 KiB, rounded up to KiB; larger parent floors retained.
+  asterdex: 2_229_248,
   backpack: 2_036_736,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
