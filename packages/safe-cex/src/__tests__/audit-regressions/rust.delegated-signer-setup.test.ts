@@ -243,10 +243,12 @@ describe('trusted delegated signer setup capsule', () => {
     expect(setup.primaryComplete).toBe(false);
     // Effective public mode: the unused callback confers no signing authority.
     expect(setup.credentialPresence).toEqual({ key: false, secret: false });
+    expect(setup.usesPayloadSigner).toBe(false);
     expect(setup.signerAlgorithms).toEqual([]);
     expect(derivePublicMode('binance', input, undefined, setup.credentialPresence).publicDataOnly).toBe(true);
     const { config } = construct(setup);
     expect(config.signing).toEqual({});
+    expect(config).toMatchObject({ publicDataOnly: true, remoteSigning: false, payloadSigner: false });
     const foreign = { primary: { credential: 'unowned', signing: 'unowned-signing' } };
     await expect(setup.signer(request(foreign), callContext()))
       .rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent', message: 'Public-only accounts cannot sign' });

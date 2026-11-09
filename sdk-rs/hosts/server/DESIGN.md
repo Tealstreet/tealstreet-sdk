@@ -579,14 +579,40 @@ generation and discard stale output, including delayed algo stop notices and
 already-queued frames. Repeated init and re-snapshot of the same account keep
 their generation. Other accounts and session envelopes are unaffected.
 
-Retained stop notices and chase ends are keyed by user, account name and source
-account fingerprint. A delayed retention callback refuses a registered replacement
-with different settings; while the registry slot is empty, its separate record
-cannot overwrite another fingerprint's owed notice. Replay selects only the
-joined account's fingerprint before enqueue.
-Rebuilding the same credentials after a disconnect preserves the existing
-resume-owner, once-only and 24-hour retention behavior; changed credentials
-cannot inherit the old account's output.
+An optional string `init.instanceId` identifies the browser registration, not
+the account or its authority. It never enters engine options, fingerprints or
+rebuild comparisons. Account `msg` replies and remote `sign-req` frames echo it
+as `d.instanceId`, matching NX #9342's TypeScript reply envelope. Absent or empty
+IDs leave the original serialized bytes untouched.
+
+Rebuild refusals notify once per account, reason and registration ID, including
+when retries for registrations interleave. Without an ID, the legacy cache still
+notifies only when the last reason changes. Cache lifetime and clearing remain
+unchanged; this cache never changes fingerprints or rebuild admission.
+
+Each joined connection owns its reply output, so devices sharing one account
+receive their own IDs. Same-engine re-init and resume replace that connection's
+output before the new snapshot; queued frames and detached replies retain their
+captured output. Account-holder broadcasts stamp separately for each recipient.
+Each init refreshes fallback reply provenance after the connection's policy
+checks, even when rebuilding is refused or the venue is unsupported. Native
+disposal or join cleanup cannot restore an older registration. Explicit client
+disposal removes it. This metadata grants no engine or signing authority; outputs
+already captured by old clients, commands or callbacks keep their original ID
+while their account generation is current; retired generations are dropped.
+Retained records capture their source account fingerprint before deferral and
+are stored separately by user, name and fingerprint. Replay selects the actually
+joined fingerprint before stamping the new holder's ID, so retired credentials
+cannot donate a notice or overwrite another account's owed record through an
+empty registry slot. Same-fingerprint rebuilds preserve resume-owner, once-only
+and 24-hour retention rules. Session envelopes and all existing account/lease
+authority checks remain unchanged.
+
+A resumed signer can reattach before the browser re-inits. Its unsent signing
+requests wait in a queue bounded by the socket's outbound capacity until the
+same account's registration is known. An accepted replacement discards those
+old signing requests instead of attributing them to the replacement. Ordinary
+legacy account messages before re-init retain their existing delivery.
 
 How FrameServer notices map onto `msg`:
 

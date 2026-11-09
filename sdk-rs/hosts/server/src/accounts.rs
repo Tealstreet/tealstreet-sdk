@@ -347,6 +347,12 @@ impl Account {
     pub fn sign_through_socket(&self, id: u64, outbox: Outbox, token: Option<(String, u64)>) {
         self.hold(id, Live { outbox, token });
     }
+
+    pub(crate) fn update_reply_outbox(&self, id: u64, outbox: Outbox) {
+        if let Some(Some(live)) = self.holders.lock().unwrap().by_id.get_mut(&id) {
+            live.outbox = outbox;
+        }
+    }
 }
 
 /// How an account's algo host reaches its sockets, without a cycle back to it.
@@ -3393,6 +3399,10 @@ pub(crate) mod tests {
 
     pub(crate) fn signing_holder(account: &Account) -> Option<u64> {
         account.holders.lock().unwrap().signing
+    }
+
+    pub(crate) fn fail_signer(registry: &Registry, account: &Arc<Account>) {
+        registry.signer_failed(account);
     }
 
     #[tokio::test(start_paused = true)]

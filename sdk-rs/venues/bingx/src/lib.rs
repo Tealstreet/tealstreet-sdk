@@ -1564,8 +1564,15 @@ impl Venue for Bingx {
         response: Response<'_>,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
-        if matches!(pending, Pending::Trade(_)) {
-            trading::evidence(response.body, evidence);
+        match pending {
+            Pending::Trade(request) => {
+                self.trading
+                    .unproven_evidence(request, response.body, evidence)
+            }
+            Pending::Signed(signed) => {
+                self.unproven_http_evidence(&signed.inner, response, evidence)
+            }
+            _ => {}
         }
     }
     fn on_sign_error(
