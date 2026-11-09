@@ -212,7 +212,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI bytes plus 10 KiB rounded up to KiB; never below either incoming parent cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_056_192,
-  asterdex: 2_193_408,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.
+  asterdex: 2_198_528,
   backpack: 2_036_736,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
@@ -224,14 +225,14 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   bitget: 2_492_416,
   bitgetusdc: 2_492_416,
-  // #3297 initial post-#3306 restage retained parent-max 1,887,232 B (master 1,886,208 B).
-  // Current CI run 42556682443 at e5ae4d9a8db, WASM job 128964311836: Bitrue 1,895,658 B.
-  // Replay job 128964312205 confirms it; measured size + 10 KiB, rounded up to KiB.
   bitrue: 1_906_688,
-  bitunix: 1_915_904,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
+  bitunix: 1_927_168,
   blofin: 2_049_024,
-  bybit: 2_320_384,
-  coinbase: 1_972_224,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
+  bybit: 2_326_528,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
+  coinbase: 1_978_368,
   cryptocom: 1_803_264,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
@@ -259,7 +260,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   paradex: 2_300_928,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
-  phemex: 2_111_488,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,104,206 B + 10 KiB, rounded up.
+  phemex: 2_114_560,
   polymarket: 1_652_736,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   txflow: 1_934_336,
@@ -267,7 +269,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
-  woo: 2_628_608,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web 2,631,851 B + 10 KiB, rounded up.
+  woo: 2_642_944,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

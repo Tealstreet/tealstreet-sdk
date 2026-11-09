@@ -258,6 +258,160 @@ fn an_unknown_batch_leg_ends_the_job_before_later_chunks() {
     );
 }
 
+fn mixed_cancel(
+    ids: [&str; 2],
+    failed_index: usize,
+) -> (
+    safe_cex_engine::VenueError,
+    Vec<safe_cex_engine::log::LogEvent>,
+) {
+    use safe_cex_engine::Outcome;
+    let (mut e, socket) = startup();
+    for id in ["confirmed", "uncertain"] {
+        event(
+            &mut e,
+            socket,
+            &format!(
+                r#"{{"ch":"order","data":{{"event":"CREATE","symbol":"BTCUSDT","orderId":"{id}","orderType":"LIMIT","side":"SELL","qty":"3","price":"100","dealAmount":"0"}}}}"#
+            ),
+        );
+        assert_eq!(e.store().order(id).unwrap().status, OrderStatus::Open);
+    }
+    e.handle(
+        101.0,
+        Event::Command(Command::CancelOrders {
+            command: 1013,
+            ids: ids.iter().map(|id| (*id).into()).collect(),
+        }),
+    );
+    let sent = requests(&mut e);
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].url.ends_with("trade/cancel_orders"));
+    let body: serde_json::Value = serde_json::from_str(sent[0].body.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        body["orderList"],
+        serde_json::json!(ids.map(|id| serde_json::json!({"orderId": id})))
+    );
+    reply(
+        &mut e,
+        sent[0].id,
+        r#"{"code":0,"data":{"successList":[{"orderId":"confirmed"}],"failureList":[{"orderId":"uncertain","errorCode":10001,"errorMsg":"Network Error"}]}}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e);
+    assert!(
+        !actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 1013, .. })
+        )),
+        "unexpected action: {actions:?}"
+    );
+    for action in &actions {
+        if let Action::Http(request) = action {
+            assert_eq!(request.method, safe_cex_engine::Method::Get);
+        }
+    }
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 1013,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "one failure completion: {actions:?}");
+    let error = failures[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        e.store().order("confirmed").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        e.store().order("uncertain").unwrap().status,
+        OrderStatus::Open
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty()),
+        "cancellation targets must not enter created-order evidence: {error:?}"
+    );
+    assert_eq!(
+        serde_json::to_value(error).unwrap()["partial"],
+        serde_json::json!({"orderIds": [], "total": 2, "failedIndex": failed_index})
+    );
+    assert!(
+        requests(&mut e)
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
+    assert_eq!(error.venue_code.as_deref(), Some("10001"));
+    assert_eq!(error.venue_message.as_deref(), Some("Network Error"));
+    let events = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) => Some(event.clone()),
+            _ => None,
+        })
+        .collect();
+    (error.clone(), events)
+}
+
+#[test]
+fn cancel_batch_with_an_unknown_row_journals_no_unconfirmed_cancellations() {
+    let (error, _) = mixed_cancel(["confirmed", "uncertain"], 1);
+    let rows = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(
+        rows[0],
+        serde_json::json!({"index": 0, "status": "applied", "effect": "cancel", "targetOrderId": "confirmed"})
+    );
+    assert_eq!(rows[1]["index"], 1);
+    assert_eq!(rows[1]["status"], "unknown");
+    assert_eq!(rows[1]["error"]["venueCode"], "10001");
+    assert_eq!(rows[1]["error"]["venueMessage"], "Network Error");
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn mixed_cancel_unknown_has_guidance_and_one_independent_diagnostic() {
+    let (error, events) = mixed_cancel(["confirmed", "uncertain"], 1);
+    let diagnostics: Vec<_> = events
+        .iter()
+        .filter(|event| event.code == "order.outcome_unknown")
+        .collect();
+    assert_eq!(
+        (
+            error
+                .message
+                .contains("The outcome is unknown. Check Open Orders"),
+            diagnostics.len()
+        ),
+        (true, 1),
+        "guidance and independent diagnostic: {error:?}, {events:?}"
+    );
+    assert_eq!(diagnostics[0].level, safe_cex_engine::Level::Warn);
+    assert!(
+        diagnostics[0]
+            .fields
+            .contains(&("command", 1013_u32.into()))
+    );
+}
+
+#[test]
+fn mixed_cancel_unknown_first_preserves_caller_index_and_journal_order() {
+    let (error, _) = mixed_cancel(["uncertain", "confirmed"], 0);
+    let rows = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(rows[0]["index"], 0);
+    assert_eq!(rows[0]["status"], "unknown");
+    assert_eq!(
+        rows[1],
+        serde_json::json!({"index": 1, "status": "applied", "effect": "cancel", "targetOrderId": "confirmed"})
+    );
+}
+
 #[test]
 fn partial_cancel_is_effective_before_its_rejection_is_reported() {
     let (mut e, _) = startup();
