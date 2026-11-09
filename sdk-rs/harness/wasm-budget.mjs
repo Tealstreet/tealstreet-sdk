@@ -244,6 +244,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3344 restage 2cc05051503: optimized web/node 2,225,418 B + 10 KiB, rounded up.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
   // Master 05241cd0f4 changes no Hyperliquid build inputs; keep both parent provenance blocks.
+  // Current CI run 42565604601, merge ec8633c44e98: web/node 2,225,586 B + 10 KiB, rounded up.
   hyperliquid: 2_236_416,
   hyperliquidspot: 2_236_416,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
