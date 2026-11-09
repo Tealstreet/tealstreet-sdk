@@ -1665,3 +1665,17 @@ test('#3299 restage (run 42558057739 at 5dec79811311) retains current measured w
   assert.equal(wasmBudgetError(cap, 'venue', 'mexc'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
 });
+
+test('#3299 merged head 2ca7125e8ab retains measured MEXC and Bitrue headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['mexc', 1_920_015, 1_931_264],
+    ['bitrue', 1_901_720, 1_912_832],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
