@@ -31,6 +31,13 @@ Changing login stops the old user's in-process chasers and removes them from
 chase listings before disconnecting exchanges. Late chase results are discarded;
 they do not appear in the next user's chase watch or one-shot command result.
 
+Pending account starts, retries, script captures, recorder completions and
+background update checks also stay bound to their starting login. Cross-trade
+startup stops its remaining account list on cancellation and disposes old
+connections without changing the new login's account activation flags. A switch
+discards their stale results, including when you switch back to the same user.
+The status bar clears, and the footer reloads the new user's saved settings.
+
 Each legacy config can identify the owner of its own accounts. Shared legacy
 files (hooks, browser approvals, vars, scripts and recordings) have one claim
 for their physical source directory across config profiles, brands and path

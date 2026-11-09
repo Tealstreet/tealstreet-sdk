@@ -1,0 +1,415 @@
+diff --git a/packages/cli-core/src/commands/nativeAccountState.test.ts b/packages/cli-core/src/commands/nativeAccountState.test.ts
+index 88c40767e9e..342d0e2a810 100644
+--- a/packages/cli-core/src/commands/nativeAccountState.test.ts
++++ b/packages/cli-core/src/commands/nativeAccountState.test.ts
+@@ -8,11 +8,11 @@ import { MemoryPreprocessStore } from '../preprocess/memoryStore';
+ import { parseConditionText } from '../preprocess/conditions';
+
+ function fixture() {
+-  const position = {
++  const position: Position = {
+     id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long,
+     contracts: 5000, entryPrice: 2, notional: 10000,
+     leverage: 2, liquidationPrice: 1, unrealizedPnl: 0,
+-  } as Position;
++  };
+   const order = {
+     id: '9007199254740995', symbol: 'BTCUSDT', side: OrderSide.Buy,
+     type: OrderType.Limit, status: OrderStatus.Open, amount: 1,
+diff --git a/packages/cli-core/src/commands/trading/BreakevenCommand.test.ts b/packages/cli-core/src/commands/trading/BreakevenCommand.test.ts
+index 4c466749cd5..2f7b97f1af4 100644
+--- a/packages/cli-core/src/commands/trading/BreakevenCommand.test.ts
++++ b/packages/cli-core/src/commands/trading/BreakevenCommand.test.ts
+@@ -26,7 +26,7 @@ function pos(p: Partial<Position> = {}): Position {
+     contracts: 1,
+     liquidationPrice: 0,
+     ...p,
+-  } as Position;
++  };
+ }
+
+ const order = (o: Partial<Order>): Order =>
+diff --git a/packages/cli-core/src/commands/trading/SwarmCommand.test.ts b/packages/cli-core/src/commands/trading/SwarmCommand.test.ts
+index 10dd0329c80..eab6e2f223d 100644
+--- a/packages/cli-core/src/commands/trading/SwarmCommand.test.ts
++++ b/packages/cli-core/src/commands/trading/SwarmCommand.test.ts
+@@ -26,7 +26,7 @@ function pos(p: Partial<Position> = {}): Position {
+     unrealizedPnl: p.unrealizedPnl ?? 0,
+     contracts: p.contracts ?? 1,
+     liquidationPrice: p.liquidationPrice ?? 0,
+-  } as Position;
++  };
+ }
+
+ function bal(p: Partial<Balance> = {}): Balance {
+diff --git a/packages/cli-core/src/commands/trading/sizeSyntax.test.ts b/packages/cli-core/src/commands/trading/sizeSyntax.test.ts
+index ecec97dc9be..a9a3ae078fb 100644
+--- a/packages/cli-core/src/commands/trading/sizeSyntax.test.ts
++++ b/packages/cli-core/src/commands/trading/sizeSyntax.test.ts
+@@ -39,7 +39,7 @@ function pos(p: Partial<Position> = {}): Position {
+     unrealizedPnl: p.unrealizedPnl ?? 0,
+     contracts: p.contracts ?? 1,
+     liquidationPrice: p.liquidationPrice ?? 0,
+-  } as Position;
++  };
+ }
+
+ function bal(p: Partial<Balance> = {}): Balance {
+diff --git a/packages/cli-core/src/commands/trading/smallCommands.test.ts b/packages/cli-core/src/commands/trading/smallCommands.test.ts
+index 5c200907bbe..2836d053ccd 100644
+--- a/packages/cli-core/src/commands/trading/smallCommands.test.ts
++++ b/packages/cli-core/src/commands/trading/smallCommands.test.ts
+@@ -42,7 +42,7 @@ function pos(p: Partial<Position> = {}): Position {
+     unrealizedPnl: p.unrealizedPnl ?? 0,
+     contracts: p.contracts ?? 1,
+     liquidationPrice: p.liquidationPrice ?? 0,
+-  } as Position;
++  };
+ }
+
+ function bal(p: Partial<Balance> = {}): Balance {
+diff --git a/packages/safe-cex/src/__tests__/audit-regressions/bitrue.trading-safety-defaults.test.ts b/packages/safe-cex/src/__tests__/audit-regressions/bitrue.trading-safety-defaults.test.ts
+index 300cf67fe3f..3632c0dfdbb 100644
+--- a/packages/safe-cex/src/__tests__/audit-regressions/bitrue.trading-safety-defaults.test.ts
++++ b/packages/safe-cex/src/__tests__/audit-regressions/bitrue.trading-safety-defaults.test.ts
+@@ -11,7 +11,6 @@ import {
+   OrderStatus,
+   OrderStopTriggerType,
+   OrderType,
+-  Position,
+   PositionMode,
+   PositionSide,
+ } from '../../types';
+@@ -44,7 +43,7 @@ const setup = () => {
+         unrealizedPnl: 0,
+         contracts: 0.01,
+         liquidationPrice: 0,
+-      } as Position,
++      },
+     ],
+     tickers: [{ symbol: market.symbol, mark: 60_000, last: 60_000, bid: 59_999, ask: 60_001 } as any],
+   });
+diff --git a/packages/safe-cex/src/__tests__/audit-regressions/bitunix.parity.test.ts b/packages/safe-cex/src/__tests__/audit-regressions/bitunix.parity.test.ts
+index 7a9c5db6265..b0f9de26f4c 100644
+--- a/packages/safe-cex/src/__tests__/audit-regressions/bitunix.parity.test.ts
++++ b/packages/safe-cex/src/__tests__/audit-regressions/bitunix.parity.test.ts
+@@ -111,7 +111,7 @@ const captureFills = (exchange: BitunixExchange) => {
+   return fills;
+ };
+
+-const crossLeg = (side: PositionSide) =>
++const crossLeg = (side: PositionSide): Position =>
+   ({
+     id: `ETHUSDT:${side}`,
+     symbol: 'ETHUSDT',
+@@ -124,7 +124,7 @@ const crossLeg = (side: PositionSide) =>
+     liquidationPrice: 0,
+     marginType: MarginType.Cross,
+     positionMode: PositionMode.Hedged,
+-  }) as Position;
++  });
+
+ describe('Bitunix TS/Rust parity regressions', () => {
+   it('(1) REST orders carry clientOrderId from clientId; virtual TP/SL legs do not', async () => {
+diff --git a/packages/safe-cex/src/__tests__/audit-regressions/bitunix.remaining-audit.test.ts b/packages/safe-cex/src/__tests__/audit-regressions/bitunix.remaining-audit.test.ts
+index 2da51f7cbd9..64518eb83c6 100644
+--- a/packages/safe-cex/src/__tests__/audit-regressions/bitunix.remaining-audit.test.ts
++++ b/packages/safe-cex/src/__tests__/audit-regressions/bitunix.remaining-audit.test.ts
+@@ -156,7 +156,7 @@ describe('Bitunix remaining July audit regressions', () => {
+           realizedPnl: 0,
+           liquidationPrice: 45_000,
+           info: { positionId: 'position-1' },
+-        } as Position,
++        },
+       ],
+     });
+     exchange.xhr = {
+@@ -209,7 +209,7 @@ describe('Bitunix remaining July audit regressions', () => {
+
+   it('refreshes a missing TP/SL positionId before emitting a preflight error', async () => {
+     const exchange = createExchange();
+-    const stalePosition = {
++    const stalePosition: Position = {
+       id: 'BTCUSDT:long',
+       symbol: 'BTCUSDT',
+       side: PositionSide.Long,
+@@ -221,7 +221,7 @@ describe('Bitunix remaining July audit regressions', () => {
+       realizedPnl: 0,
+       liquidationPrice: 45_000,
+       info: {},
+-    } as Position;
++    };
+     const freshPosition = {
+       ...stalePosition,
+       info: { positionId: 'position-1' },
+@@ -259,7 +259,7 @@ describe('Bitunix remaining July audit regressions', () => {
+
+   it('refreshes current TP/SL rows before full-position placement so adding TP preserves existing SL', async () => {
+     const exchange = createExchange();
+-    const position = {
++    const position: Position = {
+       id: 'BTCUSDT:long',
+       symbol: 'BTCUSDT',
+       side: PositionSide.Long,
+@@ -271,7 +271,7 @@ describe('Bitunix remaining July audit regressions', () => {
+       realizedPnl: 0,
+       liquidationPrice: 45_000,
+       info: { positionId: 'position-1' },
+-    } as Position;
++    };
+     const existingStopLoss = {
+       id: 'position-tpsl-1',
+       status: OrderStatus.Open,
+diff --git a/packages/safe-cex/src/__tests__/audit-regressions/bybitdemo.order-risk.test.ts b/packages/safe-cex/src/__tests__/audit-regressions/bybitdemo.order-risk.test.ts
+index ea7178fdf6d..e7729b1adf4 100644
+--- a/packages/safe-cex/src/__tests__/audit-regressions/bybitdemo.order-risk.test.ts
++++ b/packages/safe-cex/src/__tests__/audit-regressions/bybitdemo.order-risk.test.ts
+@@ -45,7 +45,7 @@ const ticker = {
+   quoteVolume: 0,
+ } as Ticker;
+
+-const position = {
++const position: Position = {
+   id: 'ARBUSDT',
+   symbol: 'ARBUSDT',
+   side: PositionSide.Long,
+@@ -57,7 +57,7 @@ const position = {
+   contracts: 200,
+   liquidationPrice: 0,
+   positionMode: PositionMode.OneWay,
+-} as Position;
++};
+
+ const demoTradingStopOrder = (overrides: Record<string, unknown>) => ({
+   orderId: 'tp-1',
+diff --git a/packages/safe-cex/src/__tests__/audit-regressions/hyrotrader.private-recovery.test.ts b/packages/safe-cex/src/__tests__/audit-regressions/hyrotrader.private-recovery.test.ts
+index 3d907a1f105..3cceb8ee958 100644
+--- a/packages/safe-cex/src/__tests__/audit-regressions/hyrotrader.private-recovery.test.ts
++++ b/packages/safe-cex/src/__tests__/audit-regressions/hyrotrader.private-recovery.test.ts
+@@ -197,7 +197,7 @@ describe('HyroTrader private stream recovery ordering', () => {
+           contracts: 0.002,
+           liquidationPrice: 0,
+           positionMode: PositionMode.OneWay,
+-        } as Position,
++        },
+       ],
+     });
+     const { socket } = attach(exchange);
+diff --git a/packages/safe-cex/src/__tests__/cutover/consumerFrame.ts b/packages/safe-cex/src/__tests__/cutover/consumerFrame.ts
+index d07d210c373..de84354d75a 100644
+--- a/packages/safe-cex/src/__tests__/cutover/consumerFrame.ts
++++ b/packages/safe-cex/src/__tests__/cutover/consumerFrame.ts
+@@ -187,6 +187,12 @@ export function consumerFrame(
+   }
+   if (data.positions) {
+     const rows = data.positions;
++    const columns: (keyof Pick<Position,
++      'entryPrice' | 'notional' | 'leverage' | 'unrealizedPnl' | 'realizedPnl' |
++      'contracts' | 'liquidationPrice' | 'marginSize' | 'lastUpdate'>)[] = [
++      'entryPrice', 'notional', 'leverage', 'unrealizedPnl', 'realizedPnl',
++      'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate',
++    ];
+     const enums = (row: Position) =>
+       Number(row.side === 'short') |
+       ([undefined, 'isolated', 'cross'].indexOf(row.marginType) << 8) |
+@@ -196,18 +202,7 @@ export function consumerFrame(
+     table(
+       8,
+       [rows.length, ...rows.map((row) => marketIndex(row.symbol)), ...rows.map(enums)],
+-      [
+-        'entryPrice',
+-        'notional',
+-        'leverage',
+-        'unrealizedPnl',
+-        'realizedPnl',
+-        'contracts',
+-        'liquidationPrice',
+-        'marginSize',
+-        'lastUpdate',
+-      ]
+-        .map((field) => rows.map((row) => (row[field as keyof Position] as number) ?? NaN))
++      columns.map((field) => rows.map((row) => row[field] ?? NaN))
+         .concat([
+           rows.map((row) => row.extra?.contractsNative ?? NaN),
+           rows.map((row) => row.extra?.unrealizedPnlNative ?? NaN),
+diff --git a/packages/safe-cex/src/__tests__/reference/kraken/kraken.ws-private.ts b/packages/safe-cex/src/__tests__/reference/kraken/kraken.ws-private.ts
+index 06d5c245bc7..32b8344c534 100644
+--- a/packages/safe-cex/src/__tests__/reference/kraken/kraken.ws-private.ts
++++ b/packages/safe-cex/src/__tests__/reference/kraken/kraken.ws-private.ts
+@@ -407,7 +407,7 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
+         marginType,
+         positionMode: PositionMode.OneWay, // Kraken only supports one-way mode
+         info: p,
+-      } as Position;
++      };
+     });
+
+     // Only include positions with non-zero contracts
+diff --git a/packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts b/packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts
+index bfb687d334c..c58283689a4 100644
+--- a/packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts
++++ b/packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts
+@@ -1287,7 +1287,7 @@ export class OrderlyExchange extends BaseExchange {
+       this.store.updatePositions(
+         this.store.positions
+           .filter((position) => position.symbol === symbol && position.marginType === marginType)
+-          .map((position) => [position, { leverage }] as [Position, Partial<Position>]),
++          .map<[Position, Partial<Position>]>((position) => [position, { leverage }]),
+       );
+     } catch (err: any) {
+       this.emitAndLogError(err?.response?.data?.message || err?.message);
+diff --git a/packages/safe-cex/src/store/store.base.test.ts b/packages/safe-cex/src/store/store.base.test.ts
+index e5e8704e9fc..662109e91e2 100644
+--- a/packages/safe-cex/src/store/store.base.test.ts
++++ b/packages/safe-cex/src/store/store.base.test.ts
+@@ -32,7 +32,7 @@ const createPosition = (overrides?: Partial<Position>): Position =>
+     leverage: 10,
+     liquidationPrice: 45000,
+     ...overrides,
+-  }) as Position;
++  });
+
+ const createMarket = (overrides?: Partial<Market>): Market =>
+   ({
+diff --git a/packages/safe-cex/src/utils/risk.ts b/packages/safe-cex/src/utils/risk.ts
+index d889c01eb0c..5c7f9f37c64 100644
+--- a/packages/safe-cex/src/utils/risk.ts
++++ b/packages/safe-cex/src/utils/risk.ts
+@@ -163,7 +163,7 @@ export const calculateOrdersRisk = (
+         }
+       }
+     })
+-    .filter((position) => position) as Position[];
++    .filter((position) => position !== null);
+
+   const [primaryPositionRisk, secondaryPositions] = processOrdersRiskForPositions(
+     tickerBySymbol,
+diff --git a/packages/safe-cex/src/webworker/ExchangeWorker.test.ts b/packages/safe-cex/src/webworker/ExchangeWorker.test.ts
+index 20f6f11f903..87223aa52ff 100644
+--- a/packages/safe-cex/src/webworker/ExchangeWorker.test.ts
++++ b/packages/safe-cex/src/webworker/ExchangeWorker.test.ts
+@@ -74,7 +74,7 @@ const createPosition = (overrides?: Partial<Position>): Position =>
+     leverage: 10,
+     liquidationPrice: 45000,
+     ...overrides,
+-  }) as Position;
++  });
+
+ const createDisplayedPosition = (overrides?: Partial<DisplayedPosition>): DisplayedPosition =>
+   ({
+@@ -82,7 +82,7 @@ const createDisplayedPosition = (overrides?: Partial<DisplayedPosition>): Displa
+     account: 'test-account',
+     exchangeName: 'bybit',
+     ...overrides,
+-  }) as DisplayedPosition;
++  });
+
+ const createActiveChaser = (overrides?: Partial<ActiveChaser>): ActiveChaser => ({
+   id: 'chaser-1',
+diff --git a/packages/safe-cex/src/webworker/postProcessors/DisplayedPositionsPostprocessor.test.ts b/packages/safe-cex/src/webworker/postProcessors/DisplayedPositionsPostprocessor.test.ts
+index bc687a47d5a..6c3c871764b 100644
+--- a/packages/safe-cex/src/webworker/postProcessors/DisplayedPositionsPostprocessor.test.ts
++++ b/packages/safe-cex/src/webworker/postProcessors/DisplayedPositionsPostprocessor.test.ts
+@@ -56,7 +56,7 @@ const createPosition = (overrides?: Partial<Position>): Position =>
+     leverage: 10,
+     liquidationPrice: 50,
+     ...overrides,
+-  }) as Position;
++  });
+
+ const createActiveChaser = (overrides?: Partial<ActiveChaser>): ActiveChaser => ({
+   id: 'chaser-1',
+diff --git a/packages/safe-cex/src/webworker/postProcessors/DisplayedPositionsPostprocessor.ts b/packages/safe-cex/src/webworker/postProcessors/DisplayedPositionsPostprocessor.ts
+index 52877195df2..70fbd391673 100644
+--- a/packages/safe-cex/src/webworker/postProcessors/DisplayedPositionsPostprocessor.ts
++++ b/packages/safe-cex/src/webworker/postProcessors/DisplayedPositionsPostprocessor.ts
+@@ -237,7 +237,7 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
+
+       const ticker = tickerMap[position.symbol];
+       const coverage = activeKey ? stopTpCoverage[activeKey] : undefined;
+-      const displayedPosition = {
++      const displayedPosition: Writable<DisplayedPosition> & { key: string } = {
+         ...position,
+         contracts,
+         unrealizedPnl: this.calculateUnrealizedPnl(
+@@ -251,12 +251,12 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
+         ticker,
+         market: marketMap[position.symbol],
+         balance: store.balance,
+-        exchangeName: this._exchangeName!,
++        exchangeName: this._exchangeName,
+         hasActiveChaser: activeKey !== undefined && activeChaserKeys?.[activeKey] === true,
+         hasActiveTWAP: activeKey !== undefined && activeTwapKeys?.[activeKey] === true,
+         hasFullStop: coverage ? coverage.hasFullStop || coverage.stopAmount >= contracts : false,
+         hasFullTP: coverage ? coverage.hasFullTP || coverage.tpAmount >= contracts : false,
+-      } as Writable<DisplayedPosition> & { key: string };
++      };
+       const pnlKey = this.trackPositionPnl(displayedPosition);
+       if (activePnlKeys && pnlKey) activePnlKeys[pnlKey] = true;
+       displayedPositions.push(displayedPosition);
+@@ -328,7 +328,7 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
+             ticker,
+             market,
+             balance: store.balance,
+-            exchangeName: this._exchangeName!,
++            exchangeName: this._exchangeName,
+             oneMinUpnl: 0,
+             fiveMinUpnl: 0,
+             hasActiveChaser: true,
+diff --git a/packages/script-api-core/src/adapter/createCoreAdapter.ts b/packages/script-api-core/src/adapter/createCoreAdapter.ts
+index d5aa8689246..436b0c83333 100644
+--- a/packages/script-api-core/src/adapter/createCoreAdapter.ts
++++ b/packages/script-api-core/src/adapter/createCoreAdapter.ts
+@@ -130,7 +130,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
+       // `getStore` first: the CLI's exchange handle and a mobile bridge do not
+       // both carry a `store`, and an empty position list clamps to nothing at
+       // all rather than failing loudly.
+-      positions: (host.getStore(account)?.positions ?? exchange?.store?.positions ?? EMPTY) as Position[],
++      positions: host.getStore(account)?.positions ?? exchange?.store?.positions ?? EMPTY,
+       // A binding because web holds OPTIMISTIC in-progress rows that exist
+       // nowhere else. A host without it clamps against the store, which is
+       // correct — just less current.
+@@ -230,7 +230,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
+       return tickers.filter((ticker) => want.has(ticker.symbol));
+     },
+     getPositions: ({ account, symbol }): readonly Position[] =>
+-      bySymbol((host.getStore(account)?.positions as readonly Position[]) ?? EMPTY, symbol),
++      bySymbol(host.getStore(account)?.positions ?? EMPTY, symbol),
+     getOrders: ({ account, symbol }): readonly Order[] =>
+       bySymbol(((host.getStore(account)?.orders as readonly Order[]) ?? EMPTY).filter(isNotTerminal), symbol),
+     getBalance: (account): Balance | undefined =>
+@@ -413,7 +413,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
+       const summary = `closePosition ${opts.symbol}${opts.side ? ` ${opts.side}` : ''}`;
+       const orderIds: string[] = [];
+       try {
+-        const candidates = ((host.getStore(account)?.positions ?? []) as Position[]).filter(
++        const candidates = (host.getStore(account)?.positions ?? []).filter(
+           (position) => position.symbol === opts.symbol && (!opts.side || position.side === opts.side),
+         );
+         if (candidates.length === 0) return { orderIds: Object.freeze([] as readonly string[]) };
+diff --git a/packages/script-api-core/src/order/downSizeReduceOrder.ts b/packages/script-api-core/src/order/downSizeReduceOrder.ts
+index ac9b4886af6..db9450e7d69 100644
+--- a/packages/script-api-core/src/order/downSizeReduceOrder.ts
++++ b/packages/script-api-core/src/order/downSizeReduceOrder.ts
+@@ -69,7 +69,7 @@ const unfilled = (order: Order): number => Math.max(0, order.amount - (order.fil
+ export const downSizeReduceOrder = (
+   market: Market,
+   order: PlaceOrderOpts,
+-  positions: Position[],
++  positions: readonly Position[],
+   orders: readonly Order[],
+   price: number,
+   {
+diff --git a/packages/script-api-core/src/order/prepareOrder.ts b/packages/script-api-core/src/order/prepareOrder.ts
+index d007b989f4a..733187ff9db 100644
+--- a/packages/script-api-core/src/order/prepareOrder.ts
++++ b/packages/script-api-core/src/order/prepareOrder.ts
+@@ -122,7 +122,7 @@ export const clampReduceOnlyOrder = (
+   if (!venueAutoDownsizesReduceOrders(exchangeName)) return order;
+   const price = order.price || ticker?.mark || ticker?.last || 0;
+   if (!price) return order;
+-  return downSizeReduceOrder(market, order, positions as Position[], restingOrders, price, {
++  return downSizeReduceOrder(market, order, positions, restingOrders, price, {
+     locksPositionSize: venueReduceOrdersLockPositionSize(exchangeName),
+   });
+ };

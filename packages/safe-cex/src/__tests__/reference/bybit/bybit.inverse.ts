@@ -1,4 +1,4 @@
-import type { Position } from '../../types';
+import type { Position } from '../../../types';
 
 /**
  * `BTCUSD`, `ETHUSDZ26`. Checked on 2026-10-15 against instruments-info: all 26 inverse symbols match and none of

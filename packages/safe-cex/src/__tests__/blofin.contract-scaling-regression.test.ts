@@ -126,7 +126,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
 
     const callback = vi.fn();
@@ -214,7 +214,7 @@ describe('Blofin contract scaling regression', () => {
     } as any;
 
     const markets = await exchange.fetchMarkets();
-    seedMarkets(store, markets as Market[]);
+    seedMarkets(store, markets);
     vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
     vi.spyOn(exchange as any, 'getPositionSide').mockResolvedValue(undefined);
 
@@ -246,7 +246,7 @@ describe('Blofin contract scaling regression', () => {
       return exchange.fetchMarkets();
     })();
 
-    seedMarkets(store, markets as Market[]);
+    seedMarkets(store, markets);
     vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
     vi.spyOn(exchange as any, 'getPositionSide').mockResolvedValue(undefined);
 
@@ -273,7 +273,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
     vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
     exchange.xhr = {
@@ -452,7 +452,7 @@ describe('Blofin contract scaling regression', () => {
       return exchange.fetchMarkets();
     })();
 
-    seedMarkets(store, markets as Market[]);
+    seedMarkets(store, markets);
     vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
     vi.spyOn(exchange as any, 'getPositionSide').mockResolvedValue('long');
 
@@ -492,7 +492,7 @@ describe('Blofin contract scaling regression', () => {
       return exchange.fetchMarkets();
     })();
 
-    seedMarkets(store, markets as Market[]);
+    seedMarkets(store, markets);
     vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
     vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
 
@@ -530,7 +530,7 @@ describe('Blofin contract scaling regression', () => {
       return exchange.fetchMarkets();
     })();
 
-    seedMarkets(store, markets as Market[]);
+    seedMarkets(store, markets);
     vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
     vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.Hedged);
 
@@ -601,7 +601,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
 
     const positions = exchange.mapPositions([
@@ -636,7 +636,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
     store.update({
       positions: [
@@ -686,7 +686,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
 
     const orders = exchange.mapOrders([
@@ -723,7 +723,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
 
     const orders = exchange.mapOrders([
@@ -757,7 +757,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
 
     const positions = exchange.mapPositions([
@@ -790,7 +790,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.01,
       info: { contractValue: 0.01, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
 
     const orders = exchange.mapOrders([
@@ -844,7 +844,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
 
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
@@ -894,7 +894,7 @@ describe('Blofin contract scaling regression', () => {
         limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
         contractSize: 0.001,
         info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-      } as Market,
+      } satisfies Market,
     ]);
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
     const fills: Array<{ amount: number; price: number }> = [];
@@ -942,7 +942,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
 
     // Mimic what BloFin returns after placing a limit order with inline SL:
@@ -1000,7 +1000,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
       contractSize: 0.001,
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [btcMarket]);
 
     // Defensive: if BloFin ever returns an algo record with orderCategory='normal'
@@ -1154,7 +1154,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
       contractSize: 1,
       info: { contractValue: 1, lotSize: 1, minSize: 1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [arbMarket]);
 
     const normalOnly = exchange.mapOrders([
@@ -1197,7 +1197,7 @@ describe('Blofin contract scaling regression', () => {
       limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
       contractSize: 1,
       info: { contractValue: 1, lotSize: 1, minSize: 1 },
-    } as Market;
+    } satisfies Market;
     seedMarkets(store, [arbMarket]);
 
     const normalOrders = exchange.mapOrders([

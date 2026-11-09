@@ -118,6 +118,10 @@ code, goes to stderr instead, and the background update notice is skipped. See
 
 ## Status bar + footer {#status-bar--footer}
 
+Changing login clears the old status and watch messages, stops its redraws and
+loads the new user's footer settings. Late exchange events, command output and
+webhook replies from the previous session are discarded.
+
 Two pinned single-line surfaces frame the scrolling output, both reserved via
 one shared ANSI scroll region (so they never fight each other or corrupt the
 prompt):
