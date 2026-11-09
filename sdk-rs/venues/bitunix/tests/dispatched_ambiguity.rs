@@ -83,7 +83,31 @@ fn probe(status: u16, code: i64, unknown: bool) {
                 },
             },
         );
-        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 110.0);
+        let mut actions = safe_cex_engine::test_support::prepared_actions(&mut e, 110.0);
+        let restores_kept_leg =
+            case == "protective cancel" && (200..300).contains(&status) && !unknown;
+        if restores_kept_leg {
+            let index = actions.iter().position(|action| matches!(action, Action::Http(request) if request.method == Method::Post))
+                .expect("TS cancellation continues after a resolved native refusal");
+            let Action::Http(kept) = actions.remove(index) else {
+                unreachable!()
+            };
+            assert!(kept.url.ends_with("/tpsl/place_order"));
+            e.handle(
+                110.0,
+                Event::HttpResponse {
+                    request: kept.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: r#"{"code":0,"data":{"orderId":"kept"}}"#,
+                    },
+                },
+            );
+            actions.extend(safe_cex_engine::test_support::prepared_actions(
+                &mut e, 110.0,
+            ));
+        }
         let failures: Vec<_> = actions
             .iter()
             .filter_map(|a| match a {
@@ -91,15 +115,21 @@ fn probe(status: u16, code: i64, unknown: bool) {
                 _ => None,
             })
             .collect();
-        assert_eq!(failures.len(), 1, "{case}/{status}/{code}: {actions:?}");
+        assert_eq!(
+            failures.len(),
+            1,
+            "{case}/{status}/{code}: one failure completion"
+        );
         let error = failures[0];
         assert_eq!(
             error.outcome,
-            Some(if unknown {
-                Outcome::Unknown
+            if unknown {
+                Some(Outcome::Unknown)
+            } else if restores_kept_leg {
+                None
             } else {
-                Outcome::Rejected
-            }),
+                Some(Outcome::Rejected)
+            },
             "{case}/{status}/{code}: {error:?}"
         );
         if unknown {
@@ -119,8 +149,8 @@ fn probe(status: u16, code: i64, unknown: bool) {
                 .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))),
             "{actions:?}"
         );
-        // Drive every timer produced by this completion, including recovery/backoff,
-        // so a delayed resend or put-back cannot hide behind the terminal notice.
+        // After the expected legacy put-back, completion cannot hide a resend
+        // or another placement behind a recovery/backoff timer.
         let timers: Vec<_> = actions
             .iter()
             .filter_map(|a| match a {
@@ -189,14 +219,6 @@ fn replacement_stale_refusal(status: u16, code: i64, unknown: bool) {
         cancel.id,
         r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
     );
-    let proof = requests(&mut e).remove(0);
-    assert_eq!(proof.method, Method::Get);
-    assert!(proof.url.contains("get_order_detail?orderId=one"));
-    reply(
-        &mut e,
-        proof.id,
-        r#"{"code":0,"data":{"symbol":"BTCUSDT","orderId":"one","qty":"3","tradeQty":"1","status":"CANCELED","orderType":"LIMIT","side":"SELL"}}"#,
-    );
     let replacement = requests(&mut e).remove(0);
     assert!(replacement.url.ends_with("/trade/place_order"));
     assert_eq!(replacement.method, Method::Post);
@@ -205,7 +227,7 @@ fn replacement_stale_refusal(status: u16, code: i64, unknown: bool) {
             .body
             .as_deref()
             .unwrap()
-            .contains(r#""qty":"2""#)
+            .contains(r#""qty":"3""#)
     );
     e.handle(
         110.0,

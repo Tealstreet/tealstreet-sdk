@@ -1,11 +1,10 @@
+import { getStorageDir, isRecord } from '../storage-context';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
 import crypto from 'crypto';
-import { BRAND } from '../brand';
 
-const DIR = join(homedir(), BRAND.configDirName);
-const HOOKS_FILE = join(DIR, 'hooks.json');
+const DIR = () => getStorageDir();
+const HOOKS_FILE = () => join(DIR(), 'hooks.json');
 
 const ID_BYTES = 16; // 32 hex chars
 const SECRET_BYTES = 16; // 32 hex chars
@@ -20,12 +19,8 @@ export interface Hook {
   createdAt: number;
 }
 
-interface HooksFile {
-  hooks: Hook[];
-}
-
 function ensureDir(): void {
-  if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true, mode: 0o700 });
+  if (!existsSync(DIR())) mkdirSync(DIR(), { recursive: true, mode: 0o700 });
 }
 
 // hooks.json holds webhook shared secrets; the rename keeps the temp file's 0600.
@@ -46,22 +41,31 @@ function atomicWrite(path: string, contents: string): void {
 }
 
 export function getHooksFilePath(): string {
-  return HOOKS_FILE;
+  return HOOKS_FILE();
 }
 
 export function loadHooks(): Hook[] {
-  if (!existsSync(HOOKS_FILE)) return [];
+  if (!existsSync(HOOKS_FILE())) return [];
   try {
-    const parsed = JSON.parse(readFileSync(HOOKS_FILE, 'utf-8')) as HooksFile;
-    if (!Array.isArray(parsed.hooks)) return [];
-    return parsed.hooks;
+    const parsed: unknown = JSON.parse(readFileSync(HOOKS_FILE(), 'utf-8'));
+    if (!isRecord(parsed) || !Array.isArray(parsed.hooks)) return [];
+    return parsed.hooks.filter(
+      (hook): hook is Hook =>
+        isRecord(hook) &&
+        typeof hook.id === 'string' &&
+        typeof hook.name === 'string' &&
+        typeof hook.secret === 'string' &&
+        typeof hook.command === 'string' &&
+        typeof hook.createdAt === 'number' &&
+        (hook.account === undefined || typeof hook.account === 'string'),
+    );
   } catch {
     return [];
   }
 }
 
 function saveHooks(hooks: Hook[]): void {
-  atomicWrite(HOOKS_FILE, JSON.stringify({ hooks }, null, 2));
+  atomicWrite(HOOKS_FILE(), JSON.stringify({ hooks }, null, 2));
 }
 
 export function createHook(input: { name: string; command: string; account?: string }): { hook: Hook; secret: string } {

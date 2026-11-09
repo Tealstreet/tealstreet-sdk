@@ -138,6 +138,16 @@
       "supportsTunnel": true,
       "privateProxyRegions": []
     },
+    "bingxspot": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": true,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
     "bitget": {
       "routing": {
         "restPool": "jp",

@@ -80,8 +80,7 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
         let error = classified_failure(&mut e, 1001);
         assert_eq!(error.kind, Some(kind));
         assert_eq!(error.outcome, Some(outcome));
-        // The status classifies a non-2xx answer; its body code is not evidence,
-        // and the engine seals 408/429/5xx before the venue reads the body.
+        // HTTP owns classification; captured native metadata never grants a resend.
         let unproven = matches!(status, 408 | 429) || status >= 500;
         assert_eq!(
             error.message,
@@ -91,7 +90,15 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
                 "Sign signature error"
             }
         );
-        assert_eq!(error.venue_code, None);
+        assert_eq!(error.venue_code.as_deref(), unproven.then_some("10007"));
+        if unproven {
+            assert_eq!(error.venue_message.as_deref(), Some("Sign signature error"));
+        }
+        assert!(
+            !requests(&mut e)
+                .iter()
+                .any(|request| request.method == safe_cex_engine::Method::Post)
+        );
     }
 }
 
@@ -148,7 +155,10 @@ fn write_transport_and_malformed_success_are_unknown_but_preflight_is_not_sent()
             })
         );
         if body.is_none() {
-            assert_eq!(error.message, "response lost");
+            assert_eq!(
+                error.message,
+                "response lost. The outcome is unknown. Check Open Orders"
+            );
         }
     }
 }
@@ -212,6 +222,7 @@ fn batch_item_failures_complete_once_with_partials_and_do_not_block_independent_
 }
 
 #[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:2570-2608
 fn an_unknown_batch_leg_ends_the_job_before_later_chunks() {
     use safe_cex_engine::Outcome;
     let (mut e, _) = startup();
@@ -231,6 +242,11 @@ fn an_unknown_batch_leg_ends_the_job_before_later_chunks() {
     // Native sent the next chunk; an uncertain leg now stops the job's writes.
     let error = classified_failure(&mut e, 1005);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(
+        error
+            .message
+            .contains("The outcome is unknown. Check Open Orders")
+    );
     assert_eq!(
         error.partial.unwrap().order_ids,
         vec!["accepted", "accepted-2", "accepted-3", "accepted-4"]
@@ -418,8 +434,14 @@ fn partial_cancel_is_effective_before_its_rejection_is_reported() {
         second.id,
         r#"{"code":20003,"msg":"Insufficient balance"}"#,
     );
+    let kept = requests(&mut e)
+        .into_iter()
+        .find(|request| request.method == safe_cex_engine::Method::Post)
+        .expect("later kept-leg write follows resolved native refusal");
+    reply(&mut e, kept.id, r#"{"code":0,"data":{"orderId":"kept"}}"#);
     let error = classified_failure(&mut e, 1006);
     assert_eq!(error.outcome, None);
+    assert_eq!(error.message, "Insufficient balance");
     assert_eq!(
         e.store().order("protect__position-1__tp").unwrap().status,
         OrderStatus::Canceled
@@ -427,6 +449,7 @@ fn partial_cancel_is_effective_before_its_rejection_is_reported() {
 }
 
 #[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:2061-2065
 fn uncertain_amend_answer_never_enters_cancel_recreate_fallback() {
     use safe_cex_engine::Outcome;
     for status in [408, 503] {
@@ -461,7 +484,7 @@ fn uncertain_amend_answer_never_enters_cancel_recreate_fallback() {
 }
 
 #[test]
-fn replacement_read_transport_failure_keeps_effective_cancel_without_claiming_unknown_write() {
+fn after_failure_fallback_replacement_loss_is_an_unknown_write() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let (mut e, _) = startup();
     e.handle(
@@ -485,20 +508,18 @@ fn replacement_read_transport_failure_keeps_effective_cancel_without_claiming_un
         cancel.id,
         r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
     );
-    let detail = requests(&mut e).remove(0);
-    assert_eq!(detail.method, safe_cex_engine::Method::Get);
+    let replacement = requests(&mut e).remove(0);
+    assert_eq!(replacement.method, safe_cex_engine::Method::Post);
     e.handle(
         10.0,
         Event::HttpFailed {
-            request: detail.id,
-            error: "read lost",
+            request: replacement.id,
+            error: "replacement response lost",
         },
     );
     let error = classified_failure(&mut e, 1008);
-    // The journal selects the refused amend; the lost read's text follows.
     assert_eq!(error.kind, Some(ErrorKind::Rejected));
-    assert!(error.message.ends_with("; read lost"), "{}", error.message);
-    assert_eq!(error.outcome, None);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_ne!(error.outcome, Some(Outcome::NotSent));
     assert_eq!(
         e.store().order("one").unwrap().status,
@@ -574,6 +595,7 @@ fn successful_single_ack_without_native_id_preserves_existing_client_identity_co
 }
 
 #[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:1663-1729
 fn malformed_cancel_peer_preserves_confirmed_cancellation_and_blocks_replacement() {
     use safe_cex_engine::Outcome;
     for data in [
@@ -596,6 +618,11 @@ fn malformed_cancel_peer_preserves_confirmed_cancellation_and_blocks_replacement
         );
         let error = classified_failure(&mut e, 1011);
         assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert!(
+            error
+                .message
+                .contains("The outcome is unknown. Check Open Orders")
+        );
         assert_eq!(
             e.store().order("one").unwrap().status,
             OrderStatus::Canceled
@@ -623,6 +650,6 @@ fn undocumented_native_code_is_uncertain_even_with_an_empty_message() {
     let error = classified_failure(&mut e, 1012);
     assert_eq!(error.kind, Some(ErrorKind::VenueUnavailable));
     assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert_eq!(error.message, "");
+    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
     assert_eq!(error.venue_code.as_deref(), Some("99999"));
 }

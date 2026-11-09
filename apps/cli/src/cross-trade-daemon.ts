@@ -1,3 +1,9 @@
+import {
+  onStorageOwnerChange,
+  getStorageEpoch,
+  isStorageSessionCurrent,
+  assertStorageSession,
+} from './storage-context';
 // Headless cross-trade engine driver for the CLI.
 //
 // Boots the accounts referenced by enabled cross-trade configs via the
@@ -161,6 +167,7 @@ export interface RunCrossTradeDaemonOpts {
  * has finished its current loop iteration.
  */
 export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): Promise<void> {
+  const ownerEpoch = getStorageEpoch();
   if (currentContext) {
     throw new Error('cross-trade daemon already running in this process');
   }
@@ -214,7 +221,9 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
       console.log(chalk.gray(`  Booting ${accountName} (${account.exchange})…`));
       await exchangeManager.enable(account);
     } catch (err) {
-      console.log(chalk.red(`  ${G.error} Failed to boot ${accountName}: ${(err as Error).message}`));
+      console.log(
+        chalk.red(`  ${G.error} Failed to boot ${accountName}: ${err instanceof Error ? err.message : String(err)}`),
+      );
     }
   }
 
@@ -235,6 +244,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
     startedAt,
     stopped: false,
   };
+  assertStorageSession(ownerEpoch);
   currentContext = ctx;
 
   manager.start(configs);
@@ -247,7 +257,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
     try {
       writeHeartbeat({ startedAt, configCount: configs.length });
     } catch (err) {
-      logger.warn(`cross-trade heartbeat write failed: ${(err as Error).message}`);
+      logger.warn(`cross-trade heartbeat write failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, HEARTBEAT_INTERVAL_MS);
 
@@ -279,10 +289,10 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
           clearInterval(ctx.heartbeatTimer);
           ctx.heartbeatTimer = null;
         }
-        clearHeartbeat();
+        if (isStorageSessionCurrent(ownerEpoch)) clearHeartbeat();
         await exchangeManager.stopAll();
       } catch (err) {
-        logger.warn(`cross-trade daemon shutdown error: ${(err as Error).message}`);
+        logger.warn(`cross-trade daemon shutdown error: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         currentContext = null;
         console.log(chalk.green(`${G.ok} Cross-trade engine stopped.\n`));
@@ -290,6 +300,10 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
       }
     };
 
+    const unsubscribe = onStorageOwnerChange(() => {
+      void shutdown('login change');
+      unsubscribe();
+    });
     process.once('SIGINT', () => void shutdown('SIGINT'));
     process.once('SIGTERM', () => void shutdown('SIGTERM'));
   });

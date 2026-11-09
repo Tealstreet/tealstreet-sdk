@@ -1137,6 +1137,17 @@ test('#3298 (run 42433363173 at a42fcf9deaf) retains measured wasm headroom', ()
   }
 });
 
+test('#3316 (run 42449269046, job 128635008984) retains measured BingX headroom', () => {
+  const measured = 2_087_229;
+  const minimumCap = 2_098_176;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
+
 test('#3263 (run 42434407009 at e78c6873b82) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['bitunix', 1_863_786, 1_874_944],
@@ -1194,6 +1205,46 @@ test('#3348 (run 42459036702 at 2c9d859698b) retains measured wasm headroom', ()
     ['kucoinspot', 2_412_630, 2_423_808],
     ['paradex', 2_271_265, 2_282_496],
     ['polymarket', 1_616_976, 1_628_160],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3345 (run 42456627405 at ca5c784d486) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['apexomni', 2_024_940, 2_035_712],
+    ['asterdex', 2_162_720, 2_173_952],
+    ['bingx', 2_087_973, 2_099_200],
+    ['bitrue', 1_851_860, 1_862_656],
+    ['bitunix', 1_867_317, 1_878_016],
+    ['blofin', 2_003_028, 2_014_208],
+    ['hyperliquid', 2_197_214, 2_207_744],
+    ['kucoinspot', 2_409_913, 2_420_736],
+    ['lighter', 2_096_714, 2_107_392],
+    ['okx', 2_003_000, 2_014_208],
+    ['paradex', 2_269_444, 2_280_448],
+    ['polymarket', 1_615_226, 1_626_112],
+    ['weex', 1_950_564, 1_960_960],
+    ['woo', 2_597_896, 2_609_152],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3383 (run 42493810742 at 1e85d49cc13) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['backpack', 2_011_875, 2_022_400],
+    ['bitget', 2_459_146, 2_469_888],
   ]) {
     assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     const cap = WASM_VENUE_OVERRIDES[venue];
