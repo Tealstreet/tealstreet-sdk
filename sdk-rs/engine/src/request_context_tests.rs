@@ -1,5 +1,75 @@
 use super::*;
 
+#[test]
+fn indexed_failure_metadata_survives_native_error_selection() {
+    use crate::write_plan::{Element, ElementResult, WritePlan};
+    for prefix in [false, true] {
+        let mut writes = CommandWrites::new(3).unwrap();
+        let mut journal = WritePlan::new(
+            (0..3)
+                .map(|index| Element {
+                    index,
+                    client_order_id: None,
+                })
+                .collect(),
+        );
+        if prefix {
+            writes.register(RequestId(1), 1).unwrap();
+            writes.released(RequestId(1)).unwrap();
+            writes
+                .result(
+                    RequestId(1),
+                    WriteResult::Accepted {
+                        order_ids: vec!["prefix".into()],
+                    },
+                )
+                .unwrap();
+            journal
+                .record(
+                    0,
+                    ElementResult::Placed {
+                        order_ids: vec!["prefix".into()],
+                    },
+                )
+                .unwrap();
+        }
+        let index = usize::from(prefix);
+        let native = VenueError::new("native uncertainty")
+            .venue_code("100500")
+            .outcome(Outcome::Unknown);
+        writes.register(RequestId(2), 2).unwrap();
+        writes.released(RequestId(2)).unwrap();
+        writes
+            .result(RequestId(2), WriteResult::Failed(native.clone()))
+            .unwrap();
+        journal
+            .record(
+                index,
+                ElementResult::Unknown {
+                    error: Box::new(native),
+                },
+            )
+            .unwrap();
+        let mut fallback = journal.attach(VenueError::new("terminal"));
+        fallback.partial = Some(Box::new(crate::Partial {
+            order_ids: vec![],
+            total: Some(3),
+            failed_index: Some(index),
+        }));
+        let error = writes.fail(fallback).unwrap();
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.venue_code.as_deref(), Some("100500"));
+        assert_eq!(error.elements.as_ref().unwrap().0, journal.outcomes());
+        let partial = error.partial.unwrap();
+        assert_eq!(partial.total, Some(3));
+        assert_eq!(partial.failed_index, Some(index));
+        assert_eq!(
+            partial.order_ids,
+            if prefix { vec!["prefix"] } else { vec![] }
+        );
+    }
+}
+
 fn context(operation: Operation, pacing: Option<Pacing>) -> Context {
     Context::new(
         Owner::Command {
