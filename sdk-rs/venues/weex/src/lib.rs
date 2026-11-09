@@ -747,9 +747,17 @@ fn interval(i: Interval, stream: bool) -> bool {
     matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
-    fn observe_unproven_http_response(&mut self, now: f64, _: &Pending, response: Response<'_>) {
+    fn observe_unproven_http_response(
+        &mut self,
+        now: f64,
+        protocol_now: f64,
+        _: &Pending,
+        response: Response<'_>,
+    ) {
         if response.status == 429 {
-            self.paused_until = self.paused_until.max(now + rate::delay(response, now));
+            self.paused_until = self
+                .paused_until
+                .max(now + rate::delay(response, protocol_now));
         }
     }
 

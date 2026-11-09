@@ -20,9 +20,10 @@ import { isWorkerMessage, isWorkerRecord } from './workerMessage';
 export const anonymousExchangeWorkers: { [key: string]: ExchangeWorker } = {};
 export const exchangeWorkers: { [key: string]: ExchangeWorker } = {};
 const telegramStartedWorkers = new WeakSet<ExchangeWorker>();
-const sharedPortWorkers = new WeakMap<MessagePort | Worker, ExchangeWorker>();
 const ports: { [key: string]: (MessagePort | Worker)[] } = {};
 const portsBySubId: { [key: string]: MessagePort | Worker } = {};
+const sharedWorkerSessions = new WeakMap<ExchangeWorker, string | undefined>();
+const sharedPortWorkers = new WeakMap<MessagePort | Worker, ExchangeWorker>();
 
 // Per-port state for throttling (SharedWorker per-client throttling)
 interface PortState {
@@ -178,6 +179,11 @@ const start = (ctx: Worker, shared = false) => {
   let exchangeName: ExchangeName;
   let _initPayload: StoreWorkerPayload;
   let portKey: string;
+  let attachedSharedWorker: ExchangeWorker | undefined;
+  let sharedInstanceId: string | undefined;
+  const sharedInstanceIds = new Set<string>();
+  let sharedRequiresInstanceId = false;
+  let initGeneration = 0;
   let hasLoggedInstanceMismatch = false;
   const _originalPostMessage = !shared
     ? ctx.postMessage.bind(ctx)
@@ -188,10 +194,21 @@ const start = (ctx: Worker, shared = false) => {
         }
       };
 
-  const getMyExchangeWorker = () =>
+  const getRegisteredWorker = () =>
     accountName ? exchangeWorkers[accountName] : anonymousExchangeWorkers[exchangeName];
+  const getMyExchangeWorker = () => {
+    const worker = getRegisteredWorker();
+    return shared && worker !== attachedSharedWorker ? undefined : worker;
+  };
 
   let failedWorker: ExchangeWorker | undefined;
+
+  const attachSharedWorker = (worker: ExchangeWorker) => {
+    attachedSharedWorker = worker;
+    sharedPortWorkers.set(ctx, worker);
+    if (!ports[portKey]) ports[portKey] = [];
+    if (!ports[portKey].includes(ctx)) ports[portKey].push(ctx);
+  };
 
   const deleteMyExchangeWorker = () => {
     if (accountName) {
@@ -221,6 +238,21 @@ const start = (ctx: Worker, shared = false) => {
   };
 
   const initExchangeWorker = async (payload: StoreWorkerPayload) => {
+    failedWorker = undefined;
+    if (shared) {
+      const previousWorker = getMyExchangeWorker();
+      const changesOwner =
+        accountName !== payload.data.accountName ||
+        exchangeName !== payload.data.exchangeName ||
+        (accountName && previousWorker && sharedWorkerSessions.get(previousWorker) !== payload.data.sessionKey);
+      cleanupPortEverywhere(ctx);
+      if (previousWorker && changesOwner && !ports[portKey]?.length) {
+        deleteMyExchangeWorker();
+        previousWorker.handlePayload({ op: 'dispose' });
+      }
+      attachedSharedWorker = undefined;
+      sharedInstanceId = payload.instanceId;
+    }
     _initPayload = payload;
     accountName = payload.data.accountName;
     exchangeName = payload.data.exchangeName;
@@ -254,13 +286,27 @@ const start = (ctx: Worker, shared = false) => {
     });
 
     if (shared) {
-      if (!ports[portKey]) ports[portKey] = [];
-      if (!ports[portKey].includes(ctx)) {
-        ports[portKey].push(ctx);
+      const existingWorker = getRegisteredWorker();
+      const channelWorker =
+        existingWorker ??
+        ports[portKey]?.map((port) => sharedPortWorkers.get(port)).find((worker) => worker !== undefined);
+      const sessionKey: unknown = payload.data.sessionKey;
+      if (
+        channelWorker &&
+        accountName &&
+        (typeof sessionKey !== 'string' || !sessionKey.trim() || sharedWorkerSessions.get(channelWorker) !== sessionKey)
+      ) {
+        ctx.postMessage({ op: 'start-status', data: false });
+        ctx.postMessage({
+          op: 'warning',
+          data: [
+            'This account is open in a different or unverifiable session. Close its other tabs before reconnecting.',
+          ],
+        });
+        return;
       }
-      const existingWorker = getMyExchangeWorker();
       if (existingWorker) {
-        sharedPortWorkers.set(ctx, existingWorker);
+        attachSharedWorker(existingWorker);
         // Check if the exchange is still alive (not disposed)
         if (existingWorker.isRecovering) {
           ctx.postMessage({ op: 'start-status', data: false });
@@ -313,7 +359,10 @@ const start = (ctx: Worker, shared = false) => {
       sessionKey,
       payload.instanceId,
     );
-    if (shared) sharedPortWorkers.set(ctx, exchangeWorker);
+    if (shared) {
+      attachSharedWorker(exchangeWorker);
+      sharedWorkerSessions.set(exchangeWorker, typeof sessionKey === 'string' ? sessionKey : undefined);
+    }
 
     if (accountName) {
       exchangeWorkers[accountName] = exchangeWorker;
@@ -425,6 +474,21 @@ const start = (ctx: Worker, shared = false) => {
 
     const exchangeWorker = getMyExchangeWorker();
 
+    if (shared && payload.op !== 'init') {
+      const target = getRegisteredWorker() ?? failedWorker;
+      if (sharedRequiresInstanceId && !payload.instanceId) return;
+      if (sharedInstanceId && payload.instanceId && sharedInstanceId !== payload.instanceId) return;
+      if (!attachedSharedWorker || target !== attachedSharedWorker) {
+        if (payload.op === 'dispose') {
+          initGeneration++;
+          cleanupPortEverywhere(ctx);
+          attachedSharedWorker = undefined;
+          failedWorker = undefined;
+        }
+        return;
+      }
+    }
+
     if (
       !shared &&
       exchangeWorker?.instanceId &&
@@ -449,12 +513,40 @@ const start = (ctx: Worker, shared = false) => {
 
     switch (payload.op) {
       case 'init': {
-        // Carry the worker that began this init across startup, even if the port rebinds.
+        let rebindsPort = false;
+        if (shared) {
+          rebindsPort = Boolean(
+            _initPayload &&
+            (accountName !== payload.data.accountName ||
+              exchangeName !== payload.data.exchangeName ||
+              _initPayload.data.sessionKey !== payload.data.sessionKey ||
+              sharedInstanceId !== payload.instanceId),
+          );
+          if (rebindsPort) {
+            if (!payload.instanceId || sharedInstanceIds.has(payload.instanceId)) {
+              ctx.postMessage({ op: 'start-status', data: false });
+              ctx.postMessage({
+                op: 'warning',
+                data: ['This account connection cannot be reused safely. Close it and open a new connection.'],
+              });
+              return;
+            }
+            // Unstamped work cannot prove which attachment created it after a rebind.
+            sharedRequiresInstanceId = true;
+          }
+          if (payload.instanceId) sharedInstanceIds.add(payload.instanceId);
+        }
+        // Reusing the same binding must not invalidate its pending startup.
+        const generation = shared && exchangeWorker && !rebindsPort ? initGeneration : ++initGeneration;
         const initializedWorker = await initExchangeWorker(payload);
+        // Shared startup belongs to the worker, which may still serve another port.
+        // startTelegramWorker checks that original worker's registry and attachments.
+        if (!shared && generation !== initGeneration) return;
         if (initializedWorker) startTelegramWorker(initializedWorker, payload);
         break;
       }
       case 'dispose':
+        initGeneration++;
         if (shared) {
           cleanupPortEverywhere(ctx);
 
@@ -463,6 +555,8 @@ const start = (ctx: Worker, shared = false) => {
             deleteMyExchangeWorker();
             exchangeWorker.handlePayload(payload);
           }
+          attachedSharedWorker = undefined;
+          failedWorker = undefined;
         } else {
           if (exchangeWorker) {
             // Drop from the map first so a fresh init creates a new worker
@@ -473,6 +567,7 @@ const start = (ctx: Worker, shared = false) => {
         }
         break;
       case 'reinit':
+        initGeneration++;
         // Force dispose: immediately dispose existing exchange without timeout
         // The web app will send a subsequent 'init' message to create a fresh exchange
         // This avoids the 10s dispose timeout that would cause race conditions
@@ -490,6 +585,8 @@ const start = (ctx: Worker, shared = false) => {
             sharedPortWorkers.delete(port);
           }
           ports[portKey] = [];
+          attachedSharedWorker = undefined;
+          failedWorker = undefined;
         }
         console.log(`[Worker] ✓ Exchange disposed, ready for fresh init`);
         break;

@@ -2,6 +2,7 @@ use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::execution::{Arithmetic, Cursor};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -827,10 +828,10 @@ impl Coinbase {
         self.account_poll(cx, true);
     }
     pub(crate) fn private_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() {
+        if !self.signers.has_primary() {
             return;
         }
-        if self.read_credentials.is_some() {
+        if self.has_read_key() {
             self.account_read(
                 cx,
                 Request::KeyPermissions {
@@ -852,7 +853,7 @@ impl Coinbase {
             code::CONFIG_INVALID,
             format!("Coinbase read-only key {reason}; reads use the trading key"),
         );
-        self.read_credentials = None;
+        self.read_disabled = true;
     }
     fn account_read(&mut self, cx: &mut Cx<'_, Pending>, req: Request) {
         let id = self.account.portfolio_id.as_deref().unwrap_or("");
@@ -961,7 +962,7 @@ impl Coinbase {
         self.private_ready(kind, cx);
     }
     pub(crate) fn private_after_markets(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() || self.account.kind.is_none() || self.account.ready {
+        if !self.signers.has_primary() || self.account.kind.is_none() || self.account.ready {
             return;
         }
         self.account.ready = true;
@@ -1024,11 +1025,25 @@ impl Coinbase {
             jwt: String,
         }
         for channel in ["user", "heartbeats"] {
-            let signed = self
-                .credentials
-                .as_ref()
+            let selected = self.signers.select(CredentialRole::SessionAuth).ok();
+            if let Some((_, c)) = selected
+                && let Some(identity) = c.identity()
+            {
+                cx.send_signed(
+                    socket,
+                    String::new(),
+                    Box::new(crate::sign::WsSubscribe::new(
+                        identity.clone(),
+                        c.key(),
+                        c.algorithm(),
+                        channel,
+                    )),
+                );
+                continue;
+            }
+            let signed = selected
                 .ok_or("Coinbase credentials missing".to_string())
-                .and_then(|c| {
+                .and_then(|(_, c)| {
                     c.jwt(cx.protocol_now(), None, |bytes| {
                         cx.fill_signing_entropy(bytes)
                     })
@@ -1524,7 +1539,7 @@ impl Coinbase {
             if response.status == 401 {
                 // The read-only key signed this read; keep trading on the trading key.
                 if read_signed {
-                    if self.read_credentials.is_some() {
+                    if self.has_read_key() {
                         self.drop_read_key(cx, "was rejected (HTTP 401)");
                     }
                     self.private_failed(cx, req, "Coinbase read-only key rejected");
@@ -1561,7 +1576,7 @@ impl Coinbase {
                     // A read key without portfolio scope says nothing about the trading key.
                     Request::Portfolios if read_signed => {
                         let reason = format!("cannot list portfolios (HTTP {})", response.status);
-                        if self.read_credentials.is_some() {
+                        if self.has_read_key() {
                             self.read_key_unverified(cx, &reason);
                         } else {
                             self.private_failed(cx, req, &reason);

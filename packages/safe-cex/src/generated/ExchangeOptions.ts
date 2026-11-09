@@ -22,6 +22,10 @@ export type ExchangeOptions = {
     readonly subkeyAddress?: string;
     readonly grvtSignerAddress?: string;
     readonly grvtTradingAccountId?: string;
+    /**
+     * Hosted CDP key algorithm; local custody infers it from key material.
+     */
+    readonly coinbaseJwtAlgorithm?: "es256" | "edDsa";
     readonly starkPrivateKey?: string;
     readonly vault?: string;
     readonly applicationId?: string;

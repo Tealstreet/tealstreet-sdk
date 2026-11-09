@@ -2163,7 +2163,7 @@ impl CommandWrites {
             .all(|a| matches!(&a.result, Some(WriteResult::Rejected(e)) if e.outcome == Some(Outcome::NotSent)));
         #[cfg(feature = "serial-plans")]
         let all_not_sent = all_not_sent && !self.streamed().is_some_and(|s| s.sent_refusal);
-        let error = |a: &WriteAttempt| match &a.result {
+        let error_from_attempt = |a: &WriteAttempt| match &a.result {
             Some(
                 WriteResult::Rejected(error)
                 | WriteResult::KnownPartial(error)
@@ -2198,7 +2198,7 @@ impl CommandWrites {
             self.attempts
                 .iter()
                 .filter(|a| self.terminal(a) && (!sent_only || self.reached(a.leg)))
-                .filter_map(|a| error(a).map(|error| (self.order(a.leg), error)))
+                .filter_map(|a| error_from_attempt(a).map(|error| (self.order(a.leg), error)))
                 .min_by(|(a, _), (b, _)| a.cmp(b))
                 .map(|(_, error)| error)
         };
@@ -2257,6 +2257,28 @@ impl CommandWrites {
             // existing partial contract; do not invent execution uncertainty.
             None
         };
+        // Earlier refusal text/evidence must not erase a later cooldown. Any
+        // unresolved rate limit still constrains reconciliation; keep the
+        // longest terminal pause, including the default for a missing header.
+        if error.outcome == Some(Outcome::Unknown)
+            && let Some(rate) = self
+                .attempts
+                .iter()
+                .filter(|attempt| attempt.released && self.terminal(attempt))
+                .filter_map(error_from_attempt)
+                .filter(|error| error.kind == Some(crate::ErrorKind::RateLimited))
+                .max_by(|a, b| {
+                    let delay = |error: &VenueError| {
+                        error
+                            .retry_after_ms
+                            .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS)
+                    };
+                    delay(a).total_cmp(&delay(b))
+                })
+        {
+            error.kind = rate.kind;
+            error.retry_after_ms = rate.retry_after_ms;
+        }
         // Preserve the selected native/fallback evidence prefix exactly. Append
         // additional facts in logical replacement order, without charging known
         // IDs again or reordering a bounded retained prefix.
