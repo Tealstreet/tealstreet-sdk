@@ -31,10 +31,20 @@ fn frozen_order_frames_key_epoch_and_canonical_fingerprint() {
         f["fingerprint"]
     );
     let submit: envelope::Inbound = serde_json::from_value(f["submit"].clone()).unwrap();
-    let envelope::Inbound::OrderSubmit(submit) = submit else {
+    let envelope::Inbound::OrderSubmit(mut submit) = submit else {
         panic!("submit shape changed");
     };
-    assert_eq!(serde_json::to_value(submit).unwrap(), f["submit"]["d"]);
+    assert_eq!(serde_json::to_value(&submit).unwrap(), f["submit"]["d"]);
+    for age in [0.0, -0.0, 1.0, 1.25, 9999.5] {
+        submit.age_ms = age;
+        let encoded = serde_json::to_value(&submit).unwrap();
+        assert_eq!(encoded["ageMs"].as_f64(), Some(age));
+        if age == 0.0 {
+            assert_eq!(encoded["ageMs"], json!(0));
+        }
+        let decoded: contract::OrderSubmit = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.age_ms, age);
+    }
     let cancel: envelope::Inbound = serde_json::from_value(f["cancelQueued"].clone()).unwrap();
     let envelope::Inbound::OrderCancelQueued(cancel) = cancel else {
         panic!("cancel shape changed");

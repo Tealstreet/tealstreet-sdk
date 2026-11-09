@@ -19,8 +19,19 @@ pub struct OrderSubmit {
     pub intent_id: String,
     pub params: Value,
     pub seq: u64,
+    #[serde(serialize_with = "serialize_age_ms")]
     pub age_ms: f64,
     pub fingerprint: String,
+}
+
+// Match the client's JSON number representation without discarding fractional
+// monotonic ages. In particular, zero is `0`, including negative zero.
+fn serialize_age_ms<S: serde::Serializer>(age: &f64, serializer: S) -> Result<S::Ok, S::Error> {
+    if (0.0..=9_007_199_254_740_991.0).contains(age) && age.fract() == 0.0 {
+        serializer.serialize_u64(*age as u64)
+    } else {
+        serializer.serialize_f64(*age)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
