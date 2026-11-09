@@ -109,6 +109,33 @@ pub struct Session {
     early: HashMap<String, Vec<Topic>>,
     /// Moved off a draining box: its accounts are released, never parked here.
     moved: bool,
+    handovers: crate::delegated::Handovers,
+    pending_verifications: HashMap<String, PendingVerification>,
+    next_verification: u64,
+    verified: tokio::sync::mpsc::UnboundedSender<JoinCompletion>,
+    verified_rx: Option<tokio::sync::mpsc::UnboundedReceiver<JoinCompletion>>,
+}
+
+struct PendingVerification {
+    generation: u64,
+    task: tokio::task::JoinHandle<()>,
+    out: Out,
+}
+
+impl Drop for PendingVerification {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// An off-loop result still belongs to the exact connection and init that
+/// created it. The socket loop alone decides whether it may be applied.
+pub struct JoinCompletion {
+    user: String,
+    socket: u64,
+    generation: u64,
+    account_name: String,
+    candidate: Result<crate::delegated::Credentials, crate::delegated::Refused>,
 }
 
 /// A chart or book subscription, by its page op.
@@ -191,6 +218,7 @@ impl Session {
         let socket = registry.next_id();
         let (loaded, loaded_rx) = tokio::sync::mpsc::unbounded_channel();
         let (dropped, dropped_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (verified, verified_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             user_socket: identity
                 .user
@@ -213,6 +241,11 @@ impl Session {
             refused: HashMap::new(),
             early: HashMap::new(),
             moved: false,
+            handovers: crate::delegated::Handovers::default(),
+            pending_verifications: HashMap::new(),
+            next_verification: 0,
+            verified,
+            verified_rx: Some(verified_rx),
         }
     }
 
@@ -311,6 +344,132 @@ impl Session {
         self.dropped_rx.take().expect("taken once")
     }
 
+    pub fn take_verified(&mut self) -> tokio::sync::mpsc::UnboundedReceiver<JoinCompletion> {
+        self.verified_rx.take().expect("taken once")
+    }
+
+    pub fn expire_handovers(&mut self) {
+        self.handovers.expire(crate::accounts::now_ms());
+    }
+
+    fn cancel_verification(&mut self, name: &str) {
+        self.pending_verifications.remove(name);
+    }
+
+    fn start_verification<F>(&mut self, name: String, verify: F)
+    where
+        F: std::future::Future<
+                Output = Result<crate::delegated::Credentials, crate::delegated::Refused>,
+            > + Send
+            + 'static,
+    {
+        self.cancel_verification(&name);
+        self.next_verification += 1;
+        let generation = self.next_verification;
+        let user = self.user().to_owned();
+        let socket = self.socket;
+        let account_name = name.clone();
+        let completed = self.verified.clone();
+        let out = self.handover_out(&name);
+        let task = tokio::spawn(async move {
+            let candidate = verify.await;
+            // A closed receiver drops the candidate and erases its fields.
+            let _ = completed.send(JoinCompletion {
+                user,
+                socket,
+                generation,
+                account_name,
+                candidate,
+            });
+        });
+        self.pending_verifications.insert(
+            name,
+            PendingVerification {
+                generation,
+                task,
+                out,
+            },
+        );
+    }
+
+    pub async fn verification_completed(&mut self, completed: JoinCompletion) -> Result<(), Close> {
+        if completed.user != self.user()
+            || completed.socket != self.socket
+            || self
+                .pending_verifications
+                .get(&completed.account_name)
+                .is_none_or(|pending| pending.generation != completed.generation)
+        {
+            return Ok(());
+        }
+        let Some(out) = self
+            .pending_verifications
+            .get(&completed.account_name)
+            .map(|pending| pending.out.clone())
+        else {
+            return Ok(());
+        };
+        self.cancel_verification(&completed.account_name);
+        if self.moved_by_drain() {
+            self.moved = true;
+            return Err(Close::Moved);
+        }
+        // Account attachment requires the private venue probe supplied by the
+        // verification slice. Opening alone never admits an account.
+        let transient = completed.candidate.is_ok();
+        self.drop_early(&completed.account_name, "verification refused");
+        out.send(envelope::init_unverified(
+            &completed.account_name,
+            transient,
+        ));
+        Ok(())
+    }
+
+    fn delegated_init(&mut self, init: InitPayload) {
+        self.cancel_verification(&init.account_name);
+        if !crate::delegated::enabled(&init.exchange_name)
+            || init.public_only == Some(true)
+            || init.account_name.starts_with("__pub_")
+            || self.joined.contains_key(&init.account_name)
+            || self.pending_verifications.len() >= 64
+        {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "delegated init refused");
+            self.refuse_handover(&init.account_name, false);
+            return;
+        }
+        self.open_handover(init);
+    }
+
+    fn open_handover(&mut self, mut init: InitPayload) {
+        let Some(sealed) = init.sealed.take() else {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "delegated init refused");
+            self.refuse_handover(&init.account_name, false);
+            return;
+        };
+        let opening =
+            match self
+                .handovers
+                .take(&init.account_name, &sealed, crate::accounts::now_ms())
+            {
+                Ok(opening) => opening,
+                Err(_) => {
+                    self.drop_early(&init.account_name, "delegated init refused");
+                    self.refuse_handover(&init.account_name, false);
+                    return;
+                }
+            };
+        self.start_verification(init.account_name.clone(), async move {
+            opening.open(
+                &init.exchange_name,
+                &init.key,
+                &sealed,
+                crate::accounts::now_ms(),
+            )
+        });
+    }
+
     /// The engine removed this client without the session asking: its queue was
     /// full or a frame too large. Without this the page got nothing and saw no gap.
     pub async fn client_dropped(&mut self, name: &str, client: u64) {
@@ -372,6 +531,18 @@ impl Session {
             .or_else(|| self.registration_outputs.get(name))
             .cloned()
             .unwrap_or_else(|| self.out.clone())
+    }
+
+    fn handover_out(&self, name: &str) -> Out {
+        self.registration_outputs
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| self.account_out(name))
+    }
+
+    fn refuse_handover(&self, name: &str, transient: bool) {
+        self.handover_out(name)
+            .send(envelope::init_unverified(name, transient));
     }
 
     /// Called once after the upgrade, for `resumable=1` sockets.
@@ -478,6 +649,11 @@ impl Session {
                 }
             }
             Inbound::Dispose { account_name } => {
+                if self.pending_verifications.contains_key(&account_name) {
+                    self.drop_early(&account_name, "account disposed during verification");
+                }
+                self.cancel_verification(&account_name);
+                self.handovers.forget(&account_name);
                 Log::info(&format!(
                     "dispose request {account_name} socket {} session {}",
                     self.socket,
@@ -552,14 +728,26 @@ impl Session {
             self.socket,
             self.resume_id_prefix()
         ));
+        self.cancel_verification(&init.account_name);
         // Refuse before routing can erase the classification or a rebuild can
         // dispose a live account with the same saved name.
         if !safe_cex_venues::supported(&init.exchange_name) {
+            self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "unsupported venue");
             out.send(envelope::init_unsupported(
                 &init.account_name,
                 &init.exchange_name,
             ));
+            return Ok(());
+        }
+        if init.signing_mode.as_deref() == Some("delegated") {
+            self.delegated_init(init);
+            return Ok(());
+        }
+        self.handovers.forget(&init.account_name);
+        if init.sealed.is_some() {
+            self.drop_early(&init.account_name, "sealed init requires delegated signing");
+            self.refuse_handover(&init.account_name, false);
             return Ok(());
         }
         self.forget_disposed();
@@ -807,6 +995,34 @@ impl Session {
         let Some(name) = msg.account_name.clone() else {
             return;
         };
+        if msg.op == "delegated-key-req" {
+            self.cancel_verification(&name);
+            if crate::delegated::enabled("bybit") {
+                self.issue_handover(&name);
+            } else {
+                self.handovers.forget(&name);
+                self.drop_early(&name, "delegated init refused");
+                self.refuse_handover(&name, false);
+            }
+            return;
+        }
+        if let Some(pending) = self.pending_verifications.get(&name) {
+            let out = pending.out.clone();
+            if msg.op == "callMethod" {
+                out.send(envelope::msg(
+                    &name,
+                    "callMethod:done",
+                    json!({
+                        "requestId": msg.data.get("requestId").cloned().unwrap_or(Value::Null),
+                        "success": false,
+                        "result": {"name":"Error", "message":"verifying", "outcome":"notSent"},
+                    }),
+                ));
+            } else {
+                out.send(envelope::error(Some(&name), "verifying"));
+            }
+            return;
+        }
         self.forget_disposed();
         let topic = Self::topic_of(&msg);
         if !self.joined.contains_key(&name)
@@ -889,6 +1105,19 @@ impl Session {
                 }
             }
             (op, _, _) => Log::warn(&format!("ignored account op {op}")),
+        }
+    }
+
+    fn issue_handover(&mut self, name: &str) {
+        match self.handovers.issue(name, crate::accounts::now_ms()) {
+            Ok(offer) => {
+                self.handover_out(name)
+                    .send(envelope::delegated_key(name, &offer));
+            }
+            Err(_) => {
+                self.drop_early(name, "delegated init refused");
+                self.refuse_handover(name, false);
+            }
         }
     }
 
@@ -1391,6 +1620,7 @@ impl Session {
 
     /// On close: park private accounts for resumable sockets, release the rest.
     pub fn close(mut self) {
+        self.pending_verifications.clear();
         let disposal = if self.moved && self.registry.planned_move(self.user()) {
             Disposal::Moving
         } else {
@@ -1851,6 +2081,8 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
         return Some("Unauthenticated exchange-server sessions must be public-only");
     }
     let present = [
+        init.signing_mode.is_some(),
+        init.sealed.is_some(),
         !init.key.is_empty(),
         init.passphrase.is_some(),
         init.testnet.is_some(),
@@ -1883,6 +2115,337 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 mod tests {
     use super::*;
 
+    fn synthetic_candidate() -> crate::delegated::Credentials {
+        serde_json::from_str(r#"{"key":"synthetic-key","secret":"synthetic-secret"}"#).unwrap()
+    }
+
+    #[tokio::test]
+    async fn sealed_init_is_opened_off_loop_without_account_attachment() {
+        let registry = crate::accounts::tests::registry();
+        let (mut session, mut sent) = user_session(registry, "a");
+        let mut completed = session.take_verified();
+        let offer = session
+            .handovers
+            .issue("acct", crate::accounts::now_ms())
+            .unwrap();
+        let sealed = crate::delegated::tests::seal(
+            &offer,
+            "bybit",
+            "synthetic-key",
+            br#"{"key":"synthetic-key","secret":"synthetic-secret"}"#,
+        );
+        let wire = json!({"t":"init", "d":{"accountName":"acct", "exchangeName":"bybit", "key":"synthetic-key", "signingMode":"delegated", "sealed":sealed}});
+        let Inbound::Init(init) = serde_json::from_value(wire).unwrap() else {
+            panic!("init expected")
+        };
+        assert_eq!(init.signing_mode.as_deref(), Some("delegated"));
+        assert!(init.sealed.is_some());
+        assert!(serde_json::to_value(&init).unwrap().get("sealed").is_none());
+        // Exercise the opening boundary directly: the shared opt-in is supplied
+        // by the separate account-build change, not enabled by this test.
+        session.open_handover(*init);
+        assert!(session.pending_verifications.contains_key("acct"));
+        assert!(session.joined.is_empty());
+        assert!(sent.try_recv().is_err());
+        let completion = completed.recv().await.unwrap();
+        assert!(completion.candidate.is_ok());
+        session.verification_completed(completion).await.unwrap();
+        let refusal: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(refusal["d"]["data"][1]["transient"], true);
+        assert!(session.joined.is_empty());
+        session.close();
+    }
+
+    #[test]
+    fn local_and_cosigned_settings_keep_the_legacy_engine_bytes_and_fingerprint() {
+        let legacy = acct_init();
+        let options = crate::accounts::engine_options(&legacy, false).to_string();
+        let fingerprint = legacy.fingerprint();
+        assert!(legacy.signing_mode.is_none() && legacy.sealed.is_none());
+        let serialized = serde_json::to_value(&legacy).unwrap();
+        assert!(serialized.get("signingMode").is_none());
+        assert!(serialized.get("sealed").is_none());
+        for mode in ["local", "cosigned"] {
+            let mut explicit = legacy.clone();
+            explicit.signing_mode = Some(mode.into());
+            assert_eq!(
+                crate::accounts::engine_options(&explicit, false).to_string(),
+                options
+            );
+            assert_eq!(explicit.fingerprint(), fingerprint);
+        }
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_connections_cannot_request_handover_keys() {
+        let (out, mut sent, _) = Out::channel(16);
+        let mut session = Session::new(
+            crate::accounts::tests::registry(),
+            Arc::default(),
+            Identity {
+                user: None,
+                chat_handle: None,
+                token: None,
+                resume_from: None,
+                resumable: false,
+            },
+            out,
+        );
+        let refused = session
+            .handle(r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct"}}"#)
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code(), 1008);
+        assert!(sent.try_recv().is_err());
+        session.close();
+    }
+
+    #[tokio::test]
+    async fn verification_completion_checks_socket_and_drain_after_the_await() {
+        let registry = crate::accounts::tests::registry();
+        let (mut first, mut first_sent) = user_session(registry.clone(), "a");
+        let mut first_results = first.take_verified();
+        first.start_verification("acct".into(), async { Ok(synthetic_candidate()) });
+        let mut completion = first_results.recv().await.unwrap();
+        let (mut second, mut second_sent) = user_session(registry.clone(), "a");
+        second.start_verification("acct".into(), std::future::pending());
+        // Same user and generation still cannot transfer a socket's result.
+        completion.generation = second.pending_verifications["acct"].generation;
+        second.verification_completed(completion).await.unwrap();
+        assert!(second_sent.try_recv().is_err());
+        assert!(second.pending_verifications.contains_key("acct"));
+        first.start_verification("acct".into(), async { Ok(synthetic_candidate()) });
+        let completion = first_results.recv().await.unwrap();
+        registry.start_drain();
+        assert_eq!(
+            first.verification_completed(completion).await,
+            Err(Close::Moved)
+        );
+        assert!(first_sent.try_recv().is_err());
+        first.close();
+        second.close();
+    }
+
+    #[tokio::test]
+    async fn pending_verification_keeps_socket_responsive_and_refuses_commands() {
+        let registry = crate::accounts::tests::registry();
+        let (mut session, mut sent) = user_session(registry.clone(), "a");
+        let mut verified = session.take_verified();
+        session.handle(r#"{"t":"msg","d":{"op":"subscribeOHLCV","accountName":"acct","data":{"symbol":"BTCUSDT","interval":"1"}}}"#).await.unwrap();
+        assert_eq!(session.early["acct"].len(), 1);
+        let (release, wait) = tokio::sync::oneshot::channel();
+        session.start_verification("acct".into(), async move {
+            wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        for (op, data) in [
+            (
+                "callMethod",
+                json!({"requestId": "pending", "method": "cancelAllOrders", "args": []}),
+            ),
+            ("subscribeOrderBook", json!({"symbol": "BTCUSDT"})),
+            ("updatePositions", json!({})),
+            ("chaser:start", json!({})),
+        ] {
+            session
+                .handle(
+                    &json!({"t":"msg", "d":{"op":op, "accountName":"acct", "data":data}})
+                        .to_string(),
+                )
+                .await
+                .unwrap();
+            let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+            if op == "callMethod" {
+                assert_eq!(frame["d"]["op"], "callMethod:done");
+                assert_eq!(frame["d"]["data"]["result"]["message"], "verifying");
+                assert_eq!(frame["d"]["data"]["result"]["outcome"], "notSent");
+            } else {
+                assert_eq!(frame["d"]["op"], "error");
+                assert_eq!(frame["d"]["data"][0], "verifying");
+            }
+        }
+        assert!(session.joined.is_empty());
+        assert_eq!(
+            session.early["acct"].len(),
+            1,
+            "pre-init topics wait for the verification outcome"
+        );
+        session.handle(r#"{"t":"ping"}"#).await.unwrap();
+        let pong: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(pong["t"], "pong");
+        assert_eq!(pong["d"]["accounts"], json!([]));
+        assert!(sent.try_recv().is_err(), "no account frames while pending");
+        release.send(()).unwrap();
+        session
+            .verification_completed(verified.recv().await.unwrap())
+            .await
+            .unwrap();
+        let refusal: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(refusal["d"]["data"][1]["kind"], "unverified");
+        assert_eq!(refusal["d"]["data"][1]["transient"], true);
+        assert!(
+            session.early.is_empty(),
+            "a refused init retires its early topics"
+        );
+        assert!(
+            session.joined.is_empty(),
+            "opening alone cannot attach an account"
+        );
+        session.close();
+    }
+
+    #[tokio::test]
+    async fn two_users_switch_during_verification_await_without_reassigning_the_result() {
+        let registry = crate::accounts::tests::registry();
+        let (mut alice, mut alice_sent) = user_session(registry.clone(), "alice");
+        let mut alice_results = alice.take_verified();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let (started, waiting) = tokio::sync::oneshot::channel();
+        alice.start_verification("acct".into(), async move {
+            started.send(()).unwrap();
+            wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        waiting.await.unwrap();
+        // Login changes while the device/venue proof is still awaited. The new
+        // authenticated connection has its own init for the same saved name.
+        let (mut bob, mut bob_sent) = user_session(registry, "bob");
+        let mut bob_results = bob.take_verified();
+        let (bob_release, bob_wait) = tokio::sync::oneshot::channel();
+        bob.start_verification("acct".into(), async move {
+            bob_wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        release.send(()).unwrap();
+        let alice_result = alice_results.recv().await.unwrap();
+        alice.close();
+        bob.verification_completed(alice_result).await.unwrap();
+        assert!(bob_sent.try_recv().is_err());
+        assert!(alice_sent.try_recv().is_err());
+        assert!(bob.pending_verifications.contains_key("acct"));
+        assert!(bob.joined.is_empty());
+        bob_release.send(()).unwrap();
+        bob.verification_completed(bob_results.recv().await.unwrap())
+            .await
+            .unwrap();
+        let own: Value = serde_json::from_str(&bob_sent.try_recv().unwrap()).unwrap();
+        assert_eq!(own["d"]["data"][1]["kind"], "unverified");
+        bob.close();
+    }
+
+    #[tokio::test]
+    async fn queued_completions_are_discarded_after_reinit_or_dispose_and_close_aborts_awaits() {
+        let registry = crate::accounts::tests::registry();
+        let (mut session, mut sent) = user_session(registry, "a");
+        let mut results = session.take_verified();
+        session.start_verification("acct".into(), async { Ok(synthetic_candidate()) });
+        let stale = results.recv().await.unwrap();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        session.start_verification("acct".into(), async move {
+            wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        session.verification_completed(stale).await.unwrap();
+        assert!(sent.try_recv().is_err());
+        assert!(session.pending_verifications.contains_key("acct"));
+        session
+            .handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        assert!(
+            release.send(()).is_err(),
+            "dispose aborted the pending await"
+        );
+        session.start_verification("acct".into(), async { Ok(synthetic_candidate()) });
+        let stale = results.recv().await.unwrap();
+        session
+            .handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+            .await
+            .unwrap();
+        session.verification_completed(stale).await.unwrap();
+        assert!(sent.try_recv().is_err());
+        let (release, wait) = tokio::sync::oneshot::channel();
+        session.start_verification("acct".into(), async move {
+            wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        tokio::task::yield_now().await;
+        session.close();
+        tokio::task::yield_now().await;
+        assert!(release.send(()).is_err(), "close aborted the pending await");
+    }
+
+    #[tokio::test]
+    async fn malformed_sealed_init_keeps_the_existing_account_and_other_windows_unchanged() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account = crate::accounts::tests::held_account_counted(
+                    &registry,
+                    link,
+                    acct_init().fingerprint(),
+                );
+                let (mut session, mut sent) = user_session(registry.clone(), "u");
+                let before = account.fingerprint.clone();
+                for mode in [None, Some("delegated")] {
+                    let mut init = acct_init();
+                    init.signing_mode = mode.map(str::to_owned);
+                    init.sealed = Some(crate::delegated::Sealed {
+                        attempt_id: "stale".into(),
+                        enc: String::new(),
+                        ciphertext: String::new(),
+                    });
+                    session.init(init).await.unwrap();
+                    let refusal: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+                    assert_eq!(refusal["d"]["data"][1]["initRefused"], true);
+                    assert!(session.joined.is_empty());
+                    assert!(registry.held("u", "acct", 7).is_some());
+                    assert_eq!(account.fingerprint, before);
+                }
+                session.close();
+                registry.release(&account, 7, Disposal::PageDisposed);
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn delegated_key_requests_use_the_existing_authenticated_socket() {
+        use base64::Engine as _;
+        let registry = crate::accounts::tests::registry();
+        let (mut session, mut sent) = user_session(registry, "handover-user");
+        session
+            .handle(r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct"}}"#)
+            .await
+            .unwrap();
+        let frame = sent.try_recv().expect("a handover key response");
+        let mut frame: Value = serde_json::from_str(&frame).unwrap();
+        if !crate::delegated::enabled("bybit") {
+            assert_eq!(frame["d"]["op"], "error");
+            assert_eq!(frame["d"]["data"][1]["initRefused"], true);
+            assert_eq!(frame["d"]["data"][1]["kind"], "unverified");
+            // The account-build change owns the opt-in declaration. Also pin
+            // the exact offer envelope while that flag remains off here.
+            session.issue_handover("acct");
+            frame = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        }
+        assert_eq!(frame["t"], "msg");
+        assert_eq!(frame["d"]["op"], "delegated-key");
+        assert_eq!(frame["d"]["accountName"], "acct");
+        assert_eq!(frame["d"]["bootId"], crate::state::boot_id());
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(frame["d"]["publicKey"].as_str().unwrap())
+                .unwrap()
+                .len(),
+            32
+        );
+        assert!(!frame["d"]["attemptId"].as_str().unwrap().is_empty());
+        assert!(frame["d"]["expiresAtMs"].as_u64().unwrap() > crate::accounts::now_ms());
+        session.close();
+    }
+    mod delegated_instance_id;
     mod instance_id;
 
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
