@@ -227,7 +227,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_886_208,
   bitunix: 1_915_904,
   blofin: 2_049_024,
-  bybit: 2_320_384,
+  // #3342 master merge e817ea1fa46: corepack yarn rust:build-wasm --venue bybit,
+  // Binaryen 132 twice -Oz measured web/node 2,336,508 B; +10 KiB rounded up.
+  bybit: 2_347_008,
   coinbase: 1_972_224,
   cryptocom: 1_803_264,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
