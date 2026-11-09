@@ -1068,9 +1068,15 @@ impl BybitLinear {
                     }
                     Decision::Next(Vec::new())
                 }
-                Err(error) => {
+                Err(failure) => {
+                    // A stable prefix lets logs count failed proofs per check.
+                    cx.notice(
+                        safe_cex_engine::Level::Warn,
+                        "partial.proof_failed",
+                        format!("[proof-diag] {}", failure.reason),
+                    );
                     let _ = cx.inherit_plan_uncertainty(&run.plan);
-                    Decision::Failed(error)
+                    Decision::Failed(failure.error())
                 }
             }
         } else {

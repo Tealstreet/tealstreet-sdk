@@ -51,6 +51,44 @@ it('private AsterDEX V3 PayloadSigner with a wallet key retains its typed custod
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
+it('Apex public-only construction ignores a saved key without a passphrase and an unused RemoteSigner', () => {
+  const { remoteSigner } = unusedSigners();
+  const exchange = new RustEngineExchange('apexomni', {
+    key: 'saved-public-key', secret: '', publicDataOnly: true, remoteSigner,
+  }, new DefaultStore());
+  try { expect(exchange.isPublicDataOnly).toBe(true); } finally { exchange.dispose(); }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+});
+
+it.each(['apexomni', 'kucoin'] as const)('%s constructs public-only accounts without validating unused signing material', (name) => {
+  const { remoteSigner, payloadSigner } = unusedSigners();
+  for (const key of ['', 'unused-public-key']) {
+    for (const callbacks of [{ remoteSigner }, { payloadSigner }, { remoteSigner, payloadSigner }]) {
+      const exchange = new RustEngineExchange(name, { key, secret: '', publicDataOnly: true, ...callbacks }, new DefaultStore());
+      try {
+        expect(exchange.isPublicDataOnly).toBe(true);
+        expect(exchange.privateWebsocket).toBeUndefined();
+        for (const field of ['key', 'secret', 'passphrase', 'payloadSigner', 'remoteSigner'])
+          expect(exchange.options).not.toHaveProperty(field);
+      } finally { exchange.dispose(); }
+    }
+  }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(remoteSigner.isAvailable).not.toHaveBeenCalled();
+  expect(remoteSigner.onAvailabilityChange).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+it.each(['apexomni', 'kucoin', 'binance', 'okx'] as const)('%s resolves explicitly public keyless accounts before validating callbacks', (name) => {
+  const { remoteSigner, payloadSigner } = unusedSigners();
+  for (const callbacks of [{ remoteSigner }, { payloadSigner }, { remoteSigner, payloadSigner }]) {
+    const exchange = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true, ...callbacks }, new DefaultStore());
+    try { expect(exchange.isPublicDataOnly).toBe(true); } finally { exchange.dispose(); }
+  }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
 type VenueCase = { name: ExchangeName; label: string; version?: 'v1' | 'v3' };
 const matrixVenues = BETA_VENUES.flatMap((name): VenueCase[] => name === 'asterdex'
   ? [{ name, label: 'asterdex-v1', version: 'v1' }, { name, label: 'asterdex-v3', version: 'v3' }]
@@ -73,6 +111,7 @@ const privateRefusal = ({ name, version }: VenueCase, kind: 'remote' | 'payload'
   if (kind === 'remote') return undefined;
   if (name === 'asterdex' && version === 'v3') return 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only';
   if (policy.payloadSupported === true) return undefined;
+  if (name === 'apexomni') return 'ApeX Omni requires RemoteSigner HMAC and zkLink contract custody';
   if (name === 'kraken') return 'Kraken Futures requires RemoteSigner SHA256/HMAC-SHA512 custody; PayloadSigner is unsupported';
   if (name === 'grvt') return 'GRVT PayloadSigner is unsupported';
   if (name === 'kucoin' || name === 'kucoinspot') return 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
@@ -319,7 +358,7 @@ it('covers every disabled-delegation beta venue', () => {
   expect(venues).toContain('asterdex');
   expect(venues).toContain('mexc');
   expect(disabledDelegation.map(({ label }) => label).sort()).toEqual([
-    'apexomni', 'kodiakfi', 'krakenspot',
+    'kodiakfi', 'krakenspot',
     'mode', 'what', 'woofi',
   ].sort());
 });
@@ -429,4 +468,24 @@ it.each(hostileCallbacks)('redacts $field inspection failures from a $shape befo
   expect(request).not.toHaveBeenCalled();
   expect(connect).not.toHaveBeenCalled();
   expect(global.fetch).not.toHaveBeenCalled();
+});
+
+it('Apex captured explicit public mode cannot be replaced with private signing input', () => {
+  const setup = new DelegatedSignerSetup('apexomni', { key: '', secret: '', publicDataOnly: true, payloadSigner: vi.fn() });
+  let config: Record<string, unknown> = {};
+  class Engine { constructor(_venue: string, json: string) { config = JSON.parse(json); } }
+  setup.construct(Engine as unknown as new (venue: string, json: string) => WasmEngineLike, 'apexomni',
+    JSON.stringify({ key: 'forged', publicDataOnly: false, publicMode: { requested: false }, remoteSigning: true }));
+  expect(config).toMatchObject({ publicDataOnly: true, publicMode: { requested: true }, remoteSigning: false, signing: {} });
+  expect(config).not.toHaveProperty('key');
+  setup.dispose();
+});
+
+it.each<ExchangeName>(['apexomni'])('%s disposed public-only setup cannot construct an engine', (name) => {
+  const setup = new DelegatedSignerSetup(name, { key: '', secret: '', publicDataOnly: true });
+  setup.dispose();
+  const Engine = vi.fn();
+  expect(() => setup.construct(Engine as unknown as new (venue: string, json: string) => WasmEngineLike, name, '{}'))
+    .toThrow('disposed');
+  expect(Engine).not.toHaveBeenCalled();
 });

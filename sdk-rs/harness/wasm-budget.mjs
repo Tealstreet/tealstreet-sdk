@@ -217,7 +217,11 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
   // CI run 42564749959, job 128989112359, merge 0bac20f54f5f: web/Node each 2,219,070 B.
   // Rule 17: measured bytes + 10 KiB, rounded up to KiB; larger parent floors retained.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 2_058_240,
+  // #3300 post-#3306: run 42557412385, job 128966462873, CI merge 291f65994cda.
+  // Optimized web/node measured 2,078,907 B; CI plus 10 KiB rounded up to KiB.
+  // #3300 merge c4d663622c01: local optimized web/node 2,092,748 B; measured + 10 KiB rounded up.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue apexomni, twice -Oz.
+  apexomni: 2_103_296,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.
   // #3302 merge 80d25442f36f: local optimized web/node 2,231,057 B; measured + 10 KiB rounded up.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue asterdex, twice -Oz.
@@ -243,7 +247,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_912_832,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
   bitunix: 1_930_240,
-  blofin: 2_055_168,
+  blofin: 2_072_576,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
   bybit: 2_330_624,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.

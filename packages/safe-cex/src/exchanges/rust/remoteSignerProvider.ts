@@ -11,6 +11,7 @@ import { inspectCoinbaseJws } from './coinbaseHostedSigning';
 const COINBASE_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['es256', 'ed25519']);
 const ED25519_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['ed25519']);
 const HMAC_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
+const APEXOMNI_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256', 'zkLinkContract']);
 const KRAKEN_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha512']);
 const DOUBLE_SHA256_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['sha256SecretSuffix']);
 const ASTER_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256', 'secp256k1Digest']);
@@ -31,7 +32,7 @@ const paradex = (name: ExchangeName) => name === 'paradex';
 /** Everything this provider signs for a venue; the engine's capability admission
  * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
 export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
-  name === 'asterdex' ? ASTER_ALGORITHMS : (name === 'coinbase' || name === 'coinbasespot') ? COINBASE_ALGORITHMS : name === 'kraken' ? KRAKEN_ALGORITHMS : name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'grvt') ? WALLET_ALGORITHMS
+  name === 'asterdex' ? ASTER_ALGORITHMS : name === 'apexomni' ? APEXOMNI_ALGORITHMS : (name === 'coinbase' || name === 'coinbasespot') ? COINBASE_ALGORITHMS : name === 'kraken' ? KRAKEN_ALGORITHMS : name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'grvt') ? WALLET_ALGORITHMS
     : lighter(name) ? SCHNORR_ALGORITHMS : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
@@ -39,7 +40,7 @@ export interface RemoteSignerIdentity {
   signing: string;
   publicCredential: string;
   passphrase?: string;
-  extra?: { kucoinBroker?: string };
+  extra?: { kucoinBroker?: string; zklinkSeed?: string };
   /** Trusted setup input, consumed into Present-only provider custody. */
   passphraseValue?: string;
 }
@@ -242,6 +243,8 @@ function wsMetadata(wire: RemoteSigningPolicy['wire'], payload: string, key: str
  */
 export function createRemoteSignerProvider(options: RemoteSignerProviderOptions): Signer {
   const { exchangeName, remoteSigner, payloadSigner } = options;
+  const apexomni = exchangeName === 'apexomni';
+  if (apexomni && !remoteSigner) throw refused();
   if (exchangeName === 'kraken' && !remoteSigner) throw refused();
   if (exchangeName === 'grvt' && !remoteSigner) throw refused();
   const kucoin = exchangeName === 'kucoin' || exchangeName === 'kucoinspot';
@@ -267,7 +270,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (slot !== 'primary' && slot !== 'secondary') throw refused();
       const identity: RemoteSignerIdentity = { credential: source.credential, signing: source.signing,
         publicCredential: source.publicCredential, ...(source.passphrase === undefined ? {} : { passphrase: source.passphrase }),
-        ...(kucoin && source.extra?.kucoinBroker ? { extra: { kucoinBroker: source.extra.kucoinBroker } } : {}) };
+        ...(kucoin && source.extra?.kucoinBroker ? { extra: { kucoinBroker: source.extra.kucoinBroker } } : {}),
+        ...(apexomni && source.extra?.zklinkSeed ? { extra: { zklinkSeed: source.extra.zklinkSeed } } : {}) };
       if (!validRef(identity.credential) || !validRef(identity.signing)
         || identity.signing === identity.credential || owned.has(identity.signing) || owned.has(identity.credential)
         || typeof identity.publicCredential !== 'string' || !identity.publicCredential
@@ -277,6 +281,9 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       owned.set(identity.signing, entry);
       owned.set(identity.credential, entry);
       credentials.set(identity.credential, { bytes, identity });
+      if (apexomni && (slot !== 'primary' || !validRef(identity.extra?.zklinkSeed)
+        || owned.has(identity.extra.zklinkSeed) || !validRef(identity.passphrase)
+        || identity.extra.zklinkSeed === identity.passphrase)) throw refused();
       if (kucoin) {
         // These are device-owned refs, never Present material at the origin.
         if (!remoteSigner || !validRef(identity.passphrase) || owned.has(identity.passphrase)
@@ -296,6 +303,66 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     for (const key of passphrases.keys()) if (owned.has(key)) throw refused();
     if (!remoteSigner && !payloadSigner) throw refused();
   } catch { throw refused(); }
+
+  /** Native ApeX graph: zkLink contracts, owned API/passphrase presentation,
+   * then HMAC whose typed result references insert those contract signatures.
+   * Only canonical bytes and contract indices cross the device wire. */
+  const signApexOmni = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    const first = operations[0];
+    if (operations.length === 1 && first?.kind === 'present') {
+      const entry = credentials.get(first.key);
+      if (!entry) throw refused();
+      return { values: [entry.bytes.slice()], receipt };
+    }
+    const count = operations.length - 3;
+    const present = operations[count]; const passphrase = operations[count + 1]; const sign = operations[count + 2];
+    const entry = sign?.kind === 'sign' ? owned.get(sign.key) : undefined;
+    if (!remoteSigner || count < 0 || count > 29 || sign?.kind !== 'sign' || sign.algorithm !== 'hmacSha256'
+      || !entry || sign.key !== entry.identity.signing || !entry.primary
+      || present?.kind !== 'present' || present.key !== entry.identity.credential
+      || passphrase?.kind !== 'present' || passphrase.key !== entry.identity.passphrase
+      || !Array.isArray(sign.payload) || !sign.payload.length || sign.payload.length > MAX_PARTS) throw refused();
+    const pass = passphrases.get(passphrase.key);
+    if (!pass) throw refused();
+    const bytePart = (value: unknown): number[] => {
+      if (!Array.isArray(value) || value.length > MAX_PAYLOAD
+        || value.some((b) => !Number.isInteger(b) || b < 0 || b > 255)) throw refused();
+      return value.slice();
+    };
+    const contracts = operations.slice(0, count).map((operation) => {
+      if (operation.kind !== 'sign' || operation.algorithm !== 'zkLinkContract'
+        || operation.key !== entry.identity.extra?.zklinkSeed || !Array.isArray(operation.payload)
+        || operation.payload.length !== 1 || operation.payload[0].kind !== 'bytes') throw refused();
+      const bytes = bytePart(operation.payload[0].bytes);
+      if (bytes.length !== 36 || bytes[0] !== 254) throw refused();
+      return bytes;
+    });
+    const seen = new Set<number>();
+    const payload = sign.payload.map((part) => {
+      if (part.kind === 'bytes') return { bytes: bytePart(part.bytes) };
+      if (part.kind !== 'result' || part.encoding !== 'hex' || !Number.isInteger(part.index)
+        || part.index < 0 || part.index >= count || seen.has(part.index)) throw refused();
+      seen.add(part.index); return { contract: part.index };
+    });
+    if (seen.size !== count) throw refused();
+    const toSign = JSON.stringify({ contracts, payload });
+    utf8(toSign);
+    const id = nanoid();
+    const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({ id, type: 'ws-auth', exchangeName,
+      ...(accountName === undefined ? {} : { accountName }), wsAuth: { toSign, outputFormat: 'apexomni-batch' } }));
+    if (!record(response) || response.id !== id || (response.error !== undefined && response.error !== '')
+      || typeof response.wsAuthSignature !== 'string') throw refused();
+    utf8(response.wsAuthSignature);
+    const output: unknown = JSON.parse(response.wsAuthSignature);
+    if (!record(output) || Object.keys(output).length !== 3 || output.credential !== entry.identity.publicCredential
+      || !Array.isArray(output.contracts) || output.contracts.length !== count) throw refused();
+    const values = output.contracts.map((signature) => {
+      if (typeof signature !== 'string' || !/^[0-9a-f]{128}$/.test(signature)) throw refused();
+      return Array.from({ length: 64 }, (_, i) => Number.parseInt(signature.slice(i * 2, i * 2 + 2), 16));
+    });
+    if (signal.aborted) throw canceled();
+    return { values: [...values, Array.from(utf8(entry.identity.publicCredential)), pass.slice(), mac(output.signature, 'base64')], receipt };
+  };
 
   const signCoinbase = async (
     operations: SignRequest['operations'],
@@ -738,6 +805,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (receipt.stampMs !== undefined && receipt.expiryMs !== undefined && receipt.expiryMs <= receipt.stampMs) throw refused();
       if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
       const operations = Array.from(request.operations);
+      if (apexomni) return await signApexOmni(operations, receipt, signal);
       if (exchangeName === 'coinbase' || exchangeName === 'coinbasespot') return await signCoinbase(operations, receipt, signal);
       if (exchangeName === 'kraken') return await signKraken(operations, receipt, signal);
       if (exchangeName === 'asterdex' && remoteSigner) return await signAster(operations, receipt, signal);

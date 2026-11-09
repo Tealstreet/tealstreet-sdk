@@ -2611,6 +2611,7 @@ export class BaseExchange implements Exchange {
       case 'asterdex-address':
       case 'asterdex-hmac':
       case 'asterdex-wallet':
+      case 'apexomni-batch':
       case 'kraken-sha512':
       case 'orderly-ed25519':
       case 'grvt-order':

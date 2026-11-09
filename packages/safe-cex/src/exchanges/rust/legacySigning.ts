@@ -8,6 +8,7 @@ import qs from 'qs';
 
 import { signCoinbaseJwt } from './coinbaseHostedSigning';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
+import { finishApexOmniRequest, prepareApexOmniRequest, serializeApexOmni } from './apexomniHostedSigning';
 import { finishBackpackRequest, prepareBackpackRequest } from './backpackHostedSigning';
 import { signKrakenHttp } from './krakenHostedSigning';
 import { signHttpCapture } from '../../utils/signHttpCapture';
@@ -149,6 +150,22 @@ export const signHostedHttp = async (
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
+  if (name === 'apexomni') {
+    const xhr = axios.create({ paramsSerializer: { serialize: serializeApexOmni },
+      headers: { 'Content-Type': 'application/json, charset=utf-8' } });
+    xhr.interceptors.request.use(async (config) => {
+      const clock = host.hostedSigningClock();
+      const prepared = prepareApexOmniRequest(config, clock.stampMs);
+      if (!prepared) { markSkipRemoteSigning(config); return { ...config, headers: new AxiosHeaders() }; }
+      if (!primaryComplete) throw new Error('Signing credential is unavailable');
+      const output = await host.hostedSigning({ kind: 'http', ...clock,
+        payload: JSON.stringify({ contracts: [], payload: [{ bytes: Array.from(new TextEncoder().encode(prepared.payload)) }] }) });
+      const passphrase = output.headers?.find(([key]) => key === 'APEX-PASSPHRASE')?.[1];
+      if (!output.credential || !output.signature || !passphrase) throw new Error('Signing result is unavailable');
+      return finishApexOmniRequest(prepared, output.credential, output.signature, passphrase);
+    });
+    return signHttpCapture(xhr, request);
+  }
   if (name === 'coinbase' || name === 'coinbasespot') {
     const xhr = axios.create();
     xhr.interceptors.request.use(async (config) => {
@@ -418,7 +435,7 @@ export const signHostedWsAuth = async (
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
   if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64'
     && outputFormat !== 'coinbase-jws' && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519' && outputFormat !== 'orderly-ed25519' && outputFormat !== 'kucoin-batch'
-    && outputFormat !== 'kraken-sha512' && outputFormat !== 'kraken-challenge')
+    && outputFormat !== 'kraken-sha512' && outputFormat !== 'kraken-challenge' && outputFormat !== 'apexomni-batch')
     return { id: request.id, error: 'Unsupported WS auth output format' };
   const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
   if (!output.signature) throw new Error('Signing result is unavailable');
