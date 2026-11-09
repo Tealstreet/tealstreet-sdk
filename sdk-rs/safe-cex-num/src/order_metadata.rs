@@ -24,6 +24,7 @@ pub(super) const ORDER_METADATA: &[(&str, bool, bool)] = &[
     ("grvt", false, true),
     ("phemex", true, false),
     ("bingx", true, false),
+    ("bingxspot", false, false),
     ("bitrue", false, true),
     ("blofin", true, false),
     ("lighter", false, false),

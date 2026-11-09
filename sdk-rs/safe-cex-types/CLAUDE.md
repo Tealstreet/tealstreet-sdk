@@ -83,10 +83,10 @@ Exchange metadata has a dedicated `Rust / native metadata` CI check: run
 Regenerate its snapshot and typed records with `corepack yarn rust:metadata`
 from the repo root (`rust:metadata:check` verifies; both need `rustfmt` on PATH); readonly arrays
 retain their element enums and nested property records stay typed objects.
-The explicit 47-name roster includes Binance Options and excludes the retired
-SalsaDEX/Tealstreet DEX brokers and DXtrade venue. Roster changes must update
-this independent fixture and the strict native enum, not replace equality checks
-with floors.
+The explicit 48-name roster includes Binance Options and fixture-only BingX Spot,
+and excludes the retired SalsaDEX/Tealstreet DEX brokers and DXtrade venue. Roster
+changes must update this independent fixture and the strict native enum, not
+replace equality checks with floors.
 
 `position_record` defines the canonical 24-field linear-perpetual journal type.
 Gross realized PnL, fees and signed funding remain separate; closeCount is the

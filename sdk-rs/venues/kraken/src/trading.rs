@@ -292,11 +292,9 @@ impl Kraken {
         {
             return Err("Kraken opening conditional orders are unsupported".into());
         }
+        // Legacy TS kraken.exchange.ts:452 sends one rounded size, even above max.
         let amount = adjust(opts.amount, market.precision.amount)?;
-        if amount <= 0.0
-            || amount < market.limits.amount.min
-            || (market.limits.amount.max > 0.0 && amount > market.limits.amount.max)
-        {
+        if amount <= 0.0 || amount < market.limits.amount.min {
             return Err("Invalid Kraken order size".into());
         }
         let kind = match (opts.kind, opts.time_in_force) {

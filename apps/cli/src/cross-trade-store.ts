@@ -1,5 +1,5 @@
+import { getStorageDir } from './storage-context';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 
@@ -8,10 +8,9 @@ import type {
   CrossTradeCopier,
   CrossTradeExecution,
 } from '@tealstreet/safe-cex/src/crossTrade/types';
-import { BRAND, brandEnv } from './brand';
 
-const CONFIG_DIR = brandEnv('CONFIG_DIR') || join(homedir(), BRAND.configDirName);
-const CROSS_TRADE_FILE = join(CONFIG_DIR, 'cross-trade.json');
+const CONFIG_DIR = () => getStorageDir();
+const CROSS_TRADE_FILE = () => join(CONFIG_DIR(), 'cross-trade.json');
 
 export const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -33,7 +32,7 @@ export interface CrossTradeFile {
 }
 
 export function getCrossTradeFilePath(): string {
-  return CROSS_TRADE_FILE;
+  return CROSS_TRADE_FILE();
 }
 
 function isLive(c: StoredCrossTradeConfig): boolean {
@@ -41,18 +40,18 @@ function isLive(c: StoredCrossTradeConfig): boolean {
 }
 
 function ensureDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+  if (!existsSync(CONFIG_DIR())) {
+    mkdirSync(CONFIG_DIR(), { recursive: true });
   }
 }
 
 export function loadCrossTradeFile(): CrossTradeFile {
   ensureDir();
-  if (!existsSync(CROSS_TRADE_FILE)) {
+  if (!existsSync(CROSS_TRADE_FILE())) {
     return { configs: [] };
   }
   try {
-    const parsed = JSON.parse(readFileSync(CROSS_TRADE_FILE, 'utf-8'));
+    const parsed = JSON.parse(readFileSync(CROSS_TRADE_FILE(), 'utf-8'));
     if (!parsed || !Array.isArray(parsed.configs)) return { configs: [] };
     return parsed as CrossTradeFile;
   } catch {
@@ -62,7 +61,7 @@ export function loadCrossTradeFile(): CrossTradeFile {
 
 export function saveCrossTradeFile(file: CrossTradeFile): void {
   ensureDir();
-  writeFileSync(CROSS_TRADE_FILE, JSON.stringify(file, null, 2));
+  writeFileSync(CROSS_TRADE_FILE(), JSON.stringify(file, null, 2));
 }
 
 export function stampUpdatedAt<T extends { updatedAt: number }>(row: T): T {

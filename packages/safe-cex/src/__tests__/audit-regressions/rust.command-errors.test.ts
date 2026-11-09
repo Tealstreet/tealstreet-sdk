@@ -216,6 +216,37 @@ it.each(['placement', 'cancellation'] as const)('retains BloFin %s facts and att
   expect(r.errors).toHaveBeenCalledTimes(1);
 });
 
+it.each([1, 0, 2])('retains Hyperliquid applied cancellation counts with an Unknown row at index %s', async (failedIndex) => {
+  const r = await fixture('hyperliquid');
+  const detail: VenueErrorDetail = {
+    message: 'unclassified cancel result',
+    kind: 'rejected',
+    outcome: 'unknown',
+    partial: { orderIds: [], total: 3, failedIndex },
+  };
+  r.onCommand(({ command }) => [{ op: 'done', command, error: detail.message, detail }]);
+  const targets = ['9', '10', '11'].map((id) => ({
+    ...order, id, symbol: 'BTC-PERP', status: OrderStatus.Open,
+    filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+  }));
+  const error = await r.exchange.cancelOrders(targets).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ExchangeError);
+  // Zero counts created IDs; the batch still attempted all three cancellations.
+  const expected = {
+    message: detail.message,
+    kind: 'rejected',
+    outcome: 'unknown',
+    partialOrderIds: [],
+    partialOrderCount: 0,
+    totalOrderCount: targets.length,
+    failedOrderIndex: failedIndex,
+  };
+  expect(error).toMatchObject(expected);
+  expect(serializeCommandError(error)).toMatchObject(expected);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+  expect(r.commands.filter(({ op }) => op === 'cancelOrders')).toHaveLength(1);
+});
+
 it('keeps populated placement error output byte-identical to master 343e38cbe96', () => {
   const detail: VenueErrorDetail = {
     message: 'Second placement acknowledgement lost',
