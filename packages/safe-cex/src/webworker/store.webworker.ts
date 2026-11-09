@@ -19,6 +19,7 @@ import { isWorkerMessage, isWorkerRecord } from './workerMessage';
 
 export const anonymousExchangeWorkers: { [key: string]: ExchangeWorker } = {};
 export const exchangeWorkers: { [key: string]: ExchangeWorker } = {};
+const telegramStartedWorkers = new WeakSet<ExchangeWorker>();
 const ports: { [key: string]: (MessagePort | Worker)[] } = {};
 const portsBySubId: { [key: string]: MessagePort | Worker } = {};
 
@@ -199,7 +200,15 @@ const start = (ctx: Worker, shared = false) => {
   };
 
   const startTelegramWorker = (worker: ExchangeWorker, payload: StoreWorkerPayload) => {
-    if (!payload.data.telegramBotToken) return;
+    if (
+      !payload.data.telegramBotToken ||
+      getMyExchangeWorker() !== worker ||
+      !worker.exchange ||
+      worker.exchange.isDisposed ||
+      telegramStartedWorkers.has(worker)
+    )
+      return;
+    telegramStartedWorkers.add(worker);
     new TelegramWorker(() => worker.exchange!, payload.data.telegramBotToken).start();
   };
 
@@ -257,7 +266,7 @@ const start = (ctx: Worker, shared = false) => {
         } else {
           ctx.postMessage({ op: 'start-status', data: true });
           existingWorker.sendSnapshot();
-          return;
+          return existingWorker;
         }
       }
       // Wrap postMessage to broadcast to all ports with per-port throttling
@@ -329,6 +338,7 @@ const start = (ctx: Worker, shared = false) => {
       exchangeWorker.dispose();
       return;
     }
+    return exchangeWorker;
   };
 
   ctx.addEventListener('message', async (event: MessageEvent<unknown>) => {
@@ -403,7 +413,7 @@ const start = (ctx: Worker, shared = false) => {
       return;
     }
 
-    let exchangeWorker = getMyExchangeWorker();
+    const exchangeWorker = getMyExchangeWorker();
 
     if (
       !shared &&
@@ -428,15 +438,12 @@ const start = (ctx: Worker, shared = false) => {
     }
 
     switch (payload.op) {
-      case 'init':
-        await initExchangeWorker(payload);
-
-        // re-get exchangeWorker after init
-        exchangeWorker = getMyExchangeWorker();
-
-        if (exchangeWorker?.exchange && !exchangeWorker.exchange.isDisposed)
-          startTelegramWorker(exchangeWorker, payload);
+      case 'init': {
+        // Carry the worker that began this init across startup, even if the port rebinds.
+        const initializedWorker = await initExchangeWorker(payload);
+        if (initializedWorker) startTelegramWorker(initializedWorker, payload);
         break;
+      }
       case 'dispose':
         if (shared) {
           cleanupPortEverywhere(ctx);

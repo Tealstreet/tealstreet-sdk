@@ -81,6 +81,12 @@ registry instance. Rebinding its creating port must not redirect a surviving
 worker's updates; replacing that registry instance drops its stale output.
 Subscription-targeted delivery is restricted to ports attached to that routing key.
 
+Telegram starts once per exact `ExchangeWorker`, including identical same-port
+init, additional shared ports and startup retries. A replacement worker can start
+its own integration. Startup carries the original worker across the await and
+checks it is still the port's current worker before starting Telegram; a port
+rebound to another owner cannot start the old owner's integration on that account.
+
 ## Files
 
 - `ExchangeWorker.ts` — the class.
