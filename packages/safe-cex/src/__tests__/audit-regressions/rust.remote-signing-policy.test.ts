@@ -19,7 +19,7 @@ describe('shared delegated signing declarations', () => {
   it('declarations retain the landed dispatch-signing flags without enabling other families', () => {
     for (const name of binance) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
     for (const name of bybit) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
-    for (const name of ['mexc', 'kraken'] as ExchangeName[]) expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
+    for (const name of ['weex', 'txflow'] as ExchangeName[]) expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
   });
   it.each(['bitget', 'bitgetinverse', 'bitgetusdc'] as const)('%s admits RemoteSigner on the shared bitget wire while refusing unsupported private PayloadSigner', (name) => {
     expect(deriveRemoteSigningPolicy(name)).toEqual({ enabled: true, payloadSupported: false,

@@ -36,6 +36,15 @@ export class ExchangeEmitter extends TinyEmitter {
     return this.listeners(event).length > 0;
   }
 
+  /** Capture subscription identity across an await, including off/on of the same callback. */
+  captureListenerGuard(event: string): () => boolean {
+    const captured = this.listeners(event);
+    return () => {
+      const current = this.listeners(event);
+      return current.length === captured.length && current.every((listener, index) => listener === captured[index]);
+    };
+  }
+
   private listeners(event: string): Listener[] {
     // TinyEmitter's inherited on/once/off own these records; snapshot before
     // dispatch so subscription changes retain its current-emission semantics.

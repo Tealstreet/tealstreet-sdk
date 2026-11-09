@@ -1365,6 +1365,7 @@ impl Venue for BinanceFutures {
     fn observe_unproven_http_response(
         &mut self,
         now: f64,
+        _: f64,
         pending: &Pending,
         response: Response<'_>,
     ) {
