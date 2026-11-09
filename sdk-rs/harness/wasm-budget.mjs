@@ -208,6 +208,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3193 at ad4f1d6d5d9: seven CI measurements + 10 KiB, rounded up to KiB.
 // Later master caps win per family; shared-family siblings remain equal.
 // #3111 historical run 42096897919 measured HL siblings at 2,106,939 B; current larger caps retained.
+// #3397 run 42552867793, merge 3bb1a69a146f (tree matches head 2cfc2f3a0ce):
+// Bybit 2,281,554; Coinbase 1,954,575; MEXC 1,873,137; Orderly 1,744,951 B.
+// CI bytes + 10 KiB rounded up to KiB; retain larger parent floors.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_037_760,
   asterdex: 2_174_976,
@@ -225,8 +228,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_864_704,
   bitunix: 1_878_016,
   blofin: 2_015_232,
-  bybit: 2_281_472,
-  coinbase: 1_953_792,
+  bybit: 2_292_736,
+  coinbase: 1_965_056,
   cryptocom: 1_779_712,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
@@ -247,9 +250,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   lighter: 2_109_440,
   'lighter-robinhood': 2_109_440,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
-  mexc: 1_872_896,
+  mexc: 1_884_160,
   okx: 2_014_208,
-  orderly: 1_744_896,
+  orderly: 1_756_160,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_282_496,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
