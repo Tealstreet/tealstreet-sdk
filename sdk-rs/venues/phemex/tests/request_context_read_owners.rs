@@ -212,7 +212,17 @@ fn identity(read: bool) -> (Engine<PhemexPerpetuals>, Vec<Action>) {
     identity_with(read, true)
 }
 fn identity_with(read: bool, release: bool) -> (Engine<PhemexPerpetuals>, Vec<Action>) {
-    let mut e = support::engine(Options {
+    let mut e = identity_engine(read);
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
+    let actions = if release {
+        safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+    } else {
+        e.drain_actions().collect()
+    };
+    (e, actions)
+}
+fn identity_engine(read: bool) -> Engine<PhemexPerpetuals> {
+    support::engine(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: read.then(|| safe_cex_engine::ReadCredentials {
@@ -221,14 +231,7 @@ fn identity_with(read: bool, release: bool) -> (Engine<PhemexPerpetuals>, Vec<Ac
             passphrase: None,
         }),
         ..Default::default()
-    });
-    e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    let actions = if release {
-        safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
-    } else {
-        e.drain_actions().collect()
-    };
-    (e, actions)
+    })
 }
 fn prepares(actions: &[Action], path: &str) -> usize {
     actions.iter().filter(|a| matches!(a, Action::ManagedHttp(action)

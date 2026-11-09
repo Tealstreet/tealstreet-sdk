@@ -5049,6 +5049,7 @@ impl<V: Venue> Engine<V> {
     }
 
     /// Trusted construction installs the provider handle; no key material enters the engine.
+    /// Replacing it retires queued signing and unclaimed signed packets.
     pub fn set_signer(
         &mut self,
         signer: Option<crate::signing::Provider>,
@@ -5061,6 +5062,14 @@ impl<V: Venue> Engine<V> {
         self.invalidate_address_setup()?;
         #[cfg(feature = "nonce-handoff")]
         self.invalidate_nonce_handoff();
+        let changed = match (&self.io.core.signer, &signer) {
+            (Some(previous), Some(next)) => !std::sync::Arc::ptr_eq(previous, next),
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            self.io.core.signing.replace_provider();
+        }
         self.io.core.signer = signer;
         Ok(())
     }
@@ -7526,6 +7535,15 @@ impl<V: Venue> Engine<V> {
     #[inline(never)]
     fn dispatch_queued_actions(&mut self, now: f64) {
         use crate::signing_dispatch::Completion;
+        let revoked = self.io.core.signing.take_revoked();
+        if !revoked.is_empty() {
+            self.io.core.actions.retain(|action| !matches!(action,
+                Action::Sign { attempt, .. } if revoked.binary_search_by_key(&attempt.0, |id| id.0).is_ok()));
+        }
+        for attempt in revoked {
+            self.sign_completed(now, attempt, Err(crate::signing::SignError::Refused));
+            self.assert_live();
+        }
         for (outbound, error) in std::mem::take(&mut self.io.core.signing_admission) {
             self.sign_failed(now, outbound, error);
             self.assert_live();
