@@ -242,8 +242,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   hyperliquidspot: 2_231_296,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
-  kraken: 2_172_928,
-  krakenspot: 2_172_928,
+  // #3304 restage run 42558782819 at CI merge a068e6cb0876a3699d46fa843b9310887bd055f4:
+  // family job 128970669128, replay jobs 128970669384/128970669374: node/web 2,228,472 B.
+  // Current CI size plus 10 KiB, rounded up to KiB; both aliases share the compiled family.
+  kraken: 2_239_488,
+  krakenspot: 2_239_488,
   kucoin: 1_872_896,
   kucoinspot: 2_440_192,
   lighter: 2_124_800,
