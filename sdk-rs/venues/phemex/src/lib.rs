@@ -460,7 +460,13 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
-    fn observe_unproven_http_response(&mut self, now: f64, _: &Pending, response: Response<'_>) {
+    fn observe_unproven_http_response(
+        &mut self,
+        now: f64,
+        _: f64,
+        _: &Pending,
+        response: Response<'_>,
+    ) {
         self.observe_rate_limit(now, &response);
     }
 
