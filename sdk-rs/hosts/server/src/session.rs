@@ -1089,13 +1089,25 @@ impl Session {
         } else {
             Vec::new()
         };
-        let plans = match methods::translate(
-            &method,
-            &args,
-            account.handle.capabilities(),
-            &symbols,
-            account.is_public(),
-        ) {
+        let plans = if account.delegated.is_some() {
+            methods::translate_delegated(
+                &account.venue,
+                &method,
+                &args,
+                account.handle.capabilities(),
+                &symbols,
+                account.is_public(),
+            )
+        } else {
+            methods::translate(
+                &method,
+                &args,
+                account.handle.capabilities(),
+                &symbols,
+                account.is_public(),
+            )
+        };
+        let plans = match plans {
             Ok(plans) => plans,
             Err(refused) => {
                 if crate::audit::ORDER_METHODS.contains(&method.as_str()) {
@@ -4084,3 +4096,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "session_delegated_writes_tests.rs"]
+mod delegated_writes_tests;
