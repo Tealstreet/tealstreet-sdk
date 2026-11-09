@@ -53,6 +53,7 @@ export class OrderbookRecorder extends BaseRecorder {
         publicDataOnly: true,
         testnet: false,
       });
+      this.ownerSession.assertCurrent();
 
       // Start the exchange (connects public WebSocket)
       await this.exchange_instance.start();

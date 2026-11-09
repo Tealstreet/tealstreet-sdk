@@ -381,3 +381,5 @@ export type {
   CandleCacheRangeLookup,
   CandleCacheSparseChunk,
 } from './candleCache';
+
+export type { OHLCVFrameRejection, OrderBookFrameRejection } from './exchanges/base';

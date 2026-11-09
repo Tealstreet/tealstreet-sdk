@@ -62,7 +62,7 @@ describe('exchange event listener isolation', () => {
       structuredClone(buffer, { transfer: [buffer] });
     });
     exchange.onFrame = forwarded;
-    const frame = consumerFrame({ markets: [market] }, undefined, true);
+    const frame = consumerFrame({ markets: [market] }, undefined, { fillId: 'order-1', fillSymbol: 'BTCUSDT' });
 
     (exchange as unknown as { receiveFrame(buffer: ArrayBuffer): void }).receiveFrame(frame);
     expect(received).toEqual([

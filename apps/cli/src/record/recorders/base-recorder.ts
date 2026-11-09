@@ -1,4 +1,4 @@
-import { getStorageEpoch, isStorageSessionCurrent } from '../../storage-context';
+import { captureStorageSession, isStorageSessionCurrent } from '../../storage-context';
 /**
  * Base Recorder
  *
@@ -28,7 +28,8 @@ export abstract class BaseRecorder {
   protected retentionDays: number;
   protected levels: number;
 
-  protected readonly ownerEpoch = getStorageEpoch();
+  protected readonly ownerSession = captureStorageSession();
+  protected readonly ownerEpoch = this.ownerSession.epoch;
   protected lastRecordTime = 0;
   protected snapshotCount = 0;
   protected cleanupInterval?: NodeJS.Timeout;
@@ -154,6 +155,7 @@ export abstract class BaseRecorder {
    * Log a message with recorder context
    */
   protected log(message: string): void {
+    if (!this.ownerSession.isCurrent()) return;
     logger.info(`[${this.dataType}:${this.exchange}:${this.symbol}] ${message}`);
   }
 
@@ -161,6 +163,7 @@ export abstract class BaseRecorder {
    * Log an error with recorder context
    */
   protected logError(message: string, error?: Error): void {
+    if (!this.ownerSession.isCurrent()) return;
     logger.error(`[${this.dataType}:${this.exchange}:${this.symbol}] ${message}`, error?.stack);
   }
 }

@@ -31,17 +31,24 @@ const makeExchange = (tickers = [makeTicker('BTCUSDT')], optionOverrides: Record
   const store = new DefaultStore();
   store.update({ tickers });
   const exchange = new WOOXExchange(
-    'woo' as any,
+    'woo',
     {
       key: 'key',
       secret: 'secret',
       applicationId: 'application-id',
       ...optionOverrides,
-    } as any,
+    },
     store,
   );
 
-  return { exchange, fundingRuntime: exchange as unknown as FundingRuntime, store };
+  const refresh: unknown = Reflect.get(exchange, 'refreshFundingRates');
+  if (typeof refresh !== 'function') throw new Error('Expected the funding refresh method');
+  const fundingRuntime: FundingRuntime = {
+    refreshFundingRates: async () => {
+      await refresh.call(exchange);
+    },
+  };
+  return { exchange, fundingRuntime, store };
 };
 
 afterEach(() => {
@@ -72,7 +79,7 @@ describe('WOO legacy funding refresh', () => {
         timestamp: 1_700_000_000_000,
       },
     });
-    exchange.xhr = { get } as any;
+    vi.spyOn(exchange.xhr, 'get').mockImplementation(get);
 
     await fundingRuntime.refreshFundingRates();
 
@@ -91,7 +98,7 @@ describe('WOO legacy funding refresh', () => {
   it('retains last-known-good funding for malformed rows and malformed response shapes', async () => {
     const ethTicker = makeTicker('ETHUSDT', 'eth-id');
     const { exchange, fundingRuntime, store } = makeExchange([makeTicker('BTCUSDT'), ethTicker]);
-    const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined as any);
+    const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined);
     const get = vi
       .fn()
       .mockResolvedValueOnce({
@@ -112,7 +119,7 @@ describe('WOO legacy funding refresh', () => {
         },
       })
       .mockResolvedValueOnce({ data: { success: true, rows: null } });
-    exchange.xhr = { get } as any;
+    vi.spyOn(exchange.xhr, 'get').mockImplementation(get);
 
     await fundingRuntime.refreshFundingRates();
     await fundingRuntime.refreshFundingRates();
@@ -129,8 +136,7 @@ describe('WOO legacy funding refresh', () => {
   it('rejects raw symbols that only match a ticker through lossy normalization', async () => {
     const { exchange, fundingRuntime, store } = makeExchange();
     const updateTicker = vi.spyOn(store, 'updateTicker');
-    exchange.xhr = {
-      get: vi.fn().mockResolvedValue({
+    vi.spyOn(exchange.xhr, 'get').mockImplementation(vi.fn().mockResolvedValue({
         data: {
           success: true,
           rows: [
@@ -141,8 +147,7 @@ describe('WOO legacy funding refresh', () => {
             },
           ],
         },
-      }),
-    } as any;
+      }));
 
     await fundingRuntime.refreshFundingRates();
 
@@ -158,10 +163,8 @@ describe('WOO legacy funding refresh', () => {
   it('retains last-known-good funding when the REST request fails', async () => {
     const { exchange, fundingRuntime, store } = makeExchange();
     const originalTicker = store.tickers[0];
-    const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined as any);
-    exchange.xhr = {
-      get: vi.fn().mockRejectedValue({ response: { data: { message: 'temporarily unavailable' } } }),
-    } as any;
+    const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined);
+    vi.spyOn(exchange.xhr, 'get').mockImplementation(vi.fn().mockRejectedValue({ response: { data: { message: 'temporarily unavailable' } } }));
 
     await fundingRuntime.refreshFundingRates();
 
@@ -182,9 +185,10 @@ describe('WOO legacy funding refresh', () => {
       {
         id: 'BTC/USDT:USDT',
         symbol: 'BTCUSDT',
+        base: 'BTC', quote: 'USDT', active: true,
         precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 10 } },
-      } as any,
+        limits: { amount: { min: 0.001, max: 10 }, leverage: { min: 1, max: 10 } },
+      },
     ]);
     vi.spyOn(exchange, 'fetchTickersRaw').mockResolvedValue([
       {
@@ -211,7 +215,7 @@ describe('WOO legacy funding refresh', () => {
           }),
       )
       .mockResolvedValue({ data: { success: true, rows: [] } });
-    exchange.xhr = { get } as any;
+    vi.spyOn(exchange.xhr, 'get').mockImplementation(get);
 
     await exchange.start();
     vi.advanceTimersByTime(59_999);
@@ -242,7 +246,10 @@ describe('WOO legacy funding refresh', () => {
     exchange.publicWebsocket.onOpen();
 
     const subscribedTopics = send.mock.calls
-      .map(([payload]) => JSON.parse(payload as string))
+      .map(([payload]) => {
+        if (typeof payload !== 'string') throw new Error('Expected a text subscription frame');
+        return JSON.parse(payload);
+      })
       .filter(({ event }) => event === 'subscribe')
       .map(({ topic }) => topic);
     expect(subscribedTopics).toEqual(['tickers', 'bbos', 'markprices']);
@@ -255,8 +262,7 @@ describe('WOO legacy funding refresh', () => {
   it('stops processing rows when disposal occurs reentrantly during the first ticker update', async () => {
     const { exchange, fundingRuntime, store } = makeExchange([makeTicker('BTCUSDT'), makeTicker('ETHUSDT', 'eth-id')]);
     const updateTicker = vi.spyOn(store, 'updateTicker').mockImplementationOnce(() => exchange.dispose());
-    exchange.xhr = {
-      get: vi.fn().mockResolvedValue({
+    vi.spyOn(exchange.xhr, 'get').mockImplementation(vi.fn().mockResolvedValue({
         data: {
           success: true,
           rows: [
@@ -272,8 +278,7 @@ describe('WOO legacy funding refresh', () => {
             },
           ],
         },
-      }),
-    } as any;
+      }));
 
     await fundingRuntime.refreshFundingRates();
 
@@ -291,13 +296,15 @@ describe('WOO legacy funding refresh', () => {
     const privateDispose = vi.spyOn(exchange.privateWebsocket, 'dispose');
     exchange.on('log', logListener);
 
-    expect((store as any).listeners.size).toBe(1);
+    const listeners: unknown = Reflect.get(store, 'listeners');
+    if (!(listeners instanceof Set)) throw new Error('Expected the store listener set');
+    expect(listeners.size).toBe(1);
 
     exchange.dispose();
     store.update({ latency: 42 });
     exchange.emitter.emit('log', 'after-dispose');
 
-    expect((store as any).listeners.size).toBe(0);
+    expect(listeners.size).toBe(0);
     expect(logListener).not.toHaveBeenCalled();
     expect(publicDispose).toHaveBeenCalledOnce();
     expect(privateDispose).toHaveBeenCalledOnce();
