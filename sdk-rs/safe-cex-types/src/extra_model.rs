@@ -1,7 +1,7 @@
 //! Remaining standalone models and public data-source capabilities.
 use crate::{
-    Balance, Candle, FetchedLeverage, Market, OHLCVOptions, Order, OrderBook, OrderSide,
-    OrderStatus, Position, StoreDataLoaded, StoreOptions, Ticker,
+    Balance, Candle, FetchedLeverage, Market, OHLCVOptions, Order, OrderBook, OrderStatus,
+    Position, StoreDataLoaded, StoreOptions, Ticker,
 };
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -46,33 +46,6 @@ pub const READ_ONLY_ORDER_STATUSES: [OrderStatus; 3] = [
     OrderStatus::Updating,
     OrderStatus::Canceling,
 ];
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderFillEvent {
-    pub id: String,
-    pub amount: f64,
-    pub price: f64,
-    pub side: OrderSide,
-    pub symbol: String,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub order_id: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub realized_pnl: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub fee: Option<f64>,
-}
 /// Rust model mutability is controlled by ownership and mutable borrows.
 pub type Writable<T> = T;
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -109,47 +82,12 @@ pub trait PublicDataSource {
 
 // Private wire companions keep serde metadata without exposing permissive decoders.
 mod strict_codecs {
-    use super::{
-        Balance, FetchedLeverage, IndexMap, Market, Order, OrderSide, Position, StoreDataLoaded,
-        StoreOptions, Ticker, Value,
-    };
     #[cfg(test)]
-    use super::{OrderFillEvent, WritableStoreData};
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::OrderFillEvent")]
-    #[serde(rename_all = "camelCase")]
-    struct WireOrderFillEvent {
-        id: String,
-        amount: f64,
-        price: f64,
-        side: OrderSide,
-        symbol: String,
-        #[serde(
-            default,
-            deserialize_with = "crate::deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        order_id: Option<String>,
-        #[serde(
-            default,
-            deserialize_with = "crate::deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        realized_pnl: Option<f64>,
-        #[serde(
-            default,
-            deserialize_with = "crate::deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        fee: Option<f64>,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::OrderFillEvent {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireOrderFillEvent::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
+    use super::WritableStoreData;
+    use super::{
+        Balance, FetchedLeverage, IndexMap, Market, Order, Position, StoreDataLoaded, StoreOptions,
+        Ticker, Value,
+    };
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::WritableStoreData")]
     #[serde(rename_all = "camelCase")]
@@ -183,7 +121,6 @@ mod strict_codecs {
         use super::*;
         #[test]
         fn every_shared_codec_has_a_narrow_input_shape() {
-            crate::strict_decode::tests::record::<OrderFillEvent>("OrderFillEvent");
             crate::strict_decode::tests::record::<WritableStoreData>("WritableStoreData");
         }
     }
