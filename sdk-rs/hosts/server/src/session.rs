@@ -385,7 +385,7 @@ impl Session {
         let registry = self.registry.clone();
         let identity = self.identity.clone();
         let socket = self.socket;
-        let outbox = self.outbox();
+        let outbox = self.out.outbox();
         async move {
             let user = identity.user.ok_or("Authenticated user required")?;
             registry
@@ -2007,6 +2007,190 @@ mod tests {
         (session, sent)
     }
 
+    async fn callback_snapshot(sent: &mut tokio::sync::mpsc::Receiver<String>) -> (u64, bool) {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                let text = sent.recv().await.expect("account output remains open");
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                if frame["d"]["op"] == "frame" && frame["d"]["snapshot"] == true {
+                    assert_eq!(frame["d"]["accountName"], "acct");
+                    return (
+                        frame["d"]["seq"].as_u64().unwrap(),
+                        frame["d"]["snapshot"].as_bool().unwrap(),
+                    );
+                }
+            }
+        })
+        .await
+        .expect("account snapshot arrives")
+    }
+
+    async fn callback_account_loaded(account: &Account) {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while !account_loaded(&account.handle).await {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("control account loads before its first snapshot");
+    }
+
+    async fn queued_callback_keeps_its_original_account(held_load: bool) {
+        let registry = crate::accounts::tests::registry();
+        let first = InitPayload {
+            key: "synthetic-callback-owner-A".into(),
+            ..acct_init()
+        };
+        let account_a = if held_load {
+            let (account, inbox) = crate::accounts::testing::account_on(
+                crate::accounts::testing::HeldLoad {
+                    placed: Arc::default(),
+                    load_after_ms: None,
+                    ticker: false,
+                },
+                ("u", "acct", "bybit"),
+                Some(safe_cex_remote_signer::SignerLink::new(
+                    0,
+                    Arc::new(|_| false),
+                )),
+                first.fingerprint(),
+                Arc::default(),
+            );
+            drop(inbox);
+            crate::accounts::tests::register(&registry, &account);
+            account
+        } else {
+            crate::accounts::testing::trading_account(&registry, "u", &first)
+        };
+        if !held_load {
+            callback_account_loaded(&account_a).await;
+        }
+        let (mut session, mut sent) = user_session(registry.clone(), "u");
+        let mut callbacks = if held_load {
+            session.take_loaded()
+        } else {
+            session.take_dropped()
+        };
+        session.init(first.clone()).await.unwrap();
+        let client_a = session.joined["acct"].client.id;
+        if held_load {
+            let mut hold = Some(Hold {
+                client: client_a,
+                loaded: session.loaded.clone(),
+            });
+            // Exercise the real timeout-release producer without a 30-second sleep.
+            release_hold(
+                &account_a.handle,
+                "acct",
+                &mut hold,
+                std::time::Instant::now() - SNAPSHOT_HOLD_LIMIT,
+            )
+            .await;
+            assert!(hold.is_none());
+        } else {
+            assert_eq!(callback_snapshot(&mut sent).await, (1, true));
+            account_a.handle.leave(client_a);
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while callbacks.is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("A's callback is queued before changing owner");
+
+        let second = InitPayload {
+            key: "synthetic-callback-owner-B".into(),
+            ..first
+        };
+        let account_b = crate::accounts::testing::trading_account(&registry, "u", &second);
+        callback_account_loaded(&account_b).await;
+        session.init(second).await.unwrap();
+        assert!(Arc::ptr_eq(&session.joined["acct"].account, &account_b));
+        let client_b = session.joined["acct"].client.id;
+        assert_ne!(client_a, client_b);
+        assert_eq!(callback_snapshot(&mut sent).await, (1, true));
+        session
+            .msg(AccountMsg {
+                op: "subscribeOHLCV".into(),
+                data: json!({"symbol": "BTCUSDT", "interval": "1m"}),
+                account_name: Some("acct".into()),
+            })
+            .await;
+        let subscriptions = session.joined["acct"].subscriptions.clone();
+        assert!(!subscriptions.is_empty());
+        let old_clients = session.joined["acct"].old.len();
+        let next_command = session.joined["acct"].next_command;
+
+        let stale = callbacks
+            .try_recv()
+            .expect("A remained queued during B's init");
+        assert_eq!(stale, ("acct".into(), client_a));
+        if held_load {
+            session.account_loaded(&stale.0, stale.1).await;
+        } else {
+            session.client_dropped(&stale.0, stale.1).await;
+        }
+        let current = &session.joined["acct"];
+        assert!(Arc::ptr_eq(&current.account, &account_b));
+        assert_eq!(current.client.id, client_b, "A must not re-snapshot B");
+        assert_eq!(current.old.len(), old_clients);
+        assert_eq!(current.next_command, next_command);
+        assert_eq!(current.subscriptions, subscriptions);
+        assert!(!session.rejoined_at.contains_key("acct"));
+        while let Ok(text) = sent.try_recv() {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            if frame["d"]["op"] == "frame" {
+                assert_eq!(frame["d"]["snapshot"], false, "no B sequence reset");
+                assert!(frame["d"]["seq"].as_u64().unwrap() > 1);
+            }
+        }
+
+        if held_load {
+            let mut hold = Some(Hold {
+                client: client_b,
+                loaded: session.loaded.clone(),
+            });
+            release_hold(
+                &account_b.handle,
+                "acct",
+                &mut hold,
+                std::time::Instant::now() - SNAPSHOT_HOLD_LIMIT,
+            )
+            .await;
+        } else {
+            account_b.handle.leave(client_b);
+        }
+        let current = tokio::time::timeout(std::time::Duration::from_secs(3), callbacks.recv())
+            .await
+            .expect("B's callback is produced")
+            .unwrap();
+        assert_eq!(current, ("acct".into(), client_b));
+        if held_load {
+            session.account_loaded(&current.0, current.1).await;
+        } else {
+            session.client_dropped(&current.0, current.1).await;
+            assert!(session.rejoined_at.contains_key("acct"));
+        }
+        assert_ne!(session.joined["acct"].client.id, client_b);
+        assert_eq!(session.joined["acct"].subscriptions, subscriptions);
+        assert_eq!(callback_snapshot(&mut sent).await, (1, true));
+        session.close();
+    }
+
+    #[tokio::test]
+    async fn a_queued_held_load_callback_cannot_rejoin_a_replacement_owner() {
+        tokio::task::LocalSet::new()
+            .run_until(queued_callback_keeps_its_original_account(true))
+            .await;
+    }
+
+    #[tokio::test]
+    async fn a_queued_dropped_client_callback_cannot_rejoin_a_replacement_owner() {
+        tokio::task::LocalSet::new()
+            .run_until(queued_callback_keeps_its_original_account(false))
+            .await;
+    }
     /// User u's account under `registry`, with a chase running and a socket of u joined to it.
     async fn chasing_session(
         registry: &Arc<Registry>,

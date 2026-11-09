@@ -101,6 +101,7 @@ mod serial_plans {
 
     #[derive(Default)]
     struct Serial {
+        reconcile_times: Vec<f64>,
         // Terms.
         total: usize,
         first: Option<SerialCall>,
@@ -381,6 +382,9 @@ mod serial_plans {
     }
 
     impl Venue for Serial {
+        fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Context>, _: Option<&[String]>) {
+            self.reconcile_times.push(cx.now);
+        }
         type Pending = Context;
         fn start(&mut self, cx: &mut Cx<'_, Context>) {
             if self.probe_custody {
@@ -2028,5 +2032,46 @@ mod serial_plans {
         // Only an engine-sealed status reply replaces the retained refusal.
         let error = failed(&refusals(false, false, &["reject", "unknown"])).unwrap();
         assert_ne!(error.message, crate::request_context::UNKNOWN_AFTER_REFUSAL);
+    }
+    #[test]
+    #[cfg(feature = "order-locks")]
+    fn prior_serial_refusal_cannot_start_reconciliation_during_retry_after() {
+        let mut e = engine(Serial {
+            total: 2,
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let (actions, now) = drive(&mut e, 0., ["reject"]);
+        let token = prepared(&actions).expect("put-back call");
+        release(&mut e, token, now);
+        e.handle(
+            now + STEP_MS,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: Response {
+                    status: 429,
+                    headers: "Retry-After: 30",
+                    body: "",
+                },
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let error = failed(&actions).expect("sealed Unknown");
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(error.kind, Some(crate::ErrorKind::RateLimited));
+        assert_eq!(error.retry_after_ms, Some(30_000.));
+        assert!(e.venue.reconcile_times.is_empty(), "no immediate read fanout");
+        assert!(prepared(&actions).is_none(), "no further writes");
+        let deadline = now + STEP_MS + 30_000.;
+        let timer = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == deadline => Some(*timer),
+                _ => None,
+            })
+            .expect("reconciliation cooldown timer");
+        e.handle(deadline, Event::TimerFired { timer });
+        assert_eq!(e.venue.reconcile_times, [deadline]);
     }
 }

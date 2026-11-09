@@ -6,6 +6,7 @@ pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod delegated;
+pub mod delegated_memory;
 pub mod envelope;
 pub mod http;
 pub mod interruption;

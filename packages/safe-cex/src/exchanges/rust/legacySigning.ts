@@ -101,6 +101,24 @@ export const finishWooRequest = (prepared: ReturnType<typeof prepareWooRequest>,
   }),
 });
 
+/** Bitrue signs timestamp, method, exact path/query and the serialized body. */
+export const prepareBitrueRequest = (config: InternalAxiosRequestConfig, stampMs: number) => {
+  const next = { ...config };
+  // Capture replies omit baseURL, so absolute transport URLs must stay intact.
+  let signingPath = next.url ?? '';
+  if (next.url?.startsWith('https://')) {
+    const url = new URL(next.url);
+    if (!['https://fapi.bitrue.com', 'https://fapiws-auth.bitrue.com'].includes(url.origin))
+      throw new Error('Unsupported Bitrue signing origin');
+    signingPath = url.pathname + url.search;
+  }
+  const method = next.method?.toUpperCase() ?? 'GET';
+  const params = next.params ? qs.stringify(next.params) : '';
+  const query = params ? `${next.url?.includes('?') ? '&' : '?'}${params}` : '';
+  const body = next.data == null ? '' : typeof next.data === 'string' ? next.data : JSON.stringify(next.data);
+  return { config: next, stampMs: Math.floor(stampMs), payload: `${Math.floor(stampMs)}${method}${signingPath}${query}${body}` };
+};
+
 /** The surviving hosted wire adapter uses standalone codecs, never a TS venue.
  * It cannot fall back to options.secret: the callback always uses owned refs.
  */
@@ -108,10 +126,33 @@ export const signHostedHttp = async (
   name: ExchangeName,
   options: ExchangeOptions,
   primaryComplete: boolean,
-  host: EngineHost,
+  host: Pick<EngineHost, 'hostedSigning' | 'hostedSigningClock'>,
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
+  if (name === 'bitrue') {
+    const recvWindow = Math.floor(Math.max(1, Math.min(options.extra?.recvWindow ?? 20_000, 60_000)));
+    const xhr = axios.create({ baseURL: 'https://fapi.bitrue.com', timeout: recvWindow,
+      paramsSerializer: { serialize: (params) => qs.stringify(params) },
+      headers: { 'Content-Type': 'application/json', 'X-Referer': 'Tealstreet' } });
+    xhr.interceptors.request.use(async (config) => {
+      if (!primaryComplete) { markSkipRemoteSigning(config); return config; }
+      const { credential } = await host.hostedSigning({ kind: 'credential' });
+      if (!credential) throw new Error('Signing credential is unavailable');
+      const clock = host.hostedSigningClock();
+      const prepared = prepareBitrueRequest(config, clock.stampMs);
+      const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock });
+      if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+      const headers = new AxiosHeaders(prepared.config.headers);
+      for (const [name, value] of output.headers ?? []) {
+        if (!['x-ch-apikey', 'x-ch-sign', 'x-ch-ts', 'recvwindow', 'content-type', 'x-referer'].includes(name.toLowerCase()))
+          headers.set(name, value);
+      }
+      headers.set({ 'X-CH-APIKEY': credential, 'X-CH-SIGN': output.signature, 'X-CH-TS': prepared.stampMs, recvWindow });
+      return { ...prepared.config, headers };
+    });
+    return signHttpCapture(xhr, request);
+  }
   if (name === 'kraken') return signKrakenHttp(host, options, primaryComplete, request);
   if (name === 'backpack') {
     const xhr = axios.create({ paramsSerializer: { serialize: (params) => qs.stringify(params, { arrayFormat: 'repeat' }) },
