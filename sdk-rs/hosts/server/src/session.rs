@@ -603,11 +603,14 @@ impl Session {
                 }
                 // Algos stopped while no browser was attached: say why.
                 // Chases that ended while it was gone are told as their replayed ends.
-                if let Some(kept) = self.registry.take_notice(
-                    self.user(),
-                    &init.account_name,
-                    self.identity.resume_from.as_deref(),
-                ) {
+                if let Some(joined) = self.joined.get(&init.account_name)
+                    && let Some(kept) = self.registry.take_notice(
+                        self.user(),
+                        &init.account_name,
+                        &joined.account.fingerprint,
+                        self.identity.resume_from.as_deref(),
+                    )
+                {
                     Log::info(&format!(
                         "algo stop notice {} to socket {}: {} ({} chase ends)",
                         init.account_name,
@@ -2113,6 +2116,66 @@ mod tests {
                                 && !frame.contains("synthetic current owner B"),
                             "retained notice replayed twice: {frame}"
                         );
+                        assert_ne!(frame, old_end);
+                    }
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retained_stop_replay_requires_same_account_fingerprint() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for same_fingerprint in [true, false] {
+                    let registry = crate::accounts::tests::registry();
+                    let first = acct_init();
+                    let account_a =
+                        crate::accounts::testing::trading_account(&registry, "u", &first);
+                    let (mut owner, mut sent) = user_session(registry.clone(), "u");
+                    owner.init(first.clone()).await.unwrap();
+                    while sent.try_recv().is_ok() {}
+                    let keep = registry.keep_notice(&account_a, &owner.resume_id);
+                    registry.dispose(&account_a, Disposal::NoBrowser);
+                    let old_end =
+                        envelope::msg("acct", "chaser:end", json!({"id":"retained-owner-A"}));
+                    let mut kept: crate::algos::Kept = "retained before replacement".into();
+                    kept.ends.push(old_end.clone());
+                    keep(kept);
+                    let current = if same_fingerprint {
+                        first
+                    } else {
+                        InitPayload {
+                            key: "different-owner-B".into(),
+                            ..first
+                        }
+                    };
+                    let rebuilt =
+                        crate::accounts::testing::trading_account(&registry, "u", &current);
+                    assert!(!Arc::ptr_eq(&account_a, &rebuilt));
+                    owner.identity.resume_from = Some(owner.resume_id.clone());
+                    owner.init(current.clone()).await.unwrap();
+                    assert!(Arc::ptr_eq(&owner.joined["acct"].account, &rebuilt));
+                    let mut frames = Vec::new();
+                    while let Ok(frame) = sent.try_recv() {
+                        frames.push(frame);
+                    }
+                    assert_eq!(
+                        frames
+                            .iter()
+                            .filter(|frame| frame.contains("retained before replacement"))
+                            .count(),
+                        usize::from(same_fingerprint),
+                        "retained replay must follow its source fingerprint: {frames:?}",
+                    );
+                    assert_eq!(
+                        frames.iter().filter(|frame| **frame == old_end).count(),
+                        usize::from(same_fingerprint)
+                    );
+                    let (mut next, mut sent) = user_session(registry.clone(), "u");
+                    next.init(current).await.unwrap();
+                    while let Ok(frame) = sent.try_recv() {
+                        assert!(!frame.contains("retained before replacement"));
                         assert_ne!(frame, old_end);
                     }
                 }

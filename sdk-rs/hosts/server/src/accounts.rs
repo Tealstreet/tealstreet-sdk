@@ -379,12 +379,14 @@ struct Parked {
     alias_until: Option<u64>,
 }
 
+type AccountEntries = HashMap<(String, String), Arc<Account>>;
+
 pub struct Registry {
     pub public_topics: Arc<crate::public_topics::PublicTopics>,
     pub user_drains: crate::user_drain::Users,
     pub router_leases: Arc<crate::router_lease::Users>,
     pub interruptions: Arc<crate::interruption::Notices>,
-    accounts: Mutex<HashMap<(String, String), Arc<Account>>>,
+    accounts: Arc<Mutex<AccountEntries>>,
     parked: Mutex<HashMap<String, Parked>>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
     /// the server has not seen yet (no close frame) takes it over.
@@ -467,6 +469,7 @@ struct OpenSession {
 /// Why an account's algos stopped, until its owning session has been told.
 struct StopRecord {
     kept: crate::algos::Kept,
+    fingerprint: String,
     at: tokio::time::Instant,
     /// The resume id of the session whose expiry stopped them.
     owner: String,
@@ -724,7 +727,7 @@ impl Registry {
             user_drains: crate::user_drain::Users::default(),
             router_leases: Arc::new(crate::router_lease::Users::new(Default::default())),
             interruptions: Default::default(),
-            accounts: Mutex::default(),
+            accounts: Arc::default(),
             parked: Mutex::default(),
             open: Mutex::default(),
             threads,
@@ -1204,19 +1207,20 @@ impl Registry {
         ))
     }
 
-    /// The stop notice for a session that resumed `from`, if it is still owed one.
+    /// The stop notice for the same fingerprint and session resumed `from`, if still owed.
     /// Another session's init must not cost the owner it, and a session that can't
     /// be the owner (a reopened tab, a second device) is told once between them.
     pub fn take_notice(
         &self,
         user: &str,
         name: &str,
+        fingerprint: &str,
         from: Option<&str>,
     ) -> Option<crate::algos::Kept> {
         let mut notices = self.notices.lock().unwrap();
         let key = (user.to_owned(), name.to_owned());
         let record = notices.get_mut(&key)?;
-        if record.at.elapsed() >= NOTICE_TTL {
+        if record.at.elapsed() >= NOTICE_TTL || record.fingerprint != fingerprint {
             notices.remove(&key);
             return None;
         }
@@ -1233,15 +1237,29 @@ impl Registry {
     /// Where the algo host leaves a notice for a browser that is gone.
     pub(crate) fn keep_notice(&self, account: &Account, owner: &str) -> crate::algos::StopNotice {
         let notices = self.notices.clone();
+        let accounts = Arc::downgrade(&self.accounts);
         let key = (account.user.clone(), account.name.clone());
+        let fingerprint = account.fingerprint.clone();
         let owner = owner.to_owned();
         Box::new(move |kept| {
+            let Some(accounts) = accounts.upgrade() else {
+                return;
+            };
+            // Keep the ownership comparison and retained insertion atomic with replacement.
+            let accounts = accounts.lock().unwrap();
+            if accounts
+                .get(&key)
+                .is_some_and(|current| current.fingerprint != fingerprint)
+            {
+                return;
+            }
             let mut notices = notices.lock().unwrap();
             notices.retain(|_, record| record.at.elapsed() < NOTICE_TTL);
             notices.insert(
                 key.clone(),
                 StopRecord {
                     kept,
+                    fingerprint: fingerprint.clone(),
                     at: tokio::time::Instant::now(),
                     owner: owner.clone(),
                     told_other: false,
@@ -2553,33 +2571,33 @@ pub(crate) mod tests {
                 let (account, _algos) = held_account();
                 (registry.keep_notice(&account, "owner"))("stopped".into());
                 assert_eq!(
-                    registry.take_notice("other", "acct", Some("owner")),
+                    registry.take_notice("other", "acct", &account.fingerprint, Some("owner")),
                     None,
                     "never another user's"
                 );
                 assert_eq!(
                     registry
-                        .take_notice("u", "acct", None)
+                        .take_notice("u", "acct", &account.fingerprint, None)
                         .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "a second device, or a reopened tab, is told"
                 );
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("elsewhere")),
+                    registry.take_notice("u", "acct", &account.fingerprint, Some("elsewhere")),
                     None,
                     "and a page load after it is not told again"
                 );
                 assert_eq!(
                     registry
-                        .take_notice("u", "acct", Some("owner"))
+                        .take_notice("u", "acct", &account.fingerprint, Some("owner"))
                         .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "the device that owned the chase still is"
                 );
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("owner")),
+                    registry.take_notice("u", "acct", &account.fingerprint, Some("owner")),
                     None,
                     "once"
                 );
@@ -2587,7 +2605,7 @@ pub(crate) mod tests {
                 (registry.keep_notice(&account, "owner"))("second".into());
                 assert_eq!(
                     registry
-                        .take_notice("u", "acct", Some("owner"))
+                        .take_notice("u", "acct", &account.fingerprint, Some("owner"))
                         .map(|kept| kept.summary())
                         .as_deref(),
                     Some("second"),
@@ -2596,7 +2614,7 @@ pub(crate) mod tests {
                 (registry.keep_notice(&account, "owner"))("stale".into());
                 tokio::time::sleep(NOTICE_TTL).await;
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("owner")),
+                    registry.take_notice("u", "acct", &account.fingerprint, Some("owner")),
                     None,
                     "dropped after 24h"
                 );

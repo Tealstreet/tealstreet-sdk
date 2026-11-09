@@ -575,6 +575,13 @@ generation and discard stale output, including delayed algo stop notices and
 already-queued frames. Repeated init and re-snapshot of the same account keep
 their generation. Other accounts and session envelopes are unaffected.
 
+Retained stop notices and chase ends also keep their source account fingerprint.
+A delayed retention callback refuses a registered replacement with different
+settings, and replay checks the joined account's fingerprint before enqueue.
+Rebuilding the same credentials after a disconnect preserves the existing
+resume-owner, once-only and 24-hour retention behavior; changed credentials
+cannot inherit the old account's output.
+
 How FrameServer notices map onto `msg`:
 
 | FrameServer notice | `msg` op |
