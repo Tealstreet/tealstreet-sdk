@@ -256,7 +256,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   paradex: 2_300_928,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
-  phemex: 2_111_488,
+  // #3377 master merge a4b99b8ded4: corepack yarn rust:build-wasm --venue phemex,
+  // Binaryen 132 twice -Oz measured web/node 2,105,874 B; +10 KiB rounded up.
+  phemex: 2_116_608,
   polymarket: 1_652_736,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   txflow: 1_934_336,

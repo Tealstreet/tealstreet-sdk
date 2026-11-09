@@ -1323,3 +1323,15 @@ test('#3383 (run 42493810742 at 1e85d49cc13) retains measured wasm headroom', ()
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+
+test('#3377 master merge a4b99b8ded4 retains measured Phemex headroom', () => {
+  const measured = 2_105_874;
+  const minimumCap = 2_116_608;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.phemex;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'phemex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'phemex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'phemex'), /exceeds/);
+});
