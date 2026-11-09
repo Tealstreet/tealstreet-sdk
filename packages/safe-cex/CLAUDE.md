@@ -71,7 +71,9 @@ Intent UUIDv7 keys become Bybit client order IDs unchanged. Acknowledged and unk
 intents are never submitted again. Unacknowledged intents expire after ten
 monotonic seconds, including time spent waiting for persistence or admission.
 Restored ambiguous handoffs are unknown; queued records from another clock epoch
-are not sent. The NX router supplies durable deduplication and queue cancellation;
+are not sent. Once enqueue persistence succeeds, temporary unavailability while
+preparing handoff retains that queued intent and its ID for retry. The NX router
+supplies durable deduplication and queue cancellation;
 see `docs/plans/callers/delegated-order-frames.md`. This module does not select a
 signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
 

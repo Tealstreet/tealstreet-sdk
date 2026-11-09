@@ -294,7 +294,13 @@ export class DelegatedOutbox {
     }
     // Write ahead of the physical handoff. On reload an ambiguous handoff is
     // unknown, even if saving a later acknowledgement or outcome failed.
-    await this.options.storage.put(this.scope, clone({ ...row, state: 'sending' as const }));
+    try {
+      await this.options.storage.put(this.scope, clone({ ...row, state: 'sending' as const }));
+    } catch {
+      // The queued intent is already durable. Preserve successful enqueue and
+      // its identity while waiting for storage to prepare the handoff.
+      return;
+    }
     if (!this.current(connection) || row.state !== 'queued') return;
     if (this.expired(row)) {
       this.expire(row);

@@ -116,3 +116,5 @@ later result failed. A queued record from a different monotonic epoch becomes
 not sent rather than inferring elapsed time from wall time. Queue cancellation
 can be persisted and resent; order submission cannot resume after acknowledgement
 or unknown. Rendering, consent and router ledger storage remain host concerns.
+Once the initial queued record is durable, temporary unavailability while preparing
+handoff keeps enqueue successful with that same intent ID; retry preserves it.

@@ -308,6 +308,25 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(f.writes).toHaveLength(1);
     restored.close();
   });
+  it('retains the same queued intent when preparing handoff cannot be persisted', async () => {
+    const f = fixture();
+    const put = f.options.storage.put;
+    f.options.storage.put = async (scope, row) => {
+      if (row.state === 'sending') throw new Error('synthetic unavailable storage');
+      await put(scope, row);
+    };
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    expect(box.entries()).toHaveLength(1);
+    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'queued' });
+    expect(f.writes).toEqual([]);
+    f.options.storage.put = put;
+    await box.flush(c);
+    expect(f.writes).toHaveLength(1);
+    expect(JSON.parse(f.writes[0]).d.intentId).toBe(id);
+    box.close();
+  });
   it('resends only queue cancellation after canceling an unacknowledged submit', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
