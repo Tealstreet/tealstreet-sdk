@@ -211,7 +211,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3306 CI3 run 42490856791, merge 331730698740: Bitunix 1,905,582 B; OKX 2,035,284 B.
 // CI bytes plus 10 KiB rounded up to KiB; never below either incoming parent cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 2_056_192,
+  // #3300 post-#3306: run 42557412385, job 128966462873, CI merge 291f65994cda.
+  // Optimized web/node measured 2,078,907 B; CI plus 10 KiB rounded up to KiB.
+  apexomni: 2_089_984,
   asterdex: 2_193_408,
   backpack: 2_036_736,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
