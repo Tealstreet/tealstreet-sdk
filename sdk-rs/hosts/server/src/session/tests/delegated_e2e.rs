@@ -250,7 +250,7 @@ async fn delegated_e2e_sealed_init_probe_admission_and_resident_signed_manual_wr
 #[tokio::test]
 async fn delegated_e2e_wrong_pair_replay_and_disabled_venue_leave_no_account() {
     let vector = vectors().remove(0);
-    for case in ["wrong-pair", "replay", "flag-off"] {
+    for case in ["wrong-pair", "replay", "other-venue"] {
         let mut bytes = plaintext(&vector);
         let venue = mock(&vector);
         let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
@@ -261,12 +261,12 @@ async fn delegated_e2e_wrong_pair_replay_and_disabled_venue_leave_no_account() {
             fields["secret"] = "synthetic-other-material".into();
             bytes = serde_json::to_vec(&fields).unwrap();
         }
-        let name = if case == "flag-off" {
+        let name = if case == "other-venue" {
             "bybitspot"
         } else {
             "bybit"
         };
-        assert_eq!(crate::delegated::enabled(name), case != "flag-off");
+        assert_eq!(crate::delegated::enabled(name), case != "other-venue");
         let init = sealed_init(&mut session, &mut sent, &vector, &bytes, name).await;
         if case == "replay" {
             // Consume this exact envelope once through the actual opener/probe,
@@ -310,4 +310,57 @@ async fn delegated_e2e_wrong_pair_replay_and_disabled_venue_leave_no_account() {
         drop(observed);
         session.close();
     }
+}
+
+#[tokio::test]
+async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io() {
+    let vector = vectors().remove(0);
+    let bytes = plaintext(&vector);
+    let venue = mock(&vector);
+    let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
+    let (mut session, mut sent) = connection(registry.clone());
+    let mut results = session.take_verified();
+    // Obtain a valid Bybit handover while the declaration is enabled.
+    let init = sealed_init(&mut session, &mut sent, &vector, &bytes, "bybit").await;
+    assert_eq!(init["d"]["exchangeName"], "bybit");
+    let sealed: Sealed = serde_json::from_value(init["d"]["sealed"].clone()).unwrap();
+    let mut declaration: Value = serde_json::from_str(include_str!(
+        "../../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
+    ))
+    .unwrap();
+    assert_eq!(declaration["venues"]["bybit"]["delegated"]["enabled"], true);
+    declaration["venues"]["bybit"]["delegated"]["enabled"] = false.into();
+    crate::delegated::with_test_declaration(declaration, async {
+        wire(&mut session, init).await;
+        assert_empty(&session, &registry).await;
+        let expected =
+            envelope::with_instance_id(envelope::init_unverified(ACCOUNT, false), INSTANCE);
+        assert_eq!(next_text(&mut sent, "error").await, expected);
+        assert!(
+            session
+                .handovers
+                .take(ACCOUNT, &sealed, crate::accounts::now_ms())
+                .is_err()
+        );
+        assert!(results.try_recv().is_err());
+        let observed = venue.observed.lock().unwrap();
+        assert_eq!(observed.preparations, 0);
+        assert_eq!(observed.requests, 0);
+        assert_eq!(observed.sockets, 0);
+        assert_eq!(observed.reads, 0);
+        assert_eq!(observed.refused, 0);
+        assert!(observed.writes.is_empty());
+    })
+    .await;
+    // The task-local fixture is gone: the same connection and pair can use a
+    // fresh offer through the normal probe and resident construction paths.
+    let init = sealed_init(&mut session, &mut sent, &vector, &bytes, "bybit").await;
+    wire(&mut session, init).await;
+    complete(&mut session, &mut results).await;
+    let account = registry
+        .held(USER, ACCOUNT, session.socket)
+        .expect("enabled declaration admits the valid pair");
+    assert!(account.delegated.is_some() && account.link.is_none());
+    assert!(venue.observed.lock().unwrap().reads > 0);
+    session.close();
 }

@@ -10,6 +10,9 @@ use tokio::sync::mpsc;
 
 #[derive(Default)]
 pub(crate) struct Observed {
+    pub preparations: usize,
+    pub requests: usize,
+    pub sockets: usize,
     pub reads: usize,
     pub refused: usize,
     pub writes: Vec<Value>,
@@ -77,6 +80,7 @@ impl Transport for MockVenue {
         _: HttpRequest,
         _: safe_cex_engine::request_context::RoutingIntent,
     ) -> HttpPrepareFuture {
+        self.observed.lock().unwrap().preparations += 1;
         let venue = self.clone();
         Box::pin(async move { Ok(Box::new(Prepared(venue)) as Box<dyn PreparedHttp>) })
     }
@@ -87,6 +91,7 @@ impl Transport for MockVenue {
         _: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        self.observed.lock().unwrap().sockets += 1;
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
         tokio::task::spawn_local(async move {
@@ -100,6 +105,7 @@ impl Transport for MockVenue {
     }
 
     fn request(&self, request: HttpRequest, events: Events) {
+        self.observed.lock().unwrap().requests += 1;
         let path = request.url.split('?').next().unwrap();
         let private = request
             .headers
