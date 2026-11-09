@@ -94,7 +94,7 @@ describe('native Balance frames into the generated contract', () => {
     expect(readBalanceFrame(frame('empty-coins'))).toHaveProperty('coins', {});
     expect(readBalanceFrame(frame('empty-coins'))).not.toHaveProperty('currencies');
   });
-  it.each(['zero', 'currencies-only'])('replaces rich balance maps through FrameApplier with %s', (next) => {
+  it.each(['zero', 'currencies-only'])('merges published balance fields and retains omitted maps through FrameApplier with %s', (next) => {
     const store = new DefaultStore();
     const applier = new FrameApplier(store);
     applier.apply(frame('rich'));
@@ -104,15 +104,15 @@ describe('native Balance frames into the generated contract', () => {
     expect(previous.coins.BTC.amount).toBe(0);
 
     applier.apply(frame(next));
-    expect(store.balance).toEqual(requiredBalance(next));
-    expect(store.balance).not.toHaveProperty('coins');
-    expect(store.serialize().balance).toEqual(requiredBalance(next));
-    if (next === 'zero') expect(store.balance).not.toHaveProperty('currencies');
-    else expect(store.balance.currencies).toEqual(requiredBalance(next).currencies);
+    const expected = { ...previous, ...requiredBalance(next) };
+    expect(store.balance).toEqual(expected);
+    expect(store.balance.coins).toEqual(previous.coins);
+    expect(store.serialize().balance).toEqual(expected);
+    expect(store.balance.currencies).toEqual(expected.currencies);
     expect(previous.coins.BTC.amount).toBe(0);
     expect(previous.currencies.USD.total).toBe(19);
   });
-  it.each(['zero', 'currencies-only'])('preserves separately fetched info while replacing maps with %s', (next) => {
+  it.each(['zero', 'currencies-only'])('preserves separately fetched info and omitted maps with %s', (next) => {
     const store = new DefaultStore();
     const info = { accountType: 'UNIFIED', collateral: { BTC: true }, tiers: [{ tier: 1 }] };
     store.update({ balance: { ...emptyBalance, info } });
@@ -122,12 +122,14 @@ describe('native Balance frames into the generated contract', () => {
     assert.ok(store.balance.coins);
     assert.ok(store.balance.currencies);
 
+    const previous = store.serialize().balance;
     applier.apply(frame(next));
+    const expected = { ...previous, ...requiredBalance(next) };
     expect(store.balance.info).toBe(info);
-    expect(store.balance).toEqual({ ...requiredBalance(next), info });
-    expect(store.balance).not.toHaveProperty('coins');
-    expect(store.serialize().balance).toEqual({ ...requiredBalance(next), info });
-    if (next === 'zero') expect(store.balance).not.toHaveProperty('currencies');
+    expect(store.balance).toEqual(expected);
+    expect(store.balance.coins).toEqual(previous.coins);
+    expect(store.serialize().balance).toEqual(expected);
+    expect(store.balance.currencies).toEqual(expected.currencies);
   });
   it('retains native nonfinite numbers and signed zero rather than fabricating display defaults', () => {
     const balance = requiredBalance('nonfinite');

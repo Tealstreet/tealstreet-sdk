@@ -461,3 +461,10 @@ omitted optional settings. Omitted rows remain with zero exposure and null
 liquidation, preserving leverage/margin/mode metadata for later operations. An
 empty full refresh closes retained rows rather than removing them. Native frame
 application through `update({ positions })` remains a separate replacement path.
+
+### Balance frame updates retain omitted fields
+
+`FrameApplier` merges published Balance fields into the previous balance, as in
+the legacy reader. Omitted coins, currencies and info retain their prior values;
+explicit empty maps replace them. Direct `store.update({ balance })` still
+replaces the complete balance. The generated reader does not fabricate maps.

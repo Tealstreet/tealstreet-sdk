@@ -46,7 +46,7 @@ it('preserves inverse native quantities and collateral after worker frame hydrat
   if (!originalBalance) throw new Error('Expected Balance fixture');
   frame.balance = () => ({ total: 5000, used: 1000, free: 4000, upnl: 0 });
   new FrameApplier(store).apply(frame);
-  expect(store.balance.coins).toBeUndefined();
+  expect(store.balance.coins).toEqual(coins);
   frame.balance = () => ({ ...originalBalance, coins: {} });
   new FrameApplier(store).apply(frame);
   expect(store.balance.coins).toEqual({});

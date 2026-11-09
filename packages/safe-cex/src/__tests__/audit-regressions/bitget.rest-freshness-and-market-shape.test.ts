@@ -190,8 +190,12 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
 
     await (exchange.privateWebsocket as any).executePositionFetch();
 
-    expect(exchange.store.positions.find((position) => position.id === positionId)).toBeUndefined();
-    expect(exchange.store.positions).toEqual([]);
+    expect(exchange.store.positions.find((position) => position.id === positionId)).toEqual(
+      expect.objectContaining({
+        contracts: 0,
+        entryPrice: 0,
+      }),
+    );
   });
 
   it('keeps and updates Classic TP/SL rows from not_trigger algo WS frames', async () => {

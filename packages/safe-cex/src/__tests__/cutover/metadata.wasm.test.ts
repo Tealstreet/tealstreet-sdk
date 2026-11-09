@@ -212,13 +212,13 @@ describe('independent frame metadata and market identities', () => {
     for (const store of stores) expect(store.balance).toEqual(value);
   });
 
-  it('replaces omitted and explicitly empty balance extensions in both stores', () => {
+  it('clears explicitly empty balance extensions while a legacy scalar update preserves unknown details', () => {
     const { deliver, stores } = pair();
     const currencies = { USDT: balance };
     const coins = { BTC: { base: 'BTC', amount: 0.5, notional: 50 } };
     deliver(consumerFrame({ balance: { ...balance, coins, currencies } }));
     deliver(consumerFrame({ balance: { ...balance, total: 1100 } }));
-    for (const store of stores) expect(store.balance).toEqual({ ...balance, total: 1100 });
+    for (const store of stores) expect(store.balance).toEqual({ ...balance, total: 1100, coins, currencies });
     deliver(consumerFrame({ balance: { ...balance, coins: {}, currencies: {} } }));
     for (const store of stores) expect(store.balance).toEqual({ ...balance, coins: {}, currencies: {} });
   });

@@ -137,10 +137,7 @@ export class FrameApplier {
 
     attempt(() => {
       const balance = readBalanceFrame(frame);
-      if (balance) {
-        // Account info is fetched separately; frame aggregates and maps replace prior state.
-        update.balance = 'info' in this.store.balance ? { ...balance, info: this.store.balance.info } : balance;
-      }
+      if (balance) update.balance = { ...this.store.balance, ...balance };
     }, LOADED_FLAG.BALANCE);
 
     attempt(() => {
