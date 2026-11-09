@@ -1,4 +1,38 @@
-# MEXC socket liveness
+# MEXC Futures
+
+## Hosted and delegated signing
+
+Local custody and RemoteSigner share provider-owned HMAC-SHA256 signing for
+all private REST requests and private WebSocket login. REST signs the public
+API key followed by integer protocol milliseconds and the sorted encoded GET
+query or exact serialized JSON body. Login signs the public key and timestamp.
+Only that canonical payload crosses the signing callback; secret material stays
+in the executing device/provider. No signing nonce is required. Native dispatch
+retains its existing receive-window clamp and clock-recovery policy.
+
+PayloadSigner is supported for canonical REST HMACs, with REST-only account
+polling and no private socket, authentication timers or reconnects. RemoteSigner
+takes precedence and never falls back to PayloadSigner or a local secret.
+Provider refusals before dispatch remain `notSent`; ambiguous dispatched writes
+remain `Unknown`. The persisted Primary account namespace is mapped before
+credential trimming in both local and delegated setup.
+
+This Futures API uses API-key HMAC, with no SDK wallet/agent cosign protocol.
+Delegated custody may sign for its provisioned account's API key. Secondary read
+keys retain their native custody path; the SDK's global policy currently
+bypasses saved read keys. Direct secondary RemoteSigner setup refuses with
+`unsupported` / `notSent`: the raw HMAC device callback cannot select that slot.
+When read keys are enabled, remove them or use browser-local custody.
+
+`tests/fixtures/hosted-signing.json` contains independent fixed HMAC vectors.
+SDK tests compare local-reference, hosted capture and actual WASM delegate
+bytes, including Unicode, batch arrays and serialized body whitespace. Native
+tests cover dispatch, private-feed policy, clock recovery and trading outcomes.
+These are deterministic fixtures; no live account connectivity is claimed.
+
+Authentication reference: https://www.mexc.com/api-docs/futures/integration-guide
+
+## Socket liveness
 
 Private sockets use `safe_cex_engine::socket::Supervisor` with a ten-second
 connection deadline and a separate ten-second authentication deadline. Native

@@ -342,6 +342,7 @@ fn family(venue: &str) -> bool {
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "woo") && venue == "woo")
+        || (cfg!(feature = "mexc") && venue == "mexc")
         || (cfg!(feature = "bitrue") && venue == "bitrue")
         || (cfg!(feature = "cryptocom") && venue == "cryptocom")
         || (cfg!(feature = "asterdex") && venue == "asterdex")

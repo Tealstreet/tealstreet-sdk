@@ -1,0 +1,24 @@
+{
+  "note": "Synthetic interoperability fixture only. Never use these inputs for a real account.",
+  "source": "RFC 9180 base mode; independently generated with Python cryptography 46.0.5 and checked by rust-hpke 0.13.0.",
+  "kemId": 32,
+  "kdfId": 1,
+  "aeadId": 3,
+  "info": "tealstreet/delegated-handover/v1",
+  "accountName": "test-account",
+  "exchangeName": "bybit",
+  "key": "synthetic-api-key",
+  "recipientPrivateKey": "JCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQ=",
+  "senderIkm": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=",
+  "publicKey": "BLzS4NAPLM5f6PHGwvvsXAf6VuOqXIilaJl12Is/zgU=",
+  "bootId": "00000000-0000-4000-8000-000000000001",
+  "attemptId": "00112233445566778899aabbccddeeff",
+  "expiresAtMs": 30000,
+  "aad": "00112233445566778899aabbccddeeff|00000000-0000-4000-8000-000000000001|bybit|synthetic-api-key",
+  "plaintext": "{\"key\":\"synthetic-api-key\",\"secret\":\"synthetic-api-secret\",\"passphrase\":\"synthetic-passphrase\"}",
+  "sealed": {
+    "attemptId": "00112233445566778899aabbccddeeff",
+    "enc": "rjvxzYfC0u0lr0oaI57tBKmQ8A50A+TIBlkn3gEP0Xo=",
+    "ciphertext": "44UVoJTf67kQe61U0EbNFrWWm4B+unTRFJWUsZMzRTXhOs9KJ8OE5Ylv61AEoog5M7kk3jiZhdnYiHIGXl3hfRwJJPD/LLOUGdHXlVCKE5rAv9hSGidijaJNIulXIpCgS/1qggoEc5FFSJ+uAwzj"
+  }
+}

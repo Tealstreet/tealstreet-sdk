@@ -272,7 +272,8 @@ impl MexcFutures {
                 path.into(),
                 payload.clone(),
                 self.options.recv_window,
-            );
+            )
+            .with_header_policy(self.options.signing_policy.header_policy());
             let url = recipe.url();
             Ok((context, plan, slot, recipe, url))
         })();
