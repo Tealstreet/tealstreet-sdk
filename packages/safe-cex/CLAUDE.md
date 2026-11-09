@@ -41,6 +41,23 @@ Core exchange integration library. See also exchange-specific `CLAUDE.md` files 
 For exchange migrations that add first-class opening trigger/conditional orders,
 read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
 
+## DELEGATED handover
+
+`sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
+Bybit DELEGATED handover. Its standalone module needs no WASM, Node Buffer or
+browser base64 globals; the host supplies the usual secure random source for
+Noble. Call it only after the host's per-venue DELEGATED enablement check. It does
+not select signing modes, open sockets or change LOCAL/COSIGNED setup.
+Inputs contain the host's padded-base64 X25519 public key and attempt/boot/venue
+context; the result contains only the attempt ID and padded-base64 encapsulation
+and ciphertext. Context fields preserve exact UTF-8 bytes and cannot contain
+the protocol's `|` separator. Optional passphrases preserve absence versus empty.
+The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
+one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
+fixtures exercise the same production sender. The shared fixture lives with
+the server tests for receiver interoperability; Rust consumption depends on
+the server handover implementation landing.
+
 ## Mirror CI invariants (don't "clean these up")
 
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean
