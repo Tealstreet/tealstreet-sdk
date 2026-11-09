@@ -563,6 +563,14 @@ impl Session {
             return Ok(());
         }
         self.forget_disposed();
+        if let Some(refusal) =
+            self.registry
+                .signing_mode_refusal(self.user(), &init, public_only, false)
+        {
+            self.send(envelope::init_refused(&init.account_name, &refusal));
+            self.drop_early(&init.account_name, "init refused for signing mode");
+            return Ok(());
+        }
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
         {

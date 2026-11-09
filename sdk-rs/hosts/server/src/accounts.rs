@@ -1,5 +1,6 @@
 //! Accounts keyed by `(userId, accountName)`: built once, shared by that user's
 //! sockets, disposed when the last holder (live socket or parked resume) lets go.
+use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
 use crate::envelope::InitPayload;
 use crate::state::Log;
 use crate::threads::EngineThreads;
@@ -58,7 +59,11 @@ pub struct Account {
     pub name: String,
     pub venue: String,
     pub handle: AccountHandle,
-    /// Present for every private account; public-only accounts have no signer.
+    /// Explicit construction mode, independent of a remote signer link.
+    public_only: bool,
+    /// Present for a DELEGATED private account.
+    pub delegated: Option<ResidentCopy>,
+    /// Present for COSIGNED private accounts only.
     pub link: Option<Arc<SignerLink>>,
     pub token: ProxyToken,
     pub fingerprint: String,
@@ -250,7 +255,7 @@ impl Account {
     }
 
     pub fn is_public(&self) -> bool {
-        self.link.is_none()
+        self.public_only
     }
 
     /// Live (not parked) sockets holding this account, other than `holder`.
@@ -669,7 +674,7 @@ pub struct Prepared {
 }
 
 /// The account's resolved routing, as its engine thread receives it.
-fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, String> {
+pub(crate) fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, String> {
     let venue = &init.exchange_name;
     let transport_flags = AccountTransport {
         tealstreet_proxy: init.tealstreet_proxy,
@@ -928,13 +933,48 @@ impl Registry {
         public_only: bool,
         holder: u64,
     ) -> Option<String> {
+        self.rebuild_refusal_for_mode(user, init, public_only, holder, false)
+    }
+
+    /// Admission check shared by socket fast paths and trusted construction.
+    pub fn signing_mode_refusal(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        delegated: bool,
+    ) -> Option<String> {
+        let accounts = self.accounts.lock().unwrap();
+        let account = accounts.get(&(user.to_owned(), init.account_name.clone()))?;
+        if public_only && account.delegated.is_none() {
+            return None;
+        }
+        (!account.is_public() && account.delegated.is_some() != delegated)
+            .then(|| "Account signing mode differs; account not attached".to_owned())
+    }
+
+    fn rebuild_refusal_for_mode(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        holder: u64,
+        delegated: bool,
+    ) -> Option<String> {
+        if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
+            return Some(refusal);
+        }
         // Shared public data carries no signer or algos; it rebuilds as before.
         if public_only {
             return None;
         }
         let key = (user.to_owned(), init.account_name.clone());
         let account = self.accounts.lock().unwrap().get(&key).cloned()?;
-        let fingerprint = init.fingerprint();
+        let fingerprint = if delegated {
+            crate::delegated::fingerprint(init)
+        } else {
+            init.fingerprint()
+        };
         if account.fingerprint == fingerprint && !account.is_public() {
             return None;
         }
@@ -1017,19 +1057,63 @@ impl Registry {
         token: Option<(String, u64)>,
         outbox: Outbox,
     ) -> Result<Arc<Account>, String> {
+        self.obtain_with_pair(user, init, public_only, holder, token, outbox, None)
+            .await
+    }
+
+    /// Host-only entry point after handover verification. Never opens socket data.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn obtain_delegated(
+        self: &Arc<Self>,
+        user: &str,
+        init: &InitPayload,
+        holder: u64,
+        token: Option<(String, u64)>,
+        outbox: Outbox,
+        pair: DelegatedPair,
+    ) -> Result<Arc<Account>, String> {
+        pair.validate(init)?;
+        self.obtain_with_pair(user, init, false, holder, token, outbox, Some(pair))
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn obtain_with_pair(
+        self: &Arc<Self>,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        holder: u64,
+        token: Option<(String, u64)>,
+        outbox: Outbox,
+        pair: Option<DelegatedPair>,
+    ) -> Result<Arc<Account>, String> {
         if self.stopping.load(Ordering::Relaxed) {
             return Err("The server is restarting; reconnecting".into());
         }
-        let fingerprint = init.fingerprint();
+        let delegated = pair.is_some();
+        if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
+            return Err(refusal);
+        }
+        let fingerprint = if delegated {
+            crate::delegated::fingerprint(init)
+        } else {
+            init.fingerprint()
+        };
         let mut attempt = self.begin_init(user, &init.account_name, public_only, &fingerprint)?;
         let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
         if let Some(account) = existing {
+            if !account.is_public() && account.delegated.is_some() != delegated {
+                return Err("Account signing mode differs; account not attached".into());
+            }
             if account.fingerprint == fingerprint && account.is_public() == public_only {
                 account.hold(holder, Live { outbox, token });
                 return Ok(account);
             }
-            if let Some(refusal) = self.rebuild_refusal(user, init, public_only, holder) {
+            if let Some(refusal) =
+                self.rebuild_refusal_for_mode(user, init, public_only, holder, delegated)
+            {
                 return Err(refusal);
             }
             // The Hyperliquid builder is per device (browser storage): a second
@@ -1064,6 +1148,7 @@ impl Registry {
                 holder,
                 outbox.clone(),
                 &attempt.authority,
+                pair,
             )
             .await?;
         let account = Arc::new(account);
@@ -1134,33 +1219,51 @@ impl Registry {
         socket: u64,
         outbox: Outbox,
         authority: &InitAuthority,
+        pair: Option<DelegatedPair>,
     ) -> Result<(Account, Option<safe_cex_remote_signer::RemoteAccount>), String> {
         self.pacer.admit().await;
         authority.check()?;
         let venue = init.exchange_name.clone();
-        let link = (!public_only).then(|| SignerLink::new(socket, outbox));
-        let Prepared {
-            plan,
-            options,
-            remote,
-        } = prepare(init, public_only, link.clone())?;
-        let signer = remote.as_ref().map(|remote| remote.provider.clone());
+        let delegated_build = pair.is_some();
+        let (link, plan, options, remote, signer, delegated) = if let Some(pair) = pair {
+            let PreparedDelegated {
+                plan,
+                options,
+                resident,
+            } = prepare_delegated(init, pair)?;
+            let signer = Some(resident.provider());
+            (None, plan, options, None, signer, Some(resident))
+        } else {
+            let link = (!public_only).then(|| SignerLink::new(socket, outbox));
+            let Prepared {
+                plan,
+                options,
+                remote,
+            } = prepare(init, public_only, link.clone())?;
+            let signer = remote.as_ref().map(|remote| remote.provider.clone());
+            (link, plan, options, remote, signer, None)
+        };
         let proxy_token = ProxyToken::new();
-        // Signer and public-only are one decision: a private account never builds
-        // from options without the remote provider (keyed construction).
-        assert_eq!(
-            signer.is_none(),
-            public_only,
-            "private accounts sign remotely"
-        );
+        // Preserve COSIGNED keyed construction; DELEGATED supplies its own provider.
+        if !delegated_build {
+            assert_eq!(
+                signer.is_none(),
+                public_only,
+                "private accounts sign remotely"
+            );
+        } else {
+            assert!(!public_only && signer.is_some() && link.is_none());
+        }
         // Public-only reads on a proxied venue need the proxy too.
         proxy_token.set(token);
         let tokens = proxy_token.provider();
         let mut config = self.engine_config.clone();
         config.log_label = Some(self.account_log_label(user, &init.account_name, &venue));
-        // A private account always signs through the browser (asserted above).
+        // Public and COSIGNED diagnostic modes retain their original values.
         config.signing_mode = Some(if public_only {
             "public"
+        } else if delegated_build {
+            "hosted_delegated"
         } else {
             "hosted_cosign"
         });
@@ -1241,6 +1344,8 @@ impl Registry {
             venue: init.exchange_name.clone(),
             handle,
             link,
+            public_only,
+            delegated,
             token: proxy_token,
             fingerprint,
             holders: Mutex::default(),
@@ -1922,6 +2027,8 @@ pub mod testing {
             name: name.into(),
             venue: venue_name.into(),
             handle,
+            public_only: link.is_none(),
+            delegated: None,
             link,
             token: ProxyToken::new(),
             fingerprint,
@@ -3995,3 +4102,7 @@ pub(crate) mod tests {
         assert!(token.provider()().await.is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "delegated_accounts_tests.rs"]
+mod delegated_accounts_tests;
