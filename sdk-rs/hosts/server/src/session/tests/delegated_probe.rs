@@ -10,6 +10,9 @@ use std::time::Duration;
 #[path = "delegated_probe_more.rs"]
 mod more;
 
+#[path = "delegated_retention.rs"]
+mod retention;
+
 struct Fixture {
     registry: Arc<Registry>,
     code: Arc<AtomicUsize>,

@@ -255,36 +255,73 @@ impl DecodedIdentity {
         if !self.key.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.credential")), self.key);
+                .insert(KeyRef(format!("{slot}.credential")), self.key.into());
         }
         if !self.secret.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.signing")), self.secret);
+                .insert(KeyRef(format!("{slot}.signing")), self.secret.into());
         }
         if let Some(passphrase) = self.passphrase {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.passphrase")), passphrase);
+                .insert(KeyRef(format!("{slot}.passphrase")), passphrase.into());
         }
         for (name, bytes) in self.extra {
             if !bytes.is_empty() {
                 let reference = Self::extra_ref(slot, name);
                 signer.roles.insert(reference.clone(), name);
-                signer.keys.insert(reference, bytes);
+                signer.keys.insert(reference, bytes.into());
             }
         }
     }
 }
 
+/// Optional native host storage for installed local signing material.
+/// The provider erases it before releasing the host buffer.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait ProtectedBytes: zeroize::Zeroize + Send + Sync {
+    fn as_bytes(&self) -> &[u8];
+}
+
+enum Material {
+    Heap(Zeroizing<Vec<u8>>),
+    #[cfg(not(target_arch = "wasm32"))]
+    Protected(Box<dyn ProtectedBytes>),
+}
+impl From<Zeroizing<Vec<u8>>> for Material {
+    fn from(bytes: Zeroizing<Vec<u8>>) -> Self {
+        Self::Heap(bytes)
+    }
+}
+impl Material {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Heap(bytes) => bytes.as_slice(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Protected(bytes) => bytes.as_bytes(),
+        }
+    }
+}
+impl Drop for Material {
+    fn drop(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Self::Protected(bytes) = self {
+            bytes.zeroize();
+        }
+    }
+}
+
 pub struct LocalSigner {
+    #[cfg(not(target_arch = "wasm32"))]
+    protected_storage: bool,
     /// This provider's setup lifetime. Re-drawn by every material mutation,
     /// which must stay `&mut self` (pre-`Arc`): a borrowed incarnation may not
-    /// outlive a re-draw. `None` (allocation exhausted) never reads a seal.
+    /// outlive a re-draw. `None` (host storage or allocation exhaustion) never reads a seal.
     incarnation: Option<Incarnation>,
     #[cfg(feature = "schnorr")]
     lighter_principal: Option<(KeyRef, LighterPrincipal)>,
-    keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
+    keys: HashMap<KeyRef, Material>,
     /// Extra refs are usable only by their own algorithm, never presented,
     /// interpolated or used as an ordinary MAC/digest key.
     roles: HashMap<KeyRef, ExtraKey>,
@@ -299,6 +336,8 @@ pub struct LocalSigner {
 impl Default for LocalSigner {
     fn default() -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            protected_storage: false,
             incarnation: Incarnation::fresh().ok(),
             #[cfg(feature = "schnorr")]
             lighter_principal: None,
@@ -310,11 +349,34 @@ impl Default for LocalSigner {
     }
 }
 impl LocalSigner {
+    /// Move installed bytes to a host-owned protected allocation. Ref bindings,
+    /// policy and signing operations stay with this local provider. Setup seals
+    /// are retired for host-owned storage. Failure drops
+    /// and erases every completed allocation and every remaining input buffer.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_protected_storage(
+        mut self,
+        mut allocate: impl FnMut(&[u8]) -> Result<Box<dyn ProtectedBytes>, SignError>,
+    ) -> Result<Self, SignError> {
+        self.protected_storage = true;
+        self.incarnation = None;
+        let mut protected = HashMap::with_capacity(self.keys.len());
+        for (reference, bytes) in std::mem::take(&mut self.keys) {
+            protected.insert(reference, Material::Protected(allocate(bytes.as_slice())?));
+        }
+        self.keys = protected;
+        Ok(self)
+    }
     pub fn new() -> Self {
         Self::default()
     }
     /// Ends every seal made under the previous material.
     fn redraw(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.protected_storage {
+            self.incarnation = None;
+            return;
+        }
         self.incarnation = Incarnation::fresh().ok();
     }
     /// Seals the provider's own public-key answer for each declared Stark
@@ -416,7 +478,7 @@ impl LocalSigner {
                 self.algorithms.remove(&reference);
             }
         }
-        self.keys.insert(reference, Zeroizing::new(bytes));
+        self.keys.insert(reference, Zeroizing::new(bytes).into());
     }
     pub fn from_setup(
         setup: LocalSetup,
@@ -585,10 +647,9 @@ impl LocalSigner {
                 // `schnorr` builds can sign one, so only they pay for the check.
                 #[cfg(feature = "schnorr")]
                 if algorithm == Algorithm::SchnorrDigest
-                    && !signer
-                        .keys
-                        .get(signing)
-                        .is_some_and(|key| crate::lighter::canonical_scalar(key).unwrap_or(false))
+                    && !signer.keys.get(signing).is_some_and(|key| {
+                        crate::lighter::canonical_scalar(key.as_slice()).unwrap_or(false)
+                    })
                 {
                     return Err(SignError::InvalidRequest);
                 }
@@ -746,7 +807,8 @@ impl LocalSigner {
             return Err(SignError::InvalidRequest);
         }
         self.redraw();
-        self.keys.insert(reference.clone(), Zeroizing::new(bytes));
+        self.keys
+            .insert(reference.clone(), Zeroizing::new(bytes).into());
         self.algorithms.insert(reference, algorithm);
         Ok(())
     }
@@ -3459,3 +3521,6 @@ mod owned_address_setup_tests {
         assert!(provider.create_public_address_setup(request(key)).is_none());
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod protected_tests;

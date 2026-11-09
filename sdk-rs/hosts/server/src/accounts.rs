@@ -1,5 +1,5 @@
 //! Accounts keyed by `(userId, accountName)`: built once, shared by that user's
-//! sockets, disposed when the last holder (live socket or parked resume) lets go.
+//! sockets, with DELEGATED retention independent of the socket resume grace.
 use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
 use crate::envelope::InitPayload;
 use crate::state::Log;
@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 mod delegated_probe;
+mod retention;
 pub(crate) use delegated_probe::ProbePermit;
 
 /// The unauthenticated public pseudo-account, as in NX `server.ts`.
@@ -183,6 +184,8 @@ pub enum Disposal {
     SignerFailures,
     /// No browser came back within the resume grace.
     NoBrowser,
+    /// No admitted client returned during DELEGATED retention.
+    NoClient48h,
     /// The page disposed it: the user removed or deactivated it, or the page dropped it.
     PageDisposed,
     /// The page's ping stopped listing it.
@@ -203,6 +206,7 @@ impl Disposal {
             Self::Replaced => "replaced",
             Self::SignerFailures => "signer_failures",
             Self::NoBrowser => "no_browser",
+            Self::NoClient48h => "no_client_48h",
             Self::PageDisposed => "page_disposed",
             Self::Orphaned => "orphaned",
             Self::JoinFailed => "join_failed",
@@ -230,6 +234,8 @@ pub struct Live {
 
 #[derive(Default)]
 struct Holders {
+    retention: Option<retention::Retention>,
+    disposed: bool,
     by_id: HashMap<u64, Option<Live>>,
     /// The socket the signer and proxy token follow.
     signing: Option<u64>,
@@ -299,19 +305,27 @@ impl Account {
         }
     }
 
-    fn hold(&self, id: u64, live: Live) {
+    fn hold(&self, id: u64, live: Live) -> bool {
         let mut holders = self.holders.lock().unwrap();
+        if self.delegated.as_ref().is_some_and(|resident| {
+            holders.disposed
+                || holders
+                    .retention
+                    .as_ref()
+                    .is_some_and(|retention| tokio::time::Instant::now() >= retention.deadline)
+                || !resident.admit()
+        }) {
+            return false;
+        }
+        holders.cancel_retention();
         holders.by_id.insert(id, Some(live.clone()));
         self.sign_through(&mut holders, id, &live);
+        true
     }
 
     pub(crate) fn has_parked_holders(&self) -> bool {
-        self.holders
-            .lock()
-            .unwrap()
-            .by_id
-            .values()
-            .any(Option::is_none)
+        let holders = self.holders.lock().unwrap();
+        holders.retention.is_some() || holders.by_id.values().any(Option::is_none)
     }
 
     /// Sends a frame, if given, to every live socket holding this account.
@@ -1139,7 +1153,9 @@ impl Registry {
                 return Err("Account signing mode differs; account not attached".into());
             }
             if account.fingerprint == fingerprint && account.is_public() == public_only {
-                account.hold(holder, Live { outbox, token });
+                if !account.hold(holder, Live { outbox, token }) {
+                    return Err("account stopped".into());
+                }
                 return Ok(account);
             }
             if let Some(refusal) =
@@ -1157,7 +1173,9 @@ impl Registry {
                     "init {} from socket {holder} joins the live account; only its hyperliquidBuilder differs",
                     init.account_name
                 ));
-                account.hold(holder, Live { outbox, token });
+                if !account.hold(holder, Live { outbox, token }) {
+                    return Err("account stopped".into());
+                }
                 return Ok(account);
             }
             self.dispose(
@@ -1411,13 +1429,25 @@ impl Registry {
     }
 
     /// Lets go of one holder; the last one disposes the account, for `disposal`.
-    pub fn release(&self, account: &Arc<Account>, holder: u64, disposal: Disposal) {
+    pub fn release(self: &Arc<Self>, account: &Arc<Account>, holder: u64, disposal: Disposal) {
         let empty = {
             let mut holders = account.holders.lock().unwrap();
-            holders.by_id.remove(&holder);
+            if holders.by_id.remove(&holder).is_none() {
+                return;
+            }
             account.hand_over(&mut holders, holder);
             holders.by_id.is_empty()
         };
+        if account.delegated.is_some() {
+            if matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned) {
+                self.dispose_for(account, disposal, "account disposed", None);
+                return;
+            }
+            if disposal == Disposal::SocketClosed {
+                self.retain_delegated(account);
+                return;
+            }
+        }
         if empty {
             self.dispose_for(account, disposal, "account disposed", None);
         }
@@ -1539,6 +1569,12 @@ impl Registry {
         stopped: Option<crate::algos::StopNotice>,
         cause: DisposalCause,
     ) {
+        if let Some(resident) = &account.delegated {
+            let mut holders = account.holders.lock().unwrap();
+            holders.cancel_retention();
+            holders.disposed = true;
+            resident.revoke();
+        }
         account.handle.begin_disposal(cause);
         if !account.running.io_allowed() {
             let stopped = stopped.unwrap_or_else(|| Box::new(|_| {}));
@@ -1673,8 +1709,18 @@ impl Registry {
         {
             accounts.remove(&key);
         }
+        {
+            let mut holders = account.holders.lock().unwrap();
+            holders.cancel_retention();
+            if let Some(resident) = &account.delegated {
+                resident.revoke();
+            }
+            *holders = Holders {
+                disposed: true,
+                ..Default::default()
+            };
+        }
         drop(accounts);
-        *account.holders.lock().unwrap() = Holders::default();
         let stopped = if stopped.is_none() && !account.running.io_allowed() {
             Some(self.keep_notice(account, "router-lease"))
         } else {
@@ -1863,13 +1909,20 @@ impl Registry {
     ) {
         let mut parked = Vec::with_capacity(accounts.len());
         for (account, holder) in accounts {
+            if account.user != user {
+                continue;
+            }
             let park_holder = self.next_id();
             {
                 let mut holders = account.holders.lock().unwrap();
+                if holders.disposed || !holders.by_id.get(&holder).is_some_and(Option::is_some) {
+                    continue;
+                }
                 holders.by_id.remove(&holder);
                 holders.by_id.insert(park_holder, None);
                 account.hand_over(&mut holders, holder);
             }
+            self.retain_delegated(&account);
             parked.push((account, park_holder));
         }
         if parked.is_empty() {
@@ -1909,7 +1962,7 @@ impl Registry {
                         account.hand_over(&mut holders, park_holder);
                         holders.by_id.is_empty()
                     };
-                    if last {
+                    if last && account.delegated.is_none() {
                         let stopped = registry.keep_notice(&account, &resume_id);
                         registry.dispose_for(&account, Disposal::NoBrowser, &reason, Some(stopped));
                     }
@@ -1989,16 +2042,26 @@ impl Registry {
         drop(parked);
         accounts
             .into_iter()
-            .map(|(account, park_holder)| {
+            .filter_map(|(account, park_holder)| {
+                let current = self
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .get(&(account.user.clone(), account.name.clone()))
+                    .is_some_and(|current| Arc::ptr_eq(current, &account));
+                // A DELEGATED resume must still name the registered account.
+                if account.delegated.is_some() && !current {
+                    return None;
+                }
                 account.holders.lock().unwrap().by_id.remove(&park_holder);
-                account.hold(
+                let admitted = account.hold(
                     holder,
                     Live {
                         outbox: outbox.clone(),
                         token: Some(token.clone()),
                     },
                 );
-                account
+                admitted.then_some(account)
             })
             .collect()
     }
@@ -4167,3 +4230,7 @@ mod delegated_accounts_tests;
 #[cfg(test)]
 #[path = "delegated_construction_tests.rs"]
 mod delegated_construction_tests;
+
+#[cfg(test)]
+#[path = "delegated_retention_tests.rs"]
+mod delegated_retention_tests;

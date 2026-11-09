@@ -531,6 +531,11 @@ impl Session {
             self.refuse_handover(&init.account_name, false);
             return;
         }
+        self.registry.interruptions.deliver_waiting_for_key(
+            self.user(),
+            &init.account_name,
+            &self.handover_out(&init.account_name),
+        );
         self.open_probed_handover(init);
     }
 
@@ -834,6 +839,8 @@ impl Session {
                 if let Some(joined) = self.joined.remove(&account_name) {
                     self.metrics.note_dispose();
                     self.leave(joined, Disposal::PageDisposed);
+                } else if let Some(user) = &self.identity.user {
+                    self.registry.dispose_delegated(user, &account_name);
                 }
             }
             Inbound::EchoRes(response) => {

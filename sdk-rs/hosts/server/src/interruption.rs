@@ -15,6 +15,7 @@ const MAX_ACKNOWLEDGEMENTS: usize = 4096;
 pub enum Reason {
     OwnerReleased,
     LeaseExpired,
+    WaitingForKey,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -40,6 +41,13 @@ impl Marker {
         Some(marker)
     }
     fn notice(&self, account: &str, display: &str) -> String {
+        if self.reason == Reason::WaitingForKey {
+            return envelope::algo_notice(
+                account,
+                "Your algos are waiting for your key after the server restarted. Provide your key again, then check Open Orders before explicitly resuming TWAPs or starting new chases.",
+                None,
+            );
+        }
         envelope::algo_notice(
             account,
             &format!(
@@ -199,12 +207,18 @@ impl Notices {
         Ok(())
     }
     pub fn deliver(&self, user: &str, account: &str, out: &Out) -> bool {
+        self.deliver_for(user, account, out, None)
+    }
+    pub(crate) fn deliver_waiting_for_key(&self, user: &str, account: &str, out: &Out) -> bool {
+        self.deliver_for(user, account, out, Some(Reason::WaitingForKey))
+    }
+    fn deliver_for(&self, user: &str, account: &str, out: &Out, reason: Option<Reason>) -> bool {
         let mut entries = self.users.lock().unwrap();
         prune(&mut entries);
         let Some(pending) = entries.get_mut(user).and_then(|user| user.marker.as_mut()) else {
             return false;
         };
-        if pending.sent {
+        if pending.sent || reason.is_some_and(|reason| pending.marker.reason != reason) {
             return false;
         }
         let display = self

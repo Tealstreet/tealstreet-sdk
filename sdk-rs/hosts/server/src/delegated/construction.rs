@@ -2,9 +2,7 @@
 use crate::accounts::{engine_options, routing_plan};
 use crate::envelope::InitPayload;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-use safe_cex_engine::signing::Provider;
 use serde_json::json;
-use std::sync::Arc;
 
 /// A handed-over pair, consumed by trusted construction. Never a socket payload.
 pub struct DelegatedPair {
@@ -38,17 +36,8 @@ impl DelegatedPair {
     }
 }
 
-/// The account's resident provider; material stays in the existing LocalSigner.
-/// This handle neither serializes nor makes another copy of the material.
-pub struct ResidentCopy {
-    provider: Provider,
-}
-impl ResidentCopy {
-    /// Trusted host ingress, as with a remote account's provider.
-    pub fn provider(&self) -> Provider {
-        self.provider.clone()
-    }
-}
+mod resident;
+pub use resident::ResidentCopy;
 
 pub struct PreparedDelegated {
     pub plan: safe_cex_native::RoutingPlan,
@@ -63,6 +52,11 @@ pub fn prepare_delegated(
     pair: DelegatedPair,
 ) -> Result<PreparedDelegated, String> {
     pair.validate(init)?;
+    let memory = crate::delegated_memory::DelegatedMemory::prepare(
+        &init.exchange_name,
+        safe_cex_remote_signer::delegated_enabled(&init.exchange_name),
+    )
+    .map_err(|_| "DELEGATED setup unavailable".to_owned())?;
     let plan = routing_plan(init, false)?;
     let setup = LocalSetup {
         primary: Some(LocalIdentity {
@@ -85,6 +79,15 @@ pub fn prepare_delegated(
     {
         return Err("Invalid DELEGATED account setup".into());
     }
+    let signer = signer
+        .with_protected_storage(|bytes| {
+            let mut protected = memory
+                .zeroed(bytes.len())
+                .map_err(|_| safe_cex_engine::signing::SignError::Unavailable)?;
+            protected.as_bytes_mut().copy_from_slice(bytes);
+            Ok(Box::new(protected))
+        })
+        .map_err(|_| "DELEGATED setup unavailable".to_owned())?;
     let mut options = engine_options(init, false);
     let fields = options.as_object_mut().expect("engine options object");
     fields.remove("key");
@@ -96,9 +99,7 @@ pub fn prepare_delegated(
     Ok(PreparedDelegated {
         plan,
         options: options.to_string(),
-        resident: ResidentCopy {
-            provider: Arc::new(signer),
-        },
+        resident: ResidentCopy::new(signer),
     })
 }
 

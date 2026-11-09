@@ -59,6 +59,11 @@ unsafe impl Send for SecretCopy {}
 unsafe impl Sync for SecretCopy {}
 
 impl SecretCopy {
+    #[cfg(test)]
+    pub(crate) fn check_release(&mut self, check: impl FnOnce(&[u8]) + Send + Sync + 'static) {
+        self.before_release = Some(Box::new(check));
+    }
+
     fn allocate(len: usize) -> io::Result<Self> {
         #[cfg(unix)]
         {
