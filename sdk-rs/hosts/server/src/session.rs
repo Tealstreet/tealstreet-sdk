@@ -357,6 +357,26 @@ impl Session {
         Arc::new(move |text: String| out.send(text))
     }
 
+    /// Exercise the trusted construction entry point from this authenticated
+    /// socket without enabling a new socket operation.
+    #[cfg(test)]
+    pub(crate) fn delegated_test_build(
+        &self,
+        init: InitPayload,
+        pair: crate::delegated::DelegatedPair,
+    ) -> impl std::future::Future<Output = Result<Arc<Account>, String>> + use<> {
+        let registry = self.registry.clone();
+        let identity = self.identity.clone();
+        let socket = self.socket;
+        let outbox = self.outbox();
+        async move {
+            let user = identity.user.ok_or("Authenticated user required")?;
+            registry
+                .obtain_delegated(&user, &init, socket, identity.token, outbox, pair)
+                .await
+        }
+    }
+
     /// Called once after the upgrade, for `resumable=1` sockets.
     pub async fn open(&mut self) {
         if !self.identity.resumable {

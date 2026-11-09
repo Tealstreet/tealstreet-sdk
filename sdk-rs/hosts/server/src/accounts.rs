@@ -478,6 +478,9 @@ pub struct Registry {
     presence: Arc<Mutex<HashMap<String, Presence>>>,
     /// The last forced-reset repair of each (user, account, topic) in this process.
     repairs: Mutex<HashMap<(String, String, String), std::time::Instant>>,
+    /// Unit-test loopback routing; the normal construction and transport run unchanged.
+    #[cfg(test)]
+    construction_test_plans: HashMap<String, RoutingPlan>,
 }
 
 /// A chart's forced reset repairs its upstream stream at most this often per account and topic.
@@ -815,6 +818,8 @@ impl Registry {
             notices: Arc::default(),
             presence: Arc::default(),
             repairs: Mutex::default(),
+            #[cfg(test)]
+            construction_test_plans: HashMap::new(),
         }
     }
 
@@ -1292,6 +1297,12 @@ impl Registry {
             config.interest_observer = Some(self.public_topics.observer(&venue));
         }
         let (spawned, receive) = tokio::sync::oneshot::channel();
+        #[cfg(test)]
+        let plan = self
+            .construction_test_plans
+            .get(user)
+            .cloned()
+            .unwrap_or(plan);
         let authority = authority.clone();
         let placed = self.threads.place(move |placement| {
             if let Err(error) = authority.check() {
@@ -4090,3 +4101,7 @@ pub(crate) mod tests {
 #[cfg(test)]
 #[path = "delegated_accounts_tests.rs"]
 mod delegated_accounts_tests;
+
+#[cfg(test)]
+#[path = "delegated_construction_tests.rs"]
+mod delegated_construction_tests;
