@@ -1,8 +1,9 @@
 # CLAUDE.md - safe-cex Package
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
-Polymarket explicitly refuses hosted/delegated signing before construction:
-its private user WebSocket needs the L2 API secret, not a signature. See
+Bitrue and Polymarket remain OUT for public and private SDK accounts.
+Polymarket's native signing layer also refuses delegated
+custody: its private user WebSocket needs the L2 API secret, not a signature. See
 `sdk-rs/venues/polymarket/README.md`; callback payloads must never export it.
 SDK factories and workers have no TypeScript venue fallback; OUT names refuse
 with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
@@ -13,7 +14,6 @@ the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
-Bitrue (HMAC RemoteSigner and REST-only PayloadSigner; `sdk-rs/venues/bitrue/README.md`),
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 Coinbase/Spot (RemoteSigner JWT and REST-only PayloadSigner; `docs/plans/callers/coinbase-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),

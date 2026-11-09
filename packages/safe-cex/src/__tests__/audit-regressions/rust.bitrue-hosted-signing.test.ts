@@ -36,13 +36,14 @@ const request = (payload: string): SignRequest => ({
     algorithm: 'hmacSha256', payload: [{ kind: 'bytes', bytes: Array.from(new TextEncoder().encode(payload)) }] }],
 });
 
-it('admits Bitrue and Crypto.com signing through the shared declaration and keeps unsupported custody refused', () => {
+it('keeps Bitrue OUT despite its signing codec and admits Crypto.com through the shared declaration', () => {
   const remoteSigner = remote();
   expect(deriveRemoteSigningPolicy('bitrue')).toMatchObject({ enabled: true, payloadSupported: true, payloadRestOnly: true,
     protectedHeaders: ['X-CH-APIKEY', 'X-CH-SIGN', 'X-CH-TS', 'recvWindow', 'Content-Type', 'X-Referer'] });
   expect(deriveBridgeConstruction('bitrue', { key: '', secret: '' }).dispatchSigning).toBe(true);
-  expect(() => assertBetaAccount('bitrue', { key, secret: '', remoteSigner })).not.toThrow();
-  expect(() => assertBetaAccount('bitrue', { key, payloadSigner: async () => ({ signature: '' }) })).not.toThrow();
+  const refused = expect.objectContaining({ message: 'bitrue is unsupported in this build', kind: 'unsupported', outcome: 'notSent' });
+  expect(() => assertBetaAccount('bitrue', { key, secret: '', remoteSigner })).toThrowError(refused);
+  expect(() => assertBetaAccount('bitrue', { key, payloadSigner: async () => ({ signature: '' }) })).toThrowError(refused);
   expect(() => assertBetaAccount('cryptocom', { key, remoteSigner })).not.toThrow();
   expect(() => assertBetaAccount('polymarket', { key, remoteSigner })).toThrow();
   expect(remoteSigner.sign).not.toHaveBeenCalled();
@@ -93,22 +94,18 @@ it.each([{ secondary_key: 'read' }, { secondary_key: 'read', secondary_secret: '
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 
-it('constructs explicitly public Bitrue accounts without using secondary custody or opening a private socket', () => {
+it('refuses explicitly public Bitrue accounts before touching secondary custody or signer callbacks', () => {
   const remoteSigner = remote();
   const isAvailable = vi.spyOn(remoteSigner, 'isAvailable');
   const onAvailabilityChange = vi.spyOn(remoteSigner, 'onAvailabilityChange');
-  const exchange = new RustEngineExchange('bitrue', {
+  expect(() => new RustEngineExchange('bitrue', {
     key, secret: '', remoteSigner, secondary_key: 'read', publicDataOnly: true,
-  }, new DefaultStore());
-  try {
-    expect(exchange.isPublicDataOnly).toBe(true);
-    expect(exchange.privateWebsocket).toBeUndefined();
-    for (const field of ['key', 'secret', 'secondary_key', 'remoteSigner'])
-      expect(exchange.options).not.toHaveProperty(field);
-    expect(remoteSigner.sign).not.toHaveBeenCalled();
-    expect(isAvailable).not.toHaveBeenCalled();
-    expect(onAvailabilityChange).not.toHaveBeenCalled();
-  } finally { exchange.dispose(); }
+  }, new DefaultStore())).toThrowError(expect.objectContaining({
+    message: 'bitrue is unsupported in this build', kind: 'unsupported', outcome: 'notSent',
+  }));
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(isAvailable).not.toHaveBeenCalled();
+  expect(onAvailabilityChange).not.toHaveBeenCalled();
 });
 
 it('still refuses keyed private Bitrue accounts with the same secondary key before callbacks', () => {
@@ -116,7 +113,7 @@ it('still refuses keyed private Bitrue accounts with the same secondary key befo
   expect(() => new RustEngineExchange('bitrue', {
     key, secret: '', remoteSigner, secondary_key: 'read', publicDataOnly: false,
   }, new DefaultStore()))
-    .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('Bitrue secondary read keys') }));
+    .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent', message: 'bitrue is unsupported in this build' }));
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 
