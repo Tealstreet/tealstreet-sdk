@@ -153,6 +153,13 @@ explicit empty never inherits. Public mode bypasses only the primary requirement
 while secondary validation stays active. Shared publicMode intent takes precedence
 over legacy publicDataOnly, including null/omitted requested. This declaration does
 not enable signing for an unmigrated family.
+
+Native public-mode parity uses trusted signer setup's normalized credential
+presence, including per-family Rust whitespace rules. Below SDK admission,
+Coinbase/Spot and TxFlow private payload intent without a native provider refuses with
+`invalidInput/notSent`; an installed provider reaches `unsupported/notSent`.
+Retained WASM fixtures must distinguish these cases rather than equating callback
+intent with provider availability.
 Normalization and required-material validation occur before opaque identities are installed, and SDK cached
 public/private intent uses the same effective presence before raw options are
 stripped. Whitespace follows Rust Unicode White_Space (NEL removed, BOM kept),
