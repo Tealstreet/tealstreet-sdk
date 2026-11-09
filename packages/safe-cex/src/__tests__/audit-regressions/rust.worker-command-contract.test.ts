@@ -304,6 +304,7 @@ it.each(['exchange', 'emitter'] as const)(
   'drops a write when its ready worker bridge changes during the await through %s',
   async (subscriptions) => {
     const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+    (exchange as RustEngineExchange).setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
     const ownerA = vi.fn();
     const ownerB = vi.fn(({ requestId }: { requestId: string }) => {
       exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
@@ -329,6 +330,7 @@ it.each(['exchange', 'emitter'] as const)(
 
 it('drops a write when a ready bridge callback is reattached for another owner', async () => {
   const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  (exchange as RustEngineExchange).setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
   const ownerA = { writes: vi.fn() };
   const ownerB = { writes: vi.fn() };
   const bridge = function (this: typeof ownerA, { requestId }: { requestId: string }) {
@@ -347,23 +349,107 @@ it('drops a write when a ready bridge callback is reattached for another owner',
   expect(ownerB.writes).toHaveBeenCalledOnce();
 });
 
-it.each(['never-wired', 'detached'] as const)('drops unbound writes queued without an owner (%s)', async (phase) => {
+it.each(['never-wired', 'detached'] as const)('preserves master bootstrap without an owner hook (%s)', async (phase) => {
   vi.useFakeTimers();
   const exchange = account(true, { publicDataOnly: true, workerMirror: true });
-  const ownerA = vi.fn();
-  const ownerB = vi.fn(({ requestId }: { requestId: string }) => {
-    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
+  const previous = vi.fn();
+  const attached = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-A' });
   });
   if (phase === 'detached') {
-    exchange.on('callMethod', ownerA);
-    exchange.off('callMethod', ownerA);
+    exchange.on('callMethod', previous);
+    exchange.off('callMethod', previous);
   }
   const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
-  exchange.on('callMethod', ownerB);
+  exchange.on('callMethod', attached);
   await vi.advanceTimersByTimeAsync(25);
-  expect(await pending).toMatchObject({ command: 'setLeverage', outcome: 'notSent' });
-  expect(ownerA).not.toHaveBeenCalled();
-  expect(ownerB).not.toHaveBeenCalled();
+  expect(await pending).toBe('owner-A');
+  expect(previous).not.toHaveBeenCalled();
+  expect(attached).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    method: 'setLeverage', args: ['BTCUSDT', 3],
+  }));
+});
+
+it.each([false, true])('preserves ready bridge dispatch compatibility (hooked=%s)', async (hooked) => {
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
+  let owner = { ownerId: 'A', generation: 1 };
+  if (hooked) exchange.setWorkerOwner(() => owner);
+  const first = vi.fn();
+  const second = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
+  });
+  exchange.on('callMethod', first);
+  const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+  owner = { ownerId: 'B', generation: 2 };
+  exchange.off('callMethod', first);
+  exchange.on('callMethod', second);
+  if (hooked) {
+    expect(await pending).toMatchObject({ command: 'setLeverage', code: 'WORKER_STOPPED', outcome: 'notSent' });
+    expect(second).not.toHaveBeenCalled();
+  } else {
+    expect(await pending).toBe('owner-B');
+    expect(second).toHaveBeenCalledOnce();
+  }
+  expect(first).not.toHaveBeenCalled();
+});
+
+it('refuses unwired calls when the installed owner hook has no current owner', async () => {
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
+  exchange.setWorkerOwner(() => undefined);
+  await expect(exchange.setLeverage('BTCUSDT', 3)).rejects.toMatchObject({
+    command: 'setLeverage', code: 'WORKER_STOPPED', outcome: 'notSent',
+  });
+});
+
+it.each([
+  { hooked: false, transition: 'same-owner' }, { hooked: false, transition: 'ready-switch' },
+  { hooked: false, transition: 'unwired-switch' }, { hooked: true, transition: 'same-owner' },
+  { hooked: true, transition: 'ready-switch' }, { hooked: true, transition: 'unwired-switch' },
+])('fences capability-adopted keyed closed PnL (hooked=$hooked, $transition)', async ({ hooked, transition }) => {
+  vi.useFakeTimers();
+  const exchange = account(true, {
+    key: 'fixture', secret: 'fixture', publicDataOnly: false, workerMirror: true,
+  }) as RustEngineExchange;
+  let owner = { ownerId: 'A', generation: 1 };
+  if (hooked) exchange.setWorkerOwner(() => owner);
+  const first = vi.fn(({ requestId, method }: { requestId: string; method: string }) => {
+    exchange.emitter.emit('callMethod:done', {
+      requestId, success: true,
+      result: method === 'fetchEngineCapabilities' ? JSON.parse(engineCapabilities('bybit')) : ['owner-A-row'],
+    });
+  });
+  const second = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: ['owner-B-row'] });
+  });
+  exchange.on('callMethod', first);
+  await exchange.loadCapabilities();
+  expect(first).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ method: 'fetchEngineCapabilities' }));
+  first.mockClear();
+  if (transition === 'unwired-switch') exchange.off('callMethod', first);
+  const opts = { symbol: 'BTCUSDT', from: 1, to: 2, accountName: 'fixture-account' };
+  const pending = exchange.fetchClosedPnl(opts).catch((error: unknown) => error);
+  expect(first).not.toHaveBeenCalled();
+  if (transition !== 'same-owner') {
+    owner = { ownerId: 'B', generation: 2 };
+    if (transition === 'ready-switch') exchange.off('callMethod', first);
+    exchange.on('callMethod', second);
+  }
+  await vi.advanceTimersByTimeAsync(25);
+  if (hooked && transition !== 'same-owner') {
+    const failure = await pending;
+    expect(failure).toMatchObject({ code: 'WORKER_STOPPED', command: 'fetchClosedPnl' });
+    expect(failure).not.toHaveProperty('outcome');
+    expect(first).not.toHaveBeenCalled();
+    expect(second).not.toHaveBeenCalled();
+    await expect(exchange.fetchClosedPnl(opts)).resolves.toEqual(['owner-B-row']);
+    expect(second).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ method: 'fetchClosedPnl', args: [opts] }));
+  } else {
+    expect(await pending).toEqual([transition === 'same-owner' ? 'owner-A-row' : 'owner-B-row']);
+    expect(transition === 'same-owner' ? first : second).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ method: 'fetchClosedPnl', args: [opts] }),
+    );
+    expect(transition === 'same-owner' ? second : first).not.toHaveBeenCalled();
+  }
 });
 
 it.each(['same-owner', 'other-owner', 'new-generation', 'logout', 'new-provider'] as const)(
@@ -437,7 +523,10 @@ it('drops a retired bound call at the next poll before the replacement bridge ex
   expect(current).toHaveBeenCalledOnce();
 });
 
-it.each([false, true])('keeps the admitted owner through initial placement settling (keyed=%s)', async (keyed) => {
+it.each([
+  { keyed: false, hooked: false }, { keyed: true, hooked: false },
+  { keyed: false, hooked: true }, { keyed: true, hooked: true },
+])('keeps placement startup compatibility (keyed=$keyed, hooked=$hooked)', async ({ keyed, hooked }) => {
   for (const switchOwner of [false, true]) {
     let rejectStartup!: (error: Error) => void;
     setWasmEngineLoader(() => new Promise<WasmEngineModule>((_resolve, reject) => { rejectStartup = reject; }));
@@ -445,6 +534,7 @@ it.each([false, true])('keeps the admitted owner through initial placement settl
       key: keyed ? 'fixture' : '', secret: keyed ? 'fixture' : '',
       publicDataOnly: !keyed, workerMirror: true,
     });
+    if (hooked) (exchange as RustEngineExchange).setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
     const ownerA = vi.fn(({ requestId }: { requestId: string }) => {
       exchange.emitter.emit('callMethod:done', { requestId, success: true, result: ['owner-A-order'] });
     });
@@ -462,7 +552,7 @@ it.each([false, true])('keeps the admitted owner through initial placement settl
       exchange.on('callMethod', ownerB);
     }
     if (keyed) rejectStartup(new Error('controlled page-engine fallback'));
-    if (switchOwner) {
+    if (switchOwner && hooked) {
       expect(await pending).toMatchObject({ command: 'placeOrders', outcome: 'notSent', clientOrderIds: ['admitted-A'] });
       expect(ownerA).not.toHaveBeenCalled();
       expect(ownerB).not.toHaveBeenCalled();
@@ -471,16 +561,18 @@ it.each([false, true])('keeps the admitted owner through initial placement settl
       }])).resolves.toEqual(['owner-B-order']);
       expect(ownerB).toHaveBeenCalledOnce();
     } else {
-      expect(await pending).toEqual(['owner-A-order']);
-      expect(ownerA).toHaveBeenCalledOnce();
+      expect(await pending).toEqual([switchOwner ? 'owner-B-order' : 'owner-A-order']);
+      expect(switchOwner ? ownerB : ownerA).toHaveBeenCalledOnce();
+      expect(switchOwner ? ownerA : ownerB).not.toHaveBeenCalled();
     }
     exchange.dispose();
   }
 });
 
-it('keeps the admitted owner through a source order refresh', async () => {
+it.each([false, true])('keeps source order refresh compatibility (hooked=%s)', async (hooked) => {
   for (const switchOwner of [false, true]) {
     const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
+    if (hooked) exchange.setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
     const ownerA = vi.fn(({ requestId }: { requestId: string }) => {
       exchange.emitter.emit('callMethod:done', { requestId, success: true, result: undefined });
     });
@@ -495,12 +587,17 @@ it('keeps the admitted owner through a source order refresh', async () => {
       exchange.off('callMethod', ownerA);
       exchange.on('callMethod', ownerB);
     }
-    expect(await pending).toBe(switchOwner ? 'dropped' : 'dispatched');
-    expect(ownerB).not.toHaveBeenCalled();
-    if (switchOwner) expect(ownerA).not.toHaveBeenCalled();
-    else expect(ownerA).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      method: 'refreshAccountOrders', args,
-    }));
+    if (switchOwner && hooked) {
+      expect(await pending).toBe('dropped');
+      expect(ownerA).not.toHaveBeenCalled();
+      expect(ownerB).not.toHaveBeenCalled();
+    } else {
+      expect(await pending).toBe('dispatched');
+      expect(switchOwner ? ownerB : ownerA).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        method: 'refreshAccountOrders', args,
+      }));
+      expect(switchOwner ? ownerA : ownerB).not.toHaveBeenCalled();
+    }
   }
 });
 

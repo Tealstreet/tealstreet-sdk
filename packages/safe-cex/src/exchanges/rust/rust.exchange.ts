@@ -517,7 +517,7 @@ const VALIDATE_ACCOUNT_TIMEOUT_MS = 45_000;
 export class RustEngineExchange extends BaseExchange {
   private workerOwnerSource?: () => { ownerId: string; generation: number } | undefined;
 
-  /** Hosts must bind their current login generation before queuing calls on an unwired mirror. */
+  /** Optional owner fencing; hosts without a binding retain legacy bridge dispatch behavior. */
   setWorkerOwner = (source: () => { ownerId: string; generation: number } | undefined): void => {
     if (typeof source !== 'function') throw new TypeError('Worker owner source must be a function');
     this.workerOwnerSource = source;
@@ -1317,6 +1317,16 @@ export class RustEngineExchange extends BaseExchange {
   /** Data source: send orders, for these symbols or the account, from a read sent after this call. */
   refreshAccountOrders = async (symbols?: string[], cancelChecks?: { id: string; symbol: string }[]): Promise<void> => {
     if (this.routesToWorker) {
+      if (!this.workerOwnerSource) {
+        // Preserve the legacy refresh's disposal no-op as well as its bridge wait.
+        await this.untilWorkerBridge();
+        if (this.isDisposed) return;
+        await (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(
+          'refreshAccountOrders',
+          ...(cancelChecks?.length ? [symbols, cancelChecks] : symbols !== undefined ? [symbols] : []),
+        );
+        return;
+      }
       try {
         await this.callWorker('refreshAccountOrders',
           ...(cancelChecks?.length ? [symbols, cancelChecks] : symbols !== undefined ? [symbols] : []));
@@ -1845,10 +1855,11 @@ export class RustEngineExchange extends BaseExchange {
     }), { code: 'WORKER_STOPPED', command: method, ...(clientOrderIds ? { clientOrderIds } : {}) });
   };
 
-  private captureWorkerAdmission = (): ((method: string, args: unknown[]) => void) => {
+  private captureWorkerAdmission = (): ((method: string, args: unknown[]) => void) | undefined => {
     const source = this.workerOwnerSource;
+    if (!source) return undefined;
     const readOwner = () => {
-      try { return source?.(); } catch { return undefined; }
+      try { return source(); } catch { return undefined; }
     };
     const owner = readOwner();
     const ownerId = owner?.ownerId;
@@ -1862,21 +1873,21 @@ export class RustEngineExchange extends BaseExchange {
       if (method === 'fetchOHLCV') return;
       const current = readOwner();
       if (this.isDisposed || source !== this.workerOwnerSource || (bridgeIsCurrent && !bridgeIsCurrent()) ||
-        (source ? !bound || current?.ownerId !== ownerId || current?.generation !== generation : !bridgeIsCurrent)) {
+        !bound || current?.ownerId !== ownerId || current?.generation !== generation) {
         throw this.workerOwnerChanged(method, args);
       }
     };
   };
 
   private callWorkerForOwner = async (
-    admitted: (method: string, args: unknown[]) => void, method: string, ...args: unknown[]
+    admitted: ((method: string, args: unknown[]) => void) | undefined, method: string, ...args: unknown[]
   ): Promise<unknown> => {
     const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
     timing?.mark('called');
-    admitted(method, args);
-    const bridgeIsCurrent = await this.untilWorkerBridge(() => admitted(method, args));
-    admitted(method, args);
-    if (this.isDisposed || !bridgeIsCurrent()) {
+    admitted?.(method, args);
+    const bridgeIsCurrent = await this.untilWorkerBridge(admitted && (() => admitted(method, args)));
+    admitted?.(method, args);
+    if (admitted && (this.isDisposed || !bridgeIsCurrent())) {
       throw this.workerOwnerChanged(method, args);
     }
     const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
@@ -1994,7 +2005,7 @@ export class RustEngineExchange extends BaseExchange {
         if (!this.isWorkerMirror || !PAGE_ENGINE_PLACEMENTS.has(method) || this.frameFedSettled) return viaWorker();
         return this.untilFrameFedSettled(method).then(
           () => {
-            admitted(method, args);
+            admitted?.(method, args);
             return this.frameFed ? local(...args) : viaWorker();
           },
           (error: unknown) => {
@@ -3665,9 +3676,7 @@ export class RustEngineExchange extends BaseExchange {
   /** Reported rows only, newest close first; failures propagate so refreshes keep their last result. */
   private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
     if (this.routesToWorker) {
-      await this.untilWorkerBridge();
-      const { callMethodInWorker }: BaseExchange = this;
-      return callMethodInWorker.bind(this)('fetchClosedPnl', opts);
+      return (await this.callWorker('fetchClosedPnl', opts)) as ClosedPnlEntry[];
     }
     if (this.isPublicDataOnly) return [];
     const ready = this.capabilitiesFor('fetchClosedPnl');
