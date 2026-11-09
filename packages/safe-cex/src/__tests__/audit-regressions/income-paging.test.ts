@@ -1,3 +1,4 @@
+import type { IncomePageFetcher } from '../../exchanges/income-paging';
 import type { IncomeRecord } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -39,7 +40,7 @@ const fakeVenue = (opts: { total: number; newest: number; order: 'newest-first' 
   const all = Array.from({ length: opts.total }, (_, i) => record(opts.newest - i * 60_000, `id-${i}`));
   const calls: Array<{ startTime: number; endTime: number; limit: number }> = [];
 
-  const fetchPage = vi.fn(async ({ startTime, endTime, limit }: any) => {
+  const fetchPage = vi.fn(async ({ startTime, endTime, limit }: Parameters<IncomePageFetcher>[0]) => {
     calls.push({ startTime, endTime, limit });
     const inWindow = all.filter((r) => r.timestamp >= startTime && r.timestamp <= endTime);
     const sorted =
@@ -110,7 +111,7 @@ describe('paginateIncomeRange', () => {
     const newest = 1_700_000_000_000;
     // 400 records a day apart = ~400 days, four 100-day chunks.
     const all = Array.from({ length: 400 }, (_, i) => record(newest - i * DAY, `id-${i}`));
-    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: any) =>
+    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: Parameters<IncomePageFetcher>[0]) =>
       all
         .filter((r) => r.timestamp >= startTime && r.timestamp <= endTime)
         .sort((a, b) => b.timestamp - a.timestamp)
@@ -133,7 +134,7 @@ describe('paginateIncomeRange', () => {
     // more than once. Without identity dedupe the ledger would double-count it.
     const t = 1_700_000_000_000;
     const all = [record(t, 'a'), record(t - 1000, 'b'), record(t - 2000, 'c')];
-    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: any) =>
+    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: Parameters<IncomePageFetcher>[0]) =>
       all
         .filter((r) => r.timestamp >= startTime && r.timestamp <= endTime)
         .sort((a, b) => b.timestamp - a.timestamp)
@@ -158,7 +159,7 @@ describe('paginateIncomeRange', () => {
     // one stuck millisecond does not cost the rest of the window.
     const t = 1_700_000_000_000;
     const all = [record(t, 'a'), record(t, 'b'), record(t, 'c'), record(t - 1000, 'd')];
-    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: any) =>
+    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: Parameters<IncomePageFetcher>[0]) =>
       all
         .filter((r) => r.timestamp >= startTime && r.timestamp <= endTime)
         .sort((a, b) => b.timestamp - a.timestamp)
@@ -183,7 +184,7 @@ describe('paginateIncomeRange', () => {
     // completeness — the point is that it says so, because a partial ledger reconciles fine.
     const t = 1_700_000_000_000;
     const all = Array.from({ length: 500 }, (_, i) => record(t - i * 1000, `id-${i}`));
-    const fetchPage = vi.fn(async ({ limit }: any) => all.slice(0, limit));
+    const fetchPage = vi.fn(async ({ limit }: Parameters<IncomePageFetcher>[0]) => all.slice(0, limit));
 
     const result = await paginateIncomeRange(fetchPage, {
       startTime: t - 400 * 1000,
@@ -239,7 +240,7 @@ describe('paginateIncomeRange', () => {
       { ...record(t, ''), income: 1 },
       { ...record(t, ''), income: 2 },
     ];
-    const fetchPage = vi.fn(async ({ endTime }: any) => (endTime >= t ? all : []));
+    const fetchPage = vi.fn(async ({ endTime }: Parameters<IncomePageFetcher>[0]) => (endTime >= t ? all : []));
 
     const result = await paginateIncomeRange(fetchPage, {
       startTime: t - DAY,
@@ -270,7 +271,7 @@ describe('paginateIncomeRange', () => {
     // halves the requests without reintroducing the assumption that broke the first fix.
     const t = 1_700_000_000_000;
     const all = Array.from({ length: 30 }, (_, i) => record(t - i * 60_000, `id-${i}`));
-    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: any) =>
+    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: Parameters<IncomePageFetcher>[0]) =>
       all
         .filter((r) => r.timestamp >= startTime && r.timestamp <= endTime)
         .sort((a, b) => a.timestamp - b.timestamp)
@@ -296,7 +297,7 @@ describe('paginateIncomeRange', () => {
     // confidently wrong costs rows.
     const t = 1_700_000_000_000;
     const all = [record(t, 'a'), record(t - 5000, 'b'), record(t - 2000, 'c'), record(t - 9000, 'd')];
-    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: any) =>
+    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: Parameters<IncomePageFetcher>[0]) =>
       // Deliberately unsorted.
       all.filter((r) => r.timestamp >= startTime && r.timestamp <= endTime).slice(0, limit),
     );
@@ -349,7 +350,7 @@ describe('paginateIncomeRange — a failed page is not an empty one', () => {
     const t = 1_700_000_000_000;
     const all = Array.from({ length: 40 }, (_, i) => record(t - i * 60_000, `id-${i}`));
     let calls = 0;
-    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: any) => {
+    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: Parameters<IncomePageFetcher>[0]) => {
       calls += 1;
       if (calls === 2) throw new Error('429 Too many requests');
       return all
@@ -375,7 +376,7 @@ describe('paginateIncomeRange — a failed page is not an empty one', () => {
     const t = 1_700_000_000_000;
     const all = Array.from({ length: 40 }, (_, i) => record(t - i * 60_000, `id-${i}`));
     let calls = 0;
-    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: any) => {
+    const fetchPage = vi.fn(async ({ startTime, endTime, limit }: Parameters<IncomePageFetcher>[0]) => {
       calls += 1;
       if (calls > 2) throw new Error('429');
       return all
@@ -407,7 +408,7 @@ describe('paginateIncomeRange — records sharing a ledger row', () => {
       { symbol: 'TRXUSDT', incomeType: 'close_long', income: -0.00084, asset: 'USDT', timestamp: t, tranId: 'bill-1', category: 'realized_pnl' },
       { symbol: 'TRXUSDT', incomeType: 'close_long_fee', income: -0.00595, asset: 'USDT', timestamp: t, tranId: 'bill-1', category: 'commission' },
     ];
-    const fetchPage = vi.fn(async ({ endTime }: any) => (endTime >= t ? pair : []));
+    const fetchPage = vi.fn(async ({ endTime }: Parameters<IncomePageFetcher>[0]) => (endTime >= t ? pair : []));
 
     const result = await paginateIncomeRange(fetchPage, {
       startTime: t - DAY,
@@ -424,7 +425,7 @@ describe('paginateIncomeRange — records sharing a ledger row', () => {
     // The property that made tranId attractive must survive the fix.
     const t = 1_700_000_000_000;
     const one: IncomeRecord = { symbol: 'TRXUSDT', incomeType: 'close_long', income: -1, asset: 'USDT', timestamp: t, tranId: 'bill-9', category: 'realized_pnl' };
-    const fetchPage = vi.fn(async ({ endTime }: any) => (endTime >= t ? [one, { ...one }] : []));
+    const fetchPage = vi.fn(async ({ endTime }: Parameters<IncomePageFetcher>[0]) => (endTime >= t ? [one, { ...one }] : []));
 
     const result = await paginateIncomeRange(fetchPage, {
       startTime: t - DAY,

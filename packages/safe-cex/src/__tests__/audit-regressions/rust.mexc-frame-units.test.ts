@@ -19,14 +19,15 @@ const frame = (units = 0) => ({
   }),
   orders: () => ({ count: 1, id: () => 'one', clientOrderId: () => undefined, parentId: () => undefined,
     market: Uint32Array.of(0), enums: Uint32Array.of(0),
+    ...(units === 1 && { remainingNative: Float64Array.of(40), filledInPlacementUnits: Float64Array.of(20) }),
     ...numbers({ price: 60000, amount: 0.006, filled: 0.002, remaining: 0.004, lastUpdate: 1, takeProfit: NaN, stopLoss: NaN }),
   }),
-  tickers: () => undefined, tickerDeltas: () => undefined, positions: () => undefined,
+  tickers: () => undefined, tickerDeltas: () => undefined, tickerObservations: () => undefined, positions: () => undefined,
   balance: () => undefined, status: () => undefined, settings: () => undefined,
 }) as unknown as Frame;
 
 describe('native placement quantity bridge', () => {
-  it('reconstructs MEXC chaser quantities from base-sized frame columns', () => {
+  it('preserves native MEXC chaser quantities alongside base-sized frame columns', () => {
     const store = new DefaultStore();
     new FrameApplier(store).apply(frame(1));
     expect(store.orders[0].extra).toMatchObject({ remainingNative: 40, filledInPlacementUnits: 20 });
@@ -35,7 +36,8 @@ describe('native placement quantity bridge', () => {
 
   it('preserves exact MEXC native leaves instead of reconstructing a fractional contract', () => {
     const value = frame(1);
-    const order = value.orders()!;
+    const order = value.orders();
+    if (!order) throw new Error('Expected Order fixture');
     value.orders = () => ({
       ...order,
       amount: Float64Array.of(4 * 0.0001),

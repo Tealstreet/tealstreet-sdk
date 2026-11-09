@@ -378,3 +378,94 @@ describe('SharedWorker session ownership', () => {
     expect(fixture.workers[1].handlePayload).toHaveBeenCalledWith(command);
   });
 });
+
+function deferredPublication(ctx: Context, message: unknown) {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  return { release, done: held.then(() => ctx.postMessage(message)) };
+}
+
+describe.each(['account', 'anonymous'] as const)('SharedWorker %s publication ownership', (mode) => {
+  const ownerA = (instanceId = 'A') => ({ ...init('A', mode === 'account' ? 'A' : ''), instanceId });
+  const ownerB = () => {
+    const payload = init('B', mode === 'account' ? 'B' : '');
+    payload.data.exchangeName = 'bybit';
+    return payload;
+  };
+
+  it('preserves deferred delivery to every port still attached to the same owner', async () => {
+    const { default: start } = await import('./store.webworker');
+    const p = port(start);
+    const q = port(start);
+    await p.send(ownerA());
+    await q.send(ownerA());
+    const message = { op: 'store', data: { owner: 'A', publication: 'deferred' } };
+    const pending = deferredPublication(fixture.workers[0].context, message);
+    pending.release();
+    await pending.done;
+    expect(p.context.postMessage).toHaveBeenCalledWith(message);
+    expect(q.context.postMessage).toHaveBeenCalledWith(message);
+  });
+
+  it('keeps a surviving A worker routed to Q after its creating port P rebinds to B', async () => {
+    const { default: start } = await import('./store.webworker');
+    const p = port(start);
+    const q = port(start);
+    await p.send(ownerA());
+    await q.send(ownerA());
+    const message = { op: 'store', data: { owner: 'A', publication: 'deferred' } };
+    const pending = deferredPublication(fixture.workers[0].context, message);
+    await p.send({ op: 'dispose', instanceId: 'A' });
+    await p.send(ownerB());
+    pending.release();
+    await pending.done;
+    expect(p.context.postMessage).not.toHaveBeenCalledWith(message);
+    expect(q.context.postMessage).toHaveBeenCalledWith(message);
+    const current = { op: 'store', data: { owner: 'B' } };
+    fixture.workers[1].context.postMessage(current);
+    expect(p.context.postMessage).toHaveBeenCalledWith(current);
+    expect(q.context.postMessage).not.toHaveBeenCalledWith(current);
+  });
+
+  it('drops deferred output after replacement under the same owner key', async () => {
+    const { default: start } = await import('./store.webworker');
+    const p = port(start);
+    await p.send(ownerA());
+    const stale = { op: 'store', data: { generation: 'old' } };
+    const pending = deferredPublication(fixture.workers[0].context, stale);
+    await p.send({ op: 'dispose', instanceId: 'A' });
+    await p.send(ownerA('fresh-A'));
+    pending.release();
+    await pending.done;
+    expect(p.context.postMessage).not.toHaveBeenCalledWith(stale);
+    const current = { op: 'store', data: { generation: 'current' } };
+    fixture.workers[1].context.postMessage(current);
+    expect(p.context.postMessage).toHaveBeenCalledWith(current);
+  });
+
+  it('never targets another owner when a subscription id is reused there during the deferral', async () => {
+    const { default: start } = await import('./store.webworker');
+    const p = port(start);
+    const q = port(start);
+    await p.send(ownerA());
+    await q.send(ownerA());
+    const subscription: StoreWorkerPayload = {
+      op: 'subscribeOrderBook',
+      instanceId: 'A',
+      data: { subId: 'reused', symbol: 'BTCUSDT' },
+    };
+    await q.send(subscription);
+    const current = { op: 'listenOrderBook', data: { subId: 'reused', owner: 'A', update: 1 } };
+    fixture.workers[0].context.postMessage(current);
+    expect(q.context.postMessage).toHaveBeenCalledWith(current);
+    expect(p.context.postMessage).not.toHaveBeenCalledWith(current);
+    const stale = { op: 'listenOrderBook', data: { subId: 'reused', owner: 'A', update: 2 } };
+    const pending = deferredPublication(fixture.workers[0].context, stale);
+    await p.send({ op: 'dispose', instanceId: 'A' });
+    await p.send(ownerB());
+    await p.send({ ...subscription, instanceId: 'B' });
+    pending.release();
+    await pending.done;
+    expect(p.context.postMessage).not.toHaveBeenCalledWith(stale);
+  });
+});
