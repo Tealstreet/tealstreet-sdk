@@ -232,7 +232,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_908_736,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
   bitunix: 1_927_168,
-  blofin: 2_067_456,
+  // #3343 signature fix at e546df5771e4db5e6eba514385d3e9e19718d694: web/node 2,062,295 B.
+  // SAFE_CEX_WASM_OPT=required build.sh --venue blofin; Rust 1.99.0 / wasm-bindgen 0.2.129 / Binaryen 132.
+  // Current measured size + 10 KiB, rounded up to KiB; original provenance floors remain pinned.
+  blofin: 2_072_576,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
   bybit: 2_326_528,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
