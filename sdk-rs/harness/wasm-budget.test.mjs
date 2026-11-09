@@ -1891,3 +1891,14 @@ test('#3302 pinned master merge 80d25442f36f retains measured asterdex headroom'
   assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
+
+test('#3302 pinned master merge 359c4b3e3c4d retains measured asterdex headroom', () => {
+  const measured = 2_231_732;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.equal(minimumCap, 2_242_560);
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
