@@ -10,8 +10,13 @@ const crate = path.resolve(__dirname, '..');
 const baselinePath = path.resolve(crate, '../../packages/safe-cex/src/types.ts');
 const models = ["OrderRiskProfile", "CoinBalance", "Balance", "Ticker", "PublicTrade", "OptionChainQuery", "OptionChainRow", "AccountGreeks", "Candle", "Execution", "OrderBookOrders", "OrderBook", "PlaceOrderOpts", "HistoricalTrade", "HistoricalTradeOptions", "OHLCVOptions", "OHLCVSOptions", "ExecutionsOptions", "OrderHistoryOptions", "HistoricalOrder", "StoreDataLoaded", "StoreOptions", "FetchedLeverage", "DisplayedMargin", "IncomeHistoryOptions", "Order", "Position", "Market", "ExchangeAccountConfig", "ExchangeOptions", "ValidateAccountResult", "UpdateOrderOpts", "ExchangeAccount", "ClosedPnlEntry", "IncomeRecord", "StoreUpdateIds", "PublicExchangeOptions"];
 const parse = (file) => ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-const baseline = parse(baselinePath);
-const boundaries = ['RemoteSigner', 'PayloadSigner', 'TransportProvider', 'PublicDataSource'];
+const facade = parse(baselinePath);
+const generated = path.resolve(crate, '../../packages/safe-cex/src/generated');
+const generatedDeclarations = fs.readdirSync(generated).filter(name => name.endsWith('.ts'))
+  .flatMap(name => parse(path.join(generated, name)).statements)
+  .filter(node => ts.isTypeAliasDeclaration(node) || ts.isEnumDeclaration(node) || ts.isInterfaceDeclaration(node));
+const baseline = ts.factory.updateSourceFile(facade, [...facade.statements, ...generatedDeclarations]);
+const boundaries = ['RemoteSigner', 'PayloadSigner', 'TransportProvider', 'PublicDataSource', 'LocalSignerMetadata', 'RustPublicFeedPolicy'];
 const { declarations, enums } = dependencies(baseline, ["OrderRiskProfile", "CoinBalance", "Balance", "Ticker", "PublicTrade", "OptionChainQuery", "OptionChainRow", "AccountGreeks", "Candle", "Execution", "OrderBookOrders", "OrderBook", "PlaceOrderOpts", "HistoricalTrade", "HistoricalTradeOptions", "OHLCVOptions", "OHLCVSOptions", "ExecutionsOptions", "OrderHistoryOptions", "HistoricalOrder", "StoreDataLoaded", "StoreOptions", "FetchedLeverage", "DisplayedMargin", "IncomeHistoryOptions", "Order", "Position", "Market", "ExchangeAccountConfig", "ExchangeOptions", "ValidateAccountResult", "UpdateOrderOpts", "ExchangeAccount", "ClosedPnlEntry", "IncomeRecord", "StoreUpdateIds", "PublicExchangeOptions", "ExchangeName", "DataProvenance", "IncomeCategory", "RequestOutcome", "RequestOutcomeCounts", "MessageHandlerStatsType", "SecondsTimeframe", "ExtendedTimeframe", "AnyTimeframe"], boundaries);
 const index = new Map(declarations.map(d => [d.name.text, d]));
 const rawFiles = fs.readdirSync(path.join(crate, 'bindings', 'raw')).filter(f => f.endsWith('.ts')).sort();

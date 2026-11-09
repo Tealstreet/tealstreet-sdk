@@ -158,6 +158,7 @@ export const createStandaloneHostBindings = (
       const resolvedSymbol = symbol ?? session.currentSymbol;
       try {
         const result = await executeCommand(command, resolvedSymbol, account, exchange, platform);
+        checkSession();
         if (!result.handled) {
           // CLI-specific and documented in `apps/cli/CLAUDE.md`: an unhandled
           // verb is named back rather than reported as a generic failure.

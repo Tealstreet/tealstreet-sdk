@@ -13,9 +13,9 @@ import {
   takePerfFixture,
 } from './perfFixture';
 import { StoreWorkerPayload, WorkerConfig } from './StoreWorkerPayload';
-import { isWorkerMessage, isWorkerRecord } from './workerMessage';
 import { TelegramWorker } from './TelgramWorker';
 import { serializeWorkerErrorForSentry } from './workerErrorSerialization';
+import { isWorkerMessage, isWorkerRecord } from './workerMessage';
 
 export const anonymousExchangeWorkers: { [key: string]: ExchangeWorker } = {};
 export const exchangeWorkers: { [key: string]: ExchangeWorker } = {};
@@ -150,7 +150,8 @@ function broadcastWithThrottle(portKey: string, msg: unknown, subId?: string): v
 
   if (subId) {
     // If subId is present, use portsBySubId to find relevant port
-    validPorts = portsBySubId[subId] ? [portsBySubId[subId]] : validPorts;
+    const target = portsBySubId[subId];
+    validPorts = target ? validPorts.filter((port) => port === target) : validPorts;
   }
 
   for (const port of validPorts) {
@@ -260,13 +261,18 @@ const start = (ctx: Worker, shared = false) => {
         }
       }
       // Wrap postMessage to broadcast to all ports with per-port throttling
+      const workerPortKey = portKey;
+      const workerRegistry = accountName ? exchangeWorkers : anonymousExchangeWorkers;
+      const workerKey = accountName || exchangeName;
       ctxWrapper = new Proxy(ctx, {
         get(target, prop) {
           if (prop === 'postMessage') {
             return function (msg: any) {
+              // The creating port can rebind while this worker survives on another port.
+              if (workerRegistry[workerKey] !== exchangeWorker) return;
               recordOutboundFrame(msg);
               const subId = msg?.data?.subId;
-              broadcastWithThrottle(portKey, msg, subId);
+              broadcastWithThrottle(workerPortKey, msg, subId);
             };
           }
           return Reflect.get(target, prop);

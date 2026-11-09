@@ -143,7 +143,7 @@ fn domain_native_field_identity_supplement() {
                 v.leverage,
                 v.unrealized_pnl,
                 v.contracts,
-                v.liquidation_price,
+                v.liquidation_price.unwrap(),
                 v.last_update.unwrap(),
             ],
             &[1., 2., 3., 4., 5., 6., 7.],

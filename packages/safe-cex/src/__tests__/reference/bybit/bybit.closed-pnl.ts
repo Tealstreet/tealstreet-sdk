@@ -1,6 +1,6 @@
-import type { ClosedPnlEntry } from '../../types';
+import type { ClosedPnlEntry } from '../../../types';
 
-import { PositionSide } from '../../types';
+import { PositionSide } from '../../../types';
 
 /**
  * Bybit `/v5/position/closed-pnl` row -> `ClosedPnlEntry`.
@@ -41,7 +41,7 @@ const toTimestamp = (value: unknown) => {
 };
 
 export const mapBybitClosedPnl = (
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   accountName: string,
   /**
    * Inverse contracts are quoted in USD and settled in coin, so the two size fields swap
