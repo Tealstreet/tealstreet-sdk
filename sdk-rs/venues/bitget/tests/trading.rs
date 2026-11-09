@@ -294,7 +294,7 @@ fn uta_lot_allocation_matches_the_six_ts_audit_sequences() {
 fn assert_lot_allocation(unified: bool) {
     let mut mismatches = vec![];
     for (amount, max, step, expected, expected_sum) in [
-        // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
         (
             26.0,
             5.0,
@@ -302,9 +302,9 @@ fn assert_lot_allocation(unified: bool) {
             vec!["4", "4", "4", "4", "4", "4", "1"],
             25.0,
         ),
-        // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
         (11.0, 5.0, 1.0, vec!["3", "3", "3", "1"], 10.0),
-        // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
         (12.0, 5.0, 1.0, vec!["3", "3", "3", "2"], 11.0),
         (10.0, 5.0, 1.0, vec!["5", "5"], 10.0),
         (7.0, 3.0, 0.5, vec!["2", "2", "2", "1"], 7.0),

@@ -303,10 +303,16 @@ function migrate(subject: string | null) {
 }
 migrate(owner);
 
-export function assertStorageSession(expected = context.getStore() ?? epoch): void {
-  if (expected !== epoch) throw new Error('CLI login changed; previous-session work was cancelled.');
+export class StorageSessionCancelledError extends Error {
+  constructor(message = 'CLI login changed; previous-session work was cancelled.') {
+    super(message);
+    this.name = 'StorageSessionCancelledError';
+  }
 }
-export function isStorageSessionCurrent(expected: number): boolean {
+export function assertStorageSession(expected = context.getStore() ?? epoch): void {
+  if (expected !== epoch) throw new StorageSessionCancelledError();
+}
+export function isStorageSessionCurrent(expected = context.getStore() ?? epoch): boolean {
   return expected === epoch && (context.getStore() === undefined || context.getStore() === epoch);
 }
 export function getStorageEpoch(): number {
@@ -339,6 +345,25 @@ export function onStorageOwnerChange(listener: () => void): () => void {
 }
 export function runInStorageSession<T>(fn: () => T): T {
   return context.run(getStorageEpoch(), fn);
+}
+/** Bind callbacks, including ones invoked outside ALS, to their creating login. */
+export function captureStorageSession() {
+  const capturedEpoch = getStorageEpoch();
+  const capturedOwner = getStorageOwner();
+  const assertCurrent = () => {
+    assertStorageSession(capturedEpoch);
+    if (owner !== capturedOwner) throw new StorageSessionCancelledError();
+  };
+  return {
+    owner: capturedOwner,
+    epoch: capturedEpoch,
+    isCurrent: () => owner === capturedOwner && isStorageSessionCurrent(capturedEpoch),
+    assertCurrent,
+    run<T>(fn: () => T): T {
+      assertCurrent();
+      return context.run(capturedEpoch, fn);
+    },
+  };
 }
 export function selectStorageOwner(subject: string | null): void {
   assertStorageSession();
@@ -376,7 +401,7 @@ export function legacyDataRequiresReentry(): boolean {
   );
 }
 
-export class QueuedSessionCancelledError extends Error {
+export class QueuedSessionCancelledError extends StorageSessionCancelledError {
   constructor() {
     super('Cancelled queued command because the CLI login changed.');
     this.name = 'QueuedSessionCancelledError';

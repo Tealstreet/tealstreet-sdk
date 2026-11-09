@@ -60,6 +60,9 @@ ship CLI source; it downloads the matching binary from
 
 Config and runtime state are isolated by signed-in user and profile under
 `~/.tealstreet/profiles/<profile hash>/users/<user hash>/` (`~/.disrupt/` for Disrupt).
+Deferred commands, background writes and output stay bound to their starting login;
+switching users cancels their remaining work and reloads the footer for the new user.
+Cross-trade startup also cancels remaining account boots and disposes old connections.
 Login changes clear live exchanges and approvals; unknown-owner legacy files
 require re-entry. Signed-out local-only state persists separately and is never
 imported into an authenticated profile. See

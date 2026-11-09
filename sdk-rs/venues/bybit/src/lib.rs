@@ -3496,6 +3496,12 @@ impl Venue for BybitLinear {
         match action {
             // The engine binds the command when the refresh is admitted.
             safe_cex_engine::VenueAction::RefreshMarkets => self.refresh_markets(cx),
+            safe_cex_engine::VenueAction::FetchClosedPnl {
+                symbol,
+                from_ms,
+                to_ms,
+                account,
+            } => self.start_closed_pnl(cx, command, symbol, from_ms, to_ms, account),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,
