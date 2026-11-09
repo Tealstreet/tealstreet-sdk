@@ -1,3 +1,5 @@
+import type { TwapWorkerContext } from '../twap/TwapOwner';
+
 import { Exchange } from '../../exchanges/base';
 import { ExchangeName } from '../../types';
 import { AppSettingsWorkerType } from '../AppSettingsWorkerType';
@@ -27,7 +29,7 @@ export abstract class BaseHandler {
   protected _accountName: string;
   protected _exchangeName: ExchangeName;
   protected _exchange: Exchange;
-  protected _ctx: Worker;
+  protected _ctx: TwapWorkerContext;
   protected _settings: AppSettingsWorkerType;
   protected _metadata: ExchangeMetadataWorkerType;
 
@@ -45,7 +47,7 @@ export abstract class BaseHandler {
     accountName: string,
     exchangeName: ExchangeName,
     exchange: Exchange,
-    ctx: Worker,
+    ctx: TwapWorkerContext,
     settings: AppSettingsWorkerType,
     metadata: ExchangeMetadataWorkerType,
   ) {

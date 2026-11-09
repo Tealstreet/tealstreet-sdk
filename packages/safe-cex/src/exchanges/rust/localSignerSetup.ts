@@ -1,6 +1,7 @@
 import type { LocalIdentityMetadata, LocalSignerMetadata, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeName, ExchangeOptions } from '../../types';
+import type { ExchangeOptions } from '../../generated/ExchangeOptions';
+import type { ExchangeName } from '../../types';
 import type { CredentialPresence, IdentitySetupPolicy, SignerSetupPolicy } from './construction';
 import { derivePublicMode, deriveSignerSetupPolicy } from './construction';
 
@@ -20,10 +21,11 @@ const invalidMetadata = (): never => {
   const message = 'Invalid local signer setup metadata';
   throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
 };
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const record = (value: unknown, fields: readonly string[]): Record<string, unknown> => {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !fields.includes(key)))
+  if (!isRecord(value) || Array.isArray(value) || Object.keys(value).some((key) => !fields.includes(key)))
     return invalidMetadata();
-  return value as Record<string, unknown>;
+  return value;
 };
 const identityMetadata = (input: unknown): LocalIdentityMetadata | undefined => {
   if (input === undefined) return undefined;
@@ -31,10 +33,10 @@ const identityMetadata = (input: unknown): LocalIdentityMetadata | undefined => 
   const { stableId, secretEncoding, trimCredential } = value;
   if (stableId !== undefined && (typeof stableId !== 'string' || !stableId.trim() || new TextEncoder().encode(stableId).length > 256 || /[\u0000-\u001f\u007f-\u009f]/u.test(stableId)))
     return invalidMetadata();
-  if (secretEncoding !== undefined && (typeof secretEncoding !== 'string' || !['utf8', 'base64', 'hex', 'pem', 'base64Text', 'base58'].includes(secretEncoding)))
+  if (secretEncoding !== undefined && secretEncoding !== 'utf8' && secretEncoding !== 'base64' && secretEncoding !== 'hex' && secretEncoding !== 'pem' && secretEncoding !== 'base64Text' && secretEncoding !== 'base58')
     return invalidMetadata();
   if (trimCredential !== undefined && typeof trimCredential !== 'boolean') return invalidMetadata();
-  return { stableId, secretEncoding, trimCredential } as LocalIdentityMetadata;
+  return { stableId, secretEncoding, trimCredential };
 };
 export const parseLocalSignerMetadata = (input: unknown): LocalSignerMetadata => {
   if (input === undefined) return {};

@@ -403,12 +403,10 @@ impl Kucoin {
                 return Err("KuCoin price rounds below the market tick".into());
             }
         }
+        // TS: packages/safe-cex/src/__tests__/reference/kucoin/kucoin.exchange.ts:881-925.
+        // Send one normalized payload; the venue enforces its maximum size.
         let amount = num::adjust(order.amount, market.precision.amount);
-        if order.amount > 0.0
-            && (!positive(amount)
-                || amount < market.limits.amount.min
-                || amount > market.limits.amount.max)
-        {
+        if order.amount > 0.0 && (!positive(amount) || amount < market.limits.amount.min) {
             return Err("KuCoin native lots are outside market limits".into());
         }
         let is_stop = advanced(order.kind);

@@ -138,8 +138,12 @@ pub struct InFlightSlice {
 
 /// One `twap:state` restore entry, as the client persisted it.
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedTwap {
     pub id: String,
+    /// Host-tagged owner namespace; absence remains unowned across persistence.
+    #[serde(default)]
+    pub owner_id: Option<String>,
     pub options: TwapOptions,
     pub state: TwapState,
 }
