@@ -260,7 +260,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   polymarket: 1_652_736,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   // #3314 CI run 42560319271, merge 449511022a8d, job 128975487404: web/node 2,121,120 B.
-  // Repaired c5c8a213f6a5, build.sh --venue txflow: web/node 2,121,037 B + 10 KiB, rounded up (Binaryen 132).
+  // Local build.sh --venue txflow (Binaryen 132): c5c8a213f6a5 2,121,037 B; e2da53cc9f26 2,120,966 B + 10 KiB, rounded up.
   txflow: 2_131_968,
   weex: 1_981_440,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.

@@ -1345,3 +1345,14 @@ test('#3314 repaired c5c8a213f6a5 retains current optimized TxFlow headroom', ()
   assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
 });
+
+test('#3314 agent setup e2da53cc9f26 retains measured TxFlow headroom', () => {
+  const measured = 2_120_966;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_131_968);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
