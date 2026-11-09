@@ -514,7 +514,13 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
-    fn observe_unproven_http_response(&mut self, _: f64, pending: &Pending, _: Response<'_>) {
+    fn observe_unproven_http_response(
+        &mut self,
+        _: f64,
+        _: f64,
+        pending: &Pending,
+        _: Response<'_>,
+    ) {
         if let Pending::Trade(request) = pending {
             self.observe_unproven_trade(request);
         }
