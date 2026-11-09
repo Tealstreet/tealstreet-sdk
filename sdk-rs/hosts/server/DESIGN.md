@@ -571,6 +571,29 @@ State that SCXF does not carry stays JSON, under the existing op names and shape
 - **`op:'store'` partial payloads:** these carry only the fields frames don't (`fetchedLeverage`, `balance.info`, `socketHealth`, `messageHandlerStats`, `activeChasers`, `activeTWAPs`, `ordersRisk`). They are merged over the frame store, which matches the worker's `_derivedStorePayload` in frame mode.
 - **Unchanged replies:** `error`, `warning`, `log`, `engine-event`, `command-progress`, `callMethod:done`, `exec-result`, `updatePositions:done`, `chaser:*` and `twap:*`.
 
+An optional string `init.instanceId` identifies the browser registration, not
+the account or its authority. It never enters engine options, fingerprints or
+rebuild comparisons. Account `msg` replies and remote `sign-req` frames echo it
+as `d.instanceId`, matching NX #9342's TypeScript reply envelope. Absent or empty
+IDs leave the original serialized bytes untouched.
+
+Each joined connection owns its reply output, so devices sharing one account
+receive their own IDs. Same-engine re-init and resume replace that connection's
+output before the new snapshot; queued frames and detached replies retain their
+captured output. Account-holder broadcasts stamp separately for each recipient.
+Retained records capture their source account fingerprint before deferral and
+are stored separately by user, name and fingerprint. Replay selects the actually
+joined fingerprint before stamping the new holder's ID, so retired credentials
+cannot donate a notice or overwrite another account's owed record through an
+empty registry slot. Session envelopes and all existing account/lease authority
+checks remain unchanged.
+
+A resumed signer can reattach before the browser re-inits. Its unsent signing
+requests wait in a queue bounded by the socket's outbound capacity until the
+same account's registration is known. An accepted replacement discards those
+old signing requests instead of attributing them to the replacement. Ordinary
+legacy account messages before re-init retain their existing delivery.
+
 How FrameServer notices map onto `msg`:
 
 | FrameServer notice | `msg` op |
