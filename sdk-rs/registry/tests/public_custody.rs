@@ -13,6 +13,33 @@ impl Visit for PublicOnly {
 }
 
 #[test]
+fn unused_private_cleanup_retains_public_agent_addresses() {
+    for venue in [
+        #[cfg(feature = "txflow")]
+        "txflow",
+        #[cfg(feature = "hyperliquid")]
+        "hyperliquid",
+        #[cfg(feature = "hyperliquid")]
+        "hyperliquidspot",
+    ] {
+        let mut options: EngineOptions = serde_json::from_value(json!({
+            "publicDataOnly":true, "key":"public-account", "applicationId":"public-application",
+            "secret":"unused", "passphrase":"unused"
+        }))
+        .unwrap();
+        let (_, identities) =
+            safe_cex_venues::prepare_local_signer_for(venue, &mut options).unwrap();
+        assert!(identities.primary.is_none() && identities.secondary.is_none());
+        assert_eq!(options.key.as_deref(), Some("public-account"), "{venue}");
+        assert_eq!(
+            options.application_id.as_deref(),
+            Some("public-application")
+        );
+        assert!(options.secret.is_none() && options.passphrase.is_none());
+    }
+}
+
+#[test]
 fn public_construction_discards_unused_private_custody() {
     let venues = [
         #[cfg(feature = "txflow")]
