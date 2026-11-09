@@ -226,7 +226,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitgetusdc: 2_492_416,
   bitrue: 1_886_208,
   bitunix: 1_915_904,
-  blofin: 2_049_024,
+  // #3343 restage at 46491209e7f, local build.sh --venue blofin: 2,056,571 B.
+  // Measured size + 10 KiB rounded up to KiB; both web and Node modules.
+  blofin: 2_067_456,
   bybit: 2_320_384,
   coinbase: 1_972_224,
   cryptocom: 1_803_264,
