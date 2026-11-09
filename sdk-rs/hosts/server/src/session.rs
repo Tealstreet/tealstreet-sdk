@@ -453,12 +453,21 @@ impl Session {
                     drop(candidate);
                     match account {
                         Ok(account) => {
-                            if let Some(previous) = self.joined.remove(&completed.account_name) {
-                                previous.out.retire_registration();
-                                Self::leave_engine(previous);
-                            }
                             self.metrics.note_init();
-                            self.join(account, out.clone()).await;
+                            if let Some(joined) = self.joined.get_mut(&completed.account_name)
+                                && Arc::ptr_eq(&joined.account, &account)
+                            {
+                                let previous = std::mem::replace(&mut joined.out, out.clone());
+                                previous.finish_registration(&out);
+                                self.resnapshot(&completed.account_name).await;
+                            } else {
+                                if let Some(previous) = self.joined.remove(&completed.account_name)
+                                {
+                                    previous.out.retire_registration();
+                                    Self::leave_engine(previous);
+                                }
+                                self.join(account, out.clone()).await;
+                            }
                             if self.joined.contains_key(&completed.account_name) {
                                 self.registry.interruptions.deliver(
                                     self.user(),

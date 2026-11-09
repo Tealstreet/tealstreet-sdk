@@ -150,6 +150,15 @@ async fn verified_pair_starts_then_reuses_the_resident_account() {
     wait_reads(&f).await;
     assert!(original.delegated.is_some() && original.link.is_none());
     assert!(f.private_reads.load(Ordering::SeqCst) > 0);
+    session
+        .msg(AccountMsg {
+            op: "subscribeOHLCV".into(),
+            data: json!({"symbol":"BTCUSDT","interval":"1m"}),
+            account_name: Some("acct".into()),
+        })
+        .await;
+    let subscriptions = session.joined["acct"].subscriptions.clone();
+    assert!(!subscriptions.is_empty());
     let reads = f.private_reads.load(Ordering::SeqCst);
     let init = payload(&mut session, Some("second"));
     session.init(init).await.unwrap();
@@ -163,6 +172,7 @@ async fn verified_pair_starts_then_reuses_the_resident_account() {
         "a running account still requires a fresh probe"
     );
     assert!(original.handle.disposal_cause().is_none());
+    assert_eq!(session.joined["acct"].subscriptions, subscriptions);
     session.close();
 }
 
