@@ -57,3 +57,8 @@ record submits before forwarding and expose acknowledgements only after commit;
 the server supplies no dedupe ledger or queued-order storage. `order.cancelQueued`
 is a router operation and never becomes a venue cancellation. The interception
 contract is documented in `docs/plans/callers/delegated-order-frames.md`.
+
+Receipt sequencing belongs to each registration output and is shared by its
+clones. Replacing or retiring that registration also retires its order receipts;
+existing method/signing envelopes retain their lifecycle. Sequence exhaustion
+signals reconnect without wrapping the counter.

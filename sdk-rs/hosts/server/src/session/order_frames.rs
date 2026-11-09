@@ -222,11 +222,12 @@ mod tests {
     #[tokio::test]
     async fn order_contract_receipts_are_bounded_and_sequenced_per_account() {
         let (out, mut sent, _) = Out::channel(8);
-        let out = out.with_instance_id(Some(&"r".repeat(128)));
+        let a = out.with_instance_id(Some(&"r".repeat(128)));
+        let b = out.with_instance_id(Some(&"r".repeat(128)));
         let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
-        for name in ["a", "a", "b"] {
+        for (out, name) in [(&a, "a"), (&a, "a"), (&b, "b")] {
             settle_intent(
-                &out,
+                out,
                 name,
                 &id,
                 id.as_str().unwrap(),

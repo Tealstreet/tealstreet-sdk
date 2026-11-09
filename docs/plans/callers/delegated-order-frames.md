@@ -41,7 +41,8 @@ Outcome ID and error fields are always present and nullable. Error objects use
 `seq`. Each account on a connection has an increasing `outcomeSeq`, assigned
 atomically when an outcome is queued for that socket. Native completions may
 finish in a different order from submits; sequence gaps are allowed, reversals
-are ignored by the outbox. A reconnect starts a new receipt-sequence domain.
+are ignored by the outbox. A reconnect or replacement registration starts a new
+receipt-sequence domain; hosts pass a new outbox connection ticket after admission.
 The intent sequence is a positive JS-safe integer allocated by the account's
 outbox and retained across resends. NX preserves admission order while awaiting
 its durable writes.
@@ -118,3 +119,20 @@ can be persisted and resent; order submission cannot resume after acknowledgemen
 or unknown. Rendering, consent and router ledger storage remain host concerns.
 Once the initial queued record is durable, temporary unavailability while preparing
 handoff keeps enqueue successful with that same intent ID; retry preserves it.
+
+### Storage retirement
+
+Pending work is limited to 1,024 records; at most 32 completed records are kept
+for recent history. Placed, refused, not-sent and canceled records can retire only
+after their state is durable and no queue cancellation is pending. Acknowledged
+and unknown records remain retained and never become resendable through pruning.
+
+Adapters provide `compact(scope, {version:1, sequence, retiredIntentIds})` as one
+atomic transaction. It deletes only those IDs for that owner/account and advances
+the durable sequence checkpoint with `max(previous, sequence)`, preserving every
+other record and other scopes. This also preserves newer writes during delayed
+retirement. `put` upserts one record without changing that checkpoint. `load`
+returns `{version:1, sequence, intents}`; legacy intent arrays are accepted and
+compacted on restore. The next sequence exceeds both the checkpoint and every
+loaded record. If compaction fails, memory retains the records and flush retries
+later. Hosts use one active outbox per scope and close it before replacing it.

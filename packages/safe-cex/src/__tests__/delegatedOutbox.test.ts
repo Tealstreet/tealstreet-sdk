@@ -1,10 +1,11 @@
-import type { DelegatedIntent, OutboxConnection, OutboxOptions } from '../delegatedOutbox';
+import type { DelegatedIntent, OutboxCompaction, OutboxConnection, OutboxOptions } from '../delegatedOutbox';
 
 import { describe, expect, it } from 'vitest';
 
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import { createDelegatedIntentId, DelegatedOutbox } from '../delegatedOutbox';
 
+const checkpoints = new WeakMap<Map<string, DelegatedIntent>, Map<string, number>>();
 function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   let now = 0;
   let entropy = 0;
@@ -12,17 +13,25 @@ function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const writes: string[] = [];
   const key = (scope: { owner: string; accountName: string }, id: string) =>
     JSON.stringify([scope.owner, scope.accountName, id]);
+  const sequences = checkpoints.get(rows) ?? new Map<string, number>();
+  checkpoints.set(rows, sequences);
+  const scopeKey = (scope: { owner: string; accountName: string }) => JSON.stringify([scope.owner, scope.accountName]);
   const options: OutboxOptions = {
     owner,
     accountName: 'main',
     storage: {
       async load(scope) {
-        return [...rows.values()]
+        const intents = [...rows.values()]
           .filter((row) => row.owner === scope.owner && row.accountName === scope.accountName)
           .map((row) => structuredClone(row));
+        return { version: 1, sequence: sequences.get(scopeKey(scope)) ?? 0, intents };
       },
       async put(scope, row) {
         rows.set(key(scope, row.intentId), structuredClone(row));
+      },
+      async compact(scope, checkpoint) {
+        for (const id of checkpoint.retiredIntentIds) rows.delete(key(scope, id));
+        sequences.set(scopeKey(scope), Math.max(sequences.get(scopeKey(scope)) ?? 0, checkpoint.sequence));
       },
     },
     clock: { epoch: 'boot-A', now: () => now, unix: () => 1_700_000_000_000 + now },
@@ -74,6 +83,257 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
+  it('distinguishes a declined handoff from a prior successful handoff on cancellation', async () => {
+    for (const handedOff of [false, true]) {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      if (handedOff) box.connect(f.connection());
+      const id = await box.enqueue(params);
+      const attempts: string[] = [];
+      const c = box.connect({
+        ...f.connection(),
+        send: (frame) => {
+          attempts.push(JSON.parse(frame).t);
+          return false;
+        },
+      });
+      await box.flush(c);
+      await box.cancel(id);
+      expect(box.entries()[0].cancelPending).toBe(handedOff);
+      expect(attempts).toEqual(handedOff ? ['order.submit', 'order.cancelQueued'] : ['order.submit']);
+      await box.flush(box.connect(f.connection()));
+      expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(
+        handedOff ? ['order.submit', 'order.cancelQueued'] : [],
+      );
+      box.close();
+    }
+  });
+  it('requires atomic compaction and upgrades legacy completed records on restore', async () => {
+    const f = fixture();
+    const compact = f.options.storage.compact;
+    f.options.storage = { ...f.options.storage, compact: undefined } as unknown as OutboxOptions['storage'];
+    await expect(DelegatedOutbox.open(f.options)).rejects.toThrow('atomic compaction');
+    f.options.storage.compact = compact;
+    const legacy: DelegatedIntent[] = [];
+    const put = f.options.storage.put;
+    f.options.storage.put = async (scope, row) => {
+      if (row.state === 'canceled') legacy.push(structuredClone(row));
+      await put(scope, row);
+    };
+    const box = await DelegatedOutbox.open(f.options);
+    for (let i = 0; i < 34; i++) {
+      f.advance(1);
+      await box.cancel(await box.enqueue(params));
+    }
+    box.close();
+    f.options.storage.put = put;
+    f.options.storage.load = async () => legacy;
+    const restored = await DelegatedOutbox.open(f.options);
+    expect(restored.entries()).toHaveLength(32);
+    expect(f.rows.size).toBe(32);
+    restored.connect(f.connection());
+    await restored.enqueue(params);
+    expect(JSON.parse(f.writes[0]).d.seq).toBe(35);
+    restored.close();
+  });
+  it('recovers failed initial persistence as terminal work before compaction', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const put = f.options.storage.put;
+    f.options.storage.put = async () => {
+      throw new Error('synthetic unavailable storage');
+    };
+    await expect(box.enqueue(params)).rejects.toThrow('storage');
+    f.options.storage.put = put;
+    await box.flush(box.connect(f.connection()));
+    expect([...f.rows.values()].map((row) => row.state)).toEqual(['notSent']);
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
+  it('bounds pending work and recovers a slot after a never-sent cancellation', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    let first = '';
+    for (let i = 0; i < 1024; i++) {
+      f.advance(1);
+      const id = await box.enqueue(params);
+      if (i === 0) first = id;
+    }
+    await expect(box.enqueue(params)).rejects.toThrow('full');
+    await box.cancel(first);
+    f.advance(1);
+    await box.enqueue(params);
+    expect(box.entries().filter((row) => row.state === 'queued')).toHaveLength(1024);
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
+  it('restores an empty checkpoint without resetting the durable sequence', async () => {
+    const f = fixture();
+    f.options.storage.load = async () => ({ version: 1, sequence: 4096, intents: [] });
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection());
+    await box.enqueue(params);
+    expect(JSON.parse(f.writes[0]).d.seq).toBe(4097);
+    box.close();
+  });
+  it('keeps retirement pending after storage failure and retries it on flush', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const compact = f.options.storage.compact;
+    f.options.storage.compact = async () => {
+      throw new Error('synthetic unavailable compaction');
+    };
+    for (let i = 0; i < 32; i++) {
+      f.advance(1);
+      await box.cancel(await box.enqueue(params));
+    }
+    f.advance(1);
+    const id = await box.enqueue(params);
+    await expect(box.cancel(id)).rejects.toThrow('compaction');
+    expect(f.rows.size).toBe(33);
+    f.options.storage.compact = compact;
+    await box.flush(box.connect(f.connection()));
+    expect(f.rows.size).toBe(32);
+    expect(box.entries()).toHaveLength(32);
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
+  it('keeps a delayed A storage checkpoint scoped while B takes over', async () => {
+    const a = fixture('alice');
+    const alice = await DelegatedOutbox.open(a.options);
+    for (let i = 0; i < 32; i++) {
+      a.advance(1);
+      await alice.cancel(await alice.enqueue(params));
+    }
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const compact = a.options.storage.compact;
+    a.options.storage.compact = async (scope, snapshot: OutboxCompaction) => {
+      entered();
+      await held;
+      await compact(scope, snapshot);
+    };
+    a.advance(1);
+    const finishing = alice.cancel(await alice.enqueue(params));
+    await waiting;
+    alice.close();
+    const b = fixture('bob', a.rows);
+    const bob = await DelegatedOutbox.open(b.options);
+    bob.connect(b.connection());
+    const bId = await bob.enqueue(params);
+    release();
+    await finishing;
+    expect(a.writes).toEqual([]);
+    expect(b.writes).toHaveLength(1);
+    expect(bob.entries()[0]).toMatchObject({ owner: 'bob', intentId: bId, state: 'queued' });
+    expect([...a.rows.values()].filter((row) => row.owner === 'bob')).toHaveLength(1);
+    bob.close();
+  });
+  it('preserves newer same-scope records and checkpoint progress during delayed retirement', async () => {
+    const a = fixture();
+    const first = await DelegatedOutbox.open(a.options);
+    for (let i = 0; i < 32; i++) {
+      a.advance(1);
+      await first.cancel(await first.enqueue(params));
+    }
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const compact = a.options.storage.compact;
+    a.options.storage.compact = async (scope, checkpoint) => {
+      entered();
+      await held;
+      await compact(scope, checkpoint);
+    };
+    a.advance(1);
+    const retiring = first.cancel(await first.enqueue(params));
+    await waiting;
+    first.close();
+    const b = fixture('alice', a.rows);
+    const next = await DelegatedOutbox.open(b.options);
+    const c = next.connect(b.connection());
+    const id = await next.enqueue(params);
+    await next.receive(
+      c,
+      response(id, 'order.outcome', {
+        seq: 34,
+        outcomeSeq: 1,
+        outcome: 'placed',
+        clientOrderId: id,
+        venueOrderId: 'native-next',
+      }),
+    );
+    release();
+    await retiring;
+    expect([...a.rows.values()].find((row) => row.intentId === id)?.state).toBe('placed');
+    next.close();
+    const restored = await DelegatedOutbox.open(b.options);
+    restored.connect(b.connection());
+    await restored.enqueue(params);
+    expect(JSON.parse(b.writes.at(-1)!).d.seq).toBe(35);
+    restored.close();
+  });
+  it('recovers capacity after completed orders and restores sequence progress', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    for (let seq = 1; seq <= 1025; seq++) {
+      const id = await box.enqueue(params);
+      await box.receive(
+        c,
+        response(id, 'order.outcome', {
+          seq,
+          outcomeSeq: seq,
+          outcome: 'placed',
+          clientOrderId: id,
+          venueOrderId: `native-${seq}`,
+        }),
+      );
+      f.advance(1);
+    }
+    expect(box.entries().length).toBeLessThanOrEqual(32);
+    expect(f.rows.size).toBeLessThanOrEqual(32);
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    restored.connect(f.connection());
+    await restored.enqueue(params);
+    expect(JSON.parse(f.writes.at(-1)!).d.seq).toBe(1026);
+    restored.close();
+  });
+  it('recovers capacity after never-sent cancellations without replaying retained work', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const uncertain = await box.enqueue(params);
+    await box.receive(c, response(uncertain, 'order.outcome', { outcome: 'unknown', clientOrderId: uncertain }));
+    f.advance(1);
+    const acknowledged = await box.enqueue(params);
+    await box.receive(c, response(acknowledged, 'order.ack', { seq: 2, received: true }));
+    box.disconnect(c);
+    for (let i = 0; i < 1025; i++) {
+      f.advance(1);
+      await box.cancel(await box.enqueue(params));
+    }
+    expect(f.rows.size).toBeLessThanOrEqual(34);
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(f.writes).toHaveLength(2);
+    expect(restored.entries().find((row) => row.intentId === uncertain)?.state).toBe('unknown');
+    expect(restored.entries().find((row) => row.intentId === acknowledged)?.state).toBe('acknowledged');
+    restored.close();
+  });
   it('pins all four frozen frame shapes against the shared native fixture', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);

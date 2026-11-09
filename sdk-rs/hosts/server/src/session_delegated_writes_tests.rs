@@ -275,7 +275,9 @@ async fn joined(
         out.clone(),
     );
     crate::accounts::tests::hold_live(&account, session.socket, out.outbox());
-    session.join(account.clone(), out).await;
+    session
+        .join(account.clone(), out.with_instance_id(None))
+        .await;
     if account.delegated.is_some() {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {

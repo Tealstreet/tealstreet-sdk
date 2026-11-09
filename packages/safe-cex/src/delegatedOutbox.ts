@@ -31,8 +31,20 @@ export interface DelegatedIntent extends OutboxScope {
   error?: { message: string; outcome?: string };
 }
 export interface OutboxStorage {
-  load(scope: Readonly<OutboxScope>): Promise<DelegatedIntent[]>;
+  load(scope: Readonly<OutboxScope>): Promise<DelegatedIntent[] | OutboxSnapshot>;
   put(scope: Readonly<OutboxScope>, intent: DelegatedIntent): Promise<void>;
+  /** Atomically delete the listed IDs and advance (never lower) the checkpoint. */
+  compact(scope: Readonly<OutboxScope>, checkpoint: OutboxCompaction): Promise<void>;
+}
+export interface OutboxSnapshot {
+  version: 1;
+  sequence: number;
+  intents: DelegatedIntent[];
+}
+export interface OutboxCompaction {
+  version: 1;
+  sequence: number;
+  retiredIntentIds: string[];
 }
 export interface OutboxOptions extends OutboxScope {
   storage: OutboxStorage;
@@ -51,6 +63,8 @@ export interface OutboxConnection extends OutboxScope {
 }
 
 const MAX_AGE_MS = 10_000;
+const MAX_PENDING = 1024;
+const COMPLETED_HISTORY = 32;
 const STATES: IntentState[] = [
   'queued',
   'sending',
@@ -70,6 +84,7 @@ export class DelegatedOutbox {
   private readonly sent = new Map<string, Readonly<OutboxConnection>>();
   private readonly canceled = new Map<string, Readonly<OutboxConnection>>();
   private readonly submitted = new Set<string>();
+  private readonly durable = new Set<string>();
   private connection?: Readonly<OutboxConnection>;
   private active = true;
   private sequence = 0;
@@ -78,9 +93,16 @@ export class DelegatedOutbox {
 
   static async open(options: OutboxOptions): Promise<DelegatedOutbox> {
     const box = new DelegatedOutbox(options);
-    const rows = await options.storage.load(box.scope);
-    if (rows.length > 1024) throw new Error('Outbox capacity exceeded');
-    for (const saved of rows) {
+    const saved = await options.storage.load(box.scope);
+    const rows = Array.isArray(saved) ? saved : saved.intents;
+    if (!Array.isArray(saved)) {
+      if (saved.version !== 1 || !Number.isSafeInteger(saved.sequence) || saved.sequence < 0)
+        throw new Error('Invalid outbox checkpoint');
+      box.sequence = saved.sequence;
+    }
+    if (!Array.isArray(rows) || rows.length > MAX_PENDING + COMPLETED_HISTORY)
+      throw new Error('Outbox capacity exceeded');
+    for (const saved of [...rows]) {
       const row = clone(saved);
       if (
         row.version !== 1 ||
@@ -112,11 +134,14 @@ export class DelegatedOutbox {
       await box.persist(row);
       box.arm(row);
     }
+    if (box.pendingCount() > MAX_PENDING) throw new Error('Outbox capacity exceeded');
+    await box.compact();
     return box;
   }
 
   private constructor(private readonly options: OutboxOptions) {
     if (!options.owner || !options.accountName || !options.clock.epoch) throw new Error('Outbox scope is required');
+    if (typeof options.storage.compact !== 'function') throw new Error('Outbox storage requires atomic compaction');
     this.scope = Object.freeze({ owner: options.owner, accountName: options.accountName });
   }
 
@@ -161,7 +186,8 @@ export class DelegatedOutbox {
 
   enqueue(params: Record<string, unknown>): Promise<string> {
     const createdAt = this.options.clock.now();
-    if (!this.active || this.intents.size >= 1024) return Promise.reject(new Error('Outbox is closed or full'));
+    if (!this.active || this.pendingCount() >= MAX_PENDING || this.intents.size >= MAX_PENDING + COMPLETED_HISTORY)
+      return Promise.reject(new Error('Outbox is closed or full'));
     if (!params || Array.isArray(params) || typeof params !== 'object' || params.clientOrderId !== undefined)
       return Promise.reject(new Error('Outbox owns the client order id'));
     const intentId = createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
@@ -193,10 +219,12 @@ export class DelegatedOutbox {
         await this.persist(row);
       } catch (error) {
         row.state = 'notSent';
+        this.stopTimer(row.intentId);
         this.changed(row);
         throw error;
       }
       if (connection) await this.sendIntent(row, connection);
+      await this.compact();
       return intentId;
     });
   }
@@ -205,9 +233,11 @@ export class DelegatedOutbox {
     return this.serial(async () => {
       for (const row of [...this.intents.values()].sort((a, b) => a.seq - b.seq)) {
         if (!this.current(connection)) return;
+        if (!this.durable.has(row.intentId) && this.completed(row)) await this.persist(row);
         if (row.state === 'queued') await this.sendIntent(row, connection);
         if (row.cancelPending) await this.sendCancellation(row, connection);
       }
+      await this.compact();
     });
   }
 
@@ -253,6 +283,7 @@ export class DelegatedOutbox {
       this.stopTimer(row.intentId);
       this.changed(row);
       await this.persist(row);
+      await this.compact();
     });
   }
 
@@ -268,6 +299,7 @@ export class DelegatedOutbox {
       if (!this.active) return;
       await this.persist(row);
       if (connection) await this.sendCancellation(row, connection);
+      await this.compact();
     });
   }
 
@@ -306,7 +338,7 @@ export class DelegatedOutbox {
       this.expire(row);
       return;
     }
-    this.submitted.add(row.intentId);
+    const previouslySubmitted = this.submitted.has(row.intentId);
     this.sent.set(row.intentId, connection);
     try {
       const frame = this.frame(connection, 'order.submit', {
@@ -327,9 +359,14 @@ export class DelegatedOutbox {
         this.expire(row);
         return;
       }
+      this.submitted.add(row.intentId);
       const sent = connection.send(frame);
       if (!sent) {
         this.sent.delete(row.intentId);
+        if (!previouslySubmitted) {
+          this.submitted.delete(row.intentId);
+          row.cancelPending = false;
+        }
         await this.persist(row);
       }
     } catch {
@@ -393,6 +430,7 @@ export class DelegatedOutbox {
       if (!this.active) return;
       await this.persist(row);
       if (connection) await this.sendCancellation(row, connection);
+      await this.compact();
     }).catch(() => {
       /* The in-memory terminal state still prevents a send. */
     });
@@ -408,8 +446,33 @@ export class DelegatedOutbox {
   private changed(row: DelegatedIntent): void {
     if (this.active) this.options.changed?.(clone(row));
   }
-  private persist(row: DelegatedIntent): Promise<void> {
-    return this.options.storage.put(this.scope, clone(row));
+  private async persist(row: DelegatedIntent): Promise<void> {
+    if (this.intents.get(row.intentId) !== row) return;
+    await this.options.storage.put(this.scope, clone(row));
+    this.durable.add(row.intentId);
+  }
+  private completed(row: DelegatedIntent): boolean {
+    return !row.cancelPending && ['placed', 'refused', 'notSent', 'canceled'].includes(row.state);
+  }
+  private pendingCount(): number {
+    return [...this.intents.values()].filter((row) => !this.durable.has(row.intentId) || !this.completed(row)).length;
+  }
+  private async compact(): Promise<void> {
+    const completed = [...this.intents.values()]
+      .filter((row) => this.durable.has(row.intentId) && this.completed(row))
+      .sort((a, b) => a.seq - b.seq);
+    const retired = completed.slice(0, Math.max(0, completed.length - COMPLETED_HISTORY));
+    if (!retired.length) return;
+    await this.options.storage.compact(this.scope, {
+      version: 1,
+      sequence: this.sequence,
+      retiredIntentIds: retired.map((row) => row.intentId),
+    });
+    for (const row of retired) {
+      this.stopTimer(row.intentId);
+      this.intents.delete(row.intentId);
+      this.durable.delete(row.intentId);
+    }
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.work.then(operation);

@@ -972,6 +972,7 @@ impl Session {
             // Resumed (or repeated) with what it was built from: a fresh snapshot only.
             let joined = self.joined.get_mut(&init.account_name).unwrap();
             let previous = std::mem::replace(&mut joined.out, out.clone());
+            previous.retire_order_receipts();
             let account = joined.account.clone();
             if account.link.is_some() {
                 account.sign_through_socket(self.socket, out.outbox(), self.identity.token.clone());
@@ -1182,6 +1183,7 @@ impl Session {
     }
 
     fn leave_engine(joined: Joined) {
+        joined.out.retire_order_receipts();
         for client in std::iter::once(joined.client).chain(joined.old) {
             client.pump.abort();
             joined.account.handle.leave(client.id);
@@ -1891,6 +1893,7 @@ impl Session {
         let joined: Vec<Joined> = self.joined.drain().map(|(_, joined)| joined).collect();
         let mut parked = Vec::new();
         for joined in joined {
+            joined.out.retire_order_receipts();
             for client in std::iter::once(joined.client).chain(joined.old) {
                 client.pump.abort();
                 joined.account.handle.leave(client.id);

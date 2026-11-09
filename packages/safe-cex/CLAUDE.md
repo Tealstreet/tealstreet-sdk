@@ -77,6 +77,16 @@ supplies durable deduplication and queue cancellation;
 see `docs/plans/callers/delegated-order-frames.md`. This module does not select a
 signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
 
+The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
+records. Acknowledged/unknown work and pending queue cancellations remain retained.
+Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
+listed retired intent IDs in that scope and advance its durable sequence using
+the maximum of old/new values. Preserve all other records. `load` returns an
+`OutboxSnapshot` with sequence progress and records (legacy record arrays are
+accepted for migration). `put` preserves checkpoint metadata. Compaction failure
+keeps records until a later flush retries; close the old outbox before replacing
+it with a new writer for the same scope.
+
 ## Mirror CI invariants (don't "clean these up")
 
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean

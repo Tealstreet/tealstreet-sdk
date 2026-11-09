@@ -45,6 +45,8 @@ export type {
   OutboxOptions,
   OutboxScope,
   OutboxStorage,
+  OutboxSnapshot,
+  OutboxCompaction,
 } from './delegatedOutbox';
 export { historyCompletenessOf, withHistoryCompleteness, copyHistoryCompleteness } from './historyCompleteness';
 export { describeStoppedAlgos, nukeWarning } from './nukeResult';
