@@ -7,6 +7,26 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
 // Boundary checks always exercise the live cap and the byte immediately above it.
 
+// #3317 run 42703052461 at 5d04ddb28ab (CI merge 46c64a76e282 has the identical tree).
+// Web sizes come from family jobs; node sizes were re-measured from sealed CI artifacts.
+for (const [family, aliases, web, node, minimumCap] of [
+  ['hyperliquid', ['hyperliquid', 'hyperliquidspot'], 2_237_802, 2_237_802, 2_248_704],
+  ['weex', ['weex'], 1_993_124, 1_993_124, 2_003_968],
+  ['woo', ['woo'], 2_656_709, 2_656_709, 2_667_520],
+]) {
+  test(`#3317 current CI ${family} web/node retains measured wasm headroom`, () => {
+    const measured = Math.max(web, node);
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    for (const venue of aliases) {
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+      assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
+
 test('#3268 (run 42404306341 at fca7d275e3a) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['bitunix', 1863967, 1874944],

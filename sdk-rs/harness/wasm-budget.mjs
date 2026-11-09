@@ -270,8 +270,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
   // Master 05241cd0f4 changes no Hyperliquid build inputs; keep both parent provenance blocks.
   // Current CI run 42565604601, merge ec8633c44e98: web/node 2,225,586 B + 10 KiB, rounded up.
-  hyperliquid: 2_236_416,
-  hyperliquidspot: 2_236_416,
+  // #3317 at 5d04ddb28ab: run 42703052461, family job 129453575087, node artifact 13712976849.
+  // CI web/node 2,237,802 B; max + 10 KiB rounded up. CI merge 46c64a76e282 has the identical source tree.
+  hyperliquid: 2_248_704,
+  hyperliquidspot: 2_248_704,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
   // #3304 restage run 42558782819 at CI merge a068e6cb0876a3699d46fa843b9310887bd055f4:
@@ -307,14 +309,18 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   txflow: 1_934_336,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
-  weex: 1_991_680,
+  // #3317 at 5d04ddb28ab: run 42703052461, family job 129453575116, node artifact 13712317711.
+  // CI web/node 1,993,124 B; max + 10 KiB rounded up. CI merge 46c64a76e282 has the identical source tree.
+  weex: 2_003_968,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
   // #3317 at 8e55e01469b: run 42622329629, job 129178042670, artifact 13676298877.
   // CI WOO measured 2,636,672 B + 10 KiB, rounded up to KiB.
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 2,631,851 B + 10 KiB, rounded up.
-  woo: 2_656_256,
+  // #3317 at 5d04ddb28ab: run 42703052461, family job 129453575014, node artifact 13713120924.
+  // CI web/node 2,656,709 B; max + 10 KiB rounded up. CI merge 46c64a76e282 has the identical source tree.
+  woo: 2_667_520,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
