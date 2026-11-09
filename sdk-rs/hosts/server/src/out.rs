@@ -46,8 +46,13 @@ impl Out {
     }
 
     pub(crate) fn order_binding(&self, instance_id: Option<&str>) -> bool {
-        instance_id.is_none_or(|id| !id.is_empty() && id.len() <= 128)
+        self.pending_signs.is_none()
+            && instance_id.is_none_or(|id| !id.is_empty() && id.len() <= 128)
             && self.instance_id.as_deref() == instance_id
+    }
+
+    pub(crate) fn order_receipt_binding_bounded(&self) -> bool {
+        self.instance_id.as_deref().is_none_or(|id| id.len() <= 128)
     }
 
     pub(crate) fn order_outcome(&self, name: &str, mut data: serde_json::Value) -> bool {

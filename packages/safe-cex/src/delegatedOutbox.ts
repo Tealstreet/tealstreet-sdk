@@ -4,6 +4,7 @@ import {
   createDelegatedIntentId,
   DELEGATED_ACK_MAX,
   DELEGATED_OUTCOME_MAX,
+  DELEGATED_SUBMIT_MAX,
   delegatedIntentFingerprint,
   delegatedIntentTime,
 } from './delegatedOrderFrames';
@@ -236,8 +237,8 @@ export class DelegatedOutbox {
       } else if (parsed.t === 'order.outcome' && ['placed', 'refused', 'unknown'].includes(String(data.outcome))) {
         if (data.clientOrderId !== null && data.clientOrderId !== row.intentId) return;
         if (!Number.isSafeInteger(data.outcomeSeq) || Number(data.outcomeSeq) <= this.outcomeSequence) return;
-        this.outcomeSequence = Number(data.outcomeSeq);
         if (data.outcome === 'placed' && (typeof data.venueOrderId !== 'string' || !data.venueOrderId)) return;
+        this.outcomeSequence = Number(data.outcomeSeq);
         row.state = data.outcome as IntentState;
         if (record(data.error) && typeof data.error.message === 'string') {
           row.error = { message: data.error.message };
@@ -302,15 +303,25 @@ export class DelegatedOutbox {
     this.submitted.add(row.intentId);
     this.sent.set(row.intentId, connection);
     try {
-      const sent = connection.send(
-        this.frame(connection, 'order.submit', {
-          intentId: row.intentId,
-          fingerprint: row.fingerprint,
-          params: row.params,
-          seq: row.seq,
-          ageMs: this.options.clock.now() - row.createdAt,
-        }),
-      );
+      const frame = this.frame(connection, 'order.submit', {
+        intentId: row.intentId,
+        fingerprint: row.fingerprint,
+        params: row.params,
+        seq: row.seq,
+        ageMs: this.options.clock.now() - row.createdAt,
+      });
+      if (utf8ToBytes(frame).length > DELEGATED_SUBMIT_MAX) {
+        row.state = 'notSent';
+        this.stopTimer(row.intentId);
+        this.changed(row);
+        await this.persist(row);
+        return;
+      }
+      if (this.expired(row)) {
+        this.expire(row);
+        return;
+      }
+      const sent = connection.send(frame);
       if (!sent) {
         this.sent.delete(row.intentId);
         await this.persist(row);

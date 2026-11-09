@@ -1,6 +1,35 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
+export interface DelegatedOrderBinding {
+  accountName: string;
+  instanceId?: string;
+  intentId: string;
+  seq: number;
+}
+export interface DelegatedOrderSubmitFrame {
+  t: 'order.submit';
+  d: DelegatedOrderBinding & { params: Record<string, unknown>; ageMs: number; fingerprint: string };
+}
+export interface DelegatedOrderAckFrame {
+  t: 'order.ack';
+  d: DelegatedOrderBinding & { received: boolean };
+}
+export interface DelegatedOrderOutcomeFrame {
+  t: 'order.outcome';
+  d: DelegatedOrderBinding & {
+    outcomeSeq: number;
+    outcome: 'placed' | 'refused' | 'unknown';
+    venueOrderId: string | null;
+    clientOrderId: string | null;
+    error: { message: string; outcome?: 'notSent' | 'unknown' } | null;
+  };
+}
+export interface DelegatedOrderCancelQueuedFrame {
+  t: 'order.cancelQueued';
+  d: DelegatedOrderBinding & { fingerprint: string };
+}
+
 export const DELEGATED_SUBMIT_MAX = 64 * 1024;
 export const DELEGATED_ACK_MAX = 4 * 1024;
 export const DELEGATED_OUTCOME_MAX = 8 * 1024;

@@ -32,6 +32,13 @@ export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from '
 export { DelegatedOutbox, createDelegatedIntentId } from './delegatedOutbox';
 export { delegatedIntentTime, delegatedIntentFingerprint, delegatedClientOrderId } from './delegatedOrderFrames';
 export type {
+  DelegatedOrderBinding,
+  DelegatedOrderSubmitFrame,
+  DelegatedOrderAckFrame,
+  DelegatedOrderOutcomeFrame,
+  DelegatedOrderCancelQueuedFrame,
+} from './delegatedOrderFrames';
+export type {
   DelegatedIntent,
   IntentState,
   OutboxConnection,

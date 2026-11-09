@@ -526,3 +526,40 @@ async fn cosigned_call_method_reply_keeps_its_existing_bytes() {
         })
         .await;
 }
+
+#[cfg(not(feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn disabled_order_frames_refuse_even_an_existing_delegated_resident() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let f: Value =
+                serde_json::from_str(include_str!("../tests/data/delegated-orders-v1.json"))
+                    .unwrap();
+            let mut submit = f["submit"].clone();
+            submit["d"]["accountName"] = "synthetic-main".into();
+            session.handle(&submit.to_string()).await.unwrap();
+            let outcome = tokio::time::timeout(Duration::from_secs(2), async {
+                while let Some(text) = sent.recv().await {
+                    let v: Value = serde_json::from_str(&text).unwrap();
+                    if v["t"] == "order.outcome" {
+                        return v;
+                    }
+                }
+                panic!("missing visible capability refusal")
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                outcome["d"]["error"]["message"],
+                "not sent: account not admitted for order frames"
+            );
+            assert!(tape.writes.lock().unwrap().is_empty());
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}

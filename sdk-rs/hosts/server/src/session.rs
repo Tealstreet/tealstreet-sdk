@@ -789,6 +789,20 @@ impl Session {
 
     pub async fn handle(&mut self, text: &str) -> Result<(), Close> {
         let Ok(message) = serde_json::from_str::<Inbound>(text) else {
+            if let Ok(frame) = serde_json::from_str::<Value>(text)
+                && frame["t"]
+                    .as_str()
+                    .is_some_and(|kind| kind.starts_with("order."))
+            {
+                if self.identity.user.is_none() {
+                    return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                let name = frame["d"]["accountName"].as_str();
+                let out = name
+                    .map(|name| self.handover_out(name))
+                    .unwrap_or_else(|| self.out.clone());
+                out.send(envelope::error(name, "not sent: invalid order frame"));
+            }
             Log::warn("invalid envelope");
             return Ok(());
         };
@@ -797,6 +811,14 @@ impl Session {
             Inbound::OrderSubmit(submit) => {
                 if !authenticated {
                     return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                if text.len() > crate::order_contract::SUBMIT_MAX {
+                    self.handover_out(&submit.account_name)
+                        .send(envelope::error(
+                            Some(&submit.account_name),
+                            "not sent: submit exceeds size limit",
+                        ));
+                    return Ok(());
                 }
                 self.order_submit(submit).await;
             }

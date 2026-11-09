@@ -22,7 +22,8 @@ impl Session {
         let name = submit.account_name.clone();
         let id = Value::String(submit.intent_id.clone());
         let out = self.handover_out(&name);
-        if name.len() > 256
+        if !out.order_receipt_binding_bounded()
+            || name.len() > 256
             || submit.intent_id.len() > order_contract::KEY_MAX
             || submit.instance_id.as_ref().is_some_and(|id| id.len() > 128)
         {
@@ -89,7 +90,8 @@ impl Session {
 
     pub(super) fn order_cancel_queued(&mut self, cancel: CancelQueued) {
         let out = self.handover_out(&cancel.account_name);
-        if cancel.account_name.len() > 256
+        if !out.order_receipt_binding_bounded()
+            || cancel.account_name.len() > 256
             || cancel.intent_id.len() > order_contract::KEY_MAX
             || cancel.instance_id.as_ref().is_some_and(|id| id.len() > 128)
         {
@@ -204,7 +206,10 @@ pub(super) fn settle_intent(
                 .chars()
                 .take(512)
                 .collect();
-            data["error"] = json!({"message":message,"outcome":if error["outcome"] == "unknown" { "unknown" } else { "notSent" }});
+            data["error"] = json!({"message":message});
+            if matches!(error["outcome"].as_str(), Some("unknown" | "notSent")) {
+                data["error"]["outcome"] = error["outcome"].clone();
+            }
         }
     }
     out.order_outcome(name, data);

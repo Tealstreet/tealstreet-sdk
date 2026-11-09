@@ -99,7 +99,7 @@ async fn order_frames_refuse_expired_or_unjoined_submits_without_a_write() {
 #[tokio::test]
 async fn order_frames_refuse_pending_missing_modes_and_mismatched_client_ids() {
     tokio::task::LocalSet::new().run_until(async {
-        for case in ["pending", "missing", "flag", "client-id", "intent", "sequence", "binding", "fingerprint", "key-age"] {
+        for case in ["pending", "missing", "resume", "flag", "client-id", "intent", "sequence", "binding", "fingerprint", "key-age"] {
             let registry = crate::accounts::tests::registry();
             let tape = Tape::default();
             let venue = if case == "flag" { "bybitspot" } else { "bybit" };
@@ -113,6 +113,7 @@ async fn order_frames_refuse_pending_missing_modes_and_mismatched_client_ids() {
                 let old = session.joined.remove("synthetic-main").unwrap();
                 Session::leave_engine(old);
             }
+            if case == "resume" { session.joined.get_mut("synthetic-main").unwrap().out = session.out.awaiting_instance_id(); }
             let key = intent(0);
             let mut data = json!({"intentId":key,"params":placement(),"seq":1,"ageMs":0,"accountName":"synthetic-main","instanceId":if case == "pending" {Some("pending-registration")} else {None},"fingerprint":crate::order_contract::fingerprint("synthetic-main",&key,&placement(),1).unwrap()});
             if case == "client-id" { data["params"]["clientOrderId"] = "another-client-id".into(); }
@@ -131,6 +132,7 @@ async fn order_frames_refuse_pending_missing_modes_and_mismatched_client_ids() {
             assert_eq!(ack["d"]["received"], false);
             let refusal = order_frame(&mut sent, "order.outcome").await;
             assert_eq!(refusal["d"]["error"]["outcome"], "notSent");
+            if case == "key-age" { assert_eq!(refusal["d"]["error"]["message"], "not sent: expired"); }
             if case == "pending" { assert_eq!(refusal["d"]["instanceId"], "pending-registration"); }
             assert!(tape.writes.lock().unwrap().is_empty());
             session.close();
