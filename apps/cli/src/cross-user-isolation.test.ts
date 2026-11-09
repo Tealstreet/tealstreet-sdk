@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,12 @@ vi.mock('./logger', () => ({
 }));
 const home = vi.hoisted(() => ({ path: '' }));
 vi.mock('os', async (original) => ({ ...(await original<typeof import('os')>()), homedir: () => home.path }));
+
+beforeAll(async () => {
+  // Transform the shared command/SDK graph outside the timed isolation assertions.
+  // Each case still resets modules and creates its own config/store instances.
+  await import('@tealstreet/cli-core');
+}, 30_000);
 
 let root: string;
 beforeEach(() => {
@@ -64,8 +70,7 @@ describe('CLI cross-user isolation (synthetic data only)', () => {
     expect(config.getAccount()?.apiKey).toBe('B');
   });
 
-  // Cold cli-core/safe-cex imports dominate this real-store test under concurrent CI load.
-  it('isolates live vars, aliases, sync queue and all safety settings across a switch', { timeout: 15_000 }, async () => {
+  it('isolates live vars, aliases, sync queue and all safety settings across a switch', async () => {
     const { login } = await fixture();
     const { FilePreprocessStore } = await import('./preprocess-store');
     const store = new FilePreprocessStore();

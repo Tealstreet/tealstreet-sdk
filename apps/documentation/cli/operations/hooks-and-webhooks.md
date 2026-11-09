@@ -11,7 +11,9 @@ An alert stays bound to the login that received it, including while it waits
 for the hosted relay's acknowledgement or the command queue. If you change
 logins during that wait, the CLI cancels the alert with a message instead of
 running it under the new login. Local hook commands keep their original login
-through asynchronous work too.
+through asynchronous work too. Late hosted status replies and output from an
+old relay are discarded after the login changes; reconnect and registration
+retries cannot restart that old relay.
 
 There are two ways a webhook reaches the CLI:
 

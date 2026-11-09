@@ -44,7 +44,7 @@ describe('roundOrderSize', () => {
   });
 
   it('falls back to the default amount precision when the market has none', () => {
-    const m = market({ precision: { price: 0.01, amount: 0 } } as Partial<Market>);
+    const m = market({ precision: { price: 0.01, amount: 0 } });
     // 10dp, not 8: at 8dp a no-op passes too, since the input sits 1e-9 away.
     // A missing fallback yields NaN (roundToNearestMultiple(x, 0)).
     expect(roundOrderSize(1.123456789, m, 'bybit')).toBeCloseTo(1.12345679, 10);
@@ -61,7 +61,7 @@ describe('roundOrderPrice', () => {
   });
 
   it('falls back to the default price precision when the market has none', () => {
-    const m = market({ precision: { price: 0, amount: 0.1 } } as Partial<Market>);
+    const m = market({ precision: { price: 0, amount: 0.1 } });
     expect(roundOrderPrice(100.567, m)).toBeCloseTo(100.57, 8);
   });
 });
@@ -88,7 +88,7 @@ describe('roundMarketCloseSize', () => {
   // Mirrors createMarketOrder: a residual position smaller than one lot step
   // must still be closable rather than collapsing to a zero-size order.
   it('falls back to the raw size when rounding collapses to zero', () => {
-    expect(roundMarketCloseSize(0.04, market({ precision: { price: 0.01, amount: 0.1 } } as Partial<Market>))).toBe(
+    expect(roundMarketCloseSize(0.04, market({ precision: { price: 0.01, amount: 0.1 } }))).toBe(
       0.04,
     );
   });

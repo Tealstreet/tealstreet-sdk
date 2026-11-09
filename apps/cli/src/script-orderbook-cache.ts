@@ -1,4 +1,4 @@
-import { getStorageEpoch, assertStorageSession, onStorageOwnerChange } from './storage-context';
+import { getStorageEpoch, assertStorageSession, onStorageOwnerChange, captureStorageSession } from './storage-context';
 import type { ExchangeLike } from '@tealstreet/cli-core';
 import type { OrderBook } from '@tealstreet/safe-cex/src/types';
 
@@ -8,6 +8,8 @@ const DEFAULT_FIRST_SNAPSHOT_TIMEOUT_MS = 1_500;
 const DEFAULT_IDLE_TTL_MS = 60_000;
 
 type CacheEntry = {
+  readonly session: ReturnType<typeof captureStorageSession>;
+  active: boolean;
   readonly account: string;
   readonly symbol: string;
   readonly exchange: ExchangeLike;
@@ -83,13 +85,14 @@ export class ScriptOrderbookCache {
       this.entries.delete(key);
     }
 
-    const entry: CacheEntry = { account, symbol, exchange };
+    const entry: CacheEntry = { account, symbol, exchange, session: captureStorageSession(), active: true };
     entry.firstSnapshot = new Promise((resolve) => {
       entry.resolveFirstSnapshot = resolve;
     });
 
     const listen = getOrderbookListener(exchange, account);
     entry.unsubscribe = listen(symbol, (orderbook) => {
+      if (!entry.active || !entry.session.isCurrent()) return;
       entry.orderbook = trimOrderbook(orderbook);
       entry.resolveFirstSnapshot?.();
       entry.resolveFirstSnapshot = undefined;
@@ -105,24 +108,38 @@ export class ScriptOrderbookCache {
     if (!firstSnapshot) return;
 
     const timeoutMs = this.opts.firstSnapshotTimeoutMs ?? DEFAULT_FIRST_SNAPSHOT_TIMEOUT_MS;
-    await Promise.race([
-      firstSnapshot,
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, timeoutMs);
-      }),
-    ]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        firstSnapshot,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            if (entry.active && entry.session.isCurrent()) resolve();
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private scheduleIdleCleanup(entry: CacheEntry): void {
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
     const ttlMs = this.opts.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
     entry.idleTimer = setTimeout(() => {
+      if (
+        !entry.active ||
+        !entry.session.isCurrent() ||
+        this.entries.get(`${entry.account}\0${entry.symbol}`) !== entry
+      )
+        return;
       this.entries.delete(`${entry.account}\0${entry.symbol}`);
       this.disposeEntry(entry);
     }, ttlMs);
   }
 
   private disposeEntry(entry: CacheEntry): void {
+    entry.active = false;
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
     entry.unsubscribe?.();
     entry.resolveFirstSnapshot?.();

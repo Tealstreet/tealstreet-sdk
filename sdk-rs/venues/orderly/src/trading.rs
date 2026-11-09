@@ -524,24 +524,26 @@ impl Orderly {
                 continue;
             }
             let amount = num::adjust(o.amount, market.precision.amount);
-            let units = (amount / market.precision.amount).round();
-            let cap = (market.limits.amount.max / market.precision.amount).floor();
-            if !units.is_finite()
-                || !cap.is_finite()
-                || cap < 1.0
-                || units > 9007199254740991.0
-                || (units / cap).ceil() > 100.0
+            // Legacy TS: orderly.exchange.ts:1073-1082. Equal rounded lots and
+            // a separate modulo tail intentionally preserve TS under-allocation.
+            let max = market.limits.amount.max;
+            let lots = if amount > max {
+                (amount / max).ceil()
+            } else {
+                1.0
+            };
+            let rest = if amount > max {
+                num::adjust(amount % max, market.precision.amount)
+            } else {
+                0.0
+            };
+            let qty = num::adjust((amount - rest) / lots, market.precision.amount);
+            let count = ts_lot_count(lots)?;
+            // TS `if (rest)` also excludes NaN after amount rounding overflows.
+            for (index, qty) in std::iter::repeat_n(qty, count)
+                .chain((rest != 0.0 && !rest.is_nan()).then_some(rest))
+                .enumerate()
             {
-                return Err("Orderly order exceeds supported split bounds".into());
-            }
-            let mut remaining = units;
-            let mut index = 0;
-            while remaining > 0.0 {
-                let lot = remaining.min(cap);
-                let qty = num::adjust(lot * market.precision.amount, market.precision.amount);
-                if qty < market.limits.amount.min {
-                    return Err("Orderly split leaves a below-minimum remainder".into());
-                }
                 let price = (o.kind == OrderType::Limit)
                     .then(|| num::adjust(o.price.unwrap(), market.precision.price));
                 let order_type = if o.kind == OrderType::Market {
@@ -594,8 +596,6 @@ impl Orderly {
                     body: Some(body),
                     effect: Effect::Place(order),
                 });
-                remaining -= lot;
-                index += 1;
             }
             if o.stop_loss.is_some() || o.take_profit.is_some() {
                 if !positional.insert((o.symbol.clone(), mode_ == MarginType::Isolated)) {
@@ -1815,6 +1815,17 @@ fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
 
+fn ts_lot_count(lots: f64) -> Result<usize, &'static str> {
+    // lodash/times returns no equal lots above Number.MAX_SAFE_INTEGER.
+    // The caller still appends the separately computed modulo remainder.
+    if lots > 9_007_199_254_740_991.0 {
+        return Ok(0);
+    }
+    lots.to_string()
+        .parse::<usize>()
+        .map_err(|_| "Orderly lot count exceeds addressable storage")
+}
+
 /// An explicit refusal (`success: false` or a 4xx). Orderly's server-side and
 /// duplicate-request codes do not prove nothing happened.
 fn answer_failure(response: Response<'_>, message: String, write: bool) -> VenueError {
@@ -1858,4 +1869,22 @@ fn ambiguous_write(mut error: VenueError) -> VenueError {
         .get_or_insert_with(|| error.message.into_boxed_str());
     error.message = "Orderly write outcome is unknown. Check Open Orders".into();
     error.outcome(Outcome::Unknown)
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::ts_lot_count;
+
+    #[test]
+    fn lodash_times_count_boundary_without_allocating() {
+        assert_eq!(ts_lot_count(1.0), Ok(1));
+        assert_eq!(ts_lot_count(101.0), Ok(101));
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(
+            ts_lot_count(9_007_199_254_740_991.0),
+            Ok(9_007_199_254_740_991)
+        );
+        assert_eq!(ts_lot_count(9_007_199_254_740_992.0), Ok(0));
+        assert_eq!(ts_lot_count(10_000_000_000_000_000.0), Ok(0));
+    }
 }

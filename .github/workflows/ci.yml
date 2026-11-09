@@ -32,6 +32,9 @@ jobs:
       - run: corepack yarn check:licenses
       - name: Check script types have not drifted
         run: corepack yarn check:script-types
+      - name: Install pinned Rust toolchain for generated type contracts
+        working-directory: sdk-rs
+        run: rustup show
       - run: corepack yarn typecheck
       - run: corepack yarn lint
       - name: Install pinned Bun for standalone CLI tests

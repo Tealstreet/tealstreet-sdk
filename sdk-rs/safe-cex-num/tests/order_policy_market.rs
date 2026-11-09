@@ -161,10 +161,10 @@ fn market_order_policy_matches_native_source_values() {
         String::from_utf8_lossy(&output.stderr)
     );
     let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    // 47 current venue records plus 14 prototype/unknown witnesses, for two predicates.
+    // 48 current venue records plus 14 prototype/unknown witnesses, for two predicates.
     // Retired venues are excluded; every remaining source row is compared.
-    // 12*8*2*2*5*2 + (47+14)*2 + 6 + 6*7*7*2+24 + 6*2*2*2*11*5 + 8 + 3.
-    assert_eq!(rows.len(), 7231, "ORDER market source cardinality");
+    // 12*8*2*2*5*2 + (48+14)*2 + 6 + 6*7*7*2+24 + 6*2*2*2*11*5 + 8 + 3.
+    assert_eq!(rows.len(), 7233, "ORDER market source cardinality");
     let mut compared = [0; 12];
     for row in &rows {
         let input = &row["input"];
@@ -366,7 +366,7 @@ fn market_order_policy_matches_native_source_values() {
     }
     assert_eq!(
         compared,
-        [768, 768, 768, 768, 768, 61, 61, 6, 612, 528, 2120, 3],
+        [768, 768, 768, 768, 768, 62, 62, 6, 612, 528, 2120, 3],
         "ORDER market compared cardinality"
     );
 }
