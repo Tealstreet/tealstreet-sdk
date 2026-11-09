@@ -476,7 +476,7 @@ impl Session {
                                 );
                                 if let Some(kept) = self.registry.take_notice(
                                     self.user(),
-                                    &completed.account_name,
+                                    self.joined[&completed.account_name].account.registry_name(),
                                     &self.joined[&completed.account_name].account.fingerprint,
                                     self.identity.resume_from.as_deref(),
                                 ) {
@@ -770,13 +770,26 @@ impl Session {
             ));
             // The client re-inits each one; an identical init then keeps it.
             for account in accounts {
-                let out = outputs
-                    .lock()
-                    .unwrap()
-                    .entry(account.name.clone())
-                    .or_insert_with(|| self.out.awaiting_instance_id())
-                    .clone();
-                self.join(account, out).await;
+                let labels = account.labels(self.socket);
+                let labels = if labels.is_empty() {
+                    vec![account.name.clone()]
+                } else {
+                    labels
+                };
+                for label in labels {
+                    let out = outputs
+                        .lock()
+                        .unwrap()
+                        .entry(label.clone())
+                        .or_insert_with(|| self.out.awaiting_instance_id())
+                        .clone();
+                    let out = if label == account.name {
+                        out
+                    } else {
+                        out.with_account_label(&label)
+                    };
+                    self.join(account.clone(), out).await;
+                }
             }
         }
         if let Some(user) = &self.identity.user {
@@ -876,6 +889,11 @@ impl Session {
 
     async fn init(&mut self, init: InitPayload) -> Result<(), Close> {
         let out = self.out.with_instance_id(init.instance_id.as_deref());
+        let out = if crate::accounts::identity::enabled(&init) {
+            out.with_account_label(&init.account_name)
+        } else {
+            out
+        };
         let authenticated = self.identity.user.is_some();
         let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
         if !authenticated && let Some(reason) = unauthenticated_init_refusal(&init) {
@@ -922,6 +940,16 @@ impl Session {
             return Ok(());
         }
         self.forget_disposed();
+        if let Some(joined) = self.joined.get(&init.account_name)
+            && joined.account.delegated.is_some()
+            && (public_only || joined.account.matches_init(self.user(), &init))
+        {
+            out.send(envelope::init_refused(
+                &init.account_name,
+                "Account signing mode differs; account not attached",
+            ));
+            return Ok(());
+        }
         if let Some(refusal) =
             self.registry
                 .signing_mode_refusal(self.user(), &init, public_only, false)
@@ -932,13 +960,19 @@ impl Session {
         }
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
+            && joined.account.matches_init(self.user(), &init)
         {
             // Resumed (or repeated) with what it was built from: a fresh snapshot only.
             let joined = self.joined.get_mut(&init.account_name).unwrap();
             let previous = std::mem::replace(&mut joined.out, out.clone());
             let account = joined.account.clone();
             if account.link.is_some() {
-                account.sign_through_socket(self.socket, out.outbox(), self.identity.token.clone());
+                account.hold_registration(
+                    self.socket,
+                    out.outbox(),
+                    self.identity.token.clone(),
+                    &init.account_name,
+                );
             } else {
                 account.update_reply_outbox(self.socket, out.outbox());
             }
@@ -968,7 +1002,9 @@ impl Session {
             // New settings rebuild it. Unless another live socket keeps it, its algos stop
             // here and this page hears their finals; leaving first would tell no one.
             let disposal = Disposal::rebuild(joined.account.is_public(), public_only);
-            if joined.account.live_holders_besides(self.socket).is_empty() {
+            if joined.account.matches_init(self.user(), &init)
+                && joined.account.live_holders_besides(self.socket).is_empty()
+            {
                 self.registry
                     .stop_for_new_settings(&joined.account, joined.out.outbox(), disposal);
                 Self::leave_engine(joined);
@@ -1003,7 +1039,7 @@ impl Session {
                 if self.joined.contains_key(&init.account_name)
                     && let Some(kept) = self.registry.take_notice(
                         self.user(),
-                        &init.account_name,
+                        self.joined[&init.account_name].account.registry_name(),
                         &self.joined[&init.account_name].account.fingerprint,
                         self.identity.resume_from.as_deref(),
                     )
@@ -1030,7 +1066,7 @@ impl Session {
     }
 
     async fn join(&mut self, account: Arc<Account>, out: Out) {
-        let name = account.name.clone();
+        let name = out.account_label(&account.name).to_owned();
         match self.client(&account, out.clone()).await {
             Ok(client) => {
                 if let Some(algos) = &account.algos {
@@ -1072,7 +1108,7 @@ impl Session {
             id,
             self.dropped.clone(),
             account.handle.clone(),
-            account.name.clone(),
+            out.account_label(&account.name).to_owned(),
             out,
             pending.clone(),
             draining.clone(),
@@ -1141,8 +1177,10 @@ impl Session {
 
     fn leave(&self, joined: Joined, disposal: Disposal) {
         let account = joined.account.clone();
+        let label = joined.out.account_label(&account.name).to_owned();
         Self::leave_engine(joined);
-        self.registry.release(&account, self.socket, disposal);
+        self.registry
+            .release_label(&account, self.socket, &label, disposal);
     }
 
     fn leave_engine(joined: Joined) {
@@ -1183,6 +1221,24 @@ impl Session {
                 self.drop_early(&name, "delegated init refused");
                 self.refuse_handover(&name, false);
             }
+            return;
+        }
+        if msg.op == "applySettings"
+            && (self
+                .joined
+                .get(&name)
+                .is_none_or(|joined| !self.registry.holds(&joined.account, self.socket))
+                || self.pending_verifications.contains_key(&name))
+        {
+            self.handover_out(&name).send(envelope::msg(
+                &name,
+                "applySettings:done",
+                json!({
+                    "requestId":msg.data.get("requestId").cloned().unwrap_or(Value::Null),
+                    "success":false,
+                    "result":{"message":"Account is not admitted; settings were not applied"}
+                }),
+            ));
             return;
         }
         if let Some(pending) = self.pending_verifications.get(&name) {
@@ -1259,18 +1315,31 @@ impl Session {
             }
             _ if topic.is_some() => self.apply_topic(&name, topic.as_ref().unwrap()),
             ("callMethod", _, _) => self.call(&name, msg.data).await,
+            ("applySettings", _, _) => self.apply_settings(&name, msg.data).await,
             ("updatePositions", _, _) => self.send(envelope::msg(
                 &name,
                 "updatePositions:done",
                 json!({"requestId": msg.data.get("requestId"), "success": true}),
             )),
             (op, _, _) if crate::algos::OPS.contains(&op) => {
-                let algos = self.joined[&name].account.algos.clone();
+                let account = &self.joined[&name].account;
+                let mut data = msg.data;
+                if op == "twap:start" && account.registry_name() != account.name {
+                    if data["accountName"] != name {
+                        self.account_out(&name).send(envelope::error(
+                            Some(&name),
+                            "TWAP must name this account label",
+                        ));
+                        return;
+                    }
+                    data["accountName"] = account.name.clone().into();
+                }
+                let algos = account.algos.clone();
                 let sent = algos.is_some_and(|algos| {
                     algos
                         .send(crate::algos::AlgoInput::Op {
                             op: op.to_owned(),
-                            data: msg.data.to_string(),
+                            data: data.to_string(),
                             origin: format!("socket:{}", self.socket),
                         })
                         .is_ok()
@@ -1285,6 +1354,48 @@ impl Session {
             }
             (op, _, _) => Log::warn(&format!("ignored account op {op}")),
         }
+    }
+
+    async fn apply_settings(&mut self, name: &str, data: Value) {
+        let out = self.account_out(name);
+        let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
+        let result = match serde_json::from_value::<InitPayload>(data["settings"].clone()) {
+            Ok(init) if init.account_name == name => {
+                let account = self.joined[name].account.clone();
+                self.registry
+                    .apply_settings(
+                        self.user(),
+                        &init,
+                        account,
+                        self.socket,
+                        self.identity.token.clone(),
+                        out.outbox(),
+                    )
+                    .await
+            }
+            _ => Err("Apply settings requires settings for this account label".into()),
+        };
+        let result = match result {
+            Ok(account) => {
+                if let Some(previous) = self.joined.remove(name) {
+                    Self::leave_engine(previous);
+                }
+                self.join(account, out.clone()).await;
+                if self.joined.contains_key(name) {
+                    Ok(())
+                } else {
+                    Err("The account could not load the applied settings".to_owned())
+                }
+            }
+            Err(error) => Err(error),
+        };
+        let reply = match result {
+            Ok(()) => json!({"requestId":request_id,"success":true,"result":null}),
+            Err(message) => {
+                json!({"requestId":request_id,"success":false,"result":{"message":message}})
+            }
+        };
+        out.send(envelope::msg(name, "applySettings:done", reply));
     }
 
     fn issue_handover(&mut self, name: &str) {
@@ -1383,10 +1494,12 @@ impl Session {
             return;
         }
         let account = &joined.account;
-        if !self
-            .registry
-            .allow_repair(&account.user, &account.name, key, std::time::Instant::now())
-        {
+        if !self.registry.allow_repair(
+            &account.user,
+            account.registry_name(),
+            key,
+            std::time::Instant::now(),
+        ) {
             Log::info(&self.topic_line(
                 "subscription repair skipped: repaired recently",
                 name,
@@ -2644,10 +2757,11 @@ mod tests {
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
     const WEB_TWAP: &str = r#"{"accountName":"acct","activeMarket":{"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true},"size":0.1,"duration":600,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"}"#;
 
+    // Legacy session fixtures use an unflagged venue; enabled Bybit has its own suite.
     fn acct_init() -> InitPayload {
         InitPayload {
             account_name: "acct".into(),
-            exchange_name: "bybit".into(),
+            exchange_name: "bybitinverse".into(),
             key: "k".into(),
             ..InitPayload::default()
         }
@@ -2764,7 +2878,7 @@ mod tests {
                     load_after_ms: None,
                     ticker: false,
                 },
-                ("u", "acct", "bybit"),
+                ("u", "acct", "bybitinverse"),
                 Some(safe_cex_remote_signer::SignerLink::new(
                     0,
                     Arc::new(|_| false),
@@ -3193,7 +3307,7 @@ mod tests {
                     let registry = crate::accounts::tests::registry();
                     let init = InitPayload {
                         account_name: "acct".into(),
-                        exchange_name: "bybit".into(),
+                        exchange_name: "bybitinverse".into(),
                         key: "k".into(),
                         ..InitPayload::default()
                     };
@@ -3240,7 +3354,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -3282,7 +3396,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -3361,7 +3475,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -3458,7 +3572,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -3558,7 +3672,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -3687,7 +3801,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -3751,7 +3865,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -3842,7 +3956,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -3910,7 +4024,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -3968,7 +4082,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };
@@ -4118,7 +4232,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "bybit".into(),
+                    exchange_name: "bybitinverse".into(),
                     key: "k".into(),
                     ..InitPayload::default()
                 };

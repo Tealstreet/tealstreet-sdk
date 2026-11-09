@@ -4,12 +4,16 @@ use safe_cex_crypto::signer::Secret;
 
 pub(crate) struct ProbePermit {
     user: String,
+    identity: String,
     fingerprint: String,
     pub(super) lease: Option<crate::router_lease::Permit>,
 }
 impl ProbePermit {
     pub(super) fn check(&self, user: &str, init: &InitPayload) -> Result<(), ProbeRefusal> {
-        if self.user != user || self.fingerprint != crate::delegated::fingerprint(init) {
+        if self.user != user
+            || identity::registry_name(user, init).as_ref() != Ok(&self.identity)
+            || self.fingerprint != crate::delegated::fingerprint(init)
+        {
             return Err(ProbeRefusal::INVALID);
         }
         if self.lease.as_ref().is_some_and(|lease| !lease.allowed()) {
@@ -44,6 +48,7 @@ impl Registry {
         }
         let permit = ProbePermit {
             user: user.into(),
+            identity: identity::registry_name(user, init).map_err(|_| ProbeRefusal::INVALID)?,
             fingerprint: crate::delegated::fingerprint(init),
             lease,
         };
@@ -122,14 +127,12 @@ impl Registry {
     ) -> Result<Arc<Account>, ProbeRefusal> {
         proof.check(user, init)?;
         pair.validate(init).map_err(|_| ProbeRefusal::INVALID)?;
-        if let Some(account) = self
-            .accounts
-            .lock()
-            .unwrap()
-            .get(&(user.into(), init.account_name.clone()))
-            && (account.is_public()
-                || account.delegated.is_none()
-                || account.fingerprint != proof.fingerprint)
+        if let Some(account) = self.accounts.lock().unwrap().get(&(
+            user.into(),
+            identity::registry_name(user, init).map_err(|_| ProbeRefusal::INVALID)?,
+        )) && (account.is_public()
+            || account.delegated.is_none()
+            || account.fingerprint != proof.fingerprint)
         {
             return Err(ProbeRefusal::INVALID);
         }

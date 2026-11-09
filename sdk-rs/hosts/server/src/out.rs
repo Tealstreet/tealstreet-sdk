@@ -10,6 +10,7 @@ pub struct Out {
     tx: mpsc::Sender<String>,
     overflow: Arc<Notify>,
     instance_id: Option<Arc<str>>,
+    account_label: Option<Arc<str>>,
     pending_signs: Option<Arc<Mutex<PendingSigns>>>,
 }
 
@@ -28,6 +29,7 @@ impl Out {
                 tx,
                 overflow: overflow.clone(),
                 instance_id: None,
+                account_label: None,
                 pending_signs: None,
             },
             rx,
@@ -41,6 +43,17 @@ impl Out {
             pending_signs: None,
             ..self.clone()
         }
+    }
+
+    pub(crate) fn with_account_label(&self, label: &str) -> Self {
+        Self {
+            account_label: Some(Arc::from(label)),
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn account_label<'a>(&'a self, fallback: &'a str) -> &'a str {
+        self.account_label.as_deref().unwrap_or(fallback)
     }
 
     /// A resumed signer can reconnect before init supplies the new registration.
@@ -102,6 +115,10 @@ impl Out {
                 _ => {}
             }
         }
+        let text = match &self.account_label {
+            Some(label) => crate::envelope::with_account_label(text, label),
+            None => text,
+        };
         let text = match &self.instance_id {
             Some(instance_id) => crate::envelope::with_instance_id(text, instance_id),
             None => text,

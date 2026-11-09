@@ -365,6 +365,11 @@ impl Inner {
         request.insert("id".into(), id.clone().into());
         request.insert("type".into(), "ws-auth".into());
         request.insert("exchangeName".into(), exchange_name.into());
+        if self.venue == "bybit" && crate::delegated_enabled(&self.venue) {
+            let key_id =
+                std::str::from_utf8(&self.primary.public).map_err(|_| SignError::Refused)?;
+            request.insert("keyId".into(), key_id.into());
+        }
         if let Some(name) = &self.account_name {
             request.insert("accountName".into(), name.clone().into());
         }

@@ -1,0 +1,385 @@
+use super::*;
+
+fn init() -> InitPayload {
+    InitPayload {
+        account_name: "display label".into(),
+        exchange_name: "bybit".into(),
+        key: "synthetic-key-A".into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn bybit_settings_fingerprint_excludes_primary_credentials() {
+    let first = init();
+    let second = InitPayload {
+        key: "synthetic-key-B".into(),
+        passphrase: Some("synthetic-passphrase".into()),
+        ..first.clone()
+    };
+    assert_eq!(first.fingerprint(), second.fingerprint());
+    let fields: Value = serde_json::from_str(&first.fingerprint()).unwrap();
+    assert!(fields.get("key").is_none());
+    assert!(fields.get("passphrase").is_none());
+}
+
+#[test]
+fn bybit_settings_fingerprint_keeps_connection_settings_and_ignores_labels() {
+    let first = init();
+    let renamed = InitPayload {
+        account_name: "another label".into(),
+        instance_id: Some("another registration".into()),
+        ..first.clone()
+    };
+    assert_eq!(first.fingerprint(), renamed.fingerprint());
+    let changed = InitPayload {
+        enable_spot_markets: Some(true),
+        ..first.clone()
+    };
+    assert_ne!(first.fingerprint(), changed.fingerprint());
+}
+
+#[test]
+fn identity_digest_vector_and_component_boundaries() {
+    let first = init();
+    let digest = identity::digest("u", &first).unwrap().unwrap();
+    assert_eq!(
+        digest,
+        "16b4dec30a65d36e34c43a9f5c927abb5b0fb639e71006fa942f6cde06b2b01f"
+    );
+    let renamed = InitPayload {
+        account_name: "renamed".into(),
+        ..first.clone()
+    };
+    assert_eq!(
+        identity::digest("u", &renamed).unwrap(),
+        Some(digest.clone())
+    );
+    for changed in [
+        InitPayload {
+            key: "synthetic-key-B".into(),
+            ..first.clone()
+        },
+        InitPayload {
+            testnet: Some(true),
+            ..first.clone()
+        },
+        InitPayload {
+            bybit_site_id: Some("BRA_BTL".into()),
+            ..first.clone()
+        },
+    ] {
+        assert_ne!(
+            identity::digest("u", &changed).unwrap(),
+            Some(digest.clone())
+        );
+    }
+    assert_ne!(identity::digest("v", &first).unwrap(), Some(digest));
+    assert!(identity::digest("", &first).is_err());
+    assert!(
+        identity::digest(
+            "u",
+            &InitPayload {
+                key: String::new(),
+                ..first
+            }
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn bybit_key_id_preserves_case_and_its_declared_no_trim_policy() {
+    let first = init();
+    let padded = InitPayload {
+        key: format!(" {} ", first.key),
+        ..first.clone()
+    };
+    let other_case = InitPayload {
+        key: first.key.to_uppercase(),
+        ..first.clone()
+    };
+    let original = identity::digest("u", &first).unwrap();
+    assert_ne!(identity::digest("u", &padded).unwrap(), original);
+    assert_ne!(identity::digest("u", &other_case).unwrap(), original);
+}
+
+#[test]
+fn identity_outputs_keep_twap_labels_local_and_preserve_owner_ids() {
+    for (op, data, path) in [
+        (
+            "store",
+            serde_json::json!({"activeTWAPs":[{"accountName":"first","symbol":"BTCUSDT"}]}),
+            "/d/data/activeTWAPs/0/accountName",
+        ),
+        (
+            "twap:stateUpdate",
+            serde_json::json!({"twap-1":{"options":{"accountName":"first"},"state":{"accountName":"first"},"ownerId":"digest"}}),
+            "/d/data/twap-1/options/accountName",
+        ),
+    ] {
+        let output = crate::envelope::with_account_label(
+            crate::envelope::msg("first", op, data.clone()),
+            "second",
+        );
+        let output: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(output["d"]["accountName"], "second");
+        assert_eq!(output.pointer(path).unwrap(), "second");
+        if op == "twap:stateUpdate" {
+            assert_eq!(output["d"]["data"]["twap-1"]["ownerId"], "digest");
+            assert_eq!(
+                output["d"]["data"]["twap-1"]["state"]["accountName"],
+                "second"
+            );
+        }
+        let unchanged = crate::envelope::msg("first", op, data);
+        assert_eq!(
+            crate::envelope::with_account_label(unchanged.clone(), "first"),
+            unchanged
+        );
+    }
+}
+
+#[test]
+fn unflagged_and_public_accounts_keep_their_existing_identity_path() {
+    let private = InitPayload {
+        exchange_name: "bybitinverse".into(),
+        ..init()
+    };
+    let another_key = InitPayload {
+        key: "synthetic-key-B".into(),
+        ..private.clone()
+    };
+    assert!(identity::digest("u", &private).unwrap().is_none());
+    assert_ne!(private.fingerprint(), another_key.fingerprint());
+    let public = InitPayload {
+        public_only: Some(true),
+        ..init()
+    };
+    assert!(identity::digest("", &public).unwrap().is_none());
+    let pseudo = InitPayload {
+        account_name: PUBLIC_ACCOUNT.into(),
+        ..init()
+    };
+    assert!(identity::digest("", &pseudo).unwrap().is_none());
+}
+
+#[test]
+fn probe_permit_remains_bound_to_identity_when_settings_match() {
+    let registry = tests::registry();
+    let first = init();
+    let second = InitPayload {
+        key: "synthetic-key-B".into(),
+        ..first.clone()
+    };
+    assert_eq!(first.fingerprint(), second.fingerprint());
+    let permit = registry.probe_permit("u", &first).unwrap();
+    assert!(permit.check("u", &first).is_ok());
+    assert!(permit.check("u", &second).is_err());
+    assert!(permit.check("v", &first).is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn expired_router_lease_removes_the_identity_keyed_actor() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = Arc::new(
+                Registry::new(
+                    EngineThreads::start(1).unwrap(),
+                    Duration::from_millis(1),
+                    Duration::from_secs(60),
+                )
+                .with_router_lease(crate::router_lease::Config {
+                    box_id: Some("01".into()),
+                    enforce: true,
+                    ..Default::default()
+                }),
+            );
+            let now = now_ms();
+            registry
+                .router_leases
+                .accept(&crate::router_lease::Heartbeat {
+                    r#box: "01".into(),
+                    issued_at: now,
+                    users: vec![crate::router_lease::Assertion {
+                        user_id: "u".into(),
+                        owner_epoch: 1,
+                        sequence: 1,
+                        not_after: now + 1000,
+                    }],
+                })
+                .unwrap();
+            let account = account(&registry, "u", &init());
+            assert!(account.running.io_allowed());
+            assert_eq!(registry.account_count(), 1);
+            tokio::time::advance(Duration::from_secs(2)).await;
+            assert!(!account.running.io_allowed());
+            registry.park_expired_router_leases();
+            assert!(account.running.parked_by_lease());
+            assert_eq!(registry.account_count(), 0);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn resident_copy_counts_without_a_live_or_parked_holder() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let mut original = init();
+            original.signing_mode = Some("delegated".into());
+            let account = account(&registry, "u", &original);
+            assert!(account.holders.lock().unwrap().by_id.is_empty());
+            let changed = InitPayload {
+                enable_spot_markets: Some(true),
+                ..original.clone()
+            };
+            assert!(
+                registry
+                    .rebuild_refusal_for_mode("u", &changed, false, 7, true)
+                    .is_some()
+            );
+            assert!(Arc::ptr_eq(
+                &registry.accounts.lock().unwrap()[&("u".into(), account.registry_name().into())],
+                &account
+            ));
+        })
+        .await;
+}
+
+fn account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> {
+    let (mut account, _inbox) = testing::account_on(
+        testing::HeldLoad {
+            placed: Arc::default(),
+            load_after_ms: Some(0.),
+            ticker: true,
+        },
+        (user, &init.account_name, &init.exchange_name),
+        Some(SignerLink::new(0, Arc::new(|_| true))),
+        init.fingerprint(),
+        Arc::new(crate::algos::Running::new(registry.algos_ended.clone())),
+    );
+    let inner = Arc::get_mut(&mut account).unwrap();
+    inner.identity = identity::digest(user, init).unwrap();
+    if init.signing_mode.as_deref() == Some("delegated") {
+        let prepared = prepare_delegated(
+            init,
+            DelegatedPair::new(
+                init.key.clone(),
+                safe_cex_crypto::signer::Secret::new("synthetic-secret".into()),
+                None,
+            ),
+        )
+        .unwrap();
+        inner.delegated = Some(prepared.resident);
+        inner.link = None;
+        inner.fingerprint = crate::delegated::fingerprint(init);
+    }
+    testing::register(registry, &account);
+    account
+}
+
+#[tokio::test]
+async fn labels_share_one_identity_and_release_independently() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let original = init();
+            let account = account(&registry, "u", &original);
+            let renamed = InitPayload {
+                account_name: "second label".into(),
+                ..original.clone()
+            };
+            let a = registry
+                .obtain("u", &original, false, 7, None, Arc::new(|_| true))
+                .await
+                .unwrap();
+            let b = registry
+                .obtain("u", &renamed, false, 7, None, Arc::new(|_| true))
+                .await
+                .unwrap();
+            assert!(Arc::ptr_eq(&a, &b) && Arc::ptr_eq(&b, &account));
+            assert_eq!(registry.account_count(), 1);
+            registry.release_label(&account, 7, &original.account_name, Disposal::Orphaned);
+            assert!(registry.held("u", &original.account_name, 7).is_none());
+            assert!(registry.held("u", &renamed.account_name, 7).is_some());
+            assert!(registry.holds(&account, 7));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn equal_labels_keep_distinct_keys_and_users_separate() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let first = init();
+            let second = InitPayload {
+                key: "synthetic-key-B".into(),
+                ..first.clone()
+            };
+            let a = account(&registry, "u", &first);
+            let b = account(&registry, "u", &second);
+            let other_user = account(&registry, "v", &first);
+            for (user, init, expected, holder) in [
+                ("u", &first, &a, 7),
+                ("u", &second, &b, 8),
+                ("v", &first, &other_user, 9),
+            ] {
+                let attached = registry
+                    .obtain(user, init, false, holder, None, Arc::new(|_| true))
+                    .await
+                    .unwrap();
+                assert!(Arc::ptr_eq(&attached, expected));
+            }
+            assert_eq!(registry.account_count(), 3);
+            assert!(!registry.holds(&a, 8) && !registry.holds(&a, 9));
+            assert!(!registry.holds(&b, 7));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn parked_holder_prevents_implicit_settings_changes_and_renamed_resume_keeps_identity() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let first = init();
+            let account = account(&registry, "u", &first);
+            let renamed = InitPayload {
+                account_name: "phone label".into(),
+                ..first.clone()
+            };
+            registry
+                .obtain("u", &renamed, false, 7, None, Arc::new(|_| true))
+                .await
+                .unwrap();
+            registry.park("resume".into(), "u", vec![(account.clone(), 7)]);
+            let changed = InitPayload {
+                enable_spot_markets: Some(true),
+                ..first.clone()
+            };
+            assert!(registry.rebuild_refusal("u", &changed, false, 8).is_some());
+            assert_eq!(registry.account_count(), 1);
+            let frames = Arc::new(Mutex::new(Vec::new()));
+            let captured = frames.clone();
+            let outbox: Outbox = Arc::new(move |text| {
+                captured.lock().unwrap().push(text);
+                true
+            });
+            let resumed = registry.resume(
+                "resume",
+                "u",
+                9,
+                ("synthetic-token".into(), now_ms() + 60_000),
+                &outbox,
+            );
+            assert_eq!(resumed.len(), 1);
+            assert!(Arc::ptr_eq(&resumed[0], &account));
+            assert_eq!(account.labels(9), [renamed.account_name]);
+            account.notify(crate::envelope::msg(&account.name, "test", Value::Null));
+            let frame: Value = serde_json::from_str(&frames.lock().unwrap()[0]).unwrap();
+            assert_eq!(frame["d"]["accountName"], "phone label");
+        })
+        .await;
+}

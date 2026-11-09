@@ -152,6 +152,52 @@ pub(crate) fn with_instance_id(text: String, instance_id: &str) -> String {
     envelope(kind, frame["d"].take())
 }
 
+pub(crate) fn with_account_label(text: String, label: &str) -> String {
+    let Ok(mut frame) = serde_json::from_str::<Value>(&text) else {
+        return text;
+    };
+    let kind = match frame["t"].as_str() {
+        Some("msg") => "msg",
+        Some("sign-req") => "sign-req",
+        _ => return text,
+    };
+    let Some(data) = frame["d"].as_object_mut() else {
+        return text;
+    };
+    if data.get("accountName").and_then(Value::as_str) == Some(label) {
+        return text;
+    }
+    match data.get("op").and_then(Value::as_str) {
+        Some("store") => {
+            if let Some(rows) = data
+                .get_mut("data")
+                .and_then(|data| data.get_mut("activeTWAPs"))
+                .and_then(Value::as_array_mut)
+            {
+                for row in rows {
+                    if let Some(row) = row.as_object_mut() {
+                        row.insert("accountName".into(), label.into());
+                    }
+                }
+            }
+        }
+        Some("twap:stateUpdate") => {
+            if let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut) {
+                for row in rows.values_mut() {
+                    for field in ["options", "state"] {
+                        if let Some(fields) = row.get_mut(field).and_then(Value::as_object_mut) {
+                            fields.insert("accountName".into(), label.into());
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    data.insert("accountName".into(), label.into());
+    envelope(kind, frame["d"].take())
+}
+
 pub fn msg(account_name: &str, op: &str, data: Value) -> String {
     envelope(
         "msg",

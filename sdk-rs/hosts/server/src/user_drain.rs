@@ -284,6 +284,9 @@ impl Users {
             .find(|tracked| tracked.running.ptr_eq(&Arc::downgrade(running)))
         {
             if account.strong_count() > 0 {
+                if let Some(account) = account.upgrade() {
+                    existing.name = account.name.clone();
+                }
                 existing.account = account;
             }
         } else {

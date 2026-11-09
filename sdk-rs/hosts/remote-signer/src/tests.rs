@@ -1090,3 +1090,35 @@ async fn a_timeout_on_a_socket_silent_since_the_send_is_a_suspension() {
 
 mod kucoin;
 mod orderly;
+
+#[tokio::test]
+async fn enabled_bybit_requests_carry_the_public_key_id_and_other_variants_keep_their_shape() {
+    for venue in ["bybit", "bybitinverse"] {
+        let (link, seen) = device(Box::new(|_| json!({"wsAuthSignature":"07".repeat(32)})));
+        let (account, options) = account(link, venue, json!({"key":"AK"}));
+        let (_, signing, _) = refs(&options);
+        account
+            .provider
+            .sign(request(
+                vec![Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key: signing,
+                    payload: vec![bytes("GET/realtime1700000000000")],
+                }],
+                SignReceipt {
+                    expiry_ms: Some(1_700_000_000_000.),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .unwrap();
+        let sent = seen.lock().unwrap()[0].clone();
+        if venue == "bybit" {
+            assert_eq!(sent["keyId"], "AK");
+        } else {
+            assert!(sent.get("keyId").is_none());
+        }
+        assert_eq!(sent["accountName"], "main");
+        assert_eq!(sent["wsAuth"]["toSign"], "GET/realtime1700000000000");
+    }
+}

@@ -1141,7 +1141,8 @@ async fn delegated_mode_refusal_reply(
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = crate::accounts::tests::registry();
-            let payload = init(requested_id);
+            let mut payload = init(requested_id);
+            payload.exchange_name = "bybit".into();
             let pair = || {
                 crate::delegated::DelegatedPair::new(
                     payload.key.clone(),
@@ -1165,6 +1166,7 @@ async fn delegated_mode_refusal_reply(
                 crate::delegated::fingerprint(&payload),
                 Arc::default(),
             );
+            crate::accounts::testing::bind_identity(&mut account, &payload);
             let inner = Arc::get_mut(&mut account).unwrap();
             inner.link = None;
             inner.delegated = Some(prepared.resident);

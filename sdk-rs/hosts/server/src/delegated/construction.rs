@@ -40,13 +40,34 @@ impl DelegatedPair {
 
 /// The account's resident provider; material stays in the existing LocalSigner.
 /// This handle neither serializes nor makes another copy of the material.
+#[derive(Clone)]
 pub struct ResidentCopy {
     provider: Provider,
+    identities: safe_cex_engine::signing::Identities,
 }
 impl ResidentCopy {
     /// Trusted host ingress, as with a remote account's provider.
     pub fn provider(&self) -> Provider {
         self.provider.clone()
+    }
+
+    pub(crate) fn reconfigure(&self, init: &InitPayload) -> Result<PreparedDelegated, String> {
+        if !super::enabled(&init.exchange_name) || init.public_only == Some(true) {
+            return Err("DELEGATED settings are not enabled for this account".into());
+        }
+        let mut options = engine_options(init, false);
+        let fields = options.as_object_mut().expect("engine options object");
+        fields.remove("key");
+        fields.remove("passphrase");
+        fields.insert("signing".into(), json!(self.identities));
+        fields.insert("publicDataOnly".into(), false.into());
+        fields.insert("remoteSigning".into(), false.into());
+        fields.insert("payloadSigner".into(), false.into());
+        Ok(PreparedDelegated {
+            plan: routing_plan(init, false)?,
+            options: options.to_string(),
+            resident: self.clone(),
+        })
     }
 }
 
@@ -98,6 +119,7 @@ pub fn prepare_delegated(
         options: options.to_string(),
         resident: ResidentCopy {
             provider: Arc::new(signer),
+            identities,
         },
     })
 }

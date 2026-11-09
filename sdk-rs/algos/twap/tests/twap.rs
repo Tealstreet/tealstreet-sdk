@@ -10,6 +10,9 @@ use safe_cex_algo_twap::{
 };
 use serde_json::{Value, json};
 
+#[path = "twap/identity.rs"]
+mod identity;
+
 struct Env {
     now: f64,
     units: Vec<f64>,
