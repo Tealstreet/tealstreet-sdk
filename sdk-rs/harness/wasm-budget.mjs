@@ -225,7 +225,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitget: 2_492_416,
   bitgetusdc: 2_492_416,
   bitrue: 1_886_208,
-  bitunix: 1_915_904,
+  bitunix: 1_931_264,
   blofin: 2_049_024,
   bybit: 2_331_648,
   coinbase: 1_972_224,
