@@ -4,7 +4,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_crypto::signer::LocalSigner;
 use safe_cex_engine::signing::{
     Algorithm, Capability, Identities, Identity, KeyRef, Operation, PayloadPart, Provider,
-    SignError, SignReceipt, SignRequest, SignResult,
+    SignError, SignReceipt, SignRequest, SignResult, Signer,
 };
 use safe_cex_venues::hosted_signing::{self, Input, OutputFormat};
 use serde_json::{Value, json};
@@ -437,5 +437,165 @@ async fn backpack_native_cancellation_timeout_and_late_answer_do_not_publish() -
         Some(SignError::Unavailable)
     );
     assert!(frames.try_recv().is_err());
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn backpack_native_login_switch_during_device_await_keeps_the_original_owner() -> TestResult {
+    fn device_answer(
+        signer: &LocalSigner,
+        identities: &Identities,
+        request: &Value,
+    ) -> Result<Value, TestError> {
+        assert_eq!(request["type"], "ws-auth");
+        assert_eq!(request["exchangeName"], "backpack");
+        assert_eq!(request["accountName"], "fixture-account");
+        assert_eq!(request["wsAuth"]["outputFormat"], "backpack-ed25519");
+        let (graph, output) = hosted_signing::prepare(
+            "backpack",
+            identities,
+            Input::WsAuth {
+                to_sign: request["wsAuth"]["toSign"]
+                    .as_str()
+                    .ok_or("missing descriptor")?
+                    .into(),
+                output_format: OutputFormat::BackpackEd25519,
+            },
+        )?;
+        let output = hosted_signing::finish(output, &signer.sign_now(&graph)?)?;
+        Ok(reply(
+            request,
+            json!(output.signature.ok_or("missing signature")?),
+        ))
+    }
+
+    // Changing the login must not change the owner captured by an existing call.
+    // Retiring A additionally drops its pending completion, as logout requires.
+    for retire_a in [false, true] {
+        let (link_a, mut frames_a) = channel();
+        let (account_a, identity_a) = setup(link_a.clone())?;
+        let (sender_b, mut frames_b) = mpsc::unbounded_channel();
+        let link_b = SignerLink::new(2, Arc::new(move |frame| sender_b.send(frame).is_ok()));
+        // Deliberately reuse the account name across two users, but not their
+        // credentials, opaque refs, device keys, links, sockets, or receipts.
+        let account_b = remote_account(
+            link_b.clone(),
+            "backpack",
+            Some("fixture-account".into()),
+            r#"{"key":"fixture-key-B"}"#,
+        )?;
+        let options_b: Value = serde_json::from_str(&account_b.options_json)?;
+        let identity_b: Identity = serde_json::from_value(options_b["signing"]["primary"].clone())?;
+        assert_ne!(identity_a, identity_b);
+        let (device_a, ids_a) = local()?;
+        let mut device_b = LocalSigner::new();
+        let credential_b = KeyRef("device-B-public".into());
+        let signing_b = KeyRef("device-B-owned-ed25519".into());
+        device_b.insert(credential_b.clone(), b"fixture-key-B".to_vec());
+        device_b.insert_declared(signing_b.clone(), vec![8; 32], Algorithm::Ed25519)?;
+        let ids_b = Identities {
+            primary: Some(Identity::new(credential_b, Some(signing_b))),
+            secondary: None,
+        };
+        let expected_a = device_a.sign_now(&work(
+            ids_a.primary.as_ref().ok_or("missing A identity")?,
+            GOLDENS[0].0,
+        )?)?;
+        let expected_b = device_b.sign_now(&work(
+            ids_b.primary.as_ref().ok_or("missing B identity")?,
+            GOLDENS[1].0,
+        )?)?;
+        assert_ne!(expected_a.values, expected_b.values);
+
+        // Model the host's active-login selection using the actual native
+        // provider. Its returned future must retain A even when selection moves.
+        let mut login = (
+            "user-A",
+            crate::RemoteProvider {
+                inner: account_a.inner.clone().ok_or("missing A owner")?,
+            },
+        );
+        let request_a = work(&identity_a, GOLDENS[0].0)?;
+        let receipt_a = request_a.receipt;
+        let mut pending_a = login.1.sign(request_a);
+        let frame_a = tokio::select! {
+            _ = &mut pending_a => return Err("A completed before its device answered".into()),
+            frame = frames_a.recv() => frame.ok_or("A channel closed")?,
+        };
+        let envelope_a: Value = serde_json::from_str(&frame_a)?;
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(
+                pending_a.as_mut().poll(cx).is_pending()
+            ))
+            .await,
+            "A is awaiting its device when login changes"
+        );
+        assert!(frames_b.try_recv().is_err());
+        assert_eq!(login.0, "user-A");
+        login.0 = "user-B";
+        login.1.inner = account_b.inner.clone().ok_or("missing B owner")?;
+        if retire_a {
+            link_a.mark_unavailable();
+        }
+
+        // B must really sign while A is still held, not merely refuse all work.
+        let mut request_b = work(&identity_b, GOLDENS[1].0)?;
+        request_b.receipt.stamp_ms = Some(1_700_000_001_123.);
+        let receipt_b = request_b.receipt;
+        let mut pending_b = login.1.sign(request_b);
+        let frame_b = tokio::select! {
+            _ = &mut pending_b => return Err("B completed before its device answered".into()),
+            frame = frames_b.recv() => frame.ok_or("B channel closed")?,
+        };
+        let envelope_b: Value = serde_json::from_str(&frame_b)?;
+        assert_ne!(envelope_a["d"]["id"], envelope_b["d"]["id"]);
+        let answer_a = device_answer(&device_a, &ids_a, &envelope_a["d"])?;
+        let answer_b = device_answer(&device_b, &ids_b, &envelope_b["d"])?;
+        assert!(
+            !link_b.resolve(2, answer_a.clone()),
+            "A never resolves B's work"
+        );
+        assert!(
+            !link_a.resolve(2, answer_a.clone()),
+            "B's socket cannot answer A"
+        );
+        assert!(link_b.resolve(2, answer_b));
+        let signed_b = pending_b.await?;
+        assert_eq!(login.0, "user-B");
+        assert_eq!(signed_b.values, expected_b.values);
+        assert_eq!(signed_b.receipt, receipt_b);
+        assert!(signed_b.headers.is_empty());
+
+        if retire_a {
+            assert!(
+                !link_a.resolve(1, answer_a),
+                "retired A drops its late answer"
+            );
+            assert_eq!(pending_a.await.err(), Some(SignError::Unavailable));
+        } else {
+            assert!(link_a.resolve(1, answer_a));
+            let signed_a = pending_a.await;
+            assert!(
+                signed_a.is_ok(),
+                "A retains its captured owner after B signs"
+            );
+            let signed_a = signed_a?;
+            assert_eq!(
+                signed_a.values, expected_a.values,
+                "A never adopts B's identity"
+            );
+            assert_eq!(signed_a.receipt, receipt_a);
+            assert!(signed_a.headers.is_empty());
+        }
+        assert_eq!(
+            login.1.sign(work(&identity_a, GOLDENS[0].0)?).await.err(),
+            Some(SignError::Refused)
+        );
+        assert!(frames_a.try_recv().is_err(), "A work is never replayed");
+        assert!(
+            frames_b.try_recv().is_err(),
+            "B sees no reattributed A work"
+        );
+    }
     Ok(())
 }
